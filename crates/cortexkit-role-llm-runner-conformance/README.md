@@ -863,3 +863,16 @@ publish `seq` off by one, or publish before syncing the record. No real bus is
 required by the kit; the adapter observes the runner's real publish seam.
 Faulty-content self-tests also check that `prompt` and `project_root` members
 are refused, along with a publication whose subject names a different runner.
+
+`tags_tool_result_blocks_share_one_number` uses the defaulted
+`numbering_tool_result(marker, blocks)` hook to script mixed text/media, empty
+and structured-only tool results. Preserve empty text blocks and keep the
+marker in metadata, not an extra text block. Unsupported shapes are named
+unchecked; block placement and image/media labels are checked when
+`rendered_model_input` is declared. Reads always check whole-result numbering
+and the next part.
+
+For step-event observations, populate `RecordedStep::with_attempt_id` from
+the independently read durable record. Published attempt identities must
+match it, and an event without a host reference must carry an attempt ID;
+run, step and attempt display counters are not a restore-safe identity.

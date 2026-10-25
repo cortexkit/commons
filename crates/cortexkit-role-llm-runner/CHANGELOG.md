@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.3
+
+- Add the durable provider-attempt `attempt_id` to `step.finished.v1`, required
+  without `harness_step_ref`, with a builder, producer check and decode check.
+  Pin its grammar and restore-safe identity independently of display facts.
+
+- Pin a tool result as one numbered part: prefix only its first non-empty
+  exposed text block, ignoring empty text for classification and placement.
+- Add `ToolResultMediaOnly`, `media_label` and `MEDIA_LABEL_TEXT` for results
+  containing non-image media without text; preserve the image-only label.
+- Add shared `ToolResultBlock`, `tool_result_kind` and `numbered_block_index`
+  helpers. Empty and structured-value-only results do not count; JSON in a
+  text block remains ordinary counted text. Add block-rendering vectors.
+
 ## 0.7.2
 
 - Add the `call_identity` describe group (contract §9.16). A runner declaring

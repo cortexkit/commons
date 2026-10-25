@@ -109,6 +109,10 @@ pub struct StepFinished {
     pub terminal_status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness_step_ref: Option<String>,
+    /// Opaque identity copied from the durable provider-attempt record. Required
+    /// without `harness_step_ref`; never reused, including after restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_request_id: Option<String>,
     pub harness: String,
@@ -144,7 +148,8 @@ pub struct StepFinished {
 }
 
 impl StepFinished {
-    /// Supply all required facts together; optional provider facts start absent.
+    /// Supply the display and position facts; set `attempt_id` or
+    /// `harness_step_ref` before publishing, then call [`Self::check`].
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         position: StepRef,
@@ -175,6 +180,7 @@ impl StepFinished {
             started_at_ms,
             finished_at_ms,
             harness_step_ref: None,
+            attempt_id: None,
             provider_request_id: None,
             work_class: None,
             input_tokens: None,
@@ -215,6 +221,24 @@ impl StepFinished {
         self.harness_step_ref = Some(value.into());
         self
     }
+    pub fn with_attempt_id(mut self, value: impl Into<String>) -> Self {
+        self.attempt_id = Some(value.into());
+        self
+    }
+
+    /// Check producer-side identity requirements before publication. Uniqueness
+    /// and equality with the durable record must be enforced by the runner.
+    pub fn check(&self) -> Result<(), &'static str> {
+        if self
+            .attempt_id
+            .as_deref()
+            .is_some_and(|id| !valid_attempt_id(id))
+            || (self.attempt_id.is_none() && self.harness_step_ref.is_none())
+        {
+            return Err("attempt_id");
+        }
+        Ok(())
+    }
     pub fn with_provider_request_id(mut self, value: impl Into<String>) -> Self {
         self.provider_request_id = Some(value.into());
         self
@@ -249,12 +273,22 @@ impl StepFinished {
     }
 }
 
+/// Whether an opaque attempt identity has 1–128 ASCII letters, digits, `_` or
+/// `-`. The grammar does not establish uniqueness or durable-record equality.
+pub fn valid_attempt_id(value: &str) -> bool {
+    (1..=128).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
 /// Why a live step hint must be dropped rather than used to update a view.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum StepEventDecodeError {
     InvalidSubject,
     Body(serde_json::Error),
+    InvalidField(&'static str),
     PublisherMismatch { publisher: String, runner: String },
 }
 
@@ -265,6 +299,7 @@ impl std::fmt::Display for StepEventDecodeError {
                 "expected a concrete ck.<account>.live.<module>.step.finished.v1 subject",
             ),
             Self::Body(error) => error.fmt(f),
+            Self::InvalidField(field) => write!(f, "invalid or missing {field}"),
             Self::PublisherMismatch { publisher, runner } => write!(
                 f,
                 "subject publisher {publisher:?} differs from body runner {runner:?}"
@@ -305,6 +340,7 @@ pub fn decode_step_finished(
         _ => return Err(StepEventDecodeError::InvalidSubject),
     };
     let event: StepFinished = serde_json::from_slice(body).map_err(StepEventDecodeError::Body)?;
+    event.check().map_err(StepEventDecodeError::InvalidField)?;
     if event.runner != publisher {
         return Err(StepEventDecodeError::PublisherMismatch {
             publisher: publisher.into(),
@@ -400,13 +436,58 @@ mod tests {
             let mut body = vectors["minimal"].clone();
             body.as_object_mut().unwrap().remove(key);
             assert!(
-                serde_json::from_value::<StepFinished>(body).is_err(),
+                decode_step_finished(
+                    "ck.account_a.live.runner_a.step.finished.v1",
+                    &serde_json::to_vec(&body).unwrap(),
+                )
+                .is_err(),
                 "missing {key}"
             );
         }
         let mut body = vectors["minimal"].clone();
         body["attempt"] = json!(0);
         assert!(serde_json::from_value::<StepFinished>(body).is_err());
+    }
+
+    #[test]
+    fn step_event_attempt_id_refusals() {
+        let vectors = vectors();
+        for case in vectors["refused_attempt_ids"].as_array().unwrap() {
+            let mut body = vectors["minimal"].clone();
+            body.as_object_mut().unwrap().remove("attempt_id");
+            body.as_object_mut()
+                .unwrap()
+                .extend(case["members"].as_object().unwrap().clone());
+            let event: StepFinished = serde_json::from_value(body.clone()).unwrap();
+            assert_eq!(event.check(), Err("attempt_id"), "{}", case["name"]);
+            assert!(
+                matches!(
+                    decode_step_finished(
+                        "ck.account_a.live.runner_a.step.finished.v1",
+                        &serde_json::to_vec(&body).unwrap(),
+                    ),
+                    Err(StepEventDecodeError::InvalidField("attempt_id"))
+                ),
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn step_event_attempt_id_boundaries_and_host_reference() {
+        let mut event: StepFinished = serde_json::from_value(vectors()["full"].clone()).unwrap();
+        assert!(event.attempt_id.is_none());
+        assert_eq!(event.check(), Ok(()));
+        for id in ["a".to_owned(), "A0_-".repeat(32)] {
+            event = event.with_attempt_id(&id);
+            assert_eq!(event.check(), Ok(()));
+            assert_eq!(event.attempt_id.as_deref(), Some(id.as_str()));
+        }
+        for id in ["", "bad.id", "é"] {
+            event = event.with_attempt_id(id);
+            assert_eq!(event.check(), Err("attempt_id"));
+        }
     }
 
     #[test]

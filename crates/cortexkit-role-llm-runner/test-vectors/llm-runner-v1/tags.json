@@ -641,6 +641,13 @@
   ],
   "rendered_parts": [
     {
+      "name": "a non-image media-only tool result",
+      "kind": "tool_result_media_only",
+      "number": 12,
+      "text": "",
+      "rendered": "§12§ [media]"
+    },
+    {
       "name": "user text: the number, one space, the text",
       "kind": "user_text",
       "number": 1,
@@ -767,6 +774,271 @@
       "name": "a dropped part keeps its number behind its placeholder",
       "number": 4,
       "rendered": "[dropped §4§]"
+    }
+  ],
+  "tool_results": [
+    {
+      "name": "text_image_text",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Invented opening"
+          },
+          {
+            "type": "image",
+            "name": "invented-square.png"
+          },
+          {
+            "type": "text",
+            "text": "Invented closing"
+          }
+        ]
+      },
+      "kind": "tool_result_text",
+      "numbered_block": 0,
+      "numbers": [
+        41,
+        42
+      ],
+      "rendered_blocks": [
+        {
+          "type": "text",
+          "text": "§41§ Invented opening"
+        },
+        {
+          "type": "image",
+          "name": "invented-square.png"
+        },
+        {
+          "type": "text",
+          "text": "Invented closing"
+        }
+      ]
+    },
+    {
+      "name": "image_text",
+      "result": {
+        "content": [
+          {
+            "type": "image",
+            "name": "invented-square.png"
+          },
+          {
+            "type": "text",
+            "text": "Invented caption"
+          }
+        ]
+      },
+      "kind": "tool_result_text",
+      "numbered_block": 1,
+      "numbers": [
+        41,
+        42
+      ],
+      "rendered_blocks": [
+        {
+          "type": "image",
+          "name": "invented-square.png"
+        },
+        {
+          "type": "text",
+          "text": "§41§ Invented caption"
+        }
+      ]
+    },
+    {
+      "name": "empty_text_then_text",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": ""
+          },
+          {
+            "type": "text",
+            "text": "Invented reply"
+          }
+        ]
+      },
+      "kind": "tool_result_text",
+      "numbered_block": 1,
+      "numbers": [
+        41,
+        42
+      ],
+      "rendered_blocks": [
+        {
+          "type": "text",
+          "text": ""
+        },
+        {
+          "type": "text",
+          "text": "§41§ Invented reply"
+        }
+      ]
+    },
+    {
+      "name": "image_empty_text",
+      "result": {
+        "content": [
+          {
+            "type": "image",
+            "name": "invented-square.png"
+          },
+          {
+            "type": "text",
+            "text": ""
+          }
+        ]
+      },
+      "kind": "tool_result_image_only",
+      "numbered_block": null,
+      "numbers": [
+        41,
+        42
+      ],
+      "rendered_blocks": [
+        {
+          "type": "text",
+          "text": "§41§ [image]"
+        },
+        {
+          "type": "image",
+          "name": "invented-square.png"
+        },
+        {
+          "type": "text",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "pdf",
+      "result": {
+        "content": [
+          {
+            "type": "file",
+            "mime_type": "application/pdf",
+            "name": "invented-notes.pdf"
+          }
+        ]
+      },
+      "kind": "tool_result_media_only",
+      "numbered_block": null,
+      "numbers": [
+        41,
+        42
+      ],
+      "rendered_blocks": [
+        {
+          "type": "text",
+          "text": "§41§ [media]"
+        },
+        {
+          "type": "file",
+          "mime_type": "application/pdf",
+          "name": "invented-notes.pdf"
+        }
+      ]
+    },
+    {
+      "name": "image_pdf",
+      "result": {
+        "content": [
+          {
+            "type": "image",
+            "name": "invented-square.png"
+          },
+          {
+            "type": "file",
+            "mime_type": "application/pdf",
+            "name": "invented-notes.pdf"
+          }
+        ]
+      },
+      "kind": "tool_result_media_only",
+      "numbered_block": null,
+      "numbers": [
+        41,
+        42
+      ],
+      "rendered_blocks": [
+        {
+          "type": "text",
+          "text": "§41§ [media]"
+        },
+        {
+          "type": "image",
+          "name": "invented-square.png"
+        },
+        {
+          "type": "file",
+          "mime_type": "application/pdf",
+          "name": "invented-notes.pdf"
+        }
+      ]
+    },
+    {
+      "name": "empty_text",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": ""
+          }
+        ]
+      },
+      "kind": "empty_text",
+      "numbered_block": null,
+      "numbers": [
+        null,
+        41
+      ],
+      "rendered_blocks": [
+        {
+          "type": "text",
+          "text": ""
+        }
+      ]
+    },
+    {
+      "name": "structured_only",
+      "result": {
+        "structuredContent": {
+          "invented": true
+        }
+      },
+      "kind": "empty_text",
+      "numbered_block": null,
+      "numbers": [
+        null,
+        41
+      ],
+      "rendered_blocks": []
+    },
+    {
+      "name": "json_text",
+      "result": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"invented\":true}"
+          }
+        ]
+      },
+      "kind": "tool_result_text",
+      "numbered_block": 0,
+      "numbers": [
+        41,
+        42
+      ],
+      "rendered_blocks": [
+        {
+          "type": "text",
+          "text": "§41§ {\"invented\":true}"
+        }
+      ]
     }
   ]
 }

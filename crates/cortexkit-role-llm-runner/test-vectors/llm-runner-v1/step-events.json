@@ -36,6 +36,7 @@
     "seq": 43,
     "run_id": "run_a",
     "step_id": "step_b",
+    "attempt_id": "attempt_invented_b",
     "attempt": 1,
     "terminal_status": "completed",
     "harness": "host_a",
@@ -93,6 +94,24 @@
       "granularity": "per_attempt",
       "history_key": "step_ref",
       "prompt": "forbidden content"
+    }
+  ],
+  "refused_attempt_ids": [
+    {
+      "name": "too_long",
+      "members": {
+        "attempt_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "bad_character",
+      "members": {
+        "attempt_id": "invented.bad"
+      }
+    },
+    {
+      "name": "missing_both",
+      "members": {}
     }
   ]
 }

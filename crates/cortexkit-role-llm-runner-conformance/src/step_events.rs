@@ -26,6 +26,8 @@ pub struct RecordedStep {
     /// A terminal failed/cancelled step still completes a step.
     pub completes_step: bool,
     pub harness_step_ref: Option<String>,
+    /// The attempt identity read from the durable record, not from an event.
+    pub attempt_id: Option<String>,
 }
 
 impl RecordedStep {
@@ -43,10 +45,15 @@ impl RecordedStep {
             attempt,
             completes_step,
             harness_step_ref: None,
+            attempt_id: None,
         }
     }
     pub fn with_harness_step_ref(mut self, value: impl Into<String>) -> Self {
         self.harness_step_ref = Some(value.into());
+        self
+    }
+    pub fn with_attempt_id(mut self, value: impl Into<String>) -> Self {
+        self.attempt_id = Some(value.into());
         self
     }
 }
@@ -158,7 +165,12 @@ where
                     events
                         .iter()
                         .filter(|e| {
-                            e.run_id == r.run_id && e.step_id == r.step_id && e.attempt == r.attempt
+                            if e.attempt_id.is_some() {
+                                e.attempt_id == r.attempt_id
+                            } else {
+                                e.harness_step_ref.is_some()
+                                    && e.harness_step_ref == r.harness_step_ref
+                            }
                         })
                         .count()
                         != 1
@@ -177,9 +189,8 @@ where
                 let record = expected
                     .iter()
                     .find(|r| {
-                        r.run_id == event.run_id
-                            && r.step_id == event.step_id
-                            && r.attempt == event.attempt
+                        r.position == event.step_ref()
+                            || (event.attempt_id.is_some() && r.attempt_id == event.attempt_id)
                     })
                     .ok_or("event has no matching native step record")?;
                 if event.step_ref() != record.position {
@@ -188,6 +199,19 @@ where
                         event.step_ref(),
                         record.position
                     ));
+                }
+                if event.run_id != record.run_id
+                    || event.step_id != record.step_id
+                    || event.attempt != record.attempt
+                {
+                    return Err("event display facts differ from the native durable record".into());
+                }
+                if event
+                    .attempt_id
+                    .as_ref()
+                    .is_some_and(|id| record.attempt_id.as_ref() != Some(id))
+                {
+                    return Err("attempt_id differs from the native durable record".into());
                 }
                 if (policy.history_key == "step_ref" && event.harness_step_ref.is_some())
                     || (policy.history_key == "harness"

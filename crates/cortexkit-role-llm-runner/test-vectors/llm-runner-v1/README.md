@@ -366,3 +366,13 @@ commands, open reply/status states including the stored terminal `outcome_unknow
 status, the optional plan `interactive` boolean and safe host menu naming. The
 absent-command baseline reuses `baseline.json` and pins its unchanged JCS bytes.
 Command output is never transcript or model input.
+
+`tags.json` also pins whole tool-result block numbering (`tool_results`):
+only the first non-empty exposed text block is prefixed; image-only and
+non-image media-only results use their labels; empty and structured-only
+results consume no number. The next part follows the whole result.
+
+`step-events.json` pins `attempt_id` validation and conditional presence.
+Only the existing `minimal` event gains the member; `full` still demonstrates
+that a host-referenced event can omit it. Refusal vectors cover length,
+characters and absence of both identities.

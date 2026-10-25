@@ -62,11 +62,7 @@ pub fn kinds(sess: &Sess, m: &Msg, defects: &Defects) -> Vec<(String, PartKind)>
                         if part.get("result").is_some()
                             && !defects.tags_embedded_result_unnumbered =>
                     {
-                        if part["result"].get(IMAGE_RESULT).is_some() {
-                            PartKind::ToolResultImageOnly
-                        } else {
-                            PartKind::ToolResultText
-                        }
+                        result_kind(&part["result"], defects)
                     }
                     "tool_call" => PartKind::ToolCall,
                     "reasoning" if defects.tags_count_reasoning => PartKind::AssistantText,
@@ -87,12 +83,74 @@ pub fn kinds(sess: &Sess, m: &Msg, defects: &Defects) -> Vec<(String, PartKind)>
     let kind = match role {
         "system" => PartKind::TurnSystem,
         "tool" if defects.tags_tool_result_entry_unnumbered => PartKind::ToolCall,
-        "tool" if m.body["content"].get(IMAGE_RESULT).is_some() => PartKind::ToolResultImageOnly,
-        "tool" => PartKind::ToolResultText,
+        "tool" => result_kind(&m.body["content"], defects),
         _ if m.body["text"].as_str().is_some_and(str::is_empty) => PartKind::EmptyText,
         _ => PartKind::UserText,
     };
     vec![("0".to_owned(), kind)]
+}
+
+fn result_blocks(result: &Value) -> Vec<tags::ToolResultBlock<'_>> {
+    result["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|block| match block["type"].as_str().unwrap_or_default() {
+            "text" => tags::ToolResultBlock::Text(block["text"].as_str().unwrap_or_default()),
+            "image" => tags::ToolResultBlock::Image,
+            _ => tags::ToolResultBlock::Media,
+        })
+        .collect()
+}
+
+fn result_kind(result: &Value, defects: &Defects) -> PartKind {
+    if result.get("fake_numbering").is_some() {
+        if defects.tags_count_structured_result && result.get("content").is_none() {
+            return PartKind::ToolResultText;
+        }
+        tags::tool_result_kind(&result_blocks(result))
+    } else if result.get(IMAGE_RESULT).is_some() {
+        PartKind::ToolResultImageOnly
+    } else {
+        PartKind::ToolResultText
+    }
+}
+
+fn render_result(
+    result: &Value,
+    kind: PartKind,
+    number: Option<u64>,
+    defects: &Defects,
+) -> Vec<String> {
+    let blocks = result_blocks(result);
+    let placement = if defects.tags_number_empty_block {
+        blocks
+            .iter()
+            .position(|block| matches!(block, tags::ToolResultBlock::Text(_)))
+    } else {
+        tags::numbered_block_index(&blocks)
+    };
+    let mut texts = Vec::new();
+    if placement.is_none() && tags::counts(kind) {
+        let kind = if defects.tags_pdf_image_label && kind == PartKind::ToolResultMediaOnly {
+            PartKind::ToolResultImageOnly
+        } else {
+            kind
+        };
+        texts.push(tags::render_part(kind, number, ""));
+    }
+    for (index, block) in blocks.iter().enumerate() {
+        match block {
+            tags::ToolResultBlock::Text(text) => {
+                let number = number.filter(|_| {
+                    Some(index) == placement || (defects.tags_number_every_text && !text.is_empty())
+                });
+                texts.push(tags::render_part(PartKind::ToolResultText, number, text));
+            }
+            _ => texts.push(result["content"][index].to_string()),
+        }
+    }
+    texts
 }
 
 /// Indices of `messages` in the order the fake renders them: storage order,
@@ -333,14 +391,23 @@ pub fn rendered_texts(sess: &Sess, defects: &Defects, honour_checkpoint: bool) -
         let m = &sess.messages[index];
         for (part, kind) in kinds(sess, m, defects) {
             let number = numbers.get(&(m.mid.clone(), part.clone())).copied();
+            let result = if m.body["role"] == "tool" {
+                &m.body["content"]
+            } else {
+                &m.body["parts"][part.parse::<usize>().unwrap_or_default()]["result"]
+            };
+            if result.get("fake_numbering").is_some() {
+                texts.extend(render_result(result, kind, number, defects));
+                continue;
+            }
             let text = match m.body["parts"].as_array() {
                 Some(parts) => {
                     let part = &parts[part.parse::<usize>().unwrap_or_default()];
                     match kind {
                         PartKind::ToolCall => continue,
-                        PartKind::ToolResultText | PartKind::ToolResultImageOnly => {
-                            part["result"].to_string()
-                        }
+                        PartKind::ToolResultText
+                        | PartKind::ToolResultImageOnly
+                        | PartKind::ToolResultMediaOnly => part["result"].to_string(),
                         PartKind::Reasoning => part["text"].as_str().unwrap_or_default().to_owned(),
                         _ => exposed(sess, m, part["text"].as_str().unwrap_or_default(), defects),
                     }

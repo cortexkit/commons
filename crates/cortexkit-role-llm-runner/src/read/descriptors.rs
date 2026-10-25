@@ -741,15 +741,20 @@ mod tests {
         let kind = match part["type"].as_str() {
             Some("tool_result") => {
                 let content = part["content"].as_array().expect("tool-result content");
-                assert!(!content.is_empty(), "tool result must contain a part");
-                if content
+                let blocks: Vec<_> = content
                     .iter()
-                    .all(|block| block["type"] == "media_ref" && block["kind"] == "image")
-                {
-                    crate::tags::PartKind::ToolResultImageOnly
-                } else {
-                    crate::tags::PartKind::ToolResultText
-                }
+                    .filter_map(|block| match block["type"].as_str() {
+                        Some("text") => block["text"]
+                            .as_str()
+                            .map(crate::tags::ToolResultBlock::Text),
+                        Some("media_ref") if block["kind"] == "image" => {
+                            Some(crate::tags::ToolResultBlock::Image)
+                        }
+                        Some("media_ref") => Some(crate::tags::ToolResultBlock::Media),
+                        _ => None,
+                    })
+                    .collect();
+                crate::tags::tool_result_kind(&blocks)
             }
             Some("media_ref") if part["kind"] == "image" => crate::tags::PartKind::UserAttachment,
             _ => panic!("resolve vector must describe a recognizable transcript part"),

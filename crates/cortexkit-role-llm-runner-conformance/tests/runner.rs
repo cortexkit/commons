@@ -2912,12 +2912,81 @@ async fn a_tagging_runner_passes_the_tags_cases() {
     }
 }
 
-/// The two cases that read which parts carry a number, each of which must
+/// The cases that read which parts carry a number, each of which must
 /// accept both layouts.
-const PART_COUNTING_CASES: [&str; 2] = [
+const PART_COUNTING_CASES: [&str; 3] = [
     "tags_on_every_read_entry",
     "tags_count_only_parts_rendered_with_a_number",
+    "tags_tool_result_blocks_share_one_number",
 ];
+
+#[tokio::test]
+async fn tool_result_numbering_rejects_every_text_numbered() {
+    only_these_fail(
+        Capability::Tags,
+        TAG_PREFIXES,
+        Defects {
+            tags_number_every_text: true,
+            ..Defects::default()
+        },
+        &[(
+            "tags_tool_result_blocks_share_one_number",
+            "text_image_text: rendered numbers",
+        )],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn tool_result_numbering_rejects_empty_block_numbered() {
+    only_these_fail(
+        Capability::Tags,
+        TAG_PREFIXES,
+        Defects {
+            tags_number_empty_block: true,
+            ..Defects::default()
+        },
+        &[(
+            "tags_tool_result_blocks_share_one_number",
+            "empty_text_then_text: number is not on the first non-empty text",
+        )],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn tool_result_numbering_rejects_pdf_image_label() {
+    only_these_fail(
+        Capability::Tags,
+        TAG_PREFIXES,
+        Defects {
+            tags_pdf_image_label: true,
+            ..Defects::default()
+        },
+        &[(
+            "tags_tool_result_blocks_share_one_number",
+            "pdf: number is not on the first non-empty text or correct label",
+        )],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn tool_result_numbering_rejects_structured_value_counted() {
+    only_these_fail(
+        Capability::Tags,
+        TAG_PREFIXES,
+        Defects {
+            tags_count_structured_result: true,
+            ..Defects::default()
+        },
+        &[(
+            "tags_tool_result_blocks_share_one_number",
+            "structured_only: whole result number",
+        )],
+    )
+    .await;
+}
 
 /// A tagging fake in an embedded layout, as OpenCode's: a call's result is
 /// stored in the requesting entry's tool part, so that entry carries two
@@ -6081,6 +6150,46 @@ async fn step_events_subject_publisher_mismatch_is_refused_by_name() {
         assert!(failed(&report, name).contains("subject publisher"));
     }
     assert_none_failed_but(&report, &names);
+}
+
+#[tokio::test]
+async fn step_events_missing_attempt_id_is_refused_by_name() {
+    let report = run(&step_event_subject(
+        Defects {
+            step_events_missing_attempt_id: true,
+            ..Defects::default()
+        },
+        "per_attempt",
+        "step_ref",
+    ))
+    .await;
+    let names = cases_of(&["step_events_"]);
+    for name in &names {
+        assert!(failed(&report, name).contains("invalid or missing attempt_id"));
+    }
+    assert_none_failed_but(&report, &names);
+}
+
+#[tokio::test]
+async fn step_events_wrong_attempt_id_fails_by_name() {
+    let report = run(&step_event_subject(
+        Defects {
+            step_events_wrong_attempt_id: true,
+            ..Defects::default()
+        },
+        "per_attempt",
+        "step_ref",
+    ))
+    .await;
+    let name = "step_events_match_durable_position";
+    let reason = failed(&report, name);
+    assert!(
+        reason.contains("attempt_id differs from the native durable record"),
+        "{reason}"
+    );
+    assert!(failed(&report, "step_events_one_per_recorded_step")
+        .contains("one event per recorded step"));
+    assert_none_failed_but(&report, &[name, "step_events_one_per_recorded_step"]);
 }
 
 /// A fake declaring `call_identity`, with display history and live events

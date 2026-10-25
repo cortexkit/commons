@@ -366,6 +366,8 @@ pub const CASES: &[CaseSpec] = &[
         "a steer sent while a tool call is held: the last model request's texts carry exactly the numbers session.read reports, increasing in the order the model saw them; inapplicable when the runner rendered the steer where it stored it"),
     case("tags_renumbering_waits_for_the_step_boundary", &[Capability::Tags, Queue, TranscriptReads, Steer, HoldToolCalls],
         "while a step's tool call is held, a steer changes neither the lineage nor any number a read before it showed; the call runs once; afterwards a part a read exposed carries another number only on a new lineage"),
+    case("tags_tool_result_blocks_share_one_number", TAGS,
+        "a whole tool result has one number on its first non-empty text or media label; empty and structured-only results do not count"),
     case("tags_count_only_parts_rendered_with_a_number", TAGS,
         "a step holding reasoning, text and a tool call numbers its text and the part holding the call's result, found through result_ordinal (where run_tool_calls is declared) or the result's marker, whether that is an entry of its own or the step's own tool part in an embedded layout; reasoning and a part holding only the call carry none; an image-only tool result carries a number and, where the adapter records rendered input, its label §N§ [image] (named as unchecked when the adapter's tool provider cannot answer an image-only result)"),
     case("tags_setup_checkpoint_anchors_at_its_cut", &[Capability::Tags, Capability::TagCheckpoint, Capability::Compaction, Queue, TranscriptReads],

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.3
+
+- Check event `attempt_id` against independently read durable step records
+  using the existing observation hook; reject missing identities and test
+  valid-but-wrong event identities with named faulty runners.
+
+- Track llm-runner 0.7.3. Add `tags_tool_result_blocks_share_one_number`,
+  checking whole-result counting, first non-empty text placement, image/media
+  labels, and the next part through reads and observed model input.
+- Add the defaulted `numbering_tool_result` fixture hook, naming unsupported
+  shapes unchecked. Exercise both result layouts and named faulty runners
+  that number every text block, number empty text, mislabel PDFs, or count
+  structured values.
+
 ## 0.15.2
 
 Carries the 0.12.7 fixes from the 0.12 line:

@@ -20,17 +20,25 @@ pub enum PartKind {
     /// and a steer or reminder the runner stores as a user message.
     /// Counted.
     UserText,
-    /// A tool result's text, error text included. Counted.
+    /// A whole tool result with non-empty exposed text, error text included.
+    /// Counted once, on its first non-empty text block; later text and media
+    /// blocks carry no number. See [`super::tool_result_kind`].
     ToolResultText,
-    /// A tool result holding only images. Counted, and rendered as a short
+    /// A tool result with images but no non-empty exposed text or other media.
+    /// Counted once, and rendered as a short
     /// text label carrying the number ([`super::image_label`]), so a context
     /// manager can address a screenshot.
     ToolResultImageOnly,
+    /// A tool result with no non-empty exposed text and at least one non-image
+    /// media block. Counted once, with [`super::media_label`].
+    ToolResultMediaOnly,
     /// The model's own text. Counted, on every provider (a Gemini thought
     /// signature or a ChatGPT `phase` beside it makes no difference).
     AssistantText,
     /// A text part whose exposed text is empty (after cleaning, for the
-    /// model's text). Nothing carries a number, so it is not counted.
+    /// model's text), or a tool result with neither non-empty exposed text nor
+    /// media. A structured value alone is not text. Nothing carries a number,
+    /// so it is not counted.
     EmptyText,
     /// A `turn_system` message (a template rendered at system authority).
     /// Not counted.
@@ -50,14 +58,15 @@ pub enum PartKind {
 }
 
 /// Whether a part of `kind` counts: it gets a number exactly when it is
-/// rendered with a visible one. User text, a tool result's text, an
-/// image-only tool result and the model's text count; nothing else does.
+/// rendered with a visible one. User text, a tool result with text or media,
+/// and the model's text count; nothing else does.
 pub fn counts(kind: PartKind) -> bool {
     matches!(
         kind,
         PartKind::UserText
             | PartKind::ToolResultText
             | PartKind::ToolResultImageOnly
+            | PartKind::ToolResultMediaOnly
             | PartKind::AssistantText
     )
 }

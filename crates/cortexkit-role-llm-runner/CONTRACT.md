@@ -2288,12 +2288,27 @@ part's key and its content digest, never a number.
   visible number. One predicate drives both counting and rendering, so the
   two cannot drift apart: a runner maps each part it renders onto
   `tags::PartKind` and asks `tags::counts`.
-  - Counted: user text, a tool result's text (error text included), the
-    model's own text, and a tool result holding only images, which renders
+  - Counted: user text, a tool result with non-empty exposed text (error
+    text included), the model's own text, and a tool result holding only
+    images apart from empty text blocks, which renders
     a short text label carrying its number (`tags::image_label`, `§N§
     [image]`) where the provider accepts text beside the image (on
     Anthropic's API, a text block before the image inside the
     `tool_result`), so a context manager can reach a screenshot.
+  - A tool result is one part, whatever its blocks: a compaction provider
+    keeps or drops the whole result, never a block inside it. Empty exposed
+    text blocks are ignored for counting and number placement. With no
+    non-empty text, images alone select `ToolResultImageOnly`; any non-image
+    media (a PDF or other file, alone or beside images) selects
+    `ToolResultMediaOnly`, counted once with `tags::media_label` (`§N§ [media]`).
+    `tags::tool_result_kind` classifies the whole result.
+  - A tool result with neither non-empty exposed text nor media is
+    `EmptyText` and is not counted. This includes a result carried only as
+    a structured value with no text block, such as a legacy reply with only
+    `structuredContent` or an imported transcript's JSON tool result: some
+    providers receive the value as an object, not text, so no number can be
+    written on it consistently across providers. A text block whose text
+    happens to be JSON is ordinary text and counts.
   - A steer the runner stores as a user message counts, as a reminder or a
     delivered notice stored that way does. A `turn_system` message (§9.7)
     does not.
@@ -2574,8 +2589,14 @@ part's key and its content digest, never a number.
   leading tag notation stripped (`tags::render_counted_text`,
   `tags::RENDER_SEPARATOR`): only `§`-shaped notation, never bare digits,
   in up to eight rounds (`tags::strip_leading_tag_notation`). Rendering
-  what it rendered gives the same bytes again. An image-only tool result
-  renders its label; a part that does not count renders as exposed, with
+  what it rendered gives the same bytes again. A tool result's number
+  prefixes its first non-empty exposed text block (`tags::numbered_block_index`);
+  later text blocks and all media blocks render as exposed, unnumbered.
+  Thus `[text, image, text]` takes one number on block 0, `[image, text]`
+  and `["", text]` put it on block 1, and `[image, ""]` uses the image label.
+  A tool result without non-empty text renders its image-only or media-only
+  label once, where the provider accepts text beside media; a part that does
+  not count renders as exposed, with
   no number (`tags::render_part`). A compaction provider builds the same
   bytes for its placeholders. `tags.json` and `tag-cleaning.json` pin
   rendered parts.
@@ -4136,6 +4157,7 @@ to the session's whole length.
   | `runner`, `session_ref`, `log_incarnation`, `seq` | Required strings for the first three, unsigned 64-bit integer for `seq`; together the durable `step_ref` |
   | `run_id`, `step_id`, `attempt`, `terminal_status` | Required identifier strings, positive 64-bit integer attempt (1-based), and open status string (`completed`, `failed`, `cancelled`, `interrupted`, or a future value) |
   | `harness_step_ref?`, `provider_request_id?` | Optional host-record and vendor-request identifier strings |
+  | `attempt_id?` | Opaque provider-attempt identifier string, required when `harness_step_ref` is absent; optional when it is present |
   | `harness`, `session` | Required strings: the harness and session the runner received |
   | `work_class?`, `provider`, `model` | Optional open work-class string, required provider identifier and the model actually sent |
   | `input_tokens?`, `cached_input_tokens?`, `cache_write_tokens?`, `output_tokens?`, `reasoning_tokens?` | Optional unsigned 64-bit per-step counters, with the same names as run usage |
@@ -4144,6 +4166,15 @@ to the session's whole length.
   | `request_body_bytes?`, `context_limit?`, `finish_reason?` | Optional unsigned 64-bit request-byte count and context-token limit, and optional open finish-reason string |
   | `started_at_ms`, `finished_at_ms` | Required unsigned 64-bit Unix epoch millisecond timestamps |
 
+- [pinned] `attempt_id` is 1–128 characters of `[A-Za-z0-9_-]`, unique per
+  provider attempt and never reused, including after a session restore. It
+  is the exact value the runner writes in its own durable step record.
+  Before publishing, `StepFinished::check` refuses an event with neither
+  `harness_step_ref` nor `attempt_id`, or with an `attempt_id` outside that
+  grammar (`step_events::valid_attempt_id`); `decode_step_finished` checks
+  the same rule. Without `harness_step_ref`, the row identity of a runner
+  step is `(runner, attempt_id)`. `run_id`, `step_id` and `attempt` are display
+  facts: their triple can repeat after a restore and is not an identity.
 - [pinned] `seq` is the runner's **native durable log position**, scoped by
   runner, session reference and log incarnation: the position acknowledged by
   the step-history consumer. It is never assumed to equal a `session.read`

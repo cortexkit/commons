@@ -30,6 +30,14 @@ pub(super) fn prepare(module: &Module, session: &str, record: &mut Value) -> Res
         record["native_attempt"] = json!(2);
     }
     record["native_seq"] = json!(std::fs::metadata(&module.log).map(|m| m.len()).unwrap_or(0));
+    let mut identity = [0; 16];
+    getrandom::fill(&mut identity).expect("fake attempt identity entropy");
+    let mut attempt_id = String::with_capacity(32);
+    for byte in identity {
+        use std::fmt::Write as _;
+        write!(attempt_id, "{byte:02x}").expect("writing an identity to a string");
+    }
+    record["attempt_id"] = json!(attempt_id);
     record["native_incarnation"] = json!(module.sessions.lock().unwrap()[session].incarnation);
     record["native_session_ref"] = json!(cortexkit_role_llm_runner::session_ref(
         &cortexkit_role_llm_runner::SessionIdentity {
@@ -81,14 +89,25 @@ pub(super) fn publish(module: &Module, session: &str, record: &Value, durable: b
         FAKE_MODEL,
         10,
         20,
-    );
+    )
+    .with_attempt_id(record["attempt_id"].as_str().unwrap());
     if module.world.step_event_policy.history_key == "harness" && record["kind"] == "step" {
         event = event.with_harness_step_ref(format!(
             "host-{}",
             record["native_step_id"].as_str().unwrap()
         ));
     }
+    event
+        .check()
+        .expect("faithful event passes producer checks");
     let mut body = serde_json::to_value(event).unwrap();
+    if STEP_EVENT_DEFECTS_ENABLED && defects.step_events_missing_attempt_id {
+        body.as_object_mut().unwrap().remove("harness_step_ref");
+        body.as_object_mut().unwrap().remove("attempt_id");
+    }
+    if STEP_EVENT_DEFECTS_ENABLED && defects.step_events_wrong_attempt_id {
+        body["attempt_id"] = json!("wrong-durable-attempt");
+    }
     if let Some(member) = defects.step_events_content_member {
         body[member] = json!("forbidden-content");
     }
@@ -136,7 +155,8 @@ pub(super) fn observe(
                 record["native_step_id"].as_str().unwrap(),
                 std::num::NonZeroU64::new(record["native_attempt"].as_u64().unwrap()).unwrap(),
                 record["kind"] == "step",
-            );
+            )
+            .with_attempt_id(record["attempt_id"].as_str().unwrap());
             if record["kind"] == "step" {
                 step = step.with_harness_step_ref(format!(
                     "host-{}",

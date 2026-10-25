@@ -1096,6 +1096,20 @@ pub trait LlmRunnerSubject: Harness {
         None
     }
 
+    /// A result in the tool provider's schema, preserving these ordered blocks
+    /// (including empty text). Use invented image/PDF media for `Image`/`Media`.
+    /// With no blocks, return only a structured value, not serialized text.
+    /// Keep `marker` in the exposed result's metadata or structured value, never
+    /// as an extra text block, so the case can find even an empty result.
+    /// `None` names that shape as unchecked by the tool-result numbering case.
+    fn numbering_tool_result(
+        &self,
+        _marker: &str,
+        _blocks: &[cortexkit_role_llm_runner::tags::ToolResultBlock<'_>],
+    ) -> Option<Value> {
+        None
+    }
+
     /// An image result in the host's actual schema, with exactly `bytes` as
     /// decoded image bytes. `nested` requests a tool_result containing the
     /// image; otherwise the result is an image block. Unsupported adapters
