@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.6
+
+- `output_refs_rewind` and `output_refs_compaction` report not applicable when the adapter's `revert_session` or `compact_in_host` returns an error, as the subject trait documents for both hooks and as the host-history and lineage cases already do. They used to fail such a runner. A faulty runner that can revert or compact but gets the result wrong still fails both cases by name. Cases and vectors are otherwise unchanged.
+
 ## 0.12.5
 
 - Use `cortexkit-rich-ui-syntax` 0.3.0 (exact `pulldown-cmark` 0.13.5). Cases and vectors are unchanged.

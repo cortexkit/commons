@@ -4734,6 +4734,11 @@ pub struct FakeSubject {
     /// Refuse reads `transient` while a tag-rendering run waits for a Setup
     /// without descent, as the contract lets a runner.
     pub holds_reads_during_setup: bool,
+    /// The adapter cannot revert a session: `revert_session` errors.
+    pub cannot_revert: bool,
+    /// The adapter cannot compact a session in its host: `compact_in_host`
+    /// errors.
+    pub cannot_compact_in_host: bool,
     /// How the fake judges the prompt cache's lifetime.
     pub cache_ttl_defect: CacheTtlDefect,
     /// The case the suite is in, as a test's progress callback sets it: the
@@ -4825,6 +4830,8 @@ impl FakeSubject {
             seed_hook: false,
             host_prefix_everywhere: 0,
             holds_reads_during_setup: false,
+            cannot_revert: false,
+            cannot_compact_in_host: false,
             cache_ttl_defect: CacheTtlDefect::None,
             current_case: Arc::new(Mutex::new(None)),
             route_calls: Arc::new(Mutex::new(Vec::new())),
@@ -5419,6 +5426,9 @@ impl LlmRunnerSubject for FakeSubject {
         session: &str,
         mid: &str,
     ) -> Result<(), HarnessError> {
+        if self.cannot_revert {
+            return Err(HarnessError::new("this runner has no revert"));
+        }
         handle
             .0
             .commit(session, json!({"kind":"revert", "mid": mid}))
@@ -5592,6 +5602,9 @@ impl LlmRunnerSubject for FakeSubject {
         handle: &FakeHandle,
         session: &str,
     ) -> Result<(), HarnessError> {
+        if self.cannot_compact_in_host {
+            return Err(HarnessError::new("this host has no compaction"));
+        }
         handle
             .0
             .commit(session, json!({ "kind": "host_compact" }))

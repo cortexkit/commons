@@ -5514,6 +5514,42 @@ async fn output_refs_undeclared_group_is_inapplicable() {
     );
 }
 
+/// A runner that declares output_refs but cannot revert a session or compact
+/// one in its host: the rewind and compaction cases report not applicable,
+/// by name, and every other output_refs case still passes.
+#[tokio::test]
+async fn output_refs_without_revert_or_host_compaction_is_inapplicable_not_failed() {
+    let mut subject = output_refs_subject(None);
+    subject.cannot_revert = true;
+    subject.cannot_compact_in_host = true;
+    let report = run(&subject).await;
+    assert!(
+        matches!(report.outcome("output_refs_rewind"), Some(CaseOutcome::Inapplicable { reason }) if reason.starts_with("the adapter cannot revert a session: ")),
+        "{}",
+        report.render()
+    );
+    assert!(
+        matches!(report.outcome("output_refs_compaction"), Some(CaseOutcome::Inapplicable { reason }) if reason.starts_with("the adapter cannot compact a session in its host: ")),
+        "{}",
+        report.render()
+    );
+    for name in cases_of(&["output_refs_"]).into_iter().filter(|name| {
+        ![
+            "output_refs_unsupported_plan",
+            "output_refs_rewind",
+            "output_refs_compaction",
+        ]
+        .contains(name)
+    }) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+}
+
 macro_rules! output_refs_fault {
     ($test:ident, $case:literal) => {
         #[tokio::test]
