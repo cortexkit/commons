@@ -85,6 +85,8 @@ open_string!(
         StorageUnavailable => "storage_unavailable", StoreUnavailable => "store_unavailable",
         StorageError => "storage_error", EncodeFailed => "encode_failed",
         ModuleDraining => "module_draining", UnknownMethod => "unknown_method",
+        UnknownAgent => "unknown_agent", Gone => "gone",
+        ClaimIntegrityFailed => "claim_integrity_failed", StoreCorrupt => "store_corrupt",
     }
 );
 

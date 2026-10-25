@@ -1,0 +1,4 @@
+[
+  {"op":"agent.resolve","request":{"agent_id":"agent_0000000000000601"},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"result":{"agent_id":"agent_0000000000000601","generation":5,"gone":{"at":700,"into_agent_id":"agent_0000000000000602","reason":"merged"},"incarnation":"0123456789abcdef","merged_into":"agent_0000000000000602","status":"merged"}}},
+  {"op":"agent.resolve","request":{"agent_id":"agent_0000000000000602"},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"result":{"agent_id":"agent_0000000000000602","generation":5,"gone":null,"incarnation":"0123456789abcdef","merged_into":null,"status":"live"}}}
+]

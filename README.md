@@ -6,6 +6,7 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 
 | Crate | Purpose | crates.io |
 |---|---|---|
+| [cortexkit-agent-identity](crates/cortexkit-agent-identity/README.md) | Typed agent identity and context reads for the project-identity module. | Not published |
 | [cortexkit-anthropic-policy](crates/cortexkit-anthropic-policy/README.md) | Anthropic authentication headers, beta tokens, account limits, credits, and quota-header policy. | [Published](https://crates.io/crates/cortexkit-anthropic-policy) |
 | [cortexkit-bus-inmemory](crates/cortexkit-bus-inmemory/README.md) | Deterministic, process-local implementation of the bus traits. | [Published](https://crates.io/crates/cortexkit-bus-inmemory) |
 | [cortexkit-bus-naming](crates/cortexkit-bus-naming/README.md) | Validation of message-plane names, topology limits, and grants. | [Published](https://crates.io/crates/cortexkit-bus-naming) |

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3
+
+- Name four more `RefusalCode` spellings that the module's agent and context
+  reads return: `unknown_agent`, `gone`, `claim_integrity_failed` and
+  `store_corrupt`. Before this release they decoded as `Other(..)`; they now
+  decode as named variants and serialize to the same strings. Code that matched
+  `Other("gone")` and the like must match the named variant instead.
+
 ## 0.1.2
 
 - Add `resolve_remote` request and reply types with distinct found, none, and

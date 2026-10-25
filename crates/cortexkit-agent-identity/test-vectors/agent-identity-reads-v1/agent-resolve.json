@@ -1,0 +1,9 @@
+[
+  {"op":"agent.resolve","request":{"agent_id":"agent_0000000000000001"},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"result":{"agent_id":"agent_0000000000000001","generation":7,"gone":null,"incarnation":"0123456789abcdef","merged_into":null,"status":"live"}}},
+  {"op":"agent.resolve","request":{"agent_id":"agent_0000000000000005"},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"result":{"agent_id":"agent_0000000000000005","generation":7,"gone":null,"incarnation":"0123456789abcdef","merged_into":null,"status":"live"}}},
+  {"op":"agent.resolve","request":{"agent_id":"agent_0000000000000004"},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"result":{"agent_id":"agent_0000000000000004","generation":7,"gone":{"at":10,"reason":"deleted"},"incarnation":"0123456789abcdef","merged_into":null,"status":"retired"}}},
+  {"op":"agent.resolve","request":{"agent_id":"agent_ffffffffffffffff"},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"result":{"agent_id":"agent_ffffffffffffffff","generation":7,"gone":null,"incarnation":"0123456789abcdef","merged_into":null,"status":"unknown"}}},
+  {"op":"agent.resolve","request":{},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"code":"invalid_request","detail":null,"message":"missing field `agent_id`"}},
+  {"op":"agent.resolve","request":{"agent_id":42},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"code":"invalid_request","detail":null,"message":"invalid type: integer `42`, expected a string"}},
+  {"op":"agent.resolve","request":{"agent_id":"agent_0000000000000001","unknown":true},"principal":{"kind":"reserved","moduleId":"phone"},"reply":{"code":"invalid_request","detail":null,"message":"unknown field `unknown`, expected `agent_id`"}}
+]
