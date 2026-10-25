@@ -793,6 +793,7 @@ CI against its real module over a real route; never against a double.
 | `catalog_disabled_tool_absent`, `call_disabled_tool_refused_by_name` | `disable_tool` |
 | `terminal_frame_on_success`, `terminal_frame_on_refusal` | — |
 | `tool_result_v1_valid` | a catalog tool declaring `result_format: "tool-result/v1"` |
+| `tool_result_legacy_route_unchanged` | a catalog tool declaring `tool-result/v1`, `legacy_reply` suite fixture |
 | `tool_result_held_reply_route_gating` | `held-reply/v1` suite fixture, `held_calls`, `late_results`, `scope_stamp`, `call_key`, `approval_execution`, a catalog tool declaring `tool-result/v1` |
 | `terminal_frame_on_cancel` | `cancellation` |
 | `call_key_malformed_refused`, `call_key_well_formed_accepted` | `call_key` |
@@ -802,21 +803,35 @@ CI against its real module over a real route; never against a double.
 | `late_results_incarnation_change_refused` | `late_results`, `scope_stamp` |
 | `crash_after_prepared_not_started`, `crash_after_authorized_not_started` | `approval_execution`, `held_calls`, `scope_stamp`, `call_key`, `late_results` |
 
-The result case infers its `tool-result/v1` requirement from the catalog, not
+The result cases infer their `tool-result/v1` requirement from the catalog, not
 from an opt-out flag on the subject (the adapter a provider writes to run
-this suite against itself). For every tool that declares `tool-result/v1`, it
-makes the calls the subject lists in `tool_result_v1_calls` on a route with no
-consumer declaration and on a route whose bind declares `tool-result/v1`. The
-first reply must not decode as `tool-result/v1`; the second must decode and
+this suite against itself). For every tool that declares `tool-result/v1`,
+`tool_result_v1_valid` makes the calls the subject lists in `tool_result_v1_calls`
+on a route whose bind declares `tool-result/v1`. The reply must decode and
 validate, including the whole serialized body's size. The catalog must list
 `result_format: "tool-result/v1"` on both routes. By default `tool_result_v1_calls`
 is the subject's `quick_call`, a `(tool name, arguments)` pair that completes
 promptly; a subject overrides it when other tools declare `tool-result/v1`, and
 may list several calls per tool. Subjects must open the declared route through
 their real route-opening path. Missing probes for a declared tool fail by
-tool name. With no declared tool, `tool_result_v1_valid` is skipped by
+tool name. With no declared tool, the result cases are skipped by
 name with missing `tool-result/v1`, never passed. Unknown result formats do not
 opt in.
+
+The subject declares `Capability::LegacyReply` and implements
+`legacy_reply(tool, arguments)` to supply each probe's exact legacy rendering,
+preferably from a pinned fixture or the legacy rendering code path, not a
+second call to the live provider. `tool_result_legacy_route_unchanged` sends
+each probe on a route without the consumer declaration and requires JSON value
+equality with the supplied body. A mismatch fails by tool name and the first
+differing JSON pointer (sorted object keys, array order; the empty pointer
+denotes the root). A legacy reply may itself decode as `ToolResult`, including
+MCP-shaped bodies with `content` and `isError`; consumers never infer the
+format from a reply's appearance. The default hook returns `None`. Without the
+`legacy_reply` fixture capability the legacy case is skipped by name, never
+passed; the declared-route checks still run and a run with no failures is
+`ConformingForDeclaredCapabilities`, not `Passed`. Declaring the capability but
+not supplying a body for a probe fails the legacy case by tool name.
 
 The `system_text` cases request full catalog answers. They check `item_digest`
 against the returned text's exact UTF-8 bytes, both digests' 64-lowercase-hex

@@ -7,8 +7,8 @@ kills do not establish real-process crash conformance. The in-process fake
 in this crate tests the runner, not any production provider.
 
 The suite's case inventory and role contract are in the wire crate's
-[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.13.0
-pairs with cortexkit-role-tool-provider 0.13.0. Version 0.12.1
+[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Versions 0.13.1 and 0.13.0
+pair with cortexkit-role-tool-provider 0.13.0. Version 0.12.1
 pairs with cortexkit-role-tool-provider 0.12.1. Version 0.12.0
 pairs with subc-protocol 0.33 and cortexkit-role-tool-provider 0.12.0. Version 0.11.0
 pairs with subc-protocol 0.33 and cortexkit-role-tool-provider 0.11.0. Version 0.10.1
@@ -26,17 +26,41 @@ from that catalog, not controlled by the subject's capability flags. No
 declaration produces a named `SKIP` with missing `tool-result/v1`, never a pass;
 unknown format strings do not opt in.
 
+| Case | Requires |
+|---|---|
+| `tool_result_v1_valid` | a live catalog tool declaring `tool-result/v1` |
+| `tool_result_legacy_route_unchanged` | a live catalog tool declaring `tool-result/v1`, `Capability::LegacyReply` |
+
 `tool_result_v1_calls()` supplies promptly completing `(tool name, arguments)`
 probes for every declared tool. The default is `[quick_call()]`; override it
 when other tools opt in, and supply multiple probes to check success and
 tool-level error bodies. A missing probe fails by tool name. For every probe,
-the case makes the same call over a route with no consumer declaration and
-over a route whose bind declares `tool-result/v1`. The first reply must not decode
-as `ToolResult`; the second must decode and pass `validate`. The opted-in route
-must still list `result_format: "tool-result/v1"` in its catalog. The case also
+`tool_result_v1_valid` calls a route whose bind declares `tool-result/v1`;
+the reply must decode as `ToolResult` and pass `validate`. Both the undeclared
+and opted-in routes must list `result_format: "tool-result/v1"` in their catalogs. The case also
 checks the entire serialized JSON body's size before decoding so unmodeled
 extensions cannot evade the 3 MiB bound. Malformed replies fail by case, tool
 and member, not as an opaque success.
+
+To check legacy compatibility, implement
+`legacy_reply(&self, tool: &str, arguments: &serde_json::Value) -> Option<serde_json::Value>`
+and declare `Capability::LegacyReply` in `capabilities()`. Return the exact
+legacy rendering for each `tool_result_v1_calls()` probe, preferably from a
+pinned fixture or the legacy rendering code path, not another call to the live
+provider. `tool_result_legacy_route_unchanged` sends each probe on a route
+without the consumer declaration and requires JSON value equality with that
+fixture. A mismatch fails by tool name and first differing JSON pointer
+(sorted object keys, array order; the empty pointer means the root). An
+MCP-shaped legacy body with `content` and `isError` is valid even if it decodes
+as `ToolResult`: consumers never infer opt-in from a reply's appearance.
+
+The hook defaults to `None`, so existing subjects still compile. Without
+`Capability::LegacyReply`, the legacy half is **not checked**, reported as
+`SKIP tool_result_legacy_route_unchanged (requires tool-result/v1, legacy_reply; missing legacy_reply)`
+when a tool declares the format. The declared-route case still runs. The
+suite is then `ConformingForDeclaredCapabilities`, not `Passed`, unless another
+failure makes it fail. Declaring the capability but returning `None` for a
+probe fails the legacy case by tool name.
 
 Subjects with a catalog tool that opts into `tool-result/v1` must implement
 `route_with_consumer_capabilities()` to open the declared route through the

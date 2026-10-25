@@ -15,7 +15,7 @@ pub struct CaseSpec {
 
 use Capability::{
     ApprovalExecution, CallKey, CallModes, Cancellation, CatalogCapabilityFilter, DisableTool,
-    HeldCalls, HeldReplyV1, LateResults, SchemaPin, ScopeStamp, SystemText,
+    HeldCalls, HeldReplyV1, LateResults, LegacyReply, SchemaPin, ScopeStamp, SystemText,
     SystemTextOptionalPreset, ToolResultV1,
 };
 
@@ -141,7 +141,12 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec {
         name: "tool_result_v1_valid",
         requires: &[ToolResultV1],
-        checks: "each declared tool-result/v1 tool returns an opaque legacy body to an undeclared route and a valid tool-result/v1 body to a route whose consumer declares support",
+        checks: "each declared tool-result/v1 tool is listed on both routes and returns a valid tool-result/v1 body under 3 MiB to a route whose consumer declares support",
+    },
+    CaseSpec {
+        name: "tool_result_legacy_route_unchanged",
+        requires: &[ToolResultV1, LegacyReply],
+        checks: "each declared tool-result/v1 tool returns exactly the subject's legacy_reply body to a route without the consumer declaration; the reply's shape does not determine its format",
     },
     CaseSpec {
         name: "tool_result_held_reply_route_gating",

@@ -55,6 +55,9 @@ pub enum Capability {
     /// At least one catalog tool declares `result_format: "tool-result/v1"`.
     /// Inferred by the runner, not an opt-out subject flag.
     ToolResultV1,
+    /// The subject supplies the provider's legacy body for each
+    /// `tool_result_v1_calls` probe. See [`ToolProviderSubject::legacy_reply`].
+    LegacyReply,
     /// The provider and harness can exercise a `tool-result/v1` call that sends
     /// a held reply when both consumer capabilities are declared.
     /// See [`ToolProviderSubject::held_reply_call`].
@@ -92,6 +95,7 @@ impl Capability {
             Self::SystemText => "system_text",
             Self::CallModes => "call_modes",
             Self::ToolResultV1 => "tool-result/v1",
+            Self::LegacyReply => "legacy_reply",
             Self::HeldReplyV1 => "held-reply/v1",
             Self::CatalogCapabilityFilter => "tool-catalog-capability-filter/v1",
             Self::Presets => "presets",
@@ -248,6 +252,19 @@ pub trait ToolProviderSubject: Harness {
     /// Missing probes for a declared tool fail the case, rather than skip it.
     fn tool_result_v1_calls(&self) -> Vec<CallSpec> {
         vec![self.quick_call()]
+    }
+
+    /// The exact legacy reply body for this tool and these probe arguments on
+    /// a route without the `tool-result/v1` consumer declaration. Prefer a
+    /// pinned fixture or the legacy rendering code path; do not call the live
+    /// provider again to obtain the expected body.
+    ///
+    /// Declare [`Capability::LegacyReply`] when supplying a body for every
+    /// `tool_result_v1_calls` probe. Without that capability the legacy-route
+    /// case is skipped by name, never passed. Declaring it but returning
+    /// `None` for a probe fails the case by tool name.
+    fn legacy_reply(&self, _tool: &str, _arguments: &Value) -> Option<Value> {
+        None
     }
 
     /// A tool probe for both mode acceptance and refusal. Required by

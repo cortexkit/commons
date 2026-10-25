@@ -369,6 +369,7 @@ where
             "call_disabled_tool_refused_by_name" => self.call_disabled_tool_refused().await,
             "terminal_frame_on_success" => self.terminal_frame_on_success().await,
             "tool_result_v1_valid" => self.tool_result_v1_valid().await,
+            "tool_result_legacy_route_unchanged" => self.tool_result_legacy_route_unchanged().await,
             "tool_result_held_reply_route_gating" => self.held_reply_route_gating(mint).await,
             "terminal_frame_on_refusal" => self.terminal_frame_on_refusal().await,
             "terminal_frame_on_cancel" => self.terminal_frame_on_cancel().await,
@@ -517,14 +518,6 @@ where
             }
             for (name, arguments) in probes {
                 let call = call_body(name, arguments.clone(), None);
-                let legacy_body =
-                    expect_response(name, request(&legacy_route, call.clone()).await?)?;
-                if serde_json::from_value::<ToolResult>(legacy_body).is_ok() {
-                    return Err(format!(
-                        "{name}: route without consumer declaration returned a body decodable as tool-result/v1"
-                    ));
-                }
-
                 let body = expect_response(name, request(&tool_result_v1_route, call).await?)?;
                 let bytes = serde_json::to_vec(&body)
                     .map_err(|e| format!("{name}: reply serialization: {e}"))?;
@@ -536,6 +529,47 @@ where
                 let result: ToolResult = serde_json::from_value(body)
                     .map_err(|e| format!("{name}: tool-result/v1 reply does not decode: {e}"))?;
                 validate(&result).map_err(|e| format!("{name}: {e}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn tool_result_legacy_route_unchanged(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let catalog = self.catalog(&route).await?;
+        let calls = self.subject.tool_result_v1_calls();
+        let tools: Vec<_> = catalog
+            .tools
+            .iter()
+            .filter(|tool| tool.result_format == Some(ResultFormat::ToolResultV1))
+            .collect();
+        if tools.is_empty() {
+            return Err("tool-result/v1 catalog declaration disappeared during the run".into());
+        }
+        for tool in tools {
+            let probes: Vec<_> = calls
+                .iter()
+                .filter(|(name, _)| name == &tool.name)
+                .collect();
+            if probes.is_empty() {
+                return Err(format!(
+                    "{}: no tool_result_v1_calls probe for declared tool-result/v1 tool",
+                    tool.name
+                ));
+            }
+            for (name, arguments) in probes {
+                let expected = self.subject.legacy_reply(name, arguments).ok_or_else(|| {
+                    format!("{name}: legacy_reply missing for probe despite declared legacy_reply capability")
+                })?;
+                let body = expect_response(
+                    name,
+                    request(&route, call_body(name, arguments.clone(), None)).await?,
+                )?;
+                if let Some(path) = first_json_difference(&expected, &body) {
+                    return Err(format!(
+                        "{name}: route without consumer declaration changed legacy reply at JSON pointer {path:?}"
+                    ));
+                }
             }
         }
         Ok(())
@@ -1666,6 +1700,39 @@ where
                 .map_err(|e| format!("a cursor from {what}: {e}"))?;
         }
         Ok(())
+    }
+}
+
+/// Return the first differing JSON pointer, sorting object keys and visiting
+/// array elements in order. The empty pointer denotes a difference at the root.
+fn first_json_difference(expected: &Value, actual: &Value) -> Option<String> {
+    if expected == actual {
+        return None;
+    }
+    match (expected, actual) {
+        (Value::Object(expected), Value::Object(actual)) => {
+            let keys: BTreeSet<_> = expected.keys().chain(actual.keys()).collect();
+            for key in keys {
+                let difference = match (expected.get(key), actual.get(key)) {
+                    (Some(expected), Some(actual)) => first_json_difference(expected, actual),
+                    _ => Some(String::new()),
+                };
+                if let Some(suffix) = difference {
+                    let member = key.replace('~', "~0").replace('/', "~1");
+                    return Some(format!("/{member}{suffix}"));
+                }
+            }
+            None
+        }
+        (Value::Array(expected), Value::Array(actual)) => {
+            for (index, (expected, actual)) in expected.iter().zip(actual).enumerate() {
+                if let Some(suffix) = first_json_difference(expected, actual) {
+                    return Some(format!("/{index}{suffix}"));
+                }
+            }
+            Some(format!("/{}", expected.len().min(actual.len())))
+        }
+        _ => Some(String::new()),
     }
 }
 

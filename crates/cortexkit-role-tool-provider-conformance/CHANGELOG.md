@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.13.1
+
+- Stop rejecting legacy replies merely because they decode as `ToolResult`;
+  MCP-shaped legacy bodies are valid on routes whose bind does not declare
+  `tool-result/v1` too.
+- Add the default `ToolProviderSubject::legacy_reply` hook and the additive
+  `Capability::LegacyReply` fixture flag. The new
+  `tool_result_legacy_route_unchanged` case compares each undeclared-route
+  reply with the supplied legacy body by JSON value equality, reporting the
+  first differing JSON pointer and tool name on mismatch.
+- Keep declared-route decoding, validation and the size bound in
+  `tool_result_v1_valid`. A subject which does not supply the legacy hook and
+  declare its capability now gets `ConformingForDeclaredCapabilities` instead
+  of `Passed` until it does (unless another failure makes the suite fail).
+- Cover MCP-shaped legacy success and error replies, a provider sending
+  `tool-result/v1` despite a route bind that does not declare support, missing
+  fixtures, named skips and nested mismatch paths with fake subjects.
+
 ## 0.13.0
 
 - Renamed the tool-result format from `content/v1` to `tool-result/v1`, with no alias. Providers and consumers that declared `content/v1` switch to `tool-result/v1` together.

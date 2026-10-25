@@ -128,8 +128,7 @@ pub enum SystemTextDefect {
     ChangingPreflightDigest,
 }
 
-/// Deliberate contract breaks: each field makes the fake violate one rule a
-/// runner case must catch.
+/// Fixture variations and deliberate contract breaks for runner tests.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
     pub user_command: Option<&'static str>,
@@ -171,6 +170,9 @@ pub struct Defects {
     pub preset_less_system_text_is_lean: bool,
     /// Keep the quick tool's legacy opaque reply and omit its format declaration.
     pub opaque_result: bool,
+    /// Use an MCP-shaped legacy fixture, valid even when the route bind does
+    /// not declare `tool-result/v1`.
+    pub mcp_shaped_legacy: bool,
     /// The tool-result/v1 tool replies with structured data but no content parts.
     pub malformed_result: bool,
     /// Send tool-result/v1 even when the route's bind does not declare support.
@@ -773,9 +775,20 @@ impl Module {
             {
                 vec![ObservedFrame::Response(if self.defects.malformed_result {
                     json!({"content": [], "structuredContent": {"only": "program data"}})
+                } else if request.arguments["fail"] == true {
+                    json!({"content": [{"type": "text", "text": "Invented failure."}], "isError": true, "errorCode": "invented_failure"})
                 } else {
                     json!({"content": [{"type": "text", "text": request.arguments["text"].as_str().unwrap_or_default()}]})
                 })]
+            }
+            QUICK if self.defects.mcp_shaped_legacy => {
+                vec![ObservedFrame::Response(
+                    if request.arguments["fail"] == true {
+                        json!({"content": [{"type": "text", "text": "Invented failure."}], "isError": true})
+                    } else {
+                        json!({"content": [{"type": "text", "text": "Legacy greeting."}], "isError": false})
+                    },
+                )]
             }
             QUICK | SLOW => vec![ObservedFrame::Response(
                 json!({ "content": request.arguments }),
@@ -1018,6 +1031,8 @@ pub struct FakeSubject {
     /// What the subject reports as its default system-text preset.
     pub system_text_default_preset: Option<String>,
     pub mode_probe: Option<CallModeProbe>,
+    pub result_calls: Vec<CallSpec>,
+    pub legacy_replies: Vec<(CallSpec, Value)>,
     live: Mutex<Option<Arc<Module>>>,
 }
 
@@ -1039,6 +1054,7 @@ impl FakeSubject {
                 Capability::SystemTextOptionalPreset,
                 Capability::CallModes,
                 Capability::HeldReplyV1,
+                Capability::LegacyReply,
             ]
             .into(),
             system_text_arguments: Some(json!({
@@ -1050,6 +1066,24 @@ impl FakeSubject {
                 call: (QUICK.into(), json!({ "text": "hi" })),
                 unlisted_mode: CallMode::Codemode,
             }),
+            result_calls: vec![(QUICK.into(), json!({"text": "hi"}))],
+            legacy_replies: if defects.mcp_shaped_legacy {
+                vec![
+                    (
+                        (QUICK.into(), json!({"text": "hi"})),
+                        json!({"content": [{"type": "text", "text": "Legacy greeting."}], "isError": false}),
+                    ),
+                    (
+                        (QUICK.into(), json!({"fail": true})),
+                        json!({"content": [{"type": "text", "text": "Invented failure."}], "isError": true}),
+                    ),
+                ]
+            } else {
+                vec![(
+                    (QUICK.into(), json!({"text": "hi"})),
+                    json!({"content": {"text": "hi"}}),
+                )]
+            },
             live: Mutex::new(None),
         }
     }
@@ -1186,6 +1220,17 @@ impl ToolProviderSubject for FakeSubject {
 
     fn quick_call(&self) -> CallSpec {
         (QUICK.into(), json!({ "text": "hi" }))
+    }
+
+    fn tool_result_v1_calls(&self) -> Vec<CallSpec> {
+        self.result_calls.clone()
+    }
+
+    fn legacy_reply(&self, tool: &str, arguments: &Value) -> Option<Value> {
+        self.legacy_replies
+            .iter()
+            .find(|((name, args), _)| name == tool && args == arguments)
+            .map(|(_, body)| body.clone())
     }
 
     fn call_mode_probe(&self) -> Option<CallModeProbe> {

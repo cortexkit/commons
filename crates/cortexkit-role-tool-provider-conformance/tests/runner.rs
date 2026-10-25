@@ -143,14 +143,128 @@ async fn malformed_tool_result_v1_reply_fails_by_case_tool_and_member() {
 
 #[tokio::test]
 async fn tool_result_v1_is_sent_only_to_a_route_that_declares_support() {
-    let report = run(&FakeSubject::new(Defects {
+    let mut subject = FakeSubject::new(Defects {
         ignore_consumer_capabilities: true,
+        mcp_shaped_legacy: true,
         ..Defects::default()
-    }))
-    .await;
-    let reason = failed(&report, "tool_result_v1_valid");
+    });
+    subject.result_calls = vec![(fake::QUICK.into(), serde_json::json!({"fail": true}))];
+    let report = run(&subject).await;
+    let reason = failed(&report, "tool_result_legacy_route_unchanged");
+    assert!(reason.contains(fake::QUICK), "{reason}");
     assert!(reason.contains("without consumer declaration"), "{reason}");
+    assert!(reason.contains("JSON pointer \"/errorCode\""), "{reason}");
+    assert_passed(&report, "tool_result_v1_valid");
     assert_passed(&report, "terminal_frame_on_success");
+}
+
+#[tokio::test]
+async fn mcp_shaped_legacy_reply_matches_the_supplied_fixture() {
+    let mut subject = FakeSubject::new(Defects {
+        mcp_shaped_legacy: true,
+        ..Defects::default()
+    });
+    subject.result_calls = subject
+        .legacy_replies
+        .iter()
+        .map(|(call, _)| call.clone())
+        .collect();
+    for (_, body) in &subject.legacy_replies {
+        assert!(
+            serde_json::from_value::<cortexkit_role_tool_provider::result::ToolResult>(
+                body.clone()
+            )
+            .is_ok()
+        );
+    }
+    let report = run(&subject).await;
+    assert_passed(&report, "tool_result_legacy_route_unchanged");
+    assert_passed(&report, "tool_result_v1_valid");
+}
+
+#[tokio::test]
+async fn without_legacy_reply_the_legacy_case_is_skipped_never_passed() {
+    let mut subject = FakeSubject::new(Defects {
+        mcp_shaped_legacy: true,
+        ..Defects::default()
+    });
+    subject.legacy_replies.clear();
+    subject.capabilities.remove(&Capability::LegacyReply);
+    // Skip the simulated crash_after_prepared_not_started and
+    // crash_after_authorized_not_started cases: they fail the suite independently
+    // of legacy-reply coverage because they cannot kill a real process.
+    subject.capabilities.remove(&Capability::ApprovalExecution);
+    let report = run(&subject).await;
+    assert_passed(&report, "tool_result_v1_valid");
+    assert_eq!(
+        report.outcome("tool_result_legacy_route_unchanged"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::LegacyReply],
+        })
+    );
+    assert_eq!(
+        report.verdict,
+        SuiteVerdict::ConformingForDeclaredCapabilities {
+            skipped: vec![Capability::ApprovalExecution, Capability::LegacyReply],
+        },
+        "{}",
+        report.render()
+    );
+    assert!(report.render().contains(
+        "SKIP tool_result_legacy_route_unchanged (requires tool-result/v1, legacy_reply; missing legacy_reply)"
+    ));
+}
+
+#[tokio::test]
+async fn declaring_legacy_reply_without_a_fixture_fails_by_tool_name() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.legacy_replies.clear();
+    let report = run(&subject).await;
+    let reason = failed(&report, "tool_result_legacy_route_unchanged");
+    assert!(reason.contains(fake::QUICK), "{reason}");
+    assert!(
+        reason.contains("legacy_reply missing for probe"),
+        "{reason}"
+    );
+    assert_passed(&report, "tool_result_v1_valid");
+}
+
+#[tokio::test]
+async fn legacy_reply_mismatch_names_the_first_differing_json_pointer() {
+    use serde_json::json;
+    for (expected, pointer) in [
+        (
+            json!({"content": [{"type": "text", "text": "Changed."}], "isError": false}),
+            "/content/0/text",
+        ),
+        (json!({"content": [], "isError": false}), "/content/0"),
+        (
+            json!({"content": [{"type": "text", "text": "Legacy greeting."}, null], "isError": false}),
+            "/content/1",
+        ),
+        (
+            json!({"content": [{"type": "text", "text": "Legacy greeting."}], "isError": false, "a~/": null}),
+            "/a~0~1",
+        ),
+        (
+            json!({"content": [{"type": "text", "text": "Legacy greeting."}]}),
+            "/isError",
+        ),
+        (json!(null), ""),
+    ] {
+        let mut subject = FakeSubject::new(Defects {
+            mcp_shaped_legacy: true,
+            ..Defects::default()
+        });
+        subject.legacy_replies[0].1 = expected;
+        let report = run(&subject).await;
+        let reason = failed(&report, "tool_result_legacy_route_unchanged");
+        assert!(reason.contains(fake::QUICK), "{reason}");
+        assert!(
+            reason.ends_with(&format!("JSON pointer {pointer:?}")),
+            "{reason}"
+        );
+    }
 }
 
 #[tokio::test]
