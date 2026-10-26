@@ -490,9 +490,10 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-lease"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "fs2",
+ "libc",
  "windows-sys 0.61.2",
 ]
 

@@ -46,6 +46,188 @@ mod windows;
 #[cfg(all(windows, feature = "test-support"))]
 pub use windows::test_support;
 
+/// Why a file or directory could not be verified as private to the current user.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum NotPrivate {
+    /// The entry could not be inspected.
+    Io(io::Error),
+    /// The owner is not the current user (a SID on Windows, a uid on Unix).
+    Owner { principal: String },
+    /// Another principal has access (a SID on Windows, a group or everyone on Unix).
+    Access { principal: String },
+    /// The entry is a symlink or Windows reparse point.
+    Link,
+    /// An unfamiliar Windows ACE cannot safely be interpreted.
+    UnsupportedAce { ace_type: u8 },
+}
+
+impl std::fmt::Display for NotPrivate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(error) => write!(f, "could not inspect permissions: {error}"),
+            Self::Owner { principal } => write!(f, "owner is another principal: {principal}"),
+            Self::Access { principal } => {
+                write!(f, "access granted to another principal: {principal}")
+            }
+            Self::Link => f.write_str("symlink or reparse point is not private"),
+            Self::UnsupportedAce { ace_type } => write!(
+                f,
+                "unrecognized ACE type {ace_type}; refusing to assume it is private"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for NotPrivate {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<io::Error> for NotPrivate {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+/// Checks that the entry's owner is the current user and no other principal is
+/// granted access. This inspects the entry itself, not its ancestor directories,
+/// and refuses symlinks and Windows reparse points rather than following them.
+///
+/// On Unix the owner must be the effective uid and no group/other mode bits may
+/// be set. On Windows the owner must be TokenUser, the DACL must be non-null,
+/// and every access-allowed ACE must grant access only to that user. Deny ACEs
+/// cannot grant access and are ignored; unfamiliar ACE types are refused.
+/// Inspection errors, including a missing path, are returned as [`NotPrivate::Io`].
+pub fn verify_private(path: &Path) -> Result<(), NotPrivate> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = std::fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink() {
+            return Err(NotPrivate::Link);
+        }
+        // SAFETY: geteuid has no arguments and returns the process's effective uid.
+        if metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(NotPrivate::Owner {
+                principal: format!("uid {}", metadata.uid()),
+            });
+        }
+        if metadata.mode() & 0o070 != 0 {
+            return Err(NotPrivate::Access {
+                principal: format!("group (gid {})", metadata.gid()),
+            });
+        }
+        if metadata.mode() & 0o007 != 0 {
+            return Err(NotPrivate::Access {
+                principal: "everyone (other)".into(),
+            });
+        }
+        Ok(())
+    }
+    #[cfg(windows)]
+    {
+        windows::verify_private(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "permission verification is unsupported",
+        )
+        .into())
+    }
+}
+
+/// Removes an entry's explicit Windows DACL and restores inheritance from its
+/// parent, leaving its owner unchanged. With `recursive`, directories and all
+/// descendants are reset; reparse points are reset as links, never traversed.
+/// Callers must not concurrently replace entries in the tree while it is reset.
+///
+/// On Unix this is a no-op: Unix has no permission inheritance, and the caller
+/// applies captured mode bits itself. No modes are widened or otherwise changed.
+/// A missing path is still an error on every OS.
+pub fn reset_to_inherited(path: &Path, recursive: bool) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        windows::reset_to_inherited(path, recursive)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = recursive;
+        std::fs::symlink_metadata(path)?;
+        Ok(())
+    }
+}
+
+/// Creates a new read/write file with owner-only permissions from the instant
+/// it exists. An existing entry (including a symlink) is refused, never opened.
+/// On Unix the mode is 0600 narrowed by the umask; on Windows a protected DACL
+/// grants only the current user access and that user is explicitly the owner.
+pub fn create_private_file(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+    }
+    #[cfg(windows)]
+    {
+        windows::create_private_file(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "private file creation is unsupported",
+        ))
+    }
+}
+
+/// Tightens one existing directory to owner-only permissions without changing
+/// any existing children. Symlinks and Windows reparse points are refused.
+///
+/// On Windows the directory gets a protected owner-only DACL and the current
+/// user as owner. New children inherit its user-only ACE, but existing children
+/// keep their current ACLs, including inherited ACEs that no longer match the
+/// parent. This call does not make the directory's contents private; callers
+/// use it when they mean exactly that. On Unix only the open directory's mode
+/// is changed to 0700, never its children's modes.
+pub fn protect_dir_only(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let directory = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(path)?;
+        directory.set_permissions(std::fs::Permissions::from_mode(0o700))
+    }
+    #[cfg(windows)]
+    {
+        windows::protect_dir_only(path)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = path;
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "directory protection is unsupported",
+        ))
+    }
+}
+
 /// Force owner-only permissions on a file this process owns the lifecycle of.
 ///
 /// Files created through `File::create` or `OpenOptions::create` get their mode

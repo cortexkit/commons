@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.5
+
+- Add `verify_private` and `NotPrivate` to check ownership and owner-only
+  permissions without following a symlink or reparse point. Refusals identify
+  the offending SID (with well-known account aliases where available) or Unix
+  principal, without potentially slow domain lookups.
+- Add `reset_to_inherited` so a backup tool can restore normal Windows DACL
+  inheritance, optionally recursively, without traversing reparse points or
+  changing ownership. On Unix it checks existence but leaves modes unchanged:
+  Unix has no permission inheritance, and the caller applies captured mode bits.
+- Add `create_private_file` to create a new read/write file with owner-only
+  security from the instant it exists, refusing existing entries.
+- Add `protect_dir_only` to tighten an existing directory without changing
+  existing children's ACLs or Unix modes. Unlike `create_private_dir`, the
+  Windows operation does not propagate ACL changes into existing contents.
+- When protecting Windows files and directories, assign the current token user's
+  SID as owner only if ownership differs, including with an elevated token whose
+  default owner may be Administrators. Entries already owned by the user need
+  only READ_CONTROL and WRITE_DAC, as before. New files and directories receive
+  the user's SID explicitly in their creation descriptor.
+- Keep existing-directory tightening failures in `create_private_dir` diagnostic
+  only, as in 0.1.4; callers needing proof use `verify_private`. `protect_file` and
+  `protect_dir_only` return protection and ownership-setting failures.
+
 ## 0.1.4
 
 - Add `LeaseHandle::raise_epoch(at_least)`: raises a held exclusive lease's

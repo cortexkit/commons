@@ -4,34 +4,43 @@
 use std::{
     io,
     mem::{size_of, zeroed},
-    os::windows::{ffi::OsStrExt, fs::MetadataExt, io::AsRawHandle},
+    os::windows::{
+        ffi::OsStrExt,
+        fs::MetadataExt,
+        io::{AsRawHandle, FromRawHandle},
+    },
     path::Path,
     ptr::{null, null_mut},
 };
 
 use windows_sys::Win32::{
     Foundation::{
-        CloseHandle, ERROR_ALREADY_EXISTS, ERROR_PATH_NOT_FOUND, GENERIC_WRITE, HANDLE,
-        INVALID_HANDLE_VALUE,
+        CloseHandle, LocalFree, ERROR_ALREADY_EXISTS, ERROR_PATH_NOT_FOUND, GENERIC_READ,
+        GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
     },
     Security::{
         AddAccessAllowedAceEx,
-        Authorization::{SetSecurityInfo, SE_FILE_OBJECT},
-        GetLengthSid, GetTokenInformation, InitializeAcl, InitializeSecurityDescriptor,
-        SetSecurityDescriptorControl, SetSecurityDescriptorDacl, TokenUser, ACCESS_ALLOWED_ACE,
-        ACL, ACL_REVISION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE,
-        PROTECTED_DACL_SECURITY_INFORMATION, PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR,
-        SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+        Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SetSecurityInfo, SE_FILE_OBJECT},
+        EqualSid, GetAce, GetLengthSid, GetTokenInformation, InitializeAcl,
+        InitializeSecurityDescriptor, SetKernelObjectSecurity, SetSecurityDescriptorControl,
+        SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TokenUser, ACCESS_ALLOWED_ACE,
+        ACE_HEADER, ACL, ACL_REVISION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION,
+        OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
+        TOKEN_QUERY, TOKEN_USER, UNPROTECTED_DACL_SECURITY_INFORMATION,
     },
     Storage::FileSystem::{
         CreateDirectoryW, CreateFileW, FlushFileBuffers, GetFileInformationByHandle, GetFileType,
-        MoveFileExW, BY_HANDLE_FILE_INFORMATION, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TYPE_DISK,
-        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
+        MoveFileExW, BY_HANDLE_FILE_INFORMATION, CREATE_NEW, FILE_ALL_ACCESS,
+        FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_TYPE_DISK, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, OPEN_EXISTING,
+        READ_CONTROL, WRITE_DAC, WRITE_OWNER,
     },
     System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
+
+use crate::NotPrivate;
 
 struct Handle(HANDLE);
 
@@ -186,14 +195,64 @@ impl OwnerAcl {
     }
 }
 
-fn open_no_follow(path: &Path) -> io::Result<(Handle, u32)> {
+fn private_descriptor(acl: &mut OwnerAcl, user: &User) -> io::Result<SECURITY_DESCRIPTOR> {
+    // SAFETY: SECURITY_DESCRIPTOR is a plain Win32 structure initialized below.
+    let mut descriptor: SECURITY_DESCRIPTOR = unsafe { zeroed() };
+    let descriptor_ptr = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast();
+    // SAFETY: descriptor is aligned and writable. Its pointers refer to acl/user,
+    // which the caller keeps alive through creation. Revision 1 is the Win32
+    // SECURITY_DESCRIPTOR_REVISION. Neither setter retains descriptor_ptr.
+    if unsafe {
+        InitializeSecurityDescriptor(descriptor_ptr, 1) == 0
+            || SetSecurityDescriptorDacl(descriptor_ptr, 1, acl.as_mut_ptr(), 0) == 0
+            || SetSecurityDescriptorOwner(descriptor_ptr, user.sid(), 0) == 0
+            || SetSecurityDescriptorControl(descriptor_ptr, SE_DACL_PROTECTED, SE_DACL_PROTECTED)
+                == 0
+    } {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(descriptor)
+}
+
+pub(super) fn create_private_file(path: &Path) -> io::Result<std::fs::File> {
+    let name = wide(path)?;
+    let user = User::current()?;
+    let mut acl = OwnerAcl::new(false)?;
+    let mut descriptor = private_descriptor(&mut acl, &user)?;
+    let attributes = SECURITY_ATTRIBUTES {
+        nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(),
+        bInheritHandle: 0,
+    };
+    // SAFETY: name and all descriptor/ACL/SID storage are live for this call.
+    // CREATE_NEW refuses existing entries, and OPEN_REPARSE_POINT never follows
+    // a final link. The protected DACL and owner are applied atomically at creation.
+    let raw = unsafe {
+        CreateFileW(
+            name.as_ptr(),
+            GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            &attributes,
+            CREATE_NEW,
+            FILE_FLAG_OPEN_REPARSE_POINT,
+            null_mut(),
+        )
+    };
+    if raw == INVALID_HANDLE_VALUE {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: CreateFileW returned a valid owned handle; File takes sole ownership.
+    Ok(unsafe { std::fs::File::from_raw_handle(raw) })
+}
+
+fn open_no_follow(path: &Path, access: u32) -> io::Result<(Handle, u32)> {
     let name = wide(path)?;
     // SAFETY: name is NUL-terminated; no security attributes or template are used.
     // OPEN_REPARSE_POINT opens the final link itself, not its target.
     let raw = unsafe {
         CreateFileW(
             name.as_ptr(),
-            READ_CONTROL | WRITE_DAC,
+            access,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             null(),
             OPEN_EXISTING,
@@ -221,18 +280,214 @@ fn open_no_follow(path: &Path) -> io::Result<(Handle, u32)> {
     Ok((handle, info.dwFileAttributes))
 }
 
-fn apply(handle: &Handle, directory: bool) -> io::Result<()> {
-    let mut acl = OwnerAcl::new(directory)?;
-    // Windows can bypass directory traversal checks. SetSecurityInfo also
-    // replaces inherited ACEs on existing descendants, so their own ACLs lose
-    // broad access when the directory is narrowed. Protected child DACLs stay intact.
-    // SAFETY: handle is live and acl contains a valid DACL. SetSecurityInfo copies
-    // the DACL, leaving owner/group/SACL unchanged. Protection disables parent ACEs.
+struct LocalAllocation(*mut std::ffi::c_void);
+
+impl Drop for LocalAllocation {
+    fn drop(&mut self) {
+        // SAFETY: The pointer is an allocation returned by a successful Win32
+        // security API, each of which specifies LocalFree for its release.
+        unsafe { LocalFree(self.0) };
+    }
+}
+
+struct Security {
+    _descriptor: LocalAllocation,
+    owner: PSID,
+    dacl: *mut ACL,
+}
+
+impl Security {
+    fn read(handle: &Handle) -> io::Result<Self> {
+        let mut owner = null_mut();
+        let mut dacl = null_mut();
+        let mut descriptor: PSECURITY_DESCRIPTOR = null_mut();
+        // SAFETY: handle has READ_CONTROL and outputs are writable. The owner
+        // and DACL point into the returned descriptor, retained by Self.
+        let error = unsafe {
+            GetSecurityInfo(
+                handle.0,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                null_mut(),
+                &mut dacl,
+                null_mut(),
+                &mut descriptor,
+            )
+        };
+        if error != 0 {
+            return Err(io::Error::from_raw_os_error(error as i32));
+        }
+        Ok(Self {
+            _descriptor: LocalAllocation(descriptor),
+            owner,
+            dacl,
+        })
+    }
+}
+
+struct Protection {
+    handle: Handle,
+    attributes: u32,
+    user: User,
+    change_owner: bool,
+}
+
+impl Protection {
+    fn open(path: &Path) -> io::Result<Self> {
+        let (handle, attributes) = open_no_follow(path, READ_CONTROL | WRITE_DAC)?;
+        let user = User::current()?;
+        let security = Security::read(&handle)?;
+        // Owners implicitly have READ_CONTROL and WRITE_DAC, but not WRITE_OWNER.
+        // Request the latter only when an elevated token or another creator left
+        // an owner different from TokenUser.
+        // SAFETY: Both SIDs belong to live Win32 structures; a missing owner is
+        // checked before EqualSid is called.
+        let change_owner =
+            security.owner.is_null() || unsafe { EqualSid(security.owner, user.sid()) } == 0;
+        let (handle, attributes) = if change_owner {
+            open_no_follow(path, READ_CONTROL | WRITE_DAC | WRITE_OWNER)?
+        } else {
+            (handle, attributes)
+        };
+        Ok(Self {
+            handle,
+            attributes,
+            user,
+            change_owner,
+        })
+    }
+
+    fn information(&self) -> u32 {
+        DACL_SECURITY_INFORMATION
+            | PROTECTED_DACL_SECURITY_INFORMATION
+            | if self.change_owner {
+                OWNER_SECURITY_INFORMATION
+            } else {
+                0
+            }
+    }
+
+    fn owner(&self) -> PSID {
+        if self.change_owner {
+            self.user.sid()
+        } else {
+            null_mut()
+        }
+    }
+}
+
+fn principal(sid: PSID) -> io::Result<String> {
+    let mut text = null_mut();
+    // SAFETY: The SID belongs to a live token or security descriptor. The call
+    // allocates a NUL-terminated SID string, released with LocalFree below.
+    if unsafe { ConvertSidToStringSidW(sid, &mut text) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let _text = LocalAllocation(text.cast());
+    // SAFETY: ConvertSidToStringSidW returned a valid NUL-terminated UTF-16 string.
+    let value = unsafe {
+        let mut len = 0;
+        while *text.add(len) != 0 {
+            len += 1;
+        }
+        String::from_utf16_lossy(std::slice::from_raw_parts(text, len))
+    };
+    // Well-known account aliases are cheap and cannot trigger a domain lookup.
+    // LookupAccountSidW can contact domain controllers even with a null system
+    // name, so unfamiliar SIDs are reported without attempting name resolution.
+    let account = match value.as_str() {
+        "S-1-1-0" => Some("Everyone"),
+        "S-1-5-11" => Some("NT AUTHORITY\\Authenticated Users"),
+        "S-1-5-18" => Some("NT AUTHORITY\\SYSTEM"),
+        "S-1-5-19" => Some("NT AUTHORITY\\LOCAL SERVICE"),
+        "S-1-5-20" => Some("NT AUTHORITY\\NETWORK SERVICE"),
+        "S-1-5-32-544" => Some("BUILTIN\\Administrators"),
+        "S-1-5-32-545" => Some("BUILTIN\\Users"),
+        "S-1-5-32-546" => Some("BUILTIN\\Guests"),
+        _ => None,
+    };
+    Ok(match account {
+        Some(account) => format!("{value} ({account})"),
+        None => value,
+    })
+}
+
+pub(super) fn verify_private(path: &Path) -> Result<(), NotPrivate> {
+    let (handle, attributes) = open_no_follow(path, READ_CONTROL)?;
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(NotPrivate::Link);
+    }
+    let user = User::current()?;
+    let security = Security::read(&handle)?;
+    if security.owner.is_null() {
+        return Err(NotPrivate::Owner {
+            principal: "unknown (missing owner SID)".into(),
+        });
+    }
+    // SAFETY: Both SIDs belong to live, initialized Win32 security structures.
+    if unsafe { EqualSid(security.owner, user.sid()) } == 0 {
+        return Err(NotPrivate::Owner {
+            principal: principal(security.owner)?,
+        });
+    }
+    if security.dacl.is_null() {
+        return Err(NotPrivate::Access {
+            principal: "S-1-1-0 (Everyone; null DACL)".into(),
+        });
+    }
+    // SAFETY: GetSecurityInfo returned a valid ACL in the live descriptor.
+    let count = unsafe { (*security.dacl).AceCount };
+    for index in 0..count {
+        let mut ace = null_mut();
+        // SAFETY: The ACL is live and index is below its AceCount.
+        if unsafe { GetAce(security.dacl, index as u32, &mut ace) } == 0 {
+            return Err(io::Error::last_os_error().into());
+        }
+        // SAFETY: Every ACE returned by GetAce starts with an ACE_HEADER.
+        let kind = unsafe { (*ace.cast::<ACE_HEADER>()).AceType };
+        match kind {
+            0 => {
+                // SAFETY: Type 0 is ACCESS_ALLOWED_ACE. Its embedded SID remains
+                // live with the descriptor until after comparison and formatting.
+                let (mask, sid) = unsafe {
+                    let allowed = &*ace.cast::<ACCESS_ALLOWED_ACE>();
+                    (
+                        allowed.Mask,
+                        (&allowed.SidStart as *const u32).cast_mut().cast(),
+                    )
+                };
+                // SAFETY: Both pointers refer to valid SIDs in live storage.
+                if mask != 0 && unsafe { EqualSid(sid, user.sid()) } == 0 {
+                    return Err(NotPrivate::Access {
+                        principal: principal(sid)?,
+                    });
+                }
+            }
+            // ACCESS_DENIED, ACCESS_DENIED_OBJECT, ACCESS_DENIED_CALLBACK,
+            // ACCESS_DENIED_CALLBACK_OBJECT: none can grant access.
+            1 | 6 | 10 | 12 => {}
+            ace_type => return Err(NotPrivate::UnsupportedAce { ace_type }),
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn reset_to_inherited(path: &Path, recursive: bool) -> io::Result<()> {
+    let (handle, attributes) = open_no_follow(path, READ_CONTROL | WRITE_DAC)?;
+    let mut acl = OwnerAcl(vec![0; size_of::<ACL>().div_ceil(size_of::<u32>())]);
+    // SAFETY: acl has enough aligned storage for an empty ACL header.
+    if unsafe { InitializeAcl(acl.as_mut_ptr(), size_of::<ACL>() as u32, ACL_REVISION) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: handle refers to the entry itself, even for reparse points. The
+    // empty (not null) ACL removes explicit ACEs and unprotection restores parent
+    // inheritance. Owner/group/SACL are not requested and remain unchanged.
     let error = unsafe {
         SetSecurityInfo(
             handle.0,
             SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            DACL_SECURITY_INFORMATION | UNPROTECTED_DACL_SECURITY_INFORMATION,
             null_mut(),
             null_mut(),
             acl.as_mut_ptr(),
@@ -241,6 +496,70 @@ fn apply(handle: &Handle, directory: bool) -> io::Result<()> {
     };
     if error != 0 {
         return Err(io::Error::from_raw_os_error(error as i32));
+    }
+    if recursive
+        && attributes & FILE_ATTRIBUTE_DIRECTORY != 0
+        && attributes & FILE_ATTRIBUTE_REPARSE_POINT == 0
+    {
+        for entry in std::fs::read_dir(path)? {
+            reset_to_inherited(&entry?.path(), true)?;
+        }
+    }
+    Ok(())
+}
+
+fn apply(protection: &Protection, directory: bool) -> io::Result<()> {
+    let mut acl = OwnerAcl::new(directory)?;
+    // Windows can bypass directory traversal checks. SetSecurityInfo also
+    // replaces inherited ACEs on existing descendants, so their own ACLs lose
+    // broad access when the directory is narrowed. Protected child DACLs stay intact.
+    // SAFETY: The handle has WRITE_DAC and, only when needed, WRITE_OWNER.
+    // ACL/SID storage stays live through the call. Group/SACL are unchanged,
+    // and an already-correct owner is not requested. Protection disables parent ACEs.
+    let error = unsafe {
+        SetSecurityInfo(
+            protection.handle.0,
+            SE_FILE_OBJECT,
+            protection.information(),
+            protection.owner(),
+            null_mut(),
+            acl.as_mut_ptr(),
+            null(),
+        )
+    };
+    if error != 0 {
+        return Err(io::Error::from_raw_os_error(error as i32));
+    }
+    Ok(())
+}
+
+pub(super) fn protect_dir_only(path: &Path) -> io::Result<()> {
+    let protection = Protection::open(path)?;
+    if protection.attributes & FILE_ATTRIBUTE_DIRECTORY == 0
+        || protection.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "not a directory or is a reparse point",
+        ));
+    }
+    let mut acl = OwnerAcl::new(true)?;
+    let mut descriptor = private_descriptor(&mut acl, &protection.user)?;
+    // SetSecurityInfo propagates inherited ACE changes to existing descendants.
+    // The handle-based kernel setter changes only this object's descriptor.
+    // SAFETY: The handle always has WRITE_DAC; WRITE_OWNER is added only when
+    // ownership differs.
+    // Descriptor/ACL/SID storage is live. The owner field is ignored unless an
+    // ownership change is requested; only the protected DACL is always requested.
+    if unsafe {
+        SetKernelObjectSecurity(
+            protection.handle.0,
+            protection.information(),
+            (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast(),
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }
@@ -260,18 +579,18 @@ pub(super) fn protect_file(path: &Path) -> io::Result<()> {
             ),
         ));
     }
-    let (handle, attributes) = match open_no_follow(path) {
+    let protection = match Protection::open(path) {
         Ok(opened) => opened,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
         Err(error) => return Err(error),
     };
-    if attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+    if protection.attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "not a regular file",
         ));
     }
-    apply(&handle, false)
+    apply(&protection, false)
 }
 
 pub(super) fn create_private_dir(dir: &Path) -> io::Result<()> {
@@ -282,17 +601,17 @@ pub(super) fn create_private_dir(dir: &Path) -> io::Result<()> {
     }
     // Existing directories may belong to another account. As on Unix, failure
     // to tighten them is diagnostic only; failure to create them is an error.
-    let result = open_no_follow(dir).and_then(|(handle, attributes)| {
-        if attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+    let result = Protection::open(dir).and_then(|protection| {
+        if protection.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
             return Ok(());
         }
-        if attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
+        if protection.attributes & FILE_ATTRIBUTE_DIRECTORY == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "not a directory",
             ));
         }
-        apply(&handle, true)
+        apply(&protection, true)
     });
     if let Err(error) = result {
         eprintln!(
@@ -320,19 +639,9 @@ fn create_all(dir: &Path) -> io::Result<()> {
     }
     let name = wide(dir)?;
     let mut acl = OwnerAcl::new(true)?;
-    // SAFETY: SECURITY_DESCRIPTOR is a plain Win32 structure initialized below.
-    let mut descriptor: SECURITY_DESCRIPTOR = unsafe { zeroed() };
+    let user = User::current()?;
+    let mut descriptor = private_descriptor(&mut acl, &user)?;
     let descriptor_ptr = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast();
-    // SAFETY: descriptor is aligned and writable; acl remains live until after
-    // CreateDirectoryW copies the descriptor. Revision 1 is SECURITY_DESCRIPTOR_REVISION.
-    if unsafe {
-        InitializeSecurityDescriptor(descriptor_ptr, 1) == 0
-            || SetSecurityDescriptorDacl(descriptor_ptr, 1, acl.as_mut_ptr(), 0) == 0
-            || SetSecurityDescriptorControl(descriptor_ptr, SE_DACL_PROTECTED, SE_DACL_PROTECTED)
-                == 0
-    } {
-        return Err(io::Error::last_os_error());
-    }
     let attributes = SECURITY_ATTRIBUTES {
         nLength: size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: descriptor_ptr,
