@@ -4,6 +4,113 @@ This crate defines caller-facing values for `exec-remote/v1`. It carries protoco
 shapes; runners remain responsible for enforcing request limits, collecting files,
 and emitting records in the required order.
 
+## Idempotent submission
+
+`RunRequest.submission_key` is an optional, opaque, caller-chosen key of 16 to
+128 bytes, each in printable ASCII 0x21 through 0x7e (no whitespace).
+`RunRequest.resume_from_seq` is an optional `u64` and is malformed without a
+`submission_key`. Decoding rejects an invalid key or a cursor without a key;
+the executor reports malformed request syntax as `invalid_params`, identifying
+the offending field. Both fields default to absent and are omitted when absent.
+
+**Capability gate:** a caller sends either field only to an executor advertising
+`SUBMISSION_KEY_CAPABILITY` (`exec-remote-submission-key/v1`). The types define no
+capability handshake. Older executors ignore unknown fields and could start a
+second job on resubmit, so sending keys without this check is unsafe.
+
+### Scope and durability
+
+The executor scopes keys to the attested caller principal (the module identity,
+not the route). Two callers never share a key namespace. The executor must not
+let a caller attach to another principal's job or read its stream.
+
+The executor records the key durably **before** submitting the job to any runner,
+and keeps the key record at least as long as the job record (24 hours today).
+While that record exists, a resubmit must never start a second job under the key.
+An executor that has forgotten a key cannot distinguish a resubmit from a fresh
+request. A caller must therefore not resubmit an unresolved key after that
+retention window: forgetting the key is not evidence that nothing ran.
+
+### Same request only
+
+A resubmit carries the same caller-supplied request as originally sent, except
+for `resume_from_seq`. The executor compares a digest of the request with
+`resume_from_seq` cleared, over a canonical encoding using RFC 8785 JSON
+canonicalization (sorted keys and no insignificant whitespace). JSON field order
+cannot cause a mismatch. The crate's vector tests use
+`serde_json_canonicalizer` for RFC 8785 encoding; this crate does not compute
+submission digests or add an execution-policy implementation.
+
+The digest covers every caller-supplied field that affects what runs. The
+current set is `command`, `cwd`, `workspace_key`, `repository_root`, `siblings`,
+`platform`, `weight_hint`, `network`, `timeout`, `queue_wait_limit_s`, `env`, and
+the return options `return_paths`, `return_max_bytes`, and `return_chunked`.
+The key identifies the record being compared and is unchanged on resubmit.
+An executor may leave out environment entries it never forwards to the command.
+
+The digest never covers anything the executor derives, such as a workspace
+snapshot or bundle, job IDs, or placement. After a caller restart, a resubmit
+may recapture a checkout whose content has moved on. It must still attach to
+the existing job: that existing job, not the recaptured checkout, is what runs.
+
+A mismatch is refused with `RefusalReason::RequestRejected` (`request_rejected`)
+and `refusal_detail` `submission_key_mismatch`. The executor must never attach a
+different command to an existing job. Such a refusal does not change the
+existing job or imply that its earlier command did not run.
+
+A refusal of a keyed request carries a `job_id` of its own, never the existing
+job's ID. A caller must not apply the refusal to any other `job_id`. In
+particular, a mismatch refusal leaves the existing job's state unaffected; that
+state is learned only from the existing job's own stream or an attach to it.
+
+For example, these two requests are the same request for digest comparison:
+only JSON field order and the replay cursor differ.
+
+```json
+{"workspace_key":"example-task","repository_root":"/example/repo","cwd":"/example/repo","command":"printf hello","env":{},"siblings":[],"submission_key":"example:task-0001"}
+```
+
+```json
+{"resume_from_seq":7,"submission_key":"example:task-0001","siblings":[],"env":{},"command":"printf hello","cwd":"/example/repo","repository_root":"/example/repo","workspace_key":"example-task"}
+```
+
+### Replies and replay
+
+For a keyed request, exactly one admission outcome applies:
+
+- Started: `Accepted.attached` is absent or false.
+- Attached: `Accepted.attached` is true and its existing `job_id` names the job
+  to which the request attaches, rather than a new job.
+- `RefusalReason::SubmissionNeverAccepted` (`submission_never_accepted`): a final
+  refusal, sent only to a caller that supplied a key. No runner ever accepted
+  this key's earlier submission, this resubmit was refused too, and nothing ran
+  under the key. The caller may resubmit under a **new** key. This is not an
+  outcome-unknown reply. Older decoders preserve the tag as `Unknown`, whose
+  existing meaning is still "did not start".
+- Any existing refusal, retaining its existing meaning for this request.
+
+Every refusal of a keyed request, including `submission_key_mismatch`,
+`submission_never_accepted`, and any other refusal of a resubmit, carries a
+`job_id` of its own. It must never name the existing job, and a caller must not
+apply the refusal to any other `job_id`. A mismatch refusal does not affect the
+existing job's state; learn that state only from the existing job's own stream
+or an attach to it.
+
+Here "started" distinguishes a new admission from attachment; `Accepted` still
+does not prove the command has begun execution (`Started` reports that).
+`attached` defaults to false and is omitted when false. A runner predating the
+field never sends it, so absence means "started, or a runner that doesn't support
+keys". A caller relies on it only after the capability check above.
+
+When the key's job exists, replay begins with the first record whose `seq` is
+**strictly greater** than `resume_from_seq`. An absent cursor replays from the
+beginning. This exclusive cursor does not change the existing inclusive
+`AttachRequest.from_seq` contract. If records after the cursor have expired, the
+existing expired-replay and outcome rules apply unchanged, including
+`ReturnAssembler::finish_expired_replay` for expired returned bytes (see Replay
+below). There is no new gap mechanism. Expired job history is not a refusal and
+must never cause a caller to start the command again.
+
 ## Hosted placement and billing
 
 A hosted runner may add `TerminalRecord.hosted` with its placement identifier, such
@@ -21,14 +128,14 @@ only when the request contains a non-empty `return_paths` and does not set
 immediately before the terminal record. This request-field gate keeps the new
 record out of streams for callers that cannot request returned files. The
 exec-remote/v1 types define no capability handshake; a caller must send non-empty
-`return_paths` only to a runner that advertises support. ck-motor advertises this
-support through its own `Hello` capability.
+`return_paths` only to a runner that advertises support. The executor advertises
+this support through its own `Hello` capability.
 
 `return_max_bytes` caps the total bytes in the returned files. Without
 `return_chunked`, an absent value selects `RETURN_MAX_BYTES_CAP` (262,144 bytes),
 and requests above that cap must be rejected with `invalid_params` identifying
 `return_max_bytes`. The caller-facing types do not implement runner request
-validation.
+limit validation; the submission-field syntax checks above run on decode.
 
 A successful `return_result` contains `returned_files`, possibly an empty list.
 Each file's `path` is cwd-relative, `sha256` is the lowercase digest of the
@@ -60,7 +167,7 @@ behaves as before.
 
 `RunRequest.return_chunked` (default false, omitted from the wire when false)
 asks for chunked return. A caller sets it only for a runner that advertises the
-capability `RETURN_CHUNKED_CAPABILITY` (`exec-remote-return/v2`). ck-motor
+capability `RETURN_CHUNKED_CAPABILITY` (`exec-remote-return/v2`). The executor
 advertises it in its `Hello`, as it does for `return_result` support.
 
 With `return_chunked` set and `return_paths` non-empty, the runner sends zero or
@@ -159,7 +266,7 @@ received for the job's returned files.
 
 ### Replay
 
-While the runner keeps the job's returned bytes (ck-motor keeps them for one
+While the runner keeps the job's returned bytes (the executor keeps them for one
 hour), a replay through `exec.attach` re-sends the same `return_chunk` records
 and `return_manifest` at the same `seq` values.
 

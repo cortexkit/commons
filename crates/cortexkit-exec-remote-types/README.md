@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.13**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.14**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -38,6 +38,35 @@ for the cap, capability requirement, and outcome rules.
 `truncated_before_seq`. Base64 is standard and padded. A chunk may split a UTF-8
 character, so decoding never converts its payload to a string.
 
+### Idempotent submission
+
+A caller may set `RunRequest::with_submission_key` only after the executor
+advertises `SUBMISSION_KEY_CAPABILITY` (`exec-remote-submission-key/v1`). Older
+executors ignore unknown fields, so sending a key without the capability check
+could start a second job. Keys are opaque caller-chosen strings of 16..=128
+bytes of ASCII 0x21..=0x7e (no whitespace). `submission_key()` reads the key.
+`with_resume_from_seq` / `resume_from_seq()` set/read an exclusive replay cursor:
+replay starts at the first record strictly after it, or from the beginning when
+absent. A cursor requires a key and the same capability check. Invalid syntax is
+rejected on decode. Both fields are omitted when absent.
+
+`Accepted::with_attached` / `attached()` report attachment to the existing
+`job_id`, not a new start. False is omitted; absence means "started, or a runner
+that doesn't support keys". Rely on it only after checking the capability.
+`RefusalReason::SubmissionNeverAccepted` (`submission_never_accepted`) is a final
+refusal only for keyed requests: nothing ran under the key and a caller may
+resubmit under a new key, unlike outcome-unknown.
+
+The executor must scope keys to the attested caller principal, durably record
+them before submitting to any runner, and retain them at least as long as the
+job record (24 hours today). A caller must not resubmit an unresolved key after
+that window: an executor that forgot it cannot distinguish a retry from new work.
+Resubmissions must carry the same caller-supplied request except for the cursor;
+the executor compares an RFC 8785 canonical request digest, never a derived
+snapshot or bundle. A mismatch is `request_rejected` with `refusal_detail`
+`submission_key_mismatch`. See [`CONTRACT.md`](CONTRACT.md) for the covered fields,
+principal isolation, and unchanged expired-replay rules.
+
 ### Network access
 
 Runs stay offline unless the caller requests `RunRequest::with_network(Network::Outbound)`.
@@ -55,7 +84,9 @@ Future strings round-trip as `Network::Unknown(String)`. A runner receiving an
 unrecognised request must refuse before start with the non-transient
 `RefusalReason::NetworkUnsupported` (`"network_unsupported"`), never downgrade or
 upgrade access. A job granted outbound access may have had outside effects, so
-the caller must not automatically rerun it after an unknown outcome.
+the caller must not automatically start it again after an unknown outcome.
+Capability-gated resubmission under the same retained key attaches to the
+existing job instead of rerunning it.
 
 ### Execution platform
 
@@ -79,7 +110,7 @@ requested platform's wire name is reported in `refusal_detail`.
 is omitted and disables `return_result`. The optional `return_max_bytes` cap
 defaults to `RETURN_MAX_BYTES_CAP` (262,144 bytes). Without `return_chunked`, a
 larger request must be rejected as `invalid_params` naming that field. The types
-crate has no runner-side request validator. See [`CONTRACT.md`](CONTRACT.md) for
+crate has no runner-side limit validator. See [`CONTRACT.md`](CONTRACT.md) for
 the capability check required before sending paths, the stream ordering, and
 the outcome rules.
 
@@ -298,6 +329,12 @@ record sequence with the requested paths, the cap, and the result
 `ReturnAssembler` must reach: thirteen accepted streams and twelve refusals,
 each checked by its own test. `SHA256SUMS` pins the chunked `.jcs` files as well
 as their individual `.sha256` companions. The vector README lists them.
+
+`test-vectors/exec-remote-v1/submission-key/` adds four invented-value cases:
+`request-resume`, `attached`, `submission-never-accepted`, and
+`submission-key-mismatch`. Each has a `.jcs` request/stream object and a
+`.sha256` companion; the directory's `SHA256SUMS` pins both. Tests check the
+inventory, hashes and typed canonical round-trips without changing older vectors.
 
 ## Verification
 

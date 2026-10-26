@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.14
+
+- Add optional `RunRequest.submission_key` and `resume_from_seq`, with `with_*`
+  setters and accessors. Decode rejects keys outside 16..=128 bytes of ASCII
+  0x21..=0x7e and cursors without keys. A caller must check the executor's
+  `SUBMISSION_KEY_CAPABILITY` (`exec-remote-submission-key/v1`) before sending
+  either field; older executors ignore them and could otherwise start work twice.
+- Add `Accepted.attached` (`with_attached`, `attached()`, omitted when false) and
+  final `RefusalReason::SubmissionNeverAccepted` (`submission_never_accepted`).
+  The latter is only for keyed requests, guarantees nothing ran under the key,
+  and permits a caller to submit under a new key.
+- The executor must scope keys to the attested caller principal, durably record
+  them before submitting to any runner, and retain them at least as long as job
+  records (24 hours today). A caller must not resubmit an unresolved key after
+  that window. Resubmission compares an RFC 8785 canonical digest of the same
+  caller-supplied request except `resume_from_seq`, never derived snapshots,
+  bundles, job IDs or placement. Mismatch is `request_rejected` with detail
+  `submission_key_mismatch`; an unchanged request attaches even if a recaptured
+  checkout has moved on. Expired replay keeps its existing rules.
+- Add keyed request, attached acceptance, never-accepted refusal and mismatch
+  refusal vectors and checksums. Existing vector bytes and default wire shapes
+  remain unchanged.
+
 ## 0.2.13
 
 - Add `TerminalRecord.execution_ended`, with `with_execution_ended` and

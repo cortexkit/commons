@@ -104,7 +104,7 @@ impl From<Platform> for String {
 ///
 /// Use [`Self::new`] and the `with_*` setters so future optional fields remain
 /// additive for callers.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct RunRequest {
     pub workspace_key: String,
@@ -144,6 +144,77 @@ pub struct RunRequest {
     /// when `return_paths` is empty. Omitted on the wire when false.
     #[serde(default, skip_serializing_if = "is_false")]
     pub return_chunked: bool,
+    /// Opaque caller-chosen idempotency key: 16..=128 bytes of ASCII 0x21..=0x7e.
+    /// Send only to an executor advertising [`SUBMISSION_KEY_CAPABILITY`]; older
+    /// executors ignore unknown fields and could start a second job on resubmit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submission_key: Option<String>,
+    /// Resume an existing keyed job with records whose seq is strictly greater
+    /// than this value. Requires `submission_key`; absent means replay from the
+    /// beginning. Send only to an executor advertising [`SUBMISSION_KEY_CAPABILITY`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_from_seq: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct RunRequestInput {
+    workspace_key: String,
+    repository_root: String,
+    cwd: String,
+    command: String,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    weight_hint: Option<u32>,
+    timeout: Option<u64>,
+    queue_wait_limit_s: Option<u64>,
+    #[serde(default)]
+    siblings: Vec<String>,
+    network: Option<Network>,
+    platform: Option<Platform>,
+    #[serde(default)]
+    return_paths: Vec<String>,
+    return_max_bytes: Option<u64>,
+    #[serde(default)]
+    return_chunked: bool,
+    submission_key: Option<String>,
+    resume_from_seq: Option<u64>,
+}
+
+impl<'de> Deserialize<'de> for RunRequest {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let input = RunRequestInput::deserialize(deserializer)?;
+        if let Some(key) = &input.submission_key {
+            if !(16..=128).contains(&key.len())
+                || !key.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+            {
+                return Err(serde::de::Error::custom(
+                    "submission_key must be 16..=128 bytes of ASCII 0x21..=0x7e",
+                ));
+            }
+        } else if input.resume_from_seq.is_some() {
+            return Err(serde::de::Error::custom(
+                "resume_from_seq requires submission_key",
+            ));
+        }
+        Ok(Self {
+            workspace_key: input.workspace_key,
+            repository_root: input.repository_root,
+            cwd: input.cwd,
+            command: input.command,
+            env: input.env,
+            weight_hint: input.weight_hint,
+            timeout: input.timeout,
+            queue_wait_limit_s: input.queue_wait_limit_s,
+            siblings: input.siblings,
+            network: input.network,
+            platform: input.platform,
+            return_paths: input.return_paths,
+            return_max_bytes: input.return_max_bytes,
+            return_chunked: input.return_chunked,
+            submission_key: input.submission_key,
+            resume_from_seq: input.resume_from_seq,
+        })
+    }
 }
 
 // serde's `skip_serializing_if` needs a function taking a reference.
@@ -174,6 +245,8 @@ impl RunRequest {
             return_paths: Vec::new(),
             return_max_bytes: None,
             return_chunked: false,
+            submission_key: None,
+            resume_from_seq: None,
         }
     }
 
@@ -181,6 +254,29 @@ impl RunRequest {
     pub fn with_env(mut self, env: BTreeMap<String, String>) -> Self {
         self.env = env;
         self
+    }
+
+    /// Set an idempotency key, only after checking [`SUBMISSION_KEY_CAPABILITY`].
+    pub fn with_submission_key(mut self, submission_key: impl Into<String>) -> Self {
+        self.submission_key = Some(submission_key.into());
+        self
+    }
+
+    /// Caller-chosen idempotency key, if supplied.
+    pub fn submission_key(&self) -> Option<&str> {
+        self.submission_key.as_deref()
+    }
+
+    /// Resume after this sequence number; requires a key and the executor's
+    /// [`SUBMISSION_KEY_CAPABILITY`] advertisement.
+    pub fn with_resume_from_seq(mut self, resume_from_seq: u64) -> Self {
+        self.resume_from_seq = Some(resume_from_seq);
+        self
+    }
+
+    /// Exclusive replay cursor, or `None` to replay from the beginning.
+    pub fn resume_from_seq(&self) -> Option<u64> {
+        self.resume_from_seq
     }
 
     /// Set the scheduling weight hint.
@@ -341,6 +437,10 @@ pub enum RefusalReason {
     /// retry is not expected to help. `refusal_detail` carries a safe human-only
     /// fault code, never credential material.
     RunnerAuthenticationFailed,
+    /// Final refusal, sent only for a request with `submission_key`: no runner
+    /// ever accepted the earlier submission and this resubmit was refused too.
+    /// Nothing ran under the key; the caller may resubmit under a new key.
+    SubmissionNeverAccepted,
     /// A refusal tag this version does not recognise. The refused command
     /// still did not start.
     Unknown(String),
@@ -366,6 +466,7 @@ impl From<String> for RefusalReason {
             "lost_to_restart" => Self::LostToRestart,
             "request_rejected" => Self::RequestRejected,
             "runner_authentication_failed" => Self::RunnerAuthenticationFailed,
+            "submission_never_accepted" => Self::SubmissionNeverAccepted,
             _ => Self::Unknown(reason),
         }
     }
@@ -391,6 +492,7 @@ impl From<RefusalReason> for String {
             RefusalReason::LostToRestart => "lost_to_restart".into(),
             RefusalReason::RequestRejected => "request_rejected".into(),
             RefusalReason::RunnerAuthenticationFailed => "runner_authentication_failed".into(),
+            RefusalReason::SubmissionNeverAccepted => "submission_never_accepted".into(),
             RefusalReason::Unknown(reason) => reason,
         }
     }
@@ -743,6 +845,10 @@ pub const REFUSAL_DETAIL_MAX_BYTES: usize = 1024;
 pub const RETURN_MAX_BYTES_CAP: u64 = 262_144;
 /// Capability a runner advertises when it supports `RunRequest.return_chunked`.
 pub const RETURN_CHUNKED_CAPABILITY: &str = "exec-remote-return/v2";
+/// Capability an executor advertises for idempotent keyed submissions. A caller
+/// sends `RunRequest.submission_key` or `RunRequest.resume_from_seq` only after
+/// checking this advertisement: older executors silently ignore those fields.
+pub const SUBMISSION_KEY_CAPABILITY: &str = "exec-remote-submission-key/v1";
 /// Maximum requested returned-file bytes with `return_chunked`, also used when
 /// `return_max_bytes` is absent from such a request.
 pub const RETURN_CHUNKED_MAX_BYTES_CAP: u64 = 10_485_760;
@@ -1685,6 +1791,12 @@ pub struct Accepted {
     /// request must fill this with the platform they will actually use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<Platform>,
+    /// True when attaching to the existing job named by `job_id`, not starting
+    /// another job. Omitted when false. Older runners never send this field, so
+    /// absence means "started, or a runner that doesn't support keys". Rely on
+    /// it only after checking [`SUBMISSION_KEY_CAPABILITY`].
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub attached: bool,
 }
 
 impl Accepted {
@@ -1695,6 +1807,7 @@ impl Accepted {
             env_not_forwarded: None,
             network: None,
             platform: None,
+            attached: false,
         }
     }
 
@@ -1702,6 +1815,18 @@ impl Accepted {
     pub fn with_env_not_forwarded(mut self, names: Vec<String>) -> Self {
         self.env_not_forwarded = Some(names);
         self
+    }
+
+    /// Report attachment to an existing keyed job rather than a new start.
+    pub fn with_attached(mut self, attached: bool) -> Self {
+        self.attached = attached;
+        self
+    }
+
+    /// Whether this acceptance attaches to an existing keyed job. Only rely on
+    /// the value after checking [`SUBMISSION_KEY_CAPABILITY`].
+    pub fn attached(&self) -> bool {
+        self.attached
     }
 
     /// Report the network access actually granted by the runner.

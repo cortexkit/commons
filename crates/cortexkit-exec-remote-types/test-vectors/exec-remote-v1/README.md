@@ -260,3 +260,20 @@ Refusals, each by its error code:
 - `refuse-total-over-cap`: `over_cap`, raised by the chunk that passes the cap.
 - `refuse-chunk-count-mismatch`: `chunk_count_mismatch`, because the manifest
   declares 3 chunks but only 2 arrived (with the correct bytes and digest).
+
+## Idempotent submission
+
+`submission-key/` contains four invented-value request/stream cases in the same
+`.jcs`/`.sha256` format:
+
+- `request-resume`: a request with `submission_key` and `resume_from_seq`.
+- `attached`: an `accepted` record with `attached: true` naming an existing job.
+- `submission-never-accepted`: a final `submission_never_accepted` refusal for a
+  keyed request, guaranteeing nothing ran under the key.
+- `submission-key-mismatch`: `request_rejected` with `refusal_detail`
+  `submission_key_mismatch`, because a resubmit changed the command.
+
+The directory's `SHA256SUMS` covers each `.jcs` and `.sha256` file with relative
+paths. Tests pin its inventory, hashes and typed RFC 8785 round-trips. The
+contract's field-order example also has a test: clearing `resume_from_seq` makes
+the two requests canonically identical, while changing the command does not.
