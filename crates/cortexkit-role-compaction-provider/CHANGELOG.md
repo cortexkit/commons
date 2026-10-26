@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.2
+
+- Add the `account_change` rewrite ride and notice event, with a required,
+  validated opaque account label. Ignore the ride's optional `account` field
+  on other causes. Providers may compare labels to avoid folding an already
+  warm prompt cache.
+- Specify pre-send account switches, including retries after refusals that
+  wrote no cache, and next-notice attribution for every switch. Older providers
+  answer unknown causes `nothing` and ignore unknown events; no rollout gate
+  is needed. Add generated valid and malformed account vectors.
+
 ## 0.7.1
 
 - Add optional, empty-omitted `accepts` to ready Setup answers, with a setter,

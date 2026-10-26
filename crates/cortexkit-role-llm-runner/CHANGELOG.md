@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.7
+
+- Include compaction-provider's `account_change` among the rewrite causes
+  covered by `compaction_wait`; account-switch rides follow the same wait
+  reporting rule as model-switch rides.
+
 ## 0.7.6
 
 - Pin `input_tokens`, cache reads and cache writes as disjoint counts across

@@ -2,10 +2,10 @@
 //! (CONTRACT.md §8).
 //!
 //! The runner sends it only when its prefix is being rewritten anyway (the
-//! prompt cache expired, the model changed, the system text or tool surface
-//! changed), or when a request reached the Setup ceiling. The provider
+//! prompt cache expired, the model or account changed, the system text or tool
+//! surface changed), or when a request reached the Setup ceiling. The provider
 //! answers with a view or with nothing; a missed deadline counts as nothing.
-//! For the three rewrite causes, nothing means the runner proceeds with its
+//! For the four rewrite causes, nothing means the runner proceeds with its
 //! current view and the run goes on: those rides never end a run. Only the
 //! `ceiling` cause waits up to the ceiling policy's `wait_ms` and can end in
 //! the run being refused.
@@ -15,9 +15,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::{notice::is_session_ref, view::CompactionView};
 
 /// Upper bound on the runner's own `deadline_ms` for the rewrite causes
-/// `ttl_expired`, `model_change` and `surface_change` when Setup's answer
-/// set no `ride_wait_ms`: without the provider's word, such a ride stays
-/// short, because it sits in front of a request the user is waiting for.
+/// `ttl_expired`, `model_change`, `account_change` and `surface_change` when
+/// Setup's answer set no `ride_wait_ms`: without the provider's word, such a
+/// ride stays short, because it sits in front of a request the user is
+/// waiting for.
 pub const MAX_REWRITE_RIDE_DEADLINE_MS: u64 = 10_000;
 
 /// Upper bound on any ride's `deadline_ms`, and on Setup's
@@ -38,6 +39,9 @@ pub enum RideCause {
     TtlExpired,
     /// `model_change`: the session's model changed.
     ModelChange,
+    /// `account_change`: the runner knows the next request's provider account
+    /// differs from the previous request's account before sending it.
+    AccountChange,
     /// `surface_change`: the frozen system text or tool surface changed.
     SurfaceChange,
     /// `ceiling`: the request reached the share of the context window that
@@ -52,6 +56,7 @@ impl RideCause {
         match self {
             Self::TtlExpired => "ttl_expired",
             Self::ModelChange => "model_change",
+            Self::AccountChange => "account_change",
             Self::SurfaceChange => "surface_change",
             Self::Ceiling => "ceiling",
             Self::Unknown(cause) => cause,
@@ -62,6 +67,7 @@ impl RideCause {
         match cause {
             "ttl_expired" => Self::TtlExpired,
             "model_change" => Self::ModelChange,
+            "account_change" => Self::AccountChange,
             "surface_change" => Self::SurfaceChange,
             "ceiling" => Self::Ceiling,
             other => Self::Unknown(other.to_owned()),
@@ -87,6 +93,14 @@ impl<'de> Deserialize<'de> for RideCause {
 pub struct RideRequest {
     pub session_ref: String,
     pub cause: RideCause,
+    /// The new provider account's opaque, stable prompt-cache label. Required
+    /// for `account_change`, ignored on other causes, and omitted when absent.
+    /// Must be 1–64 bytes of `[A-Za-z0-9._-]`, and never be or contain a
+    /// credential, token, email address or personal identifier. Equal labels
+    /// identify the same provider prompt cache; different labels identify
+    /// different caches. Read it with [`RideRequest::account`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
     /// How long the runner waits for the answer, in milliseconds from when it
     /// sent the request. Above 0 and at most [`MAX_RIDE_WAIT_MS`]. For a
     /// rewrite cause it is Setup's `ride_wait_ms` when the answer carried
@@ -135,6 +149,7 @@ impl Overflow {
 #[non_exhaustive]
 pub enum RideProblem {
     SessionRef,
+    Account,
     DeadlineOutOfRange,
 }
 
@@ -142,6 +157,7 @@ impl RideProblem {
     pub fn name(&self) -> &'static str {
         match self {
             Self::SessionRef => "session_ref",
+            Self::Account => "account",
             Self::DeadlineOutOfRange => "deadline_out_of_range",
         }
     }
@@ -152,9 +168,25 @@ impl RideRequest {
         Self {
             session_ref: session_ref.into(),
             cause,
+            account: None,
             deadline_ms,
             overflow: None,
         }
+    }
+
+    /// Set the new account's opaque prompt-cache label for `account_change`.
+    pub fn with_account(mut self, account: impl Into<String>) -> Self {
+        self.account = Some(account.into());
+        self
+    }
+
+    /// The validated account label, only for `account_change`. A malformed or
+    /// absent label, or a different cause, returns `None`.
+    pub fn account(&self) -> Option<&str> {
+        if self.cause != RideCause::AccountChange {
+            return None;
+        }
+        self.account.as_deref().filter(|value| is_account(value))
     }
 
     /// Mark the ride as following a context-window overflow. Meaningful only
@@ -173,21 +205,34 @@ impl RideRequest {
         }
     }
 
-    /// Check the session reference and the deadline: above 0 and at most
+    /// Check the session reference, the required label on `account_change`,
+    /// and the deadline: above 0 and at most
     /// [`MAX_RIDE_WAIT_MS`], whatever the cause. A rewrite ride may wait as
     /// long as the session's Setup `ride_wait_ms`, which the request does
     /// not carry, so the per-session bound is the runner's to keep.
     /// `overflow` is never a reason to fail: on a cause other than `ceiling`
-    /// it is ignored.
+    /// it is ignored. `account` is ignored on causes other than `account_change`.
     pub fn check(&self) -> Result<(), RideProblem> {
         if !is_session_ref(&self.session_ref) {
             return Err(RideProblem::SessionRef);
+        }
+        if self.cause == RideCause::AccountChange && self.account().is_none() {
+            return Err(RideProblem::Account);
         }
         if self.deadline_ms == 0 || self.deadline_ms > MAX_RIDE_WAIT_MS {
             return Err(RideProblem::DeadlineOutOfRange);
         }
         Ok(())
     }
+}
+
+/// The shared account-label grammar for rides and notice events.
+pub(crate) fn is_account(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
 /// The `compaction.ride` answer. Strict on `answer`: a runner treats an

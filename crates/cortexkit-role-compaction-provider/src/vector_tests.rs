@@ -140,6 +140,10 @@ fn notices_accepted_ignore_what_they_do_not_know() {
     }
     let unknown = Event::parse("cache_warmed:5m").unwrap();
     assert_eq!(unknown, Event::Unknown("cache_warmed:5m".into()));
+    assert_eq!(
+        Event::parse("account_change:Route_1.a-b"),
+        Ok(Event::AccountChange("Route_1.a-b".into()))
+    );
 }
 
 #[test]
@@ -448,11 +452,26 @@ fn ride_vectors() {
         [
             RideCause::TtlExpired,
             RideCause::ModelChange,
+            RideCause::AccountChange,
             RideCause::SurfaceChange,
             RideCause::Ceiling,
             RideCause::Unknown("provider_switch".into()),
         ]
     );
+    for case in vectors::cases(ride, "account_requests") {
+        let request: RideRequest = vectors::round_trip(name(case), &case["params"]);
+        assert_eq!(request.check(), Ok(()), "{}", name(case));
+        assert_eq!(
+            request.account(),
+            case["account"].as_str(),
+            "{}",
+            name(case)
+        );
+    }
+    let request = RideRequest::new(str_of(&file, "session_ref"), RideCause::AccountChange, 1500)
+        .with_account("Route_1.a-b");
+    assert_eq!(request.account(), Some("Route_1.a-b"));
+    assert_eq!(request.check(), Ok(()));
     // A rewrite ride may wait as long as Setup's ride_wait_ms, up to five
     // minutes: past the runner's own 10,000 ms default is no refusal.
     for case in vectors::cases(ride, "long_deadline_requests") {
@@ -467,6 +486,7 @@ fn ride_vectors() {
     }
     for case in vectors::cases(ride, "requests_refused") {
         let request: RideRequest = serde_json::from_value(case["params"].clone()).unwrap();
+        assert_eq!(request.account(), None, "{}", name(case));
         assert_eq!(
             request.check().expect_err(name(case)).name(),
             case["problem"].as_str().unwrap()

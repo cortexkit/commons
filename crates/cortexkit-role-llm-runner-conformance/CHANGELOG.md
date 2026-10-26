@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.8
+
+- Include `account_change` in scripted rewrite rides and the fake runner's
+  rewrite-wait handling, matching the compaction-provider account-switch
+  contract. Track llm-runner 0.7.7.
+
 ## 0.15.7
 
 - Track llm-runner 0.7.6. Documentation-only patch: correct the

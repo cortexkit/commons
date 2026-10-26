@@ -419,8 +419,8 @@ impl RunStatusRequest {
 pub const RUN_REASON_CONTEXT_CEILING_WAIT: &str = "context_ceiling_wait";
 
 /// The `reason` of an `active` run whose step waits on a rewrite ride
-/// (compaction-provider's `ttl_expired`, `model_change` or `surface_change`
-/// cause) whose answer has been pending for at least
+/// (compaction-provider's `ttl_expired`, `model_change`, `account_change` or
+/// `surface_change` cause) whose answer has been pending for at least
 /// [`COMPACTION_WAIT_REPORT_AFTER_MS`], with `deadline_ms` beside it on
 /// `run.status`: the absolute time the ride's deadline ends. The wait ends
 /// when the ride resolves (an answer, a refusal or the missed deadline), and

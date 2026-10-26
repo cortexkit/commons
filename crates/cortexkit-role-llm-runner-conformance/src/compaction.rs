@@ -173,8 +173,8 @@ pub struct ScriptedView {
 }
 
 /// How the scripted compaction provider answers the next rewrite ride of a
-/// session (compaction-provider §8: cause `ttl_expired`, `model_change` or
-/// `surface_change`): after `answer_after_ms` milliseconds from the ride's
+/// session (compaction-provider §8: cause `ttl_expired`, `model_change`,
+/// `account_change` or `surface_change`): after `answer_after_ms` milliseconds from the ride's
 /// arrival, with `view` or, when it is `None`, `nothing`. A delay past the
 /// runner's deadline for the ride means the runner never sees the answer:
 /// the ride times out. A view is

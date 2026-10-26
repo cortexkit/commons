@@ -3,11 +3,40 @@
 //! reconstruct or erase those observations.
 use super::*;
 use cortexkit_role_compaction_provider::errors::RefuseCode;
+use cortexkit_role_compaction_provider::notice::Event;
 use cortexkit_role_llm_runner::read::{EntrySource, ModelEntry, ModelPage};
 use cortexkit_role_llm_runner_conformance::{
     CompactionCall, CompactionMessage, CompactionObservation, CompactionRouteIdentity,
     CompactionSetup, CompactionSetupIdentity,
 };
+
+fn is_rewrite_event(event: &str) -> bool {
+    matches!(
+        Event::parse(event),
+        Ok(Event::TtlExpired | Event::ModelChange | Event::AccountChange(_) | Event::SurfaceChange)
+    )
+}
+
+#[test]
+fn rewrite_events_include_account_change() {
+    for event in [
+        "ttl_expired",
+        "model_change",
+        "surface_change",
+        "account_change:Route_1.a-b",
+    ] {
+        assert!(is_rewrite_event(event), "{event}");
+    }
+    for event in [
+        "account_change",
+        "account_change:",
+        "account_change:route/account",
+        "revert_below:1",
+        "future_cause:account",
+    ] {
+        assert!(!is_rewrite_event(event), "{event}");
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CompactionDefect {
@@ -537,12 +566,7 @@ impl Module {
             Some(events) => events,
             None => {
                 let events = self.cache_events(session, &sess.compaction.cache_ttl);
-                let rewrite = events.iter().any(|e| {
-                    matches!(
-                        e.as_str(),
-                        "ttl_expired" | "model_change" | "surface_change"
-                    )
-                });
+                let rewrite = events.iter().any(|e| is_rewrite_event(e));
                 let script = rewrite
                     .then(|| self.world.ride_scripts.lock().unwrap().remove(session))
                     .flatten();

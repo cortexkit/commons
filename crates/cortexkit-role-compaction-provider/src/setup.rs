@@ -88,8 +88,9 @@ pub struct SetupRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub view_apply: Vec<String>,
     /// The longest this runner can hold a step for a rewrite ride's answer
-    /// (cause `ttl_expired`, `model_change` or `surface_change`), in
-    /// milliseconds, from 1 to [`crate::ride::MAX_RIDE_WAIT_MS`]: its
+    /// (cause `ttl_expired`, `model_change`, `account_change` or
+    /// `surface_change`), in milliseconds, from 1 to
+    /// [`crate::ride::MAX_RIDE_WAIT_MS`]: its
     /// host's real limit. Absent means the runner does not honour a
     /// provider-set ride wait, and the provider sends no `ride_wait_ms`.
     /// Omitted when absent.

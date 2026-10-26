@@ -216,6 +216,10 @@ pub mod companion_edits {
 pub enum Event {
     /// `model_change`: the session's model changed.
     ModelChange,
+    /// `account_change:<account>`: the session's provider account changed.
+    /// The argument is an opaque, stable prompt-cache label, never a secret
+    /// or personal identifier (CONTRACT.md §8).
+    AccountChange(String),
     /// `surface_change`: the frozen system text or tool surface changed.
     SurfaceChange,
     /// `ttl_expired`: the prompt cache expired. Declared only by a runner that
@@ -290,6 +294,7 @@ impl Event {
     pub fn token(&self) -> String {
         match self {
             Self::ModelChange => "model_change".into(),
+            Self::AccountChange(account) => format!("account_change:{account}"),
             Self::SurfaceChange => "surface_change".into(),
             Self::TtlExpired => "ttl_expired".into(),
             Self::RevertBelow(ordinal) => format!("revert_below:{ordinal}"),
@@ -331,6 +336,10 @@ impl Event {
                 Err(malformed())
             }
             "model_change" => Ok(Self::ModelChange),
+            "account_change" if crate::ride::is_account(rest) => {
+                Ok(Self::AccountChange(rest.to_owned()))
+            }
+            "account_change" => Err(malformed()),
             "surface_change" => Ok(Self::SurfaceChange),
             "ttl_expired" => Ok(Self::TtlExpired),
             "revert_below" => parse_decimal(rest)

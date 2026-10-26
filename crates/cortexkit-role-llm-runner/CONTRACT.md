@@ -1073,7 +1073,8 @@ display-ready row for an app's reader on a runner declaring
   `cause: view_timeout`.
 - [pinned] **Waiting for a rewrite ride** (added in 0.5.2) is another. A
   runner holding a step for a rewrite ride (compaction-provider §8: cause
-  `ttl_expired`, `model_change` or `surface_change`) reports the wait once
+  `ttl_expired`, `model_change`, `account_change` or `surface_change`) reports
+  the wait once
   the ride's answer has been pending for 1 s
   (`run::COMPACTION_WAIT_REPORT_AFTER_MS`): the run stays `active` and names
   `reason: compaction_wait` (`run::RUN_REASON_COMPACTION_WAIT`,

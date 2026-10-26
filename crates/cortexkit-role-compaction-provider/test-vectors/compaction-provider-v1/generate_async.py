@@ -410,8 +410,16 @@ extra = dict(N1["headers"])
 extra["trace_id"] = "abc"
 unknown_event = dict(N2["headers"])
 unknown_event["events"] = "marker_outcome:applied:cut-1,cache_warmed:5m"
+account_event = dict(N1["headers"])
+account_event["events"] = "account_change:Route_1.a-b"
+max_account_event = dict(N1["headers"])
+max_account_event["events"] = "account_change:" + "a" * 64
 
 notices_accepted = [
+    {"name": "a known account switch is attributed in the next notice", "headers": account_event,
+     "digest": notice_digest(account_event), "events": [account_event["events"]]},
+    {"name": "a 64-byte account label is accepted", "headers": max_account_event,
+     "digest": notice_digest(max_account_event), "events": [max_account_event["events"]]},
     {"name": "a header this contract does not define is ignored and not digested", "headers": extra,
      "digest": N1["digest"], "events": []},
     {"name": "an unknown event token decodes and is ignored", "headers": unknown_event,
@@ -435,6 +443,11 @@ notices_refused = [
     mutate(N1, "an empty event token", "malformed:events", events="model_change,"),
     mutate(N1, "a space after a comma", "malformed:events", events="model_change, ttl_expired"),
     mutate(N1, "argument on an event that takes none", "malformed:events", events="model_change:x"),
+    mutate(N1, "account change without an account", "malformed:events", events="account_change"),
+    mutate(N1, "account change with an empty account", "malformed:events", events="account_change:"),
+    mutate(N1, "account change with a 65-byte account", "malformed:events", events="account_change:" + "a" * 65),
+    mutate(N1, "account change with a disallowed account character", "malformed:events", events="account_change:route/account"),
+    mutate(N1, "account change with an extra argument", "malformed:events", events="account_change:route:extra"),
     mutate(N1, "revert_below without an ordinal", "malformed:events", events="revert_below"),
     mutate(N1, "unknown marker outcome", "malformed:events", events="marker_outcome:maybe:cut-1",
            applied_view_version="3"),
@@ -502,9 +515,17 @@ ride = {
     "requests": [
         {"name": "cache expired", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 1500}}},
         {"name": "model changed", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "model_change", "deadline_ms": 1500}}},
+        {"name": "account changed before sending", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "account_change", "account": "Route_1.a-b", "deadline_ms": 1500}}},
         {"name": "surface changed", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "surface_change", "deadline_ms": 1500}}},
         {"name": "ceiling reached", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 30000}}},
         {"name": "cause this crate does not know, kept as received", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "provider_switch", "deadline_ms": 1500}}},
+    ],
+    "account_requests": [
+        {"name": "a one-byte account label", "params": {"session_ref": SR, "cause": "account_change", "account": "a", "deadline_ms": 1500}, "account": "a"},
+        {"name": "a 64-byte account label", "params": {"session_ref": SR, "cause": "account_change", "account": "a" * 64, "deadline_ms": 1500}, "account": "a" * 64},
+        {"name": "no account on another rewrite cause", "params": {"session_ref": SR, "cause": "model_change", "deadline_ms": 1500}, "account": None},
+        {"name": "a valid account on another cause is ignored", "params": {"session_ref": SR, "cause": "model_change", "account": "Route_1.a-b", "deadline_ms": 1500}, "account": None},
+        {"name": "a malformed account on another cause is ignored", "params": {"session_ref": SR, "cause": "model_change", "account": "", "deadline_ms": 1500}, "account": None},
     ],
     "overflow_requests": [
         {"name": "ceiling after an overflow error that stated a limit",
@@ -527,10 +548,16 @@ ride = {
          "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 240000}},
         {"name": "a model-change ride waiting the most a ride may: 300,000 ms",
          "params": {"session_ref": SR, "cause": "model_change", "deadline_ms": 300000}},
+        {"name": "an account-change ride waiting the most a ride may: 300,000 ms",
+         "params": {"session_ref": SR, "cause": "account_change", "account": "Route_1.a-b", "deadline_ms": 300000}},
         {"name": "a surface-change ride just past the runner's own 10,000 ms default",
          "params": {"session_ref": SR, "cause": "surface_change", "deadline_ms": 10001}},
     ],
     "requests_refused": [
+        {"name": "account change without an account", "params": {"session_ref": SR, "cause": "account_change", "deadline_ms": 1500}, "problem": "account"},
+        {"name": "account change with an empty account", "params": {"session_ref": SR, "cause": "account_change", "account": "", "deadline_ms": 1500}, "problem": "account"},
+        {"name": "account change with a 65-byte account", "params": {"session_ref": SR, "cause": "account_change", "account": "a" * 65, "deadline_ms": 1500}, "problem": "account"},
+        {"name": "account change with a disallowed account character", "params": {"session_ref": SR, "cause": "account_change", "account": "route/account", "deadline_ms": 1500}, "problem": "account"},
         {"name": "zero deadline", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 0}, "problem": "deadline_out_of_range"},
         {"name": "deadline over five minutes", "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 300001}, "problem": "deadline_out_of_range"},
         {"name": "a rewrite ride over five minutes", "params": {"session_ref": SR, "cause": "ttl_expired", "deadline_ms": 300001}, "problem": "deadline_out_of_range"},

@@ -233,7 +233,8 @@ the session and freezes that plan for use.
 - [pinned] Optional `ride_wait_max_ms` (`u64`, 1 to 300,000,
   `ride::MAX_RIDE_WAIT_MS`; added in 0.5.1,
   `SetupRequest::with_ride_wait_max_ms`) is the longest this runner can
-  hold a step for a rewrite ride (cause `ttl_expired`, `model_change` or
+  hold a step for a rewrite ride (cause `ttl_expired`, `model_change`,
+  `account_change` or
   `surface_change`, §8). Absent means the runner does not honour a
   provider-set ride wait. It declares runner support in the request, as
   `view_apply` does; a provider that predates the member ignores it (§14).
@@ -426,6 +427,7 @@ provider.
 | Token | Meaning |
 |---|---|
 | `model_change` | the session's model changed |
+| `account_change:<account>` | the session's provider account changed; sent in the next notice after every switch, whether the runner rode for it or not (§8). The required account label is 1–64 bytes of `[A-Za-z0-9._-]`, opaque and stable per account; it must never be or contain a credential, token, email address or anything that identifies the person. Equal labels identify the same provider prompt cache, and different labels identify different caches. Providers may compare labels but never interpret their content (§8) |
 | `surface_change` | the frozen system text or tool surface changed |
 | `ttl_expired` | the prompt cache expired |
 | `revert_below:<ordinal>` | the transcript was truncated; every message at `ordinal` or above is gone |
@@ -435,7 +437,9 @@ provider.
 | `view_deferred:<view_version>:<reason>` | the runner holds that view until a step boundary where applying it is safe for the current model provider, and keeps rendering its current one meanwhile (§7). `reason` has the same form: `signed_reasoning`, or another (`notice::defer_reasons`) |
 | `view_companion:<view_version>:<edit>` | the runner applied that view together with a companion edit the model provider requires, and nothing more (§7). `edit` has the same form: `strip_signed_reasoning`, or another (`notice::companion_edits`) |
 
-  A known name with arguments it does not take is malformed. An unknown
+  A bare `account_change` or a malformed account label is refused. A runner
+  with no account fact sends no account-change event. A known name with
+  arguments it does not take is malformed. An unknown
   name that follows the grammar decodes (`Event::Unknown`) and the provider
   ignores it.
 - [pinned] `applied_view_version` is the runner's durable acknowledgement
@@ -449,7 +453,8 @@ provider.
   default entry. With none of them, or with a configured entry whose `ms`
   is `null`, it never declares `ttl_expired`. A host whose model SDK places
   its own cache markers, and that receives no `cache_ttl`, declares
-  `model_change` and `surface_change` only.
+  `model_change` and `surface_change`, and `account_change` when it knows
+  the account switch; it never infers cache expiry from such a switch.
 - [pinned] A notice is refused (`AdvanceNotice::from_headers`,
   `NoticeProblem`) when a required header is missing (`missing:<header>`), a
   value breaks its encoding (`malformed:<header>`: `seq` or
@@ -842,14 +847,15 @@ provider.
 
 ## 8. Ride request and ceiling
 
-- [pinned] `compaction.ride {session_ref, cause, deadline_ms, overflow?}`
+- [pinned] `compaction.ride {session_ref, cause, deadline_ms, account?, overflow?}`
   (`ride::RideRequest`) is a synchronous call on the compaction route. The
   runner sends it only when its prefix is being rewritten anyway (`cause`
-  `ttl_expired`, `model_change` or `surface_change`), or when a request
+  `ttl_expired`, `model_change`, `account_change` or `surface_change`), or
+  when a request
   reached the ceiling (`cause` `ceiling`, below). `cause` decodes open
   (`RideCause::Unknown`); a provider answers `nothing` to a cause it does not
   know. `deadline_ms` is how long the runner waits for the answer, counted
-  from sending, and is above 0. For the three rewrite causes it is Setup's
+  from sending, and is above 0. For the four rewrite causes it is Setup's
   `ride_wait_ms` when the answer carried one (§4), and otherwise the
   runner's own short deadline, at most 10,000
   (`ride::MAX_REWRITE_RIDE_DEADLINE_MS`). The ride sits in front of a
@@ -862,6 +868,36 @@ provider.
   of 0 or above 300,000 (`ride::MAX_RIDE_WAIT_MS`) for any cause
   (`deadline_out_of_range`); the request does not carry the session's
   `ride_wait_ms`, so bounding a session's rides by it is the runner's job.
+- [pinned] `account_change` means the runner is about to send the session's
+  next request from a different provider account than its previous request.
+  A provider's prompt cache belongs to one account; for example, Anthropic
+  isolates caches between organizations. Sending the same request bytes from
+  another account is a full cache write, just as a model change is. The runner
+  rides only when it picks the new account before sending the request. This
+  includes a retry after a refusal that wrote no cache on the refused account.
+  If it learns of a switch only after the new account's cache was written,
+  such as an in-request fallback after a quota refusal, it must not ride:
+  that would rebuild an already-warm cache a second time. Every switch is
+  reported as `account_change:<account>` in the next notice, ridden or not.
+  A runner with no account fact sends neither this cause nor this event.
+- [pinned] On an `account_change` ride, `account` is required; on other causes
+  it is ignored. It is an opaque label chosen by the runner, 1–64 bytes of
+  `[A-Za-z0-9._-]`, stable per account within that runner. Equal labels mean
+  the same provider prompt cache, and different labels mean different caches.
+  A runner never sends two different labels for one account, because that
+  would cause a needless fold. A provider may compare the label with the one
+  its cached prefix was written under, and fold only when they differ; it
+  never interprets the label's content. The label must never be or contain a
+  credential, token, email address or anything that identifies the person.
+  A runner may use a truncated hash of its routing account id or vault account
+  record id. The notice event uses the same label and grammar (§5).
+  `RideRequest::check` refuses a missing or malformed label on `account_change`
+  (`account`); `RideRequest::account` returns a validated label only for that
+  cause. The optional wire field is omitted when absent, never encoded as
+  `null`.
+- [pinned] No new rollout gate is needed for `account_change`: an older
+  provider already decodes an unknown cause and answers `nothing`, ignores
+  unknown request fields, and ignores an unknown notice event token.
 - [pinned] Optional `overflow: {reported_limit_tokens?}` (`ride::Overflow`)
   is allowed only with `cause: "ceiling"`. Present, it says the ride follows a
   model provider error stating that the request exceeded the model's context
