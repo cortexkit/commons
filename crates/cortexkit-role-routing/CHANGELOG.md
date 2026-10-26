@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3
+
+- Contract text only, with no code change: §9.1 defines when the parent
+  conversation is on an account, for the parent-account preference. It is
+  on the account its conversation key's latest `admit`, `renew` or
+  `reassign` answered, whether or not the call has started, until the pin
+  lapses (`admission_valid_until_ms` if never started,
+  `lease_valid_until_ms` once started).
+
 ## 0.4.2
 
 - Contract text only, with no code change: operator configuration may name

@@ -538,7 +538,12 @@ the routing provider allocates (subscription logins).
 - [pinned] `parent_conversation_key` (optional): the same string rules as
   `conversation_key` (`CONVERSATION_KEY_MAX_CHARS`). The provider prefers an
   eligible account the parent conversation is not on, and falls back to
-  the parent's account when no other is eligible.
+  the parent's account when no other is eligible. The parent conversation
+  is on an account while its conversation key holds a live pin there: the
+  account answered by the latest `admit`, `renew` or `reassign` for that
+  key, whether or not `admission_started` has been observed. The pin stops
+  counting when it lapses: an admission never started at
+  `admission_valid_until_ms`, a started one at `lease_valid_until_ms`.
 - [pinned] `pool` (optional): the quota pool the requested model draws from,
   as the runner names it (§2).
 - [pinned] `admission_id` (required, non-empty, at most 128 characters):
