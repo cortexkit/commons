@@ -823,20 +823,8 @@ where
         .session_route(handle.inner(), session, &subject.owner_stamp())
         .await
         .map_err(|e| e.to_string())?;
-    let last = session_head(&route)
-        .await?
-        .last_run_state
-        .ok_or("Setup crash recovery has no run state")?;
-    let interrupted = match RunState::parse(&last.state) {
-        RunState::Active => false,
-        RunState::Interrupted => true,
-        _ => {
-            return Err(format!(
-                "Setup crash recovery has unexpected run state {} (expected active or interrupted)",
-                last.state
-            ));
-        }
-    };
+    let last = settled_setup_recovery(subject, &route, session).await?;
+    let interrupted = RunState::parse(&last.state) == RunState::Interrupted;
     finish_crash(subject, handle, session, head, expected).await?;
     let mut expected = model_page(&route, 0, false).await?;
     if interrupted {
@@ -921,6 +909,54 @@ where
         &obs.model_inputs[0],
         &expected.messages,
     )
+}
+
+/// Wait until a restarted runner's recovery of the Setup crash run has
+/// settled one of the two allowed ways: the run reads `interrupted` (it was
+/// sealed and needs a new send to continue), or it reads `active` and its
+/// first model request has reached the scripted model (it resumed on its
+/// own). A runner may finish recovery in the background, so `active` with
+/// no model request yet is not an answer; one read right after the restart
+/// could pick the wrong branch. Polls `session.head` with the subject's
+/// pause, at most [`crate::drive::MAX_POLLS`] times, like every other wait
+/// in the suite. Any other run state fails at once, since it cannot change
+/// into an allowed one.
+async fn settled_setup_recovery<S>(
+    subject: &S,
+    route: &S::Route,
+    session: &str,
+) -> Result<cortexkit_role_llm_runner::read::LastRunState, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let mut seen = String::new();
+    for _ in 0..crate::drive::MAX_POLLS {
+        let last = session_head(route)
+            .await?
+            .last_run_state
+            .ok_or("Setup crash recovery has no run state")?;
+        match RunState::parse(&last.state) {
+            RunState::Interrupted => return Ok(last),
+            RunState::Active => {
+                if !observation(subject, session).await?.model_inputs.is_empty() {
+                    return Ok(last);
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "Setup crash recovery has unexpected run state {} (expected active or interrupted)",
+                    last.state
+                ));
+            }
+        }
+        seen = last.state;
+        subject.pause().await;
+    }
+    Err(format!(
+        "Setup crash recovery did not settle within {} polls: the run was last seen {seen}, never interrupted, and no model request arrived",
+        crate::drive::MAX_POLLS
+    ))
 }
 
 async fn finish_crash<S>(

@@ -1654,6 +1654,39 @@ async fn compaction_sender_driven_break(defect: CompactionDefect, reason: &str) 
     assert_others_passed(&report, &["compaction_setup_durable_once"]);
 }
 
+/// A runner whose crash recovery seals the Setup run in the background reads
+/// `active` for a few `session.head` reads after the restart before it reads
+/// `interrupted`. The case waits for it to settle, sends the continuation and
+/// passes; a single read would have taken the resumed-on-its-own branch and
+/// found no model request.
+#[tokio::test]
+async fn compaction_setup_background_seal_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.seal_compaction_setup_crash = true;
+    subject.setup_crash_active_reads = 3;
+    let report = run(&subject).await;
+    for name in COMPACTION_CASES {
+        assert_passed(&report, name);
+    }
+    assert_others_passed(&report, &[]);
+}
+
+/// A runner whose recovered Setup run stays `active` with no model request
+/// fails the Setup durability case by name, saying the state it stayed in.
+#[tokio::test]
+async fn compaction_setup_recovery_never_settling_fails_only_setup_durability() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.seal_compaction_setup_crash = true;
+    subject.setup_crash_active_reads = usize::MAX;
+    let report = run(&subject).await;
+    let failure = failed(&report, "compaction_setup_durable_once");
+    assert!(
+        failure.contains("did not settle") && failure.contains("last seen active"),
+        "{failure}"
+    );
+    assert_others_passed(&report, &["compaction_setup_durable_once"]);
+}
+
 #[tokio::test]
 async fn compaction_setup_sender_driven_rerun_fails_only_setup_durability() {
     compaction_sender_driven_break(CompactionDefect::RerunSetupOnResumeSend, "Setup was re-run")

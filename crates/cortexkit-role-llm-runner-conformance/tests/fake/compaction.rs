@@ -43,7 +43,9 @@ pub(super) struct State {
     /// The runner issued its Setup call, and no error ended its run since.
     setup_issued: bool,
     request_count: usize,
-    sealed_setup_crash: bool,
+    /// A Setup crash run was sealed `interrupted`, and no send has resumed
+    /// the session since.
+    pub(super) sealed_setup_crash: bool,
     /// The Setup checkpoint `(tag_checkpoint, cut)` the provider answered,
     /// if any.
     pub checkpoint: Option<(u64, String)>,

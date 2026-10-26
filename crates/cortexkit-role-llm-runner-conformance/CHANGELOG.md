@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.10
+
+- The Setup crash-recovery case no longer chooses its branch from one
+  `session.head` read right after the restart. A runner whose recovery seals
+  its log in the background can read `active` for a moment before `interrupted`,
+  and the case then sent no continuation and failed a correct runner with zero
+  model inputs. It now polls with the subject's pause, at most `MAX_POLLS` times,
+  until the run reads `interrupted` or reads `active` with a model request already
+  held. Any other state still fails at once, and a run that never settles fails
+  by name with the state it was last seen in. The continuation send and every
+  Setup-count and cardinality check are unchanged. Backport of 0.15.9.
+
 ## 0.12.9
 
 - Require llm-runner 0.6.13. Permit imported assistant display rows without a

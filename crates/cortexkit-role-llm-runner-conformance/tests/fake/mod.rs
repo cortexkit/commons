@@ -618,6 +618,10 @@ struct World {
     /// modelling a runner that reports the run as ended only a moment after
     /// the send returns.
     late_seal_reads: AtomicUsize,
+    /// How many `session.head` reads of a Setup crash run sealed
+    /// `interrupted` at restart still answer `active`, modelling a runner
+    /// whose crash recovery seals its log in the background.
+    setup_crash_active_reads: AtomicUsize,
     /// How each session's next rewrite ride is answered, until a ride takes
     /// it.
     ride_scripts: Mutex<BTreeMap<String, cortexkit_role_llm_runner_conformance::ScriptedRide>>,
@@ -3955,10 +3959,24 @@ impl Module {
         if let Some(last) = sess.messages.last() {
             head = head.with_last_ordinal(last.ordinal);
         }
+        // Until the background seal is modelled as done, the sealed Setup
+        // crash run still reads as it did before the restart.
+        let sealing_setup_crash = sess.compaction.sealed_setup_crash
+            && sess
+                .runs
+                .last()
+                .is_some_and(|run| run.state == "interrupted")
+            && self
+                .world
+                .setup_crash_active_reads
+                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok();
         if let Some(run) = sess.runs.last() {
             head = head.with_last_run_state(LastRunState {
                 run_id: run.run_id.clone(),
-                state: if self.world.held_paused
+                state: if sealing_setup_crash {
+                    "active".into()
+                } else if self.world.held_paused
                     && sess.retention.is_some()
                     && run.state == "active"
                 {
@@ -4740,6 +4758,11 @@ pub struct FakeSubject {
     pub capabilities: BTreeSet<Capability>,
     pub delivery_order_modes: Option<Vec<String>>,
     pub seal_compaction_setup_crash: bool,
+    /// With `seal_compaction_setup_crash`, the first
+    /// `setup_crash_active_reads` `session.head` reads of the sealed Setup
+    /// crash run answer `active` before `interrupted`; `usize::MAX` never
+    /// lets it settle.
+    pub setup_crash_active_reads: usize,
     pub kill_points: Vec<&'static str>,
     /// Report every kill as a real process kill, which this in-process fake
     /// cannot make. Only for tests of the verdict.
@@ -4863,6 +4886,7 @@ impl FakeSubject {
             delivery_order_modes: None,
             without_plans: false,
             seal_compaction_setup_crash: false,
+            setup_crash_active_reads: 0,
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
             queue_receipt_pending_then_unknown: false,
@@ -4967,6 +4991,7 @@ impl FakeSubject {
                     stream_holds: Mutex::new(BTreeMap::new()),
                     in_flight: Mutex::new(BTreeMap::new()),
                     late_seal_reads: AtomicUsize::new(self.late_seal_reads),
+                    setup_crash_active_reads: AtomicUsize::new(self.setup_crash_active_reads),
                     ride_scripts: Mutex::new(BTreeMap::new()),
                     rides: Mutex::new(BTreeMap::new()),
                     resolved_rides: Mutex::new(BTreeMap::new()),
