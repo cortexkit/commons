@@ -177,6 +177,22 @@ fn restrict_user_access_without_write_owner(path: &std::path::Path, directory: b
 }
 
 #[test]
+fn named_security_helpers_accept_paths_over_max_path() {
+    let temp = TempDir::new();
+    let deep = temp
+        .0
+        .join("long-directory-component-".repeat(6))
+        .join("long-directory-component-".repeat(6));
+    assert!(deep.as_os_str().len() > 300);
+    std::fs::create_dir_all(&deep).unwrap();
+    grant_everyone(&deep);
+    assert!(!read_acl(&deep).aces.is_empty());
+    protect_dir_only(&deep).unwrap();
+    assert_owner_only(&deep, true, true);
+    verify_private(&deep).unwrap();
+}
+
+#[test]
 fn protect_file_preserves_current_owner_without_requiring_write_owner() {
     let root = TempDir::new();
     let path = root.0.join("file");

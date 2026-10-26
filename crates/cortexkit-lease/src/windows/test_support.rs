@@ -8,7 +8,6 @@
 
 use std::{
     mem::{size_of, zeroed},
-    os::windows::ffi::OsStrExt,
     path::Path,
     ptr::{null, null_mut},
 };
@@ -30,6 +29,8 @@ use windows_sys::Win32::{
     System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
 
+use crate::windows_path::wide;
+
 struct Descriptor(PSECURITY_DESCRIPTOR);
 
 impl Drop for Descriptor {
@@ -37,10 +38,6 @@ impl Drop for Descriptor {
         // SAFETY: The descriptor was allocated by an API that requires LocalFree.
         unsafe { LocalFree(self.0) };
     }
-}
-
-fn wide(path: &Path) -> Vec<u16> {
-    path.as_os_str().encode_wide().chain(Some(0)).collect()
 }
 
 /// Returns the current process token user's SID as its native binary bytes.
@@ -106,7 +103,7 @@ pub struct Snapshot {
 ///
 /// Panics on a failed Win32 call, a null DACL, or any non-ACCESS_ALLOWED ACE.
 pub fn read_acl(path: &Path) -> Snapshot {
-    let name = wide(path);
+    let name = wide(path).expect("resolve path for Win32 security API");
     let mut acl: *mut ACL = null_mut();
     let mut raw = null_mut();
     // SAFETY: name is terminated and both output pointers are writable. Windows
@@ -224,7 +221,7 @@ pub fn assert_owner_only(path: &Path, directory: bool, protected: bool) {
 /// This deliberately broadens access. Use only on disposable test paths.
 /// Panics if Windows cannot apply or read back the fixture ACL.
 pub fn grant_everyone(dir: &Path) {
-    let name = wide(dir);
+    let name = wide(dir).expect("resolve path for Win32 security API");
     let sddl: Vec<u16> = "D:P(A;OICI;FA;;;WD)"
         .encode_utf16()
         .chain(Some(0))

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.7
+
+- Windows private-file and directory operations now support paths beyond
+  `MAX_PATH`, including permission verification and restoring inheritance.
+  Direct Win32 calls (also durable replacement, directory syncing, and the
+  test-support security helpers) use normalized absolute verbatim paths, with
+  UNC support. Already-verbatim and device paths are preserved, diagnostics
+  retain the caller's path, and Unix behavior is unchanged.
+
 ## 0.1.6
 
 - On Windows, `verify_private` now requires a protected DACL and returns

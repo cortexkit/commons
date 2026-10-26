@@ -5,7 +5,6 @@ use std::{
     io,
     mem::{size_of, zeroed},
     os::windows::{
-        ffi::OsStrExt,
         fs::MetadataExt,
         io::{AsRawHandle, FromRawHandle},
     },
@@ -41,7 +40,7 @@ use windows_sys::Win32::{
     System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
 
-use crate::NotPrivate;
+use crate::{windows_path::wide, NotPrivate};
 
 struct Handle(HANDLE);
 
@@ -50,18 +49,6 @@ impl Drop for Handle {
         // SAFETY: Handle owns a valid handle returned by a successful Win32 call.
         unsafe { CloseHandle(self.0) };
     }
-}
-
-fn wide(path: &Path) -> io::Result<Vec<u16>> {
-    let mut value: Vec<u16> = path.as_os_str().encode_wide().collect();
-    if value.contains(&0) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "path contains NUL",
-        ));
-    }
-    value.push(0);
-    Ok(value)
 }
 
 pub(super) fn durable_replace(temp: &Path, dest: &Path) -> io::Result<()> {

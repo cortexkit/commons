@@ -37,6 +37,8 @@ use fs2::FileExt;
 
 #[cfg(windows)]
 mod windows;
+#[cfg(any(windows, test))]
+mod windows_path;
 
 /// Native Windows ACL observations and fixtures for tests only.
 ///
