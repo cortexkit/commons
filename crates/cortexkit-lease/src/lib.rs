@@ -54,6 +54,8 @@ pub enum NotPrivate {
     Io(io::Error),
     /// The owner is not the current user (a SID on Windows, a uid on Unix).
     Owner { principal: String },
+    /// The Windows DACL is not protected from parent permission changes.
+    Unprotected,
     /// Another principal has access (a SID on Windows, a group or everyone on Unix).
     Access { principal: String },
     /// The entry is a symlink or Windows reparse point.
@@ -67,6 +69,9 @@ impl std::fmt::Display for NotPrivate {
         match self {
             Self::Io(error) => write!(f, "could not inspect permissions: {error}"),
             Self::Owner { principal } => write!(f, "owner is another principal: {principal}"),
+            Self::Unprotected => f.write_str(
+                "permissions are inherited from the parent folder, so a change there would apply here",
+            ),
             Self::Access { principal } => {
                 write!(f, "access granted to another principal: {principal}")
             }
@@ -99,9 +104,13 @@ impl From<io::Error> for NotPrivate {
 /// and refuses symlinks and Windows reparse points rather than following them.
 ///
 /// On Unix the owner must be the effective uid and no group/other mode bits may
-/// be set. On Windows the owner must be TokenUser, the DACL must be non-null,
-/// and every access-allowed ACE must grant access only to that user. Deny ACEs
-/// cannot grant access and are ignored; unfamiliar ACE types are refused.
+/// be set. Unix mode bits are not inherited, so no inheritance-protection check
+/// is needed. On Windows the owner must be TokenUser, the DACL must be protected
+/// (`SE_DACL_PROTECTED`) and non-null, and every access-allowed ACE must grant
+/// access only to that user. An unprotected DACL is refused even if it currently
+/// grants access only to that user, because a parent's permission changes could
+/// propagate into the entry. Deny ACEs cannot grant access and are ignored;
+/// unfamiliar ACE types are refused.
 /// Inspection errors, including a missing path, are returned as [`NotPrivate::Io`].
 pub fn verify_private(path: &Path) -> Result<(), NotPrivate> {
     #[cfg(unix)]

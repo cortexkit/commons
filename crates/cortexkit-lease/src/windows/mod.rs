@@ -21,13 +21,14 @@ use windows_sys::Win32::{
     Security::{
         AddAccessAllowedAceEx,
         Authorization::{ConvertSidToStringSidW, GetSecurityInfo, SetSecurityInfo, SE_FILE_OBJECT},
-        EqualSid, GetAce, GetLengthSid, GetTokenInformation, InitializeAcl,
-        InitializeSecurityDescriptor, SetKernelObjectSecurity, SetSecurityDescriptorControl,
-        SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TokenUser, ACCESS_ALLOWED_ACE,
-        ACE_HEADER, ACL, ACL_REVISION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION,
-        OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-        PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
-        TOKEN_QUERY, TOKEN_USER, UNPROTECTED_DACL_SECURITY_INFORMATION,
+        EqualSid, GetAce, GetLengthSid, GetSecurityDescriptorControl, GetTokenInformation,
+        InitializeAcl, InitializeSecurityDescriptor, SetKernelObjectSecurity,
+        SetSecurityDescriptorControl, SetSecurityDescriptorDacl, SetSecurityDescriptorOwner,
+        TokenUser, ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_REVISION, CONTAINER_INHERIT_ACE,
+        DACL_SECURITY_INFORMATION, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+        SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+        UNPROTECTED_DACL_SECURITY_INFORMATION,
     },
     Storage::FileSystem::{
         CreateDirectoryW, CreateFileW, FlushFileBuffers, GetFileInformationByHandle, GetFileType,
@@ -430,6 +431,17 @@ pub(super) fn verify_private(path: &Path) -> Result<(), NotPrivate> {
         return Err(NotPrivate::Owner {
             principal: principal(security.owner)?,
         });
+    }
+    let mut control = 0;
+    let mut revision = 0;
+    // SAFETY: GetSecurityInfo returned the live descriptor; both outputs are writable.
+    if unsafe { GetSecurityDescriptorControl(security._descriptor.0, &mut control, &mut revision) }
+        == 0
+    {
+        return Err(io::Error::last_os_error().into());
+    }
+    if control & SE_DACL_PROTECTED == 0 {
+        return Err(NotPrivate::Unprotected);
     }
     if security.dacl.is_null() {
         return Err(NotPrivate::Access {

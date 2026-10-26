@@ -263,6 +263,55 @@ fn protect_dir_only_refuses_a_junction_and_leaves_the_target_unchanged() {
 }
 
 #[test]
+fn verify_private_refuses_inherited_user_only_dacls_until_protected() {
+    let root = TempDir::new();
+    let parent = root.0.join("private");
+    create_private_dir(&parent).unwrap();
+    verify_private(&parent).unwrap();
+    let file = parent.join("file");
+    let directory = parent.join("directory");
+    std::fs::write(&file, b"inherited").unwrap();
+    std::fs::create_dir(&directory).unwrap();
+
+    let user = super::User::current().unwrap();
+    for (path, is_directory, protect) in [
+        (
+            &file,
+            false,
+            protect_file as fn(&std::path::Path) -> std::io::Result<()>,
+        ),
+        (&directory, true, protect_dir_only),
+    ] {
+        // An elevated token can default new entries to Administrators. Set only
+        // the owner so the inherited, unprotected DACL remains the test subject.
+        let (handle, _) = super::open_no_follow(path, super::WRITE_OWNER).unwrap();
+        // SAFETY: The handle and user SID are live; only the owner is changed.
+        assert_eq!(
+            unsafe {
+                super::SetSecurityInfo(
+                    handle.0,
+                    super::SE_FILE_OBJECT,
+                    super::OWNER_SECURITY_INFORMATION,
+                    user.sid(),
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                    std::ptr::null(),
+                )
+            },
+            0
+        );
+        assert_eq!(owner_sid(path), super::test_support::current_user_sid());
+        assert_owner_only(path, is_directory, false);
+        let error = verify_private(path).unwrap_err();
+        assert!(matches!(error, NotPrivate::Unprotected), "{error}");
+
+        protect(path).unwrap();
+        verify_private(path).unwrap();
+        assert_owner_only(path, is_directory, true);
+    }
+}
+
+#[test]
 fn verify_private_refuses_other_principal_allow_ace_and_names_its_sid() {
     let root = TempDir::new();
     let path = root.0.join("file");

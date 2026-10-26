@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.6
+
+- On Windows, `verify_private` now requires a protected DACL and returns
+  `NotPrivate::Unprotected` when permissions can be inherited from the parent.
+  A caller found that an unprotected, user-only DACL was accepted even though a
+  later parent permission change could propagate broader access into the entry.
+  Entries created or protected by `create_private_dir`, `create_private_file`,
+  `protect_file`, or `protect_dir_only` already have protected DACLs and are
+  unaffected. Unix behavior is unchanged because mode bits are not inherited.
+
 ## 0.1.5
 
 - Add `verify_private` and `NotPrivate` to check ownership and owner-only
