@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.7
+
+- Track llm-runner 0.7.6. Documentation-only patch: correct the
+  `head_last_run_error_only_on_error` and
+  `head_last_run_error_requires_last_run_state` README requirements to include
+  `run_ops`, `run_status` and the model-failure fixture for failed/recovered
+  head checks. No new conformance case or fixture hook.
+
 ## 0.15.6
 
 - Track llm-runner 0.7.5. Add `head_last_run_error_only_on_error`,

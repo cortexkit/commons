@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.6
+
+- Pin `input_tokens`, cache reads and cache writes as disjoint counts across
+  run usage, per-model and session totals, and step events. Require provider
+  normalization and deduplication, with separate cost pricing. Document that
+  raw normalization belongs in each runner's parser tests, outside the kit's
+  canonical scripted usage. Add a one-step disjoint-input usage vector.
+
 ## 0.7.5
 
 - Add optional `read::HeadMeta::last_run_error`, its builder/accessor, and

@@ -546,6 +546,28 @@ mod tests {
     }
 
     #[test]
+    fn usage_disjoint_input_round_trips_without_overlap() {
+        let name = "run_status.usage_disjoint_input.json";
+        let usage = decode_vector(name);
+        assert_by_model_sums(name, &usage);
+        assert_eq!((usage.steps, usage.unreported_steps), (1, 0));
+        assert_eq!(
+            totals_of(&usage),
+            [Some(1250), Some(6000), Some(750), Some(200), None]
+        );
+        assert_eq!(usage.by_model.len(), 1);
+        assert_eq!(
+            usage.input_tokens.unwrap()
+                + usage.cached_input_tokens.unwrap()
+                + usage.cache_write_tokens.unwrap(),
+            8000
+        );
+        let mut built = RunUsage::new();
+        built.record_step("stub", "stub-model", None, reported(1250, 6000, 750, 200));
+        assert_eq!(built, usage);
+    }
+
+    #[test]
     fn usage_unreported_step_counts_it_and_keeps_totals_as_reported() {
         let name = "run_status.usage_unreported_step.json";
         let usage = decode_vector(name);

@@ -284,6 +284,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/run-tool-calls.json"),
     ),
     (
+        "run_status.usage_disjoint_input.json",
+        include_str!("../test-vectors/llm-runner-v1/run_status.usage_disjoint_input.json"),
+    ),
+    (
         "run_status.usage_model_switch.json",
         include_str!("../test-vectors/llm-runner-v1/run_status.usage_model_switch.json"),
     ),

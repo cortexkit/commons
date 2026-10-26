@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Clarify that `usage.input_tokens` excludes cache reads and writes. Document
+  normalization of inclusive provider counts, deduplication of cache-write
+  aliases, and separate cost pricing. Text only; wire shapes and validation
+  are unchanged.
+
 ## 0.1.1
 
 - New permanent failure `cost_unmeasured` for all three tools (`errors::COST_UNMEASURED`, listed in `errors::TOOL_RESULT_CODES`). A provider answered, but nothing gives the billed cost, so the answer is withheld instead of returned with a guessed cost. Usage is recorded as reported, the caller charges the request's `max_cost_usd` against its budget, and a retry with the same call key replays the failure. Additive: no existing code or shape changes.

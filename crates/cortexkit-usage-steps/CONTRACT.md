@@ -175,7 +175,7 @@ Optional members, omitted when unknown and never zero for unknown:
 | `run_id` | string | Runner steps only. |
 | `provider` | string | |
 | `model` | string | |
-| `input` | integer | Uncached input tokens. |
+| `input` | integer | Input tokens neither read from nor written to the prompt cache. |
 | `cache_read` | integer | Cached tokens read. |
 | `cache_write` | integer | Cache tokens written, the sum of every cache lifetime. |
 | `cache_write_5m` | integer | Present only when the source split cache writes by lifetime. |
@@ -187,6 +187,19 @@ Optional members, omitted when unknown and never zero for unknown:
 | `request_body_len` | integer | Request body length, where the producer reports it. |
 | `retention` | number | Non-negative; never rounded or clamped. See [Verdict](#verdict). |
 | `request_size` | string | `smaller` or `not_smaller`; see [Verdict](#verdict). |
+
+`input` excludes both `cache_read` and `cache_write`: the three counts are
+disjoint. When all three components are known, `prompt` equals their sum;
+summing only present components can give a partial total, and an omitted
+component remains unknown, not zero. The usage-feed provider normalizes source
+counts that still include cache reads or writes in the prompt or input count:
+it subtracts those included counts before reporting `input`. Already-normalized
+runner counts pass through unchanged; the same tokens never appear in two
+fields. If a source reports the same cache writes under two names, the
+usage-feed provider reports them once. A reader computing cost prices the three
+fields separately and never subtracts one from another. This is the same rule
+the runner contract pins for `input_tokens`, `cached_input_tokens` and
+`cache_write_tokens`.
 
 `reasoning` is a breakdown of `output`, never an addition to it: it counts
 output the provider reports as reasoning, and that output is already inside

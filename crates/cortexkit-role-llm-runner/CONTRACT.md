@@ -1414,6 +1414,21 @@ run's token usage whichever runner served it.
   "unreported_steps": 0}`, with every total absent and `by_model` empty or
   absent. A decoder reads an absent `by_model` as empty; a usage with
   `steps > 0` MUST carry it. `RunUsage` always encodes it.
+- [pinned] `input_tokens` counts only input that was neither read from nor
+  written to the prompt cache; it never includes `cached_input_tokens` or
+  `cache_write_tokens`. Total input consumed is `input_tokens +
+  cached_input_tokens + cache_write_tokens`, each where present. An omitted
+  component remains unknown, not zero, so this sum can be a partial total. A
+  runner whose provider includes cache reads or writes in its prompt or input
+  count subtracts those included counts before reporting `input_tokens`: the same
+  tokens never appear in two fields. If the provider reports the same cache
+  writes under two names, the runner reports them once. A consumer computing
+  cost prices the three fields separately and never subtracts one from
+  another. This rule applies to run usage, `by_model`, the `session_usage`
+  totals that share this shape, and the per-step counters of `step.finished.v1`
+  (§14.3). The conformance kit cannot observe provider normalization because
+  its scripted usage supplies canonical counts; each runner's parser tests
+  must cover the conversion from raw provider usage.
 - [pinned] `reasoning_tokens` is a breakdown of `output_tokens`, never an
   addition to it: it counts output the provider reports as reasoning, and
   that output is already inside `output_tokens`. So `reasoning_tokens <=
@@ -4268,7 +4283,7 @@ to the session's whole length.
   | `attempt_id?` | Opaque provider-attempt identifier string, required when `harness_step_ref` is absent; optional when it is present |
   | `harness`, `session` | Required strings: the harness and session the runner received |
   | `work_class?`, `provider`, `model` | Optional open work-class string, required provider identifier and the model actually sent |
-  | `input_tokens?`, `cached_input_tokens?`, `cache_write_tokens?`, `output_tokens?`, `reasoning_tokens?` | Optional unsigned 64-bit per-step counters, with the same names as run usage |
+  | `input_tokens?`, `cached_input_tokens?`, `cache_write_tokens?`, `output_tokens?`, `reasoning_tokens?` | Optional unsigned 64-bit per-step counters; the three input counters are disjoint as in §6.4 |
   | `cache_write_5m_tokens?`, `cache_write_1h_tokens?` | Optional unsigned 64-bit cache-write counters split by TTL; absent is not zero and a partial split need not add up to the total |
   | `reasoning_included_in_output?` | Optional boolean stating whether reasoning tokens are included in output tokens; absence does not imply either convention |
   | `request_body_bytes?`, `context_limit?`, `finish_reason?` | Optional unsigned 64-bit request-byte count and context-token limit, and optional open finish-reason string |

@@ -39,6 +39,15 @@ either request reports a request naming one alone; the provider refuses one
 `invalid_request`. An unfiltered request encodes exactly as before the filter
 existed.
 
+A row's `input` excludes both `cache_read` and `cache_write`: the three counts
+are disjoint. When all components are known, `prompt` equals their sum; summing
+only present components can give a partial total, and absence never means zero.
+The usage-feed provider subtracts cache counts still included in a source's
+prompt or input count before reporting `input`; already-normalized runner
+counts pass through unchanged. It reports duplicate names for the same cache
+writes only once. Price the three fields separately; never subtract one from
+another.
+
 A row's `output` includes reasoning: `reasoning` is a breakdown of `output`,
 never an addition to it, so `reasoning <= output` whenever both are present.
 Charge `output` once and never add `reasoning` on top. The provider's tests

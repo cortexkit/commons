@@ -406,9 +406,9 @@ is unchanged and prints nothing.
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
 | `describe_states_max_bytes` | `transcript_reads` |
 | `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; inapplicable without the describe group or `head_sender_identities` |
-| `head_last_run_error_only_on_error` | `queue`, `transcript_reads`; checks fresh and completed heads without the fixture, then failed/recovered heads when supported; an error summary may accompany only an error state |
+| `head_last_run_error_only_on_error` | `queue`, `transcript_reads` for fresh and completed heads; failed/recovered heads additionally require `run_ops`, `run_status` and the model-failure fixture; an error summary may accompany only an error state |
 | `head_last_run_error_matches_run_status` | `queue`, `transcript_reads`, `run_ops`, `run_status` and model-failure fixture; class, exact fractional retry seconds and reset equal the same run's `RunError`; inapplicable without the fixture |
-| `head_last_run_error_requires_last_run_state` | `queue`, `transcript_reads`; checks fresh and completed heads without the fixture; an error summary cannot appear without `last_run_state`; an unobserved optional field remains inapplicable |
+| `head_last_run_error_requires_last_run_state` | `queue`, `transcript_reads` for fresh and completed heads; failed/recovered heads additionally require `run_ops`, `run_status` and the model-failure fixture; an error summary cannot appear without `last_run_state`; an unobserved optional field remains inapplicable |
 | `call_identity_key_matches_attribution` | `call_identity` (otherwise not applicable), `queue`, `transcript_reads`, `dispatch_attribution`, and display history or live events |
 | `call_identity_pin_frozen_at_dispatch` | as above, and `dispatched_schema_pin`; the catalog rule is named unchecked without `change_tool_definition` |
 | `call_identity_denied_call_has_no_pin` | as above; not applicable without `deny_tool_call` |

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- Clarify that `input` excludes cache reads and writes, matching the runner's
+  disjoint input counters. Document normalization of inclusive source counts,
+  deduplication of cache-write aliases, and separate cost pricing. Text only;
+  wire shapes and validation are unchanged.
+
 ## 0.2.1
 
 - `codes::SUBSCRIBE_REFUSALS` and the contract's subscribe opening refusals

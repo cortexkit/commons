@@ -332,6 +332,15 @@ model, as in `usage_plain`, with `reasoning_tokens` reported on two of them. Eac
 `by_model` sums to its totals, and an absent total decodes as `None`.
 Checked by the `usage::tests` module of the wire crate.
 
+`run_status.usage_disjoint_input.json` is an invented one-step example with
+three disjoint input counts: 1,250 tokens neither read from nor written to the
+prompt cache, 6,000 cache-read tokens, and 750 cache-write tokens. The step
+consumed 8,000 input tokens in total; `input_tokens` contains neither cache
+count. The same counts appear in `by_model`. This vector checks the canonical
+wire representation, not conversion from a raw provider prompt count; that
+conversion is covered by each runner's parser tests. Checked by the wire crate's
+`usage_disjoint_input_round_trips_without_overlap` test.
+
 # Send status
 
 `send-status.json` pins `send.status` (contract §9.8): a request, requests

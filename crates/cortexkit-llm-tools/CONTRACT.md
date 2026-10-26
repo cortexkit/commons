@@ -237,7 +237,20 @@ Every result requires `usage` (possibly `{}`):
 
 Each field is an unsigned integer measurement. A field is **absent when the
 provider did not report it, never fabricated as zero**. A reported zero remains
-zero. `reasoning_tokens` is a breakdown of `output_tokens`, never in addition:
+zero.
+
+`input_tokens` counts only input neither read from nor written to the prompt
+cache; it excludes `cached_input_tokens` and `cache_write_tokens`. Total input
+consumed is `input_tokens + cached_input_tokens + cache_write_tokens`, each
+where present. An omitted component remains unknown, not zero, so this sum can
+be a partial total. A serving module whose provider includes cache reads or
+writes in its prompt or input count subtracts those included counts before reporting
+`input_tokens`; the same tokens never appear in two fields. If the provider
+reports the same cache writes under two names, the module reports them once.
+A consumer computing cost prices the three fields separately and never
+subtracts one from another.
+
+`reasoning_tokens` is a breakdown of `output_tokens`, never in addition:
 when supplied it requires `output_tokens` and cannot exceed it. A module whose
 provider reports thinking separately folds it into `output_tokens`.
 

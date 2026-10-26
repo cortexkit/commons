@@ -16,9 +16,16 @@ use serde_json::Number;
 pub const MODES: &[&str] = &["codemode", "flow"];
 
 /// Provider measurements only. Unknown counts are omitted, not fabricated as zero.
+/// The three input counts are disjoint. Their sum, each where present, is the
+/// reported part of total input; an omitted component remains unknown, not zero.
+/// Serving modules subtract cache counts included in a provider's
+/// prompt or input count and count duplicate names for the same writes once.
+/// Consumers price the three fields separately, never subtracting one from another.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Usage {
+    /// Input neither read from nor written to the prompt cache; excludes
+    /// `cached_input_tokens` and `cache_write_tokens`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

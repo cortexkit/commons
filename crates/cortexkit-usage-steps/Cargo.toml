@@ -4,7 +4,7 @@
 # and vectors. Pure serde plus one small helper (LatestRows); no transport.
 [package]
 name = "cortexkit-usage-steps"
-version = "0.2.1"
+version = "0.2.2"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

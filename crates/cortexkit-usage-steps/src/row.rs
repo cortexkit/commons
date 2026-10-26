@@ -11,6 +11,13 @@ use crate::{Cursor, RequestSize, StepSource, Verdict};
 /// [`crate::LatestRows`]).
 ///
 /// Optional members are omitted when unknown and are never zero for unknown.
+/// `input`, `cache_read` and `cache_write` are disjoint. When all are known,
+/// `prompt` equals their sum; summing only present components can give a partial
+/// total, and absence never means zero. The usage-feed provider subtracts cache
+/// counts still included in a source's prompt or input count; already-normalized
+/// runner counts pass through unchanged. It counts aliases for the same writes
+/// once.
+/// Price the three fields separately; never subtract one from another.
 /// `output` includes reasoning: `reasoning` is a breakdown of `output`, never
 /// an addition to it, so `reasoning <= output` whenever both are present (see
 /// [`StepRow::check_counts`]). `cache_write` is the sum of every cache
@@ -39,7 +46,7 @@ pub struct StepRow {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
-    /// Uncached input tokens.
+    /// Input tokens neither read from nor written to the prompt cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
