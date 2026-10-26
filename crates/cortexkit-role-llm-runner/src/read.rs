@@ -871,6 +871,13 @@ pub struct HeadMeta {
     /// The session's most recent run. Absent before the first run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_run_state: Option<LastRunState>,
+    /// Retry classification and timing for that same run, only when
+    /// `last_run_state.state` is `"error"`. Paused and interrupted runs carry
+    /// none: their `reason` already explains why they stopped. Absence on an
+    /// error means not reported, never permanent; no describe group is needed.
+    /// See [`LastRunError`] for the source and intentionally omitted details.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_error: Option<LastRunError>,
     /// When the transcript last changed, in milliseconds since the Unix
     /// epoch. Present whenever `lineage_id` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1062,6 +1069,7 @@ impl HeadMeta {
             history_version: None,
             head: None,
             last_run_state: None,
+            last_run_error: None,
             updated_at: Some(updated_at),
             input: None,
             model: None,
@@ -1084,6 +1092,7 @@ impl HeadMeta {
             history_version: None,
             head: None,
             last_run_state: None,
+            last_run_error: None,
             updated_at: None,
             input: None,
             model: None,
@@ -1119,6 +1128,15 @@ impl HeadMeta {
     pub fn with_last_run_state(mut self, last_run_state: LastRunState) -> Self {
         self.last_run_state = Some(last_run_state);
         self
+    }
+
+    pub fn with_last_run_error(mut self, last_run_error: LastRunError) -> Self {
+        self.last_run_error = Some(last_run_error);
+        self
+    }
+
+    pub fn last_run_error(&self) -> Option<&LastRunError> {
+        self.last_run_error.as_ref()
     }
 
     pub fn with_input(mut self, input: HeadInput) -> Self {
@@ -1231,6 +1249,98 @@ pub struct LastRunState {
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+}
+
+/// A finite, nonnegative retry delay in seconds, encoded as a JSON number.
+/// Fractions are retained exactly; absence is represented by `None`, not zero.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "f64", into = "f64")]
+pub struct RetryAfterSecs(f64);
+
+// Every stored value is finite, and f64 equality on finite values is an
+// equivalence relation. The private field keeps NaN and infinities out.
+impl Eq for RetryAfterSecs {}
+
+impl RetryAfterSecs {
+    pub fn new(value: f64) -> Option<Self> {
+        (value.is_finite() && value >= 0.0).then_some(Self(value))
+    }
+
+    pub fn get(&self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for RetryAfterSecs {
+    type Error = &'static str;
+
+    fn try_from(value: f64) -> Result<Self, Self::Error> {
+        Self::new(value).ok_or("retry_after_secs must be finite and at least 0")
+    }
+}
+
+impl From<RetryAfterSecs> for f64 {
+    fn from(value: RetryAfterSecs) -> Self {
+        value.get()
+    }
+}
+
+/// Retry metadata for the same run named by [`HeadMeta::last_run_state`],
+/// present only when its state is `"error"`. Paused (for example
+/// `account_changed`) and interrupted runs carry none because `reason`
+/// already explains why they stopped. Absence on an error means not reported
+/// (including by older runners), never permanent; no describe group is needed.
+///
+/// Values equal that run's [`crate::run::RunError`] as served by `run.status`,
+/// never a separate derivation. A runner should write both from the same
+/// terminal record. A negative or non-finite retry delay is omitted here.
+///
+/// The head is served to client apps and intentionally omits `message`,
+/// `provider_code`, `status`, `account_ref` and provider diagnostics: retry
+/// decisions need only class and timing. A reader wanting text calls
+/// `run.status` once.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct LastRunError {
+    /// Open string, retaining unknown values. Examples today are `transient`,
+    /// `permanent`, `auth_required`, `context_overflow` and
+    /// `provider_unavailable`; older records may say `auth`.
+    pub class: String,
+    /// Fractional seconds, finite and at least 0. Absent when the provider
+    /// gave none, never zero as a stand-in for missing information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<RetryAfterSecs>,
+    /// Provider reset time in milliseconds since the Unix epoch, if reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resets_at_ms: Option<u64>,
+}
+
+impl LastRunError {
+    pub fn new(class: impl Into<String>) -> Self {
+        Self {
+            class: class.into(),
+            retry_after_secs: None,
+            resets_at_ms: None,
+        }
+    }
+
+    pub fn with_retry_after_secs(mut self, retry_after_secs: RetryAfterSecs) -> Self {
+        self.retry_after_secs = Some(retry_after_secs);
+        self
+    }
+
+    pub fn retry_after_secs(&self) -> Option<f64> {
+        self.retry_after_secs.map(|value| value.get())
+    }
+
+    pub fn with_resets_at_ms(mut self, resets_at_ms: u64) -> Self {
+        self.resets_at_ms = Some(resets_at_ms);
+        self
+    }
+
+    pub fn resets_at_ms(&self) -> Option<u64> {
+        self.resets_at_ms
+    }
 }
 
 #[cfg(test)]
@@ -1701,6 +1811,93 @@ mod tests {
             assert!(head.lineage_consistent(), "{name}");
         }
         assert!(HeadMeta::no_lineage().lineage_consistent());
+    }
+
+    #[test]
+    fn last_run_error_round_trips_every_field() {
+        let head = HeadMeta::new("error-lineage", 0, 1790000001500)
+            .with_history_version(1)
+            .with_last_run_state(LastRunState {
+                run_id: "error-run".into(),
+                state: "error".into(),
+                reason: Some("provider_error".into()),
+            })
+            .with_last_run_error(
+                LastRunError::new("transient")
+                    .with_retry_after_secs(RetryAfterSecs::new(1.5).unwrap())
+                    .with_resets_at_ms(1790000003000),
+            );
+        let encoded = serde_json::to_string(&head).unwrap();
+        let decoded: HeadMeta = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, head);
+        let error = decoded.last_run_error().unwrap();
+        assert_eq!(error.class, "transient");
+        assert_eq!(error.retry_after_secs(), Some(1.5));
+        assert_eq!(error.resets_at_ms(), Some(1790000003000));
+        let value = serde_json::to_value(error).unwrap();
+        assert_eq!(value["retry_after_secs"], serde_json::json!(1.5));
+        assert_eq!(value.as_object().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn old_head_without_last_run_error_is_byte_identical() {
+        // Pin the pre-existing error head, which predates retry metadata.
+        let file = vectors::load("head.json");
+        let answer = &file["answers"][1]["answer"];
+        assert_eq!(file["answers"][1]["name"], "last run ended in error");
+        let head: HeadMeta = serde_json::from_value(answer.clone()).unwrap();
+        assert!(head.last_run_error().is_none());
+        let encoded = serde_json::to_value(head).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&encoded).unwrap(),
+            serde_json::to_vec(answer).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_string(&HeadMeta::no_lineage()).unwrap(),
+            "{}"
+        );
+    }
+
+    #[test]
+    fn last_run_error_unknown_class_and_absent_timing_are_preserved() {
+        let encoded = r#"{"class":"future_retry_class"}"#;
+        let error: LastRunError = serde_json::from_str(encoded).unwrap();
+        assert_eq!(error.class, "future_retry_class");
+        assert_eq!(error.retry_after_secs(), None);
+        assert_eq!(error.resets_at_ms(), None);
+        assert_eq!(serde_json::to_string(&error).unwrap(), encoded);
+    }
+
+    #[test]
+    fn retry_after_secs_rejects_invalid_numbers_and_head_remains_eq() {
+        fn assert_eq_trait<T: Eq>() {}
+        assert_eq_trait::<HeadMeta>();
+        assert_eq_trait::<LastRunError>();
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            assert_eq!(RetryAfterSecs::new(value), None);
+        }
+        assert_eq!(RetryAfterSecs::new(0.0).unwrap().get(), 0.0);
+        assert_eq!(RetryAfterSecs::new(1.5).unwrap().get(), 1.5);
+        let negative =
+            serde_json::from_str::<LastRunError>(r#"{"class":"transient","retry_after_secs":-1}"#)
+                .unwrap_err();
+        assert!(negative.to_string().contains("finite and at least 0"));
+        assert!(serde_json::from_str::<LastRunError>(
+            r#"{"class":"transient","retry_after_secs":1e400}"#,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn last_run_error_vector_decodes_and_round_trips() {
+        let file = vectors::load("head-last-run-error.json");
+        for case in vectors::cases(&file, "answers") {
+            let head: HeadMeta =
+                vectors::round_trip(case["name"].as_str().unwrap(), &case["answer"]);
+            assert!(head.lineage_consistent());
+            assert_eq!(head.last_run_state.as_ref().unwrap().state, "error");
+            assert_eq!(head.last_run_error().unwrap().retry_after_secs(), Some(1.5));
+        }
     }
 
     #[test]

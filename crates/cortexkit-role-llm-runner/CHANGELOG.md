@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.5
+
+- Add optional `read::HeadMeta::last_run_error`, its builder/accessor, and
+  `read::LastRunError` with open classification and provider retry timing from
+  the same run's `run.status`. Absence means not reported, never permanent;
+  paused and interrupted runs carry no error summary. Omit text and diagnostics.
+- Add `read::RetryAfterSecs`, a finite nonnegative fractional-seconds newtype
+  encoded as a JSON number, preserving `HeadMeta: Eq`. Invalid delays are
+  omitted from the head, not rounded or replaced with zero. Add an error-head
+  vector without changing existing vector bytes.
+
 ## 0.7.4
 
 - Add the declared `archive_prunes_reasoning` group, its three pruning kinds,

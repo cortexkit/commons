@@ -287,6 +287,11 @@ pub struct ScriptedTurn {
     /// actually receives, truncating the response and reporting its actual
     /// output usage rather than the full, untruncated scripted count.
     pub usage: Option<ScriptedUsage>,
+    /// Fail the model request instead of returning parts. The adapter drives
+    /// its real provider-failure path, preserving classification and timing;
+    /// it must not synthesize management replies. Used only when
+    /// [`LlmRunnerSubject::supports_model_failure_fixture`] returns true.
+    pub model_failure: Option<cortexkit_role_llm_runner::run::RunError>,
 }
 
 /// Usage reported by one completed model request, at face value.
@@ -486,7 +491,16 @@ impl Script {
 
 impl ScriptedTurn {
     pub fn new(parts: Vec<ScriptedPart>) -> Self {
-        Self { parts, usage: None }
+        Self {
+            parts,
+            usage: None,
+            model_failure: None,
+        }
+    }
+
+    pub fn with_model_failure(mut self, error: cortexkit_role_llm_runner::run::RunError) -> Self {
+        self.model_failure = Some(error);
+        self
     }
 
     pub fn with_usage(mut self, usage: ScriptedUsage) -> Self {
@@ -580,6 +594,14 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Whether the scripted provider can exercise a real terminal error from
+    /// [`ScriptedTurn::model_failure`], including fractional retry timing.
+    /// Without this fixture, only the head-error comparison with run.status
+    /// is inapplicable. Fresh and completed heads are still checked.
+    fn supports_model_failure_fixture(&self) -> bool {
+        false
+    }
+
     /// Seed an unpruned, idle native transcript under this session's owner.
     /// Include each declared pruning kind in at least two messages, plus an
     /// unpruned part. Enroll with exactly `accepts` when Some; None means no

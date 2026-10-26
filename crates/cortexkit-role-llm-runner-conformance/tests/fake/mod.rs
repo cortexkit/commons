@@ -170,6 +170,14 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub head_error_on_completed: bool,
+    pub head_error_on_fresh: bool,
+    pub head_error_on_paused: bool,
+    pub head_error_retry_rounded: bool,
+    pub head_error_class_wrong: bool,
+    pub head_error_reset_wrong: bool,
+    pub head_error_without_state: bool,
+    pub head_error_omitted: bool,
     pub step_events_duplicate: bool,
     pub step_events_wrong_position: bool,
     pub step_events_missing_attempt_id: bool,
@@ -2159,7 +2167,11 @@ impl Module {
             if sess.run(run_id).is_none_or(|run| run.state != "active") {
                 return Ok(());
             }
-            let turn_index = sess.events.iter().filter(|kind| *kind == "step").count();
+            let turn_index = sess
+                .events
+                .iter()
+                .filter(|kind| matches!(kind.as_str(), "step" | "model_failure"))
+                .count();
             let model_started = self.world.model_calls.lock().unwrap().contains(&(
                 session.into(),
                 run_id.into(),
@@ -2209,6 +2221,16 @@ impl Module {
                     json!({ "kind": "terminal", "run_id": run_id, "state": "error" }),
                 );
             };
+            if let Some(error) = turn.model_failure {
+                self.commit(session, json!({"kind":"model_failure", "run_id":run_id}))?;
+                return self.commit(
+                    session,
+                    json!({
+                        "kind": "terminal", "run_id": run_id, "state": "error",
+                        "reason": "provider_error", "error": error
+                    }),
+                );
+            }
             // Call ids pair calls and results within one model answer. Reusing
             // an id in a later answer is valid; duplicates in this answer are not.
             let mut ids = BTreeSet::new();
@@ -3982,6 +4004,12 @@ impl Module {
             if self.world.defects.head_sender_omitted {
                 head.sender = None;
             }
+            // Isolate the retry-metadata fault from the general empty-head case.
+            if self.world.defects.head_error_on_fresh && session.contains("head-error-ordinary") {
+                head = head.with_last_run_error(
+                    cortexkit_role_llm_runner::read::LastRunError::new("transient"),
+                );
+            }
             return respond(head);
         };
         if sess.expired_at.is_some() && self.world.retention_defect == RetentionDefect::Empty {
@@ -4097,9 +4125,54 @@ impl Module {
                     })
                     .or_else(|| run.reason.clone()),
             });
+            if run.state == "error" && !self.world.defects.head_error_omitted {
+                if let Some(error) = &run.error {
+                    let mut summary = cortexkit_role_llm_runner::read::LastRunError::new(
+                        error["class"].as_str().unwrap(),
+                    );
+                    if let Some(delay) = error["retry_after_secs"].as_f64() {
+                        let delay = if self.world.defects.head_error_retry_rounded {
+                            delay.round()
+                        } else {
+                            delay
+                        };
+                        if let Some(delay) =
+                            cortexkit_role_llm_runner::read::RetryAfterSecs::new(delay)
+                        {
+                            summary = summary.with_retry_after_secs(delay);
+                        }
+                    }
+                    if let Some(reset) = error["resets_at_ms"].as_u64() {
+                        summary = summary.with_resets_at_ms(reset);
+                    }
+                    if self.world.defects.head_error_class_wrong {
+                        summary.class = "permanent".into();
+                    }
+                    if self.world.defects.head_error_reset_wrong {
+                        summary.resets_at_ms = Some(1);
+                    }
+                    head = head.with_last_run_error(summary);
+                    if self.world.defects.head_error_on_paused {
+                        head.last_run_state.as_mut().unwrap().state = "paused".into();
+                    }
+                    if self.world.defects.head_error_without_state {
+                        head.last_run_state = None;
+                    }
+                }
+            }
         }
         if self.world.defects.head_sender_omitted {
             head.sender = None;
+        }
+        if self.world.defects.head_error_on_completed
+            && head
+                .last_run_state
+                .as_ref()
+                .is_some_and(|run| run.state == "completed")
+        {
+            head = head.with_last_run_error(cortexkit_role_llm_runner::read::LastRunError::new(
+                "transient",
+            ));
         }
         respond(head)
     }
@@ -4832,6 +4905,7 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub model_failure_fixture: bool,
     pub step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents,
     pub incarnation_fixtures: bool,
     pub head_sender_fixtures: bool,
@@ -4972,6 +5046,7 @@ impl FakeSubject {
             head_sender_fixtures: false,
             head_sender_group: true,
             incarnation_fixtures: false,
+            model_failure_fixture: true,
             output_refs_group: false,
             call_identity_group: false,
             descriptor_case: None,
@@ -5218,6 +5293,10 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    fn supports_model_failure_fixture(&self) -> bool {
+        self.model_failure_fixture
+    }
+
     async fn step_event_observation(
         &self,
         handle: &FakeHandle,

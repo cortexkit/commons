@@ -1,0 +1,24 @@
+{
+  "answers": [
+    {
+      "name": "last error run with fractional provider retry timing",
+      "answer": {
+        "lineage_id": "invented-error-lineage",
+        "last_ordinal": 7,
+        "first_ordinal": 0,
+        "history_version": 1,
+        "last_run_state": {
+          "run_id": "invented-error-run",
+          "state": "error",
+          "reason": "provider_error"
+        },
+        "last_run_error": {
+          "class": "transient",
+          "retry_after_secs": 1.5,
+          "resets_at_ms": 1790000003000
+        },
+        "updated_at": 1790000001500
+      }
+    }
+  ]
+}

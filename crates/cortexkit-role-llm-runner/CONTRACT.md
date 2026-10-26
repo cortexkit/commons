@@ -531,7 +531,7 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
 ### 4.3 Head metadata
 
 - [pinned] Head metadata without bodies: `{lineage_id, last_ordinal,
-  first_ordinal, cut?, history_version, head, last_run_state, updated_at,
+  first_ordinal, cut?, history_version, head, last_run_state, last_run_error?, updated_at,
   input?, model?, usage?, sender?, incarnation?}`
   (`HeadMeta`).
 - [pinned] `history_version` is a `u64`, on `session.head` and on every
@@ -562,6 +562,28 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   describes the most recent run, never the transcript; `updated_at` is
   milliseconds since the Unix epoch. `last_run_state` is the pinned run
   summary; a page's `lineage_state` is a runner member, not pinned.
+- [pinned] `last_run_error?: {class, retry_after_secs?, resets_at_ms?}`
+  (`read::LastRunError`, added in 0.7.5) may be present only with
+  `last_run_state` whose `state` is `"error"`, and describes that same run.
+  A `paused` run (for example `account_changed`) or an `interrupted` run
+  carries none: `reason` already explains why it stopped.
+- [pinned] Its values equal that run's `RunError.class`, `retry_after_secs`
+  and `resets_at_ms` as served by `run.status`, never a separate derivation.
+  A runner should write both from the same terminal record.
+  `retry_after_secs` is fractional (for example 1.5), absent when the provider
+  gave none, never 0 as a stand-in; `resets_at_ms` is an optional `u64`.
+  On the head, `retry_after_secs` is finite and at least 0; a runner whose
+  `RunError.retry_after_secs` is negative or non-finite omits it on the head.
+- [pinned] The head intentionally leaves out `message`, `provider_code`,
+  `status`, `account_ref` and provider diagnostics. A client app needs only
+  class and timing for its retry decision; a reader wanting the text calls
+  `run.status` once.
+- [pinned] An error state without `last_run_error` means "not reported"
+  (for example a runner predating 0.7.5), never "permanent". No describe
+  group is needed. `class` is an open string: known examples today are
+  `transient`, `permanent`, `auth_required`, `context_overflow` and
+  `provider_unavailable`; older records may say `auth`. Readers decode and
+  retain any value, including unknown ones.
 - [pinned] `input?: {attachments, modalities?, mime_types?}`
   (`read::HeadInput`, added in 0.5.1) describes what a send that names no
   model can carry. `attachments` is `yes`, `no` or `unknown`, decoded open

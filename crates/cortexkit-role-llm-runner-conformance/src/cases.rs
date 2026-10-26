@@ -89,6 +89,9 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("head_last_run_error_") => {
+                crate::last_run_error::run(self, name).await
+            }
             name if name.starts_with("archive_pruning_") => {
                 crate::archive_pruning::run(self, name).await
             }

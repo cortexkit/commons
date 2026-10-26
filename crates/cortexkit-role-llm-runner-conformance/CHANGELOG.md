@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.6
+
+- Track llm-runner 0.7.5. Add `head_last_run_error_only_on_error`,
+  `head_last_run_error_matches_run_status` and
+  `head_last_run_error_requires_last_run_state`, with named faulty runners
+  proving each case independently rejects its violation. Compare fractional
+  retry timing exactly, including a 1.5-second fixture, plus class and reset.
+- Add optional `ScriptedTurn::model_failure` and its builder, gated by
+  `LlmRunnerSubject::supports_model_failure_fixture`. Adapters drive a real
+  terminal provider failure; the fake records it durably. Runners omitting
+  the optional head field are inapplicable, never failed or silently credited
+  with a pass. Without the fixture, fresh and completed heads are still
+  checked for invalid error summaries; only the run.status comparison is
+  inapplicable. Named faulty runners prove both fixture-free checks.
+
 ## 0.15.5
 
 - `tags_tool_result_blocks_share_one_number` finds each tool result through its

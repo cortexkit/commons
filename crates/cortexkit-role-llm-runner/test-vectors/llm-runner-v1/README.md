@@ -1,5 +1,11 @@
 # `llm-runner/v1` test vectors
 
+`head-last-run-error.json` adds an invented error-state head with retry
+classification, a fractional 1.5-second delay and a reset timestamp.
+A unit test checks that the vector decodes and round-trips;
+the existing `head.json` remains byte-identical, including its older error
+head without retry metadata.
+
 `archive-prunes-reasoning.json` pairs original and served parts with actual
 pages and matching original JCS byte lengths and digests. It covers required
 reasoning text/data emptied rather than removed, optional signatures removed,

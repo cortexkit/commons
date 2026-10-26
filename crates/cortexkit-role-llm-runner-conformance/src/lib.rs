@@ -99,6 +99,7 @@ mod host_history;
 mod incarnation;
 mod input_token_cap;
 mod interrupt_reason;
+mod last_run_error;
 mod lineage;
 mod live;
 mod media;

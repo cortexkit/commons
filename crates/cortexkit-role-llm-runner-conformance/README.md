@@ -1,5 +1,25 @@
 # cortexkit-role-llm-runner-conformance
 
+## Last-run retry metadata (0.15.6)
+
+The optional `head.last_run_error` cases need no new capability group in
+`role.describe`. The
+state and presence checks need only `queue` and `transcript_reads`: every
+subject is checked before any run and after an ordinary completed turn,
+even without a provider-failure fixture. A violation fails by name; if the
+field is never observed, the case remains inapplicable.
+
+The comparison with `run.status` additionally needs `run_ops`, `run_status`
+and the provider-failure fixture. An adapter implements
+`supports_model_failure_fixture` and translates `ScriptedTurn::model_failure`
+into a real provider failure with its class and timing, never a synthesized
+management reply. The fixture reports a fractional 1.5-second retry delay.
+When supported, the cases also check the failed head and complete a later
+run to check that stale error metadata is cleared. The comparison case
+alone is inapplicable without the fixture. Named faulty runners independently
+exercise a paused head carrying an error, rounded retry timing, changed class
+or reset, and an error summary without its run state.
+
 ## Archive reasoning pruning (0.15.4)
 
 `archive_pruning_*` cases run only for `ArchivePrunesReasoning`; otherwise they
@@ -386,6 +406,9 @@ is unchanged and prints nothing.
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
 | `describe_states_max_bytes` | `transcript_reads` |
 | `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; inapplicable without the describe group or `head_sender_identities` |
+| `head_last_run_error_only_on_error` | `queue`, `transcript_reads`; checks fresh and completed heads without the fixture, then failed/recovered heads when supported; an error summary may accompany only an error state |
+| `head_last_run_error_matches_run_status` | `queue`, `transcript_reads`, `run_ops`, `run_status` and model-failure fixture; class, exact fractional retry seconds and reset equal the same run's `RunError`; inapplicable without the fixture |
+| `head_last_run_error_requires_last_run_state` | `queue`, `transcript_reads`; checks fresh and completed heads without the fixture; an error summary cannot appear without `last_run_state`; an unobserved optional field remains inapplicable |
 | `call_identity_key_matches_attribution` | `call_identity` (otherwise not applicable), `queue`, `transcript_reads`, `dispatch_attribution`, and display history or live events |
 | `call_identity_pin_frozen_at_dispatch` | as above, and `dispatched_schema_pin`; the catalog rule is named unchecked without `change_tool_definition` |
 | `call_identity_denied_call_has_no_pin` | as above; not applicable without `deny_tool_call` |

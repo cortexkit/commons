@@ -3,6 +3,189 @@
 
 mod fake;
 
+fn head_error_subject(defects: fake::Defects) -> fake::FakeSubject {
+    let mut subject = declaring(Capability::RunStatus, defects);
+    subject.advertise_status = true;
+    subject
+}
+
+#[tokio::test]
+async fn head_last_run_error_correct_runner_passes() {
+    let report = run(&head_error_subject(Defects::default())).await;
+    for name in cases_of(&["head_last_run_error_"]) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn head_last_run_error_correct_omitting_runner_is_inapplicable() {
+    let report = run(&head_error_subject(Defects {
+        head_error_omitted: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in cases_of(&["head_last_run_error_"]) {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not report head.last_run_error"),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn head_last_run_error_without_fixture_completed_error_fails_by_name() {
+    let mut subject = head_error_subject(Defects {
+        head_error_on_completed: true,
+        ..Defects::default()
+    });
+    subject.model_failure_fixture = false;
+    let report = run(&subject).await;
+    let name = "head_last_run_error_only_on_error";
+    let reason = failed(&report, name);
+    assert!(
+        reason.contains("non-error state") && reason.contains("completed"),
+        "{reason}"
+    );
+    assert_eq!(
+        report.outcome("head_last_run_error_requires_last_run_state"),
+        Some(&CaseOutcome::Passed)
+    );
+    assert!(
+        matches!(report.outcome("head_last_run_error_matches_run_status"), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot script a terminal model failure")
+    );
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn head_last_run_error_without_fixture_fresh_error_fails_by_name() {
+    let mut subject = head_error_subject(Defects {
+        head_error_on_fresh: true,
+        ..Defects::default()
+    });
+    subject.model_failure_fixture = false;
+    let report = run(&subject).await;
+    let name = "head_last_run_error_requires_last_run_state";
+    let reason = failed(&report, name);
+    assert!(reason.contains("without last_run_state"), "{reason}");
+    assert_eq!(
+        report.outcome("head_last_run_error_only_on_error"),
+        Some(&CaseOutcome::Passed)
+    );
+    assert!(
+        matches!(report.outcome("head_last_run_error_matches_run_status"), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot script a terminal model failure")
+    );
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn head_last_run_error_without_fixture_or_status_is_inapplicable_when_absent() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.model_failure_fixture = false;
+    let report = run(&subject).await;
+    for name in [
+        "head_last_run_error_only_on_error",
+        "head_last_run_error_requires_last_run_state",
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not report head.last_run_error"),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+async fn head_error_defect(defects: Defects, failing: &str, text: &str) {
+    let report = run(&head_error_subject(defects)).await;
+    let reason = failed(&report, failing);
+    println!("{failing}: {reason}");
+    assert!(reason.contains(text), "{reason}");
+    for name in cases_of(&["head_last_run_error_"]) {
+        if name != failing {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name}\n{}",
+                report.render()
+            );
+        }
+    }
+    assert_none_failed_but(&report, &[failing]);
+}
+
+#[tokio::test]
+async fn head_last_run_error_on_paused_fails_only_state_case() {
+    head_error_defect(
+        Defects {
+            head_error_on_paused: true,
+            ..Defects::default()
+        },
+        "head_last_run_error_only_on_error",
+        "non-error state",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_last_run_error_rounded_fraction_fails_only_status_case() {
+    head_error_defect(
+        Defects {
+            head_error_retry_rounded: true,
+            ..Defects::default()
+        },
+        "head_last_run_error_matches_run_status",
+        "differs from run.status",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_last_run_error_wrong_class_fails_only_status_case() {
+    head_error_defect(
+        Defects {
+            head_error_class_wrong: true,
+            ..Defects::default()
+        },
+        "head_last_run_error_matches_run_status",
+        "differs from run.status",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_last_run_error_wrong_reset_fails_only_status_case() {
+    head_error_defect(
+        Defects {
+            head_error_reset_wrong: true,
+            ..Defects::default()
+        },
+        "head_last_run_error_matches_run_status",
+        "differs from run.status",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_last_run_error_without_state_fails_only_presence_case() {
+    head_error_defect(
+        Defects {
+            head_error_without_state: true,
+            ..Defects::default()
+        },
+        "head_last_run_error_requires_last_run_state",
+        "without last_run_state",
+    )
+    .await;
+}
+
 fn held_call_subject(defects: fake::Defects) -> fake::FakeSubject {
     let mut subject = fake::FakeSubject::new(defects);
     subject.held_calls_group = true;
@@ -128,12 +311,17 @@ const OPTIONAL_GROUPS: &[Capability] = &[
 
 // The in-process fake does not declare session_retention or exercise a real
 // process kill at ReleasePending. A separate subprocess fixture covers those
-// cases. All other cases must pass.
+// cases. Head-error cases also need run_status, which some fixtures omit.
+// All other cases must pass.
 fn assert_only_session_retention_skipped(report: &SuiteReport) {
     assert!(
         matches!(&report.verdict,
-            SuiteVerdict::ConformingForDeclaredCapabilities { skipped, .. }
-            if skipped == &vec![Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
+            SuiteVerdict::ConformingForDeclaredCapabilities { declared, skipped }
+            if skipped == &if declared.contains(&Capability::RunStatus) {
+                vec![Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
+            } else {
+                vec![Capability::RunStatus, Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
+            }
         ),
         "{}",
         report.render()
@@ -163,6 +351,16 @@ const INTERRUPT_CASES: &[&str] = &[
 const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("head_last_run_error_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::RunStatus))
+    {
+        return;
+    }
+    if case.starts_with("head_last_run_error_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not report head.last_run_error" || reason == "adapter cannot script a terminal model failure")
+    {
+        return;
+    }
     if NEW_RETENTION_CASES.contains(&case)
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "session_retention is not declared")
     {
@@ -784,6 +982,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                 &vec![
                     Capability::Attachments,
                     Capability::HostHistory,
+                    Capability::RunStatus,
                     Capability::Streaming,
                     Capability::SessionChange,
                     Capability::Retention,
@@ -1156,6 +1355,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::Attachments,
                     Capability::HostHistory,
                     Capability::RunOps,
+                    Capability::RunStatus,
                     Capability::SessionChange,
                     Capability::Retention,
                     Capability::SessionRetention,
