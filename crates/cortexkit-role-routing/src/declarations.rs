@@ -153,7 +153,7 @@ pub struct StandingLimits {
 }
 
 /// Matching inputs supplied by a runner module, not a credential or a route.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RunnerDeclaration {
     pub pairs: Vec<RunnerPair>,
@@ -172,8 +172,49 @@ pub struct RunnerDeclaration {
     pub tool_capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub standing_limits: Option<StandingLimits>,
+    /// Exact programs this runner hosts sessions in, independently of its pairs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harnesses: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_harness: Option<String>,
+    /// False excludes the runner from selection, not from account operations.
+    #[serde(
+        default = "default_starts_sessions",
+        deserialize_with = "null_starts_sessions",
+        skip_serializing_if = "is_true"
+    )]
+    pub starts_sessions: bool,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub unknown: BTreeMap<String, Value>,
+}
+
+fn default_starts_sessions() -> bool {
+    true
+}
+
+fn null_starts_sessions<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<bool, D::Error> {
+    Ok(Option::<bool>::deserialize(deserializer)?.unwrap_or(true))
+}
+
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
+impl Default for RunnerDeclaration {
+    fn default() -> Self {
+        Self {
+            pairs: Vec::new(),
+            follows_account_choice: false,
+            tool_capabilities: Vec::new(),
+            standing_limits: None,
+            harnesses: None,
+            default_harness: None,
+            starts_sessions: true,
+            unknown: BTreeMap::new(),
+        }
+    }
 }
 
 impl RunnerDeclaration {
@@ -182,6 +223,33 @@ impl RunnerDeclaration {
             pairs,
             ..Self::default()
         }
+    }
+
+    pub fn with_harnesses(mut self, harnesses: Vec<String>) -> Self {
+        self.harnesses = Some(harnesses);
+        self
+    }
+
+    pub fn with_default_harness(mut self, harness: impl Into<String>) -> Self {
+        self.default_harness = Some(harness.into());
+        self
+    }
+
+    pub fn with_starts_sessions(mut self, starts_sessions: bool) -> Self {
+        self.starts_sessions = starts_sessions;
+        self
+    }
+
+    pub fn harnesses(&self) -> Option<&[String]> {
+        self.harnesses.as_deref()
+    }
+
+    pub fn default_harness(&self) -> Option<&str> {
+        self.default_harness.as_deref()
+    }
+
+    pub fn starts_sessions(&self) -> bool {
+        self.starts_sessions
     }
 }
 
@@ -304,7 +372,7 @@ fn declaration_object<'a>(
     Ok(object)
 }
 
-fn is_runner_token(value: &str) -> bool {
+pub(crate) fn is_runner_token(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
         && value.as_bytes()[0].is_ascii_lowercase()
@@ -345,6 +413,9 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
             "follows_account_choice",
             "tool_capabilities",
             "standing_limits",
+            "harnesses",
+            "default_harness",
+            "starts_sessions",
         ],
     )?;
     let pairs = runner
@@ -368,6 +439,34 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
         let auth_method = token("auth_method")?;
         if !seen.insert((wire_api, auth_method)) {
             return Err(invalid(path));
+        }
+    }
+    if runner
+        .get("starts_sessions")
+        .is_some_and(|value| !value.is_null() && !value.is_boolean())
+    {
+        return Err(invalid("runner.starts_sessions".into()));
+    }
+    if let Some(value) = runner.get("harnesses").filter(|value| !value.is_null()) {
+        validate_unique_list(value, "runner.harnesses", true, is_runner_token)?;
+        if value.as_array().expect("validated array").len() > 16 {
+            return Err(invalid("runner.harnesses".into()));
+        }
+    }
+    if let Some(value) = runner
+        .get("default_harness")
+        .filter(|value| !value.is_null())
+    {
+        let harness = value
+            .as_str()
+            .filter(|value| is_runner_token(value))
+            .ok_or_else(|| invalid("runner.default_harness".into()))?;
+        if !runner
+            .get("harnesses")
+            .and_then(Value::as_array)
+            .is_some_and(|values| values.iter().any(|value| value.as_str() == Some(harness)))
+        {
+            return Err(invalid("runner.default_harness".into()));
         }
     }
     if runner
@@ -410,6 +509,33 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runner_harness_builders_and_legacy_bytes() {
+        let legacy = r#"{"runner":{"pairs":[{"wire_api":"api","auth_method":"key"}]}}"#;
+        let parsed = parse_consumer_declarations(&serde_json::from_str(legacy).unwrap()).unwrap();
+        assert!(parsed.runner.as_ref().unwrap().starts_sessions());
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), legacy);
+        let runner = RunnerDeclaration::new(vec![RunnerPair::new("api", "key")])
+            .with_harnesses(vec!["alpha".into(), "beta".into()])
+            .with_default_harness("alpha")
+            .with_starts_sessions(false);
+        assert_eq!(runner.harnesses().unwrap(), ["alpha", "beta"]);
+        assert_eq!(runner.default_harness(), Some("alpha"));
+        assert!(!runner.starts_sessions());
+        ConsumerDeclarations::new()
+            .with_runner(runner)
+            .validate()
+            .unwrap();
+        let invalid =
+            RunnerDeclaration::new(vec![RunnerPair::new("api", "key")]).with_harnesses(vec![]);
+        assert_eq!(
+            ConsumerDeclarations::new().with_runner(invalid).validate(),
+            Err(DeclarationError::InvalidField {
+                field: "runner.harnesses".into()
+            })
+        );
+    }
 
     #[test]
     fn defaults_are_optional_and_null_is_absent() {

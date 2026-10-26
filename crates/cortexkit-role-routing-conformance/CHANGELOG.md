@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.6.0
+
+- Depend on routing 0.4.1. Breaking Rust minor: exhaustive `CatalogRunner`
+  replaces its route-key harness map with the runner's `harnesses`,
+  `default_harness` and `starts_sessions` declarations. Adapters must map
+  actual hosted programs, not labels per route.
+- Add four checks (45 total) for requested program membership and echo,
+  default/singleton/absent answers without filtering, non-starting runners,
+  and refusing a request member without `select_harness`. Update
+  `harness_only_when_declared` to read declarations. Each is exercised by
+  faulty providers whose failing check names are pinned in tests.
+- Add invented multi-program, singleton and gateway fixtures. Roll out
+  readers first: runners declare the new members only after their routing
+  provider serves 0.4.1, because 0.4.0 refuses the entire declaration.
+  Callers send `harness` only when the group is declared.
+
 ## 0.5.0
 
 - Re-export routing contract 0.4.0 through `wire`, including non-exhaustive

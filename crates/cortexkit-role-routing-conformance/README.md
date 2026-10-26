@@ -8,7 +8,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.5.0"
+cortexkit-role-routing-conformance = "0.6.0"
 ```
 
 ```rust,ignore
@@ -39,8 +39,8 @@ assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
   - `configure_catalog(catalog)`: exactly these models (with their ability,
     limits, tool calls, modalities, structured output and pricing), runners
     (the route keys each runs, the tool providers it reaches with the
-    tool capability tags each serves, and the harness it declares for each
-    route), and subscription accounts. Every
+     tool capability tags each serves, and the runner's declared `harnesses`,
+     `default_harness` and `starts_sessions`), and subscription accounts. Every
     runner listed is an attested runner module (contract section 9: its
     route carries a principal the daemon verified, and the provider knows it
     as a runner);
@@ -80,11 +80,28 @@ for defaults; the operator-precedence check also overrides the request's `iq`.
 
 ## Checks
 
-The kit runs 41 checks, including six declaration checks, eight optional-member
-checks, and nine hold checks. The hold checks cover the optional
+The kit runs 45 checks, including six declaration checks, eight optional-member
+checks, four additional program checks, and nine hold checks. The hold checks cover the optional
 `select_hold_control` group: against a provider whose `role.describe` does
 not declare it they report not applicable (`CheckOutcome::NotApplicable`,
 printed `N/A`), and the verdict stays `Passed`.
+
+The requested-program check is likewise not applicable without `select_harness`;
+the undeclared-group refusal check runs only without that group. Default-program
+and non-starting-runner checks run regardless of the group. `harness_catalog()`
+adds a runner with `["alpha", "beta"]` and default `"alpha"`, a singleton
+`["solo"]` with no default, and an attach-only gateway with
+`starts_sessions: false`. The default check also exercises multiple programs
+without a default and an undeclared program list.
+
+**Migration (breaking Rust minor):** `CatalogRunner` is exhaustive. Replace the
+old route-key harness map with `harnesses: Option<Vec<String>>`,
+`default_harness: Option<String>` and `starts_sessions: bool`. `None` means
+undeclared; a declared list is non-empty. Feed these as the runner's actual
+declaration, not labels assigned per route. **Readers first:** a 0.4.0 provider
+refuses declarations with these members, so runners declare them only after
+their routing provider serves 0.4.1. Callers send `harness` only when the
+provider declares `select_harness`.
 
 | Check | Contract rule |
 |---|---|
@@ -120,6 +137,10 @@ printed `N/A`), and the verdict stays `Passed`.
 | `account_observe_idempotent_per_event_id` | §9.2: the same `event_id` again is `duplicate: true` |
 | `tool_capabilities_matched_by_tag` | §5.1: tool capabilities are matched by tag, never by module name |
 | `harness_only_when_declared` | §5.2: `runner.harness` is the runner's declared harness, and absent when it declared none |
+| `requested_harness_is_hosted_and_echoed` | §5.1–5.3: match a declared program and echo it; unhosted is `no_route` / `harness_unavailable` |
+| `unrequested_harness_uses_declaration` | §5.2: declared default, else singleton, else absent, without filtering candidates |
+| `non_starting_runner_never_selected` | §1.2: never select a `starts_sessions: false` runner, with or without harness |
+| `undeclared_harness_group_refuses_member` | §5.1: without `select_harness`, refuse `harness` by field name |
 | `hold_answers_blocked_entry_within_limits` | §5.4: a blocked entry whose reset is within both limits is answered, and `account_for` holds |
 | `hold_moves_when_reset_beyond_window` | §5.4: a reset further away than `hold_when_reset_within` moves |
 | `hold_moves_when_reset_unknown` | §5.4: an unknown reset moves |
@@ -154,4 +175,12 @@ red, for a reason the test names. A break that rightly fails a second check
 pins both: never holding (the recorded-cap check needs a held answer to
 start from), reading `hold_ok: false` as `true` (the fallback check too),
 and dropping `reset_at_ms` (a timed cause on two refusals). `FakeSubject::without_hold_control` shows the hold
-checks not applicable and the verdict a pass.
+checks not applicable and the verdict a pass. `FakeSubject::without_harness_control`
+exercises undeclared-program-group refusals. Program defects cover membership,
+echoing, the no-route reason, default and singleton fallback, invented/missing
+programs and gateway selection. Missing or invented programs rightly fail
+multiple checks, and the tests pin those names explicitly. When the fake ignores
+the request's `runners` list, both `runners_honoured` and
+`non_starting_runner_never_selected` fail: the gateway-only runner-list case
+exercises the latter. `answering_a_runner_outside_runners_fails` asserts both
+failures.

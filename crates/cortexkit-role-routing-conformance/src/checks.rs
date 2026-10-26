@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cortexkit_role_routing::{
     account::AccountForAnswer,
-    capabilities::{self, SELECT_HOLD_CONTROL},
+    capabilities::{self, SELECT_HARNESS, SELECT_HOLD_CONTROL},
     describe::{check_describe, RoleDescribe},
     errors::{
         NoRouteDetail, NoRouteReason, PinUnavailableDetail, PinUnavailableReason, Refusal,
@@ -213,6 +213,25 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         if HOLD_CHECKS.contains(&name) {
             return self.hold_check(name).await;
         }
+        if matches!(
+            name,
+            "requested_harness_is_hosted_and_echoed" | "undeclared_harness_group_refuses_member"
+        ) {
+            let route = self.route_as(CONSUMER).await?;
+            let describe: RoleDescribe =
+                answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+            let declared = describe.serves(SELECT_HARNESS);
+            if declared == (name == "undeclared_harness_group_refuses_member") {
+                return Ok(Ending::NotApplicable(format!(
+                    "role.describe {} {SELECT_HARNESS}",
+                    if declared {
+                        "declares"
+                    } else {
+                        "does not declare"
+                    }
+                )));
+            }
+        }
         self.ungated(name).await.map(|()| Ending::Passed)
     }
 
@@ -288,6 +307,16 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             }
             "new_report_members_conflict" => self.new_report_members_conflict().await,
             "harness_only_when_declared" => self.harness_only_when_declared().await,
+            "requested_harness_is_hosted_and_echoed" => {
+                self.requested_harness_is_hosted_and_echoed().await
+            }
+            "unrequested_harness_uses_declaration" => {
+                self.unrequested_harness_uses_declaration().await
+            }
+            "non_starting_runner_never_selected" => self.non_starting_runner_never_selected().await,
+            "undeclared_harness_group_refuses_member" => {
+                self.undeclared_harness_group_refuses_member().await
+            }
             other => Err(format!("the kit has no check named {other}")),
         }
     }
@@ -1428,7 +1457,6 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             .collect();
         for (runner, key) in catalog.runners.iter_mut().zip(&keys) {
             runner.route_keys = vec![key.clone()];
-            runner.harnesses.retain(|declared, _| declared == key);
         }
         self.subject
             .configure_catalog(&catalog)
@@ -1439,7 +1467,6 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             let what = format!("a select pinned to {pin}");
             let answer = select(&route, &with(base(), "pin", json!(pin)), &what).await?;
             let runner = &answer.runner.module;
-            let key = answer.route.route_key();
             let declared = catalog
                 .runners
                 .iter()
@@ -1447,20 +1474,168 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 .ok_or_else(|| {
                     format!("{what} was answered on {runner}, which the catalog does not list")
                 })?
-                .harnesses
-                .get(&key)
-                .map(String::as_str);
+                .default_harness
+                .as_deref();
             let harness = answer.runner.harness.as_deref();
             if harness != declared {
                 return Err(match declared {
                     Some(declared) => format!(
-                        "{what} was answered with harness {harness:?}; {runner} declared {declared:?} for {key}"
+                        "{what} was answered with harness {harness:?}; {runner} declared {declared:?}"
                     ),
                     None => format!(
                         "{what} was answered with harness {harness:?}; {runner} declared none"
                     ),
                 });
             }
+        }
+        Ok(())
+    }
+
+    async fn requested_harness_is_hosted_and_echoed(&self) -> Check {
+        let mut catalog = fixture::harness_catalog();
+        catalog.runners.remove(0);
+        self.subject.configure_catalog(&catalog).await?;
+        let route = self.route_as(CONSUMER).await?;
+        for (harness, runner) in [("beta", fixture::RUNNER_ONE), ("solo", fixture::RUNNER_TWO)] {
+            let answer = select(
+                &route,
+                &with(base(), "harness", json!(harness)),
+                "requested harness",
+            )
+            .await?;
+            if answer.runner.module != runner || answer.runner.harness.as_deref() != Some(harness) {
+                return Err(format!(
+                    "requested {harness} must be hosted and echoed by {runner}, got {:?}",
+                    answer.runner
+                ));
+            }
+        }
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &with(base(), "harness", json!("unhosted")),
+            RefusalCode::NoRoute,
+            "unhosted harness",
+        )
+        .await?;
+        let detail: NoRouteDetail = refusal.detail_as().ok_or("missing no_route detail")?;
+        if detail.reason != NoRouteReason::HarnessUnavailable
+            || !refusal.message.contains("unhosted")
+        {
+            return Err(format!(
+                "unhosted harness needs reason harness_unavailable and its name: {refusal:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn unrequested_harness_uses_declaration(&self) -> Check {
+        let mut catalog = fixture::harness_catalog();
+        catalog.runners.remove(0);
+        let route = self.route_as(CONSUMER).await?;
+        for (harnesses, default, expected) in [
+            (Some(vec!["alpha", "beta"]), Some("alpha"), Some("alpha")),
+            (Some(vec!["alpha", "beta"]), Some("beta"), Some("beta")),
+            (Some(vec!["solo"]), None, Some("solo")),
+            (Some(vec!["alpha", "beta"]), None, None),
+            (None, None, None),
+        ] {
+            catalog.runners.truncate(1);
+            catalog.runners[0].harnesses =
+                harnesses.map(|values| values.into_iter().map(str::to_owned).collect());
+            catalog.runners[0].default_harness = default.map(str::to_owned);
+            self.subject.configure_catalog(&catalog).await?;
+            let answer = select(&route, &base(), "no requested harness").await?;
+            if answer.runner.module != fixture::RUNNER_ONE
+                || answer.runner.harness.as_deref() != expected
+            {
+                return Err(format!(
+                    "no requested harness: expected {expected:?} on runner-one, got {:?}",
+                    answer.runner
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    async fn non_starting_runner_never_selected(&self) -> Check {
+        let mut catalog = fixture::harness_catalog();
+        self.subject.configure_catalog(&catalog).await?;
+        let route = self.route_as(CONSUMER).await?;
+        let describe: RoleDescribe =
+            answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+        let mut requests = vec![base()];
+        if describe.serves(SELECT_HARNESS) {
+            requests.push(with(base(), "harness", json!("alpha")));
+        }
+        for request in &requests {
+            let answer = select(&route, request, "gateway excluded").await?;
+            if answer.runner.module == "runner-gateway" {
+                return Err("starts_sessions false runner was selected".into());
+            }
+            let pin = catalog.models[0].route_key();
+            let pinned = select(
+                &route,
+                &with(request.clone(), "pin", json!(pin)),
+                "pinned gateway excluded",
+            )
+            .await?;
+            if pinned.runner.module == "runner-gateway" {
+                return Err("starts_sessions false runner was selected for a pin".into());
+            }
+            refused(
+                &route,
+                ops::ROUTE_SELECT,
+                &with(request.clone(), "runners", json!(["runner-gateway"])),
+                RefusalCode::NoRoute,
+                "only gateway listed",
+            )
+            .await?;
+        }
+        catalog.runners.truncate(1);
+        self.subject.configure_catalog(&catalog).await?;
+        for request in &requests {
+            refused(
+                &route,
+                ops::ROUTE_SELECT,
+                request,
+                RefusalCode::NoRoute,
+                "only gateway available",
+            )
+            .await?;
+        }
+        let gateway = self.route_as("runner-gateway").await?;
+        let _: AccountForAnswer = answer(
+            &gateway,
+            ops::ROUTE_ACCOUNT_FOR,
+            &Self::account_for("gateway-admission", "gateway-own-turn", "model-c"),
+            "gateway account choice for its own turn",
+        )
+        .await?;
+        let _: AccountObserveAnswer = answer(
+            &gateway,
+            ops::ROUTE_ACCOUNT_OBSERVE,
+            &json!({"event_id": "gateway-observation", "kind": "attempt"}),
+            "gateway account observation",
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn undeclared_harness_group_refuses_member(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &with(base(), "harness", json!("alpha")),
+            RefusalCode::InvalidRequest,
+            "undeclared harness group",
+        )
+        .await?;
+        if refusal.detail.get("field").and_then(Value::as_str) != Some("harness") {
+            return Err(format!(
+                "undeclared harness group refusal must name harness: {refusal:?}"
+            ));
         }
         Ok(())
     }

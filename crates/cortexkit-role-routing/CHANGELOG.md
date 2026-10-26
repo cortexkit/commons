@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.1
+
+- Add optional runner-wide `harnesses` (1–16 unique pair-grammar tokens),
+  `default_harness` (must be listed), and `starts_sessions` (defaults true,
+  omitted when true). Add builders and getters without making the declaration
+  exhaustive. Existing slots keep their exact 0.4.0 bytes; field-path refusals
+  and unknown-member rejection remain all-or-nothing.
+- Add `select_harness`: a caller may request a program, not a wire/auth pair.
+  Match only a runner listing it and echo it; no hosting runner is `no_route`
+  reason `harness_unavailable`, naming the requested program in the message.
+  Without a request use the declared default, else singleton, else omit the
+  answer's harness without filtering candidates. Non-starting runners never
+  answer select; all other operations retain their rules.
+- Add declaration and select vectors with refreshed checksums. Rollout is
+  readers first: 0.4.0 providers refuse these declaration members, so runners
+  wait until their provider serves 0.4.1. Callers send `harness` only when the
+  group is declared; other providers refuse it by name.
+
 ## 0.4.0
 
 - Add optional catalog `runner` declarations: unique open-set wire API/auth

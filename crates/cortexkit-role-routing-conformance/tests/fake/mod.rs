@@ -28,15 +28,15 @@ use cortexkit_role_routing_conformance::{
             parse_account_for_request, Account, AccountForAnswer, AccountForRequest, AccountMode,
             AccountPin, AccountReason, AccountReasonCode, Admission,
         },
-        capabilities::SELECT_HOLD_CONTROL,
+        capabilities::{SELECT_HARNESS, SELECT_HOLD_CONTROL},
         describe::{ConsumerEntry, RoleDescribe},
         errors::{NoRouteReason, PinUnavailableReason, Refusal, RefusalCode},
         observe::{parse_account_observe_request, AccountObserveAnswer, Observation, ObserveKind},
         ops, parse_consumer_declarations,
         report::{parse_report_request, ReportAnswer, ReportRequest},
         select::{
-            parse_select_request, parse_select_request_serving, Requirements, RouteRef, RunnerRef,
-            SelectAnswer, ToolsRequirement, REQUIREMENT_FIELDS,
+            parse_select_request_serving, Requirements, RouteRef, RunnerRef, SelectAnswer,
+            ToolsRequirement, REQUIREMENT_FIELDS,
         },
         wire, DemandDefaults, ROLE_DECLARATIONS_KEY,
     },
@@ -125,6 +125,15 @@ pub struct Defects {
     pub invents_harness: bool,
     /// Leaves out the harness a runner declared.
     pub drops_harness: bool,
+    pub ignores_harness_filter: bool,
+    pub echoes_default_harness: bool,
+    pub ignores_single_harness: bool,
+    pub chooses_first_harness: bool,
+    /// With no requested or default program, chooses the first of several declared programs.
+    pub chooses_first_without_default: bool,
+    pub selects_gateway: bool,
+    pub accepts_undeclared_harness: bool,
+    pub wrong_harness_refusal: bool,
     /// Moves past a blocked ladder entry even when its reset is within
     /// every limit.
     pub never_holds_entry: bool,
@@ -256,6 +265,7 @@ pub struct FakeSubject {
     defects: Defects,
     /// Declares select_hold_control.
     hold_control: bool,
+    harness_control: bool,
 }
 
 impl FakeSubject {
@@ -264,6 +274,7 @@ impl FakeSubject {
             state: Arc::new(Mutex::new(State::default())),
             defects,
             hold_control: true,
+            harness_control: true,
         }
     }
 
@@ -271,6 +282,13 @@ impl FakeSubject {
     pub fn without_hold_control(defects: Defects) -> Self {
         Self {
             hold_control: false,
+            ..Self::new(defects)
+        }
+    }
+
+    pub fn without_harness_control(defects: Defects) -> Self {
+        Self {
+            harness_control: false,
             ..Self::new(defects)
         }
     }
@@ -396,6 +414,7 @@ impl RoutingSubject for FakeSubject {
             state: Arc::clone(&self.state),
             defects: self.defects,
             hold_control: self.hold_control,
+            harness_control: self.harness_control,
             stamp: stamp.clone(),
         })
     }
@@ -406,6 +425,7 @@ pub struct FakeRoute {
     state: Arc<Mutex<State>>,
     defects: Defects,
     hold_control: bool,
+    harness_control: bool,
     stamp: RouteStamp,
 }
 
@@ -490,7 +510,10 @@ impl FakeRoute {
                 });
             }
         }
-        let describe = RoleDescribe::new(consumers, true);
+        let mut describe = RoleDescribe::new(consumers, true);
+        if self.harness_control {
+            describe = describe.with_capability(SELECT_HARNESS);
+        }
         to_value(if self.hold_control {
             describe.with_capability(SELECT_HOLD_CONTROL)
         } else {
@@ -518,11 +541,14 @@ impl FakeRoute {
                 requirements.retain(|key, _| REQUIREMENT_FIELDS.contains(&key.as_str()));
             }
         }
-        let mut request = if self.hold_control {
-            parse_select_request_serving(&params, &[SELECT_HOLD_CONTROL])?
-        } else {
-            parse_select_request(&params)?
-        };
+        let mut capabilities = Vec::new();
+        if self.hold_control {
+            capabilities.push(SELECT_HOLD_CONTROL);
+        }
+        if self.harness_control || defects.accepts_undeclared_harness {
+            capabilities.push(SELECT_HARNESS);
+        }
+        let mut request = parse_select_request_serving(&params, &capabilities)?;
         let declaration = state.declarations.get(&request.consumer);
         if let Some((owner, _)) = declaration {
             let scope_owner = self.stamp.scope.as_ref().map(|scope| scope.owner.as_str());
@@ -571,6 +597,28 @@ impl FakeRoute {
         }
         request.requirements = serde_json::from_value(Value::Object(demands)).unwrap();
         let catalog = Self::catalog(state);
+        if let Some(harness) = &request.harness {
+            if !defects.ignores_harness_filter
+                && !catalog.runners.iter().any(|runner| {
+                    runner.starts_sessions
+                        && runner
+                            .harnesses
+                            .as_ref()
+                            .is_some_and(|values| values.contains(harness))
+                })
+            {
+                let mut refusal = Refusal::no_route(
+                    if defects.wrong_harness_refusal {
+                        NoRouteReason::MissingCapability
+                    } else {
+                        NoRouteReason::HarnessUnavailable
+                    },
+                    None,
+                );
+                refusal.message = format!("no runner hosts harness {harness}");
+                return Err(refusal);
+            }
+        }
         let project = match params.get("project_id").and_then(Value::as_str) {
             Some(project) if defects.reads_scope_from_body => Some(project.to_owned()),
             _ => self.stamp.project_id.clone(),
@@ -603,6 +651,14 @@ impl FakeRoute {
                 .iter()
                 .find(|runner| {
                     runner.route_keys.iter().any(|k| k == key)
+                        && (runner.starts_sessions || defects.selects_gateway)
+                        && (defects.ignores_harness_filter
+                            || request.harness.as_ref().is_none_or(|harness| {
+                                runner
+                                    .harnesses
+                                    .as_ref()
+                                    .is_some_and(|values| values.contains(harness))
+                            }))
                         && runners
                             .as_ref()
                             .is_none_or(|listed| listed.contains(&runner.module))
@@ -825,7 +881,35 @@ impl FakeRoute {
             .runners
             .iter()
             .find(|candidate| candidate.module == runner)
-            .and_then(|candidate| candidate.harnesses.get(&route.route_key()).cloned());
+            .and_then(|candidate| {
+                request
+                    .harness
+                    .clone()
+                    .filter(|_| !defects.echoes_default_harness)
+                    .or_else(|| {
+                        if defects.chooses_first_harness {
+                            candidate
+                                .harnesses
+                                .as_ref()
+                                .and_then(|values| values.first().cloned())
+                        } else {
+                            candidate.default_harness.clone()
+                        }
+                    })
+                    .or_else(|| {
+                        candidate
+                            .harnesses
+                            .as_ref()
+                            .filter(|values| {
+                                (values.len() == 1 && !defects.ignores_single_harness)
+                                    || (defects.chooses_first_without_default
+                                        && request.harness.is_none()
+                                        && candidate.default_harness.is_none()
+                                        && values.len() > 1)
+                            })
+                            .map(|values| values[0].clone())
+                    })
+            });
         let harness = match declared {
             Some(_) if defects.drops_harness => None,
             None if defects.invents_harness => Some("default-harness".to_owned()),

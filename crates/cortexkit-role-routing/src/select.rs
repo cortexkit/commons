@@ -147,6 +147,10 @@ pub struct SelectRequest {
     /// `hold_ok: false` too: the fallback that answer can take may hold.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hold_wait_max_s: Option<u64>,
+    /// Exact session program; sent only to a provider declaring
+    /// [`crate::capabilities::SELECT_HARNESS`]. Never selects a wire/auth pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
 }
 
 impl SelectRequest {
@@ -164,7 +168,13 @@ impl SelectRequest {
             detail: None,
             hold_ok: None,
             hold_wait_max_s: None,
+            harness: None,
         }
+    }
+
+    pub fn with_harness(mut self, harness: impl Into<String>) -> Self {
+        self.harness = Some(harness.into());
+        self
     }
 
     /// Set the pin, `provider/model[:variant]`.
@@ -307,9 +317,9 @@ pub struct RunnerRef {
     /// Present only for providers whose policy names a key pool.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<RunnerAuth>,
-    /// The harness the runner hosts this route on, filled only from the
-    /// runner's own declaration. A caller does not bind a runner session
-    /// on an answer without it.
+    /// The session program: a requested program the runner declares, otherwise
+    /// its declared default or sole program. Never inferred from a route/pair.
+    /// A caller does not bind a runner session on an answer without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
 }
@@ -370,7 +380,8 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
 /// A malformed pin is `pin_unavailable` with reason `invalid`. Any other
 /// bad member is `invalid_request` naming it. `hold_ok` and
 /// `hold_wait_max_s` are refused by name unless `capabilities` lists
-/// [`SELECT_HOLD_CONTROL`]. Whether the consumer is known and owned, and
+/// [`SELECT_HOLD_CONTROL`]. `harness` is refused by name unless the provider
+/// declares [`crate::capabilities::SELECT_HARNESS`]. Whether the consumer is known and owned, and
 /// whether anything can serve, is the provider's to answer after this.
 pub fn parse_select_request_serving<C: AsRef<str>>(
     params: &Value,
@@ -406,6 +417,24 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         return Err(members.refuse("runners", "a runner id must not be empty"));
     }
     let hold_ok: Option<bool> = members.optional("hold_ok")?;
+    let harness = members.optional_text("harness", None)?;
+    if let Some(harness) = &harness {
+        if !crate::declarations::is_runner_token(harness) {
+            return Err(members.refuse("harness", "harness must be a runner token"));
+        }
+        if !capabilities
+            .iter()
+            .any(|capability| capability.as_ref() == crate::capabilities::SELECT_HARNESS)
+        {
+            return Err(members.refuse(
+                "harness",
+                format!(
+                    "harness is read only by a provider declaring {}",
+                    crate::capabilities::SELECT_HARNESS
+                ),
+            ));
+        }
+    }
     let hold_wait_max_s: Option<u64> = members.optional("hold_wait_max_s")?;
     let hold_control = capabilities
         .iter()
@@ -438,6 +467,7 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         detail: members.optional("detail")?,
         hold_ok,
         hold_wait_max_s,
+        harness,
     })
 }
 

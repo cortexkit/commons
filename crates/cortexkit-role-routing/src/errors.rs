@@ -109,6 +109,8 @@ open_set! {
     /// Why nothing meets a `route.select` (`no_route`'s `detail.reason`).
     pub enum NoRouteReason {
         NoAvailableModel => "no_available_model",
+        /// No session-starting runner declares the requested harness.
+        HarnessUnavailable => "harness_unavailable",
         /// A requirement such as `tools`, `tool_capabilities`, `modalities`
         /// or `structured_output` is met by no route.
         MissingCapability => "missing_capability",

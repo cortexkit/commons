@@ -102,8 +102,11 @@ pub mod capabilities {
     /// `route.select` reads the caller's `hold_ok` and `hold_wait_max_s`.
     pub const SELECT_HOLD_CONTROL: &str = "select_hold_control";
 
+    /// `route.select` reads the caller's requested session program, `harness`.
+    pub const SELECT_HARNESS: &str = "select_harness";
+
     /// Every group this version defines.
-    pub const KNOWN: &[&str] = &[SELECT_HOLD_CONTROL];
+    pub const KNOWN: &[&str] = &[SELECT_HOLD_CONTROL, SELECT_HARNESS];
 }
 
 #[cfg(test)]

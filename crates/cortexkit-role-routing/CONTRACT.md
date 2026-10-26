@@ -89,7 +89,8 @@ a module plays.
 
 - [pinned] `runner` has the shape `{pairs: [{wire_api, auth_method}],
   follows_account_choice?: bool, tool_capabilities?: [string],
-  standing_limits?: {explicit_providers?: [string]}}` (`RunnerDeclaration`).
+  standing_limits?: {explicit_providers?: [string]}, harnesses?: [token],
+  default_harness?: token, starts_sessions?: bool}` (`RunnerDeclaration`).
   Unknown members in the slot, `runner`, any pair, or `standing_limits`
   invalidate the whole declaration. A refusal names the offending field
   path, such as `runner.pairs[0].wire_api`; no part is applied.
@@ -105,6 +106,23 @@ a module plays.
 - [pinned] `follows_account_choice` defaults to `false`. When `true`, the
   runner module calls `route.account_for` and uses its answer. Absence or
   `false` makes no such promise; a routing provider must not infer it.
+- [pinned] `harnesses`, when present, lists the exact programs the runner
+  hosts sessions in: 1–16 unique tokens using the pair token grammar above.
+  Empty is refused as `runner.harnesses`, not read as "no program". Invalid
+  or duplicate entries name `runner.harnesses[index]`. Programs are independent
+  of pairs: one runner can host several programs behind the same pair. A
+  runner that launches an agent program must actually host the requested
+  program, never merely relabel a session.
+- [pinned] `default_harness`, when present, is a token listed in `harnesses`;
+  without that list or membership it is refused as `runner.default_harness`.
+- [pinned] `starts_sessions` defaults to `true`. When `false`, the runner is
+  never answered by `route.select`, with or without a requested harness,
+  including pinned requests and requests whose `runners` list only it. A
+  gateway runner attaches to sessions started by a person or launcher rather
+  than starting them. This flag affects no other operation: `role.describe`,
+  `route.report`, `route.account_for` (including account choice for that
+  runner's own turns without a select decision), and `route.account_observe`
+  retain their existing authorization, ownership and admission rules.
 - [pinned] `tool_capabilities` defaults to an empty list. It has at most 64
   unique names following the tool-provider role's capability-name grammar:
   role-defined unprefixed tags (such as `code.read/v1`), or
@@ -126,12 +144,19 @@ a module plays.
   when serialized.
 - [pinned] Optional runner members follow §2's null-as-absence rule.
   Absent `runner`, false `follows_account_choice`, and empty
-  `tool_capabilities` are omitted when serialized. Existing consumers-only
-  slots retain their bytes, including an explicit `consumers: []`.
+  `tool_capabilities` are omitted when serialized. Absent `harnesses` and
+  `default_harness`, and true `starts_sessions`, are omitted too. Slots without
+  the new program members retain their exact 0.4.0 bytes, including an
+  explicit `consumers: []`.
 - [pinned] Rollout is readers first: a 0.3.x routing provider refuses a slot
   carrying `runner` as an unknown member, discarding even valid consumers
   in that slot. Runner modules **must not declare `runner` until the routing
   provider runs routing contract 0.4.0** (or a later version supporting it).
+- [pinned] Program declarations also roll out readers first: a 0.4.0
+  provider refuses a declaration carrying `harnesses`, `default_harness` or
+  `starts_sessions`. A runner declares these members only after its routing
+  provider serves 0.4.1 or later. A caller sends `harness` only when
+  `role.describe` declares `select_harness`.
 
 ## 2. Wire
 
@@ -206,14 +231,17 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines one
-  group:
+  does not know is kept and means nothing to it. This version defines two
+  groups:
   - `select_hold_control`: `route.select` reads `hold_ok` and
     `hold_wait_max_s` (§5.1) and decides blocked entries as §5.4 says.
     A provider without it refuses both members (§2). That refusal is why
     the group exists: a caller learns from `role.describe` whether its
     hold choice will be read, and is never answered with the choice
-    silently ignored.
+     silently ignored.
+  - `select_harness`: `route.select` reads `harness` (§5.1), matching the
+    runner's declared session programs, not its wire/auth pairs. A provider
+    without it refuses the member (§2); a caller sends it only with the group.
 - [pinned] A consumer checks the answer with `describe::check_describe`
   before routing anything to the provider.
 
@@ -261,7 +289,13 @@ a module plays.
   Excluding a route key excludes every variant of it. An entry that is not
   a route key is `invalid_request {field: "exclude"}`.
 - [pinned] `runners`: runner module ids the caller can send to. Absent: any
-  runner the provider knows.
+  session-starting runner the provider knows.
+- [pinned] `harness`: optional token using §1.2's pair token grammar (group
+  `select_harness`). Only runners whose own declaration lists that program
+  in `harnesses` are candidates. The caller picks the program, never the pair.
+  Without this member nothing is filtered by harness. A malformed value is
+  `invalid_request {field: "harness"}`; a provider without the group refuses
+  the member by that same field path rather than ignoring it. Null is absent.
 - [pinned] `affinity`: an opaque key of at most 128 characters (§7).
 - [pinned] `correlation_id`: opaque, at most 128 characters, echoed in logs
   only.
@@ -310,10 +344,14 @@ a module plays.
   pool. It names the key by public id only, never secret material. The
   runner sends with that key, still under its own admission check, and a
   runner refuses a key-pool send without it.
-- [pinned] `harness` is the harness the answered runner hosts this route
-  on. The provider fills it only from the runner's own declaration and
-  leaves it out otherwise. A caller never binds a runner session on an
-  answer without it.
+- [pinned] `runner.harness` is the exact program the answered runner hosts
+  the session in. With a requested `harness`, the runner must list it in its
+  declaration and the answer echoes that requested value. Without one, the
+  answer carries the runner's `default_harness`, else its single listed
+  harness, else leaves the member out. It is never from anything but the
+  runner's declaration or the request. A caller never binds a runner session
+  on an answer without it. A runner declaring `starts_sessions: false` is
+  never answered, regardless of harness.
 - [pinned] `context_window` and `max_output_tokens` are the answered model's
   figures from the provider's own catalog read, so a consumer sizes its
   work without a second lookup.
@@ -332,7 +370,11 @@ a module plays.
   `credential_billing_exhausted`, `cooldown`, `quota_exhausted`, `backoff`.
 - [pinned] `no_route {reason, reset_at_ms?}`. `reason` is an open set:
   `no_available_model`, `missing_capability`, `context_too_small`,
-  `quota_or_cooldown`, `all_inadequate`, `accounts_blocked` (§5.4).
+  `quota_or_cooldown`, `all_inadequate`, `accounts_blocked` (§5.4),
+  `harness_unavailable`. When no session-starting runner lists the requested
+  program, answer `no_route` with reason `harness_unavailable`, naming the
+  requested harness in the message; this cause is not timed. Other existing
+  refusals (including `pin_unavailable` for an unservable pin) are unchanged.
 - [pinned] **A timed cause carries `reset_at_ms`**: a cooldown, a backoff, or
   exhausted quota whose reset is known. A consumer waits until then and
   asks again, rather than failing its work. A refusal without `reset_at_ms`

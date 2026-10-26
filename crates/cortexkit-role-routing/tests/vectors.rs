@@ -44,8 +44,10 @@ const FILES: &[&str] = &[
     "route-account-observe.json",
     "route-report-optional.json",
     "route-report.json",
+    "route-select-harness.json",
     "route-select-hold-control.json",
     "route-select.json",
+    "runner-declarations.json",
 ];
 
 fn load(name: &str) -> Value {
@@ -157,6 +159,71 @@ fn consumer_declarations() {
             name(case)
         );
     }
+}
+
+#[test]
+fn runner_declarations() {
+    let file = load("runner-declarations.json");
+    for case in cases(&file, "valid") {
+        let parsed = parse_consumer_declarations(&case["declaration"])
+            .unwrap_or_else(|problem| panic!("{}: {problem}", name(case)));
+        parsed.validate().unwrap();
+        assert_eq!(
+            serde_json::to_string(&parsed).unwrap(),
+            case["wire"],
+            "{}",
+            name(case)
+        );
+        let decoded: ConsumerDeclarations =
+            serde_json::from_str(case["wire"].as_str().unwrap()).unwrap();
+        assert_eq!(parsed, decoded, "{}", name(case));
+    }
+    for case in cases(&file, "invalid") {
+        let mut runner = case["runner"].as_object().unwrap().clone();
+        runner.insert(
+            "pairs".into(),
+            json!([{"wire_api": "api", "auth_method": "key"}]),
+        );
+        let field = case["field"].as_str().unwrap().into();
+        let expected = if case["unknown"] == true {
+            DeclarationError::UnknownMember { field }
+        } else {
+            DeclarationError::InvalidField { field }
+        };
+        assert_eq!(
+            parse_consumer_declarations(&json!({"runner": runner})),
+            Err(expected),
+            "{}",
+            name(case)
+        );
+    }
+}
+
+#[test]
+fn route_select_harness() {
+    let file = load("route-select-harness.json");
+    let describe = RoleDescribe::new(vec![], false).with_capability(capabilities::SELECT_HARNESS);
+    assert!(describe.serves(capabilities::SELECT_HARNESS));
+    assert_eq!(check_describe(&describe), Ok(()));
+    check_op::<SelectRequest, SelectAnswer>("route-select-harness.json", |params| {
+        parse_select_request_serving(params, &[capabilities::SELECT_HARNESS])
+    });
+    for case in cases(&file, "refused_without_group") {
+        let name = name(case);
+        let refusal = parse_select_request(&case["params"]).expect_err(name);
+        assert_eq!(refusal.code.as_str(), case["refusal"]["code"]);
+        assert_eq!(Value::Object(refusal.detail), case["refusal"]["detail"]);
+    }
+    for case in cases(&file, "refusals") {
+        let refusal: Refusal = round_trip(name(case), &case["body"], &case["body"]);
+        let detail: NoRouteDetail = refusal.detail_as().unwrap();
+        assert_eq!(refusal.code, RefusalCode::NoRoute);
+        assert_eq!(detail.reason.as_str(), case["body"]["detail"]["reason"]);
+        assert_eq!(refusal.wait_until_ms(), None);
+    }
+    let absent =
+        json!({"consumer": "example_summary", "requirements": {"iq": 50}, "harness": null});
+    assert_eq!(parse_select_request(&absent).unwrap().harness, None);
 }
 
 #[test]

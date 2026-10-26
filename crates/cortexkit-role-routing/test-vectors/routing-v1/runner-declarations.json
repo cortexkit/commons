@@ -1,0 +1,32 @@
+{
+  "about": "Optional runner program declarations; wire is canonical serde output. Null optional members are absent, and starts_sessions true is omitted. Invalid declarations name the exact field path and apply nothing.",
+  "valid": [
+    {"name": "token_64_bytes", "declaration": {"runner": {"pairs": [{"wire_api": "api", "auth_method": "key"}], "harnesses": ["abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl"]}}, "wire": "{\"runner\":{\"pairs\":[{\"wire_api\":\"api\",\"auth_method\":\"key\"}],\"harnesses\":[\"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl\"]}}"},
+    {"name": "legacy_bytes", "declaration": {"runner": {"pairs": [{"wire_api": "api", "auth_method": "key"}]}}, "wire": "{\"runner\":{\"pairs\":[{\"wire_api\":\"api\",\"auth_method\":\"key\"}]}}"},
+    {"name": "two_programs_default", "declaration": {"runner": {"pairs": [{"wire_api": "api", "auth_method": "key"}], "harnesses": ["alpha", "beta"], "default_harness": "alpha"}}, "wire": "{\"runner\":{\"pairs\":[{\"wire_api\":\"api\",\"auth_method\":\"key\"}],\"harnesses\":[\"alpha\",\"beta\"],\"default_harness\":\"alpha\"}}"},
+    {"name": "singleton_without_default", "declaration": {"runner": {"pairs": [{"wire_api": "api", "auth_method": "key"}], "harnesses": ["solo"]}}, "wire": "{\"runner\":{\"pairs\":[{\"wire_api\":\"api\",\"auth_method\":\"key\"}],\"harnesses\":[\"solo\"]}}"},
+    {"name": "multiple_without_default", "declaration": {"runner": {"pairs": [{"wire_api": "api", "auth_method": "key"}], "harnesses": ["alpha", "beta"]}}, "wire": "{\"runner\":{\"pairs\":[{\"wire_api\":\"api\",\"auth_method\":\"key\"}],\"harnesses\":[\"alpha\",\"beta\"]}}"},
+    {"name": "gateway", "declaration": {"runner": {"pairs": [{"wire_api": "api", "auth_method": "key"}], "starts_sessions": false}}, "wire": "{\"runner\":{\"pairs\":[{\"wire_api\":\"api\",\"auth_method\":\"key\"}],\"starts_sessions\":false}}"},
+    {"name": "true_is_omitted", "declaration": {"runner": {"pairs": [{"wire_api": "api", "auth_method": "key"}], "starts_sessions": true}}, "wire": "{\"runner\":{\"pairs\":[{\"wire_api\":\"api\",\"auth_method\":\"key\"}]}}"},
+    {"name": "nulls_are_absent", "declaration": {"runner": {"pairs": [{"wire_api": "api", "auth_method": "key"}], "harnesses": null, "default_harness": null, "starts_sessions": null}}, "wire": "{\"runner\":{\"pairs\":[{\"wire_api\":\"api\",\"auth_method\":\"key\"}]}}"},
+    {"name": "sixteen_programs", "declaration": {"runner": {"pairs": [{"wire_api": "api", "auth_method": "key"}], "harnesses": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p"]}}, "wire": "{\"runner\":{\"pairs\":[{\"wire_api\":\"api\",\"auth_method\":\"key\"}],\"harnesses\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\",\"j\",\"k\",\"l\",\"m\",\"n\",\"o\",\"p\"]}}"}
+  ],
+  "invalid": [
+    {"name": "token_65_bytes", "runner": {"harnesses": ["abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklm"]}, "field": "runner.harnesses[0]"},
+    {"name": "empty_programs", "runner": {"harnesses": []}, "field": "runner.harnesses"},
+    {"name": "programs_not_array", "runner": {"harnesses": "solo"}, "field": "runner.harnesses"},
+    {"name": "seventeen_programs", "runner": {"harnesses": ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q"]}, "field": "runner.harnesses"},
+    {"name": "duplicate_program", "runner": {"harnesses": ["alpha", "alpha"]}, "field": "runner.harnesses[1]"},
+    {"name": "empty_token", "runner": {"harnesses": [""]}, "field": "runner.harnesses[0]"},
+    {"name": "uppercase_token", "runner": {"harnesses": ["Alpha"]}, "field": "runner.harnesses[0]"},
+    {"name": "digit_first", "runner": {"harnesses": ["1alpha"]}, "field": "runner.harnesses[0]"},
+    {"name": "non_ascii", "runner": {"harnesses": ["álpha"]}, "field": "runner.harnesses[0]"},
+    {"name": "program_not_text", "runner": {"harnesses": [false]}, "field": "runner.harnesses[0]"},
+    {"name": "default_without_list", "runner": {"default_harness": "alpha"}, "field": "runner.default_harness"},
+    {"name": "default_not_listed", "runner": {"harnesses": ["alpha"], "default_harness": "beta"}, "field": "runner.default_harness"},
+    {"name": "default_not_token", "runner": {"harnesses": ["alpha"], "default_harness": "Alpha"}, "field": "runner.default_harness"},
+    {"name": "default_not_text", "runner": {"harnesses": ["alpha"], "default_harness": true}, "field": "runner.default_harness"},
+    {"name": "starts_not_bool", "runner": {"starts_sessions": "false"}, "field": "runner.starts_sessions"},
+    {"name": "unknown_still_refused", "runner": {"harness": "alpha"}, "field": "runner.harness", "unknown": true}
+  ]
+}

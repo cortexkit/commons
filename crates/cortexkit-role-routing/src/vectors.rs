@@ -36,6 +36,13 @@ pub const ROUTE_SELECT_JSON: &str = include_str!("../test-vectors/routing-v1/rou
 pub const ROUTE_SELECT_HOLD_CONTROL_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-select-hold-control.json");
 
+/// Runner-wide program declarations and their field-path refusals.
+pub const RUNNER_DECLARATIONS_JSON: &str =
+    include_str!("../test-vectors/routing-v1/runner-declarations.json");
+/// The optional `select_harness` group, program answers and no-route refusals.
+pub const ROUTE_SELECT_HARNESS_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-harness.json");
+
 /// Optional account-allocation members added after the original v1 vectors.
 pub const ROUTE_ACCOUNT_FOR_OPTIONAL_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-account-for-optional.json");
@@ -65,11 +72,13 @@ pub const FILES: &[(&str, &str)] = &[
     ("route-account-observe.json", ROUTE_ACCOUNT_OBSERVE_JSON),
     ("route-report-optional.json", ROUTE_REPORT_OPTIONAL_JSON),
     ("route-report.json", ROUTE_REPORT_JSON),
+    ("route-select-harness.json", ROUTE_SELECT_HARNESS_JSON),
     (
         "route-select-hold-control.json",
         ROUTE_SELECT_HOLD_CONTROL_JSON,
     ),
     ("route-select.json", ROUTE_SELECT_JSON),
+    ("runner-declarations.json", RUNNER_DECLARATIONS_JSON),
 ];
 
 /// `sha256sum` output for every file in [`FILES`].

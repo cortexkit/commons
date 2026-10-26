@@ -5,7 +5,7 @@ use cortexkit_role_routing::{
         parse_account_for_request, AccountForRequest, AccountMode, CandidateAccount, Candidates,
         ExpectedPin, RequestedAccount,
     },
-    capabilities::SELECT_HOLD_CONTROL,
+    capabilities::{SELECT_HARNESS, SELECT_HOLD_CONTROL},
     errors::Refusal,
     observe::{parse_account_observe_request, AccountObserveRequest, ObserveKind},
     report::{parse_report_request, Eligibility, EligibilityScope, Outcome, ReportRequest, Usage},
@@ -64,6 +64,11 @@ fn select_builds_and_round_trips_from_outside_the_crate() {
         parse_with_hold_control,
     );
     assert!(SelectRequest::new("c", Requirements::iq(1)).hold_ok());
+    round_trip(
+        SelectRequest::new("c", Requirements::iq(1)).with_harness("beta"),
+        json!({"consumer": "c", "requirements": {"iq": 1}, "harness": "beta"}),
+        |params| parse_select_request_serving(params, &[SELECT_HARNESS]),
+    );
 
     let runner = RunnerRef::new("runner-one", RouteRef::new("p", "m"))
         .with_auth(RunnerAuth {

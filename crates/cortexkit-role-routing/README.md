@@ -8,14 +8,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.4.0"
+cortexkit-role-routing = "0.4.1"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.4.0", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.4.1", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -32,7 +32,7 @@ What the crate holds:
 - `describe`: the `role.describe` answer, its optional `capabilities`
   groups, and `check_describe`;
 - `capabilities`: the optional groups this version defines
-  (`select_hold_control`);
+  (`select_hold_control`, `select_harness`);
 - `select`: the `route.select` request, `parse_select_request` and
   `parse_select_request_serving` (which reads the members of the groups a
   provider declares), the answer and `check_answer`;
@@ -61,8 +61,30 @@ restricts it to credentials for those providers; absence (including
 declarations with vault credentials and catalog routes; declarations grant no
 credential access. See contract §1.2 for validation and matching rules.
 
+Runners optionally declare `harnesses` (1–16 unique program tokens), a
+`default_harness` listed there, and `starts_sessions` (true by default and
+omitted when true). Use `RunnerDeclaration::with_harnesses`,
+`with_default_harness` and `with_starts_sessions`, with corresponding getters.
+An empty program list is refused, not read as "no program". Programs are
+independent of wire/auth pairs: a runner that launches an agent program may
+host several programs through one pair. A gateway runner sets
+`starts_sessions: false` and never answers select, but account allocation for
+its own turns, observations, reports and describe are unchanged.
+
+With the `select_harness` describe group, a caller may request `harness` using
+`SelectRequest::with_harness`. Only a runner listing that program is a
+candidate, and `runner.harness` echoes it. No hosting runner is `no_route`
+with reason `harness_unavailable` and the requested program in the message.
+Without a requested program, candidates are not filtered by harness and the
+answer carries the declared default, else the sole listed program, else no
+harness. No route or pair is ever relabeled as a program.
+
 **Readers first:** a 0.3.x routing provider rejects a slot containing `runner`.
 Runner modules must not declare it until the routing provider adopts 0.4.0.
+Likewise, a 0.4.0 provider refuses declarations carrying the new program
+members: runners declare them only after their provider serves 0.4.1.
+A caller sends `harness` only when `role.describe` declares `select_harness`;
+a provider without the group refuses that member by name.
 
 The [contract](CONTRACT.md) is normative. See the
 [conformance kit](../cortexkit-role-routing-conformance/README.md) and the

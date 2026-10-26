@@ -137,10 +137,11 @@ pub struct CatalogRunner {
     pub route_keys: Vec<String>,
     /// The tool providers it can reach, for every project.
     pub tool_providers: Vec<ReachableToolProvider>,
-    /// The runner's own declaration of the harness it hosts each route on,
-    /// by route key. A route not listed has no declared harness, and an
-    /// answer on it carries none.
-    pub harnesses: BTreeMap<String, String>,
+    /// Exact session programs from the runner's declaration, not route labels.
+    pub harnesses: Option<Vec<String>>,
+    pub default_harness: Option<String>,
+    /// False excludes selection only; the runner may still allocate accounts.
+    pub starts_sessions: bool,
 }
 
 /// A subscription account the provider allocates.

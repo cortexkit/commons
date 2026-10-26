@@ -41,9 +41,8 @@ pub const SUBSCRIPTION_PROVIDER: &str = "example-subscription";
 /// checks can block two ladder entries with different resets.
 pub const SECOND_SUBSCRIPTION_PROVIDER: &str = "example-subscription-two";
 
-/// The harness `runner-one` declares for every route it runs. `runner-two`
-/// declares none.
-pub const HARNESS: &str = "example-harness";
+/// The default program declared by `runner-one`, which also hosts `beta`.
+pub const HARNESS: &str = "alpha";
 
 /// The project a check pins a model for.
 pub const PINNED_PROJECT: &str = "project-pinned";
@@ -136,7 +135,7 @@ pub fn catalog() -> Catalog {
 }
 
 /// Two runners that run every one of `route_keys` and reach different tool
-/// providers; `runner-one` declares [`HARNESS`] for each route.
+/// providers; `runner-one` declares [`HARNESS`] as its default program.
 fn runners(route_keys: &[String]) -> Vec<CatalogRunner> {
     let runner = |module: &str, tools: &str, tag: &str, harness: Option<&str>| CatalogRunner {
         module: module.to_owned(),
@@ -145,19 +144,26 @@ fn runners(route_keys: &[String]) -> Vec<CatalogRunner> {
             module: tools.to_owned(),
             capabilities: vec![tag.to_owned()],
         }],
-        harnesses: harness
-            .map(|harness| {
-                route_keys
-                    .iter()
-                    .map(|key| (key.clone(), harness.to_owned()))
-                    .collect()
-            })
-            .unwrap_or_default(),
+        harnesses: harness.map(|harness| vec![harness.into(), "beta".into()]),
+        default_harness: harness.map(str::to_owned),
+        starts_sessions: true,
     };
     vec![
         runner(RUNNER_ONE, TOOLS_ONE, TAG_ONE, Some(HARNESS)),
         runner(RUNNER_TWO, TOOLS_TWO, TAG_TWO, None),
     ]
+}
+
+/// Programs are runner-wide: two programs with a default, a singleton, and
+/// an attach-only gateway preferred ahead of both session-starting runners.
+pub fn harness_catalog() -> Catalog {
+    let mut catalog = catalog();
+    catalog.runners[1].harnesses = Some(vec!["solo".into()]);
+    let mut gateway = catalog.runners[0].clone();
+    gateway.module = "runner-gateway".into();
+    gateway.starts_sessions = false;
+    catalog.runners.insert(0, gateway);
+    catalog
 }
 
 /// The route key of [`hold_catalog`]'s first subscription model.

@@ -49,9 +49,16 @@ const HOLD_CHECKS: &[&str] = &[
 #[tokio::test]
 async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_passes() {
     let report = run_suite(&FakeSubject::without_hold_control(Defects::default())).await;
-    assert_eq!(report.not_applicable(), HOLD_CHECKS, "{}", report.render());
+    let mut not_applicable = vec!["undeclared_harness_group_refuses_member"];
+    not_applicable.extend_from_slice(HOLD_CHECKS);
+    assert_eq!(
+        report.not_applicable(),
+        not_applicable,
+        "{}",
+        report.render()
+    );
     for check in &report.checks {
-        if !HOLD_CHECKS.contains(&check.check) {
+        if !not_applicable.contains(&check.check) {
             assert_eq!(check.outcome, CheckOutcome::Passed, "{}", check.check);
         }
     }
@@ -77,12 +84,15 @@ async fn a_hold_break_without_the_group_is_not_reached() {
 
 #[tokio::test]
 async fn naming_an_undeclared_harness_fails() {
-    breaks(
+    breaks_all(
         Defects {
             invents_harness: true,
             ..Defects::default()
         },
-        "harness_only_when_declared",
+        &[
+            "harness_only_when_declared",
+            "unrequested_harness_uses_declaration",
+        ],
         "was answered with harness Some(\"default-harness\"); runner-two declared none",
     )
     .await;
@@ -90,15 +100,155 @@ async fn naming_an_undeclared_harness_fails() {
 
 #[tokio::test]
 async fn dropping_a_declared_harness_fails() {
-    breaks(
+    breaks_all(
         Defects {
             drops_harness: true,
             ..Defects::default()
         },
-        "harness_only_when_declared",
-        "was answered with harness None; runner-one declared \"example-harness\"",
+        &[
+            "harness_only_when_declared",
+            "requested_harness_is_hosted_and_echoed",
+            "unrequested_harness_uses_declaration",
+        ],
+        "was answered with harness None; runner-one declared \"alpha\"",
     )
     .await;
+}
+
+#[tokio::test]
+async fn ignoring_requested_harness_membership_fails() {
+    breaks(
+        Defects {
+            ignores_harness_filter: true,
+            ..Defects::default()
+        },
+        "requested_harness_is_hosted_and_echoed",
+        "requested solo must be hosted and echoed",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn not_echoing_requested_harness_fails() {
+    breaks(
+        Defects {
+            echoes_default_harness: true,
+            ..Defects::default()
+        },
+        "requested_harness_is_hosted_and_echoed",
+        "requested beta must be hosted and echoed",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn wrong_unhosted_harness_reason_fails() {
+    breaks(
+        Defects {
+            wrong_harness_refusal: true,
+            ..Defects::default()
+        },
+        "requested_harness_is_hosted_and_echoed",
+        "unhosted harness needs reason harness_unavailable",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn dropping_singleton_harness_fails() {
+    breaks(
+        Defects {
+            ignores_single_harness: true,
+            ..Defects::default()
+        },
+        "unrequested_harness_uses_declaration",
+        "expected Some(\"solo\")",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn ignoring_nonfirst_default_harness_fails() {
+    breaks(
+        Defects {
+            chooses_first_harness: true,
+            ..Defects::default()
+        },
+        "unrequested_harness_uses_declaration",
+        "expected Some(\"beta\")",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn choosing_first_of_multiple_harnesses_without_default_fails() {
+    let report = run_suite(&FakeSubject::new(Defects {
+        chooses_first_without_default: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.failing(),
+        ["unrequested_harness_uses_declaration"],
+        "{}",
+        report.render()
+    );
+    match report.outcome("unrequested_harness_uses_declaration") {
+        Some(CheckOutcome::Failed { reason }) => {
+            assert!(reason.contains("expected None on runner-one"), "{reason}");
+            assert!(reason.contains("harness: Some(\"alpha\")"), "{reason}");
+        }
+        other => panic!("unrequested_harness_uses_declaration should fail, got {other:?}"),
+    }
+    for check in [
+        "harness_only_when_declared",
+        "requested_harness_is_hosted_and_echoed",
+        "non_starting_runner_never_selected",
+    ] {
+        assert_eq!(
+            report.outcome(check),
+            Some(&CheckOutcome::Passed),
+            "{check}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn selecting_gateway_fails() {
+    breaks(
+        Defects {
+            selects_gateway: true,
+            ..Defects::default()
+        },
+        "non_starting_runner_never_selected",
+        "starts_sessions false runner was selected",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn without_harness_group_requests_are_refused() {
+    let report = run_suite(&FakeSubject::without_harness_control(Defects::default())).await;
+    assert_eq!(
+        report.not_applicable(),
+        ["requested_harness_is_hosted_and_echoed"]
+    );
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}
+
+#[tokio::test]
+async fn accepting_undeclared_harness_member_fails() {
+    let report = run_suite(&FakeSubject::without_harness_control(Defects {
+        accepts_undeclared_harness: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.failing(),
+        ["undeclared_harness_group_refuses_member"],
+        "{}",
+        report.render()
+    );
 }
 
 #[tokio::test]
@@ -246,6 +396,10 @@ async fn a_faithful_provider_passes_every_check() {
     let report = run_suite(&FakeSubject::new(Defects::default())).await;
     assert_eq!(report.checks.len(), CHECKS.len());
     for check in &report.checks {
+        if check.check == "undeclared_harness_group_refuses_member" {
+            assert!(matches!(check.outcome, CheckOutcome::NotApplicable { .. }));
+            continue;
+        }
         assert_eq!(
             check.outcome,
             CheckOutcome::Passed,
@@ -398,12 +552,12 @@ async fn ignoring_exclude_fails() {
 
 #[tokio::test]
 async fn answering_a_runner_outside_runners_fails() {
-    breaks(
+    breaks_all(
         Defects {
             ignores_runners: true,
             ..Defects::default()
         },
-        "runners_honoured",
+        &["runners_honoured", "non_starting_runner_never_selected"],
         "runner \"runner-one\" is not one of the request's runners",
     )
     .await;

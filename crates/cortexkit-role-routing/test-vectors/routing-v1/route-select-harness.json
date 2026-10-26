@@ -1,0 +1,31 @@
+{
+  "about": "select_harness gates the optional request program. Answer examples pair runner declarations with requested/default/singleton/absent programs. A gateway is never selected, regardless of its declared programs; providers check this behavior in the conformance kit.",
+  "requests": [
+    {"name": "token_64_bytes", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl"}},
+    {"name": "program_not_pair", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": "beta"}},
+    {"name": "token_punctuation", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": "alpha-2.0_test"}},
+    {"name": "null_is_absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": null}, "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}}
+  ],
+  "refused": [
+    {"name": "token_65_bytes", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklm"}, "refusal": {"code": "invalid_request", "detail": {"field": "harness"}}},
+    {"name": "empty", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": ""}, "refusal": {"code": "invalid_request", "detail": {"field": "harness"}}},
+    {"name": "uppercase", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": "Alpha"}, "refusal": {"code": "invalid_request", "detail": {"field": "harness"}}},
+    {"name": "not_text", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": false}, "refusal": {"code": "invalid_request", "detail": {"field": "harness"}}},
+    {"name": "pair_is_not_program", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": "api/key"}, "refusal": {"code": "invalid_request", "detail": {"field": "harness"}}}
+  ],
+  "refused_without_group": [
+    {"name": "program_without_group", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "harness": "beta"}, "refusal": {"code": "invalid_request", "detail": {"field": "harness"}}}
+  ],
+  "answers": [
+    {"name": "requested_beta_echoed", "declaration": {"harnesses": ["alpha", "beta"], "default_harness": "alpha"}, "requested": "beta", "answer": {"decision_id": "d1", "route": {"provider": "example", "model": "model-a"}, "runner": {"module": "runner-one", "model": {"provider": "example", "model": "model-a"}, "harness": "beta"}, "context_window": 200000, "max_output_tokens": 32000, "expires_at_ms": 1767226200000, "explanation": "Runner hosts beta."}},
+    {"name": "default_alpha", "declaration": {"harnesses": ["alpha", "beta"], "default_harness": "alpha"}, "answer": {"decision_id": "d2", "route": {"provider": "example", "model": "model-a"}, "runner": {"module": "runner-one", "model": {"provider": "example", "model": "model-a"}, "harness": "alpha"}, "context_window": 200000, "max_output_tokens": 32000, "expires_at_ms": 1767226200000, "explanation": "Runner defaults to alpha."}},
+    {"name": "singleton_solo", "declaration": {"harnesses": ["solo"]}, "answer": {"decision_id": "d3", "route": {"provider": "example", "model": "model-a"}, "runner": {"module": "runner-two", "model": {"provider": "example", "model": "model-a"}, "harness": "solo"}, "context_window": 200000, "max_output_tokens": 32000, "expires_at_ms": 1767226200000, "explanation": "Runner hosts only solo."}},
+    {"name": "multiple_no_default", "declaration": {"harnesses": ["alpha", "beta"]}, "answer": {"decision_id": "d4", "route": {"provider": "example", "model": "model-a"}, "runner": {"module": "runner-one", "model": {"provider": "example", "model": "model-a"}}, "context_window": 200000, "max_output_tokens": 32000, "expires_at_ms": 1767226200000, "explanation": "Runner has no default program."}},
+    {"name": "no_declaration", "declaration": {}, "answer": {"decision_id": "d5", "route": {"provider": "example", "model": "model-a"}, "runner": {"module": "runner-two", "model": {"provider": "example", "model": "model-a"}}, "context_window": 200000, "max_output_tokens": 32000, "expires_at_ms": 1767226200000, "explanation": "Runner declares no program."}}
+  ],
+  "refusals": [
+    {"name": "unhosted", "body": {"code": "no_route", "message": "no runner hosts harness unhosted", "detail": {"reason": "harness_unavailable"}}},
+    {"name": "only_gateway_without_request", "declaration": {"harnesses": ["alpha"], "starts_sessions": false}, "body": {"code": "no_route", "message": "no session-starting runner is available", "detail": {"reason": "no_available_model"}}},
+    {"name": "only_gateway_with_request", "declaration": {"harnesses": ["alpha"], "starts_sessions": false}, "requested": "alpha", "body": {"code": "no_route", "message": "no session-starting runner hosts harness alpha", "detail": {"reason": "harness_unavailable"}}}
+  ]
+}

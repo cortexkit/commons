@@ -116,8 +116,12 @@ pub const CHECKS: &[CheckSpec] = &[
     ),
     check(
         "harness_only_when_declared",
-        "runner.harness is the harness the answered runner declared for the route, and is left out for a runner that declared none",
+        "runner.harness is never invented for a runner that declared none, and is not dropped for one declaring a default",
     ),
+    check("requested_harness_is_hosted_and_echoed", "select_harness: only a runner listing the requested program answers, echoing it; an unhosted program is no_route harness_unavailable"),
+    check("unrequested_harness_uses_declaration", "without harness, answer the declared default, else singleton, else omit it without filtering candidates"),
+    check("non_starting_runner_never_selected", "starts_sessions false runners never answer select, with or without harness"),
+    check("undeclared_harness_group_refuses_member", "a provider without select_harness refuses harness as invalid_request naming the field"),
     check(
         "hold_answers_blocked_entry_within_limits",
         "select_hold_control: a ladder entry whose accounts are all blocked, with a reset within both hold_when_reset_within and max_hold, is answered, and the runner then holds at account_for",
