@@ -1,4 +1,4 @@
-//! Serde-only request and reply shapes for the project-identity module.
+//! Serde-only project request and reply shapes for the agent registry.
 //!
 //! These types do not canonicalize paths, inspect Git, validate registrations,
 //! or send requests. See the crate README for field presence and reader policy.
@@ -87,6 +87,7 @@ open_string!(
         ModuleDraining => "module_draining", UnknownMethod => "unknown_method",
         UnknownAgent => "unknown_agent", Gone => "gone",
         ClaimIntegrityFailed => "claim_integrity_failed", StoreCorrupt => "store_corrupt",
+        NotFound => "not_found",
     }
 );
 

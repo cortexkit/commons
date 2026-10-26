@@ -104,6 +104,12 @@ fn unknown_enum_spellings() {
     );
     vocabulary!(MoveErrorCode, ["cut_accept_pending"]);
     vocabulary!(MoveWarningCode, ["release_not_enforced"]);
+    vocabulary!(SessionNetwork, ["yes", "no", "unknown"]);
+    vocabulary!(
+        FleetAgentRole,
+        ["assistant", "workspace_head", "head", "hiree"]
+    );
+    vocabulary!(FleetAvatarType, ["creature.classic", "creature.wild"]);
     vocabulary!(Via, ["root", "containment", "worktree", "implicit", "walk"]);
     vocabulary!(
         RefusalCode,
@@ -119,6 +125,7 @@ fn unknown_enum_spellings() {
             "encode_failed",
             "store_unavailable",
             "module_draining",
+            "not_found",
         ]
     );
     for spelling in [
@@ -265,6 +272,9 @@ fn params_refuse_unknown_members() {
     refuses::<ContextProjectParams>(json!({"folder":"/folder"}));
     refuses::<AgentIdParams>(json!({"agent_id":"agent_12345678"}));
     refuses::<AgentWhereManyParams>(json!({"agentIds":["agent_12345678"]}));
+    refuses::<AgentSessionForRefParams>(json!({"ref_kind":"future-kind", "ref":"r"}));
+    refuses::<AgentSessionForRunnerParams>(json!({"runner":"runner", "session":"s"}));
+    refuses::<AgentFleetIdentityParams>(json!({}));
     assert!(serde_json::from_value::<Request<AgentResolveParams>>(
         json!({"method":"agent.resolve", "params":{"agent_id":"agent_12345678", "unknown":true}}),
     )
@@ -279,6 +289,7 @@ fn agent_read_refusal_codes_are_named() {
         ("gone", RefusalCode::Gone),
         ("claim_integrity_failed", RefusalCode::ClaimIntegrityFailed),
         ("store_corrupt", RefusalCode::StoreCorrupt),
+        ("not_found", RefusalCode::NotFound),
     ] {
         let outcome: Outcome<AgentResolveReply> =
             serde_json::from_value(json!({"code":wire, "message":"m", "detail":null})).unwrap();
@@ -307,4 +318,175 @@ fn request_spellings_and_required_fields() {
     // Constructors are data containers, not the handler's request admission layer.
     round_trip::<AgentWhereManyParams>(json!({"agentIds":[]}));
     round_trip::<AgentIdParams>(json!({"agent_id":"not-an-id"}));
+}
+
+#[test]
+fn runner_params_refuse_session_id_alias() {
+    assert!(serde_json::from_value::<AgentSessionForRunnerParams>(
+        json!({"runner":"runner", "session_id":"session"})
+    )
+    .is_err());
+    let params = AgentSessionForRunnerParams::new("runner".into(), "session".into());
+    assert_eq!(
+        serde_json::to_value(params).unwrap(),
+        json!({"runner":"runner", "session":"session"})
+    );
+}
+
+#[test]
+fn session_lookup_required_params() {
+    for params in [
+        json!({}),
+        json!({"ref_kind":"k"}),
+        json!({"ref_kind":"k", "session_ref":"s"}),
+        json!({"ref_kind":null, "ref":"s"}),
+        json!({"ref_kind":"k", "ref":null}),
+    ] {
+        assert!(serde_json::from_value::<AgentSessionForRefParams>(params).is_err());
+    }
+    for params in [
+        json!({}),
+        json!({"runner":"r"}),
+        json!({"runner":null, "session":"s"}),
+        json!({"runner":"r", "session":null}),
+    ] {
+        assert!(serde_json::from_value::<AgentSessionForRunnerParams>(params).is_err());
+    }
+    let params = AgentSessionForRefParams::new("future-kind".into(), "opaque-ref".into());
+    assert_eq!(
+        serde_json::to_value(params).unwrap(),
+        json!({"ref_kind":"future-kind", "ref":"opaque-ref"})
+    );
+}
+
+#[test]
+fn fleet_token_accepts_any_json_value() {
+    let missing: AgentFleetIdentityParams = round_trip(json!({}));
+    assert!(missing.token.is_missing());
+    for token in [
+        Value::Null,
+        json!(7),
+        json!(true),
+        json!([]),
+        json!({"nested":[false, 1]}),
+        json!(""),
+        json!("malformed"),
+        json!("wrong-incarnation:1"),
+    ] {
+        let params: AgentFleetIdentityParams = round_trip(json!({"token":token}));
+        assert_eq!(serde_json::to_value(params.token).unwrap(), token);
+    }
+}
+
+fn ref_row() -> Value {
+    json!({"agent_id":"a", "ref_kind":"future-kind", "ref":"opaque", "harness":"future-harness",
+        "session_id":"s", "project_root":null, "incarnation":"i"})
+}
+
+fn runner_row() -> Value {
+    json!({"agent_id":"a", "ref_kind":"future-kind", "ref":"opaque", "harness":"future-harness",
+        "session":"s", "project_root":null, "runner":"future-runner", "ended_at_ms":null,
+        "network":"future-network", "network_history":[{"network":"future-network", "since_ms":-1}],
+        "incarnation":"i"})
+}
+
+#[test]
+fn session_reply_spellings_are_not_aliases() {
+    let mut runner = runner_row();
+    let session = runner.as_object_mut().unwrap().remove("session").unwrap();
+    runner["session_id"] = session;
+    assert!(serde_json::from_value::<AgentSessionForRunnerReply>(runner).is_err());
+    let mut reference = ref_row();
+    let session = reference
+        .as_object_mut()
+        .unwrap()
+        .remove("session_id")
+        .unwrap();
+    reference["session"] = session;
+    // Nullable fields accept omission, but the other operation's spelling is not an alias.
+    let decoded: AgentSessionForRefReply = serde_json::from_value(reference).unwrap();
+    assert!(decoded.session_id.is_none());
+}
+
+#[test]
+fn session_runner_and_held_on_never_accept_null() {
+    let reference: AgentSessionForRefReply = round_trip(ref_row());
+    assert!(reference.runner.is_missing());
+    assert!(reference.held_on.is_missing());
+    let runner: AgentSessionForRunnerReply = round_trip(runner_row());
+    assert_eq!(
+        runner.network,
+        SessionNetwork::Other("future-network".into())
+    );
+    assert!(runner.network_history[0].network == runner.network);
+    for field in ["runner", "heldOn"] {
+        let mut reference = ref_row();
+        reference[field] = Value::Null;
+        assert!(serde_json::from_value::<AgentSessionForRefReply>(reference).is_err());
+        let mut runner = runner_row();
+        runner[field] = Value::Null;
+        assert!(serde_json::from_value::<AgentSessionForRunnerReply>(runner).is_err());
+    }
+    let mut runner = runner_row();
+    runner.as_object_mut().unwrap().remove("runner");
+    assert!(serde_json::from_value::<AgentSessionForRunnerReply>(runner).is_err());
+}
+
+#[test]
+fn fleet_empty_is_distinct_from_unchanged() {
+    let mut value = json!({"generation":0, "incarnation":"i", "logPosition":0, "token":"opaque", "unchanged":true});
+    let unchanged: AgentFleetIdentityReply = round_trip(value.clone());
+    assert!(unchanged.agents.is_missing());
+    value["unchanged"] = json!(false);
+    value["agents"] = json!([]);
+    let full: AgentFleetIdentityReply = round_trip(value.clone());
+    assert_eq!(full.agents, Presence::new(vec![]));
+    assert!(!full.unchanged);
+    value["agents"] = Value::Null;
+    assert!(serde_json::from_value::<AgentFleetIdentityReply>(value).is_err());
+}
+
+#[test]
+fn new_read_reply_members_stay_open() {
+    ignores::<AgentSessionForRefReply>(ref_row());
+    ignores::<AgentSessionForRunnerReply>(runner_row());
+    ignores::<SessionNetworkEntry>(json!({"network":"future", "since_ms":0}));
+    ignores::<AgentFleetIdentityReply>(
+        json!({"generation":0, "incarnation":"i", "logPosition":0, "token":"opaque", "unchanged":true}),
+    );
+    ignores::<FleetAvatar>(json!({"fingerprint":"opaque", "type":"future-avatar"}));
+    ignores::<FleetProject>(json!({"id":"p", "name":"project"}));
+    ignores::<FleetWorkspace>(json!({"id":"w", "name":"workspace"}));
+    ignores::<FleetAgentIdentity>(
+        json!({"agentId":"a", "displayName":"name", "tag":"", "labels":[], "role":"future-role"}),
+    );
+}
+
+#[test]
+fn fleet_optional_children_keep_present_empty_values() {
+    let agent: FleetAgentIdentity = round_trip(
+        json!({"agentId":"a", "displayName":"", "tag":"", "labels":[], "role":"future-role",
+        "project":{"id":"p", "name":"", "canonicalRoot":""}, "workspace":{"id":"w", "name":""},
+        "avatar":{"fingerprint":"", "type":"future-avatar", "version":0}}),
+    );
+    assert_eq!(agent.role, FleetAgentRole::Other("future-role".into()));
+    let Presence::Present(avatar) = agent.avatar else {
+        panic!("expected avatar")
+    };
+    assert_eq!(
+        avatar.avatar_type,
+        FleetAvatarType::Other("future-avatar".into())
+    );
+    assert_eq!(avatar.version, Presence::new(0));
+    let empty =
+        json!({"agentId":"a", "displayName":"n", "tag":"", "labels":[], "role":"assistant"});
+    let absent: FleetAgentIdentity = round_trip(empty.clone());
+    assert!(
+        absent.avatar.is_missing() && absent.project.is_missing() && absent.workspace.is_missing()
+    );
+    for field in ["avatar", "project", "workspace"] {
+        let mut null = empty.clone();
+        null[field] = Value::Null;
+        assert!(serde_json::from_value::<FleetAgentIdentity>(null).is_err());
+    }
 }

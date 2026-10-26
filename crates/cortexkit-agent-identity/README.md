@@ -1,17 +1,20 @@
 # cortexkit-agent-identity
 
-Serde-only requests and replies for the project-identity module's `context.project`,
-`context.session`, `agent.resolve`, `agent.where`, and `agent.where_many` reads.
-Version 0.1.0 is intended for review before publication.
+Serde-only requests and replies for the agent registry's `context.project`,
+`context.session`, `agent.resolve`, `agent.where`, `agent.where_many`,
+`agent.session_for_ref`, `agent.session_for_runner`, and `agent.fleet_identity` reads.
+Version 0.1.1 adds session lookups and fleet identity compatibly to 0.1.0.
 
 The crate does no I/O, ID/path validation, or cross-field validation. Params
 types refuse unknown members, as the handler does; ID syntax, `agentIds` count
 and duplicates are still checked only by the handler. It uses workspace
-`cortexkit-project-identity` with version requirement `0.1.3` (retained for
+`cortexkit-project-identity` with version requirement `0.1.4` (retained for
 publication), and reuses its `Request`, `Outcome`, `Success`,
 `Refusal`, `RefusalCode`, `Via`, and `Presence` types. These replies contain no
 full project/workspace records to duplicate: the context document is only
-metadata, not a workspace document.
+metadata, not a workspace document. Fleet project/workspace summaries use `id`,
+not `projectId`/`workspaceId`, and have different fields and presence rules from
+the shared crate's full records, so they have separate types here.
 Runtime dependencies are serde, serde_json, and the shared project crate.
 
 ```rust
@@ -50,7 +53,7 @@ detail as null; that is a fixture convention, not a transport requirement. `op`,
 
 Request: `ContextProjectParams`, required non-null `folder: string`. No aliases
 (`path`, `root`, or camelCase alternatives are not supported). The handler rejects
-extra params even though these serde readers ignore unknown members.
+extra params, as do these serde params readers.
 
 Reply: `ContextProjectReply`.
 
@@ -247,6 +250,132 @@ steps other than published/claimed/releasing, notice statuses other than
 waiting-for-target, and foreign-store reads (which synthesize unknown/unclaimed,
 epoch zero, null holder/cut/read time, stale true).
 
+## `agent.session_for_ref`
+
+Request: `AgentSessionForRefParams`, required non-null strings `ref_kind` and
+`ref` (Rust `session_ref`). No aliases, including `session_ref`. Unknown members
+are refused. The handler checks 1–64 UTF-8 bytes for `ref_kind` and 1–512 for
+`ref`; this crate does not. Reference kinds, references, harnesses and runners
+are open strings, not a closed provider vocabulary.
+
+Reply: `AgentSessionForRefReply`.
+
+| Field | Type / presence | Meaning |
+|---|---|---|
+| `agent_id` | string, R | Owning agent. |
+| `ref_kind` | string, R | Exact stored reference kind. |
+| `ref` | string, R | Exact stored reference; Rust `session_ref`. |
+| `harness` | string, R+N | Registered harness; null for a moved-in placeholder. |
+| `session_id` | string, R+N | Host session ID; null together with placeholder harness. |
+| `project_root` | string, R+N | Stored root; null for a legacy or initially omitted empty root. |
+| `runner` | string, O | Present only when recorded; **never null**. |
+| `heldOn` | string, O | Remote holder of finished session data; exact camelCase spelling. |
+| `incarnation` | string, R | Handler lifetime nonce. |
+
+A missing reference, including a structurally valid unknown kind, refuses
+`not_found` (`RefusalCode::NotFound`), not a null result or `found: false`.
+There is no `session`, lifecycle, network, registration or liveness field.
+Unlike runner lookup, a runnerless binding can succeed and omits `runner`.
+
+Published coverage: five `session-for-ref.json` records and records 1–6 of
+`session-lookup-cases.json`. Every declared field has a populated example,
+including `heldOn` from real finished-session movement. **Untested by captures:**
+null `harness`/`session_id`, which require the moved-in placeholder path rather
+than registration. The nullable reader accepts omission, as elsewhere in this
+crate; it does not treat `session` as an alias for `session_id`.
+
+## `agent.session_for_runner`
+
+Request: `AgentSessionForRunnerParams`, required non-null strings `runner` and
+**`session`**, never `session_id` (no alias). Extra members are refused even
+when `session` is also supplied. The handler checks runner length 1–64 UTF-8
+bytes without Unicode control characters and session length 1–256 bytes;
+these bounds are not validated by this crate.
+
+Reply: `AgentSessionForRunnerReply`, deliberately separate from the ref row.
+
+| Field | Type / presence | Meaning |
+|---|---|---|
+| `agent_id`, `ref_kind`, `ref` | strings, R | Same owning agent and exact stored reference meanings as ref lookup. |
+| `harness` | string, R+N | Nullable row type, but a found runner row cannot have null harness through real registration/carry. |
+| `session` | string, R | Stored host session ID under this operation's distinct spelling. |
+| `project_root` | string, R+N | Empty stored root projects to null. |
+| `runner` | string, R | Exact matched runner; **never null or omitted**. |
+| `heldOn` | string, O | Remote holder of finished data; omitted otherwise, never null. |
+| `ended_at_ms` | i64, R+N | First end timestamp; null while open. |
+| `network` | `SessionNetwork`, R | `yes`, `no`, `unknown`, or a preserved future string; latest history value, `unknown` if empty. |
+| `network_history` | array of `SessionNetworkEntry`, R | Oldest first; an empty array is retained. |
+| `network_history[].network` | `SessionNetwork`, R | Same network vocabulary. |
+| `network_history[].since_ms` | i64, R | Timestamp in milliseconds. |
+| `incarnation` | string, R | Handler lifetime nonce. |
+
+There is no `session_id` reply member. An unknown pair, wrong runner or
+runnerless binding refuses `not_found`. Runnerless rows cannot match the query;
+placeholder rows have neither host field nor runner, explaining the non-null
+runner guarantee. Network is a closed writer vocabulary, not a lookup status;
+readers preserve unfamiliar values without assigning meaning.
+
+Published coverage: four `session-for-runner.json` records and records 7–13 of
+`session-lookup-cases.json`. Every field has a populated example, including
+`heldOn`, both null and populated root/end time, empty/nonempty history and all
+current network values. **Untested by captures:** null `harness`, unreachable
+for a found runner row through the real writers. `runner: null` is not a case.
+
+## `agent.fleet_identity`
+
+Request: `AgentFleetIdentityParams`, either `{}` or `{"token": value}`. `token`
+is `Presence<serde_json::Value>`: **any JSON value is accepted**, with missing
+and present null kept distinct. Only exact equality with the current opaque
+string token produces an unchanged reply. Stale, malformed/empty/wrong-incarnation
+strings, null, numbers, booleans, arrays and objects are cache misses returning
+the full reply, never token refusals. Only extra members or a malformed params
+object/envelope yield `invalid_request`; no aliases exist.
+
+Reply: `AgentFleetIdentityReply` describes both branches without validating
+their cross-field invariant: full has `unchanged: false, agents: [...]` (possibly
+empty), unchanged has `unchanged: true` and **omits** `agents`. Missing and
+present-empty are distinct through `Presence<Vec<FleetAgentIdentity>>`.
+
+| Field | Type / presence | Meaning |
+|---|---|---|
+| `generation` | i64, R | Local journal head, not comparable between machines. |
+| `incarnation` | string, R | Handler lifetime nonce. |
+| `logPosition` | i64, R | Last shared identity-log position applied locally, zero with sharing off; present on both branches. |
+| `token` | string, R | Opaque cache token; currently `incarnation:generation`. |
+| `unchanged` | bool, R | Whether the supplied string exactly matched the current token. |
+| `agents` | array of `FleetAgentIdentity`, O | Every live agent sorted by ID, required on full replies; omitted on unchanged. |
+| `agents[].agentId` | string, R | Stored ID. |
+| `agents[].displayName` | string, R | Stored display name. |
+| `agents[].tag` | string, R | May be empty for imported legacy rows. |
+| `agents[].labels` | array of strings, R | May be empty; stored order preserved. |
+| `agents[].role` | `FleetAgentRole`, R | `assistant`, `workspace_head`, `head`, `hiree`, or future string. No separate status field. |
+| `agents[].avatar` | `FleetAvatar`, O | Summary when a genome is stored, never the genome itself. |
+| `avatar.fingerprint` | string, R | First 32 lowercase hex characters of BLAKE3 over genome, type and version joined with newlines; missing version uses empty string. |
+| `avatar.type` | `FleetAvatarType`, R | `creature.classic`, `creature.wild`, or future string; Rust `avatar_type`. |
+| `avatar.version` | i64, O | Stored version when available, never null. |
+| `agents[].project` | `FleetProject`, O | Present when project-bound; required strings `id`, `name`. |
+| `project.canonicalRoot` | string, O | Lexically first canonical root, omitted for a rootless project. |
+| `agents[].workspace` | `FleetWorkspace`, O | Required strings `id`, `name`; project workspace or workspace head's named workspace, omitted if unplaced/unavailable. |
+
+All optional objects/children above are omitted, never null. Unplaced assistants
+omit both placement objects. Roles and avatar types are open reader vocabularies;
+unknown values confer no permission. A merged multi-machine fleet uses the reply
+with the highest `logPosition`, not local `generation` or token. Token equality
+does not include `logPosition`.
+
+Published coverage: three `fleet-identity.json` records and records 14–19 of
+`session-lookup-cases.json`; every declared field is populated somewhere.
+**Untested by captures:** nonzero `logPosition` (**every fleet sample is 0**),
+`hiree`/`workspace_head` roles, `creature.wild`, an empty fleet, and cache misses
+using null/object/array/boolean/wrong-incarnation tokens. Synthetic decoder tests
+cover these token representations and empty-fleet presence, not handler behavior.
+
+For all three new reads, infrastructure failures (startup/draining, missing
+store, storage and encoding errors), null/wrong-type params objects, and
+empty/overlong string bounds/control-character failures are **untested by the
+published captures**. Only the session lookups have string bounds; no fleet token
+value is invalid. The crate does not simulate these handler checks.
+
 ## Refusals
 
 All operations preserve unknown refusal codes/message/detail through shared
@@ -262,6 +391,9 @@ Domain errors retain their own code/message/detail.
 | `agent.resolve` | `invalid_request`; unknown and terminal identities are successful answers, not `unknown_agent`/`gone` refusals. |
 | `agent.where` | `invalid_request`, `unknown_agent`, `gone` with gone detail, `claim_integrity_failed`; internal projection serialization can yield `invalid_params`. |
 | `agent.where_many` | Same as where, but skips `unknown_agent`; duplicate/out-of-range/invalid IDs yield `invalid_request`. |
+| `agent.session_for_ref` | `invalid_request` for decode/bounds; `not_found` for an absent exact reference. |
+| `agent.session_for_runner` | `invalid_request` for decode/bounds; `not_found` for an absent pair, including runnerless bindings. |
+| `agent.fleet_identity` | `invalid_request` for extra params/envelope/decode, never a token value. No unknown-agent, bad-token, stale-token or `not_found` refusal; an empty fleet succeeds. |
 
 The lists above are not an exhaustive future refusal vocabulary.
 
@@ -272,3 +404,6 @@ own exact compact-reply round-trip test through a sorted-key JSON value; SHA-256
 manifests cover exactly the copied JSON files. Separate synthetic tests cover
 unknown enum spellings, ignored object members, open participant JSON, non-string
 pin-state projections, and missing versus present-null payloads.
+The four new JSON files are copied byte-for-byte from the published owner export;
+`session-lookup-cases.json` contains nineteen records and has SHA-256
+`5e2a306b6a05bd4ab1c922c0c57541d16e3fb33c2c403a797fe5a34edb774107`.

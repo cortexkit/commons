@@ -15,6 +15,10 @@ const SHARING_OFF: &str = include_str!("../test-vectors/agent-sessions-v1/where-
 const RESOLVE: &str = include_str!("../test-vectors/agent-identity-reads-v1/agent-resolve.json");
 const RESOLVE_MERGED: &str =
     include_str!("../test-vectors/agent-identity-reads-v1/agent-resolve-merged.json");
+const FOR_REF: &str = include_str!("../test-vectors/agent-sessions-v1/session-for-ref.json");
+const FOR_RUNNER: &str = include_str!("../test-vectors/agent-sessions-v1/session-for-runner.json");
+const LOOKUPS: &str = include_str!("../test-vectors/agent-sessions-v1/session-lookup-cases.json");
+const FLEET: &str = include_str!("../test-vectors/agent-identity-reads-v1/fleet-identity.json");
 
 #[derive(Deserialize)]
 struct Record<'a> {
@@ -420,6 +424,316 @@ fn resolve_extra_param_refusal() {
     );
 }
 
+macro_rules! read_sample {
+    ($name:ident, $bytes:ident, $index:expr, $method:literal, $params:ty, $reply:ty) => {
+        #[test]
+        fn $name() {
+            success(sample::<$params, $reply>($bytes, $index, $method));
+        }
+    };
+}
+
+fn read_refusal<P: DeserializeOwned + Serialize, T: DeserializeOwned + Serialize>(
+    bytes: &str,
+    index: usize,
+    method: &str,
+    code: RefusalCode,
+) {
+    let records: Vec<Record<'_>> = serde_json::from_str(bytes).unwrap();
+    let record = &records[index];
+    let params = if let Some(op) = &record.op {
+        assert_eq!(op, method);
+        record.request.clone()
+    } else {
+        assert_eq!(record.request["method"], method);
+        record.request["params"].clone()
+    };
+    if code == RefusalCode::InvalidRequest {
+        assert!(serde_json::from_value::<P>(params).is_err());
+    } else {
+        let decoded: P = serde_json::from_value(params.clone()).unwrap();
+        assert_eq!(serde_json::to_value(decoded).unwrap(), params);
+    }
+    let Outcome::Refusal(refusal) = check_reply::<T>(record.reply.get()) else {
+        panic!("expected {code:?} refusal");
+    };
+    assert_eq!(refusal.code, code);
+    assert!(refusal.detail.is_none());
+}
+
+macro_rules! read_refusal_sample {
+    ($name:ident, $bytes:ident, $index:expr, $method:literal, $params:ty, $reply:ty, $code:ident) => {
+        #[test]
+        fn $name() {
+            read_refusal::<$params, $reply>($bytes, $index, $method, RefusalCode::$code);
+        }
+    };
+}
+
+read_sample!(
+    ref_pi,
+    FOR_REF,
+    0,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply
+);
+read_sample!(
+    ref_opencode,
+    FOR_REF,
+    1,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply
+);
+read_sample!(
+    ref_legacy_null_root,
+    FOR_REF,
+    2,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply
+);
+read_sample!(
+    ref_broca_runner,
+    FOR_REF,
+    3,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply
+);
+read_refusal_sample!(
+    ref_not_found,
+    FOR_REF,
+    4,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply,
+    NotFound
+);
+read_sample!(
+    runner_live_network_history,
+    FOR_RUNNER,
+    0,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply
+);
+read_sample!(
+    runner_ended_empty_history,
+    FOR_RUNNER,
+    1,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply
+);
+read_refusal_sample!(
+    runner_not_found,
+    FOR_RUNNER,
+    2,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply,
+    NotFound
+);
+read_refusal_sample!(
+    runner_runnerless_not_found,
+    FOR_RUNNER,
+    3,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply,
+    NotFound
+);
+read_sample!(
+    fleet_full,
+    FLEET,
+    0,
+    "agent.fleet_identity",
+    AgentFleetIdentityParams,
+    AgentFleetIdentityReply
+);
+read_sample!(
+    fleet_unchanged,
+    FLEET,
+    1,
+    "agent.fleet_identity",
+    AgentFleetIdentityParams,
+    AgentFleetIdentityReply
+);
+read_refusal_sample!(
+    fleet_extra_invalid_request,
+    FLEET,
+    2,
+    "agent.fleet_identity",
+    AgentFleetIdentityParams,
+    AgentFleetIdentityReply,
+    InvalidRequest
+);
+
+read_sample!(
+    lookup_ref_held_on,
+    LOOKUPS,
+    0,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply
+);
+read_sample!(
+    lookup_ref_rootless_runnerless,
+    LOOKUPS,
+    1,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply
+);
+read_refusal_sample!(
+    lookup_ref_not_found,
+    LOOKUPS,
+    2,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply,
+    NotFound
+);
+read_refusal_sample!(
+    lookup_ref_missing_invalid_request,
+    LOOKUPS,
+    3,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply,
+    InvalidRequest
+);
+read_refusal_sample!(
+    lookup_ref_numeric_invalid_request,
+    LOOKUPS,
+    4,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply,
+    InvalidRequest
+);
+read_refusal_sample!(
+    lookup_ref_extra_invalid_request,
+    LOOKUPS,
+    5,
+    "agent.session_for_ref",
+    AgentSessionForRefParams,
+    AgentSessionForRefReply,
+    InvalidRequest
+);
+read_sample!(
+    lookup_runner_held_on,
+    LOOKUPS,
+    6,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply
+);
+read_sample!(
+    lookup_runner_rootless_open,
+    LOOKUPS,
+    7,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply
+);
+read_refusal_sample!(
+    lookup_runner_not_found,
+    LOOKUPS,
+    8,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply,
+    NotFound
+);
+read_refusal_sample!(
+    lookup_runner_missing_invalid_request,
+    LOOKUPS,
+    9,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply,
+    InvalidRequest
+);
+read_refusal_sample!(
+    lookup_runner_numeric_invalid_request,
+    LOOKUPS,
+    10,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply,
+    InvalidRequest
+);
+read_refusal_sample!(
+    lookup_runner_session_id_invalid_request,
+    LOOKUPS,
+    11,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply,
+    InvalidRequest
+);
+read_refusal_sample!(
+    lookup_runner_runnerless_not_found,
+    LOOKUPS,
+    12,
+    "agent.session_for_runner",
+    AgentSessionForRunnerParams,
+    AgentSessionForRunnerReply,
+    NotFound
+);
+read_sample!(
+    lookup_fleet_full,
+    LOOKUPS,
+    13,
+    "agent.fleet_identity",
+    AgentFleetIdentityParams,
+    AgentFleetIdentityReply
+);
+read_sample!(
+    lookup_fleet_unchanged,
+    LOOKUPS,
+    14,
+    "agent.fleet_identity",
+    AgentFleetIdentityParams,
+    AgentFleetIdentityReply
+);
+read_sample!(
+    lookup_fleet_stale_token,
+    LOOKUPS,
+    15,
+    "agent.fleet_identity",
+    AgentFleetIdentityParams,
+    AgentFleetIdentityReply
+);
+read_refusal_sample!(
+    lookup_fleet_extra_invalid_request,
+    LOOKUPS,
+    16,
+    "agent.fleet_identity",
+    AgentFleetIdentityParams,
+    AgentFleetIdentityReply,
+    InvalidRequest
+);
+read_sample!(
+    lookup_fleet_numeric_token,
+    LOOKUPS,
+    17,
+    "agent.fleet_identity",
+    AgentFleetIdentityParams,
+    AgentFleetIdentityReply
+);
+read_sample!(
+    lookup_fleet_bad_string_token,
+    LOOKUPS,
+    18,
+    "agent.fleet_identity",
+    AgentFleetIdentityParams,
+    AgentFleetIdentityReply
+);
+
 #[test]
 fn vector_checksums() {
     let sets: [(&str, &[(&str, &str)]); 3] = [
@@ -428,6 +742,7 @@ fn vector_checksums() {
             &[
                 ("agent-resolve-merged.json", RESOLVE_MERGED),
                 ("agent-resolve.json", RESOLVE),
+                ("fleet-identity.json", FLEET),
             ],
         ),
         (
@@ -441,6 +756,9 @@ fn vector_checksums() {
         (
             include_str!("../test-vectors/agent-sessions-v1/SHA256SUMS"),
             &[
+                ("session-for-ref.json", FOR_REF),
+                ("session-for-runner.json", FOR_RUNNER),
+                ("session-lookup-cases.json", LOOKUPS),
                 ("where-many.json", MANY),
                 ("where-moving-receiver.json", RECEIVER),
                 ("where-moving-source.json", SOURCE),

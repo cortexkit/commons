@@ -1,11 +1,11 @@
 [package]
 name = "cortexkit-project-identity"
-version = "0.1.3"
+version = "0.1.4"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-description = "Transport-independent request and reply types for the project-identity module"
+description = "Transport-independent project request and reply types for the agent registry"
 readme = "README.md"
 include = ["Cargo.toml", "README.md", "CHANGELOG.md", "src/**", "tests/**", "test-vectors/**"]
 

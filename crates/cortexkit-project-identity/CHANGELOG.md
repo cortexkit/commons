@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4
+
+- Name `RefusalCode::NotFound` (`not_found`) for session lookup misses from the
+  agent registry. The non-exhaustive enum remains extensible; callers that
+  previously matched `Other("not_found")` must use the named variant instead.
+  Both mappings preserve the same wire string.
+
 ## 0.1.3
 
 - Name four more `RefusalCode` spellings that the module's agent and context

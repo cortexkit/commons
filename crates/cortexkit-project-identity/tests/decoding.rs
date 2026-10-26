@@ -60,7 +60,15 @@ string_test!(refusal_code_strings_round_trip, RefusalCode, {
     ModuleDraining => "module_draining", UnknownMethod => "unknown_method",
     UnknownAgent => "unknown_agent", Gone => "gone",
     ClaimIntegrityFailed => "claim_integrity_failed", StoreCorrupt => "store_corrupt",
+    NotFound => "not_found",
 });
+
+#[test]
+fn not_found_refusal_round_trip() {
+    let refusal = Refusal::new(RefusalCode::NotFound, "no matching session".into(), None);
+    assert_eq!(serde_json::to_value(&refusal).unwrap()["code"], "not_found");
+    round_trip(&refusal);
+}
 
 #[test]
 fn registered_is_not_current_provenance() {

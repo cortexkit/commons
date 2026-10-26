@@ -1,10 +1,9 @@
 # cortexkit-project-identity
 
-Transport-independent serde types for the four reads of the project-identity
-module: the module that maps a folder or owned remote to its project, and lists
-the known workspaces and projects. In this crate, "the handler" means that
-module's request handler.
-Version **0.1.2** owns request/reply data, not routing, admission, storage, Git
+Transport-independent serde types for four reads of the agent registry, which
+maps a folder or owned remote to its project and lists known workspaces and
+projects. In this crate, "the handler" means the agent registry's request handler.
+Version **0.1.4** owns request/reply data, not routing, admission, storage, Git
 probing, filesystem canonicalization, or transport framing. Runtime dependencies
 are only `serde` and `serde_json`. Paths, ids, epochs, and tokens stay strings;
 decoding never consults the reader's filesystem.
@@ -50,7 +49,8 @@ not bare `T`. Refusals are top-level `{code, message, detail}`; `detail` is opaq
 JSON, nullable, and also accepted when absent. Identify a refusal by `code`, not
 its message. The open vocabulary includes `invalid_request`, `invalid_params`,
 `storage_unavailable`, `store_unavailable`, `storage_error`, `encode_failed`,
-`module_draining`, and `unknown_method`. The two unavailable spellings are
+`module_draining`, `unknown_method`, and the session lookup code `not_found`
+(`RefusalCode::NotFound`). The two unavailable spellings are
 distinct. A misspelled method can produce `unknown_method`; unknown domain codes
 also remain readable.
 

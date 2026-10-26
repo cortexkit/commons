@@ -6,7 +6,7 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 
 | Crate | Purpose | crates.io |
 |---|---|---|
-| [cortexkit-agent-identity](crates/cortexkit-agent-identity/README.md) | Typed agent identity and context reads for the project-identity module. | Not published |
+| [cortexkit-agent-identity](crates/cortexkit-agent-identity/README.md) | Typed agent identity, session, fleet and context reads for the agent registry (0.1.1). | Not published |
 | [cortexkit-anthropic-policy](crates/cortexkit-anthropic-policy/README.md) | Anthropic authentication headers, beta tokens, account limits, credits, and quota-header policy. | [Published](https://crates.io/crates/cortexkit-anthropic-policy) |
 | [cortexkit-bus-inmemory](crates/cortexkit-bus-inmemory/README.md) | Deterministic, process-local implementation of the bus traits. | [Published](https://crates.io/crates/cortexkit-bus-inmemory) |
 | [cortexkit-bus-naming](crates/cortexkit-bus-naming/README.md) | Validation of message-plane names, topology limits, and grants. | [Published](https://crates.io/crates/cortexkit-bus-naming) |
@@ -24,7 +24,7 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 | [cortexkit-mutate](crates/cortexkit-mutate/README.md) | The `ckdev-mutate` mutation-testing CLI. | Not published |
 | [cortexkit-paths](crates/cortexkit-paths/README.md) | Canonical project-root identities and absolute user-directory paths. | [Published](https://crates.io/crates/cortexkit-paths) |
 | [cortexkit-persona](crates/cortexkit-persona/README.md) | Load, merge and render a module's role personas: tiers with trust classes, project approvals, sealed MiniJinja templates and digests. | [Published](https://crates.io/crates/cortexkit-persona) |
-| [cortexkit-project-identity](crates/cortexkit-project-identity/README.md) | Typed requests, replies, and forward-compatible decoding for the project-identity module. | Not published |
+| [cortexkit-project-identity](crates/cortexkit-project-identity/README.md) | Typed project requests, replies, and forward-compatible decoding for the agent registry. | Not published |
 | [cortexkit-provider-usage](crates/cortexkit-provider-usage/README.md) | Provider usage, quota windows, and reset metadata wire types. | [Published](https://crates.io/crates/cortexkit-provider-usage) |
 | [cortexkit-push-seal](crates/cortexkit-push-seal/README.md) | HPKE encryption of push-notification payloads for a recipient device. | Not published |
 | [cortexkit-resource-busy](crates/cortexkit-resource-busy/README.md) | Shared refusal detail for exclusive resources held by another caller. | Not published |

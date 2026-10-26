@@ -1,4 +1,4 @@
-//! Serde-only agent and context reads for the project-identity module.
+//! Serde-only agent, session, fleet and context reads for the agent registry.
 //!
 //! No I/O, path normalization, admission checks, or cross-field validation.
 
@@ -61,13 +61,13 @@ macro_rules! wire_struct {
 }
 
 wire_struct!(
-    /// Params refuse unknown members, as the module's handler does.
+    /// Params refuse unknown members, as the agent registry does.
     #[serde(deny_unknown_fields)]
     ContextProjectParams { folder: String }
 );
 wire_struct!(
     /// Shared single-agent params; the wire spelling is always `agent_id`.
-    /// Unknown members are refused, as the module's handler does.
+    /// Unknown members are refused, as the agent registry does.
     #[serde(deny_unknown_fields)]
     AgentIdParams { agent_id: String }
 );
@@ -75,7 +75,7 @@ pub type ContextSessionParams = AgentIdParams;
 pub type AgentResolveParams = AgentIdParams;
 pub type AgentWhereParams = AgentIdParams;
 wire_struct!(
-    /// Unknown members are refused, as the module's handler does.
+    /// Unknown members are refused, as the agent registry does.
     #[serde(deny_unknown_fields)]
     AgentWhereManyParams {
         #[serde(rename = "agentIds")]
@@ -288,3 +288,110 @@ wire_struct!(AgentWhereEntry {
     whereabouts: AgentWhere,
 });
 wire_struct!(AgentWhereManyReply { agents: Vec<AgentWhereEntry> });
+
+wire_struct!(
+    /// Exact reference lookup; bounds are checked by the agent registry only.
+    #[serde(deny_unknown_fields)]
+    AgentSessionForRefParams {
+        ref_kind: String,
+        #[serde(rename = "ref")]
+        session_ref: String,
+    }
+);
+wire_struct!(
+    /// The wire member is `session`, with no `session_id` alias.
+    #[serde(deny_unknown_fields)]
+    AgentSessionForRunnerParams { runner: String, session: String }
+);
+wire_struct!(
+    /// Reference lookup row, distinct from the runner lookup's lifecycle row.
+    AgentSessionForRefReply {
+        agent_id: String, ref_kind: String,
+        #[serde(rename = "ref")]
+        session_ref: String,
+        harness: Option<String>, session_id: Option<String>, project_root: Option<String>,
+        #[serde(default, skip_serializing_if = "Presence::is_missing")]
+        runner: Presence<String>,
+        #[serde(rename = "heldOn", default, skip_serializing_if = "Presence::is_missing")]
+        held_on: Presence<String>,
+        incarnation: String,
+    }
+);
+open_string!(SessionNetwork { Yes => "yes", No => "no", Unknown => "unknown" });
+wire_struct!(SessionNetworkEntry {
+    network: SessionNetwork,
+    since_ms: i64
+});
+wire_struct!(
+    /// Runner lookup row; a found row always has a non-null runner and session.
+    AgentSessionForRunnerReply {
+        agent_id: String, ref_kind: String,
+        #[serde(rename = "ref")]
+        session_ref: String,
+        harness: Option<String>, session: String, project_root: Option<String>, runner: String,
+        #[serde(rename = "heldOn", default, skip_serializing_if = "Presence::is_missing")]
+        held_on: Presence<String>,
+        ended_at_ms: Option<i64>, network: SessionNetwork,
+        network_history: Vec<SessionNetworkEntry>, incarnation: String,
+    }
+);
+
+wire_struct!(
+    /// Every token value is accepted; only an exact current string is a cache hit.
+    #[serde(deny_unknown_fields)]
+    AgentFleetIdentityParams {
+        #[serde(default, skip_serializing_if = "Presence::is_missing")]
+        token: Presence<Value>,
+    }
+);
+open_string!(FleetAgentRole {
+    Assistant => "assistant", WorkspaceHead => "workspace_head", Head => "head", Hiree => "hiree",
+});
+open_string!(FleetAvatarType { Classic => "creature.classic", Wild => "creature.wild" });
+wire_struct!(
+    /// Avatar summary, never the genome itself.
+    FleetAvatar {
+        fingerprint: String,
+        #[serde(rename = "type")]
+        avatar_type: FleetAvatarType,
+        #[serde(default, skip_serializing_if = "Presence::is_missing")]
+        version: Presence<i64>,
+    }
+);
+wire_struct!(
+    /// Fleet placement summary, not a full project record.
+    FleetProject {
+        id: String, name: String,
+        #[serde(rename = "canonicalRoot", default, skip_serializing_if = "Presence::is_missing")]
+        canonical_root: Presence<String>,
+    }
+);
+wire_struct!(
+    /// Fleet placement summary, not a full workspace record.
+    FleetWorkspace { id: String, name: String }
+);
+wire_struct!(FleetAgentIdentity {
+    #[serde(rename = "agentId")]
+    agent_id: String,
+    #[serde(rename = "displayName")]
+    display_name: String,
+    tag: String, labels: Vec<String>, role: FleetAgentRole,
+    #[serde(default, skip_serializing_if = "Presence::is_missing")]
+    avatar: Presence<FleetAvatar>,
+    #[serde(default, skip_serializing_if = "Presence::is_missing")]
+    project: Presence<FleetProject>,
+    #[serde(default, skip_serializing_if = "Presence::is_missing")]
+    workspace: Presence<FleetWorkspace>,
+});
+wire_struct!(
+    /// Full replies have `agents` (possibly empty); unchanged replies omit it.
+    /// The reader preserves this distinction without validating the boolean invariant.
+    AgentFleetIdentityReply {
+        generation: i64, incarnation: String,
+        #[serde(rename = "logPosition")]
+        log_position: i64,
+        token: String, unchanged: bool,
+        #[serde(default, skip_serializing_if = "Presence::is_missing")]
+        agents: Presence<Vec<FleetAgentIdentity>>,
+    }
+);
