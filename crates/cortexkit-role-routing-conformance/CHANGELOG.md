@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1
+
+- Fix the fixture's second tool capability tag: `runner-two` now reaches
+  `web.search/v1`, the tag the tool-provider contract defines, not
+  `search.web/v1`, which no runner can declare. A provider that loads the
+  fixture through the routing contract's own declaration validator refused
+  it, so `tool_capabilities_matched_by_tag` could not pass against a correct
+  provider. A new test runs every tag every fixture runner reaches through
+  that validator.
+
 ## 0.6.0
 
 - Depend on routing 0.4.1. Breaking Rust minor: exhaustive `CatalogRunner`

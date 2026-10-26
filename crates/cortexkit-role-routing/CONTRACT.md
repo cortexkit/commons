@@ -76,9 +76,17 @@ a module plays.
   third-party caller carrying the declaring module's scope is admitted;
   a module carrying only its own scope cannot borrow another's consumer.
   Every other caller is refused `consumer_not_owned {consumer}`. This refusal
-  is terminal, never timed. A name found only in operator configuration
-  remains usable by any caller. Until a module declares, the provider
-  keeps its configuration names.
+  is terminal, never timed. Until a module declares, the provider keeps
+  its configuration names.
+- [pinned] A name found only in operator configuration is usable by any
+  caller, unless that configuration names the name's owner. A configured
+  owner is a module principal, and the same two arms apply to it: the
+  caller's attested principal is that owner, or the request's
+  daemon-stamped scope is owned by it. Every other caller is refused
+  `consumer_not_owned {consumer}`. The shape of operator configuration is
+  the provider's, so how an owner is written there is not part of this
+  contract. A verified declaration of the same name still decides
+  ownership, as above.
 - [pinned] For each demand field, the first value present wins: operator
   configuration, then the request's own requirement, then the declared
   default. Omission is not a zero or false value. The request's required

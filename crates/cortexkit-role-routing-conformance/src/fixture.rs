@@ -52,7 +52,7 @@ pub const OTHER_PROJECT: &str = "project-other";
 /// A tool capability tag `runner-one` can reach, through `example-tools`.
 pub const TAG_ONE: &str = "code.read/v1";
 /// A tool capability tag `runner-two` can reach, through `other-tools`.
-pub const TAG_TWO: &str = "search.web/v1";
+pub const TAG_TWO: &str = "web.search/v1";
 /// The tool provider module `runner-one` reaches. It is a module name, not
 /// a tag, so a request listing it as a tag is met by no runner.
 pub const TOOLS_ONE: &str = "example-tools";
@@ -205,5 +205,38 @@ pub fn hold_catalog() -> Catalog {
             account(SUBSCRIPTION_PROVIDER, 2),
             account(SECOND_SUBSCRIPTION_PROVIDER, 3),
         ],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cortexkit_role_routing::declarations::{
+        ConsumerDeclarations, RunnerDeclaration, RunnerPair,
+    };
+
+    /// Every tool capability tag a fixture runner reaches must be one a real
+    /// runner can declare, or a provider loading the fixture refuses it.
+    #[test]
+    fn every_fixture_tool_tag_passes_the_runner_declaration_validator() {
+        for catalog in [catalog(), harness_catalog(), hold_catalog()] {
+            for runner in &catalog.runners {
+                for provider in &runner.tool_providers {
+                    for tag in &provider.capabilities {
+                        let mut declaration =
+                            RunnerDeclaration::new(vec![RunnerPair::new("example-api", "api-key")]);
+                        declaration.tool_capabilities = vec![tag.clone()];
+                        let result = ConsumerDeclarations::new()
+                            .with_runner(declaration)
+                            .validate();
+                        assert!(
+                            result.is_ok(),
+                            "fixture runner {} declares {tag}, which the routing contract refuses: {result:?}",
+                            runner.module
+                        );
+                    }
+                }
+            }
+        }
     }
 }

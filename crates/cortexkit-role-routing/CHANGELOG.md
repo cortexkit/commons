@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2
+
+- Contract text only, with no code change: operator configuration may name
+  an owner for a consumer name found only in configuration. With an owner,
+  the two ownership arms of §1.1 apply to it, and every other caller is
+  refused `consumer_not_owned`. With no owner, the name stays usable by any
+  caller, as before. A verified declaration still decides ownership.
+
 ## 0.4.1
 
 - Add optional runner-wide `harnesses` (1–16 unique pair-grammar tokens),
