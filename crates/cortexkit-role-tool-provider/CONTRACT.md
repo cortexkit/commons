@@ -176,7 +176,7 @@ to them. Nothing here names a particular implementation.
   - A provider with only system text answers an empty `tools` list.
 - `digest_only: true` answers `{generation, catalog_digest}` with no tools.
 - Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,
-  result_format?, capabilities, description?, input_schema, reply?, modes?,
+  result_format?, load?, capabilities, description?, input_schema, reply?, modes?,
   emits_events?}`.
   - `name` is the exact name the user tier disables the tool by.
   - `schema_digest` is the digest of the **structure** of `input_schema`
@@ -216,6 +216,16 @@ to them. Nothing here names a particular implementation.
     provider JSON body unchanged and emits no new catalog bytes, preserving
     existing catalogs and digests. A present format is catalog content,
     covered by `catalog_digest`, never by `schema_digest` or the schema pin.
+  - `load` is an optional hint for hosts that defer tool definitions behind a
+    search. `"upfront"` asks the host to keep this tool's definition visible to
+    the model from the first turn; absent leaves it to the host. A host that
+    doesn't defer tools ignores it. It is an open string enum (`ToolLoad`);
+    unknown values round-trip and a reader treats them as absent. Hosts may
+    ignore the hint; a provider should mark only tools its own instructions
+    tell the model to call without searching. Absence emits no new catalog
+    bytes, preserving existing catalogs and digests. A present hint is catalog
+    content, covered by `catalog_digest`, never by `schema_digest` or the schema
+    pin.
   - `capabilities` lists capability tags: unprefixed (`code.outline/v1`,
     defined only by this document) or namespaced (`acme:code.callgraph/v1`,
     free for anyone). Data in this answer only. This document defines these

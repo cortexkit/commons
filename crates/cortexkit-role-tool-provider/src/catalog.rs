@@ -408,6 +408,43 @@ pub fn check_presets(
     Ok(())
 }
 
+/// Open per-tool load-hint vocabulary. Readers treat unknown strings as absent,
+/// but preserve them when re-encoding the catalog.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
+pub enum ToolLoad {
+    /// `"upfront"`: keep the tool's definition visible from the first turn.
+    Upfront,
+    /// A value this release doesn't define, kept so re-encoding preserves it.
+    Unknown(String),
+}
+
+impl ToolLoad {
+    /// The wire string, for a known value or an unknown one alike.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Upfront => "upfront",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
+impl From<String> for ToolLoad {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "upfront" => Self::Upfront,
+            _ => Self::Unknown(value),
+        }
+    }
+}
+
+impl From<ToolLoad> for String {
+    fn from(value: ToolLoad) -> Self {
+        value.as_str().to_owned()
+    }
+}
+
 /// One tool in a catalog answer.
 ///
 /// Non-exhaustive so later optional members are additive: use
@@ -459,6 +496,11 @@ pub struct CatalogTool {
     /// and emits no new catalog bytes. Unknown formats round-trip unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_format: Option<crate::result::ResultFormat>,
+    /// Optional hint for hosts that defer tool definitions behind a search.
+    /// `Upfront` asks for visibility from the first turn. Hosts may ignore it;
+    /// readers treat unknown values as absent but round-trip them unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub load: Option<ToolLoad>,
     /// Capability tags naming what the tool does, for example
     /// `code.outline/v1` or `acme:code.callgraph/v1`. Data only; never in the
     /// module's HELLO manifest.
@@ -525,6 +567,12 @@ impl CatalogTool {
     /// Declare the tool's reply body format.
     pub fn with_result_format(mut self, result_format: crate::result::ResultFormat) -> Self {
         self.result_format = Some(result_format);
+        self
+    }
+
+    /// Ask the host how to load this tool's definition.
+    pub fn with_load(mut self, load: ToolLoad) -> Self {
+        self.load = Some(load);
         self
     }
 

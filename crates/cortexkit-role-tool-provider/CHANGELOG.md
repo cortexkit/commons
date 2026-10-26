@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.13.1
+
+- Add optional `CatalogTool.load`, the open-string `ToolLoad` hint, and
+  `CatalogTool::with_load`. `"upfront"` asks hosts that defer tool definitions
+  behind a search to keep the tool visible from the first turn; hosts may ignore
+  it, and unknown values round-trip unchanged.
+- Absent `load` emits no new bytes and preserves existing catalog digests.
+  Present hints are catalog content, not part of the schema digest or schema pin.
+
 ## 0.13.0
 
 - Renamed the tool-result format from `content/v1` to `tool-result/v1`, with no alias. Providers and consumers that declared `content/v1` switch to `tool-result/v1` together.
