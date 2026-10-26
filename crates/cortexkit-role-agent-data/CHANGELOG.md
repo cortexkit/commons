@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.4
+
+- Add optional per-item `dropped` counts and the validating `with_dropped`
+  builder. This is a compatible patch: `ImportedItem` is already
+  `#[non_exhaustive]` and built through `new`, whose signature is unchanged.
+- Validate the non-empty map's 16-reason cap, 1–64 byte lowercase ASCII
+  reason grammar, and positive counts up to 2^53 - 1, naming violated rules.
+- Require moves with any reported drops to be shown as completed with losses,
+  listing participant-defined reasons and counts without branching on them.
+  Roll out coordinator readers before participants send `dropped`.
+- Add drop-report validation vectors to the bundled `test-vectors` kit.
+  No separate agent-data conformance or test-kit crate needs a bump. The wire
+  version remains `agent-data/v1`; items without drops keep their previous bytes.
+
 ## 0.2.3
 
 - Use the shared helper's named `SessionIdentity` fields; runner ids are bare

@@ -6,7 +6,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-agent-data = "0.2.3"
+cortexkit-role-agent-data = "0.2.4"
 ```
 
 The [contract](CONTRACT.md) is normative. Enable the `test-vectors` feature to use the bundled [vectors](test-vectors/agent-data-v1/README.md); see the [role/conformance guide](../../docs/role-contracts.md) for context.

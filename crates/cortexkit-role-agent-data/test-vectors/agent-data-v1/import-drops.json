@@ -1,0 +1,89 @@
+{
+  "valid": [
+    {
+      "name": "import item with participant-defined losses",
+      "reply": {
+        "items": [
+          {
+            "sessionRef": "c6ea741d409f833ee60be91d9176e493",
+            "endOffset": 48213,
+            "digest": "da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8",
+            "dropped": {"root_missing": 12, "content_mismatch": 3}
+          }
+        ]
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "empty dropped map",
+      "rule": "dropped must be non-empty",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {}}]}
+    },
+    {
+      "name": "zero drop count",
+      "rule": "dropped count must be positive",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"root_missing": 0}}]}
+    },
+    {
+      "name": "drop count beyond JSON safe integers",
+      "rule": "dropped count must be at most 9007199254740991",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"root_missing": 9007199254740992}}]}
+    },
+    {
+      "name": "seventeen drop reasons",
+      "rule": "dropped must have at most 16 reasons",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"r0": 1, "r1": 1, "r2": 1, "r3": 1, "r4": 1, "r5": 1, "r6": 1, "r7": 1, "r8": 1, "r9": 1, "r10": 1, "r11": 1, "r12": 1, "r13": 1, "r14": 1, "r15": 1, "r16": 1}}]}
+    },
+    {
+      "name": "empty drop reason",
+      "rule": "dropped reason must be non-empty",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"": 1}}]}
+    },
+    {
+      "name": "sixty-five byte drop reason",
+      "rule": "dropped reason must be at most 64 ASCII bytes",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": 1}}]}
+    },
+    {
+      "name": "drop reason starting with a digit",
+      "rule": "dropped reason must start with a lowercase ASCII letter",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"1root": 1}}]}
+    },
+    {
+      "name": "drop reason starting with an underscore",
+      "rule": "dropped reason must start with a lowercase ASCII letter",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"_root": 1}}]}
+    },
+    {
+      "name": "drop reason starting with an uppercase letter",
+      "rule": "dropped reason must start with a lowercase ASCII letter",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"Root_missing": 1}}]}
+    },
+    {
+      "name": "drop reason containing an uppercase letter",
+      "rule": "dropped reason must contain only lowercase ASCII letters, digits and `_`",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"root_Missing": 1}}]}
+    },
+    {
+      "name": "drop reason containing punctuation",
+      "rule": "dropped reason must contain only lowercase ASCII letters, digits and `_`",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"root-missing": 1}}]}
+    },
+    {
+      "name": "drop reason containing a non-ASCII letter",
+      "rule": "dropped reason must contain only lowercase ASCII letters, digits and `_`",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"root_é": 1}}]}
+    },
+    {
+      "name": "negative drop count",
+      "rule": "u64",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"root_missing": -1}}]}
+    },
+    {
+      "name": "fractional drop count",
+      "rule": "u64",
+      "reply": {"items": [{"sessionRef": "c6ea741d409f833ee60be91d9176e493", "endOffset": 0, "digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "dropped": {"root_missing": 1.5}}]}
+    }
+  ]
+}

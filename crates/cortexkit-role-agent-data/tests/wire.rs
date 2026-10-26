@@ -41,6 +41,7 @@ const FILES: &[&str] = &[
     "README.md",
     "digest-mismatch.json",
     "diverged-reasons.json",
+    "import-drops.json",
 ];
 
 fn dir() -> String {
@@ -258,6 +259,80 @@ fn every_refused_reply_does_not_decode() {
             name(case)
         );
     }
+}
+
+#[test]
+fn import_dropped_vectors_validate_and_name_each_refused_rule() {
+    let file = load("import-drops.json");
+    let valid = cases(&file, "valid");
+    assert_eq!(valid.len(), 1);
+    for case in valid {
+        let _: ImportReply = round_trip(name(case), &case["reply"]);
+    }
+
+    let refused = cases(&file, "refused");
+    assert_eq!(refused.len(), 14);
+    let rules: BTreeSet<&str> = refused
+        .iter()
+        .map(|case| case["rule"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        rules,
+        BTreeSet::from([
+            "dropped must be non-empty",
+            "dropped must have at most 16 reasons",
+            "dropped reason must be non-empty",
+            "dropped reason must be at most 64 ASCII bytes",
+            "dropped reason must start with a lowercase ASCII letter",
+            "dropped reason must contain only lowercase ASCII letters, digits and `_`",
+            "dropped count must be positive",
+            "dropped count must be at most 9007199254740991",
+            "u64",
+        ])
+    );
+    for case in refused {
+        let case_name = name(case);
+        let err = serde_json::from_value::<ImportReply>(case["reply"].clone())
+            .expect_err(case_name)
+            .to_string();
+        let rule = case["rule"].as_str().unwrap();
+        assert!(
+            err.contains(rule),
+            "{case_name}: expected error naming {rule:?}, got {err:?}"
+        );
+    }
+}
+
+#[test]
+fn import_dropped_absence_preserves_existing_bytes_and_strict_items() {
+    let file = load("replies.json");
+    let case = cases(&file, "replies")
+        .iter()
+        .find(|case| name(case) == "import")
+        .unwrap();
+    let reply: ImportReply = round_trip(name(case), &case["reply"]);
+    // Pin the original serializer's bytes, not just a round trip of new bytes.
+    assert_eq!(
+        serde_json::to_string(&reply).unwrap(),
+        concat!(
+            "{\"items\":[{\"sessionRef\":\"c6ea741d409f833ee60be91d9176e493\",\"endOffset\":48213,",
+            "\"digest\":\"da267b5c82498c6ac578d48420db33f0e814aef902b86d332fc266dc57da05d8\"},",
+            "{\"sessionRef\":\"4ace44c6dd17c1d192db9a52d670ed42\",\"endOffset\":0,",
+            "\"digest\":\"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\"}]}"
+        )
+    );
+
+    let mut null = case["reply"].clone();
+    null["items"][0]["dropped"] = Value::Null;
+    let decoded: ImportReply = serde_json::from_value(null).unwrap();
+    assert_eq!(decoded, reply, "null decodes as absent");
+
+    let mut unknown = case["reply"].clone();
+    unknown["items"][0]["future"] = json!(true);
+    assert!(serde_json::from_value::<ImportReply>(unknown)
+        .unwrap_err()
+        .to_string()
+        .contains("unknown field `future`"));
 }
 
 #[test]

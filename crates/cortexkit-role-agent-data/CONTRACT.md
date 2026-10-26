@@ -458,8 +458,28 @@ check every digest.
 
 - Request: `{refs, cutId}`. Refs this participant doesn't hold yet are
   accepted (a first-time import).
-- Reply: `{items: [{sessionRef, endOffset, digest}]}`
+- Reply: `{items: [{sessionRef, endOffset, digest, dropped?}]}`
   (`import::ImportReply`).
+- Each item may carry `dropped`, a map from participant-defined reasons to
+  counts of entries dropped during import, for example
+  `{"root_missing": 12, "content_mismatch": 3}`. Omit it when nothing was
+  dropped; items without drops retain their previous wire bytes. As with
+  other optional reply fields, `null` decodes as absent.
+  - The map must be non-empty and contain at most 16 reasons. Each reason
+    must match `[a-z][a-z0-9_]{0,63}`: 1–64 ASCII bytes starting with a
+    lowercase letter. Counts must be positive integers at most
+    9007199254740991 (2^53 - 1). A reply that breaks any of these rules is a
+    contract violation; the driver stops the step as for an unknown refusal
+    code. The crate's validation names the violated rule.
+  - A move in which any item reports drops must never be shown or reported
+    as a clean success. The consumer shows it as **completed with losses**,
+    listing each reason and count. Reasons are participant-defined: a
+    consumer shows them as given and never branches on a particular reason.
+  - **Readers first:** older readers reject unknown item members. A
+    participant sends `dropped` only after the driver (Entorhinal) has
+    announced that it runs a release that decodes agent-data 0.2.4 or later. Upgrade
+    the coordinator's reader before participants send the field, in the
+    same order as the `reason` field on `diverged` (§7.6).
 - **A released copy here:** if this Mac holds a released (tombstoned) copy
   of the same refs, which happens on a move back, the import replaces it.
   That's the expected case.

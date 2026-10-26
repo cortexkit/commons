@@ -56,6 +56,10 @@ pub const FILES: &[(&str, &str)] = &[
         "diverged-reasons.json",
         include_str!("../test-vectors/agent-data-v1/diverged-reasons.json"),
     ),
+    (
+        "import-drops.json",
+        include_str!("../test-vectors/agent-data-v1/import-drops.json"),
+    ),
 ];
 
 /// `sha256sum` output over [`FILES`]: one `<hex>  <name>` line per file.
