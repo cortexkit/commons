@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.9
+
+- `compaction_setup_durable_once` no longer decides from one `session.head`
+  read right after the restart. It polls, with the subject's pause and at
+  most `MAX_POLLS` times, until the recovered Setup run reads `interrupted`
+  (then it sends the one continuation) or reads `active` with its first
+  model request held (resumed on its own). A runner whose crash recovery
+  seals its log in the background, and so still reads `active` for a moment,
+  now passes. A run that settles neither way fails the case by name, naming
+  the state it was last seen in. Every Setup-count and model-request check
+  is unchanged. The fake runner gains a background-seal mode and a
+  never-settling mode that prove both outcomes.
+
 ## 0.15.8
 
 - Include `account_change` in scripted rewrite rides and the fake runner's
