@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.7.7
+
+- The `held_copies_follow_reasoning_pruned` probe's cut conversation
+  starts its second lineage only at a cut the provider published. The probe
+  used to cut on its own after ordinal 1 and then send a Setup descending
+  from that cut. The provider never published it, so a conforming provider
+  refuses `unknown_cut` (CONTRACT.md §4) and no conforming provider could
+  pass. Now the probe asks the provider for a view with a cut through
+  ordinal 1 through the new optional `PrunedReasoningProbe::publish_cut`.
+  It checks that view as a runner checks a fetched view
+  (`view::dispose_fetched`), starts the new lineage after the view's own
+  `cut.through_ordinal`, and only then sends the descending Setup and
+  notice naming that cut. A later cut is applied where it stands; a view
+  without a cut, one a runner would not apply, or a cut below ordinal 1
+  fails by name. The cut conversation runs on every serializer profile's
+  transcript, as the conversation without a cut does.
+- An adapter without `publish_cut` (the default returns `None`) cannot have
+  the provider publish a cut, and the probe never cuts on its own. For it
+  the cut conversation is not run. `HeldCopiesReport` gains
+  `conversations_checked` and `conversations_not_applicable`, which names
+  `cut` with the reason. Not run is not a pass.
+- A Setup the provider refuses fails the probe with the refusal: the Setup
+  it answered (its lineage and any `descends_from`), the refuse code (for
+  example `unknown_cut`), any `provider_code`, and the reason. It used to
+  report any refusal as "the provider's Setup answer does not accept
+  pruned_reasoning". A ready answer without `pruned_reasoning` in
+  `accepts` still fails with that message, now naming the Setup. An
+  adapter error while delivering a Setup or a notice, or while building a
+  view, now names that step.
+- Kit tests guard these. A provider that refuses a Setup descending from
+  a cut it never published passes on every transcript. One that refuses
+  `unknown_cut` for a cut it did publish fails by name. A recording
+  provider shows that every descending Setup names a cut a published view
+  carried; that test failed on the 0.7.6 probe.
+
 ## 0.7.6
 
 - The `held_copies_follow_reasoning_pruned` probe's no-second-reconcile

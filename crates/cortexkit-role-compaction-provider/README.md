@@ -39,7 +39,14 @@ conversation without a cut and one where a cut leaves the provider holding
 copies from before it. The adapter delivers the probe's Setup requests and
 notices, answers the provider's reverse `session.read` and `session.head`
 calls with the `ScriptedRunner` it is given, and returns the provider's next
-view on request. Configure the provider to render held messages as held, in a
+view on request. The cut comes from the provider: the adapter's optional
+`PrunedReasoningProbe::publish_cut` has the provider publish a view with a
+cut, which the probe applies as a runner would before it sends the Setup
+descending from that cut. The probe never cuts on its own, because a provider
+refuses `unknown_cut` for a cut it never published. Without `publish_cut`
+the cut conversation is not run, and the report names it not applicable in
+`conversations_not_applicable`. A Setup the provider refuses fails the probe
+with the refuse code and reason. Configure the provider to render held messages as held, in a
 verbatim fold or in keep-range part edits: a view that neither replaces nor
 edits a pruned message checks nothing and fails. The probe fails a
 provider that renders pruned content from a held copy, from either side of its

@@ -17,9 +17,10 @@ use transcripts::{PruneMode, Transcript};
 use crate::{
     digest::content_digest,
     lineage::DescendsFrom,
+    notice::ViewReady,
     notice::{AdvanceNotice, NoticeDescent},
     setup::{SetupAnswer, SetupRequest, ACCEPTS_PRUNED_REASONING},
-    view::{CompactionView, ViewRange},
+    view::{dispose_fetched, CompactionView, TranscriptMessage, ViewDisposition, ViewRange},
 };
 
 /// The case name included in every failure returned by the probe.
@@ -326,6 +327,22 @@ impl ScriptedRunner {
     fn first_ordinal(&self) -> u64 {
         self.lock().first_ordinal
     }
+
+    /// The message served at `ordinal` as a runner's view checks see it:
+    /// its `mid`, its part keys in order, and its body as served.
+    fn transcript_message(&self, ordinal: u64) -> Option<TranscriptMessage> {
+        let state = self.lock();
+        let served = state.served.get(usize::try_from(ordinal).ok()?)?;
+        let parts = state.transcript.parts(&state.originals[ordinal as usize]);
+        Some(TranscriptMessage::new(
+            ordinal,
+            state.transcript.message_id(ordinal),
+            (0..parts.len())
+                .map(|index| part_key(ordinal, index))
+                .collect(),
+            served.clone(),
+        ))
+    }
 }
 
 /// The adapter for [`held_copies_follow_reasoning_pruned`]. Use a fresh
@@ -366,6 +383,37 @@ pub trait PrunedReasoningProbe {
         runner: &ScriptedRunner,
         session_ref: &str,
     ) -> Result<CompactionView, String>;
+
+    /// Have the provider publish a view of the conversation now that carries
+    /// a `cut` through `through_ordinal` (`compaction-provider/v1` §6), the
+    /// way it publishes a cut it decides on itself, and return that view as
+    /// published. Configure the provider so everything through the cut is in
+    /// replace ranges, as a cut requires.
+    ///
+    /// The probe applies the returned view as a runner applies a fetched
+    /// view: it checks it as [`crate::view::dispose_fetched`] does, then
+    /// starts the conversation's next lineage after the view's own
+    /// `cut.through_ordinal`. A cut through another ordinal, from
+    /// `through_ordinal` up to the view's coverage, is applied where it
+    /// stands. Only after that does the probe call the new lineage's Setup
+    /// with `descends_from` naming that cut.
+    ///
+    /// `None`, the default, means the adapter cannot have the provider
+    /// publish a cut on demand. The probe never cuts on its own, because a
+    /// provider refuses a Setup descending from a cut it never published
+    /// (`unknown_cut`, §4). So without this method the conversation with a
+    /// cut is not run: the report names it not applicable
+    /// ([`HeldCopiesReport::conversations_not_applicable`]), which is not a
+    /// pass.
+    fn publish_cut(
+        &mut self,
+        runner: &ScriptedRunner,
+        session_ref: &str,
+        through_ordinal: u64,
+    ) -> Option<Result<CompactionView, String>> {
+        let _ = (runner, session_ref, through_ordinal);
+        None
+    }
 }
 
 struct Conversation<'a, A: PrunedReasoningProbe> {
@@ -408,6 +456,15 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
         )
         .with_lineage(lineage_id);
         request.params = self.params();
+        // Names this Setup in a failure, so a refusal of the Setup that
+        // follows a cut reads differently from one on a fresh lineage.
+        let which = match &descends_from {
+            Some(descent) => format!(
+                "the Setup of lineage {lineage_id}, descending from {} through ordinal {}",
+                descent.lineage_id, descent.through_ordinal
+            ),
+            None => format!("the Setup of lineage {lineage_id}"),
+        };
         if let Some(descent) = descends_from {
             request = request.with_descends_from(descent);
         }
@@ -417,17 +474,29 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
         let answer = self
             .adapter
             .setup(&self.runner, &request)
-            .map_err(|e| self.fail(e))?;
-        if !matches!(answer, SetupAnswer::Ready { .. })
-            || !answer
-                .accepts()
-                .iter()
-                .any(|a| a == ACCEPTS_PRUNED_REASONING)
+            .map_err(|e| self.fail(format!("delivering {which} failed: {e}")))?;
+        // A refusal is reported as the refusal it is, with its code: it
+        // says nothing about what the provider accepts.
+        if let Some(code) = answer.refuse_code() {
+            let provider_code = answer
+                .provider_code()
+                .map(|c| format!(" (provider_code {c})"))
+                .unwrap_or_default();
+            return Err(self.fail(format!(
+                "the provider refused {which}: code {}{provider_code}, reason: {}",
+                code.as_str(),
+                answer.refuse_reason().unwrap_or_default()
+            )));
+        }
+        if !answer
+            .accepts()
+            .iter()
+            .any(|a| a == ACCEPTS_PRUNED_REASONING)
         {
-            return Err(self.fail(
-                "the provider's Setup answer does not accept pruned_reasoning; the probe \
-                 applies only to providers that do",
-            ));
+            return Err(self.fail(format!(
+                "the provider's ready answer to {which} does not accept pruned_reasoning; the \
+                 probe applies only to providers that do"
+            )));
         }
         Ok(())
     }
@@ -456,9 +525,68 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
         if let Some(pruned) = pruned {
             notice = notice.with_reasoning_pruned(pruned);
         }
-        self.adapter
-            .notice(&self.runner, &notice)
-            .map_err(|e| self.fail(e))
+        self.adapter.notice(&self.runner, &notice).map_err(|e| {
+            self.fail(format!(
+                "delivering the notice through ordinal {through} of lineage {lineage_id} \
+                 failed: {e}"
+            ))
+        })
+    }
+
+    /// Have the provider publish a view with a cut, through `asked` or later,
+    /// and apply it as a runner applies a provider's cut: the view must pass
+    /// a runner's checks of a fetched view against the current lineage and
+    /// carry a cut. Returns the cut's `through_ordinal`, or `None` when the
+    /// adapter cannot have the provider publish a cut. The new lineage is
+    /// started by the caller, after this ordinal and nowhere else.
+    fn apply_published_cut(&mut self, asked: u64) -> Result<Option<u64>, String> {
+        let Some(published) = self
+            .adapter
+            .publish_cut(&self.runner, &self.session_ref, asked)
+        else {
+            return Ok(None);
+        };
+        let view = published.map_err(|e| {
+            self.fail(format!(
+                "having the provider publish a view with a cut through ordinal {asked} failed: {e}"
+            ))
+        })?;
+        let (lineage, first) = {
+            let state = self.runner.lock();
+            (state.lineage_id.clone(), state.first_ordinal)
+        };
+        // Announced as a runner learns of it, under the probe's own session
+        // reference, so a view naming another session is not the one asked
+        // for.
+        let ready = ViewReady::new(
+            self.session_ref.clone(),
+            view.view_version,
+            view.covers_through.ordinal,
+            view.digest.clone(),
+        );
+        let disposition = dispose_fetched(&view, &ready, None, &lineage, first, |ordinal| {
+            self.runner.transcript_message(ordinal)
+        });
+        if disposition != ViewDisposition::Apply {
+            return Err(self.fail(format!(
+                "the view the provider published for a cut is not one a runner applies: {}",
+                disposition.name()
+            )));
+        }
+        let Some(cut) = &view.cut else {
+            return Err(self.fail(format!(
+                "the view the provider published when asked for a cut through ordinal {asked} \
+                 carries no cut"
+            )));
+        };
+        if cut.through_ordinal < asked {
+            return Err(self.fail(format!(
+                "the provider's published cut is through ordinal {}, below ordinal {asked} the \
+                 probe asked for, so no pruned answer would lie before it",
+                cut.through_ordinal
+            )));
+        }
+        Ok(Some(cut.through_ordinal))
     }
 
     /// Check a view against the runner's prune record: no replace range may
@@ -468,7 +596,11 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
         let view = self
             .adapter
             .next_view(&self.runner, &self.session_ref)
-            .map_err(|e| self.fail(e))?;
+            .map_err(|e| {
+                self.fail(format!(
+                    "having the provider build its next view failed: {e}"
+                ))
+            })?;
         let pruned = self.runner.pruned();
         let first = self.runner.first_ordinal();
         let transcript = self.runner.lock().transcript;
@@ -570,22 +702,30 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
 /// signature, so an edit re-serializing a held part fails too), and that a
 /// later notice with the same generation causes no second re-read: it may
 /// read from its newest held message onward, a continuity overlap, but
-/// nothing held below it. In the second, a cut first moves the conversation to a
-/// lineage starting at ordinal 2, so the provider holds copies from before
-/// its cut; after the prune it must re-read only from the cut and must not
-/// render those older copies' pruned content. Both prune with the
+/// nothing held below it. In the second, the provider first publishes a view
+/// with a cut ([`PrunedReasoningProbe::publish_cut`]) and the probe applies
+/// it as a runner would, moving the conversation to a lineage starting after
+/// that cut (at ordinal 2 for a cut through ordinal 1), with a Setup
+/// descending from the cut the provider published. The provider then holds
+/// copies from before its cut; after the prune it must re-read only from the
+/// cut and must not render those older copies' pruned content. The probe
+/// never cuts on its own, so for an adapter without `publish_cut` the second
+/// conversation is not run and is reported not applicable. Both prune with the
 /// `reasoning` and `signature` kinds. A profile transcript adds a third
 /// conversation, pruning with `opaque_reasoning` and `signature`, where only
 /// opaque payloads go and readable reasoning stays; a runner's check would
 /// refuse that readable reasoning beside a `reasoning` prune in the same
 /// fold, so the kinds are not mixed.
 ///
+/// A Setup the provider refuses fails the probe with the refusal's code and
+/// reason.
+///
 /// The transcript follows the adapter's
 /// [`PrunedReasoningProbe::serializer_profile`]. A logical part or prune
 /// kind that profile cannot carry is not checked: `Ok` here means every
-/// part the profile carries passed. Use
-/// [`held_copies_follow_reasoning_pruned_report`] to see which were checked
-/// and which were not applicable, by name.
+/// part the profile carries, in every conversation that ran, passed. Use
+/// [`held_copies_follow_reasoning_pruned_report`] to see which parts and
+/// conversations were checked and which were not applicable, by name.
 pub fn held_copies_follow_reasoning_pruned(
     adapter: &mut impl PrunedReasoningProbe,
 ) -> Result<(), String> {
@@ -606,6 +746,13 @@ pub struct HeldCopiesReport {
     pub kinds_checked: Vec<&'static str>,
     pub parts_not_applicable: Vec<NotApplicable>,
     pub kinds_not_applicable: Vec<NotApplicable>,
+    /// The probe's conversations that ran and passed, by name: `no-cut`,
+    /// `cut` and, on a profile transcript, `opaque`.
+    pub conversations_checked: Vec<&'static str>,
+    /// The conversations that did not run, by name, and why: `cut` when the
+    /// adapter cannot have the provider publish a cut
+    /// ([`PrunedReasoningProbe::publish_cut`]). Not run is not passed.
+    pub conversations_not_applicable: Vec<NotApplicable>,
 }
 
 /// [`held_copies_follow_reasoning_pruned`], returning on success what was
@@ -629,6 +776,8 @@ pub fn held_copies_follow_reasoning_pruned_report(
     if transcript.opaque_mode() {
         conversations.push(("opaque", false, PruneMode::Opaque));
     }
+    let mut conversations_checked = Vec::new();
+    let mut conversations_not_applicable = Vec::new();
     for (label, cut, mode) in conversations {
         let session = format!("probe-pruned-{label}");
         let session_ref =
@@ -654,20 +803,33 @@ pub fn held_copies_follow_reasoning_pruned_report(
         conversation.notice("probe-lineage-a", 4, None, None)?;
         let mut through = 4;
         if cut {
-            // A cut after ordinal 1: the new lineage starts at 2, and the
-            // provider keeps its copies of 0 and 1 from before it.
+            // The cut comes from the provider: it publishes a view cutting
+            // after ordinal 1 (or later), and the runner applies that cut.
+            // A runner that cut on its own would name a cut the provider
+            // never published, which a provider must refuse `unknown_cut`.
+            let Some(cut_at) = conversation.apply_published_cut(1)? else {
+                conversations_not_applicable.push(NotApplicable {
+                    name: label,
+                    reason: "the adapter cannot have the provider publish a cut \
+                             (PrunedReasoningProbe::publish_cut), and the probe never cuts on \
+                             its own",
+                });
+                continue;
+            };
+            // The new lineage starts after the published cut, and the
+            // provider keeps its copies from before it.
             conversation.runner.append_through(6);
-            conversation.runner.cut("probe-lineage-b", 2);
+            conversation.runner.cut("probe-lineage-b", cut_at + 1);
             let descent = DescendsFrom {
                 lineage_id: "probe-lineage-a".into(),
-                through_ordinal: 1,
+                through_ordinal: cut_at,
             };
             conversation.setup("probe-lineage-b", Some(descent), None)?;
-            let digest = conversation.runner.digest_at(1);
+            let digest = conversation.runner.digest_at(cut_at);
             conversation.notice(
                 "probe-lineage-b",
                 6,
-                Some(NoticeDescent::new("probe-lineage-a", 1, digest)),
+                Some(NoticeDescent::new("probe-lineage-a", cut_at, digest)),
                 None,
             )?;
             through = 6;
@@ -679,6 +841,7 @@ pub fn held_copies_follow_reasoning_pruned_report(
         conversation.check_view()?;
         conversation.check_reconciled(through)?;
         conversation.check_no_second_reconcile()?;
+        conversations_checked.push(label);
     }
     Ok(HeldCopiesReport {
         profile: transcript.profile(),
@@ -686,6 +849,8 @@ pub fn held_copies_follow_reasoning_pruned_report(
         kinds_checked: transcript.kinds_checked(),
         parts_not_applicable: transcript.parts_not_applicable(),
         kinds_not_applicable: transcript.kinds_not_applicable(),
+        conversations_checked,
+        conversations_not_applicable,
     })
 }
 
@@ -789,6 +954,13 @@ mod tests {
         reconciled: Option<u64>,
         pre_cut_through: Option<u64>,
         version: u64,
+        /// Cuts this provider published, as `(lineage, through_ordinal)`. A
+        /// Setup descending from any other cut is refused `unknown_cut`.
+        published_cuts: Vec<(String, u64)>,
+        /// The adapter offers no `publish_cut`.
+        cannot_publish_cuts: bool,
+        /// Publish a cut through this ordinal instead of the one asked for.
+        cut_through: Option<u64>,
     }
 
     #[derive(Clone, Copy, PartialEq, Eq)]
@@ -806,6 +978,11 @@ mod tests {
         /// Reconciles after the `reasoning` prunes but not after the
         /// `opaque_reasoning` one, so it renders held opaque payloads.
         IgnoresOpaquePrune,
+        /// Refuses `unknown_cut` a Setup descending from a cut it did
+        /// publish.
+        RefusesPublishedCut,
+        /// Answers a request to publish a cut with a view carrying none.
+        PublishesNoCut,
     }
 
     impl HoldingProvider {
@@ -961,6 +1138,8 @@ mod tests {
                     fault: self.fault,
                     profile: self.profile.take(),
                     edits_mode: self.edits_mode,
+                    cannot_publish_cuts: self.cannot_publish_cuts,
+                    cut_through: self.cut_through,
                     session: request.session.clone(),
                     ..Self::default()
                 };
@@ -976,6 +1155,18 @@ mod tests {
             );
             if let Some(lineage) = &request.lineage_id {
                 self.lineage = lineage.clone();
+            }
+            if let Some(descent) = &request.descends_from {
+                let published = self
+                    .published_cuts
+                    .contains(&(descent.lineage_id.clone(), descent.through_ordinal));
+                if !published || self.fault == Some(HoldingFault::RefusesPublishedCut) {
+                    return Ok(SetupAnswer::refuse(
+                        request.request_id.clone(),
+                        crate::errors::RefuseCode::from_code(crate::errors::UNKNOWN_CUT),
+                        "no view of this provider carried that cut",
+                    ));
+                }
             }
             if let Some(state) = request.reasoning_pruned {
                 self.reconcile(runner, state);
@@ -1067,6 +1258,50 @@ mod tests {
                 ranges,
             ))
         }
+
+        /// Fold every held message through the cut verbatim in one replace
+        /// range and keep the rest, so the cut sits on a range boundary
+        /// with only replaced messages before it.
+        fn publish_cut(
+            &mut self,
+            _runner: &ScriptedRunner,
+            session_ref: &str,
+            through_ordinal: u64,
+        ) -> Option<Result<CompactionView, String>> {
+            if self.cannot_publish_cuts {
+                return None;
+            }
+            let at = self.cut_through.unwrap_or(through_ordinal);
+            let last = *self.held.keys().next_back().unwrap();
+            let folded: Vec<Value> = self.held.range(..=at).map(|(_, m)| m.clone()).collect();
+            let mut ranges = vec![ViewRange::replace(
+                0,
+                at + 1,
+                serde_json::to_string(&folded).unwrap(),
+            )];
+            if at < last {
+                ranges.push(ViewRange::keep(at + 1, last + 1));
+            }
+            self.version += 1;
+            let view = CompactionView::new(
+                session_ref,
+                self.version,
+                self.lineage.clone(),
+                crate::lineage::MessageRef {
+                    ordinal: last,
+                    mid: self.mids[&last].clone(),
+                },
+                ranges,
+            );
+            if self.fault == Some(HoldingFault::PublishesNoCut) {
+                return Some(Ok(view));
+            }
+            self.published_cuts.push((self.lineage.clone(), at));
+            Some(Ok(view.with_cut(crate::view::ViewCut::new(
+                format!("probe-cut-{}", self.version),
+                at,
+            ))))
+        }
     }
 
     #[test]
@@ -1146,6 +1381,15 @@ mod tests {
             session_ref: &str,
         ) -> Result<CompactionView, String> {
             self.inner.next_view(runner, session_ref)
+        }
+
+        fn publish_cut(
+            &mut self,
+            runner: &ScriptedRunner,
+            session_ref: &str,
+            through_ordinal: u64,
+        ) -> Option<Result<CompactionView, String>> {
+            self.inner.publish_cut(runner, session_ref, through_ordinal)
         }
     }
 
@@ -1400,6 +1644,203 @@ mod tests {
         );
     }
 
+    /// The probe's transcripts: the generic one and one per profile.
+    fn every_transcript() -> impl Iterator<Item = Option<&'static str>> {
+        std::iter::once(None).chain(PROFILES.map(Some))
+    }
+
+    fn on_transcript(profile: Option<&str>) -> HoldingProvider {
+        HoldingProvider {
+            profile: profile.map(str::to_owned),
+            ..HoldingProvider::default()
+        }
+    }
+
+    #[test]
+    fn provider_honouring_its_published_cuts_passes_the_cut_conversation_on_every_profile() {
+        for profile in every_transcript() {
+            let report = held_copies_follow_reasoning_pruned_report(&mut on_transcript(profile))
+                .unwrap_or_else(|e| panic!("{profile:?}: {e}"));
+            assert!(
+                report.conversations_checked.contains(&"cut"),
+                "{profile:?}: {:?}",
+                report.conversations_checked
+            );
+            assert_eq!(report.conversations_not_applicable, [], "{profile:?}");
+        }
+    }
+
+    #[test]
+    fn provider_refusing_a_cut_it_published_fails_by_name_on_every_profile() {
+        for profile in every_transcript() {
+            let mut provider = on_transcript(profile);
+            provider.fault = Some(HoldingFault::RefusesPublishedCut);
+            assert_eq!(
+                held_copies_follow_reasoning_pruned(&mut provider).unwrap_err(),
+                format!(
+                    "{HELD_COPIES_CASE}: the provider refused the Setup of lineage \
+                     probe-lineage-b, descending from probe-lineage-a through ordinal 1: code \
+                     unknown_cut, reason: no view of this provider carried that cut"
+                ),
+                "{profile:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_publishing_a_view_without_its_cut_fails_by_name() {
+        let failure = held_copies_follow_reasoning_pruned(&mut HoldingProvider::with(
+            HoldingFault::PublishesNoCut,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            failure,
+            format!(
+                "{HELD_COPIES_CASE}: the view the provider published when asked for a cut \
+                 through ordinal 1 carries no cut"
+            )
+        );
+    }
+
+    #[test]
+    fn adapter_that_cannot_publish_a_cut_reports_the_cut_conversation_not_applicable() {
+        for profile in every_transcript() {
+            let mut provider = on_transcript(profile);
+            provider.cannot_publish_cuts = true;
+            let report = held_copies_follow_reasoning_pruned_report(&mut provider)
+                .unwrap_or_else(|e| panic!("{profile:?}: {e}"));
+            assert_eq!(
+                names(&report.conversations_not_applicable),
+                ["cut"],
+                "{profile:?}"
+            );
+            assert!(
+                !report.conversations_checked.contains(&"cut"),
+                "{profile:?}"
+            );
+            assert!(
+                report.conversations_checked.contains(&"no-cut"),
+                "{profile:?}"
+            );
+        }
+    }
+
+    /// A holding provider that also records every cut it published, as
+    /// `(lineage, through_ordinal)` taken from the views it returned, and
+    /// every `descends_from` a Setup named.
+    struct CutRecorder {
+        inner: HoldingProvider,
+        published: Vec<(String, u64)>,
+        descents: Vec<(String, u64)>,
+    }
+
+    impl CutRecorder {
+        fn on(inner: HoldingProvider) -> Self {
+            Self {
+                inner,
+                published: Vec::new(),
+                descents: Vec::new(),
+            }
+        }
+    }
+
+    impl PrunedReasoningProbe for CutRecorder {
+        fn serializer_profile(&self) -> Option<String> {
+            self.inner.serializer_profile()
+        }
+
+        fn setup(
+            &mut self,
+            runner: &ScriptedRunner,
+            request: &SetupRequest,
+        ) -> Result<SetupAnswer, String> {
+            if let Some(descent) = &request.descends_from {
+                self.descents
+                    .push((descent.lineage_id.clone(), descent.through_ordinal));
+            }
+            self.inner.setup(runner, request)
+        }
+
+        fn notice(
+            &mut self,
+            runner: &ScriptedRunner,
+            notice: &AdvanceNotice,
+        ) -> Result<(), String> {
+            self.inner.notice(runner, notice)
+        }
+
+        fn next_view(
+            &mut self,
+            runner: &ScriptedRunner,
+            session_ref: &str,
+        ) -> Result<CompactionView, String> {
+            let view = self.inner.next_view(runner, session_ref)?;
+            if let Some(cut) = &view.cut {
+                self.published
+                    .push((view.lineage_id.clone(), cut.through_ordinal));
+            }
+            Ok(view)
+        }
+
+        fn publish_cut(
+            &mut self,
+            runner: &ScriptedRunner,
+            session_ref: &str,
+            through_ordinal: u64,
+        ) -> Option<Result<CompactionView, String>> {
+            let published = self.inner.publish_cut(runner, session_ref, through_ordinal);
+            if let Some(Ok(view)) = &published {
+                if let Some(cut) = &view.cut {
+                    self.published
+                        .push((view.lineage_id.clone(), cut.through_ordinal));
+                }
+            }
+            published
+        }
+    }
+
+    /// The probe sends a Setup descending from a cut only after a view the
+    /// provider published carried that cut. A runner that cut on its own
+    /// would name a cut no view published, which a conforming provider
+    /// refuses `unknown_cut`.
+    #[test]
+    fn probe_descends_only_from_a_cut_a_published_view_carried() {
+        for profile in every_transcript() {
+            let mut recorder = CutRecorder::on(on_transcript(profile));
+            let outcome = held_copies_follow_reasoning_pruned(&mut recorder);
+            // Checked before the outcome: a descent from an unpublished cut
+            // is the defect, and the provider's refusal only follows from it.
+            assert!(!recorder.descents.is_empty(), "{profile:?}: no descent");
+            for descent in &recorder.descents {
+                assert!(
+                    recorder.published.contains(descent),
+                    "{profile:?}: a Setup descends from {descent:?}, a cut no view published \
+                     (published: {:?})",
+                    recorder.published
+                );
+            }
+            outcome.unwrap_or_else(|e| panic!("{profile:?}: {e}"));
+        }
+    }
+
+    /// A provider's cut is applied where the provider put it, not where the
+    /// probe asked: the new lineage starts after it and the Setup names it.
+    #[test]
+    fn a_later_published_cut_is_applied_where_it_stands() {
+        for profile in every_transcript() {
+            let mut inner = on_transcript(profile);
+            inner.cut_through = Some(3);
+            let mut recorder = CutRecorder::on(inner);
+            held_copies_follow_reasoning_pruned(&mut recorder)
+                .unwrap_or_else(|e| panic!("{profile:?}: {e}"));
+            assert_eq!(
+                recorder.descents,
+                [("probe-lineage-a".to_owned(), 3)],
+                "{profile:?}"
+            );
+        }
+    }
+
     /// The host's own id for a message body, where the profile's stored
     /// format carries one: OpenCode's `info.id` and a `pi` journal entry's
     /// `id`. The other profiles' bodies carry no message id, so the runner
@@ -1524,6 +1965,15 @@ mod tests {
             session_ref: &str,
         ) -> Result<CompactionView, String> {
             self.inner.next_view(runner, session_ref)
+        }
+
+        fn publish_cut(
+            &mut self,
+            runner: &ScriptedRunner,
+            session_ref: &str,
+            through_ordinal: u64,
+        ) -> Option<Result<CompactionView, String>> {
+            self.inner.publish_cut(runner, session_ref, through_ordinal)
         }
     }
 
