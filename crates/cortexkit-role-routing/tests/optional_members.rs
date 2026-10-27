@@ -1,11 +1,15 @@
 use cortexkit_role_routing::{
     account::{parse_account_for_request, AccountForRequest, CONVERSATION_KEY_MAX_CHARS},
-    capabilities::{SELECT_HOLD_CONTROL, SELECT_PREFER},
+    capabilities::{SELECT_EXCLUDE_PROVIDERS, SELECT_HOLD_CONTROL, SELECT_PREFER},
     describe::RoleDescribe,
     errors::RefusalCode,
     observe::parse_account_observe_request,
     report::{parse_report_request, EligibilityScope, MAX_USAGE_COUNT},
-    select::{parse_select_request, parse_select_request_serving, PinFallback, PinOutcome},
+    select::{
+        check_answer, is_provider_id, is_route_key, parse_select_request,
+        parse_select_request_serving, AnswerProblem, PinFallback, PinOutcome, RouteRef, RunnerRef,
+        SelectAnswer,
+    },
 };
 use serde_json::{json, Value};
 
@@ -152,6 +156,91 @@ fn prefer_entries_are_validated_by_name() {
     let refusal = parse_select_request_serving(&select_with(json!({"prefer": many})), &group)
         .expect_err("too many");
     assert_eq!(refusal.detail["field"], "prefer");
+}
+
+#[test]
+fn exclude_providers_is_refused_by_name_without_the_group() {
+    let describe = RoleDescribe::new(vec![], false);
+    assert!(!describe.serves(SELECT_EXCLUDE_PROVIDERS));
+    let params = select_with(json!({"exclude_providers": ["example-provider"]}));
+    for refusal in [
+        parse_select_request(&params).expect_err("no group"),
+        parse_select_request_serving(&params, &describe.capabilities[..]).expect_err("no group"),
+        parse_select_request_serving(&params, &[SELECT_PREFER]).expect_err("other group"),
+    ] {
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest);
+        assert_eq!(refusal.detail["field"], "exclude_providers");
+    }
+    let declared = describe.with_capability(SELECT_EXCLUDE_PROVIDERS);
+    let request = parse_select_request_serving(&params, &declared.capabilities[..]).unwrap();
+    assert_eq!(request.exclude_providers.unwrap(), ["example-provider"]);
+    assert!(parse_select_request(&select_with(json!({"exclude_providers": null}))).is_ok());
+}
+
+#[test]
+fn exclude_providers_entries_are_validated_like_exclude() {
+    let group = [SELECT_EXCLUDE_PROVIDERS];
+    // Like exclude: no length limit, and a repeated entry is not refused.
+    let many: Vec<Value> = (0..40).map(|n| json!(format!("provider-{n}"))).collect();
+    for members in [
+        json!({"exclude_providers": []}),
+        json!({"exclude_providers": many}),
+        json!({"exclude_providers": ["example-provider", "example-provider"]}),
+        json!({"exclude_providers": ["example:provider"]}),
+    ] {
+        parse_select_request_serving(&select_with(members.clone()), &group)
+            .unwrap_or_else(|refusal| panic!("{members}: {refusal}"));
+    }
+    for members in [
+        json!({"exclude_providers": [""]}),
+        json!({"exclude_providers": ["example-provider/model-a"]}),
+        json!({"exclude_providers": ["/"]}),
+        json!({"exclude_providers": "example-provider"}),
+        json!({"exclude_providers": [7]}),
+    ] {
+        let refusal = parse_select_request_serving(&select_with(members.clone()), &group)
+            .expect_err(&members.to_string());
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest, "{members}");
+        assert_eq!(refusal.detail["field"], "exclude_providers", "{members}");
+    }
+    // Every provider id accepted here is the provider part of a route key.
+    for id in ["example-provider", "example:provider"] {
+        assert!(is_route_key(&format!("{id}/model-a")), "{id}");
+        assert!(is_provider_id(id), "{id}");
+    }
+}
+
+#[test]
+fn check_answer_refuses_a_route_from_an_excluded_provider() {
+    let request = parse_select_request_serving(
+        &select_with(json!({"exclude_providers": ["example-subscription"]})),
+        &[SELECT_EXCLUDE_PROVIDERS],
+    )
+    .unwrap();
+    let answer = |provider: &str| {
+        let route = RouteRef::new(provider, "model-c");
+        SelectAnswer::new(
+            "decision-1",
+            route.clone(),
+            RunnerRef::new("runner-one", route),
+            200_000,
+            64_000,
+            u64::MAX,
+            "It meets the request.",
+        )
+    };
+    assert_eq!(
+        check_answer(&request, &answer("example-subscription")),
+        Err(AnswerProblem::ExcludedProvider(
+            "example-subscription/model-c".into()
+        ))
+    );
+    // A provider whose id only starts with an excluded one is not excluded.
+    assert_eq!(
+        check_answer(&request, &answer("example-subscription-two")),
+        Ok(())
+    );
+    assert_eq!(check_answer(&request, &answer("example-provider")), Ok(()));
 }
 
 #[test]

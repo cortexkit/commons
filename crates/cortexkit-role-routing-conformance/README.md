@@ -8,7 +8,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.7.1"
+cortexkit-role-routing-conformance = "0.7.2"
 ```
 
 ```rust,ignore
@@ -88,9 +88,10 @@ raises a `context_window` or `max_output_tokens` floor instead.
 
 ## Checks
 
-The kit runs 53 checks, including six declaration checks, eight optional-member
-checks, four additional program checks, nine hold checks, and eight new checks
-for pin fallback, reset fences, prefer and usage. The hold checks cover the optional
+The kit runs 56 checks, including six declaration checks, eight optional-member
+checks, four additional program checks, nine hold checks, eight checks
+for pin fallback, reset fences, prefer and usage, and three for provider
+exclusion. The hold checks cover the optional
 `select_hold_control` group: against a provider whose `role.describe` does
 not declare it they report not applicable (`CheckOutcome::NotApplicable`,
 printed `N/A`), and the verdict stays `Passed`. The two prefer routing checks
@@ -99,7 +100,10 @@ cover the optional `select_prefer` group the same way.
 The requested-program check is likewise not applicable without `select_harness`;
 the undeclared-group refusal check runs only without that group. The prefer
 routing checks are likewise not applicable without `select_prefer`; the
-undeclared-prefer refusal check runs only without that group. Default-program
+undeclared-prefer refusal check runs only without that group. The two
+`exclude_providers` checks are likewise not applicable without
+`select_exclude_providers`, and the undeclared-group refusal check for it runs
+only without that group. Default-program
 and non-starting-runner checks run regardless of the group. `harness_catalog()`
 adds a runner with `["alpha", "beta"]` and default `"alpha"`, a singleton
 `["solo"]` with no default, and an attach-only gateway with
@@ -170,6 +174,9 @@ provider declares `select_harness`.
 | `prefer_never_admits_inadequate_route` | §5.1: `select_prefer` never admits a route the request would not get |
 | `undeclared_prefer_group_refuses_member` | §5.1: without `select_prefer`, refuse `prefer` by field name |
 | `report_usage_strict` | §8: bad usage counts or unknown members are `invalid_request {field: usage}` |
+| `exclude_providers_answers_another_provider` | §5.1: `select_exclude_providers` never answers a route from a listed provider |
+| `exclude_providers_every_provider_no_route` | §5.1: excluding every provider is the `no_route` an `exclude` of every route gets |
+| `undeclared_exclude_providers_group_refuses_member` | §5.1: without `select_exclude_providers`, refuse `exclude_providers` by field name |
 
 `CHECKS` in `src/report.rs` states what each check asserts, and `NARROWINGS`
 where it checks less than the contract says; every report prints both.

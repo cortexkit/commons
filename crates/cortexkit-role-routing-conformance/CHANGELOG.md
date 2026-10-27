@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.2
+
+- Depend on routing 0.5.1. Add three checks (56 total) for the optional
+  `select_exclude_providers` group: excluding the provider of the route a
+  select is otherwise answered gives a route from another provider, and
+  excluding every provider is refused `no_route` with the reason and
+  `reset_at_ms` a select excluding every route key gets. Both are not
+  applicable without the group. A third check, run only without the group,
+  requires `exclude_providers` to be refused `invalid_request` naming it.
+  Faulty providers that ignore `exclude_providers`, that answer an excluded
+  provider when nothing else is left, and that accept the member without the
+  group each fail by name. A new entry in `NARROWINGS`, the kit's list of
+  where it checks less than the contract says, names what the group's checks
+  leave out.
+
 ## 0.7.1
 
 - Fix `prefer_never_admits_inadequate_route`: its request nothing meets now

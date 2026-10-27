@@ -8,14 +8,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.5.0"
+cortexkit-role-routing = "0.5.1"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.5.0", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.5.1", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -32,7 +32,8 @@ What the crate holds:
 - `describe`: the `role.describe` answer, its optional `capabilities`
   groups, and `check_describe`;
 - `capabilities`: the optional groups this version defines
-  (`select_hold_control`, `select_harness`, `select_prefer`);
+  (`select_hold_control`, `select_harness`, `select_prefer`,
+  `select_exclude_providers`);
 - `select`: the `route.select` request, `parse_select_request` and
   `parse_select_request_serving` (which reads the members of the groups a
   provider declares), the answer and `check_answer`;
@@ -91,6 +92,15 @@ With the `select_prefer` describe group, a caller may send `prefer` using
 provider answers a listed adequate route in list order, never admitting one
 the request would not otherwise get. A provider without the group refuses
 `prefer` by name, like `hold_ok`.
+
+With the `select_exclude_providers` describe group, a caller may send
+`exclude_providers` using `SelectRequest::with_exclude_providers`: provider
+ids, each the part of a route key before the `/`. No route from a listed
+provider is answered, and `check_answer` refuses one that is. When every
+adequate route is from a listed provider the select is the same `no_route`
+an `exclude` listing those routes gets. `exclude` keeps its meaning. A
+provider without the group refuses `exclude_providers` by name, so a caller
+sends it only after `role.describe` declares the group.
 
 With `pin_fallback` (`SelectRequest::with_pin_fallback`) beside a pin, an
 unservable pin routes normally instead of refusing `pin_unavailable`. The

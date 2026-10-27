@@ -108,8 +108,17 @@ pub mod capabilities {
     /// `route.select` reads the caller's ordered route preference, `prefer`.
     pub const SELECT_PREFER: &str = "select_prefer";
 
+    /// `route.select` reads the caller's `exclude_providers`: provider ids
+    /// none of whose routes may be answered.
+    pub const SELECT_EXCLUDE_PROVIDERS: &str = "select_exclude_providers";
+
     /// Every group this version defines.
-    pub const KNOWN: &[&str] = &[SELECT_HOLD_CONTROL, SELECT_HARNESS, SELECT_PREFER];
+    pub const KNOWN: &[&str] = &[
+        SELECT_HOLD_CONTROL,
+        SELECT_HARNESS,
+        SELECT_PREFER,
+        SELECT_EXCLUDE_PROVIDERS,
+    ];
 }
 
 #[cfg(test)]

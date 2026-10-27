@@ -146,6 +146,12 @@ pub struct SelectRequest {
     /// excludes every variant of that key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub exclude: Option<Vec<String>>,
+    /// Provider ids (the part of a route key before the `/`) the caller will
+    /// not take: no route from a listed provider is answered, whatever its
+    /// model or variant. Sent only to a provider declaring
+    /// [`crate::capabilities::SELECT_EXCLUDE_PROVIDERS`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude_providers: Option<Vec<String>>,
     /// Runner module ids the caller can send to. Absent: any runner the
     /// provider knows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -201,6 +207,7 @@ impl SelectRequest {
             requirements,
             pin: None,
             exclude: None,
+            exclude_providers: None,
             runners: None,
             affinity: None,
             correlation_id: None,
@@ -241,6 +248,19 @@ impl SelectRequest {
     pub fn with_exclude(mut self, exclude: Vec<String>) -> Self {
         self.exclude = Some(exclude);
         self
+    }
+
+    /// Set the provider ids none of whose routes the caller will take.
+    pub fn with_exclude_providers(mut self, exclude_providers: Vec<String>) -> Self {
+        self.exclude_providers = Some(exclude_providers);
+        self
+    }
+
+    /// Whether the request's `exclude_providers` lists `provider`.
+    pub fn excludes_provider(&self, provider: &str) -> bool {
+        self.exclude_providers
+            .as_ref()
+            .is_some_and(|excluded| excluded.iter().any(|listed| listed == provider))
     }
 
     /// Set the runner module ids the caller can send to.
@@ -346,7 +366,14 @@ impl RouteRef {
 /// Whether `key` has the shape of a route key: `provider/model`, both
 /// non-empty.
 pub fn is_route_key(key: &str) -> bool {
-    matches!(key.split_once('/'), Some((provider, model)) if !provider.is_empty() && !model.is_empty())
+    matches!(key.split_once('/'), Some((provider, model)) if is_provider_id(provider) && !model.is_empty())
+}
+
+/// Whether `id` has the shape of a route key's provider part: non-empty and
+/// without a `/`, since a route key's provider is everything before its
+/// first `/`.
+pub fn is_provider_id(id: &str) -> bool {
+    !id.is_empty() && !id.contains('/')
 }
 
 /// The key a runner sends with, named by public id only.
@@ -481,7 +508,9 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
 /// `hold_wait_max_s` are refused by name unless `capabilities` lists
 /// [`SELECT_HOLD_CONTROL`]. `harness` is refused by name unless the provider
 /// declares [`crate::capabilities::SELECT_HARNESS`]. `prefer` is refused by
-/// name unless the provider declares [`crate::capabilities::SELECT_PREFER`].
+/// name unless the provider declares [`crate::capabilities::SELECT_PREFER`],
+/// and `exclude_providers` unless it declares
+/// [`crate::capabilities::SELECT_EXCLUDE_PROVIDERS`].
 /// Whether the consumer is known and owned, and
 /// whether anything can serve, is the provider's to answer after this.
 pub fn parse_select_request_serving<C: AsRef<str>>(
@@ -507,6 +536,29 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
             return Err(members.refuse(
                 "exclude",
                 format!("{bad:?} is not a route key provider/model"),
+            ));
+        }
+    }
+    let exclude_providers: Option<Vec<String>> = members.optional("exclude_providers")?;
+    if let Some(exclude_providers) = &exclude_providers {
+        // Without the group the member is refused, never ignored: a caller
+        // that sent it must not be answered a route it meant to rule out.
+        if !capabilities
+            .iter()
+            .any(|capability| capability.as_ref() == crate::capabilities::SELECT_EXCLUDE_PROVIDERS)
+        {
+            return Err(members.refuse(
+                "exclude_providers",
+                format!(
+                    "exclude_providers is read only by a provider declaring {}",
+                    crate::capabilities::SELECT_EXCLUDE_PROVIDERS
+                ),
+            ));
+        }
+        if let Some(bad) = exclude_providers.iter().find(|id| !is_provider_id(id)) {
+            return Err(members.refuse(
+                "exclude_providers",
+                format!("{bad:?} is not a provider id, the provider part of a route key"),
             ));
         }
     }
@@ -608,6 +660,7 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         requirements,
         pin: pin.clone(),
         exclude,
+        exclude_providers,
         runners,
         affinity: members.optional_text("affinity", Some(AFFINITY_MAX_CHARS))?,
         correlation_id: members.optional_text("correlation_id", Some(CORRELATION_ID_MAX_CHARS))?,
@@ -692,6 +745,9 @@ pub enum AnswerProblem {
     RunnerNotListed(String),
     /// The answer's route key is in the request's `exclude`.
     Excluded(String),
+    /// The answer's route key (held here) is from a provider the request's
+    /// `exclude_providers` lists.
+    ExcludedProvider(String),
     /// The explanation is longer than [`EXPLANATION_MAX_CHARS`].
     ExplanationTooLong(usize),
     /// The request pinned but the answer carries no `pin_outcome`.
@@ -710,6 +766,10 @@ impl std::fmt::Display for AnswerProblem {
                 write!(f, "runner {runner:?} is not one of the request's runners")
             }
             Self::Excluded(key) => write!(f, "route {key:?} is in the request's exclude"),
+            Self::ExcludedProvider(key) => write!(
+                f,
+                "route {key:?} is from a provider in the request's exclude_providers"
+            ),
             Self::ExplanationTooLong(chars) => write!(
                 f,
                 "the explanation is {chars} characters, over {EXPLANATION_MAX_CHARS}"
@@ -737,9 +797,10 @@ impl std::fmt::Display for AnswerProblem {
 }
 
 /// Check an answer against the request it answers: the runner is one the
-/// caller listed, the route is not one it excluded, the explanation is
-/// within its bound, and a pinned request is answered with a `pin_outcome`
-/// (with `pin_reason` in `detail` on `fell_back`).
+/// caller listed, the route is not one it excluded nor from a provider it
+/// excluded, the explanation is within its bound, and a pinned request is
+/// answered with a `pin_outcome` (with `pin_reason` in `detail` on
+/// `fell_back`).
 pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<(), AnswerProblem> {
     if let Some(runners) = &request.runners {
         if !runners.contains(&answer.runner.module) {
@@ -753,6 +814,9 @@ pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<()
         .is_some_and(|exclude| exclude.contains(&key))
     {
         return Err(AnswerProblem::Excluded(key));
+    }
+    if request.excludes_provider(&answer.route.provider) {
+        return Err(AnswerProblem::ExcludedProvider(key));
     }
     let chars = answer.explanation.chars().count();
     if chars > EXPLANATION_MAX_CHARS {
@@ -890,6 +954,7 @@ mod tests {
             "requirements": {"iq": 1, "eq": null},
             "pin": null,
             "exclude": null,
+            "exclude_providers": null,
             "detail": null,
             "pin_fallback": null,
             "prefer": null,

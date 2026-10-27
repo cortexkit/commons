@@ -47,6 +47,11 @@ pub const ROUTE_SELECT_HARNESS_JSON: &str =
 pub const ROUTE_SELECT_PREFER_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-select-prefer.json");
 
+/// The optional `select_exclude_providers` group, the provider exclusion list
+/// with and without it.
+pub const ROUTE_SELECT_EXCLUDE_PROVIDERS_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-exclude-providers.json");
+
 /// Optional account-allocation members added after the original v1 vectors.
 pub const ROUTE_ACCOUNT_FOR_OPTIONAL_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-account-for-optional.json");
@@ -76,6 +81,10 @@ pub const FILES: &[(&str, &str)] = &[
     ("route-account-observe.json", ROUTE_ACCOUNT_OBSERVE_JSON),
     ("route-report-optional.json", ROUTE_REPORT_OPTIONAL_JSON),
     ("route-report.json", ROUTE_REPORT_JSON),
+    (
+        "route-select-exclude-providers.json",
+        ROUTE_SELECT_EXCLUDE_PROVIDERS_JSON,
+    ),
     ("route-select-harness.json", ROUTE_SELECT_HARNESS_JSON),
     (
         "route-select-hold-control.json",

@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cortexkit_role_routing::{
     account::AccountForAnswer,
-    capabilities::{self, SELECT_HARNESS, SELECT_HOLD_CONTROL},
+    capabilities::{self, SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL},
     describe::{check_describe, RoleDescribe},
     errors::{
         NoRouteDetail, NoRouteReason, PinUnavailableDetail, PinUnavailableReason, Refusal,
@@ -58,6 +58,13 @@ const HOLD_CHECKS: &[&str] = &[
 const PREFER_CHECKS: &[&str] = &[
     "prefer_prefers_listed_adequate_route",
     "prefer_never_admits_inadequate_route",
+];
+
+/// The checks of the `select_exclude_providers` group's rules. Each is not
+/// applicable to a provider that does not declare it.
+const EXCLUDE_PROVIDERS_CHECKS: &[&str] = &[
+    "exclude_providers_answers_another_provider",
+    "exclude_providers_every_provider_no_route",
 ];
 
 /// The operator hold settings the hold checks start from, in seconds: the
@@ -223,6 +230,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         if PREFER_CHECKS.contains(&name) {
             return self.prefer_check(name).await;
         }
+        if EXCLUDE_PROVIDERS_CHECKS.contains(&name) {
+            return self.exclude_providers_check(name).await;
+        }
         if matches!(
             name,
             "requested_harness_is_hosted_and_echoed" | "undeclared_harness_group_refuses_member"
@@ -250,6 +260,16 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 return Ok(Ending::NotApplicable(format!(
                     "role.describe declares {}",
                     crate::wire::capabilities::SELECT_PREFER
+                )));
+            }
+        }
+        if name == "undeclared_exclude_providers_group_refuses_member" {
+            let route = self.route_as(CONSUMER).await?;
+            let describe: RoleDescribe =
+                answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+            if describe.serves(SELECT_EXCLUDE_PROVIDERS) {
+                return Ok(Ending::NotApplicable(format!(
+                    "role.describe declares {SELECT_EXCLUDE_PROVIDERS}"
                 )));
             }
         }
@@ -352,6 +372,10 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 self.undeclared_prefer_group_refuses_member().await
             }
             "report_usage_strict" => self.report_usage_strict().await,
+            "undeclared_exclude_providers_group_refuses_member" => {
+                self.undeclared_exclude_providers_group_refuses_member()
+                    .await
+            }
             other => Err(format!("the kit has no check named {other}")),
         }
     }
@@ -1755,6 +1779,31 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         checked.map(|()| Ending::Passed)
     }
 
+    /// Run the exclude_providers check `name`, or report it not applicable
+    /// when the provider does not declare `select_exclude_providers`.
+    async fn exclude_providers_check(&self, name: &str) -> Result<Ending, String> {
+        let route = self.route_as(CONSUMER).await?;
+        let describe: RoleDescribe =
+            answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+        if !describe.serves(SELECT_EXCLUDE_PROVIDERS) {
+            return Ok(Ending::NotApplicable(format!(
+                "role.describe does not declare {SELECT_EXCLUDE_PROVIDERS}"
+            )));
+        }
+        let checked = match name {
+            "exclude_providers_answers_another_provider" => {
+                self.exclude_providers_answers_another_provider().await
+            }
+            "exclude_providers_every_provider_no_route" => {
+                self.exclude_providers_every_provider_no_route().await
+            }
+            other => Err(format!(
+                "the kit has no exclude_providers check named {other}"
+            )),
+        };
+        checked.map(|()| Ending::Passed)
+    }
+
     /// Set the operator's hold settings for both subscription providers of
     /// the hold catalog.
     async fn hold_limits(&self, max_hold_s: u64, within_s: u64) -> Check {
@@ -2360,6 +2409,100 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                     refusal.detail
                 ));
             }
+        }
+        Ok(())
+    }
+
+    async fn exclude_providers_answers_another_provider(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let natural = select(&route, &base(), "a plain select").await?;
+        let provider = natural.route.provider;
+        let params = with(base(), "exclude_providers", json!([provider]));
+        // `select` runs `check_answer`, which already refuses an answer
+        // from the excluded provider; the comparison below says so in this
+        // check's own words if a future `check_answer` stops doing it.
+        let answered = select(
+            &route,
+            &params,
+            &format!("a select excluding provider {provider}"),
+        )
+        .await?;
+        if answered.route.provider == provider {
+            return Err(format!(
+                "a select excluding provider {provider} was answered {}",
+                answered.route.route_key()
+            ));
+        }
+        Ok(())
+    }
+
+    async fn exclude_providers_every_provider_no_route(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let catalog = fixture::catalog();
+        let mut providers: Vec<String> = catalog
+            .models
+            .iter()
+            .map(|model| model.provider.clone())
+            .collect();
+        providers.sort();
+        providers.dedup();
+        let keys: Vec<String> = catalog
+            .models
+            .iter()
+            .map(|model| model.route_key())
+            .collect();
+        let by_provider = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &with(base(), "exclude_providers", json!(providers)),
+            RefusalCode::NoRoute,
+            &format!("a select excluding every provider {providers:?}"),
+        )
+        .await?;
+        // The contract gives this refusal the reason and reset rules of an
+        // `exclude` that lists every route, so the two are compared.
+        let by_key = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &with(base(), "exclude", json!(keys)),
+            RefusalCode::NoRoute,
+            "a select excluding every route key",
+        )
+        .await?;
+        let detail = |refusal: &Refusal| {
+            refusal
+                .detail_as::<NoRouteDetail>()
+                .map(|detail| (detail.reason, detail.reset_at_ms))
+                .ok_or_else(|| format!("a no_route detail does not decode: {:?}", refusal.detail))
+        };
+        let (provider_reason, provider_reset) = detail(&by_provider)?;
+        let (key_reason, key_reset) = detail(&by_key)?;
+        if provider_reason != key_reason || provider_reset != key_reset {
+            return Err(format!(
+                "a select excluding every provider was refused no_route {provider_reason} with reset_at_ms {provider_reset:?}, but excluding every route key is no_route {key_reason} with reset_at_ms {key_reset:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn undeclared_exclude_providers_group_refuses_member(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &with(
+                base(),
+                "exclude_providers",
+                json!([fixture::PRICED_PROVIDER]),
+            ),
+            RefusalCode::InvalidRequest,
+            "undeclared exclude_providers group",
+        )
+        .await?;
+        if refusal.detail.get("field").and_then(Value::as_str) != Some("exclude_providers") {
+            return Err(format!(
+                "undeclared exclude_providers group refusal must name exclude_providers: {refusal:?}"
+            ));
         }
         Ok(())
     }

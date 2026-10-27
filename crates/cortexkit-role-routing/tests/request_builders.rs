@@ -5,7 +5,7 @@ use cortexkit_role_routing::{
         parse_account_for_request, AccountForRequest, AccountMode, CandidateAccount, Candidates,
         ExpectedPin, RequestedAccount,
     },
-    capabilities::{SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER},
+    capabilities::{SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER},
     errors::Refusal,
     observe::{parse_account_observe_request, AccountObserveRequest, ObserveKind},
     report::{parse_report_request, Eligibility, EligibilityScope, Outcome, ReportRequest, Usage},
@@ -30,7 +30,10 @@ where
 }
 
 fn parse_with_hold_control(params: &Value) -> Result<SelectRequest, Refusal> {
-    parse_select_request_serving(params, &[SELECT_HOLD_CONTROL, SELECT_PREFER])
+    parse_select_request_serving(
+        params,
+        &[SELECT_HOLD_CONTROL, SELECT_PREFER, SELECT_EXCLUDE_PROVIDERS],
+    )
 }
 
 #[test]
@@ -39,6 +42,7 @@ fn select_builds_and_round_trips_from_outside_the_crate() {
         .with_pin("example-provider/model-a:fast")
         .with_pin_fallback(PinFallback::Route)
         .with_exclude(vec!["example-provider/model-b".into()])
+        .with_exclude_providers(vec!["example-subscription".into()])
         .with_runners(vec!["runner-one".into()])
         .with_affinity("conversation-1")
         .with_correlation_id("work-1")
@@ -53,11 +57,14 @@ fn select_builds_and_round_trips_from_outside_the_crate() {
         .with_hold_wait_max_s(120)
         .with_prefer(vec!["example-provider/model-b".into()]);
     assert!(!select.hold_ok());
+    assert!(select.excludes_provider("example-subscription"));
+    assert!(!select.excludes_provider("example-provider"));
     round_trip(
         select,
         json!({
             "consumer": "example_summary", "requirements": {"iq": 50},
             "pin": "example-provider/model-a:fast", "pin_fallback": "route", "exclude": ["example-provider/model-b"],
+            "exclude_providers": ["example-subscription"],
             "runners": ["runner-one"], "affinity": "conversation-1",
             "correlation_id": "work-1",
             "concurrency_slots": [{"key": "runner-one", "running": 1, "limit": 2}],

@@ -187,6 +187,15 @@ pub const CHECKS: &[CheckSpec] = &[
         "report_usage_strict",
         "a report usage with a negative or over-limit count or an unknown member is invalid_request naming usage",
     ),
+    check(
+        "exclude_providers_answers_another_provider",
+        "select_exclude_providers: a select excluding the provider of the route it is otherwise answered is answered with a route from another provider",
+    ),
+    check(
+        "exclude_providers_every_provider_no_route",
+        "select_exclude_providers: a select excluding every provider is refused no_route, with the reason and reset_at_ms of a select excluding every route key",
+    ),
+    check("undeclared_exclude_providers_group_refuses_member", "a provider without select_exclude_providers refuses exclude_providers as invalid_request naming the field"),
 ];
 
 /// Where the kit checks less than the contract says, and why. Every report
@@ -205,6 +214,7 @@ pub const NARROWINGS: &[&str] = &[
     "requirements other than tool_capabilities and the declared max_output_tokens floor are not checked against the catalog beyond what every check's answer must meet.",
     "Holds are checked with whole-account blocks set through a hook, on ladders of two entries; the operator max_hold limit alone, variants as separate entries, the metered-fallback rule and pooled windows are not checked, and the hold_ok true path past every entry is checked only through hold_ok false.",
     "When account_for holds only within a decision's recorded cap, the kit checks that a wait beyond it is refused with some code other than account_hold; it does not check which.",
+    "exclude_providers is checked on demand-mode selects with no pin and nothing cooling down: a pin on an excluded provider, its pin fallback, its interaction with prefer and ladders, and the no_route comparison with a timed cause are not checked.",
 ];
 
 /// How one check ended.

@@ -1,0 +1,54 @@
+{
+  "about": "select_exclude_providers gates the optional provider exclusion. A caller sends exclude_providers only to a provider declaring select_exclude_providers; no route from a listed provider is answered. Each entry is the provider part of a route key; like exclude, the list has no length limit and a repeated entry is not refused.",
+  "describe": {
+    "role": "routing",
+    "version": 1,
+    "ops": [
+      "role.describe",
+      "route.select",
+      "route.report",
+      "route.account_for",
+      "route.account_observe"
+    ],
+    "consumers": [
+      {
+        "id": "example_summary",
+        "priced_only": false
+      }
+    ],
+    "requirement_fields": [
+      "iq",
+      "eq",
+      "context_window",
+      "max_output_tokens",
+      "tools",
+      "tool_capabilities",
+      "modalities",
+      "structured_output"
+    ],
+    "detail_supported": false,
+    "capabilities": [
+      "select_exclude_providers"
+    ]
+  },
+  "requests": [
+    {"name": "single", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": ["example-provider"]}},
+    {"name": "several", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": ["example-provider", "example-subscription"]}},
+    {"name": "beside_exclude", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude": ["example-subscription/model-c"], "exclude_providers": ["example-provider"]}},
+    {"name": "repeated_entry", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": ["example-provider", "example-provider"]}},
+    {"name": "empty", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": []}},
+    {"name": "null_is_absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": null}, "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}}
+  ],
+  "refused": [
+    {"name": "entry_is_a_route_key", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": ["example-provider/model-a"]}, "refusal": {"code": "invalid_request", "detail": {"field": "exclude_providers"}}},
+    {"name": "entry_empty", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": [""]}, "refusal": {"code": "invalid_request", "detail": {"field": "exclude_providers"}}},
+    {"name": "not_a_list", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": "example-provider"}, "refusal": {"code": "invalid_request", "detail": {"field": "exclude_providers"}}}
+  ],
+  "requests_without_group": [
+    {"name": "null_is_absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": null}, "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}}
+  ],
+  "refused_without_group": [
+    {"name": "exclude_providers_without_group", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "exclude_providers": ["example-provider"]}, "refusal": {"code": "invalid_request", "detail": {"field": "exclude_providers"}}}
+  ],
+  "answers": []
+}

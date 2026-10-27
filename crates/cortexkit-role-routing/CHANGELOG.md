@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.1
+
+- Add the optional `select_exclude_providers` group: `exclude_providers`
+  lists provider ids, each the provider part of a route key, and no answer
+  names a route from a listed provider. `check_answer` refuses one that does
+  (`AnswerProblem::ExcludedProvider`). When every adequate route is from a
+  listed provider the select is the same `no_route` an `exclude` listing
+  those routes gets, and a pin on a listed provider is `pin_unavailable`
+  reason `excluded`. Entries use the route-key provider validator (new
+  `select::is_provider_id`, which `is_route_key` now uses) and the list rules
+  of `exclude`: no length limit, repeats not refused. A bad entry, and the
+  member sent to a provider without the group, are `invalid_request` naming
+  `exclude_providers`. `exclude` keeps its meaning. Build with
+  `SelectRequest::with_exclude_providers`; read with `excludes_provider`.
+  New vector file `route-select-exclude-providers.json`, pinned in
+  `SHA256SUMS`. Additive: `SelectRequest` and `AnswerProblem` were already
+  `#[non_exhaustive]`.
+
 ## 0.5.0
 
 - Add `pin_fallback: "route"` beside a pin: when the pin cannot be served

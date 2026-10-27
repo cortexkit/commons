@@ -239,7 +239,7 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines three
+  does not know is kept and means nothing to it. This version defines four
   groups:
   - `select_hold_control`: `route.select` reads `hold_ok` and
     `hold_wait_max_s` (§5.1) and decides blocked entries as §5.4 says.
@@ -253,6 +253,13 @@ a module plays.
   - `select_prefer`: `route.select` reads `prefer` (§5.1), an ordered list of
     route keys the caller would like. A provider without it refuses the member
     by name (§2); a caller sends it only with the group.
+  - `select_exclude_providers`: `route.select` reads `exclude_providers`
+    (§5.1), provider ids none of whose routes the caller will take. A caller
+    sends the member only to a provider that declares the group. A provider
+    without the group does not read the member, so it refuses it by name as
+    it refuses any member it does not read (§2): a router older than the
+    group, keeping that rule, fails the select loudly rather than silently
+    answering a route from a provider the caller meant to rule out.
 - [pinned] A consumer checks the answer with `describe::check_describe`
   before routing anything to the provider.
 
@@ -306,6 +313,23 @@ a module plays.
   `provider/model`; the variant and the runner are separate from it.
   Excluding a route key excludes every variant of it. An entry that is not
   a route key is `invalid_request {field: "exclude"}`.
+- [pinned] `exclude_providers`: provider ids the caller will not take (group
+  `select_exclude_providers`). It is a member of its own beside `exclude`,
+  whose meaning it does not change. A provider id is the provider part of a
+  route key, everything before the first `/`: it is non-empty and has no
+  `/`. No answer names a route whose provider is listed, whatever its model
+  or variant (`select::check_answer`). A pin on a listed provider cannot be
+  served, exactly as a pin on an excluded route key: `pin_unavailable` with
+  reason `excluded`, or with `pin_fallback: "route"` a fallback that is
+  itself never from a listed provider. When every route the request would
+  otherwise get is from a listed provider, the select is refused with the
+  same `no_route` (§5.3), under the same reason and `reset_at_ms` rules, as
+  a request whose `exclude` lists each of those routes. The list has the
+  limits `exclude` has: no length limit, and a repeated entry is not
+  refused. An entry that is not a provider id, or a member that is not a
+  list of strings, is `invalid_request {field: "exclude_providers"}`. A
+  provider without the group refuses the member by that same field path
+  rather than ignoring it. Null is absent.
 - [pinned] `runners`: runner module ids the caller can send to. Absent: any
   session-starting runner the provider knows.
 - [pinned] `harness`: optional token using §1.2's pair token grammar (group
@@ -340,7 +364,9 @@ a module plays.
 - [pinned] `hold_ok` and `hold_wait_max_s` sent to a provider that does not
   declare `select_hold_control` are `invalid_request {field}` naming the
   member, `hold_ok` first when both are sent. `prefer` sent to a provider
-  that does not declare `select_prefer` is `invalid_request {field: "prefer"}`.
+  that does not declare `select_prefer` is `invalid_request {field: "prefer"}`,
+  and `exclude_providers` sent to a provider that does not declare
+  `select_exclude_providers` is `invalid_request {field: "exclude_providers"}`.
   The validator takes the
   provider's declared groups (`select::parse_select_request_serving`);
   `select::parse_select_request` declares none.
@@ -369,8 +395,8 @@ a module plays.
 ```
 
 - [pinned] `runner.module` is one of the request's `runners` when the
-  request sent them, and the route is never one the request excluded
-  (`select::check_answer`).
+  request sent them, and the route is never one the request excluded nor
+  from a provider it excluded (`select::check_answer`).
 - [pinned] `runner.model` names the model as the runner names it.
 - [pinned] `auth` is present only when the provider's policy names a key
   pool. It names the key by public id only, never secret material. The
@@ -736,7 +762,8 @@ What a runner saw on an account, so the provider's headroom stays current.
   holds the `select_hold_control` members with and without the group, the
   `accounts_blocked` refusal, and an answer naming its runner's harness.
   `route-select-prefer.json` holds the `select_prefer` members with and
-  without the group. `SHA256SUMS` pins every file.
+  without the group, and `route-select-exclude-providers.json` the
+  `select_exclude_providers` members. `SHA256SUMS` pins every file.
 - [pinned] `cortexkit-role-routing-conformance` drives a live provider
   through these rules. Each check names the rule it holds a provider to;
   the kit's own tests pair every check with a faulty provider that breaks

@@ -28,7 +28,9 @@ use cortexkit_role_routing_conformance::{
             parse_account_for_request, Account, AccountForAnswer, AccountForRequest, AccountMode,
             AccountPin, AccountReason, AccountReasonCode, Admission,
         },
-        capabilities::{SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER},
+        capabilities::{
+            SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER,
+        },
         describe::{ConsumerEntry, RoleDescribe},
         errors::{NoRouteReason, PinUnavailableReason, Refusal, RefusalCode},
         observe::{parse_account_observe_request, AccountObserveAnswer, Observation, ObserveKind},
@@ -187,6 +189,14 @@ pub struct Defects {
     pub accepts_bad_usage: bool,
     /// Omits usage from decision-id body equality.
     pub ignores_usage_body: bool,
+    /// Declares select_exclude_providers but ignores `exclude_providers`.
+    pub ignores_exclude_providers: bool,
+    /// Honours `exclude_providers` while another route is adequate, but when
+    /// every adequate route is from an excluded provider answers the first
+    /// of them instead of refusing no_route.
+    pub answers_excluded_provider_when_nothing_else: bool,
+    /// Accepts exclude_providers without declaring select_exclude_providers.
+    pub accepts_undeclared_exclude_providers: bool,
 }
 
 fn now_ms() -> u64 {
@@ -306,6 +316,7 @@ pub struct FakeSubject {
     hold_control: bool,
     harness_control: bool,
     prefer_control: bool,
+    exclude_providers_control: bool,
     /// Reads a request's iq relative to the strongest routable model instead
     /// of on the catalog's own 0-100 scale. The contract leaves that mapping
     /// to the provider, so both readings are correct.
@@ -320,6 +331,7 @@ impl FakeSubject {
             hold_control: true,
             harness_control: true,
             prefer_control: true,
+            exclude_providers_control: true,
             relative_iq: false,
         }
     }
@@ -342,6 +354,14 @@ impl FakeSubject {
     pub fn without_prefer_control(defects: Defects) -> Self {
         Self {
             prefer_control: false,
+            ..Self::new(defects)
+        }
+    }
+
+    /// A fake that does not declare select_exclude_providers.
+    pub fn without_exclude_providers_control(defects: Defects) -> Self {
+        Self {
+            exclude_providers_control: false,
             ..Self::new(defects)
         }
     }
@@ -478,6 +498,7 @@ impl RoutingSubject for FakeSubject {
             hold_control: self.hold_control,
             harness_control: self.harness_control,
             prefer_control: self.prefer_control,
+            exclude_providers_control: self.exclude_providers_control,
             relative_iq: self.relative_iq,
             stamp: stamp.clone(),
         })
@@ -491,6 +512,7 @@ pub struct FakeRoute {
     hold_control: bool,
     harness_control: bool,
     prefer_control: bool,
+    exclude_providers_control: bool,
     relative_iq: bool,
     stamp: RouteStamp,
 }
@@ -587,6 +609,9 @@ impl FakeRoute {
         if self.prefer_control {
             describe = describe.with_capability(SELECT_PREFER);
         }
+        if self.exclude_providers_control {
+            describe = describe.with_capability(SELECT_EXCLUDE_PROVIDERS);
+        }
         to_value(if self.hold_control {
             describe.with_capability(SELECT_HOLD_CONTROL)
         } else {
@@ -623,6 +648,9 @@ impl FakeRoute {
         }
         if self.prefer_control || defects.accepts_undeclared_prefer {
             capabilities.push(SELECT_PREFER);
+        }
+        if self.exclude_providers_control || defects.accepts_undeclared_exclude_providers {
+            capabilities.push(SELECT_EXCLUDE_PROVIDERS);
         }
         let mut request = parse_select_request_serving(&params, &capabilities)?;
         let declaration = state.declarations.get(&request.consumer);
@@ -702,6 +730,16 @@ impl FakeRoute {
         let exclude = match &request.exclude {
             Some(exclude) if !defects.ignores_exclude => exclude.clone(),
             _ => vec![],
+        };
+        let excluded_providers = match &request.exclude_providers {
+            Some(providers) if !defects.ignores_exclude_providers => providers.clone(),
+            _ => vec![],
+        };
+        // A route is ruled out by its key in `exclude` or its provider in
+        // `exclude_providers`, at the same point of every walk, so the two
+        // lead to the same refusal.
+        let excluded = |model: &CatalogModel| {
+            exclude.contains(&model.route_key()) || excluded_providers.contains(&model.provider)
         };
         let runners = request.runners.clone().filter(|_| !defects.ignores_runners);
         let tags = request
@@ -791,7 +829,7 @@ impl FakeRoute {
                 let Some(model) = catalog.models.iter().find(|m| m.route_key() == key) else {
                     return Err((PinUnavailableReason::UnknownModel, None));
                 };
-                if exclude.contains(&key) {
+                if excluded(model) {
                     return Err((PinUnavailableReason::Excluded, None));
                 }
                 if let Some(until) = cooled(&key) {
@@ -815,7 +853,7 @@ impl FakeRoute {
                     let mut fallback: Option<(CatalogModel, Option<String>, String)> = None;
                     for model in catalog.models.iter().filter(|m| eligible(m)) {
                         let key = model.route_key();
-                        if exclude.contains(&key) {
+                        if excluded(model) {
                             continue;
                         }
                         if cooled(&key).is_some() {
@@ -850,9 +888,19 @@ impl FakeRoute {
             let mut entries = Vec::new();
             let mut earliest: Option<u64> = None;
             let mut unreachable = false;
+            // Routes ruled out only by their provider, kept for the defect
+            // that answers one when nothing else is left.
+            let mut provider_excluded = Vec::new();
             for model in ordered.iter().filter(|m| eligible(m)) {
                 let key = model.route_key();
-                if exclude.contains(&key) {
+                if excluded(model) {
+                    if defects.answers_excluded_provider_when_nothing_else
+                        && !exclude.contains(&key)
+                    {
+                        if let Some(runner) = runner_for(&key) {
+                            provider_excluded.push((model.clone(), runner));
+                        }
+                    }
                     continue;
                 }
                 let Some(runner) = runner_for(&key) else {
@@ -1123,6 +1171,7 @@ impl FakeRoute {
                     .get(preferred.unwrap_or(0))
                     .map(|(model, runner, _)| (model.clone(), runner.clone()))
             };
+            let chosen = chosen.or_else(|| provider_excluded.first().cloned());
             match chosen {
                 Some((model, runner)) => (model, None, runner),
                 None => {

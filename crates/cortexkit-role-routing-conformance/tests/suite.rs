@@ -52,6 +52,7 @@ async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_pa
     let mut not_applicable = vec!["undeclared_harness_group_refuses_member"];
     not_applicable.extend_from_slice(HOLD_CHECKS);
     not_applicable.push("undeclared_prefer_group_refuses_member");
+    not_applicable.push("undeclared_exclude_providers_group_refuses_member");
     assert_eq!(
         report.not_applicable(),
         not_applicable,
@@ -234,7 +235,8 @@ async fn without_harness_group_requests_are_refused() {
         report.not_applicable(),
         [
             "requested_harness_is_hosted_and_echoed",
-            "undeclared_prefer_group_refuses_member"
+            "undeclared_prefer_group_refuses_member",
+            "undeclared_exclude_providers_group_refuses_member"
         ]
     );
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
@@ -419,6 +421,7 @@ async fn passes_every_check(subject: &FakeSubject) {
         if [
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
+            "undeclared_exclude_providers_group_refuses_member",
         ]
         .contains(&check.check)
         {
@@ -564,12 +567,17 @@ async fn letting_first_declarer_win_conflict_fails() {
 
 #[tokio::test]
 async fn ignoring_exclude_fails() {
-    breaks(
+    // The every-provider exclusion check compares its no_route with the one
+    // an exclude of every route key gets, so ignoring exclude fails it too.
+    breaks_all(
         Defects {
             ignores_exclude: true,
             ..Defects::default()
         },
-        "exclude_honoured",
+        &[
+            "exclude_honoured",
+            "exclude_providers_every_provider_no_route",
+        ],
         "route \"example-provider/model-a\" is in the request's exclude",
     )
     .await;
@@ -1008,4 +1016,87 @@ async fn ignoring_usage_body_fails() {
         "changed usage under reused decision_id was answered",
     )
     .await;
+}
+
+#[tokio::test]
+async fn ignoring_exclude_providers_fails() {
+    breaks_all(
+        Defects {
+            ignores_exclude_providers: true,
+            ..Defects::default()
+        },
+        &[
+            "exclude_providers_answers_another_provider",
+            "exclude_providers_every_provider_no_route",
+        ],
+        "route \"example-provider/model-a\" is from a provider in the request's exclude_providers",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn answering_an_excluded_provider_when_nothing_else_is_left_fails() {
+    breaks(
+        Defects {
+            answers_excluded_provider_when_nothing_else: true,
+            ..Defects::default()
+        },
+        "exclude_providers_every_provider_no_route",
+        "a select excluding every provider [\"example-provider\", \"example-subscription\"] was answered",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn without_exclude_providers_group_its_checks_are_not_applicable() {
+    let report = run_suite(&FakeSubject::without_exclude_providers_control(
+        Defects::default(),
+    ))
+    .await;
+    assert_eq!(
+        report.not_applicable(),
+        [
+            "undeclared_harness_group_refuses_member",
+            "undeclared_prefer_group_refuses_member",
+            "exclude_providers_answers_another_provider",
+            "exclude_providers_every_provider_no_route",
+        ],
+        "{}",
+        report.render()
+    );
+    assert_eq!(
+        report.outcome("undeclared_exclude_providers_group_refuses_member"),
+        Some(&CheckOutcome::Passed)
+    );
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    assert!(report.render().contains(
+        "N/A  exclude_providers_answers_another_provider: role.describe does not declare select_exclude_providers"
+    ));
+}
+
+#[tokio::test]
+async fn an_exclude_providers_break_without_the_group_is_not_reached() {
+    // The group's checks never run against a provider that does not declare
+    // it, so ignoring the member there leaves the verdict a pass.
+    let report = run_suite(&FakeSubject::without_exclude_providers_control(Defects {
+        ignores_exclude_providers: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}
+
+#[tokio::test]
+async fn accepting_undeclared_exclude_providers_member_fails() {
+    let report = run_suite(&FakeSubject::without_exclude_providers_control(Defects {
+        accepts_undeclared_exclude_providers: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.failing(),
+        ["undeclared_exclude_providers_group_refuses_member"],
+        "{}",
+        report.render()
+    );
 }
