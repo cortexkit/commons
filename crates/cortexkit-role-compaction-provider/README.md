@@ -48,3 +48,19 @@ carry reasoning, a part holding a tool call with its thought signature and
 its result, and signed `text_with_state`), that does not re-read its held messages at or below `through_ordinal`
 after the generation changes, that reads below its cut, or that re-reads again
 without a generation change.
+
+A provider set up with a serializer profile says so through
+`PrunedReasoningProbe::serializer_profile`. The probe then names that profile
+in each Setup's `params.serializer_profile` and serves its transcript in the
+profile's own stored format (`anthropic-messages`, `opencode-aisdk`,
+`owned-broca` or `pi`), with `tags` rows as a descriptors read carries them.
+It prunes each part as that profile's rules in `llm-runner/v1` §9.14.1 say,
+and checks views with `CompactionView::restored_pruned_part_in`. A profile
+transcript adds a third conversation that prunes with `opaque_reasoning`,
+where only opaque payloads are removed and readable summaries stay.
+`held_copies_follow_reasoning_pruned_report` lists which logical parts
+(`conformance::probe_parts`) and prune kinds were checked, and names those
+the profile cannot carry as not applicable: `anthropic-messages` has no
+thought signature, no provider-state signature on text, and so no
+`signature` kind. Without a profile the probe serves the generic transcript of
+0.7.3, with its `text_with_state` in the real `gemini` provider-state shape.

@@ -3471,19 +3471,69 @@ its host's file storage, not a second copy of the host's media store.
     `data: ""` and its `provider_format`; `reasoning {text, signature?}`
     keeps `text: ""` and drops the optional signature.
   - `opaque_reasoning`: remove only encrypted/opaque fields; a readable
-    summary in the same part stays byte-identical. A `redacted_reasoning`
+    summary in the same part stays byte-identical. A `reasoning {text,
+    signature?}` part drops its optional `signature` (on Claude the
+    encrypted thinking, on Gemini the thought signature) and keeps `text`
+    byte-identical. A `redacted_reasoning`
     part keeps required `data`, rewritten as the same item JSON with only
     encrypted fields removed, preserving its summary and all other fields.
   - `signature`: remove a provider signature on a non-reasoning part, for
     example assistant text or a tool call. Text and call arguments stay
-    byte-identical. A call drops its optional `thought_signature`; a
-    `text_with_state` part keeps required `provider_state`, with only the
-    signature string inside it emptied to `""`.
+    byte-identical. A call drops its optional `thought_signature`. A
+    `text_with_state` part keeps required `provider_state {format, data}`,
+    classified by `format` (`archive_prunes_reasoning::provider_state_formats`):
+    for `gemini` and `google_code_assist`, `data` is the JSON string
+    `{"thoughtSignature": ...}`, so it is the signature and is emptied to
+    `""`; for `open_ai_responses` and `open_ai_responses_chatgpt`, `data`
+    is the Responses message item's `{id, phase}`, item state rather than a
+    signature, kept byte-identical and never counted as restored; any other
+    format is not a signature and stays unchanged. A runner classifies a new
+    format here before it prunes parts carrying it.
 - [pinned] Every field required by the stored format stays present. Required
   string payloads are emptied to `""`, never removed. No member is added to
   a block: only the page says what was pruned. A reader encountering a kind
   it does not know treats that part as changed in an unknown way: kept in
   place, but its payload is not trusted.
+- [pinned] **Per-profile rules.** The shapes above are the `owned-broca`
+  profile's. A runner whose stored bodies follow another serializer profile
+  (§4.4) applies each kind to that profile's own parts, as this table
+  says, under the same rule: required members are emptied to `""`, never
+  removed; optional members are removed; no block gains a member; the part
+  keeps its type and place. `archive_prunes_reasoning::kinds_carried`,
+  `carries_pruned_content_in`, `restored_part_in` and `restored_by_edit_in`
+  are the reference, with vectors in `reasoning-pruned-profiles.json`; the
+  functions without `_in` are the `owned-broca` reference and answer exactly
+  as their `_in` forms do for it. A profile this table does not name is
+  `UnsupportedProfile`, never "nothing pruned". A kind marked "not carried"
+  never matches a part of that profile. Every row cites its source.
+
+  | Profile | Kind | Emptied or removed | Stays | Source |
+  | --- | --- | --- | --- | --- |
+  | `owned-broca` | all three | as the kinds above, in `content`: `opaque_reasoning` removes a `reasoning` part's optional `signature`; a `tool_call {tool_call_id, tool_name, input, thought_signature?}` drops optional `thought_signature`; a `text_with_state` part's `provider_state.data` is emptied only for the `gemini` and `google_code_assist` formats | as the kinds above; `reasoning.text` under `opaque_reasoning`; `provider_state.data` of every other format | this section, as confirmed by the profile's owners against its stored types; `archive-prunes-reasoning.json`; part names from the `owned-broca` counts in `serializer_profile` |
+  | `anthropic-messages` | `reasoning` | `thinking` block: required `thinking` and `signature` emptied to `""`; `redacted_thinking` block: required `data` emptied | `type` | Anthropic Messages API documentation (thinking and redacted thinking blocks, both members required when sent back); `display::anthropic_messages` |
+  | `anthropic-messages` | `opaque_reasoning` | `thinking` block: required `signature` emptied to `""`; `redacted_thinking` block: required `data` emptied | a `thinking` block's `thinking` text (the readable summary) | Anthropic extended-thinking documentation: on current Claude models the `thinking` text is a summary and the `signature` carries the encrypted full reasoning |
+  | `anthropic-messages` | `signature` | not carried: no non-reasoning block (`text`, `tool_use`, `tool_result`) has a signature, and a `thinking` block's `signature` is reasoning | — | Anthropic Messages API documentation |
+  | `opencode-aisdk` | `reasoning` | `reasoning` part: required `text` emptied; from optional `metadata`, `anthropic.signature`, `anthropic.redactedData`, `bedrock.signature`, `bedrock.redactedData`, `google.thoughtSignature`, `vertex.thoughtSignature` and `openai.reasoningEncryptedContent` removed; in each `metadata.openrouter.reasoning_details` entry (`reasoning.text {text, signature}`, `reasoning.encrypted {data}`, `reasoning.summary {summary}`), `text` and `summary` emptied and `signature` and `data` removed | `id`, `type`, `time`, `metadata` and its other members (`openai.itemId`, an id); each detail's `type` and place | OpenCode v1.18.35 copies the AI SDK's `providerMetadata` verbatim into the part's `metadata`, keyed by provider, on reasoning, text and tool parts; the member names are those of its pinned AI SDK providers and `@openrouter/ai-sdk-provider`, as confirmed by the profile's owners; `display::opencode_aisdk` for the part types |
+  | `opencode-aisdk` | `opaque_reasoning` | `reasoning` part: `anthropic.redactedData`, `bedrock.redactedData` and `openai.reasoningEncryptedContent` removed; `data` removed from each `reasoning.encrypted` detail | `text` (the readable summary), signatures, every other member and detail | as above |
+  | `opencode-aisdk` | `signature` | any other part (`text`, `tool`, ...): `google.thoughtSignature` and `vertex.thoughtSignature` removed (Anthropic's and Bedrock's `signature` sit only on reasoning parts); on a `reasoning` part, `signature` removed from each `reasoning.text` detail | `text`, `callID`, `tool`, `state`; the detail's `text` | as above |
+  | `pi` | `reasoning` | `thinking` part: required `thinking` emptied (an Anthropic redacted block's `"[Reasoning redacted]"` included); optional `thinkingSignature` removed | `type`, `redacted` | pi's message types (`TextContent`, `ThinkingContent`, `ToolCall`, `TextSignatureV1` in `packages/ai/src/types.ts`), as confirmed by the profile's owners; `serializer_profile::top_level_part_count` for `/message/content` |
+  | `pi` | `opaque_reasoning` | `thinking` part with `redacted: true` (Anthropic redacted thinking, `{thinking: "[Reasoning redacted]", redacted: true}`): `thinkingSignature`, which holds the opaque payload, removed; `thinking` part whose `thinkingSignature` is JSON for an OpenAI Responses reasoning item holding `encrypted_content`: rewritten as the same item JSON without `encrypted_content` | `thinking` (the readable summary), `redacted`, the item's other members | pi's message types and its OpenAI Responses adapter (`packages/ai/src/api/openai-responses-shared.ts`), as confirmed by the profile's owners; other serialized `thinkingSignature` forms are left to `reasoning` |
+  | `pi` | `signature` | any other part: optional `thoughtSignature` removed; optional `textSignature` removed when it is a retained Google or Vertex thought signature (`packages/ai/src/api/google-vertex.ts`, lines 177-181) | a `textSignature` that is OpenAI Responses item state, byte-identical and never counted as restored: the `TextSignatureV1` JSON `{"v": 1, "id": ..., "phase"?}` pi encodes from the message item (`encodeTextSignatureV1`, lines 55-59 of `packages/ai/src/api/openai-responses-shared.ts`, set at line 766 and parsed back by `parseTextSignature`, lines 61-79, for the item's id and phase at lines 342 and 359), since removing it would drop the phase; `text`, `id`, `name`, `arguments` | pi's public source at https://github.com/earendil-works/pi/blob/main/packages/ai/src, as cited; a legacy plain-string Responses `textSignature` (an item id alone) cannot be told from a thought signature and is treated as one |
+
+  A provider entry in `metadata` that the `opencode-aisdk` rows do not list (`@ai-sdk/openai-compatible`'s, say) is not classified: a runner on this profile adds it to the table before relying on a prune to remove its payload, and the reference treats an unlisted entry as carrying nothing.
+- [pinned] **Requests after a prune.** A provider rejects a part sent
+  back without the signature or opaque payload it issued, so a runner
+  MUST follow this for every profile. A request sent after a prune drops
+  any reasoning-type part whose signature or opaque payload the prune
+  emptied or removed. That covers a `reasoning`, `thinking` or `redacted_*`
+  part, and a reasoning part whose text a `reasoning` prune emptied. It
+  sends any other pruned part without the emptied member: a tool call
+  without its `thought_signature`, and `text_with_state` without its
+  emptied state, as plain text. It never sends an emptied member. Those
+  parts stay because dropping a tool call would break its pairing with
+  the call's result, and dropping text would change the conversation. The
+  stored parts are unchanged by this; only the outgoing request leaves them
+  out.
 - [pinned] A pruned part stays at the same index with the same type and key.
   Thus `m<ordinal>#<index>`, tags, resolve's `part`, `part_digests` positions
   and reminder slots never move. Lineage, ordinals, tags, `history_version`
@@ -3582,8 +3632,11 @@ its host's file storage, not a second copy of the host's media store.
   `archive_prunes_reasoning::carries_pruned_content`,
   `archive_prunes_reasoning::restored_part` (replace ranges and `initial`)
   and `archive_prunes_reasoning::restored_by_edit` (part edits) are the
-  reference over the stored formats this section names, and
-  compaction-provider's `CompactionView::restored_pruned_part` applies them
+  reference over the stored formats this section names (`owned-broca`),
+  their `_in(profile, ...)` forms over each profile of the per-profile
+  table, and
+  compaction-provider's `CompactionView::restored_pruned_part` and
+  `restored_pruned_part_in` apply them
   to a whole view. Part digests do not change on a prune,
   so the check is against the runner's stored prune state (which parts it
   pruned, at which ordinals, with which kind), never against digests. The

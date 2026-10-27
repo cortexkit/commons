@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.7.11
+
+- Correct the `owned-broca` prune rules, which are what
+  `carries_pruned_content`, `restored_part` and `restored_by_edit` check.
+  0.7.10's `text_with_state` rule looked for `provider_state.signature`,
+  which matches no real stored part: a real `provider_state` is
+  `{format, data}`. Under `signature`, the rule now goes by `format`
+  (`provider_state_formats`). For `gemini` and `google_code_assist`,
+  `data` is the JSON string `{"thoughtSignature": ...}`: it is emptied to
+  `""`, and non-empty `data` counts as restored. For `open_ai_responses`
+  and `open_ai_responses_chatgpt`, `data` is item state: it stays
+  byte-identical and never counts. Any other format is not a signature,
+  and must be classified in the contract before a runner prunes it. Also,
+  0.7.10's `opaque_reasoning` ignored a `reasoning` part's `signature`; it
+  now removes that optional signature and keeps `text` byte-identical,
+  because on Claude the signature is the encrypted thinking and on Gemini
+  it is the thought signature. The `text_with_state` cases in
+  `archive-prunes-reasoning.json` and `reasoning-pruned.json` now use the
+  real shape, with digests recomputed.
+- Pin the runner's duty for requests after a prune (§9.14.1), for every
+  profile. Drop any reasoning-type part whose signature or opaque payload
+  a prune emptied or removed. Send any other pruned part without the
+  emptied member. Never send an emptied member.
+- Add per-profile archive-pruning rules (CONTRACT §9.14.1, new per-profile
+  table). Until now the prune reference read only `owned-broca` shapes: it
+  missed an `anthropic-messages` `thinking` block under `reasoning`, flagged
+  its signature under `signature`, and found no parts at all in an
+  `opencode-aisdk` (`parts`) or `pi` (`/message/content`) body. New
+  `archive_prunes_reasoning::kinds_carried`, `carries_pruned_content_in`,
+  `restored_part_in` and `restored_by_edit_in` take the serializer profile
+  and read its own part container and members. A profile the table does not
+  name answers `UnsupportedProfile`, never "nothing pruned". The functions
+  without `_in` are documented as the `owned-broca` reference and answer
+  as `_in(owned-broca)` does; their two corrections are in the entry
+  above. Every row cites its source. `anthropic-messages` cites Anthropic's
+  extended-thinking documentation (a `thinking` block's `signature` is the
+  opaque payload, emptied by `opaque_reasoning`). `opencode-aisdk` cites
+  OpenCode v1.18.35, which copies AI SDK `providerMetadata` verbatim into
+  `part.metadata`. Only listed provider entries count (`anthropic`,
+  `bedrock`, `google`, `vertex`, `openai`), plus OpenRouter
+  `reasoning_details`, whose `reasoning.text`, `reasoning.encrypted` and
+  `reasoning.summary` entries each kind prunes in place; an unlisted entry
+  carries nothing until the table lists it. `pi` cites pi's public
+  `packages/ai`: a `textSignature` that is OpenAI Responses
+  `TextSignatureV1` item state (`{"v": 1, "id", "phase"?}`) stays
+  byte-identical under `signature`, while a Google or Vertex thought
+  signature is removed.
+- Add `test-vectors/llm-runner-v1/reasoning-pruned-profiles.json`: per
+  profile, its prunes in native shapes, parts a kind must not match, and a
+  refused and an allowed replacement and part edit per carried kind.
+
 ## 0.7.10
 
 - Add the session's prune state for runners that declare

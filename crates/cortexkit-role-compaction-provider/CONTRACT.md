@@ -902,7 +902,10 @@ provider.
   part's call with its thought signature, or that edits `text_with_state`
   text but re-encodes the held `provider_state` signature, restores what a
   `signature` prune removed and is refused like new content would be.
-  `CompactionView::restored_pruned_part` is the reference. The check follows
+  `CompactionView::restored_pruned_part` is the reference for an
+  `owned-broca` session, and `CompactionView::restored_pruned_part_in`
+  for a session of any serializer profile, which reads that profile's own
+  part shapes (`llm-runner/v1` §9.14.1, per-profile rules). The check follows
   the kind the runner recorded for each pruned part of the message: under `reasoning`, any
   reasoning content; under `opaque_reasoning`, only an encrypted or opaque
   payload, so a readable summary may be sent; under `signature`, a provider
@@ -1307,7 +1310,7 @@ views and sends rides. It will check:
 | `part_edits_well_formed` | §6: a provider's part edits are sorted, one per part, inside their keep range, and name part keys the runner's `session.read` returned |
 | `ride_answers_within_deadline`, `ride_unknown_cause_nothing`, `ride_overflow_ignored_off_ceiling` | §8 |
 | `sync_reads_only_the_lineage`, `cut_lineage_keeps_state` | §3, §5.1: sync and view building never call `session.history` or read below `first_ordinal`; after a cut lineage's first notice descends at the cut, the provider keeps its state and its next read starts at `first_ordinal` |
-| `held_copies_follow_reasoning_pruned` | §4: after a prune generation change, the provider re-reads its held messages at or below `through_ordinal` once, from its cut and never below it, and renders no pruned content in a replace range or a part edit, neither from a held pre-prune copy, nor from a copy held from before its cut, nor by re-serializing a held part inside an edit. The non-default `conformance` feature ships this one as a focused probe (`conformance::held_copies_follow_reasoning_pruned`) |
+| `held_copies_follow_reasoning_pruned` | §4: after a prune generation change, the provider re-reads its held messages at or below `through_ordinal` once, from its cut and never below it, and renders no pruned content in a replace range or a part edit, neither from a held pre-prune copy, nor from a copy held from before its cut, nor by re-serializing a held part inside an edit. The non-default `conformance` feature ships this one as a focused probe (`conformance::held_copies_follow_reasoning_pruned`), serving its transcript in the native format of the serializer profile the adapter names (`anthropic-messages`, `opencode-aisdk`, `owned-broca` or `pi`) and reporting a part or kind that profile cannot carry as not applicable, by name (`held_copies_follow_reasoning_pruned_report`) |
 | `lineage_reset_drops_runner_copy` | §5.3: a new lineage without descent drops the tag index, cursor and rendered-view record, re-reads, and keeps only derived work whose message or part re-validates by digest |
 | `crash_at_<point>` for each point in §15 | §15 |
 

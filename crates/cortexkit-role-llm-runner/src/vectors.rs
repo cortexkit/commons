@@ -26,6 +26,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/reasoning-pruned.json"),
     ),
     (
+        "reasoning-pruned-profiles.json",
+        include_str!("../test-vectors/llm-runner-v1/reasoning-pruned-profiles.json"),
+    ),
+    (
         "call-identity.json",
         include_str!("../test-vectors/llm-runner-v1/call-identity.json"),
     ),

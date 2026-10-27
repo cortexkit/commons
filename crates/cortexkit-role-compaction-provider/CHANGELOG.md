@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.7.4
+
+- The probe's `owned-broca` transcript uses the real
+  `provider_state {format, data}`. It alternates the signed formats
+  `gemini` and `google_code_assist` and carries a Responses item state that
+  no prune touches. Its signed `reasoning` part gives up only its signature
+  under `opaque_reasoning`, and so does an `anthropic-messages` `thinking`
+  block. The generic transcript's `text_with_state` also moves to the
+  `gemini` shape, because llm-runner 0.7.11 corrected the `owned-broca`
+  rule it is checked by; its results are unchanged.
+- The probe's `pi` transcript also carries an OpenAI Responses text block
+  whose `textSignature` is `TextSignatureV1` item state. No prune touches
+  it, and it never counts as restored.
+- The `held_copies_follow_reasoning_pruned` probe serves one transcript
+  per serializer profile the runner contract names (`anthropic-messages`,
+  `opencode-aisdk`, `owned-broca` and `pi`), each in that profile's native
+  stored format with `tags` rows. It picks the transcript from the new
+  `PrunedReasoningProbe::serializer_profile` (default `None`) and sends it
+  in each Setup's `params.serializer_profile`. A provider with strict
+  codecs for the real formats could not read the single generic shape,
+  so for such a provider the probe proved nothing. Prunes follow each
+  profile's own rules, and views are checked with the new
+  `CompactionView::restored_pruned_part_in` (llm-runner 0.7.11's
+  `restored_part_in` and `restored_by_edit_in`). Profile transcripts add a
+  third conversation that prunes with `opaque_reasoning`. The new
+  `held_copies_follow_reasoning_pruned_report` returns a `HeldCopiesReport`
+  listing which logical parts (`probe_parts`) and kinds were checked, and
+  naming those the profile cannot carry as not applicable (`NotApplicable`).
+  Without a profile, the probe serves the generic transcript, with the
+  same results as before.
+  A kit test runs every profile transcript through llm-runner's own profile
+  code (`check_descriptor_rows`, `top_level_part_count`, `display::project`,
+  `strip_cache_control`, `carries_pruned_content_in`), so a fixture cannot
+  drift from its profile. Every existing named fault fails by name on every
+  profile transcript that can carry what it breaks, and a new
+  `opaque_reasoning` fault proves the third conversation checks something.
+  Track llm-runner 0.7.11.
+
 ## 0.7.3
 
 - Add optional `reasoning_pruned` to the Setup request

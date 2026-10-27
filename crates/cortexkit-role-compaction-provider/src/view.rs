@@ -8,7 +8,8 @@
 //! log; the runner keeps it beside them.
 
 use cortexkit_role_llm_runner::archive_prunes_reasoning::{
-    restored_by_edit, restored_part, PrunedPartAt,
+    kinds_carried, restored_by_edit, restored_by_edit_in, restored_part, restored_part_in,
+    PrunedPartAt, UnsupportedProfile,
 };
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 use serde_json::Value;
@@ -647,6 +648,48 @@ impl CompactionView {
         pruned: &'a [PrunedPartAt],
         first_ordinal: u64,
     ) -> Option<&'a PrunedPartAt> {
+        self.restored_with(
+            first_ordinal,
+            |stands_for, messages| restored_part(pruned, stands_for, messages),
+            |edit, part| restored_by_edit(pruned, edit.ordinal, &edit.part, part),
+        )
+    }
+
+    /// [`CompactionView::restored_pruned_part`] for a session whose stored
+    /// bodies follow serializer profile `profile` (`llm-runner/v1` §4.4):
+    /// replacement messages and edited parts are read in that profile's own
+    /// format, with `restored_part_in` and `restored_by_edit_in`
+    /// (`llm-runner/v1` §9.14.1, per-profile rules). `owned-broca` answers
+    /// exactly as [`CompactionView::restored_pruned_part`] does. A profile
+    /// the runner contract does not name is an error, never "nothing
+    /// restored".
+    pub fn restored_pruned_part_in<'a>(
+        &self,
+        profile: &str,
+        pruned: &'a [PrunedPartAt],
+        first_ordinal: u64,
+    ) -> Result<Option<&'a PrunedPartAt>, UnsupportedProfile> {
+        kinds_carried(profile)?;
+        Ok(self.restored_with(
+            first_ordinal,
+            |stands_for, messages| {
+                restored_part_in(profile, pruned, stands_for, messages).unwrap_or(None)
+            },
+            |edit, part| {
+                restored_by_edit_in(profile, pruned, edit.ordinal, &edit.part, part).unwrap_or(None)
+            },
+        ))
+    }
+
+    /// Walk every form the view sends bytes in, asking `replaced` about each
+    /// replace range (with the ordinals it stands for) and `edited` about
+    /// each part edit with bytes.
+    fn restored_with<'a>(
+        &self,
+        first_ordinal: u64,
+        replaced: impl Fn(std::ops::Range<u64>, &Value) -> Option<&'a PrunedPartAt>,
+        edited: impl Fn(&PartEdit, &Value) -> Option<&'a PrunedPartAt>,
+    ) -> Option<&'a PrunedPartAt> {
         self.ranges
             .iter()
             .enumerate()
@@ -658,11 +701,11 @@ impl CompactionView {
                         *from
                     };
                     let messages: Value = serde_json::from_str(bytes).ok()?;
-                    restored_part(pruned, start..*to, &messages)
+                    replaced(start..*to, &messages)
                 }
                 ViewRange::Keep { edits, .. } => edits.iter().find_map(|edit| {
                     let part: Value = serde_json::from_str(edit.bytes.as_deref()?).ok()?;
-                    restored_by_edit(pruned, edit.ordinal, &edit.part, &part)
+                    edited(edit, &part)
                 }),
             })
     }

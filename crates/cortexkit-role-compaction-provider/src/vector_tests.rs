@@ -1216,3 +1216,38 @@ fn restored_pruned_part_covers_replace_ranges_and_part_edits() {
     assert_eq!(found(&head, 2), Some((1, "m1#0".into())));
     assert_eq!(found(&head, 0), None);
 }
+
+/// The per-profile check reads each profile's own containers and parts: a
+/// fold of OpenCode messages restores through `parts`, which the
+/// `owned-broca` reference never reads, and an unnamed profile is an error.
+#[test]
+fn restored_pruned_part_in_reads_each_profiles_own_format() {
+    use cortexkit_role_llm_runner::archive_prunes_reasoning::{PrunedPartAt, UnsupportedProfile};
+    let pruned = vec![PrunedPartAt::new(1, "m1#0", "reasoning")];
+    let thought = r#"{"id":"prt_a","type":"reasoning","text":"Consider the blue door.","metadata":{"anthropic":{"signature":"s"}}}"#;
+    let fold = CompactionView::new(
+        "0".repeat(32),
+        1,
+        "lin_a",
+        MessageRef {
+            ordinal: 3,
+            mid: "m3".into(),
+        },
+        vec![ViewRange::replace(
+            0,
+            4,
+            format!(r#"[{{"info":{{"id":"msg_a","role":"assistant"}},"parts":[{thought}]}}]"#),
+        )],
+    );
+    let found = fold.restored_pruned_part_in("opencode-aisdk", &pruned, 0);
+    assert_eq!(found.unwrap().map(|p| p.part.as_str()), Some("m1#0"));
+    assert_eq!(fold.restored_pruned_part(&pruned, 0), None);
+    assert_eq!(
+        fold.restored_pruned_part_in("owned-broca", &pruned, 0),
+        Ok(None)
+    );
+    assert_eq!(
+        fold.restored_pruned_part_in("future-profile", &pruned, 0),
+        Err(UnsupportedProfile::new("future-profile"))
+    );
+}

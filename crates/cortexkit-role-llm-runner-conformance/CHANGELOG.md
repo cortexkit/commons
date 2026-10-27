@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.13
+
+- Track llm-runner 0.7.11, which this crate pins exactly. The
+  `archive_pruning_*` cases are unchanged: they already build their
+  restoring views and part edits from the subject's own native fixture and
+  served pages, whatever its serializer profile.
+
 ## 0.15.12
 
 - Track llm-runner 0.7.10, which this crate pins exactly, and

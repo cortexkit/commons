@@ -1,0 +1,3697 @@
+{
+  "unsupported": [
+    "future-profile",
+    ""
+  ],
+  "profiles": [
+    {
+      "profile": "owned-broca",
+      "kinds_carried": [
+        "reasoning",
+        "opaque_reasoning",
+        "signature"
+      ],
+      "prunes": [
+        {
+          "name": "reasoning",
+          "kind": "reasoning",
+          "original": {
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "signature": "invented-signature"
+          },
+          "served": {
+            "type": "reasoning",
+            "text": ""
+          }
+        },
+        {
+          "name": "redacted_reasoning",
+          "kind": "reasoning",
+          "original": {
+            "type": "redacted_reasoning",
+            "data": "invented-opaque-data",
+            "provider_format": "example"
+          },
+          "served": {
+            "type": "redacted_reasoning",
+            "data": "",
+            "provider_format": "example"
+          }
+        },
+        {
+          "name": "reasoning_signature_opaque",
+          "kind": "opaque_reasoning",
+          "original": {
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "signature": "invented-signature"
+          },
+          "served": {
+            "type": "reasoning",
+            "text": "Consider the blue door."
+          }
+        },
+        {
+          "name": "opaque_reasoning",
+          "kind": "opaque_reasoning",
+          "original": {
+            "type": "redacted_reasoning",
+            "data": "{\"encrypted_content\":\"invented-ciphertext\",\"id\":\"rs_example\",\"summary\":[{\"text\":\"A readable summary.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"}",
+            "provider_format": "example-item"
+          },
+          "served": {
+            "type": "redacted_reasoning",
+            "data": "{\"id\":\"rs_example\",\"summary\":[{\"text\":\"A readable summary.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"}",
+            "provider_format": "example-item"
+          }
+        },
+        {
+          "name": "tool_call_signature",
+          "kind": "signature",
+          "original": {
+            "type": "tool_call",
+            "tool_call_id": "call-example",
+            "tool_name": "open_door",
+            "input": {
+              "door": "blue"
+            },
+            "thought_signature": "invented-signature"
+          },
+          "served": {
+            "type": "tool_call",
+            "tool_call_id": "call-example",
+            "tool_name": "open_door",
+            "input": {
+              "door": "blue"
+            }
+          }
+        },
+        {
+          "name": "text_with_state_gemini",
+          "kind": "signature",
+          "original": {
+            "type": "text_with_state",
+            "text": "The door is blue.",
+            "provider_state": {
+              "format": "gemini",
+              "data": "{\"thoughtSignature\":\"invented-signature\"}"
+            }
+          },
+          "served": {
+            "type": "text_with_state",
+            "text": "The door is blue.",
+            "provider_state": {
+              "format": "gemini",
+              "data": ""
+            }
+          }
+        },
+        {
+          "name": "text_with_state_google_code_assist",
+          "kind": "signature",
+          "original": {
+            "type": "text_with_state",
+            "text": "The door is blue.",
+            "provider_state": {
+              "format": "google_code_assist",
+              "data": "{\"thoughtSignature\":\"invented-signature\"}"
+            }
+          },
+          "served": {
+            "type": "text_with_state",
+            "text": "The door is blue.",
+            "provider_state": {
+              "format": "google_code_assist",
+              "data": ""
+            }
+          }
+        }
+      ],
+      "not_carried": [
+        {
+          "name": "plain_text_carries_no_signature",
+          "kind": "signature",
+          "part": {
+            "type": "text",
+            "text": "The door is blue."
+          }
+        },
+        {
+          "name": "reasoning_summary_is_not_opaque_reasoning",
+          "kind": "opaque_reasoning",
+          "part": {
+            "type": "reasoning",
+            "text": "Consider the blue door."
+          }
+        },
+        {
+          "name": "reasoning_signature_is_not_a_signature_prune",
+          "kind": "signature",
+          "part": {
+            "type": "reasoning",
+            "text": "",
+            "signature": "invented-signature"
+          }
+        },
+        {
+          "name": "open_ai_responses_item_state_is_not_a_signature",
+          "kind": "signature",
+          "part": {
+            "type": "text_with_state",
+            "text": "The door is blue.",
+            "provider_state": {
+              "format": "open_ai_responses",
+              "data": "{\"id\":\"msg_example\",\"phase\":\"final_answer\"}"
+            }
+          }
+        },
+        {
+          "name": "open_ai_responses_chatgpt_item_state_is_not_a_signature",
+          "kind": "signature",
+          "part": {
+            "type": "text_with_state",
+            "text": "The door is blue.",
+            "provider_state": {
+              "format": "open_ai_responses_chatgpt",
+              "data": "{\"id\":\"msg_example\",\"phase\":\"final_answer\"}"
+            }
+          }
+        },
+        {
+          "name": "unclassified_format_is_not_a_signature",
+          "kind": "signature",
+          "part": {
+            "type": "text_with_state",
+            "text": "The door is blue.",
+            "provider_state": {
+              "format": "future_format",
+              "data": "{\"thoughtSignature\":\"invented-signature\"}"
+            }
+          }
+        }
+      ],
+      "refusals": [
+        {
+          "name": "reasoning_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "reasoning_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        },
+        {
+          "name": "redacted_reasoning_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_reasoning\",\"data\":\"invented-opaque-data\",\"provider_format\":\"example\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "redacted_reasoning_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_reasoning\",\"data\":\"\",\"provider_format\":\"example\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        },
+        {
+          "name": "reasoning_signature_opaque_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "reasoning_signature_opaque_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        },
+        {
+          "name": "opaque_reasoning_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_reasoning\",\"data\":\"{\\\"encrypted_content\\\":\\\"invented-ciphertext\\\",\\\"id\\\":\\\"rs_example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"A readable summary.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\",\"provider_format\":\"example-item\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "opaque_reasoning_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_reasoning\",\"data\":\"{\\\"id\\\":\\\"rs_example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"A readable summary.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\",\"provider_format\":\"example-item\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        },
+        {
+          "name": "tool_call_signature_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"tool_call_id\":\"call-example\",\"tool_name\":\"open_door\",\"input\":{\"door\":\"blue\"},\"thought_signature\":\"invented-signature\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "tool_call_signature_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"tool_call_id\":\"call-example\",\"tool_name\":\"open_door\",\"input\":{\"door\":\"blue\"}}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        },
+        {
+          "name": "text_with_state_gemini_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"{\\\"thoughtSignature\\\":\\\"invented-signature\\\"}\"}}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "text_with_state_gemini_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"\"}}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        },
+        {
+          "name": "text_with_state_google_code_assist_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"google_code_assist\",\"data\":\"{\\\"thoughtSignature\\\":\\\"invented-signature\\\"}\"}}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "text_with_state_google_code_assist_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"google_code_assist\",\"data\":\"\"}}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        },
+        {
+          "name": "open_ai_responses_item_state_unchanged_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"open_ai_responses\",\"data\":\"{\\\"id\\\":\\\"msg_example\\\",\\\"phase\\\":\\\"final_answer\\\"}\"}}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        },
+        {
+          "name": "open_ai_responses_chatgpt_item_state_unchanged_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"open_ai_responses_chatgpt\",\"data\":\"{\\\"id\\\":\\\"msg_example\\\",\\\"phase\\\":\\\"final_answer\\\"}\"}}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        },
+        {
+          "name": "reasoning_outside_the_range",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 4,
+            "to": 6
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}],\"origin\":{\"provider_module_id\":\"example-provider\",\"model_id\":\"example-model\"}}]",
+          "restored": null
+        }
+      ],
+      "edit_refusals": [
+        {
+          "name": "reasoning_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "reasoning_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"reasoning\",\"text\":\"\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "redacted_reasoning_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"redacted_reasoning\",\"data\":\"invented-opaque-data\",\"provider_format\":\"example\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "redacted_reasoning_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"redacted_reasoning\",\"data\":\"\",\"provider_format\":\"example\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "reasoning_signature_opaque_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "reasoning_signature_opaque_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "opaque_reasoning_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"redacted_reasoning\",\"data\":\"{\\\"encrypted_content\\\":\\\"invented-ciphertext\\\",\\\"id\\\":\\\"rs_example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"A readable summary.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\",\"provider_format\":\"example-item\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "opaque_reasoning_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"redacted_reasoning\",\"data\":\"{\\\"id\\\":\\\"rs_example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"A readable summary.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\",\"provider_format\":\"example-item\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "tool_call_signature_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"tool_call\",\"tool_call_id\":\"call-example\",\"tool_name\":\"open_door\",\"input\":{\"door\":\"blue\"},\"thought_signature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "tool_call_signature_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"tool_call\",\"tool_call_id\":\"call-example\",\"tool_name\":\"open_door\",\"input\":{\"door\":\"blue\"}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "text_with_state_gemini_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"{\\\"thoughtSignature\\\":\\\"invented-signature\\\"}\"}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "text_with_state_gemini_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"\"}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "text_with_state_google_code_assist_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"google_code_assist\",\"data\":\"{\\\"thoughtSignature\\\":\\\"invented-signature\\\"}\"}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "text_with_state_google_code_assist_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"google_code_assist\",\"data\":\"\"}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "open_ai_responses_item_state_unchanged_edit_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"open_ai_responses\",\"data\":\"{\\\"id\\\":\\\"msg_example\\\",\\\"phase\\\":\\\"final_answer\\\"}\"}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "open_ai_responses_chatgpt_item_state_unchanged_edit_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"open_ai_responses_chatgpt\",\"data\":\"{\\\"id\\\":\\\"msg_example\\\",\\\"phase\\\":\\\"final_answer\\\"}\"}}"
+          },
+          "restored": null
+        }
+      ]
+    },
+    {
+      "profile": "anthropic-messages",
+      "kinds_carried": [
+        "reasoning",
+        "opaque_reasoning"
+      ],
+      "prunes": [
+        {
+          "name": "thinking",
+          "kind": "reasoning",
+          "original": {
+            "type": "thinking",
+            "thinking": "Consider the blue door.",
+            "signature": "invented-signature"
+          },
+          "served": {
+            "type": "thinking",
+            "thinking": "",
+            "signature": ""
+          }
+        },
+        {
+          "name": "thinking_signature_alone",
+          "kind": "reasoning",
+          "original": {
+            "type": "thinking",
+            "thinking": "",
+            "signature": "invented-signature"
+          },
+          "served": {
+            "type": "thinking",
+            "thinking": "",
+            "signature": ""
+          }
+        },
+        {
+          "name": "redacted_thinking",
+          "kind": "reasoning",
+          "original": {
+            "type": "redacted_thinking",
+            "data": "invented-opaque-data"
+          },
+          "served": {
+            "type": "redacted_thinking",
+            "data": ""
+          }
+        },
+        {
+          "name": "redacted_thinking_opaque",
+          "kind": "opaque_reasoning",
+          "original": {
+            "type": "redacted_thinking",
+            "data": "invented-opaque-data"
+          },
+          "served": {
+            "type": "redacted_thinking",
+            "data": ""
+          }
+        },
+        {
+          "name": "thinking_signature_opaque",
+          "kind": "opaque_reasoning",
+          "original": {
+            "type": "thinking",
+            "thinking": "Consider the blue door.",
+            "signature": "invented-signature"
+          },
+          "served": {
+            "type": "thinking",
+            "thinking": "Consider the blue door.",
+            "signature": ""
+          }
+        }
+      ],
+      "not_carried": [
+        {
+          "name": "thinking_signature_is_not_a_signature_prune",
+          "kind": "signature",
+          "part": {
+            "type": "thinking",
+            "thinking": "Consider the blue door.",
+            "signature": "invented-signature"
+          }
+        },
+        {
+          "name": "thinking_summary_is_not_opaque_reasoning",
+          "kind": "opaque_reasoning",
+          "part": {
+            "type": "thinking",
+            "thinking": "Consider the blue door.",
+            "signature": ""
+          }
+        },
+        {
+          "name": "tool_use_carries_no_signature",
+          "kind": "signature",
+          "part": {
+            "type": "tool_use",
+            "id": "toolu_example",
+            "name": "open_door",
+            "input": {
+              "door": "blue"
+            }
+          }
+        },
+        {
+          "name": "reasoning_shape_of_another_profile",
+          "kind": "reasoning",
+          "part": {
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "signature": "invented-signature"
+          }
+        }
+      ],
+      "refusals": [
+        {
+          "name": "thinking_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}]}]",
+          "restored": null
+        },
+        {
+          "name": "thinking_signature_alone_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"invented-signature\"}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_signature_alone_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}]}]",
+          "restored": null
+        },
+        {
+          "name": "redacted_thinking_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_thinking\",\"data\":\"invented-opaque-data\"}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "redacted_thinking_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_thinking\",\"data\":\"\"}]}]",
+          "restored": null
+        },
+        {
+          "name": "redacted_thinking_opaque_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_thinking\",\"data\":\"invented-opaque-data\"}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "redacted_thinking_opaque_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_thinking\",\"data\":\"\"}]}]",
+          "restored": null
+        },
+        {
+          "name": "thinking_signature_opaque_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_signature_opaque_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"signature\":\"\"}]}]",
+          "restored": null
+        },
+        {
+          "name": "thinking_outside_the_range",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 4,
+            "to": 6
+          },
+          "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}]}]",
+          "restored": null
+        }
+      ],
+      "edit_refusals": [
+        {
+          "name": "thinking_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "thinking_signature_alone_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_signature_alone_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"\",\"signature\":\"\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "redacted_thinking_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"redacted_thinking\",\"data\":\"invented-opaque-data\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "redacted_thinking_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"redacted_thinking\",\"data\":\"\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "redacted_thinking_opaque_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"redacted_thinking\",\"data\":\"invented-opaque-data\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "redacted_thinking_opaque_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"redacted_thinking\",\"data\":\"\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "thinking_signature_opaque_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_signature_opaque_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"signature\":\"\"}"
+          },
+          "restored": null
+        }
+      ]
+    },
+    {
+      "profile": "opencode-aisdk",
+      "kinds_carried": [
+        "reasoning",
+        "opaque_reasoning",
+        "signature"
+      ],
+      "prunes": [
+        {
+          "name": "reasoning",
+          "kind": "reasoning",
+          "original": {
+            "id": "prt_reasoning",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "anthropic": {
+                "signature": "invented-signature"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_reasoning",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "",
+            "metadata": {
+              "anthropic": {}
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "reasoning_with_encrypted_content",
+          "kind": "reasoning",
+          "original": {
+            "id": "prt_opaque",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "A readable summary.",
+            "metadata": {
+              "openai": {
+                "itemId": "rs_example",
+                "reasoningEncryptedContent": "invented-ciphertext"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_opaque",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "",
+            "metadata": {
+              "openai": {
+                "itemId": "rs_example"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "opaque_reasoning",
+          "kind": "opaque_reasoning",
+          "original": {
+            "id": "prt_opaque",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "A readable summary.",
+            "metadata": {
+              "openai": {
+                "itemId": "rs_example",
+                "reasoningEncryptedContent": "invented-ciphertext"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_opaque",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "A readable summary.",
+            "metadata": {
+              "openai": {
+                "itemId": "rs_example"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "tool_thought_signature",
+          "kind": "signature",
+          "original": {
+            "id": "prt_tool",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "tool",
+            "callID": "call-example",
+            "tool": "open_door",
+            "state": {
+              "status": "completed",
+              "input": {
+                "door": "blue"
+              },
+              "output": "The blue door is open.",
+              "title": "open_door",
+              "metadata": {},
+              "time": {
+                "start": 1767225600000,
+                "end": 1767225601000
+              }
+            },
+            "metadata": {
+              "google": {
+                "thoughtSignature": "invented-signature"
+              }
+            }
+          },
+          "served": {
+            "id": "prt_tool",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "tool",
+            "callID": "call-example",
+            "tool": "open_door",
+            "state": {
+              "status": "completed",
+              "input": {
+                "door": "blue"
+              },
+              "output": "The blue door is open.",
+              "title": "open_door",
+              "metadata": {},
+              "time": {
+                "start": 1767225600000,
+                "end": 1767225601000
+              }
+            },
+            "metadata": {
+              "google": {}
+            }
+          }
+        },
+        {
+          "name": "text_thought_signature",
+          "kind": "signature",
+          "original": {
+            "id": "prt_text",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "text",
+            "text": "The door is blue.",
+            "metadata": {
+              "google": {
+                "thoughtSignature": "invented-signature"
+              }
+            }
+          },
+          "served": {
+            "id": "prt_text",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "text",
+            "text": "The door is blue.",
+            "metadata": {
+              "google": {}
+            }
+          }
+        },
+        {
+          "name": "anthropic_redacted_data",
+          "kind": "reasoning",
+          "original": {
+            "id": "prt_redacted",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "anthropic": {
+                "redactedData": "invented-opaque-data"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_redacted",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "",
+            "metadata": {
+              "anthropic": {}
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "anthropic_redacted_data_opaque",
+          "kind": "opaque_reasoning",
+          "original": {
+            "id": "prt_redacted",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "anthropic": {
+                "redactedData": "invented-opaque-data"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_redacted",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "anthropic": {}
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "bedrock_reasoning",
+          "kind": "reasoning",
+          "original": {
+            "id": "prt_bedrock",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "bedrock": {
+                "signature": "invented-signature",
+                "redactedData": "invented-opaque-data"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_bedrock",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "",
+            "metadata": {
+              "bedrock": {}
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "bedrock_redacted_data_opaque",
+          "kind": "opaque_reasoning",
+          "original": {
+            "id": "prt_bedrock",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "bedrock": {
+                "signature": "invented-signature",
+                "redactedData": "invented-opaque-data"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_bedrock",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "bedrock": {
+                "signature": "invented-signature"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "google_reasoning_thought_signature",
+          "kind": "reasoning",
+          "original": {
+            "id": "prt_google",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "google": {
+                "thoughtSignature": "invented-signature"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_google",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "",
+            "metadata": {
+              "google": {}
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "vertex_text_thought_signature",
+          "kind": "signature",
+          "original": {
+            "id": "prt_vertex_text",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "text",
+            "text": "The door is blue.",
+            "metadata": {
+              "vertex": {
+                "thoughtSignature": "invented-signature"
+              }
+            }
+          },
+          "served": {
+            "id": "prt_vertex_text",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "text",
+            "text": "The door is blue.",
+            "metadata": {
+              "vertex": {}
+            }
+          }
+        },
+        {
+          "name": "openrouter_reasoning_details",
+          "kind": "reasoning",
+          "original": {
+            "id": "prt_openrouter",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "openrouter": {
+                "reasoning_details": [
+                  {
+                    "type": "reasoning.text",
+                    "text": "Consider the blue door.",
+                    "signature": "invented-signature"
+                  },
+                  {
+                    "type": "reasoning.encrypted",
+                    "data": "invented-ciphertext"
+                  },
+                  {
+                    "type": "reasoning.summary",
+                    "summary": "A readable summary."
+                  }
+                ]
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_openrouter",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "",
+            "metadata": {
+              "openrouter": {
+                "reasoning_details": [
+                  {
+                    "type": "reasoning.text",
+                    "text": ""
+                  },
+                  {
+                    "type": "reasoning.encrypted"
+                  },
+                  {
+                    "type": "reasoning.summary",
+                    "summary": ""
+                  }
+                ]
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "openrouter_encrypted_detail_opaque",
+          "kind": "opaque_reasoning",
+          "original": {
+            "id": "prt_openrouter",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "openrouter": {
+                "reasoning_details": [
+                  {
+                    "type": "reasoning.text",
+                    "text": "Consider the blue door.",
+                    "signature": "invented-signature"
+                  },
+                  {
+                    "type": "reasoning.encrypted",
+                    "data": "invented-ciphertext"
+                  },
+                  {
+                    "type": "reasoning.summary",
+                    "summary": "A readable summary."
+                  }
+                ]
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_openrouter",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "openrouter": {
+                "reasoning_details": [
+                  {
+                    "type": "reasoning.text",
+                    "text": "Consider the blue door.",
+                    "signature": "invented-signature"
+                  },
+                  {
+                    "type": "reasoning.encrypted"
+                  },
+                  {
+                    "type": "reasoning.summary",
+                    "summary": "A readable summary."
+                  }
+                ]
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "openrouter_text_detail_signature",
+          "kind": "signature",
+          "original": {
+            "id": "prt_openrouter",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "openrouter": {
+                "reasoning_details": [
+                  {
+                    "type": "reasoning.text",
+                    "text": "Consider the blue door.",
+                    "signature": "invented-signature"
+                  },
+                  {
+                    "type": "reasoning.encrypted",
+                    "data": "invented-ciphertext"
+                  },
+                  {
+                    "type": "reasoning.summary",
+                    "summary": "A readable summary."
+                  }
+                ]
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          },
+          "served": {
+            "id": "prt_openrouter",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "openrouter": {
+                "reasoning_details": [
+                  {
+                    "type": "reasoning.text",
+                    "text": "Consider the blue door."
+                  },
+                  {
+                    "type": "reasoning.encrypted",
+                    "data": "invented-ciphertext"
+                  },
+                  {
+                    "type": "reasoning.summary",
+                    "summary": "A readable summary."
+                  }
+                ]
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        }
+      ],
+      "not_carried": [
+        {
+          "name": "reasoning_signature_is_not_a_signature_prune",
+          "kind": "signature",
+          "part": {
+            "id": "prt_reasoning",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "anthropic": {
+                "signature": "invented-signature"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "signature_is_not_opaque_reasoning",
+          "kind": "opaque_reasoning",
+          "part": {
+            "id": "prt_reasoning",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "anthropic": {
+                "signature": "invented-signature"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "null_encrypted_content_is_not_opaque",
+          "kind": "opaque_reasoning",
+          "part": {
+            "id": "prt_null",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "A readable summary.",
+            "metadata": {
+              "openai": {
+                "itemId": "rs_example",
+                "reasoningEncryptedContent": null
+              }
+            }
+          }
+        },
+        {
+          "name": "tool_without_metadata",
+          "kind": "signature",
+          "part": {
+            "id": "prt_tool",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "tool",
+            "callID": "call-example",
+            "tool": "open_door",
+            "state": {
+              "status": "completed",
+              "input": {
+                "door": "blue"
+              },
+              "output": "The blue door is open.",
+              "title": "open_door",
+              "metadata": {},
+              "time": {
+                "start": 1767225600000,
+                "end": 1767225601000
+              }
+            }
+          }
+        },
+        {
+          "name": "openai_item_id_is_not_reasoning",
+          "kind": "reasoning",
+          "part": {
+            "id": "prt_item",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "",
+            "metadata": {
+              "openai": {
+                "itemId": "rs_example"
+              }
+            }
+          }
+        },
+        {
+          "name": "anthropic_signature_is_not_opaque_reasoning",
+          "kind": "opaque_reasoning",
+          "part": {
+            "id": "prt_reasoning",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "Consider the blue door.",
+            "metadata": {
+              "anthropic": {
+                "signature": "invented-signature"
+              }
+            },
+            "time": {
+              "start": 1767225600000,
+              "end": 1767225601000
+            }
+          }
+        },
+        {
+          "name": "unlisted_entry_text_is_not_a_signature",
+          "kind": "signature",
+          "part": {
+            "id": "prt_compat_text",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "text",
+            "text": "The door is blue.",
+            "metadata": {
+              "openai-compatible": {
+                "thoughtSignature": "invented-signature"
+              }
+            }
+          }
+        },
+        {
+          "name": "unlisted_entry_is_not_opaque_reasoning",
+          "kind": "opaque_reasoning",
+          "part": {
+            "id": "prt_compat",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "",
+            "metadata": {
+              "openai-compatible": {
+                "reasoningEncryptedContent": "invented-ciphertext",
+                "signature": "invented-signature"
+              }
+            }
+          }
+        },
+        {
+          "name": "unlisted_entry_is_not_reasoning",
+          "kind": "reasoning",
+          "part": {
+            "id": "prt_compat",
+            "sessionID": "ses_example",
+            "messageID": "msg_example",
+            "type": "reasoning",
+            "text": "",
+            "metadata": {
+              "openai-compatible": {
+                "reasoningEncryptedContent": "invented-ciphertext",
+                "signature": "invented-signature"
+              }
+            }
+          }
+        }
+      ],
+      "refusals": [
+        {
+          "name": "reasoning_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_reasoning\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"anthropic\":{\"signature\":\"invented-signature\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "reasoning_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_reasoning\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"anthropic\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "reasoning_with_encrypted_content_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_opaque\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"A readable summary.\",\"metadata\":{\"openai\":{\"itemId\":\"rs_example\",\"reasoningEncryptedContent\":\"invented-ciphertext\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "reasoning_with_encrypted_content_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_opaque\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"openai\":{\"itemId\":\"rs_example\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "opaque_reasoning_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_opaque\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"A readable summary.\",\"metadata\":{\"openai\":{\"itemId\":\"rs_example\",\"reasoningEncryptedContent\":\"invented-ciphertext\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "opaque_reasoning_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_opaque\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"A readable summary.\",\"metadata\":{\"openai\":{\"itemId\":\"rs_example\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "tool_thought_signature_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_tool\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"tool\",\"callID\":\"call-example\",\"tool\":\"open_door\",\"state\":{\"status\":\"completed\",\"input\":{\"door\":\"blue\"},\"output\":\"The blue door is open.\",\"title\":\"open_door\",\"metadata\":{},\"time\":{\"start\":1767225600000,\"end\":1767225601000}},\"metadata\":{\"google\":{\"thoughtSignature\":\"invented-signature\"}}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "tool_thought_signature_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_tool\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"tool\",\"callID\":\"call-example\",\"tool\":\"open_door\",\"state\":{\"status\":\"completed\",\"input\":{\"door\":\"blue\"},\"output\":\"The blue door is open.\",\"title\":\"open_door\",\"metadata\":{},\"time\":{\"start\":1767225600000,\"end\":1767225601000}},\"metadata\":{\"google\":{}}}]}]",
+          "restored": null
+        },
+        {
+          "name": "text_thought_signature_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_text\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"text\",\"text\":\"The door is blue.\",\"metadata\":{\"google\":{\"thoughtSignature\":\"invented-signature\"}}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "text_thought_signature_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_text\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"text\",\"text\":\"The door is blue.\",\"metadata\":{\"google\":{}}}]}]",
+          "restored": null
+        },
+        {
+          "name": "anthropic_redacted_data_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_redacted\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"anthropic\":{\"redactedData\":\"invented-opaque-data\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "anthropic_redacted_data_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_redacted\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"anthropic\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "anthropic_redacted_data_opaque_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_redacted\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"anthropic\":{\"redactedData\":\"invented-opaque-data\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "anthropic_redacted_data_opaque_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_redacted\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"anthropic\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "bedrock_reasoning_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_bedrock\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"bedrock\":{\"signature\":\"invented-signature\",\"redactedData\":\"invented-opaque-data\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "bedrock_reasoning_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_bedrock\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"bedrock\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "bedrock_redacted_data_opaque_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_bedrock\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"bedrock\":{\"signature\":\"invented-signature\",\"redactedData\":\"invented-opaque-data\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "bedrock_redacted_data_opaque_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_bedrock\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"bedrock\":{\"signature\":\"invented-signature\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "google_reasoning_thought_signature_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_google\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"google\":{\"thoughtSignature\":\"invented-signature\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "google_reasoning_thought_signature_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_google\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"google\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "vertex_text_thought_signature_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_vertex_text\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"text\",\"text\":\"The door is blue.\",\"metadata\":{\"vertex\":{\"thoughtSignature\":\"invented-signature\"}}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "vertex_text_thought_signature_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_vertex_text\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"text\",\"text\":\"The door is blue.\",\"metadata\":{\"vertex\":{}}}]}]",
+          "restored": null
+        },
+        {
+          "name": "openrouter_reasoning_details_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"},{\"type\":\"reasoning.encrypted\",\"data\":\"invented-ciphertext\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "openrouter_reasoning_details_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"\"},{\"type\":\"reasoning.encrypted\"},{\"type\":\"reasoning.summary\",\"summary\":\"\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "openrouter_encrypted_detail_opaque_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"},{\"type\":\"reasoning.encrypted\",\"data\":\"invented-ciphertext\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "openrouter_encrypted_detail_opaque_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"},{\"type\":\"reasoning.encrypted\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "openrouter_text_detail_signature_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"},{\"type\":\"reasoning.encrypted\",\"data\":\"invented-ciphertext\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "openrouter_text_detail_signature_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\"},{\"type\":\"reasoning.encrypted\",\"data\":\"invented-ciphertext\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        },
+        {
+          "name": "reasoning_outside_the_range",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 4,
+            "to": 6
+          },
+          "bytes": "[{\"info\":{\"id\":\"msg_example\",\"sessionID\":\"ses_example\",\"role\":\"assistant\",\"time\":{\"created\":1767225600000},\"providerID\":\"example-provider\",\"modelID\":\"example-model\"},\"parts\":[{\"id\":\"prt_reasoning\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"anthropic\":{\"signature\":\"invented-signature\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}]}]",
+          "restored": null
+        }
+      ],
+      "edit_refusals": [
+        {
+          "name": "reasoning_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_reasoning\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"anthropic\":{\"signature\":\"invented-signature\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "reasoning_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_reasoning\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"anthropic\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "reasoning_with_encrypted_content_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_opaque\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"A readable summary.\",\"metadata\":{\"openai\":{\"itemId\":\"rs_example\",\"reasoningEncryptedContent\":\"invented-ciphertext\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "reasoning_with_encrypted_content_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_opaque\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"openai\":{\"itemId\":\"rs_example\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "opaque_reasoning_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_opaque\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"A readable summary.\",\"metadata\":{\"openai\":{\"itemId\":\"rs_example\",\"reasoningEncryptedContent\":\"invented-ciphertext\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "opaque_reasoning_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_opaque\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"A readable summary.\",\"metadata\":{\"openai\":{\"itemId\":\"rs_example\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "tool_thought_signature_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_tool\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"tool\",\"callID\":\"call-example\",\"tool\":\"open_door\",\"state\":{\"status\":\"completed\",\"input\":{\"door\":\"blue\"},\"output\":\"The blue door is open.\",\"title\":\"open_door\",\"metadata\":{},\"time\":{\"start\":1767225600000,\"end\":1767225601000}},\"metadata\":{\"google\":{\"thoughtSignature\":\"invented-signature\"}}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "tool_thought_signature_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_tool\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"tool\",\"callID\":\"call-example\",\"tool\":\"open_door\",\"state\":{\"status\":\"completed\",\"input\":{\"door\":\"blue\"},\"output\":\"The blue door is open.\",\"title\":\"open_door\",\"metadata\":{},\"time\":{\"start\":1767225600000,\"end\":1767225601000}},\"metadata\":{\"google\":{}}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "text_thought_signature_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_text\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"text\",\"text\":\"The door is blue.\",\"metadata\":{\"google\":{\"thoughtSignature\":\"invented-signature\"}}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "text_thought_signature_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_text\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"text\",\"text\":\"The door is blue.\",\"metadata\":{\"google\":{}}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "anthropic_redacted_data_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_redacted\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"anthropic\":{\"redactedData\":\"invented-opaque-data\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "anthropic_redacted_data_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_redacted\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"anthropic\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "anthropic_redacted_data_opaque_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_redacted\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"anthropic\":{\"redactedData\":\"invented-opaque-data\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "anthropic_redacted_data_opaque_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_redacted\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"anthropic\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "bedrock_reasoning_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_bedrock\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"bedrock\":{\"signature\":\"invented-signature\",\"redactedData\":\"invented-opaque-data\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "bedrock_reasoning_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_bedrock\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"bedrock\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "bedrock_redacted_data_opaque_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_bedrock\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"bedrock\":{\"signature\":\"invented-signature\",\"redactedData\":\"invented-opaque-data\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "bedrock_redacted_data_opaque_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_bedrock\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"bedrock\":{\"signature\":\"invented-signature\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "google_reasoning_thought_signature_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_google\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"google\":{\"thoughtSignature\":\"invented-signature\"}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "google_reasoning_thought_signature_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_google\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"google\":{}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "vertex_text_thought_signature_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_vertex_text\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"text\",\"text\":\"The door is blue.\",\"metadata\":{\"vertex\":{\"thoughtSignature\":\"invented-signature\"}}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "vertex_text_thought_signature_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_vertex_text\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"text\",\"text\":\"The door is blue.\",\"metadata\":{\"vertex\":{}}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "openrouter_reasoning_details_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"},{\"type\":\"reasoning.encrypted\",\"data\":\"invented-ciphertext\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "openrouter_reasoning_details_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"\"},{\"type\":\"reasoning.encrypted\"},{\"type\":\"reasoning.summary\",\"summary\":\"\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "openrouter_encrypted_detail_opaque_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"},{\"type\":\"reasoning.encrypted\",\"data\":\"invented-ciphertext\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "openrouter_encrypted_detail_opaque_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"},{\"type\":\"reasoning.encrypted\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "openrouter_text_detail_signature_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"},{\"type\":\"reasoning.encrypted\",\"data\":\"invented-ciphertext\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "openrouter_text_detail_signature_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_openrouter\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"metadata\":{\"openrouter\":{\"reasoning_details\":[{\"type\":\"reasoning.text\",\"text\":\"Consider the blue door.\"},{\"type\":\"reasoning.encrypted\",\"data\":\"invented-ciphertext\"},{\"type\":\"reasoning.summary\",\"summary\":\"A readable summary.\"}]}},\"time\":{\"start\":1767225600000,\"end\":1767225601000}}"
+          },
+          "restored": null
+        }
+      ]
+    },
+    {
+      "profile": "pi",
+      "kinds_carried": [
+        "reasoning",
+        "opaque_reasoning",
+        "signature"
+      ],
+      "prunes": [
+        {
+          "name": "thinking",
+          "kind": "reasoning",
+          "original": {
+            "type": "thinking",
+            "thinking": "Consider the blue door.",
+            "thinkingSignature": "invented-signature"
+          },
+          "served": {
+            "type": "thinking",
+            "thinking": ""
+          }
+        },
+        {
+          "name": "thinking_signature_alone",
+          "kind": "reasoning",
+          "original": {
+            "type": "thinking",
+            "thinking": "",
+            "thinkingSignature": "invented-signature"
+          },
+          "served": {
+            "type": "thinking",
+            "thinking": ""
+          }
+        },
+        {
+          "name": "opaque_item",
+          "kind": "opaque_reasoning",
+          "original": {
+            "type": "thinking",
+            "thinking": "A readable summary.",
+            "thinkingSignature": "{\"encrypted_content\":\"invented-ciphertext\",\"id\":\"rs_example\",\"summary\":[{\"text\":\"A readable summary.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"}"
+          },
+          "served": {
+            "type": "thinking",
+            "thinking": "A readable summary.",
+            "thinkingSignature": "{\"id\":\"rs_example\",\"summary\":[{\"text\":\"A readable summary.\",\"type\":\"summary_text\"}],\"type\":\"reasoning\"}"
+          }
+        },
+        {
+          "name": "opaque_redacted",
+          "kind": "opaque_reasoning",
+          "original": {
+            "type": "thinking",
+            "thinking": "[Reasoning redacted]",
+            "thinkingSignature": "invented-opaque-data",
+            "redacted": true
+          },
+          "served": {
+            "type": "thinking",
+            "thinking": "[Reasoning redacted]",
+            "redacted": true
+          }
+        },
+        {
+          "name": "redacted_thinking",
+          "kind": "reasoning",
+          "original": {
+            "type": "thinking",
+            "thinking": "[Reasoning redacted]",
+            "thinkingSignature": "invented-opaque-data",
+            "redacted": true
+          },
+          "served": {
+            "type": "thinking",
+            "thinking": "",
+            "redacted": true
+          }
+        },
+        {
+          "name": "tool_call_thought_signature",
+          "kind": "signature",
+          "original": {
+            "type": "toolCall",
+            "id": "call-example",
+            "name": "open_door",
+            "arguments": {
+              "door": "blue"
+            },
+            "thoughtSignature": "invented-signature"
+          },
+          "served": {
+            "type": "toolCall",
+            "id": "call-example",
+            "name": "open_door",
+            "arguments": {
+              "door": "blue"
+            }
+          }
+        },
+        {
+          "name": "google_text_signature",
+          "kind": "signature",
+          "original": {
+            "type": "text",
+            "text": "The door is blue.",
+            "textSignature": "invented-signature"
+          },
+          "served": {
+            "type": "text",
+            "text": "The door is blue."
+          }
+        }
+      ],
+      "not_carried": [
+        {
+          "name": "thinking_signature_is_not_a_signature_prune",
+          "kind": "signature",
+          "part": {
+            "type": "thinking",
+            "thinking": "Consider the blue door.",
+            "thinkingSignature": "invented-signature"
+          }
+        },
+        {
+          "name": "plain_signature_is_not_opaque_reasoning",
+          "kind": "opaque_reasoning",
+          "part": {
+            "type": "thinking",
+            "thinking": "Consider the blue door.",
+            "thinkingSignature": "invented-signature"
+          }
+        },
+        {
+          "name": "responses_text_signature_is_item_state",
+          "kind": "signature",
+          "part": {
+            "type": "text",
+            "text": "The door is blue.",
+            "textSignature": "{\"v\":1,\"id\":\"msg_example\",\"phase\":\"final_answer\"}"
+          }
+        }
+      ],
+      "refusals": [
+        {
+          "name": "thinking_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"thinkingSignature\":\"invented-signature\"}]}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\"}]}}]",
+          "restored": null
+        },
+        {
+          "name": "thinking_signature_alone_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"thinkingSignature\":\"invented-signature\"}]}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_signature_alone_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\"}]}}]",
+          "restored": null
+        },
+        {
+          "name": "opaque_item_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"A readable summary.\",\"thinkingSignature\":\"{\\\"encrypted_content\\\":\\\"invented-ciphertext\\\",\\\"id\\\":\\\"rs_example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"A readable summary.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\"}]}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "opaque_item_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"A readable summary.\",\"thinkingSignature\":\"{\\\"id\\\":\\\"rs_example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"A readable summary.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\"}]}}]",
+          "restored": null
+        },
+        {
+          "name": "opaque_redacted_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"[Reasoning redacted]\",\"thinkingSignature\":\"invented-opaque-data\",\"redacted\":true}]}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "opaque_redacted_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"[Reasoning redacted]\",\"redacted\":true}]}}]",
+          "restored": null
+        },
+        {
+          "name": "redacted_thinking_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"[Reasoning redacted]\",\"thinkingSignature\":\"invented-opaque-data\",\"redacted\":true}]}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "redacted_thinking_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"\",\"redacted\":true}]}}]",
+          "restored": null
+        },
+        {
+          "name": "tool_call_thought_signature_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"toolCall\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":{\"door\":\"blue\"},\"thoughtSignature\":\"invented-signature\"}]}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "tool_call_thought_signature_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"toolCall\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":{\"door\":\"blue\"}}]}}]",
+          "restored": null
+        },
+        {
+          "name": "google_text_signature_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"The door is blue.\",\"textSignature\":\"invented-signature\"}]}}]",
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "google_text_signature_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"The door is blue.\"}]}}]",
+          "restored": null
+        },
+        {
+          "name": "responses_text_signature_unchanged_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "stands_for": {
+            "from": 2,
+            "to": 5
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"The door is blue.\",\"textSignature\":\"{\\\"v\\\":1,\\\"id\\\":\\\"msg_example\\\",\\\"phase\\\":\\\"final_answer\\\"}\"}]}}]",
+          "restored": null
+        },
+        {
+          "name": "thinking_outside_the_range",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "stands_for": {
+            "from": 4,
+            "to": 6
+          },
+          "bytes": "[{\"type\":\"message\",\"id\":\"entry-example\",\"parentId\":\"entry-before\",\"timestamp\":\"2026-01-01T00:00:00.000Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"thinkingSignature\":\"invented-signature\"}]}}]",
+          "restored": null
+        }
+      ],
+      "edit_refusals": [
+        {
+          "name": "thinking_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"Consider the blue door.\",\"thinkingSignature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "thinking_signature_alone_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"\",\"thinkingSignature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "thinking_signature_alone_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "opaque_item_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"A readable summary.\",\"thinkingSignature\":\"{\\\"encrypted_content\\\":\\\"invented-ciphertext\\\",\\\"id\\\":\\\"rs_example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"A readable summary.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "opaque_item_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"A readable summary.\",\"thinkingSignature\":\"{\\\"id\\\":\\\"rs_example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"A readable summary.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "opaque_redacted_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"[Reasoning redacted]\",\"thinkingSignature\":\"invented-opaque-data\",\"redacted\":true}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "opaque_redacted_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "opaque_reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"[Reasoning redacted]\",\"redacted\":true}"
+          },
+          "restored": null
+        },
+        {
+          "name": "redacted_thinking_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"[Reasoning redacted]\",\"thinkingSignature\":\"invented-opaque-data\",\"redacted\":true}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "redacted_thinking_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "reasoning"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"thinking\",\"thinking\":\"\",\"redacted\":true}"
+          },
+          "restored": null
+        },
+        {
+          "name": "tool_call_thought_signature_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"toolCall\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":{\"door\":\"blue\"},\"thoughtSignature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "tool_call_thought_signature_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"toolCall\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":{\"door\":\"blue\"}}"
+          },
+          "restored": null
+        },
+        {
+          "name": "google_text_signature_edit_restored",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text\",\"text\":\"The door is blue.\",\"textSignature\":\"invented-signature\"}"
+          },
+          "restored": {
+            "ordinal": 3,
+            "part": "m3#0"
+          }
+        },
+        {
+          "name": "google_text_signature_edit_pruned_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text\",\"text\":\"The door is blue.\"}"
+          },
+          "restored": null
+        },
+        {
+          "name": "responses_text_signature_unchanged_edit_allowed",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text\",\"text\":\"The door is blue.\",\"textSignature\":\"{\\\"v\\\":1,\\\"id\\\":\\\"msg_example\\\",\\\"phase\\\":\\\"final_answer\\\"}\"}"
+          },
+          "restored": null
+        }
+      ]
+    }
+  ]
+}

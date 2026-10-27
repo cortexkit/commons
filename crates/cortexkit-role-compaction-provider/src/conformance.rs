@@ -6,8 +6,13 @@
 //! [`held_copies_follow_reasoning_pruned`] for held copies after an archive
 //! prune.
 
-use cortexkit_role_llm_runner::archive_prunes_reasoning::{kinds, PrunedPartAt, ReasoningPruned};
+use cortexkit_role_llm_runner::archive_prunes_reasoning::{PrunedPartAt, ReasoningPruned};
 use serde_json::{json, Value};
+
+mod transcripts;
+
+pub use transcripts::{probe_parts, NotApplicable};
+use transcripts::{PruneMode, Transcript};
 
 use crate::{
     digest::content_digest,
@@ -98,8 +103,9 @@ pub struct ScriptedRunner {
     state: std::sync::Mutex<RunnerState>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct RunnerState {
+    transcript: Transcript,
     lineage_id: String,
     first_ordinal: u64,
     /// Every message as written, by ordinal from 0, and as served now.
@@ -121,41 +127,29 @@ fn message_id(ordinal: u64) -> String {
     format!("probe-m{ordinal}")
 }
 
-/// Message `ordinal` of the probe's transcript: a user prompt at even
-/// ordinals, an assistant answer at odd ones. The answer carries signed
-/// reasoning (part 0, pruned with the `reasoning` kind), plain text, one
-/// part holding both a tool call with its thought signature and that call's
-/// result (part 2), and `text_with_state` whose provider state holds a
-/// signature (part 3); parts 2 and 3 are pruned with the `signature` kind.
-/// A provider that edits the tool output or the text from a held pre-prune
-/// copy re-serializes the signature the prune removed.
-fn scripted_message(ordinal: u64) -> Value {
-    if ordinal.is_multiple_of(2) {
-        json!({"role":"user","content":[{"type":"text","text":format!("Question {ordinal}.")}]})
-    } else {
-        json!({"role":"assistant","content":[
-            {"type":"reasoning","text":format!("Private thought {ordinal}."),"signature":format!("invented-signature-{ordinal}")},
-            {"type":"text","text":format!("Answer {ordinal}.")},
-            {"type":"tool_call","id":format!("call-{ordinal}"),"name":"open_door","arguments":format!("{{\"door\": {ordinal}}}"),
-             "thought_signature":format!("invented-call-signature-{ordinal}"),
-             "result":{"output":format!("Door {ordinal} is open, and here is a long listing of what is behind it.")}},
-            {"type":"text_with_state","text":format!("Noted door {ordinal}, with a long explanation."),
-             "provider_state":{"signature":format!("invented-state-signature-{ordinal}"),"format":"example"}}
-        ]})
-    }
-}
-
 impl ScriptedRunner {
-    fn new(lineage_id: &str, through: u64) -> Self {
-        let messages: Vec<Value> = (0..=through).map(scripted_message).collect();
+    fn new(transcript: Transcript, lineage_id: &str, through: u64) -> Self {
+        let messages: Vec<Value> = (0..=through).map(|o| transcript.message(o)).collect();
         Self {
             state: std::sync::Mutex::new(RunnerState {
+                transcript,
                 lineage_id: lineage_id.into(),
+                first_ordinal: 0,
                 originals: messages.clone(),
                 served: messages,
-                ..RunnerState::default()
+                pruned: Vec::new(),
+                reasoning_pruned: None,
+                reads: Vec::new(),
+                below_cut: Vec::new(),
             }),
         }
+    }
+
+    /// The serializer profile whose native format this runner serves, as
+    /// the probe's Setup requests name it in `params.serializer_profile`;
+    /// `None` for the generic transcript.
+    pub fn serializer_profile(&self) -> Option<&'static str> {
+        self.lock().transcript.profile()
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, RunnerState> {
@@ -205,8 +199,8 @@ impl ScriptedRunner {
         let mut listed = Vec::new();
         for ordinal in from..stop {
             let original = &state.originals[ordinal as usize];
-            let parts = original["content"].as_array().cloned().unwrap_or_default();
-            messages.push(json!({
+            let parts = state.transcript.parts(original);
+            let mut entry = json!({
                 "ordinal": ordinal,
                 "mid": message_id(ordinal),
                 "message": state.served[ordinal as usize],
@@ -215,7 +209,14 @@ impl ScriptedRunner {
                     "part": part_key(ordinal, index),
                     "digest": content_digest(part),
                 })).collect::<Vec<_>>(),
-            }));
+            });
+            if state.transcript.serves_tags() && !parts.is_empty() {
+                // A descriptors read's rows: every part's key, in order.
+                entry["tags"] = (0..parts.len())
+                    .map(|index| json!({"part": part_key(ordinal, index)}))
+                    .collect();
+            }
+            messages.push(entry);
             for pruned in state.pruned.iter().filter(|p| p.ordinal == ordinal) {
                 let index: usize = pruned.part.rsplit('#').next().unwrap().parse().unwrap();
                 let original_part = &parts[index];
@@ -269,7 +270,7 @@ impl ScriptedRunner {
     fn append_through(&self, through: u64) {
         let mut state = self.lock();
         while (state.served.len() as u64) <= through {
-            let message = scripted_message(state.served.len() as u64);
+            let message = state.transcript.message(state.served.len() as u64);
             state.originals.push(message.clone());
             state.served.push(message);
         }
@@ -281,36 +282,27 @@ impl ScriptedRunner {
         state.first_ordinal = first_ordinal;
     }
 
-    /// Prune every assistant message at or below `through`, as a runner
-    /// declaring the `reasoning` and `signature` kinds does: empty the
-    /// reasoning, drop the call's thought signature, and empty the signature
-    /// inside the provider state. Raise the generation in the same step.
-    fn prune_reasoning_through(&self, through: u64) -> ReasoningPruned {
+    /// Prune every assistant message at or below `through`, in the served
+    /// transcript's own terms (`llm-runner/v1` §9.14.1, per-profile rules):
+    /// empty the reasoning, remove the opaque payload where the format
+    /// carries one beside a summary, and remove or empty the signatures on
+    /// the tool call and the state-carrying text. Raise the generation in
+    /// the same step.
+    fn prune_reasoning_through(&self, through: u64, mode: PruneMode) -> ReasoningPruned {
         let mut state = self.lock();
+        let transcript = state.transcript;
         for ordinal in (1..=through).step_by(2) {
-            let key = part_key(ordinal, 0);
-            if state
-                .pruned
-                .iter()
-                .any(|p| p.ordinal == ordinal && p.part == key)
-            {
+            if state.pruned.iter().any(|p| p.ordinal == ordinal) {
                 continue;
             }
-            let content = &mut state.served[ordinal as usize]["content"];
-            content[0] = json!({"type":"reasoning","text":""});
-            if let Some(call) = content[2].as_object_mut() {
-                call.remove("thought_signature");
-            }
-            content[3]["provider_state"]["signature"] = json!("");
-            state
-                .pruned
-                .push(PrunedPartAt::new(ordinal, key, kinds::REASONING));
-            for index in [2, 3] {
-                state.pruned.push(PrunedPartAt::new(
-                    ordinal,
-                    part_key(ordinal, index),
-                    kinds::SIGNATURE,
-                ));
+            for (index, kind, served) in transcript.prunes(ordinal, mode) {
+                let parts = transcript
+                    .parts_mut(&mut state.served[ordinal as usize])
+                    .expect("scripted answers have a part array");
+                parts[index] = served;
+                state
+                    .pruned
+                    .push(PrunedPartAt::new(ordinal, part_key(ordinal, index), kind));
             }
         }
         let generation = state.reasoning_pruned.map_or(1, |p| p.generation + 1);
@@ -344,6 +336,17 @@ impl ScriptedRunner {
 /// provider store. The provider's reverse calls for the probe's conversation
 /// go to the [`ScriptedRunner`] passed in, and nowhere else.
 pub trait PrunedReasoningProbe {
+    /// The serializer profile (`llm-runner/v1` §4.4) the provider is set up
+    /// with: the value of its plan item's `params.serializer_profile`. The
+    /// probe sends it there in every Setup request and serves its transcript
+    /// in that profile's native format: `anthropic-messages`,
+    /// `opencode-aisdk`, `owned-broca` or `pi`. `None`, the default, sends
+    /// no profile and serves the generic transcript of earlier releases. A
+    /// profile the runner contract does not name fails the probe.
+    fn serializer_profile(&self) -> Option<String> {
+        None
+    }
+
     /// Deliver `request` as `compaction.setup` on a route the daemon attests
     /// as [`PROBE_RUNNER`], and return the provider's answer as it sent it.
     fn setup(
@@ -383,6 +386,15 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
         format!("{HELD_COPIES_CASE}: {why}")
     }
 
+    /// Setup's `params`: the serializer profile, when the provider has one.
+    fn params(&self) -> serde_json::Map<String, Value> {
+        let mut params = serde_json::Map::new();
+        if let Some(profile) = self.runner.serializer_profile() {
+            params.insert("serializer_profile".into(), json!(profile));
+        }
+        params
+    }
+
     fn setup(
         &mut self,
         lineage_id: &str,
@@ -399,6 +411,7 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
             1_767_225_600_000,
         )
         .with_lineage(lineage_id);
+        request.params = self.params();
         if let Some(descent) = descends_from {
             request = request.with_descends_from(descent);
         }
@@ -462,7 +475,11 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
             .map_err(|e| self.fail(e))?;
         let pruned = self.runner.pruned();
         let first = self.runner.first_ordinal();
-        if let Some(part) = view.restored_pruned_part(&pruned, first) {
+        let transcript = self.runner.lock().transcript;
+        let restored = transcript
+            .restored(&view, &pruned, first)
+            .map_err(|e| self.fail(e))?;
+        if let Some(part) = restored {
             return Err(self.fail(format!(
                 "the view renders pruned content of part {} at ordinal {} from a held copy",
                 part.part, part.ordinal
@@ -547,11 +564,63 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
 /// no second re-read. In the second, a cut first moves the conversation to a
 /// lineage starting at ordinal 2, so the provider holds copies from before
 /// its cut; after the prune it must re-read only from the cut and must not
-/// render those older copies' pruned content.
+/// render those older copies' pruned content. Both prune with the
+/// `reasoning` and `signature` kinds. A profile transcript adds a third
+/// conversation, pruning with `opaque_reasoning` and `signature`, where only
+/// opaque payloads go and readable reasoning stays; a runner's check would
+/// refuse that readable reasoning beside a `reasoning` prune in the same
+/// fold, so the kinds are not mixed.
+///
+/// The transcript follows the adapter's
+/// [`PrunedReasoningProbe::serializer_profile`]. A logical part or prune
+/// kind that profile cannot carry is not checked: `Ok` here means every
+/// part the profile carries passed. Use
+/// [`held_copies_follow_reasoning_pruned_report`] to see which were checked
+/// and which were not applicable, by name.
 pub fn held_copies_follow_reasoning_pruned(
     adapter: &mut impl PrunedReasoningProbe,
 ) -> Result<(), String> {
-    for (label, cut) in [("no-cut", false), ("cut", true)] {
+    held_copies_follow_reasoning_pruned_report(adapter).map(|_| ())
+}
+
+/// What [`held_copies_follow_reasoning_pruned_report`] checked: the
+/// transcript's profile, the logical parts ([`probe_parts`]) and prune
+/// kinds it carried, and those its profile cannot carry, which were not
+/// checked and did not pass.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct HeldCopiesReport {
+    /// The serializer profile whose native transcript was served; `None`
+    /// for the generic transcript.
+    pub profile: Option<&'static str>,
+    pub parts_checked: Vec<&'static str>,
+    pub kinds_checked: Vec<&'static str>,
+    pub parts_not_applicable: Vec<NotApplicable>,
+    pub kinds_not_applicable: Vec<NotApplicable>,
+}
+
+/// [`held_copies_follow_reasoning_pruned`], returning on success what was
+/// checked and what was not applicable to the provider's serializer
+/// profile.
+pub fn held_copies_follow_reasoning_pruned_report(
+    adapter: &mut impl PrunedReasoningProbe,
+) -> Result<HeldCopiesReport, String> {
+    let profile = adapter.serializer_profile();
+    let transcript = Transcript::for_profile(profile.as_deref()).map_err(|e| {
+        format!(
+            "{HELD_COPIES_CASE}: the adapter's serializer profile {:?} is not one the \
+                 runner contract names ({e})",
+            e.profile
+        )
+    })?;
+    let mut conversations = vec![
+        ("no-cut", false, PruneMode::Reasoning),
+        ("cut", true, PruneMode::Reasoning),
+    ];
+    if transcript.opaque_mode() {
+        conversations.push(("opaque", false, PruneMode::Opaque));
+    }
+    for (label, cut, mode) in conversations {
         let session = format!("probe-pruned-{label}");
         let session_ref =
             cortexkit_role_llm_runner::session_ref(&cortexkit_role_llm_runner::SessionIdentity {
@@ -561,7 +630,7 @@ pub fn held_copies_follow_reasoning_pruned(
             });
         let mut conversation = Conversation {
             adapter: &mut *adapter,
-            runner: ScriptedRunner::new("probe-lineage-a", 3),
+            runner: ScriptedRunner::new(transcript, "probe-lineage-a", 3),
             session,
             session_ref,
             seq: 0,
@@ -590,19 +659,28 @@ pub fn held_copies_follow_reasoning_pruned(
             through = 5;
         }
         conversation.runner.take_reads();
-        let pruned = conversation.runner.prune_reasoning_through(through);
+        let pruned = conversation.runner.prune_reasoning_through(through, mode);
         let lineage = conversation.runner.lock().lineage_id.clone();
         conversation.setup(&lineage, None, Some(pruned))?;
         conversation.check_view()?;
         conversation.check_reconciled(through)?;
         conversation.check_no_second_reconcile(through)?;
     }
-    Ok(())
+    Ok(HeldCopiesReport {
+        profile: transcript.profile(),
+        parts_checked: transcript.parts_checked(),
+        kinds_checked: transcript.kinds_checked(),
+        parts_not_applicable: transcript.parts_not_applicable(),
+        kinds_not_applicable: transcript.kinds_not_applicable(),
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cortexkit_role_llm_runner::serializer_profile::{
+        ANTHROPIC_MESSAGES, OPENCODE_AISDK, OWNED_BROCA, PI,
+    };
     use std::collections::BTreeMap;
 
     #[derive(Default)]
@@ -678,6 +756,8 @@ mod tests {
     #[derive(Default)]
     struct HoldingProvider {
         fault: Option<HoldingFault>,
+        /// The serializer profile the provider is set up with.
+        profile: Option<String>,
         /// The one conversation this provider holds state for; a Setup for
         /// another starts from nothing, as a per-session store would.
         session: String,
@@ -707,6 +787,9 @@ mod tests {
         /// Trims `text_with_state` text in a part edit built from a held
         /// pre-prune copy, re-serializing its provider-state signature.
         EditsHeldStateText,
+        /// Reconciles after the `reasoning` prunes but not after the
+        /// `opaque_reasoning` one, so it renders held opaque payloads.
+        IgnoresOpaquePrune,
     }
 
     impl HoldingProvider {
@@ -725,9 +808,31 @@ mod tests {
             }
         }
 
-        /// Part edits that trim each held answer's tool output and its
+        fn on(profile: &str, fault: Option<HoldingFault>, edits_mode: bool) -> Self {
+            Self {
+                fault,
+                edits_mode,
+                profile: Some(profile.into()),
+                ..Self::default()
+            }
+        }
+
+        fn transcript(&self) -> Transcript {
+            Transcript::for_profile(self.profile.as_deref()).unwrap()
+        }
+
+        /// Part edits that trim each held answer's tool call (its output
+        /// where the part holds one, else its arguments) and its
         /// state-carrying text, re-serializing the rest of each part.
+        /// `anthropic-messages` has neither signature, so its edits trim the
+        /// `tool_use` input and the plain text instead.
         fn trim_edits(&self) -> Vec<crate::view::PartEdit> {
+            let transcript = self.transcript();
+            let (call_index, text_index) = match transcript.profile() {
+                None => (2, 3),
+                Some(ANTHROPIC_MESSAGES) => (3, 2),
+                Some(_) => (3, 4),
+            };
             let mut edits = Vec::new();
             for (ordinal, current) in self.held.range(self.first_ordinal..) {
                 if ordinal.is_multiple_of(2) {
@@ -740,11 +845,21 @@ mod tests {
                         current
                     }
                 };
-                let mut call = source(HoldingFault::EditsHeldToolOutput)["content"][2].clone();
-                call["result"]["output"] = json!("[output trimmed]");
-                let mut text = source(HoldingFault::EditsHeldStateText)["content"][3].clone();
+                let mut call =
+                    transcript.parts(source(HoldingFault::EditsHeldToolOutput))[call_index].clone();
+                let trimmed = json!("[trimmed]");
+                match transcript.profile() {
+                    None => call["result"]["output"] = trimmed,
+                    Some(OPENCODE_AISDK) => call["state"]["output"] = trimmed,
+                    Some(PI) => call["arguments"] = json!({"door": trimmed}),
+                    Some(_) => call["input"] = json!({"door": trimmed}),
+                }
+                let mut text =
+                    transcript.parts(source(HoldingFault::EditsHeldStateText))[text_index].clone();
                 text["text"] = json!("[text trimmed]");
-                for (index, part) in [(2, call), (3, text)] {
+                let mut pair = [(call_index, call), (text_index, text)];
+                pair.sort_by_key(|(index, _)| *index);
+                for (index, part) in pair {
                     edits.push(crate::view::PartEdit::replace(
                         *ordinal,
                         format!("probe-m{ordinal}"),
@@ -778,7 +893,10 @@ mod tests {
         }
 
         fn reconcile(&mut self, runner: &ScriptedRunner, state: ReasoningPruned) {
-            if self.fault == Some(HoldingFault::IgnoresGeneration) {
+            if self.fault == Some(HoldingFault::IgnoresGeneration)
+                || (self.fault == Some(HoldingFault::IgnoresOpaquePrune)
+                    && self.session == "probe-pruned-opaque")
+            {
                 return;
             }
             if self.reconciled == Some(state.generation)
@@ -811,6 +929,10 @@ mod tests {
     }
 
     impl PrunedReasoningProbe for HoldingProvider {
+        fn serializer_profile(&self) -> Option<String> {
+            self.profile.clone()
+        }
+
         fn setup(
             &mut self,
             runner: &ScriptedRunner,
@@ -819,11 +941,21 @@ mod tests {
             if request.session != self.session {
                 *self = Self {
                     fault: self.fault,
+                    profile: self.profile.take(),
                     edits_mode: self.edits_mode,
                     session: request.session.clone(),
                     ..Self::default()
                 };
             }
+            // The probe names the provider's profile where a plan item
+            // would: in Setup's params.
+            assert_eq!(
+                request
+                    .params
+                    .get("serializer_profile")
+                    .and_then(Value::as_str),
+                self.profile.as_deref()
+            );
             if let Some(lineage) = &request.lineage_id {
                 self.lineage = lineage.clone();
             }
@@ -1009,5 +1141,276 @@ mod tests {
                  from a held copy"
             )
         );
+    }
+
+    const PROFILES: [&str; 4] = [ANTHROPIC_MESSAGES, OPENCODE_AISDK, OWNED_BROCA, PI];
+
+    fn names(list: &[NotApplicable]) -> Vec<&'static str> {
+        list.iter().map(|n| n.name).collect()
+    }
+
+    #[test]
+    fn reconciling_provider_passes_on_every_profile_transcript() {
+        for profile in PROFILES {
+            for edits_mode in [false, true] {
+                let report = held_copies_follow_reasoning_pruned_report(&mut HoldingProvider::on(
+                    profile, None, edits_mode,
+                ))
+                .unwrap_or_else(|e| panic!("{profile}: {e}"));
+                assert_eq!(report.profile, Some(profile));
+            }
+        }
+    }
+
+    #[test]
+    fn reports_name_what_each_transcript_cannot_carry() {
+        let generic =
+            held_copies_follow_reasoning_pruned_report(&mut HoldingProvider::default()).unwrap();
+        assert_eq!(generic.profile, None);
+        assert_eq!(names(&generic.parts_not_applicable), ["opaque_reasoning"]);
+        assert_eq!(names(&generic.kinds_not_applicable), ["opaque_reasoning"]);
+        assert_eq!(generic.kinds_checked, ["reasoning", "signature"]);
+        for profile in PROFILES {
+            let report = held_copies_follow_reasoning_pruned_report(&mut HoldingProvider::on(
+                profile, None, false,
+            ))
+            .unwrap();
+            let (parts_missing, kinds_missing): (&[&str], &[&str]) = match profile {
+                ANTHROPIC_MESSAGES => (&["thought_signature", "text_with_state"], &["signature"]),
+                _ => (&[], &[]),
+            };
+            assert_eq!(
+                names(&report.parts_not_applicable),
+                parts_missing,
+                "{profile}"
+            );
+            assert_eq!(
+                names(&report.kinds_not_applicable),
+                kinds_missing,
+                "{profile}"
+            );
+            for name in parts_missing {
+                assert!(!report.parts_checked.contains(name), "{profile}: {name}");
+            }
+            for kind in kinds_missing {
+                assert!(!report.kinds_checked.contains(kind), "{profile}: {kind}");
+            }
+            assert_eq!(
+                report.parts_checked.len() + parts_missing.len(),
+                probe_parts::ALL.len()
+            );
+        }
+    }
+
+    #[test]
+    fn named_faults_fail_by_name_on_every_profile_transcript() {
+        let at = |part: &str| {
+            format!(
+                "{HELD_COPIES_CASE}: the view renders pruned content of part {part} at ordinal 1 \
+                 from a held copy"
+            )
+        };
+        for profile in PROFILES {
+            let run = |fault, edits_mode| {
+                held_copies_follow_reasoning_pruned_report(&mut HoldingProvider::on(
+                    profile,
+                    Some(fault),
+                    edits_mode,
+                ))
+            };
+            assert_eq!(
+                run(HoldingFault::IgnoresGeneration, false).unwrap_err(),
+                at("m1#0"),
+                "{profile}"
+            );
+            assert_eq!(
+                run(HoldingFault::RendersPreCutCopy, false).unwrap_err(),
+                at("m1#0"),
+                "{profile}"
+            );
+            assert_eq!(
+                run(HoldingFault::ReadsBelowCut, false).unwrap_err(),
+                format!("{HELD_COPIES_CASE}: the provider read from ordinal 0, below its cut at 2"),
+                "{profile}"
+            );
+            let rereads = run(HoldingFault::RereadsEveryNotice, false).unwrap_err();
+            assert!(
+                rereads.contains("re-read ordinal 0 again"),
+                "{profile}: {rereads}"
+            );
+            // The first part an `opaque_reasoning` prune changes: the
+            // signed reasoning where its signature is the opaque payload,
+            // else the part holding the encrypted item.
+            let first_opaque = match profile {
+                ANTHROPIC_MESSAGES | OWNED_BROCA => "m1#0",
+                _ => "m1#1",
+            };
+            assert_eq!(
+                run(HoldingFault::IgnoresOpaquePrune, false).unwrap_err(),
+                at(first_opaque),
+                "{profile}"
+            );
+            let call = run(HoldingFault::EditsHeldToolOutput, true);
+            let text = run(HoldingFault::EditsHeldStateText, true);
+            if profile == ANTHROPIC_MESSAGES {
+                // Neither signature exists in this format, so neither fault
+                // can happen: the report says so by name instead of passing.
+                let call = call.unwrap();
+                assert!(names(&call.parts_not_applicable).contains(&"thought_signature"));
+                assert!(!call.parts_checked.contains(&"thought_signature"));
+                let text = text.unwrap();
+                assert!(names(&text.parts_not_applicable).contains(&"text_with_state"));
+                assert!(!text.parts_checked.contains(&"text_with_state"));
+            } else {
+                assert_eq!(call.unwrap_err(), at("m1#3"), "{profile}");
+                assert_eq!(text.unwrap_err(), at("m1#4"), "{profile}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_profile_the_runner_contract_does_not_name_fails_the_probe_by_name() {
+        let failure = held_copies_follow_reasoning_pruned(&mut HoldingProvider::on(
+            "future-profile",
+            None,
+            false,
+        ))
+        .unwrap_err();
+        assert_eq!(
+            failure,
+            format!(
+                "{HELD_COPIES_CASE}: the adapter's serializer profile \"future-profile\" is not \
+                 one the runner contract names (no archive-pruning rules for serializer profile: \
+                 future-profile)"
+            )
+        );
+    }
+
+    /// Every member of `served` exists in `original`, checked recursively
+    /// through nested objects; array contents are not inspected.
+    fn adds_nothing(original: &Value, served: &Value) -> bool {
+        match (original, served) {
+            (Value::Object(original), Value::Object(served)) => {
+                served.iter().all(|(key, value)| {
+                    original
+                        .get(key)
+                        .is_some_and(|before| adds_nothing(before, value))
+                })
+            }
+            _ => true,
+        }
+    }
+
+    /// Every profile transcript, before and after each prune mode, is one a
+    /// runner of that profile would serve: the runner crate's own profile
+    /// code accepts every entry, and each prune follows its per-profile
+    /// rules. A fixture drifting from its profile fails here.
+    #[test]
+    fn every_profile_transcript_passes_the_runner_crates_own_profile_code() {
+        use cortexkit_role_llm_runner::{
+            archive_prunes_reasoning::{carries_pruned_content_in, kinds},
+            display::{self, DisplayPart},
+            read::ReadPage,
+            serializer_profile::{strip_cache_control, top_level_part_count},
+        };
+        for profile in PROFILES {
+            let transcript = Transcript::for_profile(Some(profile)).unwrap();
+            let mut shown = std::collections::BTreeSet::new();
+            for mode in [PruneMode::Reasoning, PruneMode::Opaque] {
+                let runner = ScriptedRunner::new(transcript, "probe-lineage", 5);
+                let before = runner.read(&json!({})).unwrap();
+                runner.prune_reasoning_through(5, mode);
+                let after = runner.read(&json!({})).unwrap();
+                for page in [before, after] {
+                    let page: ReadPage = serde_json::from_value(page)
+                        .unwrap_or_else(|e| panic!("{profile}: page does not decode: {e}"));
+                    for entry in &page.messages {
+                        let m = &entry.message;
+                        entry
+                            .check_descriptor_rows(profile)
+                            .unwrap_or_else(|e| panic!("{profile} {}: {e}", entry.mid));
+                        assert_eq!(
+                            top_level_part_count(profile, m),
+                            Ok(transcript.parts(m).len()),
+                            "{profile} {}",
+                            entry.mid
+                        );
+                        if profile == ANTHROPIC_MESSAGES {
+                            assert_eq!(&strip_cache_control(m), m, "{profile} {}", entry.mid);
+                        }
+                        if matches!(profile, ANTHROPIC_MESSAGES | OPENCODE_AISDK) {
+                            let row = display::project(profile, m, None)
+                                .unwrap_or_else(|e| panic!("{profile} {}: {e}", entry.mid));
+                            for part in row.parts {
+                                shown.insert(match part {
+                                    DisplayPart::Text(_) => "text",
+                                    DisplayPart::Reasoning(_) => "reasoning",
+                                    DisplayPart::ToolCall(_) => "tool_call",
+                                    DisplayPart::ToolResult(_) => "tool_result",
+                                    _ => "other",
+                                });
+                            }
+                        }
+                    }
+                }
+                // Folding the served transcript restores nothing; folding
+                // the originals restores the first pruned part.
+                let pruned = runner.pruned();
+                let all = |messages: &[Value]| Value::Array(messages.to_vec());
+                let (originals, served) = {
+                    let state = runner.lock();
+                    (all(&state.originals), all(&state.served))
+                };
+                let restored = |messages: &Value| {
+                    cortexkit_role_llm_runner::archive_prunes_reasoning::restored_part_in(
+                        profile,
+                        &pruned,
+                        0..6,
+                        messages,
+                    )
+                    .unwrap()
+                    .map(|p| p.part.clone())
+                };
+                assert_eq!(restored(&served), None, "{profile} {mode:?}");
+                assert_eq!(
+                    restored(&originals),
+                    Some(pruned[0].part.clone()),
+                    "{profile}"
+                );
+            }
+            if matches!(profile, ANTHROPIC_MESSAGES | OPENCODE_AISDK) {
+                for kind in ["text", "reasoning", "tool_call", "tool_result"] {
+                    assert!(shown.contains(kind), "{profile}: no {kind} part");
+                }
+            }
+            for ordinal in [1, 3, 5] {
+                for part in transcript.answer_parts(ordinal) {
+                    let original = &part.original;
+                    if part.pruned.is_empty() {
+                        for kind in kinds::ALL {
+                            assert_eq!(
+                                carries_pruned_content_in(profile, kind, original),
+                                Ok(false),
+                                "{profile}: a kept part carries {kind}: {original}"
+                            );
+                        }
+                    }
+                    for (kind, served) in &part.pruned {
+                        assert_eq!(
+                            carries_pruned_content_in(profile, kind, original),
+                            Ok(true),
+                            "{profile} {kind}: {original}"
+                        );
+                        assert_eq!(
+                            carries_pruned_content_in(profile, kind, served),
+                            Ok(false),
+                            "{profile} {kind}: {served}"
+                        );
+                        assert_eq!(original["type"], served["type"], "{profile} {kind}");
+                        assert!(adds_nothing(original, served), "{profile} {kind}: {served}");
+                    }
+                }
+            }
+        }
     }
 }

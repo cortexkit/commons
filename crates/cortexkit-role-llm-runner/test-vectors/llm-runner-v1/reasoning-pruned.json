@@ -236,7 +236,7 @@
         "from": 2,
         "to": 5
       },
-      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"signature\":\"invented-signature\",\"format\":\"example\"}}]}]",
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"{\\\"thoughtSignature\\\":\\\"invented-signature\\\"}\"}}]}]",
       "restored": {
         "ordinal": 3,
         "part": "m3#1"
@@ -255,7 +255,7 @@
         "from": 2,
         "to": 5
       },
-      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":\"{\\\"color\\\": \\\"blue\\\"}\"},{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"signature\":\"\",\"format\":\"example\"}},{\"type\":\"reasoning\",\"text\":\"Reasoning is not what this prune removed.\"}]}]",
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":\"{\\\"color\\\": \\\"blue\\\"}\"},{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"\"}},{\"type\":\"reasoning\",\"text\":\"Reasoning is not what this prune removed.\"}]}]",
       "restored": null
     },
     {

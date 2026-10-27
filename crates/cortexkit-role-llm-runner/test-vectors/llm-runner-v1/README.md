@@ -10,8 +10,12 @@ head without retry metadata.
 pages and matching original JCS byte lengths and digests. It covers required
 reasoning text/data emptied rather than removed, optional signatures removed,
 opaque item JSON retaining a readable summary, tool-call arguments unchanged,
-and required provider state retaining an emptied signature. The wire crate's
-archive-pruning tests verify these native-format examples and page round trips.
+and a required `gemini` provider state whose signed `data` is emptied. The
+wire crate's archive-pruning tests verify these native-format examples and
+page round trips. Its `text_with_state` case first carried a
+`provider_state.signature`, a shape no `owned-broca` part has; llm-runner
+0.7.11 replaced it with the real `{format, data}` shape and recomputed its
+digests and byte length.
 
 `reasoning-pruned.json` pins the session's prune state (§9.14.1): heads
 never pruned, pruned once and pruned again, raw and model pages repeating
@@ -24,8 +28,27 @@ ordinal below the cut. Its `edit_refusals` are keep-range part edits
 checked the same way, a refused and an allowed edit per kind, plus an edit
 moving reasoning into a sibling part of the pruned message (refused), an
 edit at another ordinal and a drop (both allowed).
-`archive_prunes_reasoning` tests check them; all existing vector files are
-unchanged.
+`archive_prunes_reasoning` tests check them. Since llm-runner 0.7.11 its
+provider-state cases use the real `{format: "gemini", data}` shape.
+
+`reasoning-pruned-profiles.json` pins the per-profile prune rules of
+§9.14.1 (`carries_pruned_content_in`, `restored_part_in`,
+`restored_by_edit_in`), one entry per named serializer profile with its
+parts in that profile's own shapes: the kinds the profile carries; each
+prune as an original part and its served form, which keeps the part's type
+and adds no member; parts a kind must not match (an `anthropic-messages`
+`thinking` block's signature under `signature`, `owned-broca` Responses
+item state and an unclassified provider-state format, among them); for
+`owned-broca`, one emptied and restored case per signed provider-state
+format and one unchanged and allowed case per Responses format; for
+`opencode-aisdk`, a case per listed provider entry and per OpenRouter
+`reasoning_details` kind, and unlisted entries carrying nothing; for `pi`,
+a removed Google `textSignature` and an unchanged, allowed Responses
+`TextSignatureV1`; and, per
+carried kind, a refused and an allowed replacement and part edit, plus a
+restoring replacement outside the range it stands for. Its `unsupported`
+profiles answer `UnsupportedProfile` from every function. Every id,
+signature and text in it is invented.
 
 `call-identity.json` pins the `call_identity` group (§9.16): describe answers
 declaring it beside display history or live events alone, its refusal

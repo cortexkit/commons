@@ -262,16 +262,16 @@
         "type": "text_with_state",
         "text": "The door is blue.",
         "provider_state": {
-          "signature": "invented-signature",
-          "format": "example"
+          "format": "gemini",
+          "data": "{\"thoughtSignature\":\"invented-signature\"}"
         }
       },
       "served": {
         "type": "text_with_state",
         "text": "The door is blue.",
         "provider_state": {
-          "signature": "",
-          "format": "example"
+          "format": "gemini",
+          "data": ""
         }
       },
       "original_message": {
@@ -281,8 +281,8 @@
             "type": "text_with_state",
             "text": "The door is blue.",
             "provider_state": {
-              "signature": "invented-signature",
-              "format": "example"
+              "format": "gemini",
+              "data": "{\"thoughtSignature\":\"invented-signature\"}"
             }
           }
         ]
@@ -300,17 +300,17 @@
                   "type": "text_with_state",
                   "text": "The door is blue.",
                   "provider_state": {
-                    "signature": "",
-                    "format": "example"
+                    "format": "gemini",
+                    "data": ""
                   }
                 }
               ]
             },
-            "digest": "1d296d079362541e2801147c288b9d259be69d336d809dbafb38bc3bce30c19a",
+            "digest": "09d889bedb96205e0182c0531de7b1daf46a502c381e4e425e30e82d6ced0cba",
             "part_digests": [
               {
                 "part": "m4#0",
-                "digest": "cbe40a1c6035268e9bdf389a3d452da3c165716a2368a906c8932ba20e31090c"
+                "digest": "b0d9c21d34a19313944828217b940e8948aa6783a0bdfcc74e598a94ae7cd11f"
               }
             ],
             "tags": [
@@ -325,8 +325,8 @@
             "mid": "message-4",
             "part": "m4#0",
             "kind": "signature",
-            "bytes": 124,
-            "sha256": "cbe40a1c6035268e9bdf389a3d452da3c165716a2368a906c8932ba20e31090c"
+            "bytes": 145,
+            "sha256": "b0d9c21d34a19313944828217b940e8948aa6783a0bdfcc74e598a94ae7cd11f"
           }
         ]
       }
