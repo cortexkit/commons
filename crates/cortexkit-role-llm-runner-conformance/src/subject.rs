@@ -607,6 +607,14 @@ pub trait LlmRunnerSubject: Harness {
     /// unpruned part. Enroll with exactly `accepts` when Some; None means no
     /// compaction provider. Return independently scripted original/served
     /// parts, never expectations obtained by running the pruning code.
+    ///
+    /// When it enrolls a provider, that provider is the adapter's scripted
+    /// compaction provider for the session: [`Self::install_compaction_setup`]
+    /// changes its next Setup answer, [`Self::publish_compaction_view`]
+    /// publishes from it, and [`Self::compaction_observation`] and
+    /// [`Self::compaction_provider_calls`] report what it received. It
+    /// answers model calls without holding them, so runs on the session end
+    /// without [`Self::release_compaction_model`].
     async fn archive_pruning_fixture(
         &self,
         _session: &str,
@@ -623,6 +631,21 @@ pub trait LlmRunnerSubject: Harness {
     async fn prune_archived_session(&self, _session: &str) -> Result<(), HarnessError> {
         Err(HarnessError::new(
             "prune_archived_session is not implemented",
+        ))
+    }
+
+    /// Every call the runner made to `session`'s scripted compaction
+    /// provider, in the order the provider received them, with each call's
+    /// params exactly as received ([`crate::ProviderCall`]). Capture them at
+    /// the provider, outside the runner, and never rebuild them from runner
+    /// state. Required with `archive_prunes_reasoning` and `compaction`: the
+    /// default fails the cases that need it by name.
+    async fn compaction_provider_calls(
+        &self,
+        _session: &str,
+    ) -> Result<Vec<crate::ProviderCall>, HarnessError> {
+        Err(HarnessError::new(
+            "compaction provider calls are not implemented",
         ))
     }
     /// Return actual publication subjects and bodies for the fixture session and each

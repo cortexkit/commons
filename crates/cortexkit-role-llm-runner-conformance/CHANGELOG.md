@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.15.12
+
+- Track llm-runner 0.7.10, which this crate pins exactly, and
+  compaction-provider 0.7.3.
+- Add `archive_pruning_generation`, `archive_pruning_restored_view_refused`,
+  `archive_pruning_restored_edit_refused`, `archive_pruning_setup_after_prune` and
+  `archive_pruning_setup_initial_replaced`. Like every `archive_pruning_*`
+  case they are not applicable without `archive_prunes_reasoning`. Named
+  faulty runners prove each fails a runner that prunes without raising the
+  generation, applies a view that restores a pruned part through a replace
+  range or through a keep-range part edit, skips the Setup
+  after a prune, or keeps rendering the pre-prune `initial`.
+- Add the `compaction_provider_calls` adapter hook (`ProviderCall`), and
+  the `ScriptedRange::ReplaceVerbatim` and
+  `ScriptedRange::KeepWithVerbatimEdits` (`ScriptedPartEdit`) ranges, which
+  carry messages or parts already in the runner's schema unchanged. Document that the provider
+  `archive_pruning_fixture` enrolls is the adapter's scripted compaction
+  provider and does not hold model answers.
+
 ## 0.15.11
 
 - Track llm-runner 0.7.9, which this crate pins exactly. No suite change.

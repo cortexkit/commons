@@ -153,6 +153,74 @@ pub enum ScriptedRange {
         to: u64,
         replacement: Vec<String>,
     },
+    /// Send `messages` in place of `[from, to)`, already in the runner's
+    /// message schema: the adapter encodes them as the range's JSON array
+    /// unchanged, translating nothing. The archive-pruning cases use it to
+    /// replay copies of messages exactly as `session.read` served them,
+    /// as a provider rendering its held copies does.
+    ReplaceVerbatim {
+        from: u64,
+        to: u64,
+        messages: Vec<Value>,
+    },
+    /// Send the transcript's messages in `[from, to)` as written, except the
+    /// parts `edits` names: a keep range with part edits whose `bytes` the
+    /// adapter encodes from each edit's `part_value` unchanged. The
+    /// archive-pruning cases use it to send a pruned part's original bytes
+    /// back as a part edit.
+    KeepWithVerbatimEdits {
+        from: u64,
+        to: u64,
+        edits: Vec<ScriptedPartEdit>,
+    },
+}
+
+/// One part edit of [`ScriptedRange::KeepWithVerbatimEdits`]: the message's
+/// ordinal and `mid`, the runner's part key, and the part to send in its
+/// place, already in the runner's message schema.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ScriptedPartEdit {
+    pub ordinal: u64,
+    pub mid: String,
+    pub part: String,
+    pub part_value: Value,
+}
+
+impl ScriptedPartEdit {
+    pub fn new(
+        ordinal: u64,
+        mid: impl Into<String>,
+        part: impl Into<String>,
+        part_value: Value,
+    ) -> Self {
+        Self {
+            ordinal,
+            mid: mid.into(),
+            part: part.into(),
+            part_value,
+        }
+    }
+}
+
+/// One call the runner made to a session's scripted compaction provider, in
+/// arrival order: the op (`compaction.setup`, `view.get`,
+/// `compaction.ride`) and its params exactly as received. Captured at the
+/// provider, never rebuilt from runner state.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct ProviderCall {
+    pub method: String,
+    pub params: Value,
+}
+
+impl ProviderCall {
+    pub fn new(method: impl Into<String>, params: Value) -> Self {
+        Self {
+            method: method.into(),
+            params,
+        }
+    }
 }
 
 /// A view the scripted compaction provider publishes

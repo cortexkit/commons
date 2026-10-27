@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 
 use crate::digest::{finish, frame, is_sha256_hex, parse_decimal};
 
+pub use cortexkit_role_llm_runner::archive_prunes_reasoning::ReasoningPruned;
+
 /// Event name of the runner's advance notice, under the runner's module id.
 pub const ADVANCED_EVENT: &str = "compaction.advanced";
 /// Event name of the provider's view-ready event, under the provider's
@@ -28,7 +30,7 @@ pub const EVENT_VERSION: u32 = 1;
 /// Upper bound on a notice's headers: the sum over every header this contract
 /// defines of the name's and the value's length in bytes, the way the bus
 /// counts a message's header size. The per-value bounds below keep every
-/// well-formed notice under it (at most 2,313 bytes); a runner with more
+/// well-formed notice under it (at most 2,391 bytes); a runner with more
 /// events than fit in `events` splits them across consecutive notices.
 pub const MAX_NOTICE_HEADER_BYTES: usize = 4096;
 /// Upper bound on one header value, in bytes.
@@ -94,6 +96,12 @@ pub mod headers {
     /// The current lineage's first ordinal (`llm-runner/v1`'s
     /// `session.head.first_ordinal`); optional.
     pub const FIRST_ORDINAL: &str = "first_ordinal";
+    /// The session's prune state, `<generation>:<through_ordinal>:<at_ms>`,
+    /// exactly as `llm-runner/v1`'s `session.head.reasoning_pruned` reports
+    /// it when the notice was recorded; `generation` is at least 1. Optional:
+    /// only a runner declaring `archive_prunes_reasoning` sends it, and only
+    /// for a session it has pruned ([`super::ReasoningPruned`]).
+    pub const REASONING_PRUNED: &str = "reasoning_pruned";
     /// A view's version.
     pub const VIEW_VERSION: &str = "view_version";
     /// The last ordinal a view covers.
@@ -112,6 +120,7 @@ pub mod headers {
         LAST_USAGE,
         LINEAGE_ID,
         MODEL,
+        REASONING_PRUNED,
         SEQ,
         SESSION_REF,
         THROUGH_DIGEST,
@@ -189,6 +198,13 @@ pub mod refusal_reasons {
     /// range: a view tiles only the lineage, and everything before it rides
     /// in the view's head.
     pub const RANGES_START: &str = "ranges_start";
+    /// A replace range carries content the runner's archive pruning removed
+    /// from a message the range stands for (`llm-runner/v1` §9.14.1). The
+    /// refusal is permanent for that view. The provider reads `session.head`,
+    /// reconciles its held copies as for a new prune generation, and only
+    /// then builds another view.
+    pub const PRUNED_REASONING_RESTORED: &str =
+        cortexkit_role_llm_runner::archive_prunes_reasoning::PRUNED_REASONING_RESTORED;
 }
 
 /// Reasons a runner gives in `view_deferred`. Open, like the refusal
@@ -589,6 +605,22 @@ pub fn descent_outcome(
     }
 }
 
+/// The `reasoning_pruned` header value: `<generation>:<through_ordinal>:<at_ms>`.
+pub fn encode_reasoning_pruned(state: &ReasoningPruned) -> String {
+    format!(
+        "{}:{}:{}",
+        state.generation, state.through_ordinal, state.at_ms
+    )
+}
+
+/// Parse a `reasoning_pruned` header value: three canonical decimals, the
+/// first at least 1. `None` for anything else.
+pub fn parse_reasoning_pruned(value: &str) -> Option<ReasoningPruned> {
+    let mut parts = value.split(':').map(parse_decimal);
+    let state = ReasoningPruned::new(parts.next()??, parts.next()??, parts.next()??);
+    (parts.next().is_none() && state.valid()).then_some(state)
+}
+
 fn is_model(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= MAX_MODEL_BYTES
@@ -618,6 +650,10 @@ pub struct AdvanceNotice {
     pub descends_from: Option<NoticeDescent>,
     /// The lineage's first ordinal, at most one above `through_ordinal`.
     pub first_ordinal: Option<u64>,
+    /// The session's prune state when the notice was recorded, as
+    /// `session.head` reports it. A convenience copy: `session.head` stays
+    /// the authority.
+    pub reasoning_pruned: Option<ReasoningPruned>,
 }
 
 impl AdvanceNotice {
@@ -644,7 +680,13 @@ impl AdvanceNotice {
             applied_view_version: None,
             descends_from: None,
             first_ordinal: None,
+            reasoning_pruned: None,
         }
+    }
+
+    pub fn with_reasoning_pruned(mut self, state: ReasoningPruned) -> Self {
+        self.reasoning_pruned = Some(state);
+        self
     }
 
     pub fn with_first_ordinal(mut self, first_ordinal: u64) -> Self {
@@ -719,6 +761,12 @@ impl AdvanceNotice {
         if let Some(first) = self.first_ordinal {
             map.insert(headers::FIRST_ORDINAL.into(), first.to_string());
         }
+        if let Some(state) = &self.reasoning_pruned {
+            map.insert(
+                headers::REASONING_PRUNED.into(),
+                encode_reasoning_pruned(state),
+            );
+        }
         map
     }
 
@@ -764,6 +812,12 @@ impl AdvanceNotice {
             first_ordinal: optional(map, headers::FIRST_ORDINAL)?
                 .map(|value| decimal(value, headers::FIRST_ORDINAL))
                 .transpose()?,
+            reasoning_pruned: optional(map, headers::REASONING_PRUNED)?
+                .map(|value| {
+                    parse_reasoning_pruned(value)
+                        .ok_or(NoticeProblem::Malformed(headers::REASONING_PRUNED))
+                })
+                .transpose()?,
         };
         notice.check()?;
         Ok(notice)
@@ -799,6 +853,9 @@ impl AdvanceNotice {
         }
         if !is_model(&self.model) {
             return Err(NoticeProblem::Malformed(headers::MODEL));
+        }
+        if self.reasoning_pruned.is_some_and(|state| !state.valid()) {
+            return Err(NoticeProblem::Malformed(headers::REASONING_PRUNED));
         }
         if self.events.len() > MAX_EVENTS {
             return Err(NoticeProblem::TooManyEvents);

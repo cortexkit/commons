@@ -1,0 +1,187 @@
+{
+  "notices": [
+    {
+      "name": "a notice for a session never pruned has no reasoning_pruned header",
+      "headers": {
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000"
+      },
+      "digest": "04b7625fe877220de2b4b2b39117fbf8514f478c28b746f131ed91d79d9e322c"
+    },
+    {
+      "name": "a notice after the first prune",
+      "headers": {
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "reasoning_pruned": "1:5:1767225600000"
+      },
+      "digest": "60f035cbb91308dd82df097143c527dff137f5c9dad566ef1870c43b5582a808",
+      "reasoning_pruned": {
+        "generation": 1,
+        "through_ordinal": 5,
+        "at_ms": 1767225600000
+      }
+    },
+    {
+      "name": "a notice reporting a pruned view's refusal",
+      "headers": {
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "reasoning_pruned": "2:6:1767312000000",
+        "applied_view_version": "6",
+        "events": "view_refused:7:pruned_reasoning_restored"
+      },
+      "digest": "77bf6d72b42e749de005b7be93ae8fbd49fd5d33c7be556f5dcb00022027b04c",
+      "reasoning_pruned": {
+        "generation": 2,
+        "through_ordinal": 6,
+        "at_ms": 1767312000000
+      }
+    }
+  ],
+  "notices_refused": [
+    {
+      "name": "reasoning_pruned with generation 0",
+      "headers": {
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "reasoning_pruned": "0:5:1767225600000"
+      },
+      "problem": "malformed:reasoning_pruned"
+    },
+    {
+      "name": "reasoning_pruned with two numbers",
+      "headers": {
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "reasoning_pruned": "1:5"
+      },
+      "problem": "malformed:reasoning_pruned"
+    },
+    {
+      "name": "reasoning_pruned with four numbers",
+      "headers": {
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "reasoning_pruned": "1:5:1767225600000:1"
+      },
+      "problem": "malformed:reasoning_pruned"
+    },
+    {
+      "name": "reasoning_pruned with a leading zero",
+      "headers": {
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "reasoning_pruned": "01:5:1767225600000"
+      },
+      "problem": "malformed:reasoning_pruned"
+    },
+    {
+      "name": "reasoning_pruned with a sign",
+      "headers": {
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "reasoning_pruned": "+1:5:1767225600000"
+      },
+      "problem": "malformed:reasoning_pruned"
+    },
+    {
+      "name": "reasoning_pruned with empty",
+      "headers": {
+        "session_ref": "0b9679cc5a4044d51710921d5233db02",
+        "seq": "9",
+        "lineage_id": "lin_a",
+        "through_ordinal": "6",
+        "through_digest": "efc959960e9c3392a28c897f298ca6651073d4d263c7f241eb7956ed87267fc1",
+        "est_tokens": "1200",
+        "model": "anthropic/claude-sonnet-4-5",
+        "window": "200000",
+        "reasoning_pruned": ""
+      },
+      "problem": "malformed:reasoning_pruned"
+    }
+  ],
+  "setup_requests": [
+    {
+      "name": "a Setup for a session never pruned",
+      "request": {
+        "session": "ses_01J9Z",
+        "harness": "broca",
+        "request_id": "cr-000009",
+        "preset": "head",
+        "params": {},
+        "composition": {},
+        "model": "anthropic/claude-opus-4-5",
+        "lineage_id": "lin_a",
+        "now": 1790000000000
+      }
+    },
+    {
+      "name": "the Setup a runner calls after a prune, before any other provider call",
+      "request": {
+        "session": "ses_01J9Z",
+        "harness": "broca",
+        "request_id": "cr-000010",
+        "preset": "head",
+        "params": {},
+        "composition": {},
+        "model": "anthropic/claude-opus-4-5",
+        "lineage_id": "lin_a",
+        "now": 1790000000000,
+        "reasoning_pruned": {
+          "generation": 2,
+          "through_ordinal": 6,
+          "at_ms": 1767312000000
+        }
+      }
+    }
+  ]
+}

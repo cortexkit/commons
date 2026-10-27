@@ -51,6 +51,42 @@ integration tests remain responsible for other required fields and model-family
 compatibility. Reminder slots are protected by the unchanged part order/keys;
 their model-specific rendering remains the adapter's responsibility.
 
+### Prune generation and held copies (0.15.12)
+
+Five more `archive_pruning_*` cases check the session's `reasoning_pruned`
+state and what a runner owes an enrolled provider after a prune:
+
+- `archive_pruning_generation`: `session.head` has no `reasoning_pruned`
+  before the first prune, generation 1 after it, and one higher after a
+  later prune that removes the reasoning of a scripted run; `through_ordinal`
+  is the highest ordinal any page lists a pruned part for, and every raw and
+  model page repeats the head. With `compaction`, the notice after the run
+  carries the head's value. Not applicable when the runner does not declare
+  the `reasoning` kind, or when the later prune removed nothing.
+- `archive_pruning_restored_view_refused` (`compaction`): the kit publishes
+  a fold of the messages exactly as read before the prune, with
+  `ScriptedRange::ReplaceVerbatim`. The runner must refuse it
+  `view_refused:<version>:pruned_reasoning_restored` and never name it in
+  `applied_view_version`. The same fold built from the pruned copies must
+  then apply.
+- `archive_pruning_restored_edit_refused` (`compaction`): the same check for
+  a keep range whose part edit, with `ScriptedRange::KeepWithVerbatimEdits`,
+  sends one pruned part's original bytes back. The runner must refuse it by
+  the same reason; the same edit carrying the pruned part must then apply.
+- `archive_pruning_setup_after_prune` (`compaction`): after one run and a
+  prune, the first call the provider receives is a Setup whose
+  `reasoning_pruned` equals the head's.
+- `archive_pruning_setup_initial_replaced` (`compaction`, `model_view`):
+  while no view has applied, the post-prune Setup's new `initial` replaces
+  the one the runner rendered before the prune.
+
+The adapter implements `compaction_provider_calls`, which returns every call
+its scripted provider received, with params exactly as received, and handles
+`ScriptedRange::ReplaceVerbatim` and `ScriptedRange::KeepWithVerbatimEdits` by
+encoding the messages and parts unchanged. The
+provider `archive_pruning_fixture` enrolls is the adapter's scripted
+compaction provider for the session, and it does not hold model answers.
+
 `display_row_is_the_profile_projection` permits an imported assistant message
 with no recorded model. `display_own_run_records_model` separately drives a
 unique scripted answer through the runner and requires its recorded model.

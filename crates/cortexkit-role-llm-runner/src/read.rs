@@ -227,6 +227,11 @@ pub struct ReadPage {
     /// Original identities of the pruned parts served on this page, on every read.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pruned_reasoning: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
+    /// The session's prune state as of this page, the same value
+    /// `session.head` reports. Absent when the session was never pruned or
+    /// the runner does not declare `archive_prunes_reasoning`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_pruned: Option<crate::archive_prunes_reasoning::ReasoningPruned>,
     pub messages: Vec<ReadMessage>,
     /// The session's lineage, on every page of a session that has one.
     /// Absent means the session has no lineage yet: it was never written,
@@ -255,6 +260,7 @@ impl ReadPage {
     pub fn new(lineage_id: impl Into<String>, messages: Vec<ReadMessage>) -> Self {
         Self {
             pruned_reasoning: Vec::new(),
+            reasoning_pruned: None,
             messages,
             lineage_id: Some(lineage_id.into()),
             next_from_ordinal: None,
@@ -267,6 +273,7 @@ impl ReadPage {
     pub fn no_lineage() -> Self {
         Self {
             pruned_reasoning: Vec::new(),
+            reasoning_pruned: None,
             messages: Vec::new(),
             lineage_id: None,
             next_from_ordinal: None,
@@ -289,6 +296,14 @@ impl ReadPage {
 
     pub fn with_head(mut self, head: Map<String, Value>) -> Self {
         self.head = Some(head);
+        self
+    }
+
+    pub fn with_reasoning_pruned(
+        mut self,
+        state: crate::archive_prunes_reasoning::ReasoningPruned,
+    ) -> Self {
+        self.reasoning_pruned = Some(state);
         self
     }
 
@@ -318,6 +333,10 @@ pub struct ModelPage {
     /// Pruned stored parts actually served, excluding parts hidden by compaction.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pruned_reasoning: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
+    /// The session's prune state, as on a raw page
+    /// ([`ReadPage::reasoning_pruned`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_pruned: Option<crate::archive_prunes_reasoning::ReasoningPruned>,
     /// Entries in non-decreasing anchor order, insertions first at a tie.
     pub messages: Vec<ModelEntry>,
     /// The session's lineage, as on a raw page ([`ReadPage::lineage_id`]):
@@ -458,6 +477,14 @@ pub enum ModelPageProblem {
 }
 
 impl ModelPage {
+    pub fn with_reasoning_pruned(
+        mut self,
+        state: crate::archive_prunes_reasoning::ReasoningPruned,
+    ) -> Self {
+        self.reasoning_pruned = Some(state);
+        self
+    }
+
     pub fn with_pruned_reasoning(
         mut self,
         parts: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
@@ -470,6 +497,7 @@ impl ModelPage {
     pub fn new(lineage_id: impl Into<String>, messages: Vec<ModelEntry>) -> Self {
         Self {
             pruned_reasoning: Vec::new(),
+            reasoning_pruned: None,
             messages,
             lineage_id: Some(lineage_id.into()),
             next_from_ordinal: None,
@@ -483,6 +511,7 @@ impl ModelPage {
     pub fn no_lineage() -> Self {
         Self {
             pruned_reasoning: Vec::new(),
+            reasoning_pruned: None,
             messages: Vec::new(),
             lineage_id: None,
             next_from_ordinal: None,
@@ -909,6 +938,13 @@ pub struct HeadMeta {
     /// Recorded release and the end of its minimum storage hold, until deletion.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub released: Option<crate::session_retention::Released>,
+    /// The session's prune state (CONTRACT §9.14.1), the authority every
+    /// copy on pages, Setup requests and notices repeats. Only on a runner
+    /// that declares `archive_prunes_reasoning`, and absent until the
+    /// session's first prune, so a session never written has none. A prune
+    /// is not a lineage change: the value survives cuts and reverts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_pruned: Option<crate::archive_prunes_reasoning::ReasoningPruned>,
 }
 
 /// The caller's own delivery grant on `session.head`, independent of lineage.
@@ -1042,6 +1078,13 @@ impl HeadInput {
 }
 
 impl HeadMeta {
+    pub fn with_reasoning_pruned(
+        mut self,
+        state: crate::archive_prunes_reasoning::ReasoningPruned,
+    ) -> Self {
+        self.reasoning_pruned = Some(state);
+        self
+    }
     pub fn with_released(mut self, released: crate::session_retention::Released) -> Self {
         self.released = Some(released);
         self
@@ -1079,6 +1122,7 @@ impl HeadMeta {
             retention_policy: None,
             retention_state: None,
             released: None,
+            reasoning_pruned: None,
         }
     }
 
@@ -1102,6 +1146,7 @@ impl HeadMeta {
             retention_policy: None,
             retention_state: None,
             released: None,
+            reasoning_pruned: None,
         }
     }
 
@@ -1200,6 +1245,7 @@ impl HeadMeta {
                     && self.head.is_none()
                     && self.last_run_state.is_none()
                     && self.updated_at.is_none()
+                    && self.reasoning_pruned.is_none()
             }
             Some(_) => {
                 let bounded = match (self.first_ordinal, self.last_ordinal) {

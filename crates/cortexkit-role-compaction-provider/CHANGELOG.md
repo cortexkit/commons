@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.7.3
+
+- Add optional `reasoning_pruned` to the Setup request
+  (`SetupRequest::with_reasoning_pruned`, `setup::ReasoningPruned`, the
+  runner crate's type) and the optional advance-notice header
+  `reasoning_pruned: <generation>:<through_ordinal>:<at_ms>`
+  (`AdvanceNotice::with_reasoning_pruned`, `encode_reasoning_pruned`,
+  `parse_reasoning_pruned`). A notice with a malformed value or generation 0
+  is refused `malformed:reasoning_pruned`. Both are absent unless the runner
+  has pruned the session, so existing requests, notices and digests keep
+  their bytes. The widest well-formed notice grows from 2,313 to 2,391
+  bytes, still under the 4,096-byte bound.
+- Pin the post-prune Setup (§4), the provider's duty to reconcile its held
+  copies once per prune generation from its cut and never below it before
+  rendering any view from them (a provider must not accept
+  `pruned_reasoning` otherwise), and the runner's
+  `pruned_reasoning_restored` view refusal (§7,
+  `notice::refusal_reasons::PRUNED_REASONING_RESTORED`), which covers every
+  form a view sends bytes in: replace ranges and keep-range part edits.
+  `CompactionView::restored_pruned_part` is the reference over a whole view.
+  The text states that provider-authored bytes for a pruned message include a
+  held part re-serialized inside an edit, not only new content.
+- Add the `held_copies_follow_reasoning_pruned` probe to the non-default
+  `conformance` feature, with a scripted runner (`ScriptedRunner`) and the
+  `PrunedReasoningProbe` adapter trait. Named faulty providers prove it
+  fails a provider that renders a held pre-prune copy, renders a copy held
+  from before its cut, reads below its cut, re-reads without a generation
+  change, or builds a keep-range part edit from a held pre-prune part: one
+  trimming the output of a part holding a tool call and its result, which
+  re-encodes the call's thought signature, and one editing
+  `text_with_state` text, which re-encodes its provider-state signature.
+- Add `test-vectors/compaction-provider-v1/reasoning-pruned.json` with
+  independently computed notice digests. Track llm-runner 0.7.10.
+
 ## 0.7.2
 
 - Add the `account_change` rewrite ride and notice event, with a required,

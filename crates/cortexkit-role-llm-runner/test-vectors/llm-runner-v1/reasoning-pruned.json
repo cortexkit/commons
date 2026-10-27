@@ -1,0 +1,444 @@
+{
+  "heads": [
+    {
+      "name": "never_pruned",
+      "head": {
+        "lineage_id": "lineage-example",
+        "last_ordinal": 7,
+        "first_ordinal": 0,
+        "history_version": 1,
+        "updated_at": 1767225600000
+      }
+    },
+    {
+      "name": "pruned_once",
+      "head": {
+        "lineage_id": "lineage-example",
+        "last_ordinal": 7,
+        "first_ordinal": 0,
+        "history_version": 1,
+        "updated_at": 1767225600000,
+        "reasoning_pruned": {
+          "generation": 1,
+          "through_ordinal": 5,
+          "at_ms": 1767225600000
+        }
+      }
+    },
+    {
+      "name": "pruned_again",
+      "head": {
+        "lineage_id": "lineage-example",
+        "last_ordinal": 7,
+        "first_ordinal": 0,
+        "history_version": 1,
+        "updated_at": 1767225600000,
+        "reasoning_pruned": {
+          "generation": 2,
+          "through_ordinal": 7,
+          "at_ms": 1767312000000
+        }
+      }
+    }
+  ],
+  "pages": [
+    {
+      "name": "raw_page",
+      "view": "raw",
+      "page": {
+        "lineage_id": "lineage-example",
+        "messages": [],
+        "reasoning_pruned": {
+          "generation": 2,
+          "through_ordinal": 7,
+          "at_ms": 1767312000000
+        }
+      }
+    },
+    {
+      "name": "model_page",
+      "view": "model",
+      "page": {
+        "lineage_id": "lineage-example",
+        "messages": [],
+        "reasoning_pruned": {
+          "generation": 2,
+          "through_ordinal": 7,
+          "at_ms": 1767312000000
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "generation_zero",
+      "reasoning_pruned": {
+        "generation": 0,
+        "through_ordinal": 5,
+        "at_ms": 1767225600000
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "reasoning_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "stands_for": {
+        "from": 2,
+        "to": 5
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"},{\"type\":\"text\",\"text\":\"Open the blue door.\"}]}]",
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#0"
+      }
+    },
+    {
+      "name": "reasoning_signature_alone_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "stands_for": {
+        "from": 2,
+        "to": 5
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"\",\"signature\":\"invented-signature\"}]}]",
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#0"
+      }
+    },
+    {
+      "name": "redacted_reasoning_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "stands_for": {
+        "from": 2,
+        "to": 5
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_reasoning\",\"data\":\"invented-opaque-data\",\"provider_format\":\"example\"}]}]",
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#0"
+      }
+    },
+    {
+      "name": "reasoning_fold_without_reasoning",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "stands_for": {
+        "from": 2,
+        "to": 5
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"\"},{\"type\":\"text\",\"text\":\"Summary: the door is blue.\"}]}]",
+      "restored": null
+    },
+    {
+      "name": "reasoning_outside_the_range",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "stands_for": {
+        "from": 4,
+        "to": 6
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"A later thought.\",\"signature\":\"invented-signature\"}]}]",
+      "restored": null
+    },
+    {
+      "name": "opaque_reasoning_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "opaque_reasoning"
+        }
+      ],
+      "stands_for": {
+        "from": 2,
+        "to": 5
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_reasoning\",\"data\":\"{\\\"encrypted_content\\\":\\\"invented-ciphertext\\\",\\\"id\\\":\\\"item-example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"Consider the blue door.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\",\"provider_format\":\"example-item\"}]}]",
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#0"
+      }
+    },
+    {
+      "name": "opaque_reasoning_summary_allowed",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "opaque_reasoning"
+        }
+      ],
+      "stands_for": {
+        "from": 2,
+        "to": 5
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"redacted_reasoning\",\"data\":\"{\\\"id\\\":\\\"item-example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"Consider the blue door.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\",\"provider_format\":\"example-item\"},{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\"}]}]",
+      "restored": null
+    },
+    {
+      "name": "signature_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#1",
+          "kind": "signature"
+        }
+      ],
+      "stands_for": {
+        "from": 2,
+        "to": 5
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":\"{\\\"color\\\": \\\"blue\\\"}\",\"thought_signature\":\"invented-signature\"}]}]",
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#1"
+      }
+    },
+    {
+      "name": "signature_in_provider_state_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#1",
+          "kind": "signature"
+        }
+      ],
+      "stands_for": {
+        "from": 2,
+        "to": 5
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"signature\":\"invented-signature\",\"format\":\"example\"}}]}]",
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#1"
+      }
+    },
+    {
+      "name": "signature_removed_allowed",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#1",
+          "kind": "signature"
+        }
+      ],
+      "stands_for": {
+        "from": 2,
+        "to": 5
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":\"{\\\"color\\\": \\\"blue\\\"}\"},{\"type\":\"text_with_state\",\"text\":\"The door is blue.\",\"provider_state\":{\"signature\":\"\",\"format\":\"example\"}},{\"type\":\"reasoning\",\"text\":\"Reasoning is not what this prune removed.\"}]}]",
+      "restored": null
+    },
+    {
+      "name": "cut_lineage_head_restores_below_the_cut",
+      "first_ordinal": 4,
+      "pruned": [
+        {
+          "ordinal": 1,
+          "part": "m1#0",
+          "kind": "reasoning"
+        }
+      ],
+      "stands_for": {
+        "from": 0,
+        "to": 4
+      },
+      "range": {
+        "from": 4,
+        "to": 4
+      },
+      "bytes": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"reasoning\",\"text\":\"A thought from before the cut.\",\"signature\":\"invented-signature\"}]}]",
+      "restored": {
+        "ordinal": 1,
+        "part": "m1#0"
+      }
+    }
+  ],
+  "edit_refusals": [
+    {
+      "name": "reasoning_edit_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "edit": {
+        "ordinal": 3,
+        "part": "m3#0",
+        "bytes": "{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}"
+      },
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#0"
+      }
+    },
+    {
+      "name": "reasoning_edit_into_a_sibling_part_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "edit": {
+        "ordinal": 3,
+        "part": "m3#1",
+        "bytes": "{\"type\":\"reasoning\",\"text\":\"Consider the blue door.\",\"signature\":\"invented-signature\"}"
+      },
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#0"
+      }
+    },
+    {
+      "name": "reasoning_edit_without_reasoning_allowed",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "edit": {
+        "ordinal": 3,
+        "part": "m3#0",
+        "bytes": "{\"type\":\"reasoning\",\"text\":\"\"}"
+      },
+      "restored": null
+    },
+    {
+      "name": "reasoning_edit_at_another_ordinal_allowed",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "edit": {
+        "ordinal": 4,
+        "part": "m4#0",
+        "bytes": "{\"type\":\"reasoning\",\"text\":\"A later thought.\",\"signature\":\"invented-signature\"}"
+      },
+      "restored": null
+    },
+    {
+      "name": "reasoning_drop_allowed",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "reasoning"
+        }
+      ],
+      "edit": {
+        "ordinal": 3,
+        "part": "m3#0",
+        "drop": true
+      },
+      "restored": null
+    },
+    {
+      "name": "opaque_reasoning_edit_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "opaque_reasoning"
+        }
+      ],
+      "edit": {
+        "ordinal": 3,
+        "part": "m3#0",
+        "bytes": "{\"type\":\"redacted_reasoning\",\"data\":\"{\\\"encrypted_content\\\":\\\"invented-ciphertext\\\",\\\"id\\\":\\\"item-example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"Consider the blue door.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\",\"provider_format\":\"example-item\"}"
+      },
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#0"
+      }
+    },
+    {
+      "name": "opaque_reasoning_edit_summary_allowed",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#0",
+          "kind": "opaque_reasoning"
+        }
+      ],
+      "edit": {
+        "ordinal": 3,
+        "part": "m3#0",
+        "bytes": "{\"type\":\"redacted_reasoning\",\"data\":\"{\\\"id\\\":\\\"item-example\\\",\\\"summary\\\":[{\\\"text\\\":\\\"Consider the blue door.\\\",\\\"type\\\":\\\"summary_text\\\"}],\\\"type\\\":\\\"reasoning\\\"}\",\"provider_format\":\"example-item\"}"
+      },
+      "restored": null
+    },
+    {
+      "name": "signature_edit_restored",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#1",
+          "kind": "signature"
+        }
+      ],
+      "edit": {
+        "ordinal": 3,
+        "part": "m3#1",
+        "bytes": "{\"type\":\"tool_call\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":\"{\\\"color\\\": \\\"blue\\\"}\",\"thought_signature\":\"invented-signature\"}"
+      },
+      "restored": {
+        "ordinal": 3,
+        "part": "m3#1"
+      }
+    },
+    {
+      "name": "signature_edit_without_signature_allowed",
+      "pruned": [
+        {
+          "ordinal": 3,
+          "part": "m3#1",
+          "kind": "signature"
+        }
+      ],
+      "edit": {
+        "ordinal": 3,
+        "part": "m3#1",
+        "bytes": "{\"type\":\"tool_call\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":\"{\\\"color\\\": \\\"blue\\\"}\"}"
+      },
+      "restored": null
+    }
+  ]
+}

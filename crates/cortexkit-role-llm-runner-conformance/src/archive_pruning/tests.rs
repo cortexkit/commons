@@ -4,10 +4,12 @@ use crate::{
     route::{Reply, RouteFailure, SubscribeOutcome},
 };
 use async_trait::async_trait;
+use cortexkit_role_compaction_provider::notice::{AdvanceNotice, Event};
 use cortexkit_role_harness::{
     CrashDriver, Harness, HarnessError, KillPoint, KillReport, PointDeclaration, RouteStamp,
     Trigger,
 };
+use cortexkit_role_llm_runner::archive_prunes_reasoning::ReasoningPruned;
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
@@ -36,6 +38,11 @@ enum Fault {
     AddedMember,
     ReopenRestoresReasoning,
     ExpiresCursor,
+    NoGenerationBump,
+    AcceptsRestoringView,
+    AcceptsRestoringEdit,
+    SkipsSetupAfterPrune,
+    KeepsPrePruneInitial,
 }
 
 #[derive(Default)]
@@ -48,6 +55,20 @@ struct Stored {
     hold_active: bool,
     hold_queue: bool,
     reads: usize,
+    /// The session's prune state, as `session.head` reports it.
+    reasoning_pruned: Option<ReasoningPruned>,
+    /// Original values of every part a prune emptied: what a view must not
+    /// bring back.
+    removed: Vec<Value>,
+    setup_done: bool,
+    setup_due: bool,
+    installed: Option<crate::CompactionMessage>,
+    rendered: Option<crate::CompactionMessage>,
+    pending: Vec<(u64, crate::ScriptedView)>,
+    published: u64,
+    applied: Option<u64>,
+    calls: Vec<crate::ProviderCall>,
+    notices: Vec<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Default)]
@@ -84,6 +105,105 @@ fn fixture() -> Vec<ArchivePruningPart> {
     parts
 }
 
+/// A later assistant message with signed reasoning, which every run of the
+/// native runner appends, so a later prune has something new to remove.
+fn later_oracle() -> ArchivePruningPart {
+    ArchivePruningPart {
+        kind: "reasoning".into(),
+        original: json!({"type":"reasoning","text":"A later thought.","signature":"later-signature"}),
+        served: json!({"type":"reasoning","text":""}),
+    }
+}
+
+fn stored_message(ordinal: usize, parts: Vec<Value>, tags: Value) -> Value {
+    let message = json!({"role":"assistant","content":parts});
+    let digests: Vec<_> = parts
+        .iter()
+        .enumerate()
+        .map(|(i, p)| json!({"part":i.to_string(),"digest":content_digest(p)}))
+        .collect();
+    json!({"ordinal":ordinal,"mid":format!("message-{ordinal}"),"message":message,"digest":content_digest(&message),"part_digests":digests,"tags":tags,"written_at":1000 + ordinal,"role":"assistant"})
+}
+
+impl Stored {
+    /// One run of the native runner: the post-prune Setup and the views due
+    /// at its step boundary, then its answer and an advance notice.
+    fn serve_run(&mut self, fault: Fault) {
+        let mut events = Vec::new();
+        if self.accepts.is_some() {
+            let first_setup = !self.setup_done;
+            if first_setup || (self.setup_due && fault != Fault::SkipsSetupAfterPrune) {
+                let mut params = json!({"session":"example"});
+                if let Some(state) = &self.reasoning_pruned {
+                    params["reasoning_pruned"] = serde_json::to_value(state).unwrap();
+                }
+                self.calls
+                    .push(crate::ProviderCall::new("compaction.setup", params));
+                if let Some(answer) = self.installed.clone() {
+                    if first_setup
+                        || (self.applied.is_none() && fault != Fault::KeepsPrePruneInitial)
+                    {
+                        self.rendered = Some(answer);
+                    }
+                }
+                self.setup_done = true;
+                self.setup_due = false;
+            }
+            for (version, view) in std::mem::take(&mut self.pending) {
+                self.calls.push(crate::ProviderCall::new(
+                    "view.get",
+                    json!({"view_version":version}),
+                ));
+                let by_replace = view.ranges.iter().any(|range| {
+                    matches!(range, crate::ScriptedRange::ReplaceVerbatim { messages, .. }
+                        if messages.iter().any(|m| m["content"].as_array().into_iter().flatten()
+                            .any(|part| self.removed.contains(part))))
+                });
+                let by_edit = view.ranges.iter().any(|range| {
+                    matches!(range, crate::ScriptedRange::KeepWithVerbatimEdits { edits, .. }
+                        if edits.iter().any(|edit| self.removed.contains(&edit.part_value)))
+                });
+                let restores = (by_replace && fault != Fault::AcceptsRestoringView)
+                    || (by_edit && fault != Fault::AcceptsRestoringEdit);
+                if restores {
+                    events.push(Event::ViewRefused {
+                        view_version: version,
+                        reason: "pruned_reasoning_restored".into(),
+                    });
+                } else {
+                    self.applied = Some(version);
+                }
+            }
+        }
+        let ordinal = self.messages.len();
+        self.messages.push(stored_message(
+            ordinal,
+            vec![later_oracle().original],
+            json!([{"part":"0"}]),
+        ));
+        if self.accepts.is_some() {
+            let last = self.messages.last().unwrap();
+            let mut notice = AdvanceNotice::new(
+                "0123456789abcdef0123456789abcdef",
+                self.notices.len() as u64 + 1,
+                "example-lineage",
+                ordinal as u64,
+                last["digest"].as_str().unwrap(),
+                1,
+                "example/model",
+            )
+            .with_events(events);
+            if let Some(version) = self.applied {
+                notice = notice.with_applied_view_version(version);
+            }
+            if let Some(state) = self.reasoning_pruned {
+                notice = notice.with_reasoning_pruned(state);
+            }
+            self.notices.push(notice.to_headers());
+        }
+    }
+}
+
 impl NativeRunner {
     fn caps() -> BTreeSet<Capability> {
         [
@@ -113,8 +233,20 @@ impl NativeRunner {
             return;
         }
         session.reads = 0;
+        let mut touched = Vec::new();
         for entry in &mut session.messages {
-            for (index, oracle) in fixture().iter().enumerate() {
+            let oracles = if entry["message"]["content"].as_array().unwrap().len() == 1 {
+                vec![later_oracle()]
+            } else {
+                fixture()
+            };
+            let mid = entry["mid"].clone();
+            if session.pruned.iter().any(|row| row["mid"] == mid) {
+                continue;
+            }
+            touched.push(entry["ordinal"].as_u64().unwrap());
+            for (index, oracle) in oracles.iter().enumerate() {
+                session.removed.push(oracle.original.clone());
                 let key = index.to_string();
                 let mut served = oracle.served.clone();
                 match self.fault {
@@ -157,6 +289,22 @@ impl NativeRunner {
                     .swap(0, 2),
                 _ => {}
             }
+        }
+        if let Some(highest) = touched.into_iter().max() {
+            let generation = match session.reasoning_pruned {
+                None => 1,
+                Some(state) if self.fault == Fault::NoGenerationBump => state.generation,
+                Some(state) => state.generation + 1,
+            };
+            let through = session
+                .reasoning_pruned
+                .map_or(highest, |state| state.through_ordinal.max(highest));
+            session.reasoning_pruned = Some(ReasoningPruned::new(
+                generation,
+                through,
+                1_767_225_600_000 + generation,
+            ));
+            session.setup_due = session.accepts.is_some();
         }
     }
 }
@@ -203,6 +351,9 @@ impl RunnerRoute for Route {
                 .unwrap();
                 head["history_version"] = json!(1);
                 head["last_run_state"] = json!({"run_id":"example-run","state":if session.active {"active"} else {"completed"}});
+                if let Some(state) = &session.reasoning_pruned {
+                    head["reasoning_pruned"] = serde_json::to_value(state).unwrap();
+                }
                 head
             }
             ops::SESSION_SEND => {
@@ -211,6 +362,9 @@ impl RunnerRoute for Route {
                 if self.runner.fault == Fault::ReopenRestoresReasoning && !session.pruned.is_empty()
                 {
                     session.messages[0]["message"]["content"][0] = fixture()[0].original.clone();
+                }
+                if !session.active && !session.queued {
+                    session.serve_run(self.runner.fault);
                 }
                 json!({"state":if session.queued {"pending"} else {"active"},"run_id":"example-run","submission_id":"example-send"})
             }
@@ -238,8 +392,17 @@ impl RunnerRoute for Route {
                     if index + 1 < session.messages.len() {
                         page["newer"] = json!((index + 1).to_string());
                     }
-                } else if index + 1 < session.messages.len() {
-                    page["next_from_ordinal"] = json!(index + 1);
+                } else {
+                    if index + 1 < session.messages.len() {
+                        page["next_from_ordinal"] = json!(index + 1);
+                    }
+                    if let Some(state) = &session.reasoning_pruned {
+                        page["reasoning_pruned"] = serde_json::to_value(state).unwrap();
+                    }
+                    if let (true, Some(initial)) = (params["view"] == "model", &session.rendered) {
+                        page["compaction_id"] = json!(initial.compaction_id);
+                        page["version"] = json!(initial.version);
+                    }
                 }
                 if !session.pruned.is_empty() {
                     if self.runner.fault != Fault::FirstPageOnly || session.reads == 0 {
@@ -373,19 +536,58 @@ impl LlmRunnerSubject for NativeRunner {
         for ordinal in 0..2 {
             let mut parts: Vec<_> = fixture().into_iter().map(|p| p.original).collect();
             parts.push(json!({"type":"text","text":"An unchanged reminder slot."}));
-            let message = json!({"role":"assistant","content":parts});
-            let digests: Vec<_> = parts
-                .iter()
-                .enumerate()
-                .map(|(i, p)| json!({"part":i.to_string(),"digest":content_digest(p)}))
-                .collect();
-            stored.messages.push(json!({"ordinal":ordinal,"mid":format!("message-{ordinal}"),"message":message,"digest":content_digest(&message),"part_digests":digests,"tags":[{"part":"0"},{"part":"1"},{"part":"2","tag":format!("§{}§",1 + 2 * ordinal)},{"part":"3"},{"part":"4","tag":format!("§{}§",2 + 2 * ordinal)}],"written_at":1000 + ordinal,"role":"assistant"}));
+            stored.messages.push(stored_message(
+                ordinal,
+                parts,
+                json!([{"part":"0"},{"part":"1"},{"part":"2","tag":format!("§{}§",1 + 2 * ordinal)},{"part":"3"},{"part":"4","tag":format!("§{}§",2 + 2 * ordinal)}]),
+            ));
         }
         self.state.lock().unwrap().insert(name.into(), stored);
         Ok(fixture())
     }
     async fn prune_archived_session(&self, name: &str) -> Result<(), HarnessError> {
         self.prune(name);
+        Ok(())
+    }
+    async fn install_compaction_setup(
+        &self,
+        name: &str,
+        setup: crate::CompactionSetup,
+    ) -> Result<(), HarnessError> {
+        let crate::CompactionSetup::Ready(initial) = setup else {
+            return Err(HarnessError::new("only ready answers are scripted here"));
+        };
+        self.state.lock().unwrap().get_mut(name).unwrap().installed = Some(initial);
+        Ok(())
+    }
+    async fn compaction_observation(
+        &self,
+        name: &str,
+    ) -> Result<crate::CompactionObservation, HarnessError> {
+        Ok(crate::CompactionObservation {
+            notices: self.state.lock().unwrap()[name].notices.clone(),
+            ..Default::default()
+        })
+    }
+    async fn publish_compaction_view(
+        &self,
+        name: &str,
+        view: crate::ScriptedView,
+    ) -> Result<u64, HarnessError> {
+        let mut state = self.state.lock().unwrap();
+        let session = state.get_mut(name).unwrap();
+        session.published += 1;
+        let version = session.published;
+        session.pending.push((version, view));
+        Ok(version)
+    }
+    async fn compaction_provider_calls(
+        &self,
+        name: &str,
+    ) -> Result<Vec<crate::ProviderCall>, HarnessError> {
+        Ok(self.state.lock().unwrap()[name].calls.clone())
+    }
+    async fn release_compaction_model(&self, _: &str) -> Result<(), HarnessError> {
         Ok(())
     }
     async fn hold_next_model_step(&self, name: &str) -> Result<(), HarnessError> {
@@ -573,4 +775,61 @@ proof!(
     rejects_unlisted_identical_part_change,
     "archive_pruning_only_listed_parts",
     UnlistedTwinChange
+);
+
+/// A faulty runner fails its case, and the failure names what it broke.
+macro_rules! named_proof {
+    ($positive:ident, $faulty:ident, $case:literal, $fault:ident, $named:literal) => {
+        #[tokio::test]
+        async fn $positive() {
+            assert!(matches!(
+                exercise($case, Fault::None).await.unwrap(),
+                Ending::Passed
+            ));
+        }
+        #[tokio::test]
+        async fn $faulty() {
+            let Err(failure) = exercise($case, Fault::$fault).await else {
+                panic!(concat!($case, " must reject ", stringify!($fault)));
+            };
+            assert!(failure.contains($named), "{failure}");
+        }
+    };
+}
+
+named_proof!(
+    positive_generation,
+    rejects_prune_without_generation_bump,
+    "archive_pruning_generation",
+    NoGenerationBump,
+    "a later prune did not raise the generation by one"
+);
+named_proof!(
+    positive_restored_view_refused,
+    rejects_applying_a_view_that_restores_pruned_content,
+    "archive_pruning_restored_view_refused",
+    AcceptsRestoringView,
+    "a view restoring pruned content was not refused view_refused:1:pruned_reasoning_restored"
+);
+named_proof!(
+    positive_setup_after_prune,
+    rejects_skipping_setup_after_prune,
+    "archive_pruning_setup_after_prune",
+    SkipsSetupAfterPrune,
+    "the runner made no call to the compaction provider after the prune"
+);
+named_proof!(
+    positive_setup_initial_replaced,
+    rejects_keeping_the_pre_prune_initial,
+    "archive_pruning_setup_initial_replaced",
+    KeepsPrePruneInitial,
+    "the runner still renders the pre-prune one"
+);
+
+named_proof!(
+    positive_restored_edit_refused,
+    rejects_applying_a_part_edit_that_restores_pruned_content,
+    "archive_pruning_restored_edit_refused",
+    AcceptsRestoringEdit,
+    "a part edit restoring pruned content was not refused view_refused:1:pruned_reasoning_restored"
 );

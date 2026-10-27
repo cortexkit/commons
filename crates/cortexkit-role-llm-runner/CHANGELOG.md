@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.7.10
+
+- Add the session's prune state for runners that declare
+  `archive_prunes_reasoning`: `reasoning_pruned: {generation,
+  through_ordinal, at_ms}` (`archive_prunes_reasoning::ReasoningPruned`) on
+  `session.head` (the authority) and on raw and model `session.read` pages.
+  It is absent until the first prune; the generation is 1 after it and rises
+  by one in the same commit as every later prune; `through_ordinal` is the
+  highest ordinal any prune touched; `at_ms` is for display only. Every
+  member is optional and omitted when absent, so existing bytes are
+  unchanged (§4.2, §4.3, §8, §9.14.1).
+- Pin the runner's duties after a prune of an enrolled session: call the
+  provider's Setup, carrying `reasoning_pruned`, before any other provider
+  call for a run; let a ready answer replace only `accepts` and, while no
+  view has applied, `initial`; and refuse a view whose replace range would
+  restore pruned content, `view_refused:<version>:pruned_reasoning_restored`,
+  by the kind recorded for each pruned part. The rule is about content, not
+  edit shape: it covers a replace range's bytes and a keep-range part edit's
+  bytes (a drop restores nothing), from `view.get` and ride answers alike,
+  and the bytes include a held part re-serialized inside an edit. The refusal is permanent for
+  that view. State the brief head-index window after a prune as allowed
+  (§9.14.1, §11.1).
+- Add `PRUNED_REASONING_RESTORED`, `PrunedPartAt`,
+  `carries_pruned_content`, `restored_part` (replacements) and
+  `restored_by_edit` (part edits) as the reference check, and
+  `test-vectors/llm-runner-v1/reasoning-pruned.json`: heads never pruned and
+  pruned twice, pages repeating the head, an invalid generation 0, and
+  refused and allowed replacements for each pruning kind, including a cut
+  lineage's head range standing for ordinals below the cut, and keep-range
+  part edits refused and allowed for each kind. Existing vector
+  files are unchanged.
+- Add the four new conformance cases to the §15 table.
+
 ## 0.7.9
 
 - Widen the `owned-broca` error output's `module` member: it is now 1 to

@@ -16,6 +16,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/compaction-provider-v1/setup-accepts.json"),
     ),
     (
+        "reasoning-pruned.json",
+        include_str!("../test-vectors/compaction-provider-v1/reasoning-pruned.json"),
+    ),
+    (
         "README.md",
         include_str!("../test-vectors/compaction-provider-v1/README.md"),
     ),

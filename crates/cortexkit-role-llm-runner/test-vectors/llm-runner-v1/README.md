@@ -13,6 +13,20 @@ opaque item JSON retaining a readable summary, tool-call arguments unchanged,
 and required provider state retaining an emptied signature. The wire crate's
 archive-pruning tests verify these native-format examples and page round trips.
 
+`reasoning-pruned.json` pins the session's prune state (§9.14.1): heads
+never pruned, pruned once and pruned again, raw and model pages repeating
+the head, and a generation of 0 that is not valid. Its `refusals` are
+replacements checked against recorded pruned parts, at least one refused
+per kind, with allowed counterparts: a fold without reasoning, reasoning
+outside the range, an opaque item keeping only its summary, and a call
+without its signature. One is a cut lineage's head range standing for an
+ordinal below the cut. Its `edit_refusals` are keep-range part edits
+checked the same way, a refused and an allowed edit per kind, plus an edit
+moving reasoning into a sibling part of the pruned message (refused), an
+edit at another ordinal and a drop (both allowed).
+`archive_prunes_reasoning` tests check them; all existing vector files are
+unchanged.
+
 `call-identity.json` pins the `call_identity` group (§9.16): describe answers
 declaring it beside display history or live events alone, its refusal
 without either (`call_identity_without_display`) and an answer without it;

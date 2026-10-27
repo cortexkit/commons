@@ -125,7 +125,8 @@ mod user_commands;
 
 pub use compaction::{
     CompactionCall, CompactionMessage, CompactionObservation, CompactionRouteIdentity,
-    CompactionSetup, CompactionSetupIdentity, ScriptedRange, ScriptedRide, ScriptedView,
+    CompactionSetup, CompactionSetupIdentity, ProviderCall, ScriptedPartEdit, ScriptedRange,
+    ScriptedRide, ScriptedView,
 };
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_llm_runner as wire;

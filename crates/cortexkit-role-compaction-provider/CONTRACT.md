@@ -203,7 +203,8 @@ the session and freezes that plan for use.
   a new lineage of a session it holds is a repeat, answered from that
   state. The answer is recorded before the lineage's first model call, and
   Setup does not run again within the lineage while the runner holds that
-  record. A runner that no longer holds it (after a restore of its store,
+  record, except once after each archive prune (`llm-runner/v1` §9.14.1;
+  the post-prune Setup below). A runner that no longer holds it (after a restore of its store,
   say) calls Setup again before its next model call, as after a failed
   Setup below.
 - [pinned] If Setup fails or times out with no answer, no model call is
@@ -218,7 +219,7 @@ the session and freezes that plan for use.
 - [pinned] The request (`SetupRequest`) is `{session, harness, request_id,
   preset?, params, composition, model, variant?, context_window?,
   output_limit?, newest?, lineage_id?, descends_from?, now, view_apply?,
-  ride_wait_max_ms?}`.
+  ride_wait_max_ms?, reasoning_pruned?}`.
   `model` is a string; `variant`, `context_window` and `output_limit` are
   sibling fields, not a nested model object. `params` defaults to `{}`; an
   absent `preset` selects the provider's default. `composition` is an opaque
@@ -238,6 +239,25 @@ the session and freezes that plan for use.
   `surface_change`, §8). Absent means the runner does not honour a
   provider-set ride wait. It declares runner support in the request, as
   `view_apply` does; a provider that predates the member ignores it (§14).
+- [pinned] Optional `reasoning_pruned: {generation, through_ordinal, at_ms}`
+  (`setup::ReasoningPruned`, `llm-runner/v1`'s
+  `archive_prunes_reasoning::ReasoningPruned`; added in 0.7.3,
+  `SetupRequest::with_reasoning_pruned`) is the session's prune state,
+  exactly as `session.head` reports it. A runner declaring
+  `archive_prunes_reasoning` sends it on every Setup for a session it has
+  pruned. It is absent when the session was never pruned: `generation`
+  counts from 1, so absence is the only "never pruned".
+- [pinned] **The post-prune Setup.** After a prune, the runner calls Setup,
+  carrying `reasoning_pruned`, before any other call to the provider for a
+  run on the session (`llm-runner/v1` §9.14.1). The lineage is unchanged, so
+  the provider answers it from the state it holds, as for any repeat. A
+  ready answer replaces only the runner's recorded `accepts` and, while no
+  view has applied in the lineage, its recorded `initial`. The frozen
+  `ceiling` and `ride_wait_ms`, any checkpoint, and an applied view stay as
+  they are. A replacement `initial` that carries content the prune removed
+  (the rule of §7) is a failed Setup naming `pruned_reasoning_restored`. A
+  refusal or a failure ends the run as at any Setup, and the next send calls
+  Setup again with the same `reasoning_pruned`.
 - Informative, not a rule: a runner sends its host's real limit. The Claude Code
   gateway sends 240,000: Claude Code times a request out 360 s before its
   first byte, which leaves room for the model's own time to that byte.
@@ -377,6 +397,34 @@ the session and freezes that plan for use.
   and write-time digests stay unchanged. Unknown kinds leave the part in
   place but its changed payload is not trusted. Sessions without a compaction
   provider do not need this permission.
+- [pinned] **Held copies after a prune.** A provider reads a session forward
+  from its cursor, so a prune of messages it already holds would otherwise
+  leave its copies with the original reasoning. A provider that lists
+  `pruned_reasoning` therefore stores, with its held copies, the
+  `reasoning_pruned.generation` it last reconciled (none before the first).
+  When the runner's value differs, whether seen on the post-prune Setup, a
+  notice, a page or `session.head`, then before rendering any view from held
+  copies it re-reads, once, the messages it holds at or below
+  `through_ordinal`: from its cut (the lineage's `first_ordinal`, 0 before
+  the first cut) up to the lower of its last held ordinal and
+  `through_ordinal`, with `session.read`, never below its cut. The
+  acceptance above applies to each re-read message: it replaces the held
+  copy and is not a resync. It then stores the new generation. Every part
+  it edits is built from the reconciled copy: an edit that re-serializes a
+  held pre-prune part, even to change only a tool output or some text,
+  sends the pruned payload back. Copies it
+  holds from below its cut cannot be re-read: once `through_ordinal` reaches
+  them, it renders none of their content of the kinds §9.14.1 prunes, only
+  derived work such as a summary that carries none. A provider must not
+  list `pruned_reasoning` unless it does all of this. The post-prune Setup
+  carries the value before any other call for a run, so a provider can
+  reconcile at Setup alone and need not check every notice.
+- [pinned] **The index window.** A runner may serve `session.head` from an
+  index updated right after the pruned bytes commit, so a provider can read
+  the previous generation for a moment. A view it builds from a stale held
+  copy in that window is refused `view_refused:<version>:pruned_reasoning_restored`
+  (§7); the provider then reads `session.head` again, reconciles as above,
+  and builds a new view. Neither side treats the window as a defect.
 
 ## 5. Advance notices: runner to provider
 
@@ -418,6 +466,7 @@ provider.
 | `model` | yes | the current model id: 1 to 256 bytes, printable ASCII, no space |
 | `last_usage` | no | the last response's measured usage, `<input>:<cache_read>:<cache_write>:<output>`; omitted before the first response |
 | `first_ordinal` | no | the current lineage's first ordinal (`llm-runner/v1`'s `session.head.first_ordinal`), at most one above `through_ordinal` |
+| `reasoning_pruned` | no | the session's prune state when the notice was recorded, `<generation>:<through_ordinal>:<at_ms>`, as `llm-runner/v1`'s `session.head.reasoning_pruned` reports it (§4); `generation` at least 1; sent only by a runner declaring `archive_prunes_reasoning`, for a session it has pruned. A convenience copy: `session.head` stays the authority |
 
 - [pinned] Event tokens (`notice::Event`). Every token follows one grammar:
   a name `[a-z][a-z0-9_]*`, then zero or more `:<argument>` segments of
@@ -433,7 +482,7 @@ provider.
 | `revert_below:<ordinal>` | the transcript was truncated; every message at `ordinal` or above is gone |
 | `marker_outcome:<applied\|deferred\|unknown>:<cut_id>` | the host's native compaction marker for the cut of the view named by `applied_view_version` in the same notice (§9). `cut_id` is 1 to 64 bytes of `[A-Za-z0-9._-]` |
 | `view_discarded:<view_version>` | the runner discarded that view because its coverage is no longer a prefix of the transcript; always with `revert_below` in the same notice |
-| `view_refused:<view_version>:<reason>` | the runner will not render that view and keeps its current one (§7). `reason` is 1 to 32 bytes of `[a-z0-9_]`: `tool_pair_split`, `role_order`, `unknown_part`, `provider_constraint`, `unsupported_apply`, `ranges_start`, or another reason a provider treats the same way (`notice::refusal_reasons`) |
+| `view_refused:<view_version>:<reason>` | the runner will not render that view and keeps its current one (§7). `reason` is 1 to 32 bytes of `[a-z0-9_]`: `tool_pair_split`, `role_order`, `unknown_part`, `provider_constraint`, `unsupported_apply`, `ranges_start`, `pruned_reasoning_restored`, or another reason a provider treats the same way (`notice::refusal_reasons`) |
 | `view_deferred:<view_version>:<reason>` | the runner holds that view until a step boundary where applying it is safe for the current model provider, and keeps rendering its current one meanwhile (§7). `reason` has the same form: `signed_reasoning`, or another (`notice::defer_reasons`) |
 | `view_companion:<view_version>:<edit>` | the runner applied that view together with a companion edit the model provider requires, and nothing more (§7). `edit` has the same form: `strip_signed_reasoning`, or another (`notice::companion_edits`) |
 
@@ -461,7 +510,8 @@ provider.
   `applied_view_version` of 0, a digest not lowercase hexadecimal, a
   non-canonical number, a lineage id outside its grammar, a malformed token,
   a `descends_from` that does not parse or names the notice's own lineage, a
-  value over 1,024 bytes), a token repeats (`duplicate_event`), there are
+  `reasoning_pruned` that is not three canonical numbers with a generation
+  of at least 1, a value over 1,024 bytes), a token repeats (`duplicate_event`), there are
   more than 32 tokens (`too_many_events`), `view_discarded` comes without
   `revert_below` (`view_discarded_without_revert_below`), or
   `marker_outcome` comes without `applied_view_version`
@@ -470,7 +520,7 @@ provider.
 - [pinned] Size bound: the headers this contract defines total at most
   4,096 bytes (`MAX_NOTICE_HEADER_BYTES`), counting every name's and value's
   length as the bus counts a message's headers. The per-value bounds keep
-  every well-formed notice at or under 2,313 bytes; a runner with more events
+  every well-formed notice at or under 2,391 bytes; a runner with more events
   than fit splits them across consecutive notices.
 - [pinned] Notice digest (`AdvanceNotice::digest`, `notice::notice_digest`):
   lowercase hexadecimal SHA-256 over a sequence of frames, each an 8-byte
@@ -833,6 +883,33 @@ provider.
   start at the lineage's `first_ordinal` (`ranges_start`, step 6 above),
   and when an edit names a part key the message does not have
   (`unknown_part`, step 7 above).
+- [pinned] A runner declaring `llm-runner/v1`'s `archive_prunes_reasoning`
+  also refuses any view whose edits would put content its prune removed back
+  into a message it pruned, whatever the edit's shape. It reports
+  `view_refused:<version>:pruned_reasoning_restored`
+  (`notice::refusal_reasons::PRUNED_REASONING_RESTORED`). Views from
+  `view.get` and from ride answers are checked alike, in every form a view
+  sends bytes (§6):
+  - a `replace` range's `bytes`, against every ordinal the range stands
+    for: `[from, to)` and, for the first range of a lineage whose
+    `first_ordinal` is above 0, every ordinal below it as well;
+  - a keep range's part edit with `bytes`, against the message at the
+    edit's `ordinal`, whichever of its parts the edit names;
+  - a part edit with `drop: true` sends nothing and restores nothing.
+  Provider-authored bytes for a pruned message count whatever their
+  origin: they cover a held part re-serialized inside an edit, not only new
+  content. A part edit that trims a tool output but re-encodes the held
+  part's call with its thought signature, or that edits `text_with_state`
+  text but re-encodes the held `provider_state` signature, restores what a
+  `signature` prune removed and is refused like new content would be.
+  `CompactionView::restored_pruned_part` is the reference. The check follows
+  the kind the runner recorded for each pruned part of the message: under `reasoning`, any
+  reasoning content; under `opaque_reasoning`, only an encrypted or opaque
+  payload, so a readable summary may be sent; under `signature`, a provider
+  signature on a non-reasoning part (`llm-runner/v1` §9.14.1). The refusal
+  is permanent for that view, and nothing of it applies. A provider that
+  meets it reads `session.head`, reconciles its held copies as for a new
+  prune generation (§4), and only then builds another view.
 - [pinned] A view with a cut starts a new lineage once it applies
   (`llm-runner/v1` §4.5). The view stays the runner's record of what it
   rendered on the old lineage; on the new one the runner renders the new
@@ -1168,8 +1245,8 @@ terminal behavior per message.
 - [pinned] Versions and ordinals are `u64`, as `llm-runner/v1` types them.
 - [pinned] Public types with optional members are non-exhaustive where they
   are likely to grow, built with a constructor and `with_*` setters.
-- [pinned] Setup's `descends_from`, `view_apply` and `ride_wait_max_ms`, a
-  view's `apply`, the answer's `ceiling` and `ride_wait_ms`, and `cache_ttl`
+- [pinned] Setup's `descends_from`, `view_apply`, `ride_wait_max_ms` and
+  `reasoning_pruned`, a view's `apply`, the answer's `ceiling` and `ride_wait_ms`, and `cache_ttl`
   on a Setup answer, a ride answer or a view default to absent and are
   omitted when absent, never encoded as `null`; inside an entry, `ms`
   is always encoded, `null` included. A
@@ -1230,6 +1307,7 @@ views and sends rides. It will check:
 | `part_edits_well_formed` | §6: a provider's part edits are sorted, one per part, inside their keep range, and name part keys the runner's `session.read` returned |
 | `ride_answers_within_deadline`, `ride_unknown_cause_nothing`, `ride_overflow_ignored_off_ceiling` | §8 |
 | `sync_reads_only_the_lineage`, `cut_lineage_keeps_state` | §3, §5.1: sync and view building never call `session.history` or read below `first_ordinal`; after a cut lineage's first notice descends at the cut, the provider keeps its state and its next read starts at `first_ordinal` |
+| `held_copies_follow_reasoning_pruned` | §4: after a prune generation change, the provider re-reads its held messages at or below `through_ordinal` once, from its cut and never below it, and renders no pruned content in a replace range or a part edit, neither from a held pre-prune copy, nor from a copy held from before its cut, nor by re-serializing a held part inside an edit. The non-default `conformance` feature ships this one as a focused probe (`conformance::held_copies_follow_reasoning_pruned`) |
 | `lineage_reset_drops_runner_copy` | §5.3: a new lineage without descent drops the tag index, cursor and rendered-view record, re-reads, and keeps only derived work whose message or part re-validates by digest |
 | `crash_at_<point>` for each point in §15 | §15 |
 

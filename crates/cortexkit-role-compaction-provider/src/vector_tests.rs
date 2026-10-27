@@ -178,6 +178,7 @@ fn the_largest_well_formed_notice_fits_the_header_bound() {
     .with_applied_view_version(max)
     .with_first_ordinal(max)
     .with_descends_from(NoticeDescent::new("p".repeat(256), max, "b".repeat(64)))
+    .with_reasoning_pruned(notice::ReasoningPruned::new(max, max, max))
     .with_events(events);
     let encoded = notice.to_headers();
     assert!(encoded[notice::headers::EVENTS].len() <= notice::MAX_HEADER_VALUE_BYTES);
@@ -186,8 +187,10 @@ fn the_largest_well_formed_notice_fits_the_header_bound() {
     // 256, and the rest at their widest encodings.
     let names: usize = notice::headers::NOTICE.iter().map(|n| n.len()).sum();
     let descent = 256 + 1 + 20 + 1 + 64;
-    let widest = names + 1024 + 4 * 20 + 3 + 256 + 32 + 64 + 6 * 20 + 256 + descent;
-    assert_eq!(widest, 2313);
+    let reasoning_pruned = 3 * 20 + 2;
+    let widest =
+        names + 1024 + 4 * 20 + 3 + 256 + 32 + 64 + 6 * 20 + 256 + descent + reasoning_pruned;
+    assert_eq!(widest, 2391);
     assert!(widest <= notice::MAX_NOTICE_HEADER_BYTES);
     assert!(notice::header_bytes(&encoded) <= widest);
 }
@@ -1101,4 +1104,115 @@ fn faulty_cache_ttl_rules_fail_their_named_vectors() {
         let failed = failed_decisions(rule);
         assert!(failed.iter().any(|f| f == named), "{named}: {failed:?}");
     }
+}
+
+/// `reasoning-pruned.json`: the optional prune-state header and Setup member.
+/// Its digests were computed by a separate implementation, as `async.json`'s were.
+#[test]
+fn reasoning_pruned_notices_and_setup_requests() {
+    let file = vectors::load("reasoning-pruned.json");
+    for case in vectors::cases(&file, "notices") {
+        let name = name(case);
+        let map = headers(&case["headers"]);
+        let notice = AdvanceNotice::from_headers(&map).unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        assert_eq!(notice.to_headers(), map, "{name}");
+        assert_eq!(notice.digest(), case["digest"].as_str().unwrap(), "{name}");
+        let expected = case
+            .get("reasoning_pruned")
+            .map(|state| serde_json::from_value::<notice::ReasoningPruned>(state.clone()).unwrap());
+        assert_eq!(notice.reasoning_pruned, expected, "{name}");
+        for event in &notice.events {
+            if let Event::ViewRefused { reason, .. } = event {
+                assert_eq!(reason, notice::refusal_reasons::PRUNED_REASONING_RESTORED);
+            }
+        }
+    }
+    // A notice without the header keeps the digest it had before the header
+    // existed: absent optional headers are not framed.
+    let plain = &vectors::cases(&file, "notices")[0];
+    assert!(plain["headers"].get("reasoning_pruned").is_none());
+    for case in vectors::cases(&file, "notices_refused") {
+        let name = name(case);
+        let problem = AdvanceNotice::from_headers(&headers(&case["headers"]))
+            .expect_err(name)
+            .name();
+        assert_eq!(problem, case["problem"].as_str().unwrap(), "{name}");
+    }
+    for case in vectors::cases(&file, "setup_requests") {
+        let name = name(case);
+        let request: SetupRequest = vectors::round_trip(name, &case["request"]);
+        assert_eq!(
+            request.reasoning_pruned.is_some(),
+            case["request"].get("reasoning_pruned").is_some(),
+            "{name}"
+        );
+    }
+}
+
+/// A view restores pruned content through any edit form that carries bytes:
+/// a replace range or a keep-range part edit. A drop restores nothing.
+#[test]
+fn restored_pruned_part_covers_replace_ranges_and_part_edits() {
+    use cortexkit_role_llm_runner::archive_prunes_reasoning::PrunedPartAt;
+    let pruned = vec![
+        PrunedPartAt::new(1, "m1#0", "reasoning"),
+        PrunedPartAt::new(3, "m3#1", "signature"),
+    ];
+    let thought = r#"{"type":"reasoning","text":"Consider the blue door.","signature":"s"}"#;
+    let signed_call =
+        r#"{"type":"tool_call","id":"c","name":"open","arguments":"{}","thought_signature":"s"}"#;
+    let view = |ranges: Vec<ViewRange>| {
+        CompactionView::new(
+            "0".repeat(32),
+            1,
+            "lin_a",
+            MessageRef {
+                ordinal: 3,
+                mid: "m3".into(),
+            },
+            ranges,
+        )
+    };
+    let found = |v: &CompactionView, first: u64| {
+        v.restored_pruned_part(&pruned, first)
+            .map(|p| (p.ordinal, p.part.clone()))
+    };
+    let edit_restoring = view(vec![ViewRange::keep_with_edits(
+        0,
+        4,
+        vec![PartEdit::replace(1, "m1", "m1#0", thought)],
+    )]);
+    assert_eq!(found(&edit_restoring, 0), Some((1, "m1#0".into())));
+    let edit_signature = view(vec![ViewRange::keep_with_edits(
+        0,
+        4,
+        vec![PartEdit::replace(3, "m3", "m3#1", signed_call)],
+    )]);
+    assert_eq!(found(&edit_signature, 0), Some((3, "m3#1".into())));
+    let edit_emptied = view(vec![ViewRange::keep_with_edits(
+        0,
+        4,
+        vec![
+            PartEdit::replace(1, "m1", "m1#0", r#"{"type":"reasoning","text":""}"#),
+            PartEdit::drop(3, "m3", "m3#1"),
+        ],
+    )]);
+    assert_eq!(found(&edit_emptied, 0), None);
+    let fold = view(vec![ViewRange::replace(
+        0,
+        4,
+        format!(r#"[{{"role":"assistant","content":[{thought}]}}]"#),
+    )]);
+    assert_eq!(found(&fold, 0), Some((1, "m1#0".into())));
+    // On a lineage starting at 2, the head range stands for ordinal 1 too.
+    let head = view(vec![
+        ViewRange::replace(
+            2,
+            2,
+            format!(r#"[{{"role":"user","content":[{thought}]}}]"#),
+        ),
+        ViewRange::keep(2, 4),
+    ]);
+    assert_eq!(found(&head, 2), Some((1, "m1#0".into())));
+    assert_eq!(found(&head, 0), None);
 }

@@ -368,7 +368,7 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
 
 ### 4.2 The page
 
-`{messages, lineage_id, next_from_ordinal?, head?, pruned_reasoning?}` (`ReadPage`).
+`{messages, lineage_id, next_from_ordinal?, head?, pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
 
 - [pinned] Every page of a session that has a lineage carries `lineage_id`.
   A session that was never written has no lineage yet: a read of it returns
@@ -532,8 +532,10 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
 
 - [pinned] Head metadata without bodies: `{lineage_id, last_ordinal,
   first_ordinal, cut?, history_version, head, last_run_state, last_run_error?, updated_at,
-  input?, model?, usage?, sender?, incarnation?}`
-  (`HeadMeta`).
+  input?, model?, usage?, sender?, incarnation?, reasoning_pruned?}`
+  (`HeadMeta`). `reasoning_pruned` is the session's prune state, only on a
+  runner that declares `archive_prunes_reasoning` and only after the
+  session's first prune (§9.14.1).
 - [pinned] `history_version` is a `u64`, on `session.head` and on every
   `session.history` page. It rises at every lineage change except a cut: a
   revert, a recovery that rewrites written messages, or a restart after the
@@ -1630,7 +1632,8 @@ new members.
   promised.
 - [pinned] It is `session.read` with `view: "model"` (`ReadView`), answered
   as `{messages, lineage_id?, next_from_ordinal?, head?, compaction_id?,
-  version?}` (`ModelPage`). The value is strict, so an unknown view is
+  version?, pruned_reasoning?, reasoning_pruned?}` (`ModelPage`); the last
+  two are §9.14.1's. The value is strict, so an unknown view is
   refused naming `view`. `lineage_id`, `next_from_ordinal` and `head` mean
   what they mean on a raw page (§4.2).
 - [pinned] Each entry is `{source, message}` (`ModelEntry`), `message` in the
@@ -3504,9 +3507,96 @@ its host's file storage, not a second copy of the host's media store.
   may rely on this to accept the change and replace its held copy. Part
   identity and digests do not move when it does so.
 - [pinned] A runner never prunes a session enrolled with a compaction provider
-  whose `compaction.setup` ready answer did not list `pruned_reasoning` in
-  `accepts`. Omission or an empty list grants no permission. Sessions with no
-  compaction provider are unaffected by this enrollment gate.
+  whose latest recorded `compaction.setup` ready answer did not list
+  `pruned_reasoning` in `accepts`. Omission or an empty list grants no
+  permission. Sessions with no compaction provider are unaffected by this
+  enrollment gate.
+- [pinned] **Prune state.** A runner keeps, for each session it has pruned,
+  `reasoning_pruned: {generation, through_ordinal, at_ms}`
+  (`archive_prunes_reasoning::ReasoningPruned`). It is absent until the
+  session's first prune, so a session never pruned needs no stored value and
+  reports none. `generation` is a `u64` that is 1 after the first prune and
+  rises by one in the same commit as every later prune, the commit that
+  writes the pruned payloads; it is never 0. `through_ordinal` is the highest
+  ordinal any prune of the session has touched; it never decreases.
+  `at_ms` is when the latest prune committed, in milliseconds since the Unix
+  epoch, for display only: no party compares it with its own clock. A prune
+  is not a lineage change, so cuts and reverts leave the value as it is. A
+  runner that does not declare this group never sends the member.
+- [pinned] **Where it is carried.** `session.head` carries it as
+  `reasoning_pruned` and is the authority. Raw and model `session.read`
+  pages (`ReadPage`, `ModelPage`) repeat it, and so does every Setup request
+  and every advance notice the runner sends to an enrolled compaction
+  provider (compaction-provider §4, §5). Those copies are a convenience: each
+  reports the value as of when it was built. Every copy is absent exactly
+  when the head's is.
+- [pinned] **Setup before work after a prune.** After pruning a session
+  enrolled with a compaction provider, the runner calls that provider's
+  Setup before any other call to it for a run on the session: before any
+  `view.get` or `compaction.ride` and before the run's first model call.
+  The request carries `reasoning_pruned` exactly as the head reports it, so
+  a provider can reconcile at Setup alone, with no check on every notice.
+  This is a repeat Setup within the lineage (compaction-provider §4). A ready
+  answer replaces only the recorded `accepts` and, while no view has
+  applied in the lineage, the recorded `initial`. The frozen `ceiling` and
+  `ride_wait_ms`, any checkpoint, and the current view once one has applied
+  stay as they are. The runner checks a replacement `initial` with the
+  restore rule below, `initial` standing for the ordinals of its range; one
+  that would restore pruned content is a failed Setup naming
+  `pruned_reasoning_restored` (`archive_prunes_reasoning::PRUNED_REASONING_RESTORED`):
+  no model call, run error `compaction_unavailable`. A refusal or a failure
+  ends the run as any Setup refusal or failure does, and the next send calls
+  Setup again, still carrying `reasoning_pruned`. Once a post-prune Setup is
+  answered and recorded, the next one is due after the next prune.
+- [pinned] **A view that restores pruned content is refused.** The rule is
+  about content, not the shape of the edit: the runner refuses any view
+  whose edits would put content its prune removed back into a message it
+  pruned. It reports `view_refused:<version>:pruned_reasoning_restored` on
+  its next advance notice (compaction-provider §7) and keeps its current
+  view. A view fetched with `view.get` and one carried by a ride answer are
+  checked alike. These are every form in which a view sends bytes in place
+  of the transcript (compaction-provider §6), and each is checked:
+  - a `replace` range's `bytes`, against every ordinal the range stands
+    for. A range stands for `[from, to)`; the first range of a lineage whose
+    `first_ordinal` is above 0 also stands for every ordinal below it,
+    because it carries the view's head;
+  - a keep range's part edit with `bytes`, against the message at the
+    edit's `ordinal`, whichever of its parts the edit names, so moving the
+    content into a sibling part does not get it past;
+  - a part edit with `drop: true` sends no bytes and restores nothing.
+  Provider-authored bytes for a pruned message count whatever their
+  origin: they cover a held part re-serialized inside an edit, not only new
+  content. A part edit that trims a tool output but re-encodes the held
+  part's call with its thought signature, or that edits `text_with_state`
+  text but re-encodes the held `provider_state` signature, restores what a
+  `signature` prune removed and is refused like new content would be.
+  A post-prune Setup's `initial` is checked by the same rule (above). The
+  check follows the kind the runner recorded for each pruned part of the
+  message, using the kind names of this section, and covers only what that
+  prune removed:
+  - `reasoning`: any reasoning content, whether reasoning text, a reasoning
+    signature, or redacted or encrypted reasoning data;
+  - `opaque_reasoning`: only an encrypted or opaque reasoning payload; a
+    readable summary may be sent;
+  - `signature`: a provider signature on a non-reasoning part.
+  `archive_prunes_reasoning::carries_pruned_content`,
+  `archive_prunes_reasoning::restored_part` (replace ranges and `initial`)
+  and `archive_prunes_reasoning::restored_by_edit` (part edits) are the
+  reference over the stored formats this section names, and
+  compaction-provider's `CompactionView::restored_pruned_part` applies them
+  to a whole view. Part digests do not change on a prune,
+  so the check is against the runner's stored prune state (which parts it
+  pruned, at which ordinals, with which kind), never against digests. The
+  refusal is permanent for that view's body: the runner applies nothing
+  from it, now or at a later boundary. The ordinal and part it found are for
+  the runner's own logs and do not travel on the wire.
+- [pinned] **The index window.** A runner may serve `session.head` from an
+  index it updates right after the pruned payloads commit. For that moment a
+  head read can report the previous generation while pages already serve
+  pruned bytes. Neither side treats this as a defect: a provider that reads
+  the stale generation and sends a view rendered from its held copy gets
+  `pruned_reasoning_restored`, then reads `session.head` again, reconciles
+  its held copies, and only then builds another view.
 - [informative] Reopening continues without the pruned reasoning. Before
   pruning a model family, the runner is responsible for ensuring that its
   model provider accepts the resulting history.
@@ -3840,7 +3930,9 @@ owes.
     restore starts a new lineage whose recorded Setup answer did not
     survive or that the runner discards with the lost lineage (§9.6),
     calls Setup again before its next model call, as after a failed Setup
-    (compaction-provider §4);
+    (compaction-provider §4). A runner declaring `archive_prunes_reasoning`
+    also calls it after a prune, before any other call to the provider for
+    a run on the session (§9.14.1);
   - advance notices on ck-bus after every committed transcript change the
     provider should see, from which the provider reads with `session.read`
     (§4) and `session.resolve` (§9.6), within the current lineage, never
@@ -3853,8 +3945,9 @@ owes.
     across restarts and while the provider is down. A view's ranges tile
     from the lineage's `first_ordinal`; the runner refuses a view whose
     ranges start anywhere else (`view_refused:<version>:ranges_start`,
-    compaction-provider §7). A view with a cut starts a new lineage once it
-    applies (§4.5);
+    compaction-provider §7), and one whose replace range or part edit would
+    restore pruned content (`view_refused:<version>:pruned_reasoning_restored`,
+    §9.14.1). A view with a cut starts a new lineage once it applies (§4.5);
   - rides (`compaction.ride`) when the runner's prefix is being rewritten
     anyway, and at the ceiling;
   - the ceiling Setup sets, with the `context_ceiling` refusal and run state
@@ -4406,6 +4499,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; Setup's head insertion precedes and travels with message zero over both caps and is not repeated on the next page, and the held model request carries the canonical view |
 | `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops`; Setup-only unavailability and role/finer Setup refusal codes |
 | the runner half of compaction-provider 0.3.0 §3 (notices, views, rides, the ceiling, native markers) | no live case yet; a later conformance release adds them |
+| `archive_pruning_generation`, `archive_pruning_restored_view_refused`, `archive_pruning_restored_edit_refused`, `archive_pruning_setup_after_prune`, `archive_pruning_setup_initial_replaced` | `archive_prunes_reasoning`, `transcript_reads`, `queue`; all but the first also `compaction`, and the last also `model_view`; inapplicable by name without the group (§9.14.1): `reasoning_pruned` is absent before the first prune, generation 1 after it and one higher after a later prune, with `through_ordinal` the highest pruned ordinal, and pages and notices repeat the head; a view whose replace range carries the pruned original is refused `view_refused:<version>:pruned_reasoning_restored` and never rendered, and so is a view whose keep-range part edit sends a pruned part's original bytes; the first provider call after a prune is a Setup carrying the head's `reasoning_pruned`; a post-prune Setup's new `initial` replaces the pre-prune one while no view has applied |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete` | — |
 | `extra_op_still_admitted` | — |
 | `baseline_owner_only`, `baseline_matches_admission_reply`, `baseline_not_yet_before_first_request` | — |

@@ -21,6 +21,7 @@ use serde_json::{Map, Value};
 /// Setup permission required before a runner prunes an enrolled session.
 pub const ACCEPTS_PRUNED_REASONING: &str = "pruned_reasoning";
 
+pub use cortexkit_role_llm_runner::archive_prunes_reasoning::ReasoningPruned;
 pub use cortexkit_role_llm_runner::tags::SetupCheckpoint;
 
 use crate::{
@@ -96,6 +97,14 @@ pub struct SetupRequest {
     /// Omitted when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ride_wait_max_ms: Option<u64>,
+    /// The session's prune state, exactly as `llm-runner/v1`'s
+    /// `session.head` reports it, on every Setup a runner declaring
+    /// `archive_prunes_reasoning` calls for a session it has pruned. Absent
+    /// when the session was never pruned. A provider that accepted pruned
+    /// reasoning reconciles its held copies here when the generation
+    /// differs from the one it last reconciled (CONTRACT.md §4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_pruned: Option<ReasoningPruned>,
 }
 
 impl SetupRequest {
@@ -124,6 +133,7 @@ impl SetupRequest {
             now,
             view_apply: Vec::new(),
             ride_wait_max_ms: None,
+            reasoning_pruned: None,
         }
     }
 
@@ -171,6 +181,12 @@ impl SetupRequest {
     /// ride's answer.
     pub fn with_ride_wait_max_ms(mut self, cap: u64) -> Self {
         self.ride_wait_max_ms = Some(cap);
+        self
+    }
+
+    /// Carry the session's prune state, as `session.head` reports it.
+    pub fn with_reasoning_pruned(mut self, state: ReasoningPruned) -> Self {
+        self.reasoning_pruned = Some(state);
         self
     }
 }

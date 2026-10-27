@@ -7,6 +7,9 @@
 //! view never replaces or rewrites the runner's transcript or write-ahead
 //! log; the runner keeps it beside them.
 
+use cortexkit_role_llm_runner::archive_prunes_reasoning::{
+    restored_by_edit, restored_part, PrunedPartAt,
+};
 use serde::{de::IgnoredAny, Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -624,6 +627,45 @@ fn check_edits(from: u64, to: u64, edits: &[PartEdit]) -> Result<(), ViewProblem
         }
     }
     Ok(())
+}
+
+impl CompactionView {
+    /// The pruned part this view would put pruned content back into, if any:
+    /// the check behind `view_refused:<version>:pruned_reasoning_restored`
+    /// (`llm-runner/v1` §9.14.1, CONTRACT.md §7). It covers every edit form a
+    /// view has: each replace range's `bytes`, checked against the ordinals
+    /// the range stands for, and each keep-range part edit's `bytes`, checked
+    /// against its message. A `drop` edit sends nothing and restores nothing.
+    ///
+    /// `pruned` is the runner's record of the parts it pruned, in the order
+    /// it wants them reported. `first_ordinal` is the lineage's first
+    /// ordinal: the first range of a lineage starting above 0 is the view's
+    /// head, so it also stands for every ordinal below it. Bytes that are not
+    /// JSON are skipped here; [`CompactionView::check`] refuses them.
+    pub fn restored_pruned_part<'a>(
+        &self,
+        pruned: &'a [PrunedPartAt],
+        first_ordinal: u64,
+    ) -> Option<&'a PrunedPartAt> {
+        self.ranges
+            .iter()
+            .enumerate()
+            .find_map(|(index, range)| match range {
+                ViewRange::Replace { from, to, bytes } => {
+                    let start = if index == 0 && first_ordinal > 0 {
+                        0
+                    } else {
+                        *from
+                    };
+                    let messages: Value = serde_json::from_str(bytes).ok()?;
+                    restored_part(pruned, start..*to, &messages)
+                }
+                ViewRange::Keep { edits, .. } => edits.iter().find_map(|edit| {
+                    let part: Value = serde_json::from_str(edit.bytes.as_deref()?).ok()?;
+                    restored_by_edit(pruned, edit.ordinal, &edit.part, &part)
+                }),
+            })
+    }
 }
 
 /// One message of the runner's transcript as the runner's checks and
