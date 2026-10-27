@@ -54,6 +54,12 @@ pub const IMAGE_MAX_PIXELS: u64 = 16_000_000;
 /// Longest image reference handle, in characters.
 pub const IMAGE_HANDLE_MAX_LEN: usize = 128;
 
+/// Largest image, in encoded bytes, a module may hand out a reference for
+/// (4 MiB less 64 KiB). Its resolve reply carries the bytes raw in one daemon
+/// frame, whose body is capped just under 4 MiB, and the 64 KiB leaves room
+/// for the reply's head. A larger image gets no handle (`RULES.md` §13.1).
+pub const MAX_REFERENCE_IMAGE_BYTES: usize = IMAGE_MAX_BYTES - 64 * 1024;
+
 /// Why a host that does not declare image references refuses one: it
 /// cannot read the bytes, so to it a reference is an unsupported image.
 pub const REFERENCE_UNSUPPORTED: &str =
@@ -664,6 +670,18 @@ mod tests {
                 .canonical()
                 .is_err());
         }
+    }
+
+    #[test]
+    fn a_reference_image_fits_one_daemon_frame_with_room_for_its_head() {
+        // Issuers quote this number, so it must not drift.
+        assert_eq!(MAX_REFERENCE_IMAGE_BYTES, 4_128_768);
+        // The daemon delivers a module's reply body of at most 4 MiB less its
+        // 21-byte frame header. The resolve reply spends 4 bytes on the head
+        // length, and the rest must leave room for a realistic head.
+        let body_cap = 4 * 1024 * 1024 - 21;
+        let head_room = body_cap - 4 - MAX_REFERENCE_IMAGE_BYTES;
+        assert!(head_room >= 64 * 1024 - 25, "{head_room}");
     }
 
     #[test]

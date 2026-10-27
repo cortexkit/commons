@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.2
+
+- Image references (`RULES.md` §13.1): a module hands out a handle only for
+  an image of at most `image::MAX_REFERENCE_IMAGE_BYTES` (4,128,768 bytes, 4
+  MiB less 64 KiB) encoded bytes, never downscaling to fit, so its resolve
+  reply fits in one daemon frame. A successful resolve is a binary reply in
+  subc-protocol's framed layout with a closed head `{content_type, sha256,
+  length}`. The host checks the length and digest before the inline checks
+  and refuses a malformed or mismatched reply `image_unavailable`; only the
+  host sends `image_source_unavailable`. Additive: no type or wire change.
+
 ## 0.3.1
 
 - Additive: `RefusalDetail` carries three optional spend members, `cost_usd

@@ -293,6 +293,24 @@ issued it, just before it calls the model.
     refusal never tells a caller whether a handle it may not use exists.
   - `image_source_unavailable`, transient, with `detail.retry_after_ms`:
     the issuing module is unreachable or timed out.
+- [pinned] **The issuer hands out only deliverable images.** A module hands
+  out a handle only for an image whose encoded bytes are at most
+  `image::MAX_REFERENCE_IMAGE_BYTES` (4,128,768 bytes, 4 MiB less 64 KiB), so
+  its resolve reply fits in one daemon frame. For a larger image it hands out
+  no handle and says why. It never downscales to fit: a handle resolves to
+  exactly the bytes the caller was shown.
+- [pinned] **The resolve reply.** A successful resolve is a binary reply
+  (`FLAG_BINARY`), never base64, laid out as subc-protocol's framed body: a
+  `u32` big-endian head length, the head as JSON, then the image bytes. The
+  head is a closed object `{content_type, sha256, length}`: the content type,
+  the lowercase hex SHA-256 of the bytes, and their count. The host checks
+  `length` and `sha256` against the bytes first, then applies the inline
+  checks. A malformed head, an unknown or missing member, or bytes that do
+  not match is refused `image_unavailable`, permanent: an issuer that sent
+  bad bytes would send them again. A refusal is the issuing module's own
+  response body; the host answers it `image_unavailable`. Only the host
+  sends `image_source_unavailable`, when the issuer cannot be reached or does
+  not answer in time.
 - [pinned] A reference has no bytes until it is resolved, and the code
   never pretends otherwise: `Image::decode` and `Image::approx_bytes` are
   `None` for one, which is neither a decode failure nor zero bytes.
