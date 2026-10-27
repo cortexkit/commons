@@ -69,4 +69,23 @@ pub trait ExtractorSubject: Send + Sync {
 
     /// Answer every later call whose `state` is `state` with `scripted`.
     async fn script(&self, state: &str, scripted: Scripted);
+
+    /// The image-reference hook: hand `bytes`, of `content_type`, to the
+    /// image source the module resolves references through (the stand-in
+    /// for the module that issues handles), and return the handle the
+    /// module will resolve to them. `None`, the default, when the subject
+    /// has no such hook: the checks that need a resolvable handle are then
+    /// not applicable. A subject that returns a handle must also implement
+    /// [`ExtractorSubject::set_image_source_down`].
+    async fn issue_image_reference(&self, content_type: &str, bytes: Vec<u8>) -> Option<String> {
+        let _ = (content_type, bytes);
+        None
+    }
+
+    /// Make the image source unreachable (`true`), so the module's
+    /// resolution of any handle fails as if the issuing module were down or
+    /// timed out, or reachable again (`false`).
+    async fn set_image_source_down(&self, down: bool) {
+        let _ = down;
+    }
 }

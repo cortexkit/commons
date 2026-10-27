@@ -57,7 +57,8 @@ only what is this role's own. Route roles and model discovery follow RULES §18.
       images: { max: n } | null,  // null = no image support; always stated
       price?: { input_per_mtok_usd?, output_per_mtok_usd? },  // absent if unpriced
       egress_host                 // the provider host item text is sent to
-    } ]
+    } ],
+    image_reference?: {}          // present iff the module resolves image references (§3)
   }
   ```
 
@@ -95,6 +96,19 @@ only what is this role's own. Route roles and model discovery follow RULES §18.
   `invalid_params` with `detail.field` `items[i].state` (the real index).
 - [pinned] `images` is accepted only where the model's catalog row allows
   it, up to its `images.max` (clef: at most 4). TypeSafe takes text only.
+- [pinned] **Image references.** An image may be a reference `{handle}` to
+  an image another module holds, under RULES §13.1. The rollout rule: a
+  module that resolves references declares the `image_reference` group in
+  `role.describe` (§2), and a caller sends a reference only to a module
+  that declares it. A module that does not declare it refuses a reference
+  as an unsupported image, `invalid_params` naming `items[i].images[j]`
+  (`check_request`). A declaring module checks the handle
+  (`check_request_with_references`), resolves every reference through the
+  module that issued it before any provider call or write
+  (`resolve_item_images`), and gives the resolved bytes exactly the checks
+  an inline image gets, with the same refusals and paths
+  (`check_resolved_item_images`). A reference it cannot resolve refuses the
+  call `image_unavailable` or `image_source_unavailable` (§7).
 - [pinned] Truncation: the provider truncates a `state` longer than the
   model's context without saying so. Neither provider reports truncation,
   so the reply carries no truncation flag: a guessed flag would read as a
@@ -174,7 +188,8 @@ keep their numbers, and say what is this role's own.
 ### 6.1 Idempotent by `batch_id`
 
 - [pinned] As RULES §2. **Body identity** is the model, the questions, and
-  each item (its images in canonical form) (`BatchIdentity`).
+  each item (its images in canonical form, a reference as its `{handle}`)
+  (`BatchIdentity`).
 - [pinned] `detail.field` of `batch_id_reuse` names the first field that
   differs: `model`, `questions`, `items` (a different item count) or
   `items[i]` (the first differing item), checked in that order
@@ -206,7 +221,9 @@ keep their numbers, and say what is this role's own.
   sent: question count, question ids, question types, choice options 2-255,
   score levels 2-10, `state` kinds, images (RULES §13), `max_items`,
   `max_request_bytes`
-  (`parse_request`, `check_request_bytes`, `check_request`).
+  (`parse_request`, `check_request_bytes`, `check_request`). A module that
+  declares `image_reference` resolves the references and checks their bytes
+  here too (§3).
 - [pinned] `detail.field` paths: `batch_id`, `model`, `questions`,
   `questions.<id>`, `questions.<id>.type`, `questions.<id>.instructions`,
   `questions.<id>.criteria`, `items`, `items[i]`, `items[i].state`,
@@ -248,7 +265,12 @@ detail and class, and which codes are stored and stop the call are RULES
 - [pinned] Admission refusals (`ADMISSION_CODES`): `invalid_params`,
   `batch_id_reuse`, `model_unknown`, `model_not_classifier`,
   `cost_exceeded`, `account_walled`, `batch_in_progress`, `auth_failed`,
-  `model_unavailable`.
+  `model_unavailable`, `image_unavailable`, `image_source_unavailable`. The
+  last two come only from a module that declares `image_reference`, both
+  with `detail.field` `items[i].images[j]`: `image_unavailable` is
+  permanent (the handle is unknown, expired or not usable by this caller,
+  one answer for all three); `image_source_unavailable` is transient, with
+  `detail.retry_after_ms` (the issuing module is unreachable or timed out).
 - [pinned] Per-item errors (`ITEM_CODES`): `rate_limited`,
   `provider_error`, `provider_refused`, `invalid_item`, `cost_exceeded`,
   `auth_failed`, `model_unavailable`.
@@ -287,7 +309,8 @@ compatible" (`provider` module).
   the provider truncates a long state silently. `questions` maps id to
   question (clef: 1 to 64 entries). `images` is clef only: at most 4, each
   a `data:` URL or `{content_type, base64}`; 4 MiB and 16 megapixels each,
-  8 MiB in total, a body of at most 13 MiB, no remote URLs.
+  8 MiB in total, a body of at most 13 MiB, no remote URLs. A resolved
+  reference is sent as its bytes; the provider never sees a handle.
 - Response: `{model, answers: {<id>: Answer}, usage: {input_tokens,
   output_tokens}}`.
 - [pinned] A runner sends the pinned `model` value of the catalog row it

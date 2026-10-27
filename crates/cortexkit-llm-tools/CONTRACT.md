@@ -110,8 +110,8 @@ Model/item errors are exactly the classifier role's codes, with shared classes:
 
 | Codes | Class |
 |---|---|
-| `invalid_params`, `batch_id_reuse`, `model_unknown`, `model_not_classifier`, `cost_exceeded`, `auth_failed`, `model_unavailable`, `account_not_entitled`, `provider_refused`, `invalid_item` | permanent |
-| `account_walled`, `batch_in_progress`, `account_limit_exhausted`, `rate_limited`, `provider_error` | transient |
+| `invalid_params`, `batch_id_reuse`, `model_unknown`, `model_not_classifier`, `cost_exceeded`, `auth_failed`, `model_unavailable`, `account_not_entitled`, `image_unavailable`, `provider_refused`, `invalid_item` | permanent |
+| `account_walled`, `batch_in_progress`, `account_limit_exhausted`, `image_source_unavailable`, `rate_limited`, `provider_error` | transient |
 
 The role's admission/item distinctions and provider mappings remain unchanged;
 `answer_too_large` is not a classifier error. There is no second vocabulary.
@@ -149,11 +149,35 @@ Model/item errors are exactly the extractor role's codes:
 
 | Codes | Class |
 |---|---|
-| `invalid_params`, `batch_id_reuse`, `model_unknown`, `model_not_extractor`, `cost_exceeded`, `auth_failed`, `model_unavailable`, `account_not_entitled`, `provider_refused`, `invalid_item`, `answer_too_large` | permanent |
-| `account_walled`, `batch_in_progress`, `account_limit_exhausted`, `rate_limited`, `provider_error` | transient |
+| `invalid_params`, `batch_id_reuse`, `model_unknown`, `model_not_extractor`, `cost_exceeded`, `auth_failed`, `model_unavailable`, `account_not_entitled`, `image_unavailable`, `provider_refused`, `invalid_item`, `answer_too_large` | permanent |
+| `account_walled`, `batch_in_progress`, `account_limit_exhausted`, `image_source_unavailable`, `rate_limited`, `provider_error` | transient |
 
 The role's admission/item distinctions remain unchanged (in particular,
 `cost_exceeded` is an item error, not an extractor admission refusal).
+
+## Image references (`llm.classify/v1`, `llm.extract/v1`)
+
+An item image may be a reference `{handle}` to an image another module
+already holds, as the shared model-batch rules state it
+(`cortexkit-model-batch` `RULES.md` §13.1): a caller sends a short handle
+instead of the image's bytes, and the serving module resolves the handle
+through the module that issued it before it calls the model. The handle is
+1-128 characters of `[A-Za-z0-9._:-]`.
+
+- A provider's tool input schema lists the `{handle}` form only in the
+  release where the provider resolves references
+  (`input_schema_with_image_references`); before that it exports
+  `input_schema`, which lists only a `data:` URL and `{content_type,
+  base64}`. A caller sends a reference only to a tool whose schema lists it.
+- A provider that does not resolve references refuses one as an
+  unsupported image, `invalid_params` naming `item.images[j]`
+  (`validate_request`). One that does checks the handle
+  (`validate_request_with_image_references`), resolves it, and gives the
+  resolved bytes exactly the checks an inline image gets.
+- A reference it cannot resolve is refused `image_unavailable` (permanent:
+  unknown, expired or not usable by this caller, one answer for all three)
+  or `image_source_unavailable` (transient, with `detail.retry_after_ms`:
+  the issuing module did not answer), naming `item.images[j]`.
 
 ## `llm.complete/v1`
 

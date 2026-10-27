@@ -14,7 +14,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{Number, Value};
 
-use crate::{non_negative, Usage, ValidationError};
+use crate::{check_item_images, non_negative, Usage, ValidationError};
 
 pub const TAG: &str = "llm.extract/v1";
 
@@ -44,7 +44,22 @@ pub struct Result {
 
 /// Checks role invariants independent of a catalog row. Serving modules must also
 /// apply the selected model's limits, supported field types and image policy.
+/// An image reference `{handle}` is refused as an unsupported image: this is
+/// the validator of a provider that does not resolve references.
 pub fn validate_request(request: &Request) -> std::result::Result<(), ValidationError> {
+    validate(request, false)
+}
+
+/// [`validate_request`] for a provider that resolves image references: a
+/// reference is checked by its handle's grammar, and the provider resolves
+/// it and checks its bytes as the extractor role states.
+pub fn validate_request_with_image_references(
+    request: &Request,
+) -> std::result::Result<(), ValidationError> {
+    validate(request, true)
+}
+
+fn validate(request: &Request, references: bool) -> std::result::Result<(), ValidationError> {
     if request.model.is_empty() {
         return Err(ValidationError::EmptyModel);
     }
@@ -79,14 +94,7 @@ pub fn validate_request(request: &Request) -> std::result::Result<(), Validation
                 "images is non-empty when present",
             )));
         }
-        for (i, image) in images.iter().enumerate() {
-            cortexkit_model_batch::image::check_image(image).map_err(|message| {
-                ValidationError::Role(Refusal::invalid_params(
-                    format!("item.images[{i}]"),
-                    message,
-                ))
-            })?;
-        }
+        check_item_images(images, references)?;
     }
     if request
         .item
@@ -108,8 +116,18 @@ pub fn validate_result(result: &Result) -> std::result::Result<(), ValidationErr
     result.usage.validate()
 }
 
+/// The tool's input schema. Its images are a `data:` URL or
+/// `{content_type, base64}` only: the schema of a provider that does not
+/// resolve image references.
 pub fn input_schema() -> Value {
-    crate::schema::extract_input()
+    crate::schema::extract_input(false)
+}
+
+/// The input schema of a provider that resolves image references: an
+/// image may also be `{handle}`. A provider exports it only from the
+/// release that resolves references.
+pub fn input_schema_with_image_references() -> Value {
+    crate::schema::extract_input(true)
 }
 pub fn result_schema() -> Value {
     crate::schema::role_result(true)

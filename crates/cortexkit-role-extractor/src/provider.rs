@@ -22,7 +22,7 @@ pub use cortexkit_model_batch::status::{
 use crate::{
     errors::{ItemError, Refusal, PROVIDER_ERROR},
     field::Field,
-    image::Image,
+    image::{DecodedImage, Image, InlineImage},
     reply::{Answer, ItemResult, Usage},
     request::ExtractRequest,
 };
@@ -83,7 +83,9 @@ pub struct ProviderRequest {
     /// The provider's own model value, [`models::CLAIRIC`].
     pub model: String,
     pub state: String,
-    /// Forwarded as the caller wrote them.
+    /// Forwarded as the caller wrote them, except that the provider never
+    /// sees a reference: a module that resolved an item's references sends
+    /// their bytes instead ([`ProviderRequest::with_resolved_images`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<Image>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -115,25 +117,54 @@ impl ProviderRequest {
             },
         })
     }
+
+    /// This request with the item's images replaced by their bytes, in
+    /// order: what a module that resolved the item's references
+    /// (`resolve_item_images`) sends. Inline images keep their bytes, sent
+    /// in the canonical object form.
+    pub fn with_resolved_images(mut self, resolved: &[DecodedImage]) -> Self {
+        if self.images.is_some() {
+            self.images = Some(
+                resolved
+                    .iter()
+                    .map(|image| Image::Inline(InlineImage::from_decoded(image)))
+                    .collect(),
+            );
+        }
+        self
+    }
+}
+
+/// Refuse item `index` when its provider request `body` would be larger
+/// than the provider accepts (`max_body_bytes`), before any provider call:
+/// `invalid_params` naming `items[index]` and the limit. A module that
+/// resolves image references runs this on the request with the resolved
+/// images in it ([`ProviderRequest::with_resolved_images`]).
+pub fn check_provider_body(
+    index: usize,
+    body: &ProviderRequest,
+    max_body_bytes: u64,
+) -> Result<(), Refusal> {
+    let size = serde_json::to_vec(body).map_or(u64::MAX, |bytes| bytes.len() as u64);
+    if size > max_body_bytes {
+        return Err(Refusal::over_limit(
+            format!("items[{index}]"),
+            max_body_bytes,
+            format!("the provider request for this item is {size} bytes; at most {max_body_bytes}"),
+        ));
+    }
+    Ok(())
 }
 
 /// Refuse a batch any of whose provider requests would be larger than the
 /// provider accepts (`max_body_bytes`; Clairic's is
 /// [`clairic_limits::MAX_BODY_BYTES`]), before any provider call:
-/// `invalid_params` naming `items[i]` and the limit.
+/// `invalid_params` naming `items[i]` and the limit. An image reference
+/// counts here only as its handle; see [`check_provider_body`].
 pub fn check_provider_bodies(request: &ExtractRequest, max_body_bytes: u64) -> Result<(), Refusal> {
     for index in 0..request.items.len() {
-        let body = ProviderRequest::for_item(request, index, models::CLAIRIC)
-            .map(|body| serde_json::to_vec(&body).map_or(u64::MAX, |bytes| bytes.len() as u64))
-            .unwrap_or(0);
-        if body > max_body_bytes {
-            return Err(Refusal::over_limit(
-                format!("items[{index}]"),
-                max_body_bytes,
-                format!(
-                    "the provider request for this item is {body} bytes; at most {max_body_bytes}"
-                ),
-            ));
+        if let Some(body) = ProviderRequest::for_item(request, index, models::CLAIRIC) {
+            check_provider_body(index, &body, max_body_bytes)?;
         }
     }
     Ok(())

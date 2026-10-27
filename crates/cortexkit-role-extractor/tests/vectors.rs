@@ -4,13 +4,17 @@
 //! byte; then each file is checked against the code that states its rule.
 
 use cortexkit_role_extractor::{
-    describe::{check_describe, RoleDescribe},
+    describe::{check_describe, ImageReferenceSupport, RoleDescribe},
     errors::{self, ErrorClass, ItemError, Refusal},
     field::{types, Field, FieldType},
     identity::BatchIdentity,
+    image::ResolveFailure,
     provider::{clairic_limits, models, read_reply, ProviderRequest},
     reply::{span_byte_range, Answer, ExtractReply, ItemResult},
-    request::{admit, estimated_reply_bytes, CatalogRow, ExtractRequest, REPLY_FRAME_BYTES},
+    request::{
+        admit, estimated_reply_bytes, resolve_item_images, CatalogRow, ExtractRequest,
+        REPLY_FRAME_BYTES,
+    },
     spend::{check_before_call, item_cost_input, usd_to_nanos, ModuleBounds, Rounding},
     vectors, IndexMap,
 };
@@ -184,6 +188,28 @@ fn one_admission_refusal_per_code_and_the_kindless_row() {
             | errors::MODEL_UNKNOWN
             | errors::MODEL_NOT_EXTRACTOR
             | "model_not_extractor_kindless" => admitted.unwrap_err(),
+            errors::IMAGE_UNAVAILABLE | errors::IMAGE_SOURCE_UNAVAILABLE => {
+                // A module that does not declare image_reference refuses
+                // the reference as an unsupported image; one that declares
+                // it admits the request and refuses it when resolution
+                // fails.
+                let undeclared = admitted.unwrap_err();
+                assert_eq!(undeclared.code, errors::INVALID_PARAMS, "{name}");
+                assert_eq!(undeclared.field(), Some("items[0].images[0]"), "{name}");
+                let declaring = describe
+                    .clone()
+                    .with_image_reference(ImageReferenceSupport::new());
+                let request = self::admitted(&declaring, &file.catalog, &case.request)
+                    .unwrap_or_else(|e| panic!("{name}: {e}"));
+                let failure = if name == errors::IMAGE_UNAVAILABLE {
+                    ResolveFailure::Unavailable
+                } else {
+                    ResolveFailure::SourceUnavailable {
+                        retry_after_ms: 2000,
+                    }
+                };
+                resolve_item_images(&request, 0, |_| Err(failure)).unwrap_err()
+            }
             other => {
                 // Decided by state the request does not show, so the
                 // request itself is admitted.

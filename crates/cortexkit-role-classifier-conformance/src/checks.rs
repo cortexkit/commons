@@ -10,6 +10,7 @@ use cortexkit_role_classifier::{
     describe::{check_describe, ModelEntry, RoleDescribe},
     errors::{self, ErrorClass, Refusal},
     ops,
+    question::{Image, IMAGE_MAX_BYTES},
     reply::ClassifyReply,
     IndexMap, PROVIDES,
 };
@@ -42,6 +43,15 @@ const OVERSIZE_CAP: u64 = 64 * 1024 * 1024;
 const ITEM_SPEND_USD: f64 = 2.0;
 const CEILING_USD: f64 = 1.0;
 const LOOSE_CEILING_USD: f64 = 1000.0;
+
+/// The bytes of [`PIXEL`].
+fn pixel_bytes() -> Vec<u8> {
+    Image::DataUrl(PIXEL.into())
+        .decode()
+        .and_then(Result::ok)
+        .map(|decoded| decoded.bytes)
+        .expect("the one-pixel PNG decodes")
+}
 
 /// The question every check asks unless it needs another.
 fn noul_question() -> Value {
@@ -194,6 +204,11 @@ where
                     .await
             }
             "unreported_usage_stays_absent" => self.unreported_usage().await,
+            "image_reference_follows_declaration" => self.reference_follows_declaration().await,
+            "image_reference_resolved_and_answered" => self.reference_resolved().await,
+            "image_reference_oversized_refused_like_inline" => self.reference_oversized().await,
+            "image_source_down_refused_transient" => self.reference_source_down().await,
+            "image_reference_identity_is_its_handle" => self.reference_identity().await,
             other => Err(format!("the suite has no check named {other}")),
         }
     }
@@ -1574,6 +1589,201 @@ where
         }
         self.expect_calls(&format!("{what}, item 1"), &kx, crossing_calls)
             .await?;
+        Ok(Ending::Passed)
+    }
+
+    // ---- image references -----------------------------------------------
+
+    /// The first served model that takes images.
+    fn image_model(&self) -> Option<&ModelEntry> {
+        let served: BTreeSet<String> = self
+            .subject
+            .served_models()
+            .into_iter()
+            .map(|served| served.model)
+            .collect();
+        self.describe
+            .models
+            .iter()
+            .find(|entry| served.contains(&entry.model) && entry.images.is_some())
+    }
+
+    /// A model that takes images, on a module that declares
+    /// `image_reference`, and a handle the subject's hook issued for
+    /// `bytes`; or why the check is not applicable.
+    async fn issue(&self, bytes: Vec<u8>) -> Result<(&ModelEntry, String), String> {
+        let model = self.image_model().ok_or("no served model takes images")?;
+        if !self.describe.declares_image_reference() {
+            return Err("role.describe does not declare image_reference".into());
+        }
+        let handle = self
+            .subject
+            .issue_image_reference("image/png", bytes)
+            .await
+            .ok_or("the subject has no hook to issue image references")?;
+        Ok((model, handle))
+    }
+
+    /// A one-item `classify.run` body whose item carries `image`.
+    fn image_params(batch: &str, model: &ModelEntry, state: &str, image: Value) -> String {
+        params(
+            batch,
+            &model.model,
+            &noul_question(),
+            vec![json!({"state": state, "images": [image]})],
+            None,
+        )
+    }
+
+    /// After a refusal of `batch`, a valid body under the same `batch_id` is
+    /// admitted: the refusal wrote nothing.
+    async fn nothing_written(&self, what: &str, batch: &str, model: &ModelEntry) -> Check {
+        let (state, key) = self.marker("valid-after-refusal");
+        self.script_answer(&key, noul_body("0.5", None)).await;
+        let body = params(
+            batch,
+            &model.model,
+            &noul_question(),
+            items(&[&state]),
+            None,
+        );
+        Self::reply_of(
+            &format!("a valid body with the batch_id refused for {what}"),
+            self.send(&body).await?,
+        )
+        .map_err(|e| format!("{e}: the refused request was recorded"))?;
+        Ok(Ending::Passed)
+    }
+
+    async fn reference_follows_declaration(&self) -> Check {
+        let Some(model) = self.image_model() else {
+            return Ok(Ending::NotApplicable("no served model takes images".into()));
+        };
+        let (state, key) = self.marker("unissued-reference");
+        self.script_answer(&key, noul_body("0.5", None)).await;
+        let batch = self.mint("unissued-reference");
+        let handle = self.mint("never-issued");
+        let body = Self::image_params(&batch, model, &state, json!({"handle": handle}));
+        let (what, code) = if self.describe.declares_image_reference() {
+            (
+                "a reference the module never issued, on a module that declares image_reference",
+                errors::IMAGE_UNAVAILABLE,
+            )
+        } else {
+            (
+                "a reference, on a module that does not declare image_reference",
+                errors::INVALID_PARAMS,
+            )
+        };
+        let refusal = Self::refusal_of(what, self.send(&body).await?)?;
+        Self::expect_refusal(what, &refusal, code, Some("items[0].images[0]"))?;
+        self.expect_calls(what, &key, 0).await?;
+        self.nothing_written(what, &batch, model).await
+    }
+
+    async fn reference_resolved(&self) -> Check {
+        let (model, handle) = match self.issue(pixel_bytes()).await {
+            Ok(issued) => issued,
+            Err(reason) => return Ok(Ending::NotApplicable(reason)),
+        };
+        let (state, key) = self.marker("resolved-reference");
+        self.script_answer(&key, noul_body("0.7", None)).await;
+        let batch = self.mint("resolved-reference");
+        let body = Self::image_params(&batch, model, &state, json!({"handle": handle}));
+        let what = "a reference the hook issued";
+        let (_, reply) = Self::reply_of(what, self.send(&body).await?)?;
+        Self::answers(what, &reply, 0)?;
+        self.expect_calls(what, &key, 1).await?;
+        Ok(Ending::Passed)
+    }
+
+    async fn reference_oversized(&self) -> Check {
+        let mut bytes = pixel_bytes();
+        bytes.resize(IMAGE_MAX_BYTES + 1, 0);
+        let (model, handle) = match self.issue(bytes).await {
+            Ok(issued) => issued,
+            Err(reason) => return Ok(Ending::NotApplicable(reason)),
+        };
+        let (state, key) = self.marker("oversized-reference");
+        self.script_answer(&key, noul_body("0.5", None)).await;
+        let batch = self.mint("oversized-reference");
+        let body = Self::image_params(&batch, model, &state, json!({"handle": handle}));
+        let what = "a reference resolving to one byte over the per-image limit";
+        let refusal = Self::refusal_of(what, self.send(&body).await?)?;
+        Self::expect_refusal(
+            what,
+            &refusal,
+            errors::INVALID_PARAMS,
+            Some("items[0].images[0]"),
+        )?;
+        self.expect_calls(what, &key, 0).await?;
+        self.nothing_written(what, &batch, model).await
+    }
+
+    async fn reference_source_down(&self) -> Check {
+        let (model, handle) = match self.issue(pixel_bytes()).await {
+            Ok(issued) => issued,
+            Err(reason) => return Ok(Ending::NotApplicable(reason)),
+        };
+        let (state, key) = self.marker("source-down");
+        self.script_answer(&key, noul_body("0.6", None)).await;
+        let batch = self.mint("source-down");
+        let body = Self::image_params(&batch, model, &state, json!({"handle": handle}));
+        let what = "a reference while the image source is down";
+        self.subject.set_image_source_down(true).await;
+        let refused = self.send(&body).await;
+        // The source comes back before any early return, so a failure here
+        // cannot leave it down for the checks after this one.
+        self.subject.set_image_source_down(false).await;
+        let refusal = Self::refusal_of(what, refused?)?;
+        Self::expect_refusal(
+            what,
+            &refusal,
+            errors::IMAGE_SOURCE_UNAVAILABLE,
+            Some("items[0].images[0]"),
+        )?;
+        if refusal.detail.retry_after_ms.is_none() {
+            return Err(format!(
+                "{what}: image_source_unavailable carries no detail.retry_after_ms"
+            ));
+        }
+        self.expect_calls(what, &key, 0).await?;
+        let again = "the same body once the image source is back";
+        let (_, reply) = Self::reply_of(again, self.send(&body).await?)
+            .map_err(|e| format!("{e}: the refused request was recorded"))?;
+        Self::answers(again, &reply, 0)?;
+        self.expect_calls(again, &key, 1).await?;
+        Ok(Ending::Passed)
+    }
+
+    async fn reference_identity(&self) -> Check {
+        let (model, handle) = match self.issue(pixel_bytes()).await {
+            Ok(issued) => issued,
+            Err(reason) => return Ok(Ending::NotApplicable(reason)),
+        };
+        let (state, key) = self.marker("reference-identity");
+        self.script_answer(&key, noul_body("0.8", None)).await;
+        let batch = self.mint("reference-identity");
+        let body = Self::image_params(&batch, model, &state, json!({"handle": handle}));
+        let (_, first) = Self::reply_of("the first call", self.send(&body).await?)?;
+        let answers = Self::answers("the first call", &first, 0)?;
+        let what = "a re-send with the same handle";
+        let (_, again) = Self::reply_of(what, self.send(&body).await?)?;
+        if Self::answers(what, &again, 0)? != answers {
+            return Err(format!("{what}: the answers differ from the first call's"));
+        }
+        self.expect_calls(what, &key, 1).await?;
+        let pixel = PIXEL.split_once(',').map_or("", |(_, data)| data);
+        let inline = Self::image_params(
+            &batch,
+            model,
+            &state,
+            json!({"content_type": "image/png", "base64": pixel}),
+        );
+        let what = "a re-send carrying the same picture inline instead of the handle";
+        let refusal = Self::refusal_of(what, self.send(&inline).await?)?;
+        Self::expect_refusal(what, &refusal, errors::BATCH_ID_REUSE, Some("items[0]"))?;
+        self.expect_calls(what, &key, 1).await?;
         Ok(Ending::Passed)
     }
 

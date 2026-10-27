@@ -244,10 +244,13 @@ pub(crate) use cortexkit_model_batch::admission::bounded;
 // model-batch rules (`cortexkit-model-batch`, its `RULES.md` §13),
 // re-exported here at their `classifier/v1` paths. `check_image` decodes
 // the base64, so malformed base64 and a `data:` URL without `;base64` are
-// refused before any provider call.
+// refused before any provider call. An image may also be a reference to an
+// image another module holds (`ImageReference`, RULES §13.1); a host that
+// declares `image_reference` resolves it with `resolve_images`.
 pub use cortexkit_model_batch::image::{
-    check_image, content_types, Image, InlineImage, IMAGES_MAX_TOTAL_BYTES, IMAGE_MAX_BYTES,
-    IMAGE_MAX_PIXELS,
+    check_decoded_with, check_image, content_types, is_image_handle, CanonicalImage, DecodedImage,
+    Image, ImageReference, InlineImage, ResolveFailure, IMAGES_MAX_TOTAL_BYTES,
+    IMAGE_HANDLE_MAX_LEN, IMAGE_MAX_BYTES, IMAGE_MAX_PIXELS, REFERENCE_UNSUPPORTED,
 };
 
 #[cfg(test)]

@@ -82,6 +82,10 @@ pub struct ProviderRequest {
     /// silently truncates a long state.
     pub state: Value,
     pub questions: IndexMap<String, Question>,
+    /// The item's images as the provider reads them: never a reference. A
+    /// module that resolved an item's references sends their bytes
+    /// (`InlineImage::from_decoded`), since the provider cannot resolve a
+    /// handle.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub images: Option<Vec<Image>>,
 }

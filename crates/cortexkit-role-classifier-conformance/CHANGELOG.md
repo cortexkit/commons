@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0
+
+- Depends on `cortexkit-role-classifier` 0.5.0, re-exported as `wire`, whose
+  item image may be a reference `{handle}` (breaking: `Image` gains a
+  variant and is non-exhaustive).
+- New optional subject hook for image references:
+  `ClassifierSubject::issue_image_reference` (hand bytes to the image
+  source the module resolves through, get the handle back) and
+  `set_image_source_down`. Both have defaults, so a subject without the
+  hook keeps compiling.
+- Five new checks: `image_reference_follows_declaration` (an unissued
+  handle is `image_unavailable` on a module that declares
+  `image_reference`, `invalid_params` on one that does not),
+  `image_reference_resolved_and_answered`,
+  `image_reference_oversized_refused_like_inline` (the inline refusal at
+  `items[0].images[0]`), `image_source_down_refused_transient` (with
+  `retry_after_ms`), and `image_reference_identity_is_its_handle` (the same
+  handle is a replay; the same picture inline is `batch_id_reuse` naming
+  `items[0]`). The last four are not applicable without the hook or the
+  declaration.
+- The image narrowing now says byte limits are checked through a resolved
+  reference, and a new narrowing says the stand-in does not show the bytes
+  a resolved reference reached the provider with.
+
 ## 0.5.0
 
 - Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.

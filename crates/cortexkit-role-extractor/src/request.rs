@@ -18,7 +18,7 @@ use cortexkit_model_batch::{
         bounded, check_batch_id, check_catalog_row as check_row, check_max_cost_usd,
         check_request_size,
     },
-    image::check_images,
+    image::{check_images, check_resolved_images, check_unresolved_images, resolve_images},
 };
 
 pub use cortexkit_model_batch::admission::{
@@ -29,7 +29,7 @@ use crate::{
     describe::{Limits, ModelEntry, RoleDescribe},
     errors::Refusal,
     field::{check_field, Field},
-    image::Image,
+    image::{DecodedImage, Image, ImageReference, ResolveFailure},
 };
 
 /// The catalog `kind` of an extraction model.
@@ -324,7 +324,7 @@ pub fn parse_request(text: &str) -> Result<ExtractRequest, Refusal> {
                     if serde_json::from_value::<Image>(image.clone()).is_err() {
                         return Err(malformed(
                             format!("items[{i}].images[{j}]"),
-                            "an image is a data: URL or {content_type, base64}",
+                            "an image is a data: URL, {content_type, base64} or {handle}",
                         ));
                     }
                 }
@@ -372,10 +372,38 @@ pub fn check_catalog_row(model: &str, row: CatalogRow<'_>) -> Result<(), Refusal
 /// the batch id; the field count and each field ([`check_field`]); the item
 /// count; each item's state, images (shared image rules) and
 /// `reference_date`; and `max_cost_usd`.
+///
+/// This is the check of a module that does not declare `image_reference`
+/// (`CONTRACT.md` §3): an image reference is refused `invalid_params`
+/// naming `items[i].images[j]`, as an unsupported image. A module that
+/// declares it uses [`check_request_with_references`].
 pub fn check_request(
     request: &ExtractRequest,
     model: &ModelEntry,
     limits: &Limits,
+) -> Result<(), Refusal> {
+    check(request, model, limits, false)
+}
+
+/// [`check_request`] for a module that declares `image_reference`: every
+/// check is the same, except that a reference's bytes are not here to
+/// check. Its handle is checked now; after the module resolved the item's
+/// references ([`resolve_item_images`]), [`check_resolved_item_images`]
+/// runs the inline checks on the bytes. Both run before anything is written
+/// or sent.
+pub fn check_request_with_references(
+    request: &ExtractRequest,
+    model: &ModelEntry,
+    limits: &Limits,
+) -> Result<(), Refusal> {
+    check(request, model, limits, true)
+}
+
+fn check(
+    request: &ExtractRequest,
+    model: &ModelEntry,
+    limits: &Limits,
+    references: bool,
 ) -> Result<(), Refusal> {
     check_batch_id(&request.batch_id)?;
     bounded(
@@ -415,7 +443,11 @@ pub fn check_request(
                     "images, when present, holds at least one image",
                 ));
             }
-            check_images(&model.model, &field, images, model.images.as_ref())?;
+            if references {
+                check_unresolved_images(&model.model, &field, images, model.images.as_ref())?;
+            } else {
+                check_images(&model.model, &field, images, model.images.as_ref())?;
+            }
         }
         if let Some(date) = &item.reference_date {
             if !is_calendar_date(date) {
@@ -427,6 +459,41 @@ pub fn check_request(
         }
     }
     check_max_cost_usd(request.max_cost_usd.as_ref())
+}
+
+/// Item `i`'s images as bytes, in order, for a module that declares
+/// `image_reference`: each inline image decoded, each reference resolved by
+/// `resolve`, which the module backs with the module that issued the
+/// handle. A failure refuses the call naming `items[i].images[j]`:
+/// `image_unavailable` or `image_source_unavailable`
+/// ([`ResolveFailure::refusal`]). Empty when the item has no images, or
+/// there is no item `i`.
+pub fn resolve_item_images(
+    request: &ExtractRequest,
+    i: usize,
+    resolve: impl FnMut(&ImageReference) -> Result<DecodedImage, ResolveFailure>,
+) -> Result<Vec<DecodedImage>, Refusal> {
+    match request.items.get(i).and_then(|item| item.images.as_deref()) {
+        Some(images) => resolve_images(&format!("items[{i}].images"), images, resolve),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// The checks an inline image gets, run on item `i`'s images after the
+/// module resolved them ([`resolve_item_images`]): count, content type, size
+/// each and in total, against the model's `images` limits. A refusal names
+/// `items[i].images` or `items[i].images[j]`, as for an inline image.
+pub fn check_resolved_item_images(
+    model: &ModelEntry,
+    i: usize,
+    resolved: &[DecodedImage],
+) -> Result<(), Refusal> {
+    check_resolved_images(
+        &model.model,
+        &format!("items[{i}].images"),
+        resolved,
+        model.images.as_ref(),
+    )
 }
 
 /// The length of `text` as a JSON string, quotes and escapes included.
@@ -500,6 +567,16 @@ pub fn check_reply_size(request: &ExtractRequest, model: &ModelEntry) -> Result<
 /// decoded request when every check passes. A model whose row is an
 /// extraction model but which `describe` does not list is `model_unknown`:
 /// this module does not serve it.
+///
+/// When `describe` declares `image_reference`, the request checks are
+/// [`check_request_with_references`], and admission is not complete until
+/// the module has resolved every item's references
+/// ([`resolve_item_images`]), checked their bytes
+/// ([`check_resolved_item_images`]) and checked each provider request with
+/// the resolved images in it
+/// ([`check_provider_body`](crate::provider::check_provider_body)): here a
+/// reference counts only as its handle. Otherwise a reference is refused as
+/// an unsupported image.
 pub fn admit<'a>(
     text: &str,
     describe: &RoleDescribe,
@@ -512,7 +589,11 @@ pub fn admit<'a>(
     let model = describe
         .model(&request.model)
         .ok_or_else(|| Refusal::model_unknown(&request.model))?;
-    check_request(&request, model, &describe.limits)?;
+    if describe.declares_image_reference() {
+        check_request_with_references(&request, model, &describe.limits)?;
+    } else {
+        check_request(&request, model, &describe.limits)?;
+    }
     crate::provider::check_provider_bodies(&request, max_provider_body_bytes)?;
     check_reply_size(&request, model)?;
     Ok(request)
@@ -659,6 +740,56 @@ mod tests {
             field(check_request(&malformed, &model(), &limits())),
             "items[0].images[1]"
         );
+    }
+
+    #[test]
+    fn references_are_refused_unless_declared_and_resolved_bytes_get_the_inline_checks() {
+        use crate::{
+            describe::ImageReferenceSupport,
+            errors::IMAGE_SOURCE_UNAVAILABLE,
+            image::{DecodedImage, ImageReference, ResolveFailure, IMAGE_MAX_BYTES},
+            provider::{check_provider_body, models, ProviderRequest},
+        };
+        let text = r#"{"batch_id":"b","model":"cloudflare-workers-ai/@cf/cloudflare/clairic","fields":{"total":{"type":"number"}},"items":[{"state":"","images":[{"handle":"shot:1"}]}]}"#;
+        let plain = RoleDescribe::new(limits(), vec![model()]);
+        let row = |_: &str| CatalogRow::Kind("extraction");
+        let refusal = admit(text, &plain, row, u64::MAX).unwrap_err();
+        assert_eq!(refusal.code, INVALID_PARAMS);
+        assert_eq!(refusal.field(), Some("items[0].images[0]"));
+        let declaring = plain.with_image_reference(ImageReferenceSupport::new());
+        let request = admit(text, &declaring, row, u64::MAX).unwrap();
+        let mut bad = request.clone();
+        bad.items[0].images = Some(vec![Image::Reference(ImageReference::new("a b"))]);
+        assert_eq!(
+            field(check_request_with_references(&bad, &model(), &limits())),
+            "items[0].images[0]"
+        );
+        let resolved = resolve_item_images(&request, 0, |_| {
+            Ok(DecodedImage::new("image/png", vec![0; IMAGE_MAX_BYTES + 1]))
+        })
+        .unwrap();
+        let refusal = check_resolved_item_images(&model(), 0, &resolved).unwrap_err();
+        assert_eq!(refusal.code, INVALID_PARAMS);
+        assert_eq!(refusal.field(), Some("items[0].images[0]"));
+        let down = resolve_item_images(&request, 0, |_| {
+            Err(ResolveFailure::SourceUnavailable {
+                retry_after_ms: 300,
+            })
+        })
+        .unwrap_err();
+        assert_eq!(down.code, IMAGE_SOURCE_UNAVAILABLE);
+        assert_eq!(down.field(), Some("items[0].images[0]"));
+        // The provider body is checked again with the bytes in it, which a
+        // reference's handle alone did not count.
+        let body = ProviderRequest::for_item(&request, 0, models::CLAIRIC).unwrap();
+        assert!(check_provider_body(0, &body, 1024).is_ok());
+        let small = [DecodedImage::new("image/png", vec![0; 2048])];
+        let resolved_body = body.with_resolved_images(&small);
+        assert!(!serde_json::to_string(&resolved_body)
+            .unwrap()
+            .contains("handle"));
+        let refusal = check_provider_body(0, &resolved_body, 1024).unwrap_err();
+        assert_eq!(refusal.field(), Some("items[0]"));
     }
 
     #[test]

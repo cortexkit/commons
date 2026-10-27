@@ -287,3 +287,48 @@ fn tool_identity_excludes_direct_agent_mode() {
         ["llm.classify/v1", "llm.extract/v1", "llm.complete/v1"]
     );
 }
+
+#[test]
+fn an_image_reference_is_offered_and_accepted_only_where_references_resolve() {
+    let with = |image: Value| -> Value {
+        json!({"model":"example/classifier","questions":{"q":{"type":"noul","instructions":"Invented?"}},
+            "item":{"state":"invented","images":[image]},"max_cost_usd":0.01})
+    };
+    let reference = with(json!({"handle":"shot:0001.png"}));
+    let plain = jsonschema::validator_for(&classify::input_schema()).unwrap();
+    let resolving =
+        jsonschema::validator_for(&classify::input_schema_with_image_references()).unwrap();
+    assert!(!plain.is_valid(&reference));
+    assert!(resolving.is_valid(&reference));
+    let request: classify::Request = serde_json::from_value(reference).unwrap();
+    match classify::validate_request(&request) {
+        Err(ValidationError::Role(refusal)) => {
+            assert_eq!(refusal.field(), Some("item.images[0]"))
+        }
+        other => panic!("{other:?}"),
+    }
+    classify::validate_request_with_image_references(&request).unwrap();
+    for bad in [
+        json!({"handle":"a b"}),
+        json!({"handle":"shot:1","content_type":"image/png","base64":"AAAA"}),
+    ] {
+        assert!(!resolving.is_valid(&with(bad.clone())), "{bad}");
+    }
+    let malformed: classify::Request =
+        serde_json::from_value(with(json!({"handle":"a b"}))).unwrap();
+    assert!(classify::validate_request_with_image_references(&malformed).is_err());
+
+    let extract_request = json!({"model":"example/extractor","fields":{"x":{"type":"text"}},
+        "item":{"state":"","images":[{"handle":"shot:0001.png"}]},"max_cost_usd":0.01});
+    assert!(!jsonschema::validator_for(&extract::input_schema())
+        .unwrap()
+        .is_valid(&extract_request));
+    assert!(
+        jsonschema::validator_for(&extract::input_schema_with_image_references())
+            .unwrap()
+            .is_valid(&extract_request)
+    );
+    let request: extract::Request = serde_json::from_value(extract_request).unwrap();
+    assert!(extract::validate_request(&request).is_err());
+    extract::validate_request_with_image_references(&request).unwrap();
+}

@@ -15,7 +15,9 @@ use cortexkit_model_batch::{
     admission::{
         check_batch_id, check_catalog_row as check_row, check_max_cost_usd, check_request_size,
     },
-    image::{check_images, ImageLimits},
+    image::{
+        check_images, check_resolved_images, check_unresolved_images, resolve_images, ImageLimits,
+    },
 };
 
 pub use cortexkit_model_batch::admission::{
@@ -25,7 +27,9 @@ pub use cortexkit_model_batch::admission::{
 use crate::{
     describe::{Limits, ModelEntry},
     errors::Refusal,
-    question::{bounded, check_question, Image, Question},
+    question::{
+        bounded, check_question, DecodedImage, Image, ImageReference, Question, ResolveFailure,
+    },
 };
 
 /// The catalog `kind` of a classifier model.
@@ -190,7 +194,7 @@ pub fn parse_request(text: &str) -> Result<ClassifyRequest, Refusal> {
                     if serde_json::from_value::<Image>(image.clone()).is_err() {
                         return Err(malformed(
                             format!("items[{i}].images[{j}]"),
-                            "an image is a data: URL or {content_type, base64}",
+                            "an image is a data: URL, {content_type, base64} or {handle}",
                         ));
                     }
                 }
@@ -233,7 +237,35 @@ pub fn check_catalog_row(model: &str, row: CatalogRow<'_>) -> Result<(), Refusal
 /// Check every limit of `request` against the model's `role.describe` entry:
 /// the batch id, question count and each question, item count, each item's
 /// state and images, and `max_cost_usd`. Returns the first refusal.
+///
+/// This is the check of a host that does not declare `image_reference`
+/// (`CONTRACT.md` §3): an image reference is refused `invalid_params`
+/// naming `items[i].images[j]`, as an unsupported image. A host that
+/// declares it uses [`check_request_with_references`].
 pub fn check_request(request: &ClassifyRequest, model: &ModelEntry) -> Result<(), Refusal> {
+    check(request, model, false)
+}
+
+/// [`check_request`] for a host that declares `image_reference`: every
+/// check is the same, except that a reference's bytes are not here to
+/// check. Its handle is checked now; after the host resolved the item's
+/// references ([`resolve_item_images`]), [`check_resolved_item_images`]
+/// runs the inline checks on the bytes. Both run before anything is written
+/// or sent.
+pub fn check_request_with_references(
+    request: &ClassifyRequest,
+    model: &ModelEntry,
+) -> Result<(), Refusal> {
+    check(request, model, true)
+}
+
+fn image_limits(model: &ModelEntry) -> Option<ImageLimits> {
+    model
+        .images
+        .map(|support| ImageLimits::workers_ai(support.max))
+}
+
+fn check(request: &ClassifyRequest, model: &ModelEntry, references: bool) -> Result<(), Refusal> {
     check_batch_id(&request.batch_id)?;
     bounded(
         request.questions.len(),
@@ -260,19 +292,52 @@ pub fn check_request(request: &ClassifyRequest, model: &ModelEntry) -> Result<()
             ));
         }
         if let Some(images) = &item.images {
-            let limits = model
-                .images
-                .map(|support| ImageLimits::workers_ai(support.max));
-            check_images(
-                &model.model,
-                &format!("items[{i}].images"),
-                images,
-                limits.as_ref(),
-            )?;
+            let limits = image_limits(model);
+            let field = format!("items[{i}].images");
+            if references {
+                check_unresolved_images(&model.model, &field, images, limits.as_ref())?;
+            } else {
+                check_images(&model.model, &field, images, limits.as_ref())?;
+            }
         }
     }
     check_max_cost_usd(request.max_cost_usd.as_ref())?;
     Ok(())
+}
+
+/// Item `i`'s images as bytes, in order, for a host that declares
+/// `image_reference`: each inline image decoded, each reference resolved by
+/// `resolve`, which the host backs with the module that issued the handle.
+/// A failure refuses the call naming `items[i].images[j]`:
+/// `image_unavailable` or `image_source_unavailable`
+/// ([`ResolveFailure::refusal`]). Empty when the item has no images, or
+/// there is no item `i`.
+pub fn resolve_item_images(
+    request: &ClassifyRequest,
+    i: usize,
+    resolve: impl FnMut(&ImageReference) -> Result<DecodedImage, ResolveFailure>,
+) -> Result<Vec<DecodedImage>, Refusal> {
+    match request.items.get(i).and_then(|item| item.images.as_deref()) {
+        Some(images) => resolve_images(&format!("items[{i}].images"), images, resolve),
+        None => Ok(Vec::new()),
+    }
+}
+
+/// The checks an inline image gets, run on item `i`'s images after the
+/// host resolved them ([`resolve_item_images`]): count, content type, size
+/// each and in total, against the model's limits. A refusal names
+/// `items[i].images` or `items[i].images[j]`, as for an inline image.
+pub fn check_resolved_item_images(
+    model: &ModelEntry,
+    i: usize,
+    resolved: &[DecodedImage],
+) -> Result<(), Refusal> {
+    check_resolved_images(
+        &model.model,
+        &format!("items[{i}].images"),
+        resolved,
+        image_limits(model).as_ref(),
+    )
 }
 
 #[cfg(test)]
@@ -282,7 +347,7 @@ mod tests {
     use super::*;
     use crate::{
         describe::ImageSupport,
-        errors::{INVALID_PARAMS, MODEL_NOT_CLASSIFIER, MODEL_UNKNOWN},
+        errors::{IMAGE_UNAVAILABLE, INVALID_PARAMS, MODEL_NOT_CLASSIFIER, MODEL_UNKNOWN},
         question::InlineImage,
     };
 
@@ -376,6 +441,66 @@ mod tests {
         assert_eq!(
             field(check_request(&request(vec![item]), &model())),
             "items[0].images[0]"
+        );
+    }
+
+    #[test]
+    fn a_reference_is_refused_unless_the_host_declares_references() {
+        let reference = Image::Reference(ImageReference::new("shot:1"));
+        let item = Item::new("s").with_images(vec![reference.clone()]);
+        let refusal =
+            check_request(&request(vec![Item::new("t"), item.clone()]), &model()).unwrap_err();
+        assert_eq!(refusal.code, INVALID_PARAMS);
+        assert_eq!(refusal.field(), Some("items[1].images[0]"));
+        let declared = request(vec![Item::new("t"), item]);
+        assert_eq!(check_request_with_references(&declared, &model()), Ok(()));
+        // The model's image support still applies to a reference.
+        let text_only = ModelEntry::new("typesafe/jev-1.13.0", 2, 3, 8192, "api.typesafe.ai");
+        let refusal = check_request_with_references(&declared, &text_only).unwrap_err();
+        assert_eq!(refusal.field(), Some("items[1].images"));
+        let bad =
+            request(vec![Item::new("s").with_images(vec![Image::Reference(
+                ImageReference::new("a/b"),
+            )])]);
+        assert_eq!(
+            field(check_request_with_references(&bad, &model())),
+            "items[0].images[0]"
+        );
+        let parsed = parse_request(
+            r#"{"batch_id":"b","model":"m","questions":{"q":{"type":"noul","instructions":"i"}},"items":[{"state":"s","images":[{"handle":"shot:1"}]}]}"#,
+        )
+        .unwrap();
+        assert_eq!(parsed.items[0].images.as_deref(), Some(&[reference][..]));
+        let mixed = parse_request(
+            r#"{"batch_id":"b","model":"m","questions":{"q":{"type":"noul","instructions":"i"}},"items":[{"state":"s","images":[{"handle":"shot:1","content_type":"image/png","base64":"AAAA"}]}]}"#,
+        )
+        .unwrap_err();
+        assert_eq!(mixed.field(), Some("items[0].images[0]"));
+    }
+
+    #[test]
+    fn resolved_bytes_get_the_inline_checks_and_failures_name_the_image() {
+        let images = vec![
+            Image::Inline(InlineImage::new("image/png", "AAAA")),
+            Image::Reference(ImageReference::new("shot:1")),
+        ];
+        let declared = request(vec![Item::new("s").with_images(images)]);
+        let too_big = crate::question::IMAGE_MAX_BYTES + 1;
+        let resolved = resolve_item_images(&declared, 0, |_| {
+            Ok(DecodedImage::new("image/png", vec![0; too_big]))
+        })
+        .unwrap();
+        assert_eq!(resolved.len(), 2);
+        let refusal = check_resolved_item_images(&model(), 0, &resolved).unwrap_err();
+        assert_eq!(refusal.code, INVALID_PARAMS);
+        assert_eq!(refusal.field(), Some("items[0].images[1]"));
+        let refusal =
+            resolve_item_images(&declared, 0, |_| Err(ResolveFailure::Unavailable)).unwrap_err();
+        assert_eq!(refusal.code, IMAGE_UNAVAILABLE);
+        assert_eq!(refusal.field(), Some("items[0].images[1]"));
+        assert_eq!(
+            resolve_item_images(&declared, 3, |_| panic!("no item 3")),
+            Ok(Vec::new())
         );
     }
 

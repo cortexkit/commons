@@ -13,8 +13,9 @@
 //!   code table;
 //! - [`identity`]: batch identity, hashed as canonical JSON with images in
 //!   canonical form;
-//! - [`image`]: the item image shape, its decoding validation and its
-//!   canonical form;
+//! - [`image`]: the item image shape (inline bytes or a reference to an
+//!   image another module holds), its decoding validation, the checks a
+//!   host runs on a resolved reference, and its canonical form;
 //! - [`admission`]: the `batch_id` grammar, bounds, request size, the
 //!   catalog row, and the spend ceiling;
 //! - [`estimate`]: the conservative cost estimate and nanodollar arithmetic;

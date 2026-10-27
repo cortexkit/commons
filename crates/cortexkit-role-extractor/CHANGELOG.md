@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.2.0
+
+Breaking, with `cortexkit-model-batch` 0.3.0: an item image may be a
+reference `{handle}` to an image another module holds (RULES §13.1,
+CONTRACT §3).
+
+- `image::Image` gains `Reference(ImageReference)` and is now
+  `#[non_exhaustive]`; `InlineImage` refuses unknown members, so an object
+  mixing both forms is refused naming `items[i].images[j]`. `Image::decode`
+  and `Image::approx_bytes` return `None` for a reference, and
+  `Image::canonical` returns `CanonicalImage`. `image` re-exports the
+  reference types and checks (`ImageReference`, `CanonicalImage`,
+  `ResolveFailure`, `resolve_images`, `check_unresolved_images`,
+  `check_resolved_images`, `check_decoded_with`, `is_image_handle`,
+  `IMAGE_HANDLE_MAX_LEN`, `REFERENCE_UNSUPPORTED`).
+- `role.describe` gains the optional group `image_reference: {}`
+  (`RoleDescribe::image_reference`, `with_image_reference`,
+  `declares_image_reference`, `describe::ImageReferenceSupport`). A module
+  that resolves references states it; a caller sends a reference only to a
+  module that does.
+- `check_request` refuses a reference as an unsupported image
+  (`invalid_params` naming `items[i].images[j]`). A declaring module uses
+  `check_request_with_references`, then `resolve_item_images` and
+  `check_resolved_item_images`, so resolved bytes get exactly the inline
+  checks. `admit` picks between the two by the describe's group.
+- `provider::check_provider_body` checks one provider request's size, and
+  `ProviderRequest::with_resolved_images` puts resolved bytes in place of
+  the item's images, so a declaring module checks the body it actually
+  sends. `check_provider_bodies` is unchanged and uses it.
+- New admission codes in `ADMISSION_CODES`: `image_unavailable`
+  (permanent) and `image_source_unavailable` (transient, with
+  `detail.retry_after_ms`), both naming `items[i].images[j]`.
+- Body identity hashes a reference as `{handle}`, never its resolved bytes.
+- `parse_request` names `{handle}` among the image forms in its refusal.
+- Vectors: `admission-refusals.json` adds one refusal for each new code;
+  `SHA256SUMS` is refreshed.
+
 ## 0.1.2
 
 - Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.

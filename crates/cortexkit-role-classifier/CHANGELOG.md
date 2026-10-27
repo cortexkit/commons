@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.5.0
+
+Breaking, with `cortexkit-model-batch` 0.3.0: an item image may be a
+reference `{handle}` to an image another module holds (RULES §13.1,
+CONTRACT §3).
+
+- `question::Image` gains `Reference(ImageReference)` and is now
+  `#[non_exhaustive]`; `InlineImage` refuses unknown members, so an object
+  mixing both forms is refused naming `items[i].images[j]`. `Image::decode`
+  and `Image::approx_bytes` return `None` for a reference, and
+  `Image::canonical` returns `CanonicalImage`. `question` re-exports
+  `ImageReference`, `CanonicalImage`, `DecodedImage`, `ResolveFailure`,
+  `check_decoded_with`, `is_image_handle`, `IMAGE_HANDLE_MAX_LEN` and
+  `REFERENCE_UNSUPPORTED`.
+- `role.describe` gains the optional group `image_reference: {}`
+  (`RoleDescribe::image_reference`, `with_image_reference`,
+  `declares_image_reference`, `describe::ImageReferenceSupport`). A module
+  that resolves references states it; a caller sends a reference only to a
+  module that does.
+- `check_request` refuses a reference as an unsupported image
+  (`invalid_params` naming `items[i].images[j]`): the answer of a module
+  that does not declare `image_reference`. A declaring module uses
+  `check_request_with_references`, then `resolve_item_images` and
+  `check_resolved_item_images`, so resolved bytes get exactly the inline
+  checks, with the same refusals and paths.
+- New admission codes in `ADMISSION_CODES`: `image_unavailable`
+  (permanent) and `image_source_unavailable` (transient, with
+  `detail.retry_after_ms`), both naming `items[i].images[j]`.
+- Body identity hashes a reference as `{handle}`, never its resolved bytes,
+  so a reference and an inline copy of the same picture are different
+  batches.
+- `parse_request` names `{handle}` among the image forms in its refusal.
+- Vectors: `admission-refusals.json` adds one refusal for each new code;
+  `SHA256SUMS` is refreshed.
+
 ## 0.4.3
 
 - Moves to subc-protocol 0.33; take subc-protocol 0.33, subc-transport 0.14, subc-control 0.33 and subc-client-rs 0.31 together.

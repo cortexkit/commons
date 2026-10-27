@@ -14,9 +14,12 @@ use cortexkit_role_classifier::{
     provider::{
         self, item_code_for_status, workers_ai_item_code, ProviderRequest, ProviderResponse,
     },
-    question::{check_question, QuestionType},
+    question::{check_question, QuestionType, ResolveFailure},
     reply::{check_reply, sum_usage, Answer, ClassifyReply, Usage},
-    request::{check_request, CatalogRow, ClassifyRequest},
+    request::{
+        check_request, check_request_with_references, resolve_item_images, CatalogRow,
+        ClassifyRequest,
+    },
     vectors, IndexMap,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -395,6 +398,25 @@ fn one_admission_refusal_per_code_as_the_crate_builds_it() {
             errors::MODEL_UNAVAILABLE => {
                 assert!(describe.model(&vector.request.model).is_some());
                 Refusal::model_unavailable(&vector.request.model)
+            }
+            errors::IMAGE_UNAVAILABLE | errors::IMAGE_SOURCE_UNAVAILABLE => {
+                // The request is admitted by a module that declares
+                // image_reference, refused as an unsupported image by one
+                // that does not, and refused by resolution on a declaring
+                // module whose resolver fails.
+                let model = describe.model(&vector.request.model).unwrap();
+                check_request_with_references(&vector.request, model).unwrap();
+                let undeclared = check_request(&vector.request, model).unwrap_err();
+                assert_eq!(undeclared.code, errors::INVALID_PARAMS);
+                assert_eq!(undeclared.field(), Some("items[0].images[0]"));
+                let failure = if vector.name == errors::IMAGE_UNAVAILABLE {
+                    ResolveFailure::Unavailable
+                } else {
+                    ResolveFailure::SourceUnavailable {
+                        retry_after_ms: 2000,
+                    }
+                };
+                resolve_item_images(&vector.request, 0, |_| Err(failure)).unwrap_err()
             }
             other => panic!("unexpected refusal {other}"),
         };

@@ -23,13 +23,19 @@ fn failing(report: &SuiteReport) -> Vec<&'static str> {
 /// Run the fake with `defects`, and check that exactly `red` fails, for a
 /// reason containing `because`.
 async fn breaks(defects: Defects, red: &str, because: &str) {
+    breaks_all(defects, &[red], because).await;
+}
+
+/// Run the fake with `defects`, and check that exactly the checks in `red`
+/// fail, the first for a reason containing `because`.
+async fn breaks_all(defects: Defects, red: &[&str], because: &str) {
     let report = run_suite(&FakeSubject::new(defects)).await;
-    assert_eq!(failing(&report), [red], "{}", report.render());
-    match report.outcome(red) {
+    assert_eq!(failing(&report), red, "{}", report.render());
+    match report.outcome(red[0]) {
         Some(CheckOutcome::Failed { reason }) => {
-            assert!(reason.contains(because), "{red}: {reason}")
+            assert!(reason.contains(because), "{}: {reason}", red[0])
         }
-        other => panic!("{red} should fail, got {other:?}"),
+        other => panic!("{} should fail, got {other:?}", red[0]),
     }
     assert!(matches!(report.verdict, SuiteVerdict::Failed { .. }));
 }
@@ -48,6 +54,57 @@ async fn a_faithful_module_passes_every_check() {
         );
     }
     assert_eq!(report.verdict, SuiteVerdict::Passed);
+}
+
+/// The checks that need the subject's hook to issue a resolvable handle.
+const IMAGE_HOOK_CHECKS: [&str; 4] = [
+    "image_reference_resolved_and_answered",
+    "image_reference_oversized_refused_like_inline",
+    "image_source_down_refused_transient",
+    "image_reference_identity_is_its_handle",
+];
+
+/// `report` passed every check but the image-hook ones, which are not
+/// applicable for `reason`, and `image_reference_follows_declaration`
+/// passed.
+fn only_the_image_hook_checks_not_applicable(report: &SuiteReport, reason: &str) {
+    assert_eq!(
+        report.verdict,
+        SuiteVerdict::PassedExceptNotApplicable {
+            not_applicable: IMAGE_HOOK_CHECKS.to_vec()
+        },
+        "{}",
+        report.render()
+    );
+    assert_eq!(
+        report.outcome("image_reference_follows_declaration"),
+        Some(&CheckOutcome::Passed)
+    );
+    for name in IMAGE_HOOK_CHECKS {
+        assert!(
+            matches!(report.outcome(name), Some(CheckOutcome::NotApplicable { reason: why }) if why == reason),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_module_that_does_not_declare_references_refuses_one_as_unsupported() {
+    let report = run_suite(&FakeSubject::without_image_references()).await;
+    only_the_image_hook_checks_not_applicable(
+        &report,
+        "role.describe does not declare image_reference",
+    );
+}
+
+#[tokio::test]
+async fn a_subject_without_the_image_hook_gets_the_hook_checks_not_applicable() {
+    let report = run_suite(&FakeSubject::without_image_hook()).await;
+    only_the_image_hook_checks_not_applicable(
+        &report,
+        "the subject has no hook to issue image references",
+    );
 }
 
 macro_rules! break_test {
@@ -151,12 +208,26 @@ break_test!(
     "counts_refused_with_limit",
     "expected a refusal"
 );
-break_test!(
-    unchecked_images_fail,
-    images_unchecked,
-    "images_refused_before_any_call",
-    "expected a refusal"
-);
+/// A module that checks no images does not resolve references either, so
+/// the reference checks that expect a refusal or resolved bytes fail too.
+#[tokio::test]
+async fn unchecked_images_fail() {
+    breaks_all(
+        Defects {
+            images_unchecked: true,
+            ..Defects::default()
+        },
+        &[
+            "images_refused_before_any_call",
+            "image_reference_follows_declaration",
+            "image_reference_resolved_and_answered",
+            "image_reference_oversized_refused_like_inline",
+            "image_source_down_refused_transient",
+        ],
+        "expected a refusal",
+    )
+    .await;
+}
 break_test!(
     an_unchecked_request_size_fails,
     request_size_unchecked,
@@ -175,12 +246,23 @@ break_test!(
     "clairic_request_mapped",
     "the stand-in received"
 );
-break_test!(
-    accepted_reuse_fails,
-    reuse_accepted,
-    "reuse_refused_naming_part",
-    "expected a refusal"
-);
+/// The image identity check's inline re-send must be refused
+/// batch_id_reuse too.
+#[tokio::test]
+async fn accepted_reuse_fails() {
+    breaks_all(
+        Defects {
+            reuse_accepted: true,
+            ..Defects::default()
+        },
+        &[
+            "reuse_refused_naming_part",
+            "image_reference_identity_is_its_handle",
+        ],
+        "expected a refusal",
+    )
+    .await;
+}
 break_test!(
     images_hashed_as_written_fail,
     images_hashed_as_written,

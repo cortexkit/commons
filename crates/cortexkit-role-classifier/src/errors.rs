@@ -22,13 +22,15 @@ pub use cortexkit_model_batch::errors::{
     admission_class, classes, is_batch_level, item_class, ErrorClass, ItemError, ItemErrorDetail,
     Refusal, RefusalDetail, ACCOUNT_LIMIT_EXHAUSTED, ACCOUNT_NOT_ENTITLED, ACCOUNT_WALLED,
     ANSWER_TOO_LARGE, AUTH_FAILED, BATCH_ID_REUSE, BATCH_IN_PROGRESS, BATCH_LEVEL_CODES,
-    COST_EXCEEDED, INVALID_ITEM, INVALID_PARAMS, MODEL_NOT_CLASSIFIER, MODEL_UNAVAILABLE,
-    MODEL_UNKNOWN, PROVIDER_ERROR, PROVIDER_REFUSED, RATE_LIMITED,
+    COST_EXCEEDED, IMAGE_SOURCE_UNAVAILABLE, IMAGE_UNAVAILABLE, INVALID_ITEM, INVALID_PARAMS,
+    MODEL_NOT_CLASSIFIER, MODEL_UNAVAILABLE, MODEL_UNKNOWN, PROVIDER_ERROR, PROVIDER_REFUSED,
+    RATE_LIMITED,
 };
 
 /// Every admission refusal code in the contract's §7 table, in its order.
 /// The batch-level account codes, which refuse a call only when its first
-/// provider call meets one, are [`BATCH_LEVEL_CODES`].
+/// provider call meets one, are [`BATCH_LEVEL_CODES`]. The two image codes
+/// come only from a module that declares `image_reference`.
 pub const ADMISSION_CODES: &[&str] = &[
     INVALID_PARAMS,
     BATCH_ID_REUSE,
@@ -39,6 +41,8 @@ pub const ADMISSION_CODES: &[&str] = &[
     BATCH_IN_PROGRESS,
     AUTH_FAILED,
     MODEL_UNAVAILABLE,
+    IMAGE_UNAVAILABLE,
+    IMAGE_SOURCE_UNAVAILABLE,
 ];
 
 /// Every per-item error code in the contract's §7 table, in its order.
@@ -74,6 +78,14 @@ mod tests {
             Some(ErrorClass::Transient)
         );
         assert_eq!(admission_class(ACCOUNT_WALLED), Some(ErrorClass::Transient));
+        assert_eq!(
+            admission_class(IMAGE_SOURCE_UNAVAILABLE),
+            Some(ErrorClass::Transient)
+        );
+        assert_eq!(
+            admission_class(IMAGE_UNAVAILABLE),
+            Some(ErrorClass::Permanent)
+        );
         assert_eq!(item_class(RATE_LIMITED), Some(ErrorClass::Transient));
         assert_eq!(item_class(PROVIDER_ERROR), Some(ErrorClass::Transient));
         assert_eq!(item_class(PROVIDER_REFUSED), Some(ErrorClass::Permanent));

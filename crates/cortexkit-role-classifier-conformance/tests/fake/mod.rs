@@ -19,7 +19,10 @@
 
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 
@@ -27,16 +30,19 @@ use async_trait::async_trait;
 use cortexkit_role_classifier_conformance::{
     state_key,
     wire::{
-        describe::{ImageSupport, Limits, ModelEntry, Price, RoleDescribe},
+        describe::{ImageReferenceSupport, ImageSupport, Limits, ModelEntry, Price, RoleDescribe},
         errors::{self, ItemError, Refusal},
         identity::BatchIdentity,
         ops,
         provider::item_code_for_status,
-        question::{Criteria, QuestionType, SCORE_MAX_LEVELS},
+        question::{
+            Criteria, DecodedImage, ImageReference, QuestionType, ResolveFailure, SCORE_MAX_LEVELS,
+        },
         reply::{Answer, Usage},
         request::{
-            check_catalog_row, check_request, check_request_bytes, effective_ceiling,
-            parse_request, CatalogRow, ClassifyRequest, CLASSIFIER_KIND,
+            check_catalog_row, check_request, check_request_bytes, check_request_with_references,
+            check_resolved_item_images, effective_ceiling, parse_request, resolve_item_images,
+            CatalogRow, ClassifyRequest, CLASSIFIER_KIND,
         },
         IndexMap,
     },
@@ -165,6 +171,37 @@ impl StandIn {
     }
 }
 
+/// The stand-in for the module that issues image handles: the images it
+/// holds by handle, and whether it is reachable.
+#[derive(Default)]
+pub struct ImageSource {
+    images: Mutex<BTreeMap<String, DecodedImage>>,
+    down: AtomicBool,
+}
+
+impl ImageSource {
+    fn issue(&self, content_type: &str, bytes: Vec<u8>) -> String {
+        let mut images = self.images.lock().unwrap();
+        let handle = format!("fake-image:{}", images.len());
+        images.insert(handle.clone(), DecodedImage::new(content_type, bytes));
+        handle
+    }
+
+    fn resolve(&self, reference: &ImageReference) -> Result<DecodedImage, ResolveFailure> {
+        if self.down.load(Ordering::SeqCst) {
+            return Err(ResolveFailure::SourceUnavailable {
+                retry_after_ms: 100,
+            });
+        }
+        self.images
+            .lock()
+            .unwrap()
+            .get(&reference.handle)
+            .cloned()
+            .ok_or(ResolveFailure::Unavailable)
+    }
+}
+
 /// One item's recorded outcome.
 #[derive(Clone)]
 enum Stored {
@@ -225,6 +262,10 @@ struct RawItems {
 pub struct FakeModule {
     defects: Defects,
     priced: bool,
+    /// Whether role.describe declares image_reference and references are
+    /// resolved through `images`.
+    references: bool,
+    images: Arc<ImageSource>,
     stand_in: Arc<StandIn>,
     batches: Mutex<BTreeMap<String, Batch>>,
 }
@@ -261,7 +302,12 @@ impl FakeModule {
         if self.defects.describe_omits_model {
             models.truncate(1);
         }
-        RoleDescribe::new(Limits::new(MAX_ITEMS, MAX_REQUEST_BYTES), models)
+        let describe = RoleDescribe::new(Limits::new(MAX_ITEMS, MAX_REQUEST_BYTES), models);
+        if self.references {
+            describe.with_image_reference(ImageReferenceSupport::new())
+        } else {
+            describe
+        }
     }
 
     fn catalog_row(&self, model: &str) -> CatalogRow<'static> {
@@ -340,7 +386,26 @@ impl FakeModule {
                 self.stand_in.call(&item.state).await;
             }
         }
-        if let Err(refusal) = check_request(&checked, &model) {
+        if self.references {
+            // Every reference is resolved and its bytes checked before
+            // anything is recorded or sent.
+            if let Err(refusal) = check_request_with_references(&checked, &model) {
+                return refused(refusal);
+            }
+            for i in 0..checked.items.len() {
+                let resolved = match resolve_item_images(&checked, i, |reference| {
+                    self.images.resolve(reference)
+                }) {
+                    Ok(resolved) => resolved,
+                    Err(refusal) => return refused(refusal),
+                };
+                if checked.items[i].images.is_some() {
+                    if let Err(refusal) = check_resolved_item_images(&model, i, &resolved) {
+                        return refused(refusal);
+                    }
+                }
+            }
+        } else if let Err(refusal) = check_request(&checked, &model) {
             return refused(refusal);
         }
         let identity = BatchIdentity::of(&request).unwrap();
@@ -715,32 +780,54 @@ impl ClassifierRoute for FakeRoute {
 pub struct FakeSubject {
     module: Arc<FakeModule>,
     can_hold: bool,
+    /// Whether `issue_image_reference` hands out handles.
+    image_hook: bool,
 }
 
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
-        Self::build(defects, true, true)
+        Self::build(defects, true, true, true, true)
     }
 
     /// A module whose catalog prices nothing.
     pub fn unpriced() -> Self {
-        Self::build(Defects::default(), false, true)
+        Self::build(Defects::default(), false, true, true, true)
     }
 
     /// A stand-in that cannot hold calls.
     pub fn without_hold() -> Self {
-        Self::build(Defects::default(), true, false)
+        Self::build(Defects::default(), true, false, true, true)
     }
 
-    fn build(defects: Defects, priced: bool, can_hold: bool) -> Self {
+    /// A module that does not declare image_reference, with no hook.
+    pub fn without_image_references() -> Self {
+        Self::build(Defects::default(), true, true, false, false)
+    }
+
+    /// A module that declares image_reference, run by a subject with no
+    /// hook to issue handles.
+    pub fn without_image_hook() -> Self {
+        Self::build(Defects::default(), true, true, true, false)
+    }
+
+    fn build(
+        defects: Defects,
+        priced: bool,
+        can_hold: bool,
+        references: bool,
+        image_hook: bool,
+    ) -> Self {
         Self {
             module: Arc::new(FakeModule {
                 defects,
                 priced,
+                references,
+                images: Arc::new(ImageSource::default()),
                 stand_in: Arc::new(StandIn::default()),
                 batches: Mutex::new(BTreeMap::new()),
             }),
             can_hold,
+            image_hook,
         }
     }
 }
@@ -823,5 +910,14 @@ impl ClassifierSubject for FakeSubject {
 
     async fn pause(&self) {
         tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
+    async fn issue_image_reference(&self, content_type: &str, bytes: Vec<u8>) -> Option<String> {
+        self.image_hook
+            .then(|| self.module.images.issue(content_type, bytes))
+    }
+
+    async fn set_image_source_down(&self, down: bool) {
+        self.module.images.down.store(down, Ordering::SeqCst);
     }
 }

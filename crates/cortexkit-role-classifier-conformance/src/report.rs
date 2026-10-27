@@ -101,6 +101,26 @@ pub const CHECKS: &[CheckSpec] = &[
         "unreported_usage_stays_absent",
         "an item whose provider response has no usage carries no token counts, an item reporting only input_tokens carries no output_tokens, and the batch usage sums input_tokens and leaves output_tokens absent, never zero",
     ),
+    check(
+        "image_reference_follows_declaration",
+        "on a model that takes images, an item image given as a reference {handle} the module never issued is refused before any stand-in call naming items[0].images[0]: image_unavailable, class permanent, when role.describe declares image_reference, and invalid_params (an unsupported image) when it does not; the refusal writes nothing, so a valid body with the same batch_id is then admitted",
+    ),
+    check(
+        "image_reference_resolved_and_answered",
+        "with a module that declares image_reference, a reference the subject's hook issued for a one-pixel PNG resolves, passes the inline image checks, and the item is answered with one stand-in call; not applicable without the hook",
+    ),
+    check(
+        "image_reference_oversized_refused_like_inline",
+        "with a module that declares image_reference, a reference the hook issued for one byte over the per-image limit (4 MiB) is refused invalid_params naming items[0].images[0], the refusal an inline image of that size gets, before any stand-in call and writing nothing; not applicable without the hook",
+    ),
+    check(
+        "image_source_down_refused_transient",
+        "with a module that declares image_reference, while the hook's image source is down a reference is refused image_source_unavailable, class transient, naming items[0].images[0] with detail.retry_after_ms, before any stand-in call; once the source is back the same body is admitted and answered, so the refusal wrote nothing; not applicable without the hook",
+    ),
+    check(
+        "image_reference_identity_is_its_handle",
+        "with a module that declares image_reference, a re-send carrying the same handle is a replay with no new stand-in call, and a re-send carrying the same picture inline instead of the handle is refused batch_id_reuse naming items[0]; not applicable without the hook",
+    ),
 ];
 
 /// Where the suite checks less than the contract says, and why. Every
@@ -112,7 +132,8 @@ pub const NARROWINGS: &[&str] = &[
     "The 400 a stand-in answers is mapped to invalid_item by the contract; the suite checks only that the item's error is permanent, not its code.",
     "auth_failed is checked with a 401 only; the contract maps 403 the same way.",
     "A stand-in 429 is answered at once and every time, so the suite cannot tell a module's own retries apart; it checks only that the item ends rate_limited and that the items after it are not sent.",
-    "Images are checked only for count and support, not for byte or pixel limits.",
+    "Inline images are checked only for count and support; byte limits are checked only through a resolved reference, and pixel limits not at all.",
+    "The stand-in does not report the images it received, so the suite cannot see that a resolved reference reached the provider as its bytes; it checks that the item is admitted and answered.",
 ];
 
 /// How one check ended.

@@ -1,5 +1,5 @@
 {
-  "about": "One admission refusal per code in the contract's table, with an additional case for a row whose catalog kind is absent. Each refuses the whole request with an ERROR frame whose body is refusal ({code, message, detail}); detail.class carries the code's class, and the other detail members are the table's. An admission refusal writes nothing and calls no provider. batch_id_reuse assumes a recorded batch vec-refuse-reuse whose item 0 differs; replay-batch-id-reuse.json shows both calls. batch_in_progress assumes another call holds vec-refuse-busy. auth_failed and model_unavailable assume the call's first provider call (item 0) was answered 401 and 404: a 401 or 403, or a 404, met on the first provider call refuses the whole call at admission, so item 1 is never sent and nothing is recorded.",
+  "about": "One admission refusal per code in the contract's table, with an additional case for a row whose catalog kind is absent. Each refuses the whole request with an ERROR frame whose body is refusal ({code, message, detail}); detail.class carries the code's class, and the other detail members are the table's. An admission refusal writes nothing and calls no provider. batch_id_reuse assumes a recorded batch vec-refuse-reuse whose item 0 differs; replay-batch-id-reuse.json shows both calls. batch_in_progress assumes another call holds vec-refuse-busy. auth_failed and model_unavailable assume the call's first provider call (item 0) was answered 401 and 404: a 401 or 403, or a 404, met on the first provider call refuses the whole call at admission, so item 1 is never sent and nothing is recorded. image_unavailable and image_source_unavailable assume a module that declares image_reference in role.describe and an item image given as a reference it could not resolve: the handle is unknown, expired or not this caller's, or the module that issued it did not answer. Both name the image and write nothing.",
   "refusals": [
     {
       "name": "invalid_params",
@@ -244,6 +244,69 @@
         "detail": {
           "class": "permanent",
           "model": "cloudflare-workers-ai/@cf/cloudflare/clef"
+        }
+      }
+    },
+    {
+      "name": "image_unavailable",
+      "request": {
+        "batch_id": "vec-refuse-image-unavailable",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "The checkout page shows this error.",
+            "images": [
+              {
+                "handle": "screenshot:0001.png"
+              }
+            ]
+          }
+        ]
+      },
+      "refusal": {
+        "code": "image_unavailable",
+        "message": "the image reference is unknown, expired or not usable by this caller",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0].images[0]"
+        }
+      }
+    },
+    {
+      "name": "image_source_unavailable",
+      "request": {
+        "batch_id": "vec-refuse-image-source",
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clef",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "The checkout page shows this error.",
+            "images": [
+              {
+                "handle": "screenshot:0001.png"
+              }
+            ]
+          }
+        ]
+      },
+      "refusal": {
+        "code": "image_source_unavailable",
+        "message": "the module holding the referenced image did not answer",
+        "detail": {
+          "class": "transient",
+          "field": "items[0].images[0]",
+          "retry_after_ms": 2000
         }
       }
     },

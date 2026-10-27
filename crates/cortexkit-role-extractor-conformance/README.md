@@ -29,6 +29,12 @@ fake under `tests/fake/` exists only to test the suite itself.
     no body. The suite scripts Clairic's replies from the role crate's
     `provider-replies.json`, captured in a live probe of
     2026-10-22.
+  - optionally, the **image-reference hook**
+    (`ExtractorSubject::issue_image_reference` and
+    `set_image_source_down`), for a module that declares `image_reference`:
+    hand bytes to the image source the module resolves handles through and
+    return the handle, and take that source down or bring it back. Without
+    it, the checks that need a resolvable handle are not applicable.
 
 ## Verdict
 
@@ -66,6 +72,11 @@ ran and passed is "passed".
 | `spans_forwarded_unconverted` | the model serves no text fields |
 | `provider_errors_mapped` | — |
 | `cost_usd_from_reported_tokens` | no priced served model takes list fields |
+| `image_reference_follows_declaration` | the model takes no images |
+| `image_reference_resolved_and_answered` | the model takes no images (or no PNG), the module does not declare `image_reference`, or the subject has no image-reference hook |
+| `image_reference_oversized_refused_like_inline` | the model takes no images, its `max_bytes_each` is 64 MiB or more, the module does not declare `image_reference`, or the subject has no image-reference hook |
+| `image_source_down_refused_transient` | the model takes no images, the module does not declare `image_reference`, or the subject has no image-reference hook |
+| `image_reference_identity_is_its_handle` | as above |
 
 `CHECKS` in `src/report.rs` states what each check asserts, and `NARROWINGS`
 where it checks less than the contract says; every report prints both.
@@ -73,5 +84,7 @@ where it checks less than the contract says; every report prints both.
 ## The suite's own tests
 
 `tests/suite.rs` runs the suite against the fake: a faithful fake passes
-every check, and each deliberate break in `fake::Defects` turns exactly its
-check red, by name.
+every check, and each deliberate break in `fake::Defects` turns its check
+red, by name. Each test pins exactly which checks a break turns red: most
+turn only their own, and a break the image-reference checks also catch (no
+image checks at all, an accepted reuse) names those too.

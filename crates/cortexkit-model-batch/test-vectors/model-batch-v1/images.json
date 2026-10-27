@@ -1,5 +1,5 @@
 {
-  "about": "One one-pixel PNG in three spellings: a data: URL, the object form, and the object form without base64 padding. All three decode to the same bytes and have one canonical form, so batch identity hashes them alike. The refused images each fail validation for the reason given, before any provider call; a reason ending in a colon is followed by the decoder's own words.",
+  "about": "One one-pixel PNG in three spellings: a data: URL, the object form, and the object form without base64 padding. All three decode to the same bytes and have one canonical form, so batch identity hashes them alike. The refused images each fail validation for the reason given, before any provider call; a reason ending in a colon is followed by the decoder's own words. A reference {handle} names an image another module holds: its canonical form is the handle itself, never the bytes it resolves to, so it is a different identity from the same picture sent inline. Each refused handle fails its grammar (1-128 characters of [A-Za-z0-9._:-]). Each of not_images mixes the two object forms or adds a member, and decodes as no image at all, because both object forms are closed.",
   "same_image": [
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
     {
@@ -44,6 +44,53 @@
         "base64": "R0lGODlhAQABAAAAACw="
       },
       "because": "unsupported image content type image/gif"
+    }
+  ],
+  "reference": {
+    "image": {
+      "handle": "screenshot:0001.png"
+    },
+    "canonical": {
+      "handle": "screenshot:0001.png"
+    }
+  },
+  "refused_handles": [
+    {
+      "image": {
+        "handle": ""
+      },
+      "because": "an image handle is 1-128 characters of [A-Za-z0-9._:-]"
+    },
+    {
+      "image": {
+        "handle": "screenshots/0001.png"
+      },
+      "because": "an image handle is 1-128 characters of [A-Za-z0-9._:-]"
+    },
+    {
+      "image": {
+        "handle": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "because": "an image handle is 1-128 characters of [A-Za-z0-9._:-]"
+    }
+  ],
+  "not_images": [
+    {
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "content_type": "image/png",
+      "handle": "screenshot:0001.png"
+    },
+    {
+      "content_type": "image/png",
+      "handle": "screenshot:0001.png"
+    },
+    {
+      "base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      "handle": "screenshot:0001.png"
+    },
+    {
+      "expires_at_ms": 1798761600000,
+      "handle": "screenshot:0001.png"
     }
   ]
 }

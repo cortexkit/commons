@@ -91,6 +91,19 @@ pub const ACCOUNT_LIMIT_EXHAUSTED: &str = "account_limit_exhausted";
 /// unanswered carries it. Never stored.
 pub const ACCOUNT_NOT_ENTITLED: &str = "account_not_entitled";
 
+/// An image reference (`{handle}`) cannot be resolved: the handle is
+/// unknown, expired, or not usable by this caller. One answer for all
+/// three, so a refusal never tells a caller whether a handle it may not use
+/// exists. `detail.field` names the image (`items[i].images[j]`).
+/// Permanent: the same handle meets the same answer.
+pub const IMAGE_UNAVAILABLE: &str = "image_unavailable";
+
+/// The module that issued an image reference's handle is unreachable or
+/// timed out, so the host could not resolve it. `detail.field` names the
+/// image (`items[i].images[j]`) and `detail.retry_after_ms` says when to
+/// re-send. Transient. Nothing was written or dispatched.
+pub const IMAGE_SOURCE_UNAVAILABLE: &str = "image_source_unavailable";
+
 // ---- per-item errors ------------------------------------------------------
 
 /// The provider answered 429 or 529 after the runner's own retries.
@@ -138,6 +151,8 @@ pub const ADMISSION_VOCABULARY: &[&str] = &[
     MODEL_UNAVAILABLE,
     ACCOUNT_LIMIT_EXHAUSTED,
     ACCOUNT_NOT_ENTITLED,
+    IMAGE_UNAVAILABLE,
+    IMAGE_SOURCE_UNAVAILABLE,
 ];
 
 /// Every per-item error code the vocabulary lists. A role answers with the
@@ -161,8 +176,10 @@ pub fn admission_class(code: &str) -> Option<ErrorClass> {
     match code {
         INVALID_PARAMS | BATCH_ID_REUSE | MODEL_UNKNOWN | MODEL_NOT_CLASSIFIER
         | MODEL_NOT_EXTRACTOR | COST_EXCEEDED | AUTH_FAILED | MODEL_UNAVAILABLE
-        | ACCOUNT_NOT_ENTITLED => Some(ErrorClass::Permanent),
-        ACCOUNT_WALLED | BATCH_IN_PROGRESS | ACCOUNT_LIMIT_EXHAUSTED => Some(ErrorClass::Transient),
+        | ACCOUNT_NOT_ENTITLED | IMAGE_UNAVAILABLE => Some(ErrorClass::Permanent),
+        ACCOUNT_WALLED | BATCH_IN_PROGRESS | ACCOUNT_LIMIT_EXHAUSTED | IMAGE_SOURCE_UNAVAILABLE => {
+            Some(ErrorClass::Transient)
+        }
         _ => None,
     }
 }
@@ -630,6 +647,28 @@ impl Refusal {
             .edit(|detail| detail.with_retry_after_ms(retry_after_ms))
     }
 
+    /// `image_unavailable` for the image reference at `field`
+    /// (`items[i].images[j]`). The message is the same whether the handle
+    /// is unknown, expired or not this caller's.
+    pub fn image_unavailable(field: impl Into<String>) -> Self {
+        Self::new(
+            IMAGE_UNAVAILABLE,
+            "the image reference is unknown, expired or not usable by this caller",
+        )
+        .edit(|detail| detail.with_field(field))
+    }
+
+    /// `image_source_unavailable` for the image reference at `field`
+    /// (`items[i].images[j]`): its issuing module did not answer; re-send
+    /// after `retry_after_ms`.
+    pub fn image_source_unavailable(field: impl Into<String>, retry_after_ms: u64) -> Self {
+        Self::new(
+            IMAGE_SOURCE_UNAVAILABLE,
+            "the module holding the referenced image did not answer",
+        )
+        .edit(|detail| detail.with_field(field).with_retry_after_ms(retry_after_ms))
+    }
+
     /// The refused field, if the detail names one.
     pub fn field(&self) -> Option<&str> {
         self.detail.field.as_deref()
@@ -659,13 +698,17 @@ mod tests {
         for code in ITEM_VOCABULARY {
             assert!(item_class(code).is_some(), "{code}");
         }
-        for code in [ACCOUNT_WALLED, BATCH_IN_PROGRESS, ACCOUNT_LIMIT_EXHAUSTED] {
+        for code in [
+            ACCOUNT_WALLED,
+            BATCH_IN_PROGRESS,
+            ACCOUNT_LIMIT_EXHAUSTED,
+            IMAGE_SOURCE_UNAVAILABLE,
+        ] {
             assert_eq!(admission_class(code), Some(ErrorClass::Transient), "{code}");
         }
-        assert_eq!(
-            admission_class(ACCOUNT_NOT_ENTITLED),
-            Some(ErrorClass::Permanent)
-        );
+        for code in [ACCOUNT_NOT_ENTITLED, IMAGE_UNAVAILABLE] {
+            assert_eq!(admission_class(code), Some(ErrorClass::Permanent), "{code}");
+        }
         assert_eq!(admission_class("nope"), None);
     }
 
@@ -763,5 +806,18 @@ mod tests {
             Refusal::account_limit_exhausted().detail.class,
             ErrorClass::Transient
         );
+    }
+
+    #[test]
+    fn image_refusals_name_the_image_and_say_when_to_retry() {
+        let gone = Refusal::image_unavailable("items[0].images[1]");
+        assert_eq!(
+            serde_json::to_string(&gone).unwrap(),
+            r#"{"code":"image_unavailable","message":"the image reference is unknown, expired or not usable by this caller","detail":{"class":"permanent","field":"items[0].images[1]"}}"#
+        );
+        let down = Refusal::image_source_unavailable("items[0].images[1]", 500);
+        assert_eq!(down.detail.class, ErrorClass::Transient);
+        assert_eq!(down.field(), Some("items[0].images[1]"));
+        assert_eq!(down.detail.retry_after_ms, Some(500));
     }
 }

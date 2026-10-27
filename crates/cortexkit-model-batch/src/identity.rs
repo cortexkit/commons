@@ -6,8 +6,12 @@
 //! as equal (`1.0` and `1`, `1e30` and `1E+30`) can't turn a retry into a
 //! reuse. An item's images are hashed in their canonical form
 //! ([`Image::canonical`]), so a `data:` URL and the same image as
-//! `{content_type, base64}` are the same item. Each role names its parts
-//! and their order; [`first_difference`] names the first that differs.
+//! `{content_type, base64}` are the same item. A reference is hashed as
+//! `{handle}`, never the bytes it resolves to: checking a re-sent
+//! `batch_id` never needs a handle that may have expired, and a reference
+//! and an inline copy of the same picture are different items. Each role
+//! names its parts and their order; [`first_difference`] names the first
+//! that differs.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -93,7 +97,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::image::InlineImage;
+    use crate::image::{ImageReference, InlineImage};
 
     #[test]
     fn number_spelling_and_key_order_do_not_change_a_digest() {
@@ -122,6 +126,24 @@ mod tests {
         assert_ne!(
             item_digest(&a, Some(&url)).unwrap(),
             item_digest(&c, Some(&other)).unwrap()
+        );
+    }
+
+    #[test]
+    fn a_reference_is_hashed_as_its_handle_never_its_bytes() {
+        let item = |images: &Vec<Image>| {
+            item_digest(&json!({"state": "s", "images": images}), Some(images)).unwrap()
+        };
+        let shot = vec![Image::Reference(ImageReference::new("shot:1"))];
+        let again = vec![Image::Reference(ImageReference::new("shot:1"))];
+        let other = vec![Image::Reference(ImageReference::new("shot:2"))];
+        let inline = vec![Image::Inline(InlineImage::new("image/png", "AAECAw=="))];
+        assert_eq!(item(&shot), item(&again));
+        assert_ne!(item(&shot), item(&other));
+        assert_ne!(item(&shot), item(&inline));
+        assert_eq!(
+            item(&shot),
+            digest(&json!({"state": "s", "images": [{"handle": "shot:1"}]})).unwrap()
         );
     }
 

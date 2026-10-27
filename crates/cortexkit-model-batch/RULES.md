@@ -53,6 +53,12 @@ the provider, for one item.
   standard padded base64 (`identity::item_digest`). The same image sent as a
   `data:` URL on one call and as `{content_type, base64}` on a re-send is the
   same batch.
+- [pinned] An image reference is hashed in its canonical form `{handle}`,
+  never the bytes it resolves to (§13). So deciding whether a re-sent
+  `batch_id` is a replay or a reuse never needs a handle that may since have
+  expired, and a reference and an inline copy of the same picture are
+  different batches: a re-send that swaps one for the other is
+  `batch_id_reuse` naming `items[i]`.
 - [pinned] `max_cost_usd` is never part of the body identity (§5).
 
 ## 3. Single flight per `batch_id`
@@ -231,9 +237,14 @@ the provider, for one item.
 ## 13. Item images
 
 - [pinned] An image is a `data:` URL string,
-  `data:<content type>;base64,<payload>`, or `{content_type, base64}`. The
-  content type is one of `image/png`, `image/jpeg`, `image/webp`, or the
-  fewer a model states. Remote URLs are refused.
+  `data:<content type>;base64,<payload>`, `{content_type, base64}`, or a
+  reference `{handle}` to an image another module holds (§13.1). The content
+  type is one of `image/png`, `image/jpeg`, `image/webp`, or the fewer a
+  model states. Remote URLs are refused.
+- [pinned] Both object forms are closed: an object with any other member,
+  or with members of both forms (`{content_type, base64, handle}`), is no
+  image, and is refused `invalid_params` naming `items[i].images[j]`. So each
+  JSON shape is exactly one form (`Image`, `InlineImage`, `ImageReference`).
 - [pinned] Validation decodes the base64 (standard alphabet, padding
   optional, no whitespace), so malformed base64, a `data:` URL without
   `;base64`, and an image of no bytes are refused before any provider call.
@@ -248,6 +259,46 @@ the provider, for one item.
   bytes as standard padded base64 (`Image::canonical`); it is what batch
   identity hashes (§2). A module forwards the image to the provider as the
   caller wrote it.
+
+### 13.1 Image references
+
+A caller that already handed an image to another module (a screenshot, say)
+sends a short opaque handle instead of copying the image's bytes into every
+request. The host resolves the handle to bytes through the module that
+issued it, just before it calls the model.
+
+- [pinned] A reference is `{handle}`. The handle is opaque: 1 to 128
+  characters of `[A-Za-z0-9._:-]` (`image::is_image_handle`). Anything else
+  is refused like any malformed image, `invalid_params` naming
+  `items[i].images[j]`.
+- [pinned] **Declared support.** A host resolves references only where its
+  role's `role.describe` declares the `image_reference` group. A caller sends
+  a reference only to a host that declares it. A host that does not declare
+  it refuses a reference as an unsupported image: `invalid_params` naming
+  `items[i].images[j]` (`image::check_images`). That is also how a host built
+  before references existed answers one, so a caller can roll references out
+  host by host.
+- [pinned] **Resolution before anything else.** A declaring host resolves
+  every reference of the request before any model call and before it writes
+  anything (`image::resolve_images`). It then applies exactly the checks an
+  inline image gets to the resolved bytes, with the same refusals and the
+  same `detail.field`: content type, size per image, the item's total, the
+  module's pixel limit, and the model's image support
+  (`image::check_unresolved_images` before resolution,
+  `image::check_resolved_images` after it).
+- [pinned] **Two refusals for a reference that cannot be resolved**, both
+  admission refusals naming `items[i].images[j]` and writing nothing:
+  - `image_unavailable`, permanent: the handle is unknown, expired, or not
+    usable by this caller. These are one answer, with one message, so a
+    refusal never tells a caller whether a handle it may not use exists.
+  - `image_source_unavailable`, transient, with `detail.retry_after_ms`:
+    the issuing module is unreachable or timed out.
+- [pinned] A reference has no bytes until it is resolved, and the code
+  never pretends otherwise: `Image::decode` and `Image::approx_bytes` are
+  `None` for one, which is neither a decode failure nor zero bytes.
+- [pinned] The canonical form of a reference is `{handle}` as sent (§2). A
+  host forwards the resolved bytes to the provider
+  (`InlineImage::from_decoded`); a provider never sees a handle.
 
 ## 14. Error vocabulary
 
@@ -283,6 +334,8 @@ Admission refusals:
 | `model_unavailable` | the call's first provider call met "no such model" | `model` | permanent |
 | `account_limit_exhausted` | the call's first provider call met Workers AI 3036 | `resets_at_ms?` | transient |
 | `account_not_entitled` | the call's first provider call met Workers AI 5035, 5016 or 3023 | — | permanent |
+| `image_unavailable` | an image reference is unknown, expired or not usable by this caller (§13.1) | `field` | permanent |
+| `image_source_unavailable` | the module that issued an image reference did not answer (§13.1) | `field`, `retry_after_ms` | transient |
 | `model_unserved` | caller found no module that lists the model | `model` | permanent (caller-raised; not a module error) |
 | `model_ambiguous` | caller found more than one module that lists the model | `model`, `modules` (sorted module ids) | permanent (caller-raised; not a module error) |
 
@@ -368,7 +421,9 @@ then checks it against the code:
   whether it stops the call;
 - `status-mapping.json`: the Workers AI table and the status mapping;
 - `images.json`: one image in three spellings with one canonical form and
-  one identity, and the images validation refuses;
+  one identity, and the images validation refuses; a reference with its
+  canonical form `{handle}`, handles the grammar refuses, and objects that
+  mix the two forms or add a member and so decode as no image;
 - `estimates.json`: the estimate, including probe 05's exact counts (which
   estimate exactly what Clairic billed) and byte bounds (at least that),
   images and overhead on every pass, a byte-bound state past the pass

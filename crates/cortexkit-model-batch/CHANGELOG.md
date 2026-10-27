@@ -1,5 +1,58 @@
 # Changelog
 
+## 0.3.0
+
+Breaking: an item image may be a reference to an image another module
+holds, so a caller need not copy its bytes into every request. The host
+resolves the reference through the module that issued it, just before it
+calls the model (`RULES.md` §13.1).
+
+- New `Image::Reference(ImageReference)`, `ImageReference { handle }`. The
+  handle is opaque: 1-128 characters of `[A-Za-z0-9._:-]`
+  (`is_image_handle`, `ImageReference::check`, `IMAGE_HANDLE_MAX_LEN`).
+- `Image` is now `#[non_exhaustive]`: a match outside this crate needs a
+  wildcard arm.
+- `InlineImage` and `ImageReference` refuse unknown members, so each JSON
+  shape decodes as exactly one variant. Before, `{content_type, base64,
+  handle}` decoded as an inline image and dropped the handle; now it, and any
+  inline object with an extra member, is no image.
+- `Image::decode` now returns `Option<Result<DecodedImage, String>>` and
+  `Image::approx_bytes` returns `Option<usize>`: `None` for a reference,
+  which has no bytes until it is resolved. An `Option` keeps "no bytes here"
+  apart from a decode failure and from zero bytes, and makes every caller
+  decide what a reference means to it instead of counting it as empty or
+  malformed.
+- `Image::canonical` now returns `CanonicalImage`: `Inline` (`{content_type,
+  base64}`, as before for both byte-carrying spellings) or `Reference`
+  (`{handle}`). Batch identity hashes a reference as its handle, never its
+  resolved bytes, so a `batch_id` reuse check never needs an expired handle,
+  and a reference and an inline copy of the same picture are different
+  batches (`RULES.md` §2).
+- A host that does not declare references keeps `check_images`, which now
+  refuses a reference as an unsupported image (`invalid_params` naming
+  `items[i].images[j]`, message `REFERENCE_UNSUPPORTED`). `check_image` and
+  `check_image_with` refuse one the same way.
+- A host that declares references runs `check_unresolved_images` (count,
+  handles, inline images), `resolve_images` (inline images decoded,
+  references resolved in order by the host's resolver, each failure a
+  `ResolveFailure`), then `check_resolved_images`: the inline checks on
+  every image's bytes, with the same refusals and paths. `check_decoded_with`
+  checks one image's bytes; `DecodedImage::new` and `InlineImage::from_decoded`
+  build the decoded form from resolved bytes and turn it back into the form
+  a provider reads.
+- `ImageReferenceSupport`: the `image_reference` group a role's
+  `role.describe` states when the host resolves references (no members
+  yet; later ones are additive).
+- Two new admission codes, in `ADMISSION_VOCABULARY` and `admission_class`:
+  `image_unavailable` (permanent: unknown, expired or not usable by this
+  caller, one answer for all three) and `image_source_unavailable`
+  (transient, with `detail.retry_after_ms`: the issuing module is
+  unreachable or timed out). Both carry `detail.field`
+  `items[i].images[j]`. Constructors `Refusal::image_unavailable` and
+  `Refusal::image_source_unavailable`.
+- Vectors: `vocabulary.json` lists the two codes; `images.json` adds a
+  reference and its canonical form, refused handles, and mixed shapes that
+  decode as no image.
 ## 0.2.1
 
 - `RULES.md` now pins role-specific management routes and the capability

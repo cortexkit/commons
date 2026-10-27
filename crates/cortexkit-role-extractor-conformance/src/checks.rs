@@ -10,6 +10,7 @@ use cortexkit_role_extractor::{
     describe::{check_describe, ModelEntry, RoleDescribe},
     errors::{self, ErrorClass, Refusal},
     field::{types, Field, FieldType},
+    image::Image,
     ops,
     provider::{read_reply, ProviderRequest},
     reply::{ExtractReply, ItemResult},
@@ -46,6 +47,15 @@ const OVERSIZE_CAP: u64 = 64 * 1024 * 1024;
 
 fn pixel_url() -> String {
     format!("data:image/png;base64,{PIXEL_BASE64}")
+}
+
+/// The bytes of the one-pixel PNG.
+fn pixel_bytes() -> Vec<u8> {
+    Image::DataUrl(pixel_url())
+        .decode()
+        .and_then(Result::ok)
+        .map(|decoded| decoded.bytes)
+        .expect("the one-pixel PNG decodes")
 }
 
 /// One of Clairic's captured replies from the role crate's
@@ -165,6 +175,11 @@ where
             "spans_forwarded_unconverted" => self.spans_unconverted().await,
             "provider_errors_mapped" => self.errors_mapped().await,
             "cost_usd_from_reported_tokens" => self.cost_from_usage().await,
+            "image_reference_follows_declaration" => self.reference_follows_declaration().await,
+            "image_reference_resolved_and_answered" => self.reference_resolved().await,
+            "image_reference_oversized_refused_like_inline" => self.reference_oversized().await,
+            "image_source_down_refused_transient" => self.reference_source_down().await,
+            "image_reference_identity_is_its_handle" => self.reference_identity().await,
             other => Err(format!("the suite has no check named {other}")),
         }
     }
@@ -376,6 +391,228 @@ where
     }
 
     // ---- checks ---------------------------------------------------------
+
+    /// The first served model, when it takes images, on a module that
+    /// declares `image_reference`, and a handle the subject's hook issued
+    /// for `bytes` of `content_type`; or why the check is not applicable.
+    async fn issue(
+        &self,
+        content_type: &str,
+        bytes: Vec<u8>,
+    ) -> Result<Result<(&ModelEntry, String), String>, String> {
+        let model = self.model()?;
+        if model.images.is_none() {
+            return Ok(Err("the model takes no images".into()));
+        }
+        if !self.describe.declares_image_reference() {
+            return Ok(Err("role.describe does not declare image_reference".into()));
+        }
+        Ok(self
+            .subject
+            .issue_image_reference(content_type, bytes)
+            .await
+            .map(|handle| (model, handle))
+            .ok_or_else(|| "the subject has no hook to issue image references".into()))
+    }
+
+    /// A valid one-item request on `model` whose item carries `image`.
+    fn with_image(model: &ModelEntry, batch_id: &str, state: &str, image: Value) -> Value {
+        let mut request = Self::base(model, batch_id, &[state]);
+        request["items"][0]["images"] = json!([image]);
+        request
+    }
+
+    async fn reference_follows_declaration(&self) -> Check {
+        let model = self.model()?;
+        if model.images.is_none() {
+            return Ok(Ending::NotApplicable("the model takes no images".into()));
+        }
+        let state = self.mint("unissued");
+        let handle = self.mint("never-issued");
+        let request = Self::with_image(
+            model,
+            &self.mint("unissued"),
+            &state,
+            json!({"handle": handle}),
+        );
+        let (what, code) = if self.describe.declares_image_reference() {
+            (
+                "a reference the module never issued, on a module that declares image_reference",
+                errors::IMAGE_UNAVAILABLE,
+            )
+        } else {
+            (
+                "a reference, on a module that does not declare image_reference",
+                errors::INVALID_PARAMS,
+            )
+        };
+        self.refused(
+            what,
+            &request,
+            &[&state],
+            code,
+            Some("items[0].images[0]"),
+            None,
+        )
+        .await?;
+        Ok(Ending::Passed)
+    }
+
+    async fn reference_resolved(&self) -> Check {
+        let pixel = pixel_bytes();
+        let (model, handle) = match self.issue("image/png", pixel.clone()).await? {
+            Ok(issued) => issued,
+            Err(reason) => return Ok(Ending::NotApplicable(reason)),
+        };
+        if !model
+            .images
+            .as_ref()
+            .is_some_and(|limits| limits.formats.iter().any(|f| f == "image/png"))
+        {
+            return Ok(Ending::NotApplicable(
+                "the model takes no PNG images".into(),
+            ));
+        }
+        let state = self.mint("resolved");
+        let request = Self::with_image(
+            model,
+            &self.mint("resolved"),
+            &state,
+            json!({"handle": handle}),
+        );
+        let what = "a reference the hook issued";
+        Self::reply_of(what, self.send(&request).await?)?;
+        let bodies = self.subject.received(&state).await;
+        let [body] = bodies.as_slice() else {
+            return Err(format!(
+                "{what}: the stand-in received {} calls for the item, expected 1",
+                bodies.len()
+            ));
+        };
+        let got: ProviderRequest = serde_json::from_str(body)
+            .map_err(|e| format!("{what}: the provider request does not decode: {e}"))?;
+        let sent = got.images.as_deref().unwrap_or_default();
+        let decoded = match sent {
+            [image] => image.decode(),
+            _ => None,
+        };
+        match decoded {
+            Some(Ok(image)) if image.content_type == "image/png" && image.bytes == pixel => {
+                Ok(Ending::Passed)
+            }
+            _ => Err(format!(
+                "{what}: the stand-in received {body}, expected the image's bytes as its one image"
+            )),
+        }
+    }
+
+    async fn reference_oversized(&self) -> Check {
+        let model = self.model()?;
+        let Some(limits) = model.images.clone() else {
+            return Ok(Ending::NotApplicable("the model takes no images".into()));
+        };
+        if limits.max_bytes_each >= OVERSIZE_CAP {
+            return Ok(Ending::NotApplicable(format!(
+                "images.max_bytes_each {} is over the suite's cap of {OVERSIZE_CAP}",
+                limits.max_bytes_each
+            )));
+        }
+        let format = limits.formats.first().cloned().unwrap_or_default();
+        let mut bytes = pixel_bytes();
+        bytes.resize(limits.max_bytes_each as usize + 1, 0);
+        let (model, handle) = match self.issue(&format, bytes).await? {
+            Ok(issued) => issued,
+            Err(reason) => return Ok(Ending::NotApplicable(reason)),
+        };
+        let state = self.mint("oversized");
+        let request = Self::with_image(
+            model,
+            &self.mint("oversized"),
+            &state,
+            json!({"handle": handle}),
+        );
+        self.refused(
+            "a reference resolving to one byte over images.max_bytes_each",
+            &request,
+            &[&state],
+            errors::INVALID_PARAMS,
+            Some("items[0].images[0]"),
+            None,
+        )
+        .await?;
+        Ok(Ending::Passed)
+    }
+
+    async fn reference_source_down(&self) -> Check {
+        let (model, handle) = match self.issue("image/png", pixel_bytes()).await? {
+            Ok(issued) => issued,
+            Err(reason) => return Ok(Ending::NotApplicable(reason)),
+        };
+        let state = self.mint("source-down");
+        let request = Self::with_image(
+            model,
+            &self.mint("source-down"),
+            &state,
+            json!({"handle": handle}),
+        );
+        let what = "a reference while the image source is down";
+        self.subject.set_image_source_down(true).await;
+        let sent = self.send(&request).await;
+        // The source comes back before any early return, so a failure here
+        // cannot leave it down for the checks after this one.
+        self.subject.set_image_source_down(false).await;
+        let refusal = Self::refusal_of(what, sent?)?;
+        Self::expect_refusal(
+            what,
+            &refusal,
+            errors::IMAGE_SOURCE_UNAVAILABLE,
+            Some("items[0].images[0]"),
+            None,
+        )?;
+        if refusal.detail.retry_after_ms.is_none() {
+            return Err(format!(
+                "{what}: image_source_unavailable carries no detail.retry_after_ms"
+            ));
+        }
+        if self.calls(&state).await != 0 {
+            return Err(format!("{what}: the refused request reached the stand-in"));
+        }
+        let again = "the same body once the image source is back";
+        Self::reply_of(again, self.send(&request).await?)
+            .map_err(|e| format!("{e}: the refused request was recorded"))?;
+        if self.calls(&state).await != 1 {
+            return Err(format!("{again}: the item did not reach the stand-in once"));
+        }
+        Ok(Ending::Passed)
+    }
+
+    async fn reference_identity(&self) -> Check {
+        let (model, handle) = match self.issue("image/png", pixel_bytes()).await? {
+            Ok(issued) => issued,
+            Err(reason) => return Ok(Ending::NotApplicable(reason)),
+        };
+        let state = self.mint("identity");
+        let batch_id = self.mint("identity");
+        let request = Self::with_image(model, &batch_id, &state, json!({"handle": handle}));
+        Self::reply_of("the first call", self.send(&request).await?)?;
+        Self::reply_of("a re-send with the same handle", self.send(&request).await?)?;
+        let inline = Self::with_image(
+            model,
+            &batch_id,
+            &state,
+            json!({"content_type": "image/png", "base64": PIXEL_BASE64}),
+        );
+        let what = "a re-send carrying the same picture inline instead of the handle";
+        let refusal = Self::refusal_of(what, self.send(&inline).await?)?;
+        Self::expect_refusal(
+            what,
+            &refusal,
+            errors::BATCH_ID_REUSE,
+            Some("items[0]"),
+            None,
+        )?;
+        Ok(Ending::Passed)
+    }
 
     fn describe_complete(&self) -> Check {
         check_describe(&self.describe).map_err(|e| format!("check_describe: {e}"))?;

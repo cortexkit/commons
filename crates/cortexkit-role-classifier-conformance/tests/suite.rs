@@ -86,6 +86,47 @@ async fn an_unpriced_module_gets_not_applicable_never_passed() {
     assert!(report.render().contains("N/A  cost_usd_stable_on_replay"));
 }
 
+/// The checks that need the subject's hook to issue a resolvable handle.
+const IMAGE_HOOK_CHECKS: [&str; 4] = [
+    "image_reference_resolved_and_answered",
+    "image_reference_oversized_refused_like_inline",
+    "image_source_down_refused_transient",
+    "image_reference_identity_is_its_handle",
+];
+
+/// `report` passed every check but the image-hook ones, which are not
+/// applicable, and `image_reference_follows_declaration` passed.
+fn only_the_image_hook_checks_not_applicable(report: &SuiteReport) {
+    assert_eq!(
+        report.verdict,
+        SuiteVerdict::PassedExceptNotApplicable {
+            not_applicable: IMAGE_HOOK_CHECKS.to_vec()
+        },
+        "{}",
+        report.render()
+    );
+    assert_eq!(
+        report.outcome("image_reference_follows_declaration"),
+        Some(&CheckOutcome::Passed)
+    );
+}
+
+#[tokio::test]
+async fn a_module_that_does_not_declare_references_refuses_one_as_unsupported() {
+    let report = run(&FakeSubject::without_image_references()).await;
+    only_the_image_hook_checks_not_applicable(&report);
+    assert!(report.render().contains("does not declare image_reference"));
+}
+
+#[tokio::test]
+async fn a_subject_without_the_image_hook_gets_the_hook_checks_not_applicable() {
+    let report = run(&FakeSubject::without_image_hook()).await;
+    only_the_image_hook_checks_not_applicable(&report);
+    assert!(report
+        .render()
+        .contains("no hook to issue image references"));
+}
+
 #[tokio::test]
 async fn a_stand_in_that_cannot_hold_makes_the_concurrent_check_not_applicable() {
     let report = run(&FakeSubject::without_hold()).await;
@@ -169,6 +210,8 @@ async fn reasking_answered_items_fails_the_retry_check() {
             "auth_failure_stops_the_call_unstored",
             "model_unavailable_stops_the_call_unstored",
             "rate_limit_stops_the_rest_of_the_call",
+            // Its same-handle re-send must call nothing too.
+            "image_reference_identity_is_its_handle",
         ],
         "",
     )
@@ -284,7 +327,12 @@ async fn accepting_reuse_fails_the_reuse_check() {
             reuse_accepted: true,
             ..Defects::default()
         },
-        &["reuse_refused_naming_field"],
+        // The image identity check's inline re-send must be refused
+        // batch_id_reuse too.
+        &[
+            "reuse_refused_naming_field",
+            "image_reference_identity_is_its_handle",
+        ],
         "expected a refusal",
     )
     .await;
@@ -300,6 +348,8 @@ async fn hashing_raw_item_text_fails_the_reordered_state_check() {
         &[
             "reuse_refused_naming_field",
             "reordered_object_state_is_replay",
+            // Raw item text names `items`, not the differing `items[0]`.
+            "image_reference_identity_is_its_handle",
         ],
         "",
     )

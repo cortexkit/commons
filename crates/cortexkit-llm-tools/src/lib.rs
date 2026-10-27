@@ -89,3 +89,27 @@ pub(crate) fn non_negative(value: &Number, field: &'static str) -> Result<(), Va
         Ok(())
     }
 }
+
+/// Check a tool item's images, naming `item.images[i]`. A reference
+/// `{handle}` is checked by its handle's grammar when `references` is set,
+/// for a provider that resolves references; otherwise it is refused as an
+/// unsupported image, as the role refuses it on a module that does not
+/// declare `image_reference`. Every other image gets the role's image check.
+pub(crate) fn check_item_images(
+    images: &[cortexkit_model_batch::image::Image],
+    references: bool,
+) -> Result<(), ValidationError> {
+    for (i, image) in images.iter().enumerate() {
+        let checked = match image.reference() {
+            Some(reference) if references => reference.check(),
+            _ => cortexkit_model_batch::image::check_image(image),
+        };
+        checked.map_err(|message| {
+            ValidationError::Role(cortexkit_model_batch::errors::Refusal::invalid_params(
+                format!("item.images[{i}]"),
+                message,
+            ))
+        })?;
+    }
+    Ok(())
+}

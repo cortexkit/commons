@@ -19,20 +19,27 @@
 
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 
 use async_trait::async_trait;
 use cortexkit_role_extractor_conformance::{
     wire::{
-        describe::{ImageLimits, Limits, ModelEntry, Price, RoleDescribe},
+        describe::{ImageLimits, ImageReferenceSupport, Limits, ModelEntry, Price, RoleDescribe},
         errors::{ItemError, Refusal, PROVIDER_ERROR},
         field::{types, FieldType},
         identity::{digest, BatchIdentity},
+        image::{DecodedImage, ImageReference, ResolveFailure},
         ops,
-        provider::{read_reply, ProviderRequest},
+        provider::{check_provider_body, read_reply, ProviderRequest},
         reply::{span_byte_range, ExtractReply, ItemResult},
-        request::{admit, parse_request, CatalogRow, ExtractRequest, REPLY_FRAME_BYTES},
+        request::{
+            admit, check_resolved_item_images, parse_request, resolve_item_images, CatalogRow,
+            ExtractRequest, REPLY_FRAME_BYTES,
+        },
         spend::{
             check_before_call, input_cost_nanos, item_cost_input, nanos_to_usd, usd_to_nanos,
             ModuleBounds, Rounding,
@@ -191,8 +198,43 @@ fn to_bytes(state: &str, span: &RawValue) -> Option<Box<RawValue>> {
     RawValue::from_string(format!("[{},{}]", range.start, range.end)).ok()
 }
 
+/// The stand-in for the module that issues image handles: the images it
+/// holds by handle, and whether it is reachable.
+#[derive(Default)]
+pub struct ImageSource {
+    images: Mutex<BTreeMap<String, DecodedImage>>,
+    down: AtomicBool,
+}
+
+impl ImageSource {
+    fn issue(&self, content_type: &str, bytes: Vec<u8>) -> String {
+        let mut images = self.images.lock().unwrap();
+        let handle = format!("fake-image:{}", images.len());
+        images.insert(handle.clone(), DecodedImage::new(content_type, bytes));
+        handle
+    }
+
+    fn resolve(&self, reference: &ImageReference) -> Result<DecodedImage, ResolveFailure> {
+        if self.down.load(Ordering::SeqCst) {
+            return Err(ResolveFailure::SourceUnavailable {
+                retry_after_ms: 100,
+            });
+        }
+        self.images
+            .lock()
+            .unwrap()
+            .get(&reference.handle)
+            .cloned()
+            .ok_or(ResolveFailure::Unavailable)
+    }
+}
+
 pub struct FakeModule {
     defects: Defects,
+    /// Whether role.describe declares image_reference and references are
+    /// resolved through `images`.
+    references: bool,
+    images: Arc<ImageSource>,
     stand_in: Arc<StandIn>,
     batches: Mutex<BTreeMap<String, BatchIdentity>>,
 }
@@ -226,10 +268,15 @@ impl FakeModule {
         if self.defects.describe_wrong_pass_tokens {
             model.pass_tokens = 1;
         }
-        RoleDescribe::new(
+        let describe = RoleDescribe::new(
             Limits::new(MAX_ITEMS, MAX_REQUEST_BYTES, MAX_INSTRUCTION_BYTES),
             vec![model],
-        )
+        );
+        if self.references {
+            describe.with_image_reference(ImageReferenceSupport::new())
+        } else {
+            describe
+        }
     }
 
     fn row(&self, model: &str) -> CatalogRow<'static> {
@@ -269,6 +316,36 @@ impl FakeModule {
             }
             Err(refusal) => return refused(refusal),
         };
+        // A declaring module resolves every reference, and checks the bytes
+        // and the provider requests that carry them, before it records or
+        // sends anything.
+        let mut resolved = Vec::new();
+        if self.references && !self.defects.images_unchecked {
+            let model = describe
+                .model(&request.model)
+                .cloned()
+                .unwrap_or_else(served_model);
+            for i in 0..request.items.len() {
+                let images = match resolve_item_images(&request, i, |reference| {
+                    self.images.resolve(reference)
+                }) {
+                    Ok(images) => images,
+                    Err(refusal) => return refused(refusal),
+                };
+                if request.items[i].images.is_some() {
+                    if let Err(refusal) = check_resolved_item_images(&model, i, &images) {
+                        return refused(refusal);
+                    }
+                }
+                let body = ProviderRequest::for_item(&request, i, PROVIDER_MODEL)
+                    .expect("the item exists")
+                    .with_resolved_images(&images);
+                if let Err(refusal) = check_provider_body(i, &body, MAX_BODY_BYTES) {
+                    return refused(refusal);
+                }
+                resolved.push(images);
+            }
+        }
         if let Some(identity) = self.identity(&request) {
             let mut batches = self.batches.lock().unwrap();
             match batches.get(&request.batch_id) {
@@ -312,8 +389,11 @@ impl FakeModule {
             estimated_nanos += input
                 .and_then(|input| check_before_call(&input, rate, 0, None).ok().flatten())
                 .map_or(0, |estimate| estimate.cost_nanos);
-            let body = ProviderRequest::for_item(&request, index, PROVIDER_MODEL)
+            let mut body = ProviderRequest::for_item(&request, index, PROVIDER_MODEL)
                 .expect("the item exists");
+            if let Some(images) = resolved.get(index) {
+                body = body.with_resolved_images(images);
+            }
             let answered = self.stand_in.call(
                 &item.state,
                 serde_json::to_string(&body).expect("a provider request encodes"),
@@ -432,16 +512,36 @@ impl ExtractorRoute for FakeRoute {
 
 pub struct FakeSubject {
     module: Arc<FakeModule>,
+    /// Whether `issue_image_reference` hands out handles.
+    image_hook: bool,
 }
 
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
+        Self::build(defects, true, true)
+    }
+
+    /// A module that does not declare image_reference, with no hook.
+    pub fn without_image_references() -> Self {
+        Self::build(Defects::default(), false, false)
+    }
+
+    /// A module that declares image_reference, run by a subject with no
+    /// hook to issue handles.
+    pub fn without_image_hook() -> Self {
+        Self::build(Defects::default(), true, false)
+    }
+
+    fn build(defects: Defects, references: bool, image_hook: bool) -> Self {
         Self {
             module: Arc::new(FakeModule {
                 defects,
+                references,
+                images: Arc::new(ImageSource::default()),
                 stand_in: Arc::new(StandIn::default()),
                 batches: Mutex::new(BTreeMap::new()),
             }),
+            image_hook,
         }
     }
 }
@@ -494,5 +594,14 @@ impl ExtractorSubject for FakeSubject {
             .lock()
             .unwrap()
             .insert(state.to_owned(), scripted);
+    }
+
+    async fn issue_image_reference(&self, content_type: &str, bytes: Vec<u8>) -> Option<String> {
+        self.image_hook
+            .then(|| self.module.images.issue(content_type, bytes))
+    }
+
+    async fn set_image_source_down(&self, down: bool) {
+        self.module.images.down.store(down, Ordering::SeqCst);
     }
 }

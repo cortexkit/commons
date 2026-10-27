@@ -31,13 +31,28 @@ fn usage() -> Value {
     )
 }
 
-fn image() -> Value {
-    json!({"oneOf":[{"type":"string"},
-        object(json!({"content_type":text(),"base64":text()}), &["content_type","base64"])]})
+/// An item image. The `{handle}` reference form is listed only when
+/// `references` is set: a provider's tool schema offers it only in a release
+/// that resolves references.
+fn image(references: bool) -> Value {
+    let mut forms = vec![
+        json!({"type":"string"}),
+        object(
+            json!({"content_type":text(),"base64":text()}),
+            &["content_type", "base64"],
+        ),
+    ];
+    if references {
+        forms.push(object(
+            json!({"handle":{"type":"string","pattern":"^[A-Za-z0-9._:-]{1,128}$"}}),
+            &["handle"],
+        ));
+    }
+    json!({"oneOf":forms})
 }
 
-fn images() -> Value {
-    json!({"type":"array","items":image()})
+fn images(references: bool) -> Value {
+    json!({"type":"array","items":image(references)})
 }
 
 fn question() -> Value {
@@ -60,12 +75,12 @@ fn question() -> Value {
     schema
 }
 
-pub(crate) fn classify_input() -> Value {
+pub(crate) fn classify_input(references: bool) -> Value {
     document(object(
         json!({"model":nonempty(), "max_cost_usd":cost(),
             "questions":{"type":"object","minProperties":1,
                 "propertyNames":{"pattern":"^[a-z0-9_-]{1,64}$"},"additionalProperties":question()},
-            "item":object(json!({"state":{"type":["string","object","array"]},"images":images()}), &["state"])
+            "item":object(json!({"state":{"type":["string","object","array"]},"images":images(references)}), &["state"])
         }),
         &["model", "questions", "item", "max_cost_usd"],
     ))
@@ -119,9 +134,9 @@ fn field() -> Value {
     json!({"oneOf":branches})
 }
 
-pub(crate) fn extract_input() -> Value {
+pub(crate) fn extract_input(references: bool) -> Value {
     let mut item = object(
-        json!({"state":text(),"images":images(),
+        json!({"state":text(),"images":images(references),
         "reference_date":{"type":"string","pattern":"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"}}),
         &["state"],
     );

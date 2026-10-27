@@ -7,7 +7,7 @@ use cortexkit_model_batch::{
     errors::{self, ErrorClass, ItemError},
     estimate::{estimate_item, Estimate, EstimateError, ItemCostInput, Tokens},
     identity::item_digest,
-    image::{check_image, Image, InlineImage},
+    image::{check_image, CanonicalImage, Image, ImageReference, REFERENCE_UNSUPPORTED},
     status::{item_code_for_status, workers_ai_item_code},
     vectors,
 };
@@ -156,8 +156,23 @@ fn provider_errors_map_to_item_codes() {
 struct Images {
     about: String,
     same_image: Vec<Image>,
-    canonical: InlineImage,
+    canonical: CanonicalImage,
     refused: Vec<RefusedImage>,
+    reference: ReferenceCase,
+    refused_handles: Vec<RefusedHandle>,
+    not_images: Vec<serde_json::Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ReferenceCase {
+    image: Image,
+    canonical: CanonicalImage,
+}
+
+#[derive(Deserialize, Serialize)]
+struct RefusedHandle {
+    image: ImageReference,
+    because: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -180,6 +195,25 @@ fn one_image_in_any_spelling_is_one_identity_and_malformed_ones_are_refused() {
         })
         .collect();
     assert!(digests.windows(2).all(|pair| pair[0] == pair[1]));
+    let reference = &file.reference.image;
+    assert!(matches!(reference, Image::Reference(_)));
+    assert_eq!(reference.canonical().unwrap(), file.reference.canonical);
+    assert_eq!(
+        check_image(reference),
+        Err(REFERENCE_UNSUPPORTED.to_owned())
+    );
+    let images = vec![reference.clone()];
+    let by_handle = item_digest(&json!({"state": "s", "images": images}), Some(&images)).unwrap();
+    assert_ne!(by_handle, digests[0], "a reference is not its inline copy");
+    for refused in &file.refused_handles {
+        assert_eq!(refused.image.check(), Err(refused.because.clone()));
+    }
+    for value in &file.not_images {
+        assert!(
+            serde_json::from_value::<Image>(value.clone()).is_err(),
+            "{value} decoded as an image"
+        );
+    }
     for refused in &file.refused {
         let why = check_image(&refused.image).unwrap_err();
         if let Some(prefix) = refused.because.strip_suffix(':') {

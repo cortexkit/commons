@@ -9,9 +9,11 @@ use std::collections::BTreeSet;
 use serde::{Deserialize, Serialize};
 use serde_json::Number;
 
+pub use cortexkit_model_batch::image::ImageReferenceSupport;
+
 use crate::PROVIDES;
 
-/// The answer to `role.describe`: `{role, limits, models}`.
+/// The answer to `role.describe`: `{role, limits, models, image_reference?}`.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct RoleDescribe {
@@ -19,6 +21,10 @@ pub struct RoleDescribe {
     pub role: String,
     pub limits: Limits,
     pub models: Vec<ModelEntry>,
+    /// Present when the module resolves image references (`CONTRACT.md`
+    /// §3); absent when it refuses them as unsupported images.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_reference: Option<ImageReferenceSupport>,
 }
 
 impl RoleDescribe {
@@ -27,7 +33,20 @@ impl RoleDescribe {
             role: PROVIDES.to_owned(),
             limits,
             models,
+            image_reference: None,
         }
+    }
+
+    /// Declare that the module resolves image references.
+    pub fn with_image_reference(mut self, support: ImageReferenceSupport) -> Self {
+        self.image_reference = Some(support);
+        self
+    }
+
+    /// Whether the module declares `image_reference`: a caller sends an
+    /// image reference only when this is true.
+    pub fn declares_image_reference(&self) -> bool {
+        self.image_reference.is_some()
     }
 
     /// The entry for `model`, if this runner serves it.
@@ -263,6 +282,22 @@ mod tests {
     #[test]
     fn a_complete_answer_passes() {
         assert_eq!(check_describe(&describe()), Ok(()));
+    }
+
+    #[test]
+    fn the_image_reference_group_is_stated_only_when_declared() {
+        let plain = serde_json::to_string(&describe()).unwrap();
+        assert!(!plain.contains("image_reference"), "{plain}");
+        let decoded: RoleDescribe = serde_json::from_str(&plain).unwrap();
+        assert!(!decoded.declares_image_reference());
+        let declared = describe().with_image_reference(ImageReferenceSupport::new());
+        let text = serde_json::to_string(&declared).unwrap();
+        assert!(text.ends_with(r#","image_reference":{}}"#), "{text}");
+        assert_eq!(check_describe(&declared), Ok(()));
+        // A later member of the group is tolerated.
+        let later = text.replace(r#""image_reference":{}"#, r#""image_reference":{"v":2}"#);
+        let decoded: RoleDescribe = serde_json::from_str(&later).unwrap();
+        assert!(decoded.declares_image_reference());
     }
 
     #[test]

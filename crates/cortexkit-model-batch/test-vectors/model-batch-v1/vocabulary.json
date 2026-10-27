@@ -1,5 +1,5 @@
 {
-  "about": "Every code of the shared error vocabulary with its class. Admission codes refuse a whole call and write nothing. Item codes stand in an item's place in a reply; stored says whether a runner records the error as the item's outcome, and stops_the_call whether no further item is sent in that call. The four codes that say nothing about the item (auth_failed, model_unavailable, account_limit_exhausted, account_not_entitled) are never stored and stop the call; when the call's first provider call meets one, the whole call is refused at admission with the same code.",
+  "about": "Every code of the shared error vocabulary with its class. Admission codes refuse a whole call and write nothing. Item codes stand in an item's place in a reply; stored says whether a runner records the error as the item's outcome, and stops_the_call whether no further item is sent in that call. The four codes that say nothing about the item (auth_failed, model_unavailable, account_limit_exhausted, account_not_entitled) are never stored and stop the call; when the call's first provider call meets one, the whole call is refused at admission with the same code. image_unavailable (permanent) and image_source_unavailable (transient) refuse a call whose image reference the host could not resolve.",
   "admission": [
     {
       "code": "invalid_params",
@@ -48,6 +48,14 @@
     {
       "code": "account_not_entitled",
       "class": "permanent"
+    },
+    {
+      "code": "image_unavailable",
+      "class": "permanent"
+    },
+    {
+      "code": "image_source_unavailable",
+      "class": "transient"
     }
   ],
   "item": [

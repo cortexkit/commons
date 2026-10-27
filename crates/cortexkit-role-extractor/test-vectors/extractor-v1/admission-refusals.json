@@ -1,5 +1,5 @@
 {
-  "about": "One refusal per admission code, plus the kindless catalog row: a row with no kind is model_not_extractor without detail.kind, never model_unknown and never an invented kind. Each refusal writes nothing. invalid_params and the catalog codes come from admission's own checks against catalog; the rest come from state the request alone does not show: batch_id_reuse from a recorded batch whose fields differ, account_walled from the module's own spend guard, batch_in_progress from a call holding the batch, and the last four from the call's first provider call (a 401, a 404 or Workers AI 3042, Workers AI 3036, and 5035, 5016 or 3023).",
+  "about": "One refusal per admission code, plus the kindless catalog row: a row with no kind is model_not_extractor without detail.kind, never model_unknown and never an invented kind. Each refusal writes nothing. invalid_params and the catalog codes come from admission's own checks against catalog; the rest come from state the request alone does not show: batch_id_reuse from a recorded batch whose fields differ, account_walled from the module's own spend guard, batch_in_progress from a call holding the batch, and the last four from the call's first provider call (a 401, a 404 or Workers AI 3042, Workers AI 3036, and 5035, 5016 or 3023). image_unavailable and image_source_unavailable come from a module that declares image_reference in role.describe, resolving an item image given as a reference: the handle is unknown, expired or not this caller's, or the module that issued it did not answer. Both name the image.",
   "catalog": [
     {
       "model": "cloudflare-workers-ai/@cf/cloudflare/clairic",
@@ -286,6 +286,67 @@
         "message": "the provider account may not use this model",
         "detail": {
           "class": "permanent"
+        }
+      }
+    },
+    {
+      "name": "image_unavailable",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "images": [
+              {
+                "handle": "screenshot:0001.png"
+              }
+            ],
+            "state": "Invoice 7, as a screenshot"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "image_unavailable",
+        "message": "the image reference is unknown, expired or not usable by this caller",
+        "detail": {
+          "class": "permanent",
+          "field": "items[0].images[0]"
+        }
+      }
+    },
+    {
+      "name": "image_source_unavailable",
+      "request": {
+        "batch_id": "admit-1",
+        "fields": {
+          "total": {
+            "type": "number"
+          }
+        },
+        "items": [
+          {
+            "images": [
+              {
+                "handle": "screenshot:0001.png"
+              }
+            ],
+            "state": "Invoice 7, as a screenshot"
+          }
+        ],
+        "model": "cloudflare-workers-ai/@cf/cloudflare/clairic"
+      },
+      "refusal": {
+        "code": "image_source_unavailable",
+        "message": "the module holding the referenced image did not answer",
+        "detail": {
+          "class": "transient",
+          "field": "items[0].images[0]",
+          "retry_after_ms": 2000
         }
       }
     }

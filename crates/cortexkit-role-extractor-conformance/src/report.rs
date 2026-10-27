@@ -113,6 +113,26 @@ pub const CHECKS: &[CheckSpec] = &[
         "cost_usd_from_reported_tokens",
         "on a priced model that takes list fields, with the stand-in replaying Clairic's reply to probe 03, the reply's cost_usd is the reported input_tokens (304) at the model's input price, never the pre-call estimate",
     ),
+    check(
+        "image_reference_follows_declaration",
+        "on a model that takes images, an item image given as a reference {handle} the module never issued is refused before any call naming items[0].images[0]: image_unavailable, class permanent, when role.describe declares image_reference, and invalid_params (an unsupported image) when it does not; the refusal writes nothing",
+    ),
+    check(
+        "image_reference_resolved_and_answered",
+        "with a module that declares image_reference, a reference the subject's hook issued for a one-pixel PNG is admitted, and the stand-in receives the item with the image's bytes as {content_type, base64}, never the handle; not applicable without the hook",
+    ),
+    check(
+        "image_reference_oversized_refused_like_inline",
+        "with a module that declares image_reference, a reference the hook issued for one byte over the model's images.max_bytes_each is refused invalid_params naming items[0].images[0], the refusal an inline image of that size gets, before any call and writing nothing; not applicable without the hook",
+    ),
+    check(
+        "image_source_down_refused_transient",
+        "with a module that declares image_reference, while the hook's image source is down a reference is refused image_source_unavailable, class transient, naming items[0].images[0] with detail.retry_after_ms, before any call; once the source is back the same body is admitted, so the refusal wrote nothing; not applicable without the hook",
+    ),
+    check(
+        "image_reference_identity_is_its_handle",
+        "with a module that declares image_reference, a re-send carrying the same handle is not batch_id_reuse, and a re-send carrying the same picture inline instead of the handle is refused batch_id_reuse naming items[0]; not applicable without the hook",
+    ),
 ];
 
 /// Where the suite checks less than the contract says, and why. Every
@@ -124,6 +144,7 @@ pub const NARROWINGS: &[&str] = &[
     "Batch-level provider errors (auth_failed, model_unavailable, account_limit_exhausted, account_not_entitled on the first provider call) are not checked: the live probe captured none of them.",
     "Single flight and stored outcomes on a re-send are not checked here.",
     "The provider body limit is not checked: reaching it needs a request larger than most modules' max_request_bytes.",
+    "Image references are checked on the first served model only, with one image per item; the pixel limit of a resolved image is not checked.",
 ];
 
 /// How one check ended.

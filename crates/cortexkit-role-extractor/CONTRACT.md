@@ -64,7 +64,8 @@ what is this role's own. Route roles and model discovery follow RULES §18.
       images: { max, max_bytes_each, max_bytes_total, formats } | null,
       price?: { input_per_mtok_usd?, output_per_mtok_usd? },
       egress_host
-    } ]
+    } ],
+    image_reference?: {}             // present iff the module resolves image references (§3)
   }
   ```
 
@@ -117,6 +118,22 @@ what is this role's own. Route roles and model discovery follow RULES §18.
   checks the decoded sizes against the model's `images` (Clairic: 4 MiB
   each, 8 MiB in total) before any call. `images: []` is refused naming
   `items[i].images`.
+- [pinned] **Image references.** An image may be a reference `{handle}` to
+  an image another module holds, under RULES §13.1. The rollout rule: a
+  module that resolves references declares the `image_reference` group in
+  `role.describe` (§2), and a caller sends a reference only to a module
+  that declares it. A module that does not declare it refuses a reference
+  as an unsupported image, `invalid_params` naming `items[i].images[j]`
+  (`check_request`; `admit` without the group). A declaring module checks
+  the handle (`check_request_with_references`; `admit` with the group),
+  resolves every reference through the module that issued it before any
+  provider call or write (`resolve_item_images`), and gives the resolved
+  bytes exactly the checks an inline image gets, with the same refusals and
+  paths (`check_resolved_item_images`). It checks each provider request's
+  size with the resolved bytes in it (`ProviderRequest::with_resolved_images`,
+  `check_provider_body`), since a handle alone does not count them. A
+  reference it cannot resolve refuses the call `image_unavailable` or
+  `image_source_unavailable` (§7).
 - [pinned] `reference_date` is a real calendar date, `YYYY-MM-DD`, years
   0001 to 9999 (`is_calendar_date`); `2026-02-30` or any other non-date is
   refused naming `items[i].reference_date`.
@@ -282,8 +299,9 @@ say what is this role's own.
 ### 6.1 Idempotent by `batch_id`
 
 - [pinned] As RULES §2. **Body identity** is the model, the fields, the
-  options in force, and each item (its images in canonical form, its
-  `reference_date` included) (`BatchIdentity`). The options are hashed as in
+  options in force, and each item (its images in canonical form, a
+  reference as its `{handle}`, its `reference_date` included)
+  (`BatchIdentity`). The options are hashed as in
   force (`EffectiveOptions`), so an absent option and the same option sent
   as `false` are one batch; they are part of the identity because they
   change what the provider answers.
@@ -323,7 +341,10 @@ say what is this role's own.
   row (§6.8); the batch id, the field count, each field (§4), the item
   count, each item's state, images and `reference_date`, and
   `max_cost_usd` (`check_request`); each provider request's size
-  (`check_provider_bodies`); and the reply size (`check_reply_size`).
+  (`check_provider_bodies`); and the reply size (`check_reply_size`). A
+  module that declares `image_reference` then resolves the references and
+  checks their bytes and the provider requests that carry them (§3), still
+  before anything is written or sent.
 - [pinned] Admission refuses, before any provider call, the three requests
   Clairic was measured to refuse (probes 08, 09 and 11; their bodies are in
   `provider-replies.json`):
@@ -411,7 +432,13 @@ detail and class, and which codes are stored and stop the call are RULES
   `batch_id_reuse`, `model_unknown`, `model_not_extractor`,
   `account_walled`, `batch_in_progress`, and, when the call's first provider
   call meets one, `auth_failed`, `model_unavailable`,
-  `account_limit_exhausted`, `account_not_entitled`.
+  `account_limit_exhausted`, `account_not_entitled`; and, only from a module
+  that declares `image_reference`, `image_unavailable` and
+  `image_source_unavailable`, both with `detail.field` `items[i].images[j]`.
+  `image_unavailable` is permanent (the handle is unknown, expired or not
+  usable by this caller, one answer for all three);
+  `image_source_unavailable` is transient, with `detail.retry_after_ms` (the
+  issuing module is unreachable or timed out).
 - [pinned] Per-item errors (`ITEM_CODES`): `rate_limited`,
   `provider_error`, `provider_refused`, `invalid_item`, `cost_exceeded`,
   `answer_too_large`, `auth_failed`, `model_unavailable`,
@@ -449,7 +476,8 @@ detail and class, and which codes are stored and stop the call are RULES
 - Request per item (`ProviderRequest::for_item`): `{model:
   "@cf/cloudflare/clairic", state, images?, reference_date?, fields,
   options: {include_quantiles, return_state_text}}`, with `fields` passed
-  through key by key and both options always sent.
+  through key by key and both options always sent. A resolved reference is
+  sent as its bytes; the provider never sees a handle.
 - Reply: the envelope's `result`, `{model, answers, truncated, usage,
   state_text?}` in that order (`ProviderResult`): `model` is the
   provider's own name (`"clairic"`), not forwarded; `state_text` is present
