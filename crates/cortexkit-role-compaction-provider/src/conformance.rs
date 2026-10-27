@@ -527,14 +527,26 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
         Ok(())
     }
 
-    /// A notice repeating the reconciled generation re-reads nothing held.
-    fn check_no_second_reconcile(&mut self, through: u64) -> Result<(), String> {
+    /// A notice repeating the reconciled generation re-reads nothing held
+    /// below the provider's newest held ordinal.
+    ///
+    /// The newest held ordinal itself may be read again. A provider can keep
+    /// a standing continuity read: on every notice it reads from the newest
+    /// ordinal it holds onward, a one-entry overlap, to confirm the
+    /// transcript still continues from what it holds. When the reconciled
+    /// `through` is the newest message, that overlap touches `through`
+    /// without reconciling anything. A second reconcile reads held ordinals
+    /// from the cut onward, so it always reads one below the newest held
+    /// ordinal, and that is what fails. The newest held ordinal is the
+    /// runner's newest served one, since the provider read through it
+    /// before this notice.
+    fn check_no_second_reconcile(&mut self) -> Result<(), String> {
         let lineage = self.runner.lock().lineage_id.clone();
         let last = self.runner.lock().served.len() as u64 - 1;
         let pruned = self.runner.lock().reasoning_pruned;
         self.notice(&lineage, last, None, pruned)?;
         self.check_view()?;
-        if let Some(ordinal) = self.runner.take_reads().iter().find(|o| **o <= through) {
+        if let Some(ordinal) = self.runner.take_reads().iter().find(|o| **o < last) {
             return Err(self.fail(format!(
                 "the provider re-read ordinal {ordinal} again although the generation it \
                  reconciled had not changed"
@@ -556,8 +568,9 @@ impl<A: PrunedReasoningProbe> Conversation<'_, A> {
 /// pruned content in any replace range or part edit (the prune removes
 /// reasoning, a tool call's thought signature and a provider-state
 /// signature, so an edit re-serializing a held part fails too), and that a
-/// later notice with the same generation causes
-/// no second re-read. In the second, a cut first moves the conversation to a
+/// later notice with the same generation causes no second re-read: it may
+/// read from its newest held message onward, a continuity overlap, but
+/// nothing held below it. In the second, a cut first moves the conversation to a
 /// lineage starting at ordinal 2, so the provider holds copies from before
 /// its cut; after the prune it must re-read only from the cut and must not
 /// render those older copies' pruned content. Both prune with the
@@ -665,7 +678,7 @@ pub fn held_copies_follow_reasoning_pruned_report(
         conversation.setup(&lineage, None, Some(pruned))?;
         conversation.check_view()?;
         conversation.check_reconciled(through)?;
-        conversation.check_no_second_reconcile(through)?;
+        conversation.check_no_second_reconcile()?;
     }
     Ok(HeldCopiesReport {
         profile: transcript.profile(),
@@ -1061,6 +1074,90 @@ mod tests {
         held_copies_follow_reasoning_pruned(&mut HoldingProvider::default()).unwrap();
     }
 
+    /// A reconciling provider with a standing continuity read: on every
+    /// notice it reads from the newest ordinal it holds onward, so the first
+    /// entry served overlaps what it holds, and it checks that entry's `mid`
+    /// still matches before storing what follows. Everything else is
+    /// [`HoldingProvider`]'s.
+    #[derive(Default)]
+    struct OverlapReadingProvider {
+        inner: HoldingProvider,
+    }
+
+    impl OverlapReadingProvider {
+        fn on(profile: Option<&str>) -> Self {
+            Self {
+                inner: HoldingProvider {
+                    profile: profile.map(Into::into),
+                    ..HoldingProvider::default()
+                },
+            }
+        }
+    }
+
+    impl PrunedReasoningProbe for OverlapReadingProvider {
+        fn serializer_profile(&self) -> Option<String> {
+            self.inner.serializer_profile()
+        }
+
+        fn setup(
+            &mut self,
+            runner: &ScriptedRunner,
+            request: &SetupRequest,
+        ) -> Result<SetupAnswer, String> {
+            self.inner.setup(runner, request)
+        }
+
+        fn notice(
+            &mut self,
+            runner: &ScriptedRunner,
+            notice: &AdvanceNotice,
+        ) -> Result<(), String> {
+            let inner = &mut self.inner;
+            inner.lineage = notice.lineage_id.clone();
+            inner.first_ordinal = notice.first_ordinal.unwrap_or(0);
+            if let Some(state) = notice.reasoning_pruned {
+                inner.reconcile(runner, state);
+            }
+            let newest = inner
+                .held
+                .range(inner.first_ordinal..)
+                .next_back()
+                .map(|(ordinal, _)| *ordinal);
+            let from = newest.unwrap_or(inner.first_ordinal);
+            let page = runner
+                .read(&json!({"from_ordinal": from}))
+                .map_err(|e| e.to_string())?;
+            if let Some(newest) = newest {
+                let served = page["messages"][0]["mid"].as_str();
+                if served != Some(inner.mids[&newest].as_str()) {
+                    return Err(format!(
+                        "the transcript no longer continues from held ordinal {newest}"
+                    ));
+                }
+            }
+            inner.store(&page);
+            Ok(())
+        }
+
+        fn next_view(
+            &mut self,
+            runner: &ScriptedRunner,
+            session_ref: &str,
+        ) -> Result<CompactionView, String> {
+            self.inner.next_view(runner, session_ref)
+        }
+    }
+
+    #[test]
+    fn provider_with_a_one_entry_overlap_read_passes_on_every_transcript() {
+        let profiles = std::iter::once(None).chain(PROFILES.map(Some));
+        for profile in profiles {
+            held_copies_follow_reasoning_pruned(&mut OverlapReadingProvider::on(profile))
+                .unwrap_or_else(|e| panic!("{profile:?}: {e}"));
+        }
+    }
+
     #[test]
     fn provider_rendering_a_held_pre_prune_copy_fails_by_name() {
         let failure = held_copies_follow_reasoning_pruned(&mut HoldingProvider::with(
@@ -1110,7 +1207,13 @@ mod tests {
             HoldingFault::RereadsEveryNotice,
         ))
         .unwrap_err();
-        assert!(failure.contains("re-read ordinal 0 again"), "{failure}");
+        assert_eq!(
+            failure,
+            format!(
+                "{HELD_COPIES_CASE}: the provider re-read ordinal 0 again although the \
+                 generation it reconciled had not changed"
+            )
+        );
     }
 
     #[test]

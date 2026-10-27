@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.6
+
+- The `held_copies_follow_reasoning_pruned` probe's no-second-reconcile
+  check fails only on a read of an ordinal below the provider's newest held
+  ordinal. A provider that reads from its newest held message onward on
+  every notice, a one-entry overlap confirming the transcript still
+  continues from what it holds, no longer fails as "re-read ordinal 4
+  again" when the reconciled `through` is the newest message. A second
+  reconcile, which re-reads held ordinals from the cut onward, still fails
+  with the same message.
+
 ## 0.7.5
 
 - The `held_copies_follow_reasoning_pruned` probe's profile transcripts
