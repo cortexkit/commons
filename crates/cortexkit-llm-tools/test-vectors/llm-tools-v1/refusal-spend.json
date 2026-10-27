@@ -1,0 +1,19 @@
+{
+  "about": "Invented refusal-spend samples for llm.classify/v1, llm.extract/v1 and llm.complete/v1. Each case carries the refusal under test in value and the expected errors::refusal_spend outcome in expect: a spend object for valid refusals, an error name for invalid ones.",
+  "cases": [
+    {"name":"measured-provider-error","value":{"code":"provider_error","message":"The fictional provider failed after retries; the call cost USD 0.0042.","detail":{"class":"transient","cost_usd":0.0042}},"expect":{"spend":"measured","cost_usd":0.0042}},
+    {"name":"unknown-transient","value":{"code":"rate_limited","message":"The fictional provider rate-limited the call after an unknown billed attempt.","detail":{"class":"transient","retry_after_ms":1000,"cost_unknown":true}},"expect":{"spend":"charge_ceiling"}},
+    {"name":"unmeasured","value":{"code":"cost_unmeasured","message":"The fictional provider omitted the input-token count its price needs.","detail":{"class":"permanent"}},"expect":{"spend":"charge_ceiling"}},
+    {"name":"no-spend-predispatch","value":{"code":"scope_required","message":"A daemon-stamped scope is required.","detail":{"class":"permanent","no_spend":true}},"expect":{"spend":"no_spend"}},
+    {"name":"undeclared-predispatch","value":{"code":"flow_scope_required","message":"The invented refusal carries no spend marker.","detail":{"class":"permanent"}},"expect":{"spend":"undeclared"}},
+    {"name":"both-present","value":{"code":"provider_error","message":"The invented refusal carries both spend members.","detail":{"class":"transient","cost_usd":0.001,"cost_unknown":true}},"expect":{"error":"both_present"}},
+    {"name":"unknown-false","value":{"code":"provider_error","message":"The invented refusal marks cost_unknown false.","detail":{"class":"transient","cost_unknown":false}},"expect":{"error":"unknown_not_true"}},
+    {"name":"negative-cost","value":{"code":"provider_error","message":"The invented refusal carries a negative cost.","detail":{"class":"transient","cost_usd":-0.01}},"expect":{"error":"invalid_cost"}},
+    {"name":"unmeasured-with-cost","value":{"code":"cost_unmeasured","message":"The invented unmeasured refusal carries a cost.","detail":{"class":"permanent","cost_usd":0.001}},"expect":{"error":"unmeasured_with_spend"}},
+    {"name":"unmeasured-with-unknown","value":{"code":"cost_unmeasured","message":"The invented unmeasured refusal carries an unknown mark.","detail":{"class":"permanent","cost_unknown":true}},"expect":{"error":"unmeasured_with_spend"}},
+    {"name":"no-spend-with-cost","value":{"code":"provider_error","message":"The invented refusal marks no spend and carries a cost.","detail":{"class":"transient","cost_usd":0.001,"no_spend":true}},"expect":{"error":"both_present"}},
+    {"name":"no-spend-with-unknown","value":{"code":"rate_limited","message":"The invented refusal marks no spend and unknown spend.","detail":{"class":"transient","cost_unknown":true,"no_spend":true}},"expect":{"error":"both_present"}},
+    {"name":"unmeasured-with-no-spend","value":{"code":"cost_unmeasured","message":"The invented unmeasured refusal marks no spend.","detail":{"class":"permanent","no_spend":true}},"expect":{"error":"unmeasured_with_spend"}},
+    {"name":"no-spend-false","value":{"code":"provider_error","message":"The invented refusal marks no_spend false.","detail":{"class":"transient","no_spend":false}},"expect":{"error":"no_spend_not_true"}}
+  ]
+}

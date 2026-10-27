@@ -11,7 +11,8 @@ The schemas are JSON objects suitable for a provider's `tool.catalog` entry.
 `complete` also exports `Demand`, `Model`, `OUTPUT_SCHEMA_MAX_BYTES`, and
 `validate_result_for_request()` to check the output branch against the request.
 `errors` reuses the role error types/codes, defines common admission and
-completion-only codes, and exposes their classes and a refusal constructor.
+completion-only codes, exposes their classes, a refusal constructor, and the
+refusal-spend checker (`refusal_spend` with `RefusalSpend`/`SpendViolation`).
 
 The classifier and extractor reuse the roles' `Item`, `Question`/`Field`,
 `Options` and `Answer` types rather than translating their contents. Their

@@ -437,6 +437,21 @@ pub struct RefusalDetail {
     /// can tell which login to fix. Always an id, never the secret itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credential: Option<String>,
+    /// The billed cost of the provider call behind this refusal, in USD.
+    /// Only the `cortexkit-llm-tools` refusal-spend rule defines when it is
+    /// present and what it means; other roles leave it absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    /// Marks an unmeasured refusal that may still have been billed. Only the
+    /// `cortexkit-llm-tools` refusal-spend rule defines when it is present;
+    /// it is always `true` when present. Other roles leave it absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_unknown: Option<bool>,
+    /// Marks a refusal that spent nothing. Only the `cortexkit-llm-tools`
+    /// refusal-spend rule defines when it is present; it is always `true`
+    /// when present. Other roles leave it absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_spend: Option<bool>,
 }
 
 impl RefusalDetail {
@@ -452,6 +467,9 @@ impl RefusalDetail {
             resets_at_ms: None,
             retry_after_ms: None,
             credential: None,
+            cost_usd: None,
+            cost_unknown: None,
+            no_spend: None,
         }
     }
 
@@ -497,6 +515,30 @@ impl RefusalDetail {
 
     pub fn with_credential(mut self, credential: impl Into<String>) -> Self {
         self.credential = Some(credential.into());
+        self
+    }
+
+    /// The billed cost of the provider call behind a refusal, in USD. The
+    /// `cortexkit-llm-tools` refusal-spend rule states when a refusal
+    /// carries it; other roles leave it absent.
+    pub fn with_cost_usd(mut self, cost_usd: f64) -> Self {
+        self.cost_usd = Some(cost_usd);
+        self
+    }
+
+    /// Marks a refusal whose spend may have reached the provider but was
+    /// never measured. The `cortexkit-llm-tools` refusal-spend rule states
+    /// when a refusal carries it; it is always `true` when present.
+    pub fn with_cost_unknown(mut self) -> Self {
+        self.cost_unknown = Some(true);
+        self
+    }
+
+    /// Marks a refusal that spent nothing. The `cortexkit-llm-tools`
+    /// refusal-spend rule states when a refusal carries it; it is always
+    /// `true` when present.
+    pub fn with_no_spend(mut self) -> Self {
+        self.no_spend = Some(true);
         self
     }
 }

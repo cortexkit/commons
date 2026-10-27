@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.1
+
+- New refusal-spend rule (`CONTRACT.md` beside the billing rule): the
+  serving module marks every refusal with exactly one spend marker.
+  Measured (`detail.cost_usd`, charged exactly), `cost_unmeasured` (the
+  code itself, charged at `max_cost_usd`), unknown (`detail.cost_unknown`
+  is `true`, charged at `max_cost_usd`), or no spend (`detail.no_spend`
+  is `true`, charged nothing). A serving module that cannot prove a
+  failure happened before anything was sent marks it unknown, never free.
+  A refusal with no marker is from a producer that does not follow the
+  rule, and the caller applies its own policy to it. A repeat with the
+  same call key returns the same refusal with the same spend members and
+  is never billed twice.
+- New `errors::refusal_spend(&Refusal) ->
+  Result<RefusalSpend, SpendViolation>` checker used by the caller and the
+  serving module, with `RefusalSpend::{Measured, ChargeCeiling, NoSpend,
+  Undeclared}` (both `cost_unmeasured` and `cost_unknown` give
+  `ChargeCeiling`) and the `COST_USD_KEY` / `COST_UNKNOWN_KEY` /
+  `NO_SPEND_KEY` detail-key constants. All new types are
+  `#[non_exhaustive]`. Requires `cortexkit-model-batch` 0.3.1 for the
+  three detail members.
+- New `refusal-spend.json` vectors with valid and invalid spend samples
+  and their expected checker results; `SHA256SUMS` is refreshed.
+
+
 ## 0.2.0
 
 - Depends on `cortexkit-model-batch` 0.3.0, `cortexkit-role-classifier`

@@ -41,6 +41,40 @@ must not be fabricated to derive a cost. A known free rate and cost may be zero.
 When nothing gives the billed cost, the call fails `cost_unmeasured` (below)
 instead of succeeding.
 
+**Refusal spend:** every refusal of the three tools states its spend, so
+the caller charges a refusal without keeping a list of no-spend codes.
+The serving module marks every refusal with exactly one
+of:
+
+1. **Measured:** `detail.cost_usd` is a non-negative finite JSON number. A
+   provider call was made and its billed cost was measured, the same number
+   a success would have carried. The caller charges exactly that.
+2. **`cost_unmeasured`:** the code itself, unchanged. The provider answered
+   but nothing gives the cost. The caller charges the request's
+   `max_cost_usd`.
+3. **Unknown:** `detail.cost_unknown` is `true`. A call may have reached
+   the provider and been billed, but nothing measured it, for example a
+   timeout or a connection lost after the request was sent. Any code may
+   carry it, transient ones included. The caller charges `max_cost_usd`. A
+   serving module that cannot prove a failure happened before anything was
+   sent uses this, never case 4: spend fails toward charging, never toward
+   free.
+4. **No spend:** `detail.no_spend` is `true`. That is a promise nothing
+   was spent, for example every pre-dispatch refusal, or a provider error
+   the provider does not bill. The caller charges nothing.
+
+A refusal with none of these markers is from a producer that does not
+follow this rule: the caller cannot tell such a refusal from a no-spend
+one, so it applies its own policy to it.
+
+Invalid, and refused by the spend check: any two markers together
+(`cost_usd`, `cost_unknown`, `no_spend`, or the `cost_unmeasured` code
+carrying one); `cost_unknown` or `no_spend` with any value other than
+`true`; `cost_usd` that is not a non-negative finite number.
+
+**Replay:** a repeat with the same call key returns the same refusal with
+the same spend members, and is never billed twice.
+
 ## Common tool-admission refusals (all three tools)
 
 These checks run **before anything is written and before anything reaches a

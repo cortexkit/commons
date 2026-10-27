@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+
+- Additive: `RefusalDetail` carries three optional spend members, `cost_usd
+  (Option<f64>)`, `cost_unknown (Option<bool>)` and `no_spend
+  (Option<bool>)`, all omitted when
+  absent, with `with_cost_usd`, `with_cost_unknown` and `with_no_spend` builders. Their
+  meaning is defined by the `cortexkit-llm-tools` refusal-spend rule;
+  other roles leave them absent. Existing vectors and wire bytes are
+  unchanged.
+
 ## 0.3.0
 
 Breaking: an item image may be a reference to an image another module

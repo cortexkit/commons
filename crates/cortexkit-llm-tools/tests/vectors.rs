@@ -159,6 +159,53 @@ fn refusals_cover_every_published_code_and_class() {
 }
 
 #[test]
+fn refusal_spend_covers_every_spend_vector() {
+    let document: Value = serde_json::from_str(vectors::REFUSAL_SPEND).unwrap();
+    let cases = document["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 14);
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let refusal: errors::Refusal = serde_json::from_value(case["value"].clone())
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+        // The spend members survive the typed refusal shape.
+        assert_eq!(
+            serde_json::to_value(&refusal).unwrap(),
+            case["value"],
+            "{name}"
+        );
+        let expect = &case["expect"];
+        if let Some(spend) = expect.get("spend").and_then(Value::as_str) {
+            let got =
+                errors::refusal_spend(&refusal).unwrap_or_else(|error| panic!("{name}: {error}"));
+            match spend {
+                "measured" => {
+                    let cost = expect["cost_usd"].as_f64().unwrap();
+                    assert_eq!(got, errors::RefusalSpend::Measured(cost), "{name}");
+                }
+                "charge_ceiling" => {
+                    assert_eq!(got, errors::RefusalSpend::ChargeCeiling, "{name}")
+                }
+                "no_spend" => assert_eq!(got, errors::RefusalSpend::NoSpend, "{name}"),
+                "undeclared" => assert_eq!(got, errors::RefusalSpend::Undeclared, "{name}"),
+                other => panic!("{name}: unknown spend {other}"),
+            }
+        } else {
+            let error = expect["error"].as_str().unwrap();
+            let got = errors::refusal_spend(&refusal).unwrap_err();
+            let expected = match error {
+                "both_present" => errors::SpendViolation::BothPresent,
+                "unknown_not_true" => errors::SpendViolation::UnknownNotTrue,
+                "no_spend_not_true" => errors::SpendViolation::NoSpendNotTrue,
+                "invalid_cost" => errors::SpendViolation::InvalidCost,
+                "unmeasured_with_spend" => errors::SpendViolation::UnmeasuredWithSpend,
+                other => panic!("{name}: unknown error {other}"),
+            };
+            assert_eq!(got, expected, "{name}");
+        }
+    }
+}
+
+#[test]
 fn vector_sha256sums_inventory_and_embedded_bytes_match() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-vectors/llm-tools-v1");
     let lines: Vec<_> = vectors::SHA256SUMS.lines().collect();
