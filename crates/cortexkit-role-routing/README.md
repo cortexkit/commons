@@ -8,14 +8,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.4.1"
+cortexkit-role-routing = "0.5.0"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.4.1", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.5.0", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -32,7 +32,7 @@ What the crate holds:
 - `describe`: the `role.describe` answer, its optional `capabilities`
   groups, and `check_describe`;
 - `capabilities`: the optional groups this version defines
-  (`select_hold_control`, `select_harness`);
+  (`select_hold_control`, `select_harness`, `select_prefer`);
 - `select`: the `route.select` request, `parse_select_request` and
   `parse_select_request_serving` (which reads the members of the groups a
   provider declares), the answer and `check_answer`;
@@ -85,6 +85,26 @@ Likewise, a 0.4.0 provider refuses declarations carrying the new program
 members: runners declare them only after their provider serves 0.4.1.
 A caller sends `harness` only when `role.describe` declares `select_harness`;
 a provider without the group refuses that member by name.
+
+With the `select_prefer` describe group, a caller may send `prefer` using
+`SelectRequest::with_prefer`: up to 16 route keys with no duplicates. The
+provider answers a listed adequate route in list order, never admitting one
+the request would not otherwise get. A provider without the group refuses
+`prefer` by name, like `hold_ok`.
+
+With `pin_fallback` (`SelectRequest::with_pin_fallback`) beside a pin, an
+unservable pin routes normally instead of refusing `pin_unavailable`. The
+answer carries `pin_outcome` (`SelectAnswer::with_pin_outcome`), and on
+`fell_back` its `detail` carries `pin_reason`. Without the field pins still
+refuse.
+
+Reports carry `usage` built with `Usage::new` and its `with_*` setters: token
+counts matching the runner's names plus `duration_ms` and `first_token_ms`,
+all bounded integers, and the caller's optional `cost_usd` claim, which the
+provider may ignore. A failed report with a future `reset_at_ms` fences
+only that decision's route on that account until the reset (capped at 24
+hours; a past reset fences nothing). `run_finished` observations release the
+runner's account pin.
 
 The [contract](CONTRACT.md) is normative. See the
 [conformance kit](../cortexkit-role-routing-conformance/README.md) and the

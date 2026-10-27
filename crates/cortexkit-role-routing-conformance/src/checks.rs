@@ -53,6 +53,13 @@ const HOLD_CHECKS: &[&str] = &[
     "hold_account_for_applies_recorded_cap",
 ];
 
+/// The checks of the `select_prefer` group's rules. Each is not applicable
+/// to a provider that does not declare it.
+const PREFER_CHECKS: &[&str] = &[
+    "prefer_prefers_listed_adequate_route",
+    "prefer_never_admits_inadequate_route",
+];
+
 /// The operator hold settings the hold checks start from, in seconds: the
 /// contract's defaults.
 const MAX_HOLD_S: u64 = 900;
@@ -213,6 +220,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         if HOLD_CHECKS.contains(&name) {
             return self.hold_check(name).await;
         }
+        if PREFER_CHECKS.contains(&name) {
+            return self.prefer_check(name).await;
+        }
         if matches!(
             name,
             "requested_harness_is_hosted_and_echoed" | "undeclared_harness_group_refuses_member"
@@ -229,6 +239,17 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                     } else {
                         "does not declare"
                     }
+                )));
+            }
+        }
+        if name == "undeclared_prefer_group_refuses_member" {
+            let route = self.route_as(CONSUMER).await?;
+            let describe: RoleDescribe =
+                answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+            if describe.serves(crate::wire::capabilities::SELECT_PREFER) {
+                return Ok(Ending::NotApplicable(format!(
+                    "role.describe declares {}",
+                    crate::wire::capabilities::SELECT_PREFER
                 )));
             }
         }
@@ -317,6 +338,20 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             "undeclared_harness_group_refuses_member" => {
                 self.undeclared_harness_group_refuses_member().await
             }
+            "pin_fallback_routes_and_labels" => self.pin_fallback_routes_and_labels().await,
+            "report_reset_fences_only_decision_route_and_account" => {
+                self.report_reset_fences_only_decision_route_and_account()
+                    .await
+            }
+            "report_past_reset_fences_nothing_and_is_recorded" => {
+                self.report_past_reset_fences_nothing_and_is_recorded()
+                    .await
+            }
+            "report_reset_capped_at_24h" => self.report_reset_capped_at_24h().await,
+            "undeclared_prefer_group_refuses_member" => {
+                self.undeclared_prefer_group_refuses_member().await
+            }
+            "report_usage_strict" => self.report_usage_strict().await,
             other => Err(format!("the kit has no check named {other}")),
         }
     }
@@ -1246,6 +1281,11 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 json!({"scope": "account", "code": "one"}),
             ),
             ("request_input_tokens", json!(0), json!(1)),
+            (
+                "usage",
+                json!({"input_tokens": 100}),
+                json!({"input_tokens": 101}),
+            ),
         ] {
             let selected = select(&consumer, &base(), "select for report body comparison").await?;
             let body = with(
@@ -1686,6 +1726,30 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         checked.map(|()| Ending::Passed)
     }
 
+    /// Run the prefer check `name`, or report it not applicable when the
+    /// provider does not declare `select_prefer`.
+    async fn prefer_check(&self, name: &str) -> Result<Ending, String> {
+        let route = self.route_as(CONSUMER).await?;
+        let describe: RoleDescribe =
+            answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+        if !describe.serves(crate::wire::capabilities::SELECT_PREFER) {
+            return Ok(Ending::NotApplicable(format!(
+                "role.describe does not declare {}",
+                crate::wire::capabilities::SELECT_PREFER
+            )));
+        }
+        let checked = match name {
+            "prefer_prefers_listed_adequate_route" => {
+                self.prefer_prefers_listed_adequate_route().await
+            }
+            "prefer_never_admits_inadequate_route" => {
+                self.prefer_never_admits_inadequate_route().await
+            }
+            other => Err(format!("the kit has no prefer check named {other}")),
+        };
+        checked.map(|()| Ending::Passed)
+    }
+
     /// Set the operator's hold settings for both subscription providers of
     /// the hold catalog.
     async fn hold_limits(&self, max_hold_s: u64, within_s: u64) -> Check {
@@ -1948,5 +2012,336 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             Err(_) => Ok(()),
             Ok(_) => Err("account_for naming the decision was answered, though every account is blocked".into()),
         }
+    }
+
+    async fn pin_fallback_routes_and_labels(&self) -> Check {
+        use cortexkit_role_routing::select::{PinFallback, PinOutcome};
+        let route = self.route_as(CONSUMER).await?;
+        let bad_pin = format!("{}/model-z", fixture::PRICED_PROVIDER);
+        refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &with(base(), "pin", json!(bad_pin)),
+            RefusalCode::PinUnavailable,
+            "an unservable pin without pin_fallback",
+        )
+        .await?;
+        let good_pin = format!("{}/model-a", fixture::PRICED_PROVIDER);
+        let mut pinned_params = base();
+        pinned_params["pin"] = json!(good_pin);
+        pinned_params["pin_fallback"] = json!("route");
+        let pinned = select(&route, &pinned_params, "a servable pin with pin_fallback").await?;
+        if pinned.pin_outcome != Some(PinOutcome::Pinned) {
+            return Err(format!(
+                "a servable pin with pin_fallback was answered pin_outcome {:?}, not pinned",
+                pinned.pin_outcome
+            ));
+        }
+        let mut fallback_params = base();
+        fallback_params["pin"] = json!(bad_pin);
+        fallback_params["pin_fallback"] = json!(PinFallback::Route.as_str());
+        let fallback = select(
+            &route,
+            &fallback_params,
+            "an unservable pin with pin_fallback",
+        )
+        .await?;
+        if fallback.pin_outcome != Some(PinOutcome::FellBack) {
+            return Err(format!(
+                "a fallback answer was labelled {:?}, not fell_back",
+                fallback.pin_outcome
+            ));
+        }
+        match fallback
+            .detail
+            .as_ref()
+            .and_then(Value::as_object)
+            .and_then(|detail| detail.get("pin_reason"))
+            .and_then(Value::as_str)
+        {
+            Some("unknown_model") => Ok(()),
+            other => Err(format!(
+                "a fell_back without the code carries pin_reason {other:?}, not \"unknown_model\""
+            )),
+        }
+    }
+
+    async fn report_reset_fences_only_decision_route_and_account(&self) -> Check {
+        let consumer = self.route_as(CONSUMER).await?;
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let pin = format!("{}/model-c", fixture::SUBSCRIPTION_PROVIDER);
+        let selected = select(
+            &consumer,
+            &with(base(), "pin", json!(pin)),
+            "a select pinned to subscription model-c",
+        )
+        .await?;
+        let admitted: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &with(
+                Self::account_for("fence-admission", "fence-conversation", "model-c"),
+                "decision_id",
+                json!(selected.decision_id),
+            ),
+            "an admission naming the decision",
+        )
+        .await?;
+        let catalog = fixture::catalog();
+        let other = catalog
+            .accounts
+            .iter()
+            .find(|account| account.account_id != admitted.account.account_id)
+            .cloned()
+            .ok_or("the fixture has a single account")?;
+        let reset = now_ms() + 600_000;
+        let _: ReportAnswer = answer(
+            &consumer,
+            ops::ROUTE_REPORT,
+            &json!({"decision_id": selected.decision_id, "outcome": "failed",
+                "credential_id": admitted.account.credential_id, "reset_at_ms": reset}),
+            "a failure report with a future reset",
+        )
+        .await?;
+        let fenced: Value = json!({
+            "provider": fixture::SUBSCRIPTION_PROVIDER, "model": "model-c",
+            "conversation_key": "after-fence", "admission_id": "after-fence-fenced",
+            "candidates": {"view_digest": "fence", "accounts": [{"account_id": admitted.account.account_id, "credential_id": admitted.account.credential_id}]}
+        });
+        match call::<_, AccountForAnswer>(&runner, ops::ROUTE_ACCOUNT_FOR, &fenced).await? {
+            Err(refusal) => {
+                match refusal.wait_until_ms() {
+                    Some(until) if until.abs_diff(reset) <= 60_000 => {}
+                    other => {
+                        return Err(format!(
+                            "the fenced account was refused with reset {other:?}, not the report reset {reset}"
+                        ))
+                    }
+                }
+            }
+            Ok(_) => {
+                return Err("the fenced account was answered, though its route was fenced".into())
+            }
+        }
+        let other_body: Value = json!({
+            "provider": fixture::SUBSCRIPTION_PROVIDER, "model": "model-c",
+            "conversation_key": "after-fence-other", "admission_id": "after-fence-other",
+            "candidates": {"view_digest": "fence", "accounts": [{"account_id": other.account_id, "credential_id": other.credential_id}]}
+        });
+        answer::<_, AccountForAnswer>(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &other_body,
+            "another account for the same route",
+        )
+        .await?;
+        let other_route: Value = json!({
+            "provider": fixture::SUBSCRIPTION_PROVIDER, "model": "model-d",
+            "conversation_key": "after-fence-route", "admission_id": "after-fence-route",
+            "candidates": {"view_digest": "fence", "accounts": [{"account_id": admitted.account.account_id, "credential_id": admitted.account.credential_id}]}
+        });
+        answer::<_, AccountForAnswer>(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &other_route,
+            "the same account for another route",
+        )
+        .await?;
+        select(
+            &consumer,
+            &with(
+                base(),
+                "pin",
+                json!(format!("{}/model-a", fixture::PRICED_PROVIDER)),
+            ),
+            "a pin on another provider after a fenced report",
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn report_past_reset_fences_nothing_and_is_recorded(&self) -> Check {
+        let consumer = self.route_as(CONSUMER).await?;
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let pin = format!("{}/model-c", fixture::SUBSCRIPTION_PROVIDER);
+        let selected = select(
+            &consumer,
+            &with(base(), "pin", json!(pin)),
+            "a select pinned to subscription model-c",
+        )
+        .await?;
+        let admitted: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &with(
+                Self::account_for("past-admission", "past-conversation", "model-c"),
+                "decision_id",
+                json!(selected.decision_id),
+            ),
+            "an admission naming the decision",
+        )
+        .await?;
+        let past = now_ms().saturating_sub(6_000);
+        let _: ReportAnswer = answer(
+            &consumer,
+            ops::ROUTE_REPORT,
+            &json!({"decision_id": selected.decision_id, "outcome": "failed",
+                "credential_id": admitted.account.credential_id, "reset_at_ms": past}),
+            "a failure report with a past reset",
+        )
+        .await
+        .map_err(|e| format!("a past reset that is refused: {e}"))?;
+        let fenced: Value = json!({
+            "provider": fixture::SUBSCRIPTION_PROVIDER, "model": "model-c",
+            "conversation_key": "after-past", "admission_id": "after-past-fenced",
+            "candidates": {"view_digest": "past", "accounts": [{"account_id": admitted.account.account_id, "credential_id": admitted.account.credential_id}]}
+        });
+        match call::<_, AccountForAnswer>(&runner, ops::ROUTE_ACCOUNT_FOR, &fenced).await? {
+            Ok(_) => Ok(()),
+            Err(refusal) => Err(format!(
+                "a past reset that fences: the account was refused {}: {}",
+                refusal.code, refusal.message
+            )),
+        }
+    }
+
+    async fn report_reset_capped_at_24h(&self) -> Check {
+        let consumer = self.route_as(CONSUMER).await?;
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let pin = format!("{}/model-c", fixture::SUBSCRIPTION_PROVIDER);
+        let selected = select(
+            &consumer,
+            &with(base(), "pin", json!(pin)),
+            "a select pinned to subscription model-c",
+        )
+        .await?;
+        let admitted: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &with(
+                Self::account_for("cap-admission", "cap-conversation", "model-c"),
+                "decision_id",
+                json!(selected.decision_id),
+            ),
+            "an admission naming the decision",
+        )
+        .await?;
+        let now = now_ms();
+        let far = now + 48 * 60 * 60 * 1000;
+        let _: ReportAnswer = answer(
+            &consumer,
+            ops::ROUTE_REPORT,
+            &json!({"decision_id": selected.decision_id, "outcome": "failed",
+                "credential_id": admitted.account.credential_id, "reset_at_ms": far}),
+            "a failure report with a reset beyond 24 hours",
+        )
+        .await?;
+        let fenced: Value = json!({
+            "provider": fixture::SUBSCRIPTION_PROVIDER, "model": "model-c",
+            "conversation_key": "after-cap", "admission_id": "after-cap-fenced",
+            "candidates": {"view_digest": "cap", "accounts": [{"account_id": admitted.account.account_id, "credential_id": admitted.account.credential_id}]}
+        });
+        match call::<_, AccountForAnswer>(&runner, ops::ROUTE_ACCOUNT_FOR, &fenced).await? {
+            Err(refusal) => {
+                let capped = now + 24 * 60 * 60 * 1000;
+                match refusal.wait_until_ms() {
+                    Some(until) if until <= capped + 60_000 && until + 60_000 < far => Ok(()),
+                    other => Err(format!(
+                        "a reset accepted beyond 24h without capping carries reset {other:?}, not capped near {capped}"
+                    )),
+                }
+            }
+            Ok(_) => Err("the fenced account was answered, though its route was fenced".into()),
+        }
+    }
+
+    async fn prefer_prefers_listed_adequate_route(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let first = format!("{}/model-c", fixture::SUBSCRIPTION_PROVIDER);
+        let second = format!("{}/model-b", fixture::PRICED_PROVIDER);
+        let params = with(base(), "prefer", json!([first, second]));
+        let answered = select(&route, &params, "a select preferring two adequate routes").await?;
+        if answered.route.route_key() != first {
+            return Err(format!(
+                "a select preferring [{first}, {second}] was answered {}, not {first}: prefer ignored when a listed route is adequate",
+                answered.route.route_key()
+            ));
+        }
+        Ok(())
+    }
+
+    async fn prefer_never_admits_inadequate_route(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let listed = format!("{}/model-a", fixture::PRICED_PROVIDER);
+        let expected = format!("{}/model-c", fixture::SUBSCRIPTION_PROVIDER);
+        let mut params = base();
+        params["requirements"] =
+            json!({"iq": 50, "context_window": 150_000, "max_output_tokens": 40_000});
+        params["prefer"] = json!([listed]);
+        let answered = select(&route, &params, "a select preferring an inadequate route").await?;
+        if answered.route.route_key() != expected {
+            return Err(format!(
+                "a select preferring inadequate {listed} was answered {}, not {expected}: prefer admitted a route the request would not get",
+                answered.route.route_key()
+            ));
+        }
+        let mut impossible = base();
+        impossible["requirements"] = json!({"iq": 100});
+        impossible["prefer"] = json!([listed]);
+        refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &impossible,
+            RefusalCode::NoRoute,
+            "a select nothing meets preferring a route",
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn undeclared_prefer_group_refuses_member(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let refusal = refused(
+            &route,
+            ops::ROUTE_SELECT,
+            &with(base(), "prefer", json!(["example-provider/model-a"])),
+            RefusalCode::InvalidRequest,
+            "undeclared prefer group",
+        )
+        .await?;
+        if refusal.detail.get("field").and_then(Value::as_str) != Some("prefer") {
+            return Err(format!(
+                "undeclared prefer group refusal must name prefer: {refusal:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    async fn report_usage_strict(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let decision = select(&route, &base(), "a plain select").await?.decision_id;
+        for (name, usage) in [
+            ("negative", json!({"input_tokens": -1})),
+            ("over-limit", json!({"input_tokens": 9007199254740992u64})),
+            ("unknown", json!({"input_tokens": 1, "bogus": 1})),
+        ] {
+            let mut params = json!({"decision_id": decision, "outcome": "completed"});
+            params["usage"] = usage;
+            let refusal = refused(
+                &route,
+                ops::ROUTE_REPORT,
+                &params,
+                RefusalCode::InvalidRequest,
+                &format!("a report usage with a {name} count"),
+            )
+            .await?;
+            if refusal.detail.get("field").and_then(Value::as_str) != Some("usage") {
+                return Err(format!(
+                    "a report usage with a {name} count must name detail.field usage, got {:?}",
+                    refusal.detail
+                ));
+            }
+        }
+        Ok(())
     }
 }

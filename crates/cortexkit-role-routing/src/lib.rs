@@ -105,8 +105,11 @@ pub mod capabilities {
     /// `route.select` reads the caller's requested session program, `harness`.
     pub const SELECT_HARNESS: &str = "select_harness";
 
+    /// `route.select` reads the caller's ordered route preference, `prefer`.
+    pub const SELECT_PREFER: &str = "select_prefer";
+
     /// Every group this version defines.
-    pub const KNOWN: &[&str] = &[SELECT_HOLD_CONTROL, SELECT_HARNESS];
+    pub const KNOWN: &[&str] = &[SELECT_HOLD_CONTROL, SELECT_HARNESS, SELECT_PREFER];
 }
 
 #[cfg(test)]

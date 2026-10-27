@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.5.0
+
+- Add `pin_fallback: "route"` beside a pin: when the pin cannot be served
+  the provider routes normally instead of refusing `pin_unavailable`. The
+  answer carries `pin_outcome: "pinned" | "fell_back"` whenever the
+  request pinned, and on `fell_back` its `detail` carries `pin_reason` naming
+  the pin refusal's reason. Any other `pin_fallback` value, or a fallback
+  without a pin, is `invalid_request` naming the field. Without the field
+  pins still refuse and a second select for the same work stays forbidden.
+- Add a fenced reset on `route.report`: a report with `outcome: failed` and
+  a future `reset_at_ms` fences only that decision's route on that decision's
+  account until the reset. A reset further than 24 hours away is capped at
+  24 hours; a reset already in the past is recorded as a failure with no
+  fence. Only the decision's own consumer may report, as before.
+- Say that `account_observe {kind: run_finished}` releases the runner's
+  account pin, with `lease_valid_until_ms` only the backstop.
+- Add the optional `select_prefer` group: `prefer` lists up to 16 route keys
+  with no duplicates, each `provider/model`. Among the routes the provider
+  would already answer it answers a listed adequate one in list order, never
+  admitting a route the request would not otherwise get. A provider without
+  the group refuses `prefer` by name. `role.describe` lists it in
+  `capabilities` like the other groups.
+- Replace the report `usage` with token counts and timing that match the
+  runner's usage names: `input_tokens`, `cached_input_tokens`,
+  `cache_write_tokens`, `output_tokens`, `reasoning_tokens`, `duration_ms`
+  and `first_token_ms`, plus the existing `cost_usd` claim. Input never
+  includes cache reads or writes. Every count is a non-negative integer up
+  to 2^53-1; `cost_usd` stays an optional non-negative finite number, the
+  caller's own claim the provider may ignore. Unknown members are refused,
+  and `usage` is part of the report body for idempotency.
+- Breaking Rust minor: `SelectAnswer` and `Usage` were exhaustive and are now
+  `#[non_exhaustive]`. Build answers with `SelectAnswer::new` and its
+  `with_*` setters, and usage with `Usage::new` and its `with_*` setters
+  (including `with_cost_usd`). New vectors and checksums cover the new members
+  and the new prefer file.
+
 ## 0.4.3
 
 - Contract text only, with no code change: §9.1 defines when the parent

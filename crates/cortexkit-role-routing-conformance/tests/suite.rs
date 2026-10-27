@@ -51,6 +51,7 @@ async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_pa
     let report = run_suite(&FakeSubject::without_hold_control(Defects::default())).await;
     let mut not_applicable = vec!["undeclared_harness_group_refuses_member"];
     not_applicable.extend_from_slice(HOLD_CHECKS);
+    not_applicable.push("undeclared_prefer_group_refuses_member");
     assert_eq!(
         report.not_applicable(),
         not_applicable,
@@ -231,7 +232,10 @@ async fn without_harness_group_requests_are_refused() {
     let report = run_suite(&FakeSubject::without_harness_control(Defects::default())).await;
     assert_eq!(
         report.not_applicable(),
-        ["requested_harness_is_hosted_and_echoed"]
+        [
+            "requested_harness_is_hosted_and_echoed",
+            "undeclared_prefer_group_refuses_member"
+        ]
     );
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
 }
@@ -396,7 +400,12 @@ async fn a_faithful_provider_passes_every_check() {
     let report = run_suite(&FakeSubject::new(Defects::default())).await;
     assert_eq!(report.checks.len(), CHECKS.len());
     for check in &report.checks {
-        if check.check == "undeclared_harness_group_refuses_member" {
+        if [
+            "undeclared_harness_group_refuses_member",
+            "undeclared_prefer_group_refuses_member",
+        ]
+        .contains(&check.check)
+        {
             assert!(matches!(check.outcome, CheckOutcome::NotApplicable { .. }));
             continue;
         }
@@ -814,3 +823,160 @@ account_case!(
     ignores_report_members,
     "changed pool under reused decision_id was answered"
 );
+
+#[tokio::test]
+async fn pin_fallback_mislabelled_as_pinned_fails() {
+    breaks(
+        Defects {
+            pin_fallback_labels_pinned: true,
+            ..Defects::default()
+        },
+        "pin_fallback_routes_and_labels",
+        "labelled",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn pin_fallback_without_code_fails() {
+    breaks(
+        Defects {
+            pin_fallback_omits_pin_reason: true,
+            ..Defects::default()
+        },
+        "pin_fallback_routes_and_labels",
+        "pin_reason",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn fence_wider_than_route_and_account_fails() {
+    breaks(
+        Defects {
+            fences_wide: true,
+            ..Defects::default()
+        },
+        "report_reset_fences_only_decision_route_and_account",
+        "another",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn past_reset_that_fences_fails() {
+    breaks(
+        Defects {
+            past_reset_fences: true,
+            ..Defects::default()
+        },
+        "report_past_reset_fences_nothing_and_is_recorded",
+        "fences",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn past_reset_that_is_refused_fails() {
+    breaks(
+        Defects {
+            past_reset_refused: true,
+            ..Defects::default()
+        },
+        "report_past_reset_fences_nothing_and_is_recorded",
+        "refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn reset_beyond_24h_without_capping_fails() {
+    breaks(
+        Defects {
+            reset_not_capped: true,
+            ..Defects::default()
+        },
+        "report_reset_capped_at_24h",
+        "without capping",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn prefer_ignored_when_listed_adequate_fails() {
+    breaks(
+        Defects {
+            ignores_prefer: true,
+            ..Defects::default()
+        },
+        "prefer_prefers_listed_adequate_route",
+        "ignored",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn prefer_admitting_inadequate_fails() {
+    breaks(
+        Defects {
+            admits_prefer: true,
+            ..Defects::default()
+        },
+        "prefer_never_admits_inadequate_route",
+        "admitted",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn without_prefer_group_requests_are_not_applicable() {
+    let report = run_suite(&FakeSubject::without_prefer_control(Defects::default())).await;
+    assert!(report
+        .not_applicable()
+        .contains(&"prefer_prefers_listed_adequate_route"));
+    assert!(report
+        .not_applicable()
+        .contains(&"prefer_never_admits_inadequate_route"));
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}
+
+#[tokio::test]
+async fn accepting_undeclared_prefer_member_fails() {
+    let report = run_suite(&FakeSubject::without_prefer_control(Defects {
+        accepts_undeclared_prefer: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.failing(),
+        ["undeclared_prefer_group_refuses_member"],
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn accepting_bad_usage_fails() {
+    breaks(
+        Defects {
+            accepts_bad_usage: true,
+            ..Defects::default()
+        },
+        "report_usage_strict",
+        "was answered",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn ignoring_usage_body_fails() {
+    breaks(
+        Defects {
+            ignores_usage_body: true,
+            ..Defects::default()
+        },
+        "new_report_members_conflict",
+        "changed usage under reused decision_id was answered",
+    )
+    .await;
+}

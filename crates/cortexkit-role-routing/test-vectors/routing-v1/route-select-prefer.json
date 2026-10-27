@@ -1,0 +1,53 @@
+{
+  "about": "select_prefer gates the optional ordered route preference. A caller sends prefer only to a provider declaring select_prefer; the provider answers a listed adequate route in list order and never admits a route the request would not otherwise get.",
+  "describe": {
+    "role": "routing",
+    "version": 1,
+    "ops": [
+      "role.describe",
+      "route.select",
+      "route.report",
+      "route.account_for",
+      "route.account_observe"
+    ],
+    "consumers": [
+      {
+        "id": "example_summary",
+        "priced_only": false
+      }
+    ],
+    "requirement_fields": [
+      "iq",
+      "eq",
+      "context_window",
+      "max_output_tokens",
+      "tools",
+      "tool_capabilities",
+      "modalities",
+      "structured_output"
+    ],
+    "detail_supported": false,
+    "capabilities": [
+      "select_prefer"
+    ]
+  },
+  "requests": [
+    {"name": "single", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": ["example-provider/model-b"]}},
+    {"name": "ordered", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": ["example-provider/model-b", "example-provider/model-a"]}},
+    {"name": "null_is_absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": null}, "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}}
+  ],
+  "refused": [
+    {"name": "entry_not_a_route_key", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": ["model-b"]}, "refusal": {"code": "invalid_request", "detail": {"field": "prefer"}}},
+    {"name": "variant_is_not_a_route_key", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": ["example-provider/model-a:fast"]}, "refusal": {"code": "invalid_request", "detail": {"field": "prefer"}}},
+    {"name": "too_many", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": ["p/m0", "p/m1", "p/m2", "p/m3", "p/m4", "p/m5", "p/m6", "p/m7", "p/m8", "p/m9", "p/m10", "p/m11", "p/m12", "p/m13", "p/m14", "p/m15", "p/m16"]}, "refusal": {"code": "invalid_request", "detail": {"field": "prefer"}}},
+    {"name": "duplicate", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": ["example-provider/model-a", "example-provider/model-a"]}, "refusal": {"code": "invalid_request", "detail": {"field": "prefer"}}},
+    {"name": "not_a_list", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": "example-provider/model-a"}, "refusal": {"code": "invalid_request", "detail": {"field": "prefer"}}}
+  ],
+  "requests_without_group": [
+    {"name": "null_is_absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": null}, "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}}
+  ],
+  "refused_without_group": [
+    {"name": "prefer_without_group", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "prefer": ["example-provider/model-a"]}, "refusal": {"code": "invalid_request", "detail": {"field": "prefer"}}}
+  ],
+  "answers": []
+}

@@ -239,7 +239,7 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines two
+  does not know is kept and means nothing to it. This version defines three
   groups:
   - `select_hold_control`: `route.select` reads `hold_ok` and
     `hold_wait_max_s` (§5.1) and decides blocked entries as §5.4 says.
@@ -250,6 +250,9 @@ a module plays.
   - `select_harness`: `route.select` reads `harness` (§5.1), matching the
     runner's declared session programs, not its wire/auth pairs. A provider
     without it refuses the member (§2); a caller sends it only with the group.
+  - `select_prefer`: `route.select` reads `prefer` (§5.1), an ordered list of
+    route keys the caller would like. A provider without it refuses the member
+    by name (§2); a caller sends it only with the group.
 - [pinned] A consumer checks the answer with `describe::check_describe`
   before routing anything to the provider.
 
@@ -292,6 +295,13 @@ a module plays.
   before the first `/`; a variant is what follows the last `:` after it. A
   pin that cannot be served is `pin_unavailable`; a malformed one is
   `pin_unavailable` with reason `invalid`.
+- [pinned] `pin_fallback`: `"route"` beside a pin. When the pin cannot be
+  served, the provider routes normally instead of refusing
+  `pin_unavailable`. Routing still decides, since only it knows why the pin
+  failed, and the fallback answer is still the one selection for the work
+  (§1): the caller never selects again. Any other value is
+  `invalid_request {field: "pin_fallback"}`, as is a `pin_fallback`
+  without a pin. Without the field behaviour is unchanged.
 - [pinned] `exclude`: route keys the caller will not take. A route key is
   `provider/model`; the variant and the runner are separate from it.
   Excluding a route key excludes every variant of it. An entry that is not
@@ -303,6 +313,16 @@ a module plays.
   in `harnesses` are candidates. The caller picks the program, never the pair.
   Without this member nothing is filtered by harness. A malformed value is
   `invalid_request {field: "harness"}`; a provider without the group refuses
+  the member by that same field path rather than ignoring it. Null is absent.
+- [pinned] `prefer`: an ordered list of at most 16 route keys (group
+  `select_prefer`), each `provider/model` without a variant, with no
+  duplicates. Among the routes the provider would already answer for the
+  request it answers a listed one when one is adequate, in list order. It
+  never admits a route the request would not otherwise get, so it is not a
+  pin: a listed route that is excluded, fails the requirements, has no
+  runner, or is otherwise unavailable is skipped. An entry that is not a
+  route key, a list longer than 16, or a duplicate entry is
+  `invalid_request {field: "prefer"}`. A provider without the group refuses
   the member by that same field path rather than ignoring it. Null is absent.
 - [pinned] `affinity`: an opaque key of at most 128 characters (§7).
 - [pinned] `correlation_id`: opaque, at most 128 characters, echoed in logs
@@ -319,7 +339,9 @@ a module plays.
   that request can take may still hold, and the cap applies to it.
 - [pinned] `hold_ok` and `hold_wait_max_s` sent to a provider that does not
   declare `select_hold_control` are `invalid_request {field}` naming the
-  member, `hold_ok` first when both are sent. The validator takes the
+  member, `hold_ok` first when both are sent. `prefer` sent to a provider
+  that does not declare `select_prefer` is `invalid_request {field: "prefer"}`.
+  The validator takes the
   provider's declared groups (`select::parse_select_request_serving`);
   `select::parse_select_request` declares none.
 - [pinned] Any other malformed member is `invalid_request {field}` naming
@@ -340,7 +362,9 @@ a module plays.
   context_window, max_output_tokens,   // tokens, from the provider's own catalog read
   expires_at_ms,
   explanation,                         // one sentence, at most 200 characters
-  detail?                              // the explanation object, when asked for and supported
+  detail?,                             // the explanation object, when asked for and supported;
+                                       // on `fell_back` it carries `pin_reason`
+  pin_outcome?                         // `"pinned" | "fell_back"`, exactly when the request pinned
 }
 ```
 
@@ -365,7 +389,13 @@ a module plays.
   work without a second lookup.
 - [pinned] `expires_at_ms` is in the future when the answer is given (§6).
 - [pinned] `explanation` is one sentence of at most 200 characters.
-- [pinned] `detail` is non-normative; a consumer never acts on it.
+- [pinned] `detail` is non-normative; a consumer never acts on it, except that
+  on `pin_outcome: "fell_back"` it carries `pin_reason` naming the pin
+  refusal's reason, so the caller knows why the pin was skipped.
+- [pinned] `pin_outcome` is present exactly when the request pinned:
+  `"pinned"` when the pin was served, `"fell_back"` when
+  `pin_fallback: "route"` routed instead (`select::check_answer`). A
+  fallback answer is still the one selection for the work.
 
 ### 5.3 Refusals
 
@@ -491,9 +521,29 @@ pool?, eligibility?, request_input_tokens?}`.
 - [pinned] `request_input_tokens`: non-negative integer, the request's
   input size in tokens. A size-shaped refusal fences only that request-size
   class, not smaller requests that can pass.
-- [pinned] `usage`: `{input_tokens, output_tokens, cost_usd?}`. Reasoning
-  tokens are counted in `output_tokens`. `cost_usd` is the caller's own
-  claim: the provider prices usage from its own catalog and may ignore it.
+- [pinned] `usage`: `{input_tokens?, cached_input_tokens?,
+  cache_write_tokens?, output_tokens?, reasoning_tokens?, duration_ms?,
+  first_token_ms?, cost_usd?}` (`report::Usage`). The token field names and their meaning
+  match `cortexkit-role-llm-runner`'s usage: `input_tokens` never includes
+  cache reads or writes, which are the separate `cached_input_tokens` and
+  `cache_write_tokens` counts; `reasoning_tokens` is a breakdown of
+  `output_tokens`, never an addition to it; an absent count means unrecorded,
+  never zero. `duration_ms` is the wall-clock
+  run time and `first_token_ms` the time to the first output token, both in
+  milliseconds. Every present count is a non-negative integer up to 2^53-1
+  (`report::MAX_USAGE_COUNT`); `cost_usd` is the caller's own claim, a
+  non-negative finite JSON number. The provider may ignore it, since it prices usage
+  from its own catalog. An unknown member is refused as
+  `invalid_request {field: "usage"}`. `usage` is part of the report body for
+  idempotency: a repeat with different usage is a different report.
+- [pinned] A report with `outcome: failed` and a future `reset_at_ms` fences
+  only that decision's route on that decision's account until the reset:
+  never the whole provider, never other accounts, never other routes. A
+  caller-supplied reset further than 24 hours away is capped at 24 hours
+  from now (`report::RESET_FENCE_CAP_MS`). A reset already in the past is
+  not refused: the report is recorded as a failure with no fence, because a
+  "retry in 5 s" landing 6 s later is a normal race. Only the decision's
+  own consumer may report, as §6 says.
 - [pinned] The answer (`report::ReportAnswer`) is
   `{decision_id, report_id, outcome}`: the provider's id for the recorded
   report and the outcome recorded.
@@ -501,7 +551,7 @@ pool?, eligibility?, request_input_tokens?}`.
   returns exactly the first answer; a different body after the first is
   `report_conflict`. Bodies are compared as decoded, so key order, and a
   member sent as `null` instead of left out, never make bodies differ.
-  `pool`, `eligibility` and `request_input_tokens` are part of the body.
+  `pool`, `eligibility`, `request_input_tokens` and `usage` are part of the body.
 - [pinned] Refusals: `invalid_request {field}`, `unknown_decision`,
   `report_conflict`.
 
@@ -629,6 +679,8 @@ What a runner saw on an account, so the provider's headroom stays current.
   `invalid_request {field: "headers"}`.
 - [pinned] In `headers` and `limit_window`, a disabled usage window is left
   out of a reading, never sent with a stale fraction.
+- [pinned] `account_observe {kind: run_finished}` releases the runner's
+  account pin; `lease_valid_until_ms` is only the backstop.
 - [pinned] The answer (`observe::AccountObserveAnswer`) is
   `{observation: {id, duplicate, bound, effects}}`. `bound` says whether
   the observation matched an admission; `effects` lists, in the provider's
@@ -683,7 +735,8 @@ What a runner saw on an account, so the provider's headroom stays current.
   including a byte-exact declaration round trip. `route-select-hold-control.json`
   holds the `select_hold_control` members with and without the group, the
   `accounts_blocked` refusal, and an answer naming its runner's harness.
-  `SHA256SUMS` pins every file.
+  `route-select-prefer.json` holds the `select_prefer` members with and
+  without the group. `SHA256SUMS` pins every file.
 - [pinned] `cortexkit-role-routing-conformance` drives a live provider
   through these rules. Each check names the rule it holds a provider to;
   the kit's own tests pair every check with a faulty provider that breaks

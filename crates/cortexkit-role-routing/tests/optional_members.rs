@@ -1,11 +1,11 @@
 use cortexkit_role_routing::{
     account::{parse_account_for_request, AccountForRequest, CONVERSATION_KEY_MAX_CHARS},
-    capabilities::SELECT_HOLD_CONTROL,
+    capabilities::{SELECT_HOLD_CONTROL, SELECT_PREFER},
     describe::RoleDescribe,
     errors::RefusalCode,
     observe::parse_account_observe_request,
-    report::{parse_report_request, EligibilityScope},
-    select::{parse_select_request, parse_select_request_serving},
+    report::{parse_report_request, EligibilityScope, MAX_USAGE_COUNT},
+    select::{parse_select_request, parse_select_request_serving, PinFallback, PinOutcome},
 };
 use serde_json::{json, Value};
 
@@ -98,6 +98,113 @@ fn hold_members_are_refused_by_name_without_the_group() {
     )
     .is_ok());
     assert!(parse_select_request(&select_with(json!({"hold_ok": null}))).is_ok());
+}
+
+#[test]
+fn prefer_members_are_refused_by_name_without_the_group() {
+    let describe = RoleDescribe::new(vec![], false);
+    assert!(!describe.serves(SELECT_PREFER));
+    let params = select_with(json!({"prefer": ["example-provider/model-a"]}));
+    for refusal in [
+        parse_select_request(&params).expect_err("no group"),
+        parse_select_request_serving(&params, &describe.capabilities[..]).expect_err("no group"),
+        parse_select_request_serving(&params, &["some_other_group"]).expect_err("other"),
+    ] {
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest);
+        assert_eq!(refusal.detail["field"], "prefer");
+    }
+    let declared = describe.with_capability(SELECT_PREFER);
+    assert!(parse_select_request_serving(
+        &select_with(json!({"prefer": ["example-provider/model-a"]})),
+        &declared.capabilities[..]
+    )
+    .is_ok());
+    assert!(parse_select_request(&select_with(json!({"prefer": null}))).is_ok());
+}
+
+#[test]
+fn prefer_entries_are_validated_by_name() {
+    let group = [SELECT_PREFER];
+    let valid = parse_select_request_serving(
+        &select_with(json!({"prefer": ["example-provider/model-a"]})),
+        &group,
+    )
+    .unwrap();
+    assert_eq!(valid.prefer.unwrap(), ["example-provider/model-a"]);
+    for (members, field) in [
+        (json!({"prefer": ["model-a"]}), "prefer"),
+        (
+            json!({"prefer": ["example-provider/model-a:fast"]}),
+            "prefer",
+        ),
+        (
+            json!({"prefer": ["example-provider/model-a", "example-provider/model-a"]}),
+            "prefer",
+        ),
+        (json!({"prefer": "example-provider/model-a"}), "prefer"),
+    ] {
+        let refusal = parse_select_request_serving(&select_with(members.clone()), &group)
+            .expect_err(&members.to_string());
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest);
+        assert_eq!(refusal.detail["field"], field);
+    }
+    let many: Vec<serde_json::Value> = (0..17).map(|n| json!(format!("p/m{n}"))).collect();
+    let refusal = parse_select_request_serving(&select_with(json!({"prefer": many})), &group)
+        .expect_err("too many");
+    assert_eq!(refusal.detail["field"], "prefer");
+}
+
+#[test]
+fn pin_fallback_other_values_and_missing_pin_are_refused() {
+    let with_pin = |fallback: serde_json::Value| {
+        let mut params = select_with(json!({"pin": "example-provider/model-a"}));
+        params["pin_fallback"] = fallback;
+        params
+    };
+    let request = parse_select_request(&with_pin(json!("route"))).unwrap();
+    assert_eq!(request.pin_fallback.unwrap(), PinFallback::Route);
+    for params in [
+        with_pin(json!("retry")),
+        with_pin(json!(7)),
+        select_with(json!({"pin_fallback": "route"})),
+    ] {
+        let refusal = parse_select_request(&params).expect_err(&params.to_string());
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest);
+        assert_eq!(refusal.detail["field"], "pin_fallback");
+    }
+    assert!(parse_select_request(&select_with(json!({"pin_fallback": null}))).is_ok());
+    assert_eq!(
+        parse_select_request(&with_pin(json!("route"))).unwrap(),
+        parse_select_request_serving(&with_pin(json!("route")), &[SELECT_PREFER]).unwrap()
+    );
+}
+
+#[test]
+fn usage_counts_are_bounded_and_strict() {
+    let base = || json!({"decision_id": "d", "outcome": "completed"});
+    let with_usage = |usage: serde_json::Value| {
+        let mut params = base();
+        params["usage"] = usage;
+        params
+    };
+    let full = json!({"input_tokens": 1, "cached_input_tokens": 2, "cache_write_tokens": 3, "output_tokens": 4, "reasoning_tokens": 1, "duration_ms": 10, "first_token_ms": 2, "cost_usd": 0.5});
+    let request = parse_report_request(&with_usage(full.clone())).unwrap();
+    assert_eq!(serde_json::to_value(request.usage.unwrap()).unwrap(), full);
+    assert!(parse_report_request(&with_usage(json!({}))).is_ok());
+    for usage in [
+        json!({"input_tokens": -1}),
+        json!({"output_tokens": 1.5}),
+        json!({"input_tokens": MAX_USAGE_COUNT + 1}),
+        json!({"cost_usd": -0.5}),
+        json!({"bogus": 1}),
+    ] {
+        let refusal =
+            parse_report_request(&with_usage(usage.clone())).expect_err(&usage.to_string());
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest);
+        assert_eq!(refusal.detail["field"], "usage");
+    }
+    assert_eq!(PinOutcome::Pinned.as_str(), "pinned");
+    assert_eq!(PinOutcome::FellBack.as_str(), "fell_back");
 }
 
 #[test]
@@ -262,6 +369,11 @@ fn report_members_are_part_of_the_body() {
             json!({"scope": "account", "code": "one"}),
         ),
         ("request_input_tokens", json!(0), json!(1)),
+        (
+            "usage",
+            json!({"input_tokens": 100}),
+            json!({"input_tokens": 101}),
+        ),
     ] {
         let mut a = base.clone();
         let mut b = base.clone();

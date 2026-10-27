@@ -46,6 +46,7 @@ const FILES: &[&str] = &[
     "route-report.json",
     "route-select-harness.json",
     "route-select-hold-control.json",
+    "route-select-prefer.json",
     "route-select.json",
     "runner-declarations.json",
 ];
@@ -298,6 +299,44 @@ fn route_select_hold_control() {
 }
 
 #[test]
+fn route_select_prefer() {
+    let file = load("route-select-prefer.json");
+    let describe: RoleDescribe = round_trip("describe", &file["describe"], &file["describe"]);
+    assert_eq!(check_describe(&describe), Ok(()));
+    assert!(describe.serves(capabilities::SELECT_PREFER));
+    assert_eq!(
+        RoleDescribe::new(describe.consumers.clone(), false)
+            .with_capability(capabilities::SELECT_PREFER),
+        describe
+    );
+    check_op::<SelectRequest, SelectAnswer>("route-select-prefer.json", |params| {
+        parse_select_request_serving(params, &[capabilities::SELECT_PREFER])
+    });
+    for case in cases(&file, "requests_without_group") {
+        let name = name(case);
+        let parsed = parse_select_request(&case["params"])
+            .unwrap_or_else(|refusal| panic!("{name}: {refusal}"));
+        assert_eq!(
+            serde_json::to_value(&parsed).unwrap(),
+            case["encodes_as"],
+            "{name}"
+        );
+    }
+    for case in cases(&file, "refused_without_group") {
+        let name = name(case);
+        let refusal = parse_select_request(&case["params"]).expect_err(name);
+        assert_eq!(refusal.code.as_str(), case["refusal"]["code"], "{name}");
+        assert_eq!(
+            Value::Object(refusal.detail.clone()),
+            case["refusal"]["detail"],
+            "{name}"
+        );
+        parse_select_request_serving(&case["params"], &[capabilities::SELECT_PREFER])
+            .unwrap_or_else(|refusal| panic!("{name} with the group: {refusal}"));
+    }
+}
+
+#[test]
 fn route_report() {
     check_op::<ReportRequest, ReportAnswer>("route-report.json", parse_report_request);
     let file = load("route-report.json");
@@ -365,7 +404,7 @@ fn optional_members() {
 fn legacy_requests_keep_their_bytes() {
     let account = r#"{"provider":"p","model":"m","affinity_model":"m","conversation_key":"c","admission_id":"a","mode":"admit","expected_pin":{"id":"pin","generation":1},"initial_input_bytes":12,"initial_input_estimated":true,"candidates":{"view_digest":"v","accounts":[{"account_id":"a","credential_id":"c"}]},"requested_account":{"account_id":"a","credential_id":"c"},"hold_wait_max_s":9,"decision_id":"d"}"#;
     let observe = r#"{"event_id":"e","kind":"attempt","admission_id":"a","run_id":"r","served_account_id":"a","credential_id":"c","view_digest":"v","observed_at_ms":1,"upstream_origin":"u","headers":{"x-remaining":"4"},"limit_window":"w","resets_at_ms":2,"resets_at_source":"s"}"#;
-    let report = r#"{"decision_id":"d","outcome":"completed","runner_code":"ok","credential_id":"c","reset_at_ms":1,"usage":{"input_tokens":12,"output_tokens":3,"cost_usd":0.5}}"#;
+    let report = r#"{"decision_id":"d","outcome":"completed","runner_code":"ok","credential_id":"c","reset_at_ms":1,"usage":{"input_tokens":12,"output_tokens":3}}"#;
     let select = r#"{"consumer":"c","requirements":{"iq":50,"eq":3},"pin":"p/m","exclude":["p/x"],"runners":["r"],"affinity":"a","correlation_id":"w","concurrency_slots":[{"key":"k","running":1,"limit":2}],"detail":true}"#;
     let answer = r#"{"decision_id":"d","route":{"provider":"p","model":"m"},"runner":{"module":"r","model":{"provider":"p","model":"m"},"auth":{"pool":"k"}},"context_window":1,"max_output_tokens":2,"expires_at_ms":3,"explanation":"e"}"#;
     let describe = r#"{"role":"routing","version":1,"ops":["route.select"],"consumers":[{"id":"c","priced_only":false}],"requirement_fields":["iq"],"detail_supported":false}"#;
@@ -518,6 +557,11 @@ fn unknown_open_set_values_decode_and_are_kept() {
                     decoded.reason.code.as_str().to_owned(),
                 )
             }
+            "SelectAnswer" => {
+                let decoded: SelectAnswer = round_trip(name, value, value);
+                let outcome = decoded.pin_outcome.expect("pin_outcome is present");
+                (outcome.is_known(), outcome.as_str().to_owned())
+            }
             other => panic!("{name}: no type {other}"),
         };
         assert!(!known, "{name}: {unknown} should be unknown to this crate");
@@ -531,6 +575,7 @@ fn unknown_open_set_values_decode_and_are_kept() {
         "NoRouteDetail",
         "AccountObserveRequest",
         "AccountForAnswer",
+        "SelectAnswer",
     ] {
         assert!(types.contains(&kind), "no unknown-value vector for {kind}");
     }

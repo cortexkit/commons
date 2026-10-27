@@ -78,13 +78,24 @@
         "exclude": null,
         "runners": null,
         "affinity": null,
-        "detail": null
+        "detail": null,
+        "pin_fallback": null,
+        "prefer": null
       },
       "encodes_as": {
         "consumer": "example_summary",
         "requirements": {
           "iq": 50
         }
+      }
+    },
+    {
+      "name": "pin_fallback_route",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {"iq": 50},
+        "pin": "example-provider/model-a",
+        "pin_fallback": "route"
       }
     }
   ],
@@ -229,6 +240,25 @@
       }
     },
     {
+      "name": "pin_fallback_other_value",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {"iq": 50},
+        "pin": "example-provider/model-a",
+        "pin_fallback": "retry"
+      },
+      "refusal": {"code": "invalid_request", "detail": {"field": "pin_fallback"}}
+    },
+    {
+      "name": "pin_fallback_without_pin",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {"iq": 50},
+        "pin_fallback": "route"
+      },
+      "refusal": {"code": "invalid_request", "detail": {"field": "pin_fallback"}}
+    },
+    {
       "name": "affinity_over_128_characters",
       "params": {
         "consumer": "example_summary",
@@ -295,7 +325,22 @@
         "detail": {
           "candidates_considered": 3,
           "note": "non-normative"
-        }
+        },
+        "pin_outcome": "pinned"
+      }
+    },
+    {
+      "name": "pin_fallback_routed",
+      "answer": {
+        "decision_id": "decision-3",
+        "route": {"provider": "example-provider", "model": "model-b"},
+        "runner": {"module": "runner-one", "model": {"provider": "example-provider", "model": "model-b"}},
+        "context_window": 128000,
+        "max_output_tokens": 16000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "The pin example-provider/model-z is unavailable, so model-b serves instead.",
+        "detail": {"pin_reason": "unknown_model"},
+        "pin_outcome": "fell_back"
       }
     }
   ]

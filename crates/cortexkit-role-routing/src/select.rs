@@ -10,7 +10,6 @@ use crate::{
     errors::{PinUnavailableReason, Refusal},
     members::Members,
 };
-
 /// Every requirement member this version defines, in contract order. A
 /// `routing/v1` provider reads every one of them; `role.describe` lists them
 /// in `requirement_fields`.
@@ -33,6 +32,8 @@ pub const AFFINITY_MAX_CHARS: usize = 128;
 pub const CORRELATION_ID_MAX_CHARS: usize = 128;
 /// The longest `explanation`, in characters.
 pub const EXPLANATION_MAX_CHARS: usize = 200;
+/// The most entries a `prefer` list may carry.
+pub const PREFER_MAX_ENTRIES: usize = 16;
 
 open_set! {
     /// The `tools` requirement.
@@ -50,6 +51,30 @@ open_set! {
         Image => "image",
         Pdf => "pdf",
         Audio => "audio",
+    }
+}
+
+open_set! {
+    /// What to do when the request's pin cannot be served. The only value
+    /// this version reads is `"route"`: route normally instead of refusing
+    /// `pin_unavailable`. Any other value is `invalid_request` naming
+    /// `pin_fallback`.
+    pub enum PinFallback {
+        /// Route normally when the pin cannot be served.
+        Route => "route",
+    }
+}
+
+open_set! {
+    /// How a pinned select was answered. Carried whenever the request pinned:
+    /// `"pinned"` when the pin was served, `"fell_back"` when
+    /// `pin_fallback: "route"` routed instead. On `fell_back` the answer's
+    /// `detail` carries `pin_reason` naming the pin refusal's reason.
+    pub enum PinOutcome {
+        /// The pin was served.
+        Pinned => "pinned",
+        /// The pin could not be served and the provider routed instead.
+        FellBack => "fell_back",
     }
 }
 
@@ -151,6 +176,21 @@ pub struct SelectRequest {
     /// [`crate::capabilities::SELECT_HARNESS`]. Never selects a wire/auth pair.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
+    /// Ordered route preference: at most [`PREFER_MAX_ENTRIES`] entries, no
+    /// duplicates, each `provider/model` without a variant. Among the routes
+    /// the provider would already answer for the request it answers a listed
+    /// one when one is adequate, in list order. It never admits a route the
+    /// request would not otherwise get. Sent only to a provider declaring
+    /// [`crate::capabilities::SELECT_PREFER`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefer: Option<Vec<String>>,
+    /// `pin_fallback: "route"` beside a pin: when the pin cannot be served,
+    /// route normally instead of refusing `pin_unavailable`. Without it the
+    /// pin still refuses and a second select for the same work stays
+    /// forbidden. Any other value is `invalid_request` naming the field, and
+    /// a `pin_fallback` without a pin is too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_fallback: Option<PinFallback>,
 }
 
 impl SelectRequest {
@@ -169,6 +209,8 @@ impl SelectRequest {
             hold_ok: None,
             hold_wait_max_s: None,
             harness: None,
+            prefer: None,
+            pin_fallback: None,
         }
     }
 
@@ -180,6 +222,18 @@ impl SelectRequest {
     /// Set the pin, `provider/model[:variant]`.
     pub fn with_pin(mut self, pin: impl Into<String>) -> Self {
         self.pin = Some(pin.into());
+        self
+    }
+
+    /// Set what to do when the pin cannot be served.
+    pub fn with_pin_fallback(mut self, pin_fallback: PinFallback) -> Self {
+        self.pin_fallback = Some(pin_fallback);
+        self
+    }
+
+    /// Set the ordered route preference, each `provider/model`.
+    pub fn with_prefer(mut self, prefer: Vec<String>) -> Self {
+        self.prefer = Some(prefer);
         self
     }
 
@@ -349,7 +403,9 @@ impl RunnerRef {
 }
 
 /// The `route.select` answer.
+/// Build with [`Self::new`] and the `with_*` setters.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct SelectAnswer {
     pub decision_id: String,
     pub route: RouteRef,
@@ -362,8 +418,51 @@ pub struct SelectAnswer {
     /// One sentence, at most [`EXPLANATION_MAX_CHARS`] characters.
     pub explanation: String,
     /// The provider's non-normative explanation object, when asked for.
+    /// On `pin_outcome: "fell_back"` it carries `pin_reason` naming the
+    /// pin refusal's reason.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<Value>,
+    /// How a pinned select was answered. Present exactly when the request
+    /// pinned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_outcome: Option<PinOutcome>,
+}
+
+impl SelectAnswer {
+    /// An answer naming `route` on `runner` with the provider's limits.
+    pub fn new(
+        decision_id: impl Into<String>,
+        route: RouteRef,
+        runner: RunnerRef,
+        context_window: u64,
+        max_output_tokens: u64,
+        expires_at_ms: u64,
+        explanation: impl Into<String>,
+    ) -> Self {
+        Self {
+            decision_id: decision_id.into(),
+            route,
+            runner,
+            context_window,
+            max_output_tokens,
+            expires_at_ms,
+            explanation: explanation.into(),
+            detail: None,
+            pin_outcome: None,
+        }
+    }
+
+    /// Set the provider's explanation object.
+    pub fn with_detail(mut self, detail: Value) -> Self {
+        self.detail = Some(detail);
+        self
+    }
+
+    /// Set how a pinned select was answered.
+    pub fn with_pin_outcome(mut self, pin_outcome: PinOutcome) -> Self {
+        self.pin_outcome = Some(pin_outcome);
+        self
+    }
 }
 
 /// Validate and decode `route.select` params for a provider that declares
@@ -381,7 +480,9 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
 /// bad member is `invalid_request` naming it. `hold_ok` and
 /// `hold_wait_max_s` are refused by name unless `capabilities` lists
 /// [`SELECT_HOLD_CONTROL`]. `harness` is refused by name unless the provider
-/// declares [`crate::capabilities::SELECT_HARNESS`]. Whether the consumer is known and owned, and
+/// declares [`crate::capabilities::SELECT_HARNESS`]. `prefer` is refused by
+/// name unless the provider declares [`crate::capabilities::SELECT_PREFER`].
+/// Whether the consumer is known and owned, and
 /// whether anything can serve, is the provider's to answer after this.
 pub fn parse_select_request_serving<C: AsRef<str>>(
     params: &Value,
@@ -455,10 +556,57 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
             }
         }
     }
+    let pin_fallback: Option<PinFallback> = members.optional("pin_fallback")?;
+    if let Some(fallback) = &pin_fallback {
+        if !fallback.is_known() {
+            return Err(members.refuse(
+                "pin_fallback",
+                format!("{fallback} is not a pin fallback this provider reads"),
+            ));
+        }
+        if pin.is_none() {
+            return Err(members.refuse("pin_fallback", "pin_fallback without a pin is invalid"));
+        }
+    }
+    let prefer: Option<Vec<String>> = members.optional("prefer")?;
+    if let Some(prefer) = &prefer {
+        if !capabilities
+            .iter()
+            .any(|capability| capability.as_ref() == crate::capabilities::SELECT_PREFER)
+        {
+            return Err(members.refuse(
+                "prefer",
+                format!(
+                    "prefer is read only by a provider declaring {}",
+                    crate::capabilities::SELECT_PREFER
+                ),
+            ));
+        }
+        if prefer.len() > PREFER_MAX_ENTRIES {
+            return Err(members.refuse(
+                "prefer",
+                format!("prefer carries more than {PREFER_MAX_ENTRIES} entries"),
+            ));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for entry in prefer {
+            if !seen.insert(entry) {
+                return Err(
+                    members.refuse("prefer", format!("{entry:?} is listed twice in prefer"))
+                );
+            }
+            if entry.contains(':') || !is_route_key(entry) {
+                return Err(members.refuse(
+                    "prefer",
+                    format!("{entry:?} is not a route key provider/model"),
+                ));
+            }
+        }
+    }
     Ok(SelectRequest {
         consumer,
         requirements,
-        pin,
+        pin: pin.clone(),
         exclude,
         runners,
         affinity: members.optional_text("affinity", Some(AFFINITY_MAX_CHARS))?,
@@ -468,6 +616,8 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         hold_ok,
         hold_wait_max_s,
         harness,
+        prefer,
+        pin_fallback,
     })
 }
 
@@ -544,6 +694,13 @@ pub enum AnswerProblem {
     Excluded(String),
     /// The explanation is longer than [`EXPLANATION_MAX_CHARS`].
     ExplanationTooLong(usize),
+    /// The request pinned but the answer carries no `pin_outcome`.
+    MissingPinOutcome,
+    /// The request did not pin but the answer carries a `pin_outcome`.
+    UnexpectedPinOutcome,
+    /// The request pinned and fell back but the answer's `detail` carries no
+    /// `pin_reason`.
+    MissingPinReason,
 }
 
 impl std::fmt::Display for AnswerProblem {
@@ -557,13 +714,32 @@ impl std::fmt::Display for AnswerProblem {
                 f,
                 "the explanation is {chars} characters, over {EXPLANATION_MAX_CHARS}"
             ),
+            Self::MissingPinOutcome => {
+                write!(
+                    f,
+                    "the request pinned but the answer carries no pin_outcome"
+                )
+            }
+            Self::UnexpectedPinOutcome => {
+                write!(
+                    f,
+                    "the request did not pin but the answer carries a pin_outcome"
+                )
+            }
+            Self::MissingPinReason => {
+                write!(
+                    f,
+                    "the answer fell back but its detail carries no pin_reason"
+                )
+            }
         }
     }
 }
 
 /// Check an answer against the request it answers: the runner is one the
-/// caller listed, the route is not one it excluded, and the explanation is
-/// within its bound.
+/// caller listed, the route is not one it excluded, the explanation is
+/// within its bound, and a pinned request is answered with a `pin_outcome`
+/// (with `pin_reason` in `detail` on `fell_back`).
 pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<(), AnswerProblem> {
     if let Some(runners) = &request.runners {
         if !runners.contains(&answer.runner.module) {
@@ -581,6 +757,22 @@ pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<()
     let chars = answer.explanation.chars().count();
     if chars > EXPLANATION_MAX_CHARS {
         return Err(AnswerProblem::ExplanationTooLong(chars));
+    }
+    match (&request.pin, &answer.pin_outcome) {
+        (Some(_), None) => return Err(AnswerProblem::MissingPinOutcome),
+        (None, Some(_)) => return Err(AnswerProblem::UnexpectedPinOutcome),
+        (Some(_), Some(outcome)) if *outcome == PinOutcome::FellBack => {
+            let reason = answer
+                .detail
+                .as_ref()
+                .and_then(Value::as_object)
+                .and_then(|detail| detail.get("pin_reason"))
+                .and_then(Value::as_str);
+            if reason.is_none_or(str::is_empty) {
+                return Err(AnswerProblem::MissingPinReason);
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -699,6 +891,8 @@ mod tests {
             "pin": null,
             "exclude": null,
             "detail": null,
+            "pin_fallback": null,
+            "prefer": null,
         }))
         .unwrap();
         let without =

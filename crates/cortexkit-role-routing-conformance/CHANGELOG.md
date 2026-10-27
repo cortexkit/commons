@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.0
+
+- Depend on routing 0.5.0. Breaking Rust minor for the new request and answer
+  shapes (`SelectAnswer` and `Usage` are now non-exhaustive; `CatalogRunner`
+  gains no new fields but the fake gains prefer control).
+- Add eight checks (53 total): pin fallback routing with `pin_outcome` and
+  `detail pin_reason`, a reset fence narrowed to the decision's route and
+  account with past-reset and 24-hour-cap handling, prefer routing in list
+  order without admitting inadequate routes, refusing `prefer` without
+  `select_prefer`, and strict report usage. Prefer routing checks are not
+  applicable without the group. Each is paired with a faulty provider that
+  fails it by name.
+- Extend `new_report_members_conflict` to cover `usage` as part of the report
+  body.
+
 ## 0.6.1
 
 - Fix the fixture's second tool capability tag: `runner-two` now reaches

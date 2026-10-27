@@ -43,6 +43,10 @@ pub const RUNNER_DECLARATIONS_JSON: &str =
 pub const ROUTE_SELECT_HARNESS_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-select-harness.json");
 
+/// The optional `select_prefer` group, the preference list with and without it.
+pub const ROUTE_SELECT_PREFER_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-prefer.json");
+
 /// Optional account-allocation members added after the original v1 vectors.
 pub const ROUTE_ACCOUNT_FOR_OPTIONAL_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-account-for-optional.json");
@@ -77,6 +81,7 @@ pub const FILES: &[(&str, &str)] = &[
         "route-select-hold-control.json",
         ROUTE_SELECT_HOLD_CONTROL_JSON,
     ),
+    ("route-select-prefer.json", ROUTE_SELECT_PREFER_JSON),
     ("route-select.json", ROUTE_SELECT_JSON),
     ("runner-declarations.json", RUNNER_DECLARATIONS_JSON),
 ];

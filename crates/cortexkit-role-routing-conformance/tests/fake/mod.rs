@@ -28,15 +28,15 @@ use cortexkit_role_routing_conformance::{
             parse_account_for_request, Account, AccountForAnswer, AccountForRequest, AccountMode,
             AccountPin, AccountReason, AccountReasonCode, Admission,
         },
-        capabilities::{SELECT_HARNESS, SELECT_HOLD_CONTROL},
+        capabilities::{SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER},
         describe::{ConsumerEntry, RoleDescribe},
         errors::{NoRouteReason, PinUnavailableReason, Refusal, RefusalCode},
         observe::{parse_account_observe_request, AccountObserveAnswer, Observation, ObserveKind},
         ops, parse_consumer_declarations,
-        report::{parse_report_request, ReportAnswer, ReportRequest},
+        report::{parse_report_request, ReportAnswer, ReportRequest, RESET_FENCE_CAP_MS},
         select::{
-            parse_select_request_serving, Requirements, RouteRef, RunnerRef, SelectAnswer,
-            ToolsRequirement, REQUIREMENT_FIELDS,
+            parse_select_request_serving, PinFallback, PinOutcome, Requirements, RouteRef,
+            RunnerRef, SelectAnswer, ToolsRequirement, REQUIREMENT_FIELDS,
         },
         wire, DemandDefaults, ROLE_DECLARATIONS_KEY,
     },
@@ -160,6 +160,30 @@ pub struct Defects {
     pub holds_in_demand_mode: bool,
     /// account_for naming a decision ignores the cap its select recorded.
     pub account_for_ignores_recorded_cap: bool,
+    /// A fallback answer is labelled pinned instead of fell_back.
+    pub pin_fallback_labels_pinned: bool,
+    /// A fell_back answer omits pin_reason from detail.
+    pub pin_fallback_omits_pin_reason: bool,
+    /// Ignores prefer and always answers the natural first candidate.
+    pub ignores_prefer: bool,
+    /// Treats prefer as a pin: answers the first listed route even when it
+    /// is not a candidate.
+    pub admits_prefer: bool,
+    /// Accepts prefer without declaring select_prefer.
+    pub accepts_undeclared_prefer: bool,
+    /// A fenced report blocks every account and route, not just the
+    /// decision's.
+    pub fences_wide: bool,
+    /// A past reset still fences.
+    pub past_reset_fences: bool,
+    /// A past reset is refused as invalid_request.
+    pub past_reset_refused: bool,
+    /// A reset beyond 24 hours is used uncapped.
+    pub reset_not_capped: bool,
+    /// Accepts a report usage with a bad count or unknown member.
+    pub accepts_bad_usage: bool,
+    /// Omits usage from decision-id body equality.
+    pub ignores_usage_body: bool,
 }
 
 fn now_ms() -> u64 {
@@ -217,6 +241,10 @@ struct State {
     hold_limits: HashMap<String, (u64, u64)>,
     /// Account id to the end of its blocking window; `None` when unknown.
     blocks: HashMap<String, Option<u64>>,
+    /// (route key, account id) to the end of a report fence.
+    fences: HashMap<(String, String), u64>,
+    /// Decision id to the account index its account_for named.
+    decision_accounts: HashMap<String, usize>,
     counter: u64,
 }
 
@@ -234,6 +262,14 @@ impl State {
             .get(provider)
             .copied()
             .unwrap_or((DEFAULT_HOLD_S, DEFAULT_HOLD_S))
+    }
+
+    /// Whether the account is fenced for the route at `now`.
+    fn fenced(&self, route_key: &str, account_id: &str, now: u64) -> Option<u64> {
+        self.fences
+            .get(&(route_key.to_owned(), account_id.to_owned()))
+            .copied()
+            .filter(|reset| *reset > now)
     }
 
     /// Whether every account of `provider` is blocked at `now`, and if so
@@ -266,6 +302,7 @@ pub struct FakeSubject {
     /// Declares select_hold_control.
     hold_control: bool,
     harness_control: bool,
+    prefer_control: bool,
 }
 
 impl FakeSubject {
@@ -275,6 +312,7 @@ impl FakeSubject {
             defects,
             hold_control: true,
             harness_control: true,
+            prefer_control: true,
         }
     }
 
@@ -289,6 +327,13 @@ impl FakeSubject {
     pub fn without_harness_control(defects: Defects) -> Self {
         Self {
             harness_control: false,
+            ..Self::new(defects)
+        }
+    }
+
+    pub fn without_prefer_control(defects: Defects) -> Self {
+        Self {
+            prefer_control: false,
             ..Self::new(defects)
         }
     }
@@ -415,6 +460,7 @@ impl RoutingSubject for FakeSubject {
             defects: self.defects,
             hold_control: self.hold_control,
             harness_control: self.harness_control,
+            prefer_control: self.prefer_control,
             stamp: stamp.clone(),
         })
     }
@@ -426,6 +472,7 @@ pub struct FakeRoute {
     defects: Defects,
     hold_control: bool,
     harness_control: bool,
+    prefer_control: bool,
     stamp: RouteStamp,
 }
 
@@ -514,6 +561,9 @@ impl FakeRoute {
         if self.harness_control {
             describe = describe.with_capability(SELECT_HARNESS);
         }
+        if self.prefer_control {
+            describe = describe.with_capability(SELECT_PREFER);
+        }
         to_value(if self.hold_control {
             describe.with_capability(SELECT_HOLD_CONTROL)
         } else {
@@ -547,6 +597,9 @@ impl FakeRoute {
         }
         if self.harness_control || defects.accepts_undeclared_harness {
             capabilities.push(SELECT_HARNESS);
+        }
+        if self.prefer_control || defects.accepts_undeclared_prefer {
+            capabilities.push(SELECT_PREFER);
         }
         let mut request = parse_select_request_serving(&params, &capabilities)?;
         let declaration = state.declarations.get(&request.consumer);
@@ -682,32 +735,67 @@ impl FakeRoute {
                     .cloned()
             })
         });
+        let mut fell_back_reason: Option<PinUnavailableReason> = None;
         let (model, variant, runner) = if let Some(pin) = pin {
-            let unavailable =
-                |reason, reset_at| Err(Refusal::pin_unavailable(pin.clone(), reason, reset_at));
-            let Some(route) = RouteRef::parse_pin(&pin) else {
-                return unavailable(PinUnavailableReason::Invalid, None);
-            };
-            if !catalog.models.iter().any(|m| m.provider == route.provider) {
-                return unavailable(PinUnavailableReason::UnknownProvider, None);
+            #[allow(clippy::type_complexity)]
+            let attempt: Result<
+                (CatalogModel, Option<String>, String),
+                (PinUnavailableReason, Option<u64>),
+            > = (|| {
+                let Some(route) = RouteRef::parse_pin(&pin) else {
+                    return Err((PinUnavailableReason::Invalid, None));
+                };
+                if !catalog.models.iter().any(|m| m.provider == route.provider) {
+                    return Err((PinUnavailableReason::UnknownProvider, None));
+                }
+                let key = route.route_key();
+                let Some(model) = catalog.models.iter().find(|m| m.route_key() == key) else {
+                    return Err((PinUnavailableReason::UnknownModel, None));
+                };
+                if exclude.contains(&key) {
+                    return Err((PinUnavailableReason::Excluded, None));
+                }
+                if let Some(until) = cooled(&key) {
+                    return Err((PinUnavailableReason::Cooldown, reset(until)));
+                }
+                if !eligible(model) {
+                    return Err((PinUnavailableReason::NotAvailable, None));
+                }
+                let Some(runner) = runner_for(&key) else {
+                    return Err((PinUnavailableReason::NotAvailable, None));
+                };
+                Ok((model.clone(), route.variant, runner))
+            })();
+            match attempt {
+                Ok((model, variant, runner)) => (model, variant, runner),
+                Err((reason, _reset_at))
+                    if request.pin.is_some()
+                        && request.pin_fallback == Some(PinFallback::Route) =>
+                {
+                    fell_back_reason = Some(reason.clone());
+                    let mut fallback: Option<(CatalogModel, Option<String>, String)> = None;
+                    for model in catalog.models.iter().filter(|m| eligible(m)) {
+                        let key = model.route_key();
+                        if exclude.contains(&key) {
+                            continue;
+                        }
+                        if cooled(&key).is_some() {
+                            continue;
+                        }
+                        if let Some(runner) = runner_for(&key) {
+                            fallback = Some((model.clone(), None, runner));
+                            break;
+                        }
+                    }
+                    match fallback {
+                        Some((model, variant, runner)) => (model, variant, runner),
+                        None => return Err(Refusal::no_route(NoRouteReason::AllInadequate, None)),
+                    }
+                }
+                Err((reason, reset_at)) => {
+                    return Err(Refusal::pin_unavailable(pin.clone(), reason, reset_at));
+                }
             }
-            let key = route.route_key();
-            let Some(model) = catalog.models.iter().find(|m| m.route_key() == key) else {
-                return unavailable(PinUnavailableReason::UnknownModel, None);
-            };
-            if exclude.contains(&key) {
-                return unavailable(PinUnavailableReason::Excluded, None);
-            }
-            if let Some(until) = cooled(&key) {
-                return unavailable(PinUnavailableReason::Cooldown, reset(until));
-            }
-            if !eligible(model) {
-                return unavailable(PinUnavailableReason::NotAvailable, None);
-            }
-            let Some(runner) = runner_for(&key) else {
-                return unavailable(PinUnavailableReason::NotAvailable, None);
-            };
-            (model.clone(), route.variant, runner)
         } else {
             let ladder = state.ladders.get(&consumer.id).cloned();
             let ordered: Vec<CatalogModel> = match &ladder {
@@ -788,6 +876,190 @@ impl FakeRoute {
                         Some(reset) => defects.holds_in_demand_mode && holdable(model, *reset),
                     })
                     .collect();
+                if !defects.ignores_prefer {
+                    if let Some(prefer) = &request.prefer {
+                        if defects.admits_prefer {
+                            if let Some(first) = prefer.first() {
+                                if let Some(model) =
+                                    catalog.models.iter().find(|m| &m.route_key() == first)
+                                {
+                                    if let Some(runner) = runner_for(first) {
+                                        let decision_id = state.next("decision");
+                                        let route = RouteRef {
+                                            provider: model.provider.clone(),
+                                            model: model.model.clone(),
+                                            variant: None,
+                                        };
+                                        state.decisions.insert(
+                                            decision_id.clone(),
+                                            Decision {
+                                                principal: self.principal().to_owned(),
+                                                route: route.clone(),
+                                                runner: runner.clone(),
+                                                hold_cap: request.hold_wait_max_s,
+                                            },
+                                        );
+                                        return to_value(SelectAnswer::new(
+                                            decision_id,
+                                            route.clone(),
+                                            RunnerRef::new(
+                                                runner.clone(),
+                                                RouteRef {
+                                                    provider: model.provider.clone(),
+                                                    model: model.model.clone(),
+                                                    variant: None,
+                                                },
+                                            ),
+                                            model.context_window,
+                                            model.max_output_tokens,
+                                            if defects.expiry_in_past {
+                                                now - 1
+                                            } else {
+                                                now + DECISION_TTL_MS
+                                            },
+                                            format!(
+                                                "{} meets the request on {runner}.",
+                                                model.route_key()
+                                            ),
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        for wanted in prefer {
+                            if let Some((model, runner, _)) = candidates
+                                .iter()
+                                .find(|(model, _, _)| &model.route_key() == wanted)
+                            {
+                                let decision_id = state.next("decision");
+                                let route = RouteRef {
+                                    provider: model.provider.clone(),
+                                    model: model.model.clone(),
+                                    variant: None,
+                                };
+                                state.decisions.insert(
+                                    decision_id.clone(),
+                                    Decision {
+                                        principal: self.principal().to_owned(),
+                                        route: route.clone(),
+                                        runner: runner.clone(),
+                                        hold_cap: request.hold_wait_max_s,
+                                    },
+                                );
+                                if let Some(affinity) = &request.affinity {
+                                    state.affinity.insert(
+                                        (
+                                            self.principal().to_owned(),
+                                            consumer.id.clone(),
+                                            affinity.clone(),
+                                        ),
+                                        AffinityEntry {
+                                            decision_id: decision_id.clone(),
+                                            ended: false,
+                                        },
+                                    );
+                                }
+                                let expires_at_ms = if defects.expiry_in_past {
+                                    now - 1
+                                } else {
+                                    now + DECISION_TTL_MS
+                                };
+                                let declared = catalog
+                                    .runners
+                                    .iter()
+                                    .find(|candidate| candidate.module == *runner)
+                                    .and_then(|candidate| {
+                                        request
+                                            .harness
+                                            .clone()
+                                            .filter(|_| !defects.echoes_default_harness)
+                                            .or_else(|| {
+                                                if defects.chooses_first_harness {
+                                                    candidate
+                                                        .harnesses
+                                                        .as_ref()
+                                                        .and_then(|values| values.first().cloned())
+                                                } else {
+                                                    candidate.default_harness.clone()
+                                                }
+                                            })
+                                            .or_else(|| {
+                                                candidate
+                                                    .harnesses
+                                                    .as_ref()
+                                                    .filter(|values| {
+                                                        (values.len() == 1
+                                                            && !defects.ignores_single_harness)
+                                                            || (defects
+                                                                .chooses_first_without_default
+                                                                && request.harness.is_none()
+                                                                && candidate
+                                                                    .default_harness
+                                                                    .is_none()
+                                                                && values.len() > 1)
+                                                    })
+                                                    .map(|values| values[0].clone())
+                                            })
+                                    });
+                                let harness = match declared {
+                                    Some(_) if defects.drops_harness => None,
+                                    None if defects.invents_harness => {
+                                        Some("default-harness".to_owned())
+                                    }
+                                    declared => declared,
+                                };
+                                let mut runner_ref = RunnerRef::new(runner.clone(), route.clone());
+                                if let Some(harness) = harness {
+                                    runner_ref = runner_ref.with_harness(harness);
+                                }
+                                let mut answer = SelectAnswer::new(
+                                    decision_id,
+                                    route.clone(),
+                                    runner_ref,
+                                    model.context_window,
+                                    model.max_output_tokens,
+                                    expires_at_ms,
+                                    format!("{} meets the request on {runner}.", route.route_key()),
+                                );
+                                if request.detail == Some(true) {
+                                    answer =
+                                        answer.with_detail(serde_json::json!({"order": "catalog"}));
+                                }
+                                if request.pin.is_some() {
+                                    let outcome = if fell_back_reason.is_some() {
+                                        PinOutcome::FellBack
+                                    } else {
+                                        PinOutcome::Pinned
+                                    };
+                                    if defects.pin_fallback_labels_pinned
+                                        && outcome == PinOutcome::FellBack
+                                    {
+                                        answer = answer.with_pin_outcome(PinOutcome::Pinned);
+                                    } else {
+                                        answer = answer.with_pin_outcome(outcome);
+                                    }
+                                    if answer.pin_outcome == Some(PinOutcome::FellBack)
+                                        && !defects.pin_fallback_omits_pin_reason
+                                    {
+                                        let reason = fell_back_reason
+                                            .clone()
+                                            .map(|reason| reason.as_str().to_owned())
+                                            .unwrap_or_else(|| "not_available".to_owned());
+                                        let mut detail = answer
+                                            .detail
+                                            .clone()
+                                            .and_then(|detail| detail.as_object().cloned())
+                                            .unwrap_or_default();
+                                        detail
+                                            .insert("pin_reason".to_owned(), Value::String(reason));
+                                        answer = answer.with_detail(Value::Object(detail));
+                                    }
+                                }
+                                return to_value(answer);
+                            }
+                        }
+                    }
+                }
                 // The affinity key's previous route wins over the catalog
                 // order while it is still a candidate: it meets the request
                 // and is not cooling down. A failure report on it ends the
@@ -919,33 +1191,86 @@ impl FakeRoute {
         if let Some(harness) = harness {
             runner_ref = runner_ref.with_harness(harness);
         }
-        to_value(SelectAnswer {
+        let mut answer = SelectAnswer::new(
             decision_id,
-            explanation: format!("{} meets the request on {runner}.", route.route_key()),
-            runner: runner_ref,
-            route,
-            context_window: model.context_window,
-            max_output_tokens: model.max_output_tokens,
+            route.clone(),
+            runner_ref,
+            model.context_window,
+            model.max_output_tokens,
             expires_at_ms,
-            detail: (request.detail == Some(true)).then(|| serde_json::json!({"order": "catalog"})),
-        })
+            format!("{} meets the request on {runner}.", route.route_key()),
+        );
+        if request.detail == Some(true) {
+            answer = answer.with_detail(serde_json::json!({"order": "catalog"}));
+        }
+        // Pinned answers carry how the pin was served; unpinned carry none.
+        // `fell_back_reason` is set only when the pin failed and fallback routed.
+        if request.pin.is_some() {
+            let outcome = if fell_back_reason.is_some() {
+                PinOutcome::FellBack
+            } else {
+                PinOutcome::Pinned
+            };
+            if defects.pin_fallback_labels_pinned && outcome == PinOutcome::FellBack {
+                answer = answer.with_pin_outcome(PinOutcome::Pinned);
+            } else {
+                answer = answer.with_pin_outcome(outcome);
+            }
+            if answer.pin_outcome == Some(PinOutcome::FellBack)
+                && !defects.pin_fallback_omits_pin_reason
+            {
+                let reason = fell_back_reason
+                    .clone()
+                    .map(|reason| reason.as_str().to_owned())
+                    .unwrap_or_else(|| "not_available".to_owned());
+                let mut detail = answer
+                    .detail
+                    .clone()
+                    .and_then(|detail| detail.as_object().cloned())
+                    .unwrap_or_default();
+                detail.insert("pin_reason".to_owned(), Value::String(reason));
+                answer = answer.with_detail(Value::Object(detail));
+            }
+        }
+        to_value(answer)
     }
 
     fn report(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
         let defects = self.defects;
-        let request = parse_report_request(params)?;
-        let Some(decision) = state.decisions.get(&request.decision_id) else {
-            return Err(Refusal::unknown_decision());
+        let request = match parse_report_request(params) {
+            Ok(request) => request,
+            Err(refusal)
+                if defects.accepts_bad_usage
+                    && refusal.detail.get("field") == Some(&Value::String("usage".into())) =>
+            {
+                let mut stripped = params.clone();
+                stripped
+                    .as_object_mut()
+                    .map(|object| object.remove("usage"));
+                parse_report_request(&stripped)?
+            }
+            Err(refusal) => return Err(refusal),
         };
-        if decision.principal != self.principal() && !defects.accepts_report_from_any_principal {
-            return Err(Refusal::unknown_decision());
-        }
+        let decision_route = {
+            let Some(decision) = state.decisions.get(&request.decision_id) else {
+                return Err(Refusal::unknown_decision());
+            };
+            if decision.principal != self.principal() && !defects.accepts_report_from_any_principal
+            {
+                return Err(Refusal::unknown_decision());
+            }
+            decision.route.clone()
+        };
         if let Some((first, answer)) = state.reports.get(&request.decision_id) {
             let mut compared = request.clone();
             if defects.ignores_report_members {
                 compared.pool.clone_from(&first.pool);
                 compared.eligibility.clone_from(&first.eligibility);
                 compared.request_input_tokens = first.request_input_tokens;
+                compared.usage.clone_from(&first.usage);
+            }
+            if defects.ignores_usage_body {
+                compared.usage.clone_from(&first.usage);
             }
             if *first == compared {
                 if !defects.rerecords_repeated_report {
@@ -963,7 +1288,7 @@ impl FakeRoute {
         {
             let model = (eligibility.scope
                 == cortexkit_role_routing_conformance::wire::report::EligibilityScope::Model)
-                .then(|| decision.route.model.clone());
+                .then(|| decision_route.model.clone());
             state.ineligible.push((credential.clone(), model));
             if defects.holds_on_eligibility {
                 state.held_credentials.push(credential.clone());
@@ -978,6 +1303,82 @@ impl FakeRoute {
             for entry in state.affinity.values_mut() {
                 if entry.decision_id == request.decision_id {
                     entry.ended = true;
+                }
+            }
+        }
+        // A failed report with a reset fences only the decision's route on
+        // its account. Only `failed` fences; other failures just end affinity.
+        if request.outcome == cortexkit_role_routing_conformance::wire::report::Outcome::Failed {
+            if let Some(reset) = request.reset_at_ms {
+                let now = now_ms();
+                if reset <= now {
+                    if defects.past_reset_refused {
+                        return Err(Refusal::invalid_request(
+                            "reset_at_ms",
+                            "a past reset is still recorded, never refused: this fake refuses it",
+                        ));
+                    }
+                    if defects.past_reset_fences {
+                        let catalog = Self::catalog(state);
+                        let route_key = decision_route.route_key();
+                        let account_id = state
+                            .decision_accounts
+                            .get(&request.decision_id)
+                            .and_then(|index| catalog.accounts.get(*index))
+                            .map(|account| account.account_id.clone())
+                            .or_else(|| {
+                                request.credential_id.as_ref().and_then(|credential| {
+                                    catalog
+                                        .accounts
+                                        .iter()
+                                        .find(|account| &account.credential_id == credential)
+                                        .map(|account| account.account_id.clone())
+                                })
+                            });
+                        if let Some(account_id) = account_id {
+                            state.fences.insert((route_key, account_id), now + 600_000);
+                        }
+                    }
+                } else {
+                    let capped = if defects.reset_not_capped {
+                        reset
+                    } else {
+                        reset.min(now + RESET_FENCE_CAP_MS)
+                    };
+                    let catalog = Self::catalog(state);
+                    if defects.fences_wide {
+                        for model in &catalog.models {
+                            for account in catalog
+                                .accounts
+                                .iter()
+                                .filter(|account| account.provider == model.provider)
+                            {
+                                state.fences.insert(
+                                    (model.route_key(), account.account_id.clone()),
+                                    capped,
+                                );
+                            }
+                        }
+                    } else {
+                        let route_key = decision_route.route_key();
+                        let account_id = state
+                            .decision_accounts
+                            .get(&request.decision_id)
+                            .and_then(|index| catalog.accounts.get(*index))
+                            .map(|account| account.account_id.clone())
+                            .or_else(|| {
+                                request.credential_id.as_ref().and_then(|credential| {
+                                    catalog
+                                        .accounts
+                                        .iter()
+                                        .find(|account| &account.credential_id == credential)
+                                        .map(|account| account.account_id.clone())
+                                })
+                            });
+                        if let Some(account_id) = account_id {
+                            state.fences.insert((route_key, account_id), capped);
+                        }
+                    }
                 }
             }
         }
@@ -1108,6 +1509,22 @@ impl FakeRoute {
             })
             .map(|(index, _)| index)
             .collect();
+        let route_key = format!("{}/{}", request.provider, request.model);
+        let mut unfenced = Vec::new();
+        let mut fence_resets = Vec::new();
+        for index in usable {
+            let account_id = &catalog.accounts[index].account_id;
+            if let Some(reset) = state.fenced(&route_key, account_id, now) {
+                fence_resets.push(reset);
+            } else {
+                unfenced.push(index);
+            }
+        }
+        if unfenced.is_empty() && !fence_resets.is_empty() {
+            let earliest = fence_resets.into_iter().min().unwrap();
+            return Err(Refusal::account_pool_exhausted(Some(earliest)));
+        }
+        let usable = unfenced;
         if usable.is_empty() {
             return Err(Refusal::new(
                 RefusalCode::AuthRequired,
@@ -1205,6 +1622,9 @@ impl FakeRoute {
             Some(decision_id) => decision_id.clone(),
             None => state.next("allocation"),
         };
+        if request.decision_id.is_some() {
+            state.decision_accounts.insert(decision_id.clone(), account);
+        }
         let chosen = &catalog.accounts[account];
         let answer = AccountForAnswer {
             admission: Admission {

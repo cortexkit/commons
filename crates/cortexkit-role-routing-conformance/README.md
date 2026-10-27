@@ -8,7 +8,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.6.0"
+cortexkit-role-routing-conformance = "0.7.0"
 ```
 
 ```rust,ignore
@@ -80,14 +80,18 @@ for defaults; the operator-precedence check also overrides the request's `iq`.
 
 ## Checks
 
-The kit runs 45 checks, including six declaration checks, eight optional-member
-checks, four additional program checks, and nine hold checks. The hold checks cover the optional
+The kit runs 53 checks, including six declaration checks, eight optional-member
+checks, four additional program checks, nine hold checks, and eight new checks
+for pin fallback, reset fences, prefer and usage. The hold checks cover the optional
 `select_hold_control` group: against a provider whose `role.describe` does
 not declare it they report not applicable (`CheckOutcome::NotApplicable`,
-printed `N/A`), and the verdict stays `Passed`.
+printed `N/A`), and the verdict stays `Passed`. The two prefer routing checks
+cover the optional `select_prefer` group the same way.
 
 The requested-program check is likewise not applicable without `select_harness`;
-the undeclared-group refusal check runs only without that group. Default-program
+the undeclared-group refusal check runs only without that group. The prefer
+routing checks are likewise not applicable without `select_prefer`; the
+undeclared-prefer refusal check runs only without that group. Default-program
 and non-starting-runner checks run regardless of the group. `harness_catalog()`
 adds a runner with `["alpha", "beta"]` and default `"alpha"`, a singleton
 `["solo"]` with no default, and an attach-only gateway with
@@ -112,7 +116,7 @@ provider declares `select_harness`.
 | `malformed_pool_refused_by_field` | §2: malformed pools are `invalid_request {field: "pool"}` on all three ops |
 | `pool_body_admission_conflict` | §9.1: pool changes under a used admission id are conflicts |
 | `parent_body_admission_conflict` | §9.1: parent key changes under a used admission id are conflicts |
-| `new_report_members_conflict` | §8: pool, eligibility and input-size changes under a used decision id are conflicts |
+| `new_report_members_conflict` | §8: pool, eligibility, input-size and usage changes under a used decision id are conflicts |
 | `describe_lists_consumers_and_fields` | §4: describe lists every configured consumer with `priced_only`, every required op and every requirement field |
 | `unknown_requirement_refused_by_name` | §5.1: an unknown requirement is `invalid_requirements {field}`, never ignored |
 | `unknown_consumer_refused` | §5.1: an unknown consumer is `unknown_consumer` |
@@ -150,6 +154,14 @@ provider declares `select_harness`.
 | `hold_nothing_within_limit_accounts_blocked` | §5.4: nothing within the limit is `no_route` `accounts_blocked` with the earliest known reset, or none |
 | `hold_demand_mode_skips_blocked_model` | §5.4: a demand-mode consumer skips a blocked model |
 | `hold_account_for_applies_recorded_cap` | §9.1: `account_for` naming a decision applies the cap its select recorded |
+| `pin_fallback_routes_and_labels` | §5: an unservable pin with `pin_fallback: route` routes with `pin_outcome fell_back` and `detail pin_reason`; a servable pin is `pinned` |
+| `report_reset_fences_only_decision_route_and_account` | §8: a failed report with a future reset fences only that decision's route on that account |
+| `report_past_reset_fences_nothing_and_is_recorded` | §8: a past reset fences nothing and is recorded, never refused |
+| `report_reset_capped_at_24h` | §8: a reset beyond 24 hours is capped at 24 hours |
+| `prefer_prefers_listed_adequate_route` | §5.1: `select_prefer` answers a listed adequate route in list order |
+| `prefer_never_admits_inadequate_route` | §5.1: `select_prefer` never admits a route the request would not get |
+| `undeclared_prefer_group_refuses_member` | §5.1: without `select_prefer`, refuse `prefer` by field name |
+| `report_usage_strict` | §8: bad usage counts or unknown members are `invalid_request {field: usage}` |
 
 `CHECKS` in `src/report.rs` states what each check asserts, and `NARROWINGS`
 where it checks less than the contract says; every report prints both.

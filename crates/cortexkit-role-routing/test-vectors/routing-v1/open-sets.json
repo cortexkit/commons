@@ -77,6 +77,21 @@
           "quota_age_band": "fresh"
         }
       }
+    },
+    {
+      "name": "pin_outcome",
+      "type": "SelectAnswer",
+      "at": "/pin_outcome",
+      "value": {
+        "decision_id": "decision-1",
+        "route": {"provider": "example-provider", "model": "model-a"},
+        "runner": {"module": "runner-one", "model": {"provider": "example-provider", "model": "model-a"}},
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "model-a meets iq 50.",
+        "pin_outcome": "held_over"
+      }
     }
   ]
 }

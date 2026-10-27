@@ -21,7 +21,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("malformed_pool_refused_by_field", "malformed pools are invalid_request with detail.field pool on all three ops"),
     check("pool_body_admission_conflict", "changing pool under a reused admission_id is admission_conflict"),
     check("parent_body_admission_conflict", "changing parent_conversation_key under a reused admission_id is admission_conflict"),
-    check("new_report_members_conflict", "changing pool, eligibility or request_input_tokens under a reused decision_id is report_conflict"),
+    check("new_report_members_conflict", "changing pool, eligibility, request_input_tokens or usage under a reused decision_id is report_conflict"),
     check(
         "describe_lists_consumers_and_fields",
         "role.describe names routing version 1 and every required op and requirement field, and lists exactly the configured consumers, each with its priced_only",
@@ -157,6 +157,35 @@ pub const CHECKS: &[CheckSpec] = &[
     check(
         "hold_account_for_applies_recorded_cap",
         "select_hold_control: account_for naming a decision holds only within the cap that decision's select recorded; the same wait without the decision is account_hold",
+    ),
+    check(
+        "pin_fallback_routes_and_labels",
+        "an unservable pin with pin_fallback route is answered with pin_outcome fell_back and detail pin_reason, and a servable pin with fallback is answered pinned; without fallback it is pin_unavailable",
+    ),
+    check(
+        "report_reset_fences_only_decision_route_and_account",
+        "a failed report with a future reset fences only that decision's route on that decision's account until the reset, never other routes, accounts or providers",
+    ),
+    check(
+        "report_past_reset_fences_nothing_and_is_recorded",
+        "a failed report with a past reset is recorded as a failure with no fence, never refused for being in the past",
+    ),
+    check(
+        "report_reset_capped_at_24h",
+        "a caller-supplied reset further than 24 hours away is capped at 24 hours from now",
+    ),
+    check(
+        "prefer_prefers_listed_adequate_route",
+        "select_prefer: among the routes the provider would already answer, a listed adequate one is answered in list order",
+    ),
+    check(
+        "prefer_never_admits_inadequate_route",
+        "select_prefer: a listed route the request would not otherwise get is never admitted",
+    ),
+    check("undeclared_prefer_group_refuses_member", "a provider without select_prefer refuses prefer as invalid_request naming the field"),
+    check(
+        "report_usage_strict",
+        "a report usage with a negative or over-limit count or an unknown member is invalid_request naming usage",
     ),
 ];
 

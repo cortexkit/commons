@@ -32,16 +32,106 @@ impl Outcome {
     }
 }
 
-/// Token usage of the work run on a decision.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Largest usage count exactly representable by readers using JSON doubles.
+/// Every `usage` count shares this bound.
+pub const MAX_USAGE_COUNT: u64 = (1 << 53) - 1;
+
+/// Token usage and timing of the work run on a decision.
+/// Build with [`Self::new`] and the `with_*` setters.
+///
+/// The token field names and their meaning match
+/// `cortexkit-role-llm-runner`'s usage: `input_tokens` counts only input
+/// that was neither read from nor written to the prompt cache; cache reads
+/// and writes are the separate `cached_input_tokens` and `cache_write_tokens`
+/// counts. `reasoning_tokens` is a breakdown of `output_tokens`, never an
+/// addition to it. An absent count means unrecorded, never zero. Every present
+/// count is a non-negative integer up to [`MAX_USAGE_COUNT`]. `cost_usd` is
+/// the caller's own cost claim, a non-negative finite JSON number. The provider may
+/// ignore it, since it prices usage from its own catalog.
+/// Unknown members are refused.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+#[serde(deny_unknown_fields)]
 pub struct Usage {
-    pub input_tokens: u64,
-    /// Reasoning tokens are counted here.
-    pub output_tokens: u64,
-    /// The caller's own claim. The provider prices usage from its own
-    /// catalog and may ignore it.
+    /// Input tokens excluding cache reads and writes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    /// Input read from the prompt cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_tokens: Option<u64>,
+    /// Input written to the prompt cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+    /// Output tokens, including any counted in `reasoning_tokens`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
+    /// Output reported as reasoning, already inside `output_tokens`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+    /// Wall-clock run time, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// Time to the first output token, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_token_ms: Option<u64>,
+    /// The caller's own cost claim in USD. The provider may ignore it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+}
+
+impl Usage {
+    /// Empty usage: no count known yet.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set input tokens excluding cache reads and writes.
+    pub fn with_input_tokens(mut self, input_tokens: u64) -> Self {
+        self.input_tokens = Some(input_tokens);
+        self
+    }
+
+    /// Set input read from the prompt cache.
+    pub fn with_cached_input_tokens(mut self, cached_input_tokens: u64) -> Self {
+        self.cached_input_tokens = Some(cached_input_tokens);
+        self
+    }
+
+    /// Set input written to the prompt cache.
+    pub fn with_cache_write_tokens(mut self, cache_write_tokens: u64) -> Self {
+        self.cache_write_tokens = Some(cache_write_tokens);
+        self
+    }
+
+    /// Set output tokens.
+    pub fn with_output_tokens(mut self, output_tokens: u64) -> Self {
+        self.output_tokens = Some(output_tokens);
+        self
+    }
+
+    /// Set output reported as reasoning.
+    pub fn with_reasoning_tokens(mut self, reasoning_tokens: u64) -> Self {
+        self.reasoning_tokens = Some(reasoning_tokens);
+        self
+    }
+
+    /// Set wall-clock run time in milliseconds.
+    pub fn with_duration_ms(mut self, duration_ms: u64) -> Self {
+        self.duration_ms = Some(duration_ms);
+        self
+    }
+
+    /// Set time to the first output token in milliseconds.
+    pub fn with_first_token_ms(mut self, first_token_ms: u64) -> Self {
+        self.first_token_ms = Some(first_token_ms);
+        self
+    }
+
+    /// Set the caller's own cost claim in USD.
+    pub fn with_cost_usd(mut self, cost_usd: f64) -> Self {
+        self.cost_usd = Some(cost_usd);
+        self
+    }
 }
 
 open_set! {
@@ -131,7 +221,7 @@ impl ReportRequest {
         self
     }
 
-    /// Set the work's token usage and optional cost claim.
+    /// Set the work's token usage and timing.
     pub fn with_usage(mut self, usage: Usage) -> Self {
         self.usage = Some(usage);
         self
@@ -167,18 +257,50 @@ pub struct ReportAnswer {
     pub outcome: Outcome,
 }
 
+/// A caller-supplied reset fences at most this long: 24 hours in
+/// milliseconds. A reset further away is capped at this bound; a reset
+/// already in the past fences nothing.
+pub const RESET_FENCE_CAP_MS: u64 = 24 * 60 * 60 * 1000;
+
 /// Validate and decode `route.report` params. A bad member is
 /// `invalid_request` naming it. An outcome this crate does not name is
 /// accepted and kept.
 pub fn parse_report_request(params: &Value) -> Result<ReportRequest, Refusal> {
     let members = Members::of(params)?;
+    let usage: Option<Usage> = members.optional("usage")?;
+    if let Some(usage) = &usage {
+        for (name, value) in [
+            ("input_tokens", usage.input_tokens),
+            ("cached_input_tokens", usage.cached_input_tokens),
+            ("cache_write_tokens", usage.cache_write_tokens),
+            ("output_tokens", usage.output_tokens),
+            ("reasoning_tokens", usage.reasoning_tokens),
+            ("duration_ms", usage.duration_ms),
+            ("first_token_ms", usage.first_token_ms),
+        ] {
+            if value.is_some_and(|count| count > MAX_USAGE_COUNT) {
+                return Err(
+                    members.refuse("usage", format!("usage.{name} is above {MAX_USAGE_COUNT}"))
+                );
+            }
+        }
+        if usage
+            .cost_usd
+            .is_some_and(|cost| !cost.is_finite() || cost < 0.0)
+        {
+            return Err(members.refuse(
+                "usage",
+                "usage.cost_usd must be a non-negative finite number",
+            ));
+        }
+    }
     let request = ReportRequest {
         decision_id: members.text("decision_id", None)?,
         outcome: members.required("outcome")?,
         runner_code: members.optional_text("runner_code", None)?,
         credential_id: members.optional_text("credential_id", None)?,
         reset_at_ms: members.optional("reset_at_ms")?,
-        usage: members.optional("usage")?,
+        usage,
         pool: members.pool()?,
         eligibility: members.optional("eligibility")?,
         request_input_tokens: members.optional("request_input_tokens")?,

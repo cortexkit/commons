@@ -1,5 +1,5 @@
 {
-  "about": "Optional quota pool, eligibility and request input size; eligibility conflicts name detail.field eligibility.",
+  "about": "Optional quota pool, eligibility, request input size and usage; eligibility conflicts name detail.field eligibility.",
   "requests": [
     {"name": "pool", "params": {"decision_id": "d", "outcome": "completed", "pool": "model.pool_1-x"}},
     {"name": "model_eligibility", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "model", "code": "model_not_included"}}},
@@ -7,7 +7,9 @@
     {"name": "unknown_scope_kept", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "future_scope", "code": "future_code"}}},
     {"name": "zero_input", "params": {"decision_id": "d", "outcome": "completed", "request_input_tokens": 0}},
     {"name": "large_input", "params": {"decision_id": "d", "outcome": "refused", "request_input_tokens": 1000000}},
-    {"name": "nulls_are_absent", "params": {"decision_id": "d", "outcome": "completed", "pool": null, "eligibility": null, "request_input_tokens": null}, "encodes_as": {"decision_id": "d", "outcome": "completed"}}
+    {"name": "usage_every_count", "params": {"decision_id": "d", "outcome": "completed", "usage": {"input_tokens": 1200, "cached_input_tokens": 400, "cache_write_tokens": 800, "output_tokens": 300, "reasoning_tokens": 60, "duration_ms": 1500, "first_token_ms": 300, "cost_usd": 0.0042}}},
+    {"name": "usage_empty", "params": {"decision_id": "d", "outcome": "completed", "usage": {}}},
+    {"name": "nulls_are_absent", "params": {"decision_id": "d", "outcome": "completed", "pool": null, "eligibility": null, "request_input_tokens": null, "usage": null}, "encodes_as": {"decision_id": "d", "outcome": "completed"}}
   ],
   "refused": [
     {"name": "empty_pool", "params": {"decision_id": "d", "outcome": "completed", "pool": ""}, "refusal": {"code": "invalid_request", "detail": {"field": "pool"}}},
@@ -24,7 +26,12 @@
     {"name": "eligibility_and_pool_exhaustion", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "account", "code": "disabled"}, "runner_code": "account_pool_exhausted"}, "refusal": {"code": "invalid_request", "detail": {"field": "eligibility"}}},
     {"name": "eligibility_and_quota_exhaustion", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "model", "code": "not_included"}, "runner_code": "quota_exhausted"}, "refusal": {"code": "invalid_request", "detail": {"field": "eligibility"}}},
     {"name": "eligibility_and_billing_exhaustion", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "account", "code": "disabled"}, "runner_code": "credential_billing_exhausted"}, "refusal": {"code": "invalid_request", "detail": {"field": "eligibility"}}},
-    {"name": "eligibility_and_reset", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "model", "code": "not_included"}, "reset_at_ms": 0}, "refusal": {"code": "invalid_request", "detail": {"field": "eligibility"}}}
+    {"name": "eligibility_and_reset", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "model", "code": "not_included"}, "reset_at_ms": 0}, "refusal": {"code": "invalid_request", "detail": {"field": "eligibility"}}},
+    {"name": "usage_negative", "params": {"decision_id": "d", "outcome": "completed", "usage": {"input_tokens": -1}}, "refusal": {"code": "invalid_request", "detail": {"field": "usage"}}},
+    {"name": "usage_fractional", "params": {"decision_id": "d", "outcome": "completed", "usage": {"output_tokens": 1.5}}, "refusal": {"code": "invalid_request", "detail": {"field": "usage"}}},
+    {"name": "usage_over_limit", "params": {"decision_id": "d", "outcome": "completed", "usage": {"input_tokens": 9007199254740992}}, "refusal": {"code": "invalid_request", "detail": {"field": "usage"}}},
+    {"name": "usage_unknown_member", "params": {"decision_id": "d", "outcome": "completed", "usage": {"input_tokens": 1, "bogus": 1}}, "refusal": {"code": "invalid_request", "detail": {"field": "usage"}}},
+    {"name": "usage_negative_cost", "params": {"decision_id": "d", "outcome": "completed", "usage": {"input_tokens": 1, "cost_usd": -0.5}}, "refusal": {"code": "invalid_request", "detail": {"field": "usage"}}}
   ],
   "answers": [],
   "bodies": [
@@ -32,6 +39,7 @@
     {"name": "eligibility_is_body", "first": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "model", "code": "one"}}, "second": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "model", "code": "two"}}, "same": false},
     {"name": "scope_is_body", "first": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "model", "code": "one"}}, "second": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "account", "code": "one"}}, "same": false},
     {"name": "input_size_is_body", "first": {"decision_id": "d", "outcome": "refused", "request_input_tokens": 0}, "second": {"decision_id": "d", "outcome": "refused", "request_input_tokens": 1}, "same": false},
-    {"name": "new_nulls_are_absent", "first": {"decision_id": "d", "outcome": "refused"}, "second": {"decision_id": "d", "outcome": "refused", "pool": null, "eligibility": null, "request_input_tokens": null}, "same": true}
+    {"name": "usage_is_body", "first": {"decision_id": "d", "outcome": "completed", "usage": {"input_tokens": 100}}, "second": {"decision_id": "d", "outcome": "completed", "usage": {"input_tokens": 101}}, "same": false},
+    {"name": "new_nulls_are_absent", "first": {"decision_id": "d", "outcome": "refused"}, "second": {"decision_id": "d", "outcome": "refused", "pool": null, "eligibility": null, "request_input_tokens": null, "usage": null}, "same": true}
   ]
 }
