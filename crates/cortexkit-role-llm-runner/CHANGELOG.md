@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.15
+
+- Text only. Contract §4.3 now says which message `session.head.cut` names
+  for a cut a host made before the runner adopted the session: the last
+  message the host's compaction folded away, never a message the host keeps
+  visible after compacting, such as its compaction marker or the summary it
+  shows. A consumer that drops everything up to `cut` therefore never drops
+  that summary. `read::HeadCut`'s doc says the same. No type, wire shape or
+  vector changes.
+
 ## 0.7.14
 
 - Add the `rich_ui_stamp` describe group (contract §9.17), listing

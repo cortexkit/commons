@@ -1338,7 +1338,9 @@ impl HeadMeta {
 /// never by content. `digest` is that message's content digest
 /// ([`crate::content_digest::content_digest`]), the digest a cut lineage's
 /// `descends_from` names. A cut made before the runner numbered anything
-/// (in a host's history before adoption) names the host's message.
+/// (in a host's history before adoption) names the host's message: the last
+/// one the host's compaction folded away, never one the host keeps visible
+/// after compacting, such as its compaction marker or summary.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeadCut {

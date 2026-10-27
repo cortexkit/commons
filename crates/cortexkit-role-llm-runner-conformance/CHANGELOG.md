@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.17
+
+- Requires `cortexkit-role-llm-runner` 0.7.15, a text-only release that says
+  which message a host's pre-adoption cut names. No check changes.
+
 ## 0.15.16
 
 - Track llm-runner 0.7.14, which this crate pins exactly.

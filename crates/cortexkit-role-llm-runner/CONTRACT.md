@@ -570,7 +570,12 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   (the digest a cut lineage's `descends_from` names, compaction-provider
   §5.1) and its creation time. A cut made before the runner numbered
   anything, in a host's history before the runner adopted the session,
-  names the host's message, and its lineage's `first_ordinal` may be 0. A
+  names the host's message, and its lineage's `first_ordinal` may be 0.
+  That message is the last one the host's compaction folded away: the
+  newest message the host no longer carries to the model. It is never a
+  message the host keeps visible after compacting, such as its compaction
+  marker or the summary that marker shows, so a consumer that drops
+  everything up to `cut` never drops the summary with it. A
   lineage with no cut carries no `cut`, and its `first_ordinal` is 0.
 - [pinned] `first_ordinal` is the current lineage's first ordinal (§4.5):
   0 for a lineage no cut started, the cut's first retained ordinal for one a
