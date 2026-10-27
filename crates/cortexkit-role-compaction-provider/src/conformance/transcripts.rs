@@ -169,6 +169,19 @@ impl Transcript {
         ))
     }
 
+    /// The `mid` a runner serves for message `ordinal`. Where the profile's
+    /// stored body carries the host's own message id (OpenCode's `info.id`,
+    /// a `pi` journal entry's `id`), it is that id, as `llm-runner/v1`
+    /// pins for a host-served entry; the other profiles' bodies carry no
+    /// message id, so the runner mints its own.
+    pub fn message_id(self, ordinal: u64) -> String {
+        match self {
+            Self::Profile(OPENCODE_AISDK) => opencode_message_id(ordinal),
+            Self::Profile(PI) => pi_entry_id(ordinal),
+            _ => format!("probe-m{ordinal}"),
+        }
+    }
+
     pub fn profile(self) -> Option<&'static str> {
         match self {
             Self::Generic => None,
@@ -275,22 +288,14 @@ impl Transcript {
                 ]
             }
             Self::Profile(OWNED_BROCA) => {
+                // Parts as a served page carries them: every part in its
+                // stored form, signatures included, except a stored
+                // text-with-state part, which is served as plain text
+                // because its provider state never leaves the runner. The
+                // tool call's `thought_signature` is the one
+                // non-reasoning signature a page can carry.
                 let call = json!({"type":"tool_call","tool_call_id":format!("call-{o}"),
                     "tool_name":"open_door","input":{"door":o},"thought_signature":call_signature});
-                // Answers alternate between the two signed provider-state
-                // formats, and each also carries a Responses item state,
-                // which no prune touches and which never counts as restored.
-                let (signed_format, item_format) = if o % 4 == 1 {
-                    ("gemini", "open_ai_responses")
-                } else {
-                    ("google_code_assist", "open_ai_responses_chatgpt")
-                };
-                let state = signed_state(&noted, signed_format, &state_signature);
-                let mut state_served = state.clone();
-                state_served["provider_state"]["data"] = json!("");
-                let item_state = json!({"type":"text_with_state","text":format!("Closing note {o}."),
-                    "provider_state":{"format":item_format,
-                        "data":json!({"id":format!("msg_probe_{o}"),"phase":"final_answer"}).to_string()}});
                 vec![
                     // The signature is the opaque payload, so an
                     // `opaque_reasoning` prune removes it and keeps the text.
@@ -301,11 +306,11 @@ impl Transcript {
                     ),
                     opaque(
                         json!({"type":"redacted_reasoning","data":reasoning_item(o, true),
-                            "provider_format":"probe-item"}),
+                            "provider_format":"open_ai_responses_chatgpt"}),
                         json!({"type":"redacted_reasoning","data":"",
-                            "provider_format":"probe-item"}),
+                            "provider_format":"open_ai_responses_chatgpt"}),
                         json!({"type":"redacted_reasoning","data":reasoning_item(o, false),
-                            "provider_format":"probe-item"}),
+                            "provider_format":"open_ai_responses_chatgpt"}),
                     ),
                     kept(json!({"type":"text","text":answer})),
                     pruned(
@@ -313,8 +318,7 @@ impl Transcript {
                         kinds::SIGNATURE,
                         without(call, "thought_signature"),
                     ),
-                    pruned(state, kinds::SIGNATURE, state_served),
-                    kept(item_state),
+                    kept(json!({"type":"text","text":noted})),
                 ]
             }
             Self::Profile(ANTHROPIC_MESSAGES) => vec![
@@ -342,7 +346,7 @@ impl Transcript {
             Self::Profile(OPENCODE_AISDK) => {
                 let part = |index: usize, rest: Value| {
                     let mut part = json!({"id":format!("prt_probe_{o}_{index}"),
-                        "sessionID":"ses_probe","messageID":format!("msg_probe_{o}")});
+                        "sessionID":"ses_probe","messageID":opencode_message_id(o)});
                     part.as_object_mut()
                         .unwrap()
                         .extend(rest.as_object().unwrap().clone());
@@ -445,7 +449,7 @@ impl Transcript {
                 if let Some(c) = call {
                     content.push(
                         json!({"type":"tool_result","tool_call_id":format!("call-{c}"),
-                        "output":[{"type":"text","text":tool_output(c)}]}),
+                        "output":{"kind":"text","text":tool_output(c)},"is_error":false}),
                     );
                 }
                 content.push(json!({"type":"text","text":question}));
@@ -463,11 +467,11 @@ impl Transcript {
                 json!({"role":"user","content":content})
             }
             Self::Profile(OPENCODE_AISDK) => json!({
-                "info":{"id":format!("msg_probe_{o}"),"sessionID":"ses_probe","role":"user",
+                "info":{"id":opencode_message_id(o),"sessionID":"ses_probe","role":"user",
                     "time":{"created":AT_MS + o * 1000},"agent":"probe",
                     "model":{"providerID":"probe-provider","modelID":"probe-model"}},
                 "parts":[{"id":format!("prt_probe_{o}_0"),"sessionID":"ses_probe",
-                    "messageID":format!("msg_probe_{o}"),"type":"text","text":question}],
+                    "messageID":opencode_message_id(o),"type":"text","text":question}],
             }),
             Self::Profile(PI) => {
                 let message = match call {
@@ -491,9 +495,9 @@ impl Transcript {
             Self::Profile(OWNED_BROCA) => json!({"role":"assistant","content":parts,
                 "origin":{"provider_module_id":"probe-model-provider","model_id":"probe-model"}}),
             Self::Profile(OPENCODE_AISDK) => json!({
-                "info":{"id":format!("msg_probe_{o}"),"sessionID":"ses_probe","role":"assistant",
+                "info":{"id":opencode_message_id(o),"sessionID":"ses_probe","role":"assistant",
                     "time":{"created":AT_MS + o * 1000,"completed":AT_MS + o * 1000 + 900},
-                    "parentID":format!("msg_probe_{}", o - 1),"providerID":"probe-provider",
+                    "parentID":opencode_message_id(o - 1),"providerID":"probe-provider",
                     "modelID":"probe-model","mode":"probe","path":{"cwd":"/probe","root":"/probe"},
                     "cost":0,"tokens":{"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}},
                 "parts":parts,
@@ -538,6 +542,11 @@ impl Transcript {
                     reason: "an anthropic-messages text block has no provider-state signature",
                 },
             ],
+            Self::Profile(OWNED_BROCA) => vec![NotApplicable {
+                name: probe_parts::TEXT_WITH_STATE,
+                reason: "an owned-broca page serves a text-with-state part as plain text: its \
+                         provider state never leaves the runner",
+            }],
             Self::Profile(_) => Vec::new(),
         }
     }
@@ -584,18 +593,29 @@ impl Transcript {
     }
 }
 
-/// An `owned-broca` `text_with_state` part whose provider state is a signed
-/// `format`: `data` is the JSON string `{"thoughtSignature": ...}`.
+/// A generic-transcript `text_with_state` part whose `provider_state` has
+/// one of the signed formats (`format`), with `data` the JSON string
+/// `{"thoughtSignature": ...}`.
 fn signed_state(text: &str, format: &str, signature: &str) -> Value {
     json!({"type":"text_with_state","text":text,"provider_state":{"format":format,
         "data":json!({"thoughtSignature":signature}).to_string()}})
+}
+
+/// OpenCode's message id (`info.id`) for message `o`.
+fn opencode_message_id(o: u64) -> String {
+    format!("msg_probe_{o}")
+}
+
+/// The `pi` journal entry id for message `o`.
+fn pi_entry_id(o: u64) -> String {
+    format!("probe-entry-{o}")
 }
 
 /// A `pi` journal entry wrapping `message`.
 fn pi_entry(o: u64, message: Value) -> Value {
     let parent = o
         .checked_sub(1)
-        .map_or(Value::Null, |p| json!(format!("probe-entry-{p}")));
-    json!({"type":"message","id":format!("probe-entry-{o}"),"parentId":parent,
+        .map_or(Value::Null, |p| json!(pi_entry_id(p)));
+    json!({"type":"message","id":pi_entry_id(o),"parentId":parent,
         "timestamp":"2026-01-01T00:00:00.000Z","message":message})
 }

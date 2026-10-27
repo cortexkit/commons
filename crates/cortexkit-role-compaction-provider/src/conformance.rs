@@ -123,10 +123,6 @@ fn part_key(ordinal: u64, index: usize) -> String {
     format!("m{ordinal}#{index}")
 }
 
-fn message_id(ordinal: u64) -> String {
-    format!("probe-m{ordinal}")
-}
-
 impl ScriptedRunner {
     fn new(transcript: Transcript, lineage_id: &str, through: u64) -> Self {
         let messages: Vec<Value> = (0..=through).map(|o| transcript.message(o)).collect();
@@ -175,7 +171,7 @@ impl ScriptedRunner {
         let from = if let Some(from) = params.get("from_ordinal").and_then(Value::as_u64) {
             from
         } else if let Some(mid) = params.get("after_mid").and_then(Value::as_str) {
-            match (0..state.served.len() as u64).find(|o| message_id(*o) == mid) {
+            match (0..state.served.len() as u64).find(|o| state.transcript.message_id(*o) == mid) {
                 Some(ordinal) => ordinal + 1,
                 None => return refuse("unknown_mid", Value::Null),
             }
@@ -202,7 +198,7 @@ impl ScriptedRunner {
             let parts = state.transcript.parts(original);
             let mut entry = json!({
                 "ordinal": ordinal,
-                "mid": message_id(ordinal),
+                "mid": state.transcript.message_id(ordinal),
                 "message": state.served[ordinal as usize],
                 "digest": content_digest(original),
                 "part_digests": parts.iter().enumerate().map(|(index, part)| json!({
@@ -221,7 +217,7 @@ impl ScriptedRunner {
                 let index: usize = pruned.part.rsplit('#').next().unwrap().parse().unwrap();
                 let original_part = &parts[index];
                 listed.push(json!({
-                    "mid": message_id(ordinal),
+                    "mid": state.transcript.message_id(ordinal),
                     "part": pruned.part,
                     "kind": pruned.kind,
                     "bytes": serde_jcs::to_vec(original_part).map(|b| b.len()).unwrap_or(0),
@@ -256,7 +252,7 @@ impl ScriptedRunner {
         if state.first_ordinal > 0 {
             let cut = state.first_ordinal - 1;
             head["cut"] = json!({
-                "mid": message_id(cut),
+                "mid": state.transcript.message_id(cut),
                 "digest": content_digest(&state.originals[cut as usize]),
                 "written_at": 1_767_225_600_000u64,
             });
@@ -628,21 +624,26 @@ pub fn held_copies_follow_reasoning_pruned_report(
                 harness: PROBE_HARNESS,
                 session: &session,
             });
+        // Every notice ends on an even ordinal: a prompt or a tool result.
+        // Where a profile stores a call's result in the next message, an
+        // answer at an odd ordinal ends on a call with no result yet, which
+        // a runner does announce but which is not what this probe is about;
+        // ending on a complete call and result keeps the probe to pruning.
         let mut conversation = Conversation {
             adapter: &mut *adapter,
-            runner: ScriptedRunner::new(transcript, "probe-lineage-a", 3),
+            runner: ScriptedRunner::new(transcript, "probe-lineage-a", 4),
             session,
             session_ref,
             seq: 0,
             setups: 0,
         };
         conversation.setup("probe-lineage-a", None, None)?;
-        conversation.notice("probe-lineage-a", 3, None, None)?;
-        let mut through = 3;
+        conversation.notice("probe-lineage-a", 4, None, None)?;
+        let mut through = 4;
         if cut {
             // A cut after ordinal 1: the new lineage starts at 2, and the
             // provider keeps its copies of 0 and 1 from before it.
-            conversation.runner.append_through(5);
+            conversation.runner.append_through(6);
             conversation.runner.cut("probe-lineage-b", 2);
             let descent = DescendsFrom {
                 lineage_id: "probe-lineage-a".into(),
@@ -652,11 +653,11 @@ pub fn held_copies_follow_reasoning_pruned_report(
             let digest = conversation.runner.digest_at(1);
             conversation.notice(
                 "probe-lineage-b",
-                5,
+                6,
                 Some(NoticeDescent::new("probe-lineage-a", 1, digest)),
                 None,
             )?;
-            through = 5;
+            through = 6;
         }
         conversation.runner.take_reads();
         let pruned = conversation.runner.prune_reasoning_through(through, mode);
@@ -762,6 +763,8 @@ mod tests {
         /// another starts from nothing, as a per-session store would.
         session: String,
         held: BTreeMap<u64, Value>,
+        /// Each held message's `mid`, as the runner served it.
+        mids: BTreeMap<u64, String>,
         /// Render through keep-range part edits instead of one fold.
         edits_mode: bool,
         /// The copies part edits are built from. A correct provider keeps it
@@ -862,7 +865,7 @@ mod tests {
                 for (index, part) in pair {
                     edits.push(crate::view::PartEdit::replace(
                         *ordinal,
-                        format!("probe-m{ordinal}"),
+                        self.mids[ordinal].clone(),
                         format!("m{ordinal}#{index}"),
                         serde_json::to_string(&part).unwrap(),
                     ));
@@ -875,6 +878,8 @@ mod tests {
             for entry in page["messages"].as_array().unwrap() {
                 let ordinal = entry["ordinal"].as_u64().unwrap();
                 self.held.insert(ordinal, entry["message"].clone());
+                self.mids
+                    .insert(ordinal, entry["mid"].as_str().unwrap().to_owned());
                 let stale = matches!(
                     self.fault,
                     Some(HoldingFault::EditsHeldToolOutput | HoldingFault::EditsHeldStateText)
@@ -1044,7 +1049,7 @@ mod tests {
                 self.lineage.clone(),
                 crate::lineage::MessageRef {
                     ordinal: last,
-                    mid: format!("probe-m{last}"),
+                    mid: self.mids[&last].clone(),
                 },
                 ranges,
             ))
@@ -1177,6 +1182,7 @@ mod tests {
             .unwrap();
             let (parts_missing, kinds_missing): (&[&str], &[&str]) = match profile {
                 ANTHROPIC_MESSAGES => (&["thought_signature", "text_with_state"], &["signature"]),
+                OWNED_BROCA => (&["text_with_state"], &[]),
                 _ => (&[], &[]),
             };
             assert_eq!(
@@ -1253,16 +1259,21 @@ mod tests {
             let call = run(HoldingFault::EditsHeldToolOutput, true);
             let text = run(HoldingFault::EditsHeldStateText, true);
             if profile == ANTHROPIC_MESSAGES {
-                // Neither signature exists in this format, so neither fault
-                // can happen: the report says so by name instead of passing.
+                // A tool_use block has no signature, so the fault cannot
+                // happen: the report says so by name instead of passing.
                 let call = call.unwrap();
                 assert!(names(&call.parts_not_applicable).contains(&"thought_signature"));
                 assert!(!call.parts_checked.contains(&"thought_signature"));
+            } else {
+                assert_eq!(call.unwrap_err(), at("m1#3"), "{profile}");
+            }
+            if matches!(profile, ANTHROPIC_MESSAGES | OWNED_BROCA) {
+                // No served text carries a provider-state signature, so the
+                // fault cannot happen: the report says so by name.
                 let text = text.unwrap();
                 assert!(names(&text.parts_not_applicable).contains(&"text_with_state"));
                 assert!(!text.parts_checked.contains(&"text_with_state"));
             } else {
-                assert_eq!(call.unwrap_err(), at("m1#3"), "{profile}");
                 assert_eq!(text.unwrap_err(), at("m1#4"), "{profile}");
             }
         }
@@ -1284,6 +1295,222 @@ mod tests {
                  future-profile)"
             )
         );
+    }
+
+    /// The host's own id for a message body, where the profile's stored
+    /// format carries one: OpenCode's `info.id` and a `pi` journal entry's
+    /// `id`. The other profiles' bodies carry no message id, so the runner
+    /// mints its own `mid`.
+    fn native_message_id(profile: &str, message: &Value) -> Option<String> {
+        match profile {
+            OPENCODE_AISDK => message.pointer("/info/id"),
+            PI => message.get("id"),
+            _ => None,
+        }
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+    }
+
+    /// The tool-call ids `message` opens and the ids it answers, in
+    /// `transcript`'s stored format. A call whose result rides in the same
+    /// part (the generic transcript's `result`, an `opencode-aisdk` tool
+    /// part in a final state) opens nothing.
+    fn tool_arcs(transcript: Transcript, message: &Value) -> (Vec<String>, Vec<String>) {
+        let id = |part: &Value, key: &str| part[key].as_str().unwrap_or_default().to_owned();
+        let mut calls = Vec::new();
+        let mut results = Vec::new();
+        if transcript.profile() == Some(PI) && message["message"]["role"] == "toolResult" {
+            results.push(id(&message["message"], "toolCallId"));
+        }
+        for part in transcript.parts(message) {
+            match (transcript.profile(), part["type"].as_str()) {
+                (None, Some("tool_call")) if part.get("result").is_none() => {
+                    calls.push(id(&part, "id"));
+                }
+                (Some(OPENCODE_AISDK), Some("tool"))
+                    if !matches!(
+                        part["state"]["status"].as_str(),
+                        Some("completed" | "error")
+                    ) =>
+                {
+                    calls.push(id(&part, "callID"));
+                }
+                (Some(OWNED_BROCA), Some("tool_call")) => calls.push(id(&part, "tool_call_id")),
+                (Some(OWNED_BROCA), Some("tool_result")) => {
+                    results.push(id(&part, "tool_call_id"));
+                }
+                (Some(ANTHROPIC_MESSAGES), Some("tool_use")) => calls.push(id(&part, "id")),
+                (Some(ANTHROPIC_MESSAGES), Some("tool_result")) => {
+                    results.push(id(&part, "tool_use_id"));
+                }
+                (Some(PI), Some("toolCall")) => calls.push(id(&part, "id")),
+                _ => {}
+            }
+        }
+        (calls, results)
+    }
+
+    /// An `owned-broca` page serves parts as the runner's read surface does:
+    /// a stored text-with-state part is served as plain `text`, because the
+    /// provider state never leaves the runner, and a tool result's `output`
+    /// is an object tagged on `kind`, never an array.
+    fn served_owned_broca_shape_defects(
+        transcript: Transcript,
+        message: &Value,
+        ordinal: u64,
+        defects: &mut Vec<String>,
+    ) {
+        for part in transcript.parts(message) {
+            if part["type"] == "text_with_state" {
+                defects.push(format!(
+                    "owned-broca m{ordinal}: a served text_with_state part"
+                ));
+            }
+            if part["type"] == "tool_result" {
+                let output = &part["output"];
+                let tagged = matches!(
+                    output["kind"].as_str(),
+                    Some("text" | "json" | "parts" | "denied" | "error")
+                );
+                if output.is_array() || !tagged {
+                    defects.push(format!(
+                        "owned-broca m{ordinal}: tool_result output {output} is not tagged on kind"
+                    ));
+                }
+            }
+        }
+    }
+
+    /// A holding provider that also records, for every notice the probe
+    /// sends, its `through_ordinal` and the messages served up to it.
+    struct NoticeRecorder {
+        inner: HoldingProvider,
+        notices: Vec<(String, u64, Vec<Value>)>,
+    }
+
+    impl PrunedReasoningProbe for NoticeRecorder {
+        fn serializer_profile(&self) -> Option<String> {
+            self.inner.serializer_profile()
+        }
+
+        fn setup(
+            &mut self,
+            runner: &ScriptedRunner,
+            request: &SetupRequest,
+        ) -> Result<SetupAnswer, String> {
+            self.inner.setup(runner, request)
+        }
+
+        fn notice(
+            &mut self,
+            runner: &ScriptedRunner,
+            notice: &AdvanceNotice,
+        ) -> Result<(), String> {
+            // Read the runner's state directly, so recording adds no reads
+            // the probe would count.
+            let through = notice.through_ordinal;
+            let served = runner.lock().served[..=through as usize].to_vec();
+            self.notices
+                .push((self.inner.session.clone(), through, served));
+            self.inner.notice(runner, notice)
+        }
+
+        fn next_view(
+            &mut self,
+            runner: &ScriptedRunner,
+            session_ref: &str,
+        ) -> Result<CompactionView, String> {
+            self.inner.next_view(runner, session_ref)
+        }
+    }
+
+    /// The transcripts are ones a real runner could serve, so a provider
+    /// that strictly decodes the stored formats gets as far as the prune:
+    /// on a host profile every page's `mid` (and every `mid` naming that
+    /// message elsewhere) is the host's own message id, an `owned-broca`
+    /// page serves only the part shapes its read surface serves, and no
+    /// notice the probe sends ends on an assistant message whose tool call
+    /// has no result yet.
+    #[test]
+    fn probe_transcripts_keep_host_mids_and_notices_end_on_complete_tool_arcs() {
+        let mut defects = Vec::new();
+        for profile in PROFILES {
+            let transcript = Transcript::for_profile(Some(profile)).unwrap();
+            for mode in [PruneMode::Reasoning, PruneMode::Opaque] {
+                let runner = ScriptedRunner::new(transcript, "probe-lineage", 6);
+                let before = runner.read(&json!({})).unwrap();
+                runner.prune_reasoning_through(6, mode);
+                let after = runner.read(&json!({})).unwrap();
+                for page in [before, after] {
+                    for entry in page["messages"].as_array().unwrap() {
+                        let native = native_message_id(profile, &entry["message"]);
+                        if matches!(profile, OPENCODE_AISDK | PI) && native.is_none() {
+                            defects.push(format!("{profile}: a host body without its id"));
+                        }
+                        let mid = entry["mid"].as_str().unwrap();
+                        if native.as_deref().is_some_and(|native| native != mid) {
+                            defects.push(format!(
+                                "{profile}: page mid {mid} is not the host's id {native:?}"
+                            ));
+                        }
+                        let ordinal = entry["ordinal"].as_u64().unwrap();
+                        if profile == OWNED_BROCA {
+                            served_owned_broca_shape_defects(
+                                transcript,
+                                &entry["message"],
+                                ordinal,
+                                &mut defects,
+                            );
+                        }
+                        for listed in page["pruned_reasoning"].as_array().into_iter().flatten() {
+                            let at = listed["part"].as_str().unwrap();
+                            if at.starts_with(&format!("m{ordinal}#")) && listed["mid"] != mid {
+                                defects.push(format!(
+                                    "{profile}: pruned_reasoning names {} for {mid}",
+                                    listed["mid"]
+                                ));
+                            }
+                        }
+                    }
+                }
+                runner.cut("probe-lineage-b", 2);
+                let cut = &runner.head()["cut"]["mid"];
+                let native = native_message_id(profile, &transcript.message(1));
+                if native.is_some_and(|native| *cut != json!(native)) {
+                    defects.push(format!(
+                        "{profile}: head cut mid {cut} is not the host's id"
+                    ));
+                }
+            }
+        }
+        let transcripts = std::iter::once(None).chain(PROFILES.map(Some));
+        for profile in transcripts {
+            let transcript = Transcript::for_profile(profile).unwrap();
+            let mut recorder = NoticeRecorder {
+                inner: HoldingProvider {
+                    profile: profile.map(str::to_owned),
+                    ..HoldingProvider::default()
+                },
+                notices: Vec::new(),
+            };
+            held_copies_follow_reasoning_pruned(&mut recorder)
+                .unwrap_or_else(|e| panic!("{profile:?}: {e}"));
+            assert!(!recorder.notices.is_empty(), "{profile:?}");
+            for (session, through, served) in recorder.notices {
+                let (calls, _) = tool_arcs(transcript, &served[through as usize]);
+                let answered: Vec<String> = served
+                    .iter()
+                    .flat_map(|m| tool_arcs(transcript, m).1)
+                    .collect();
+                for call in calls.iter().filter(|c| !answered.contains(c)) {
+                    defects.push(format!(
+                        "{profile:?} {session}: a notice through {through} ends on call {call} \
+                         with no result"
+                    ));
+                }
+            }
+        }
+        assert!(defects.is_empty(), "{}", defects.join("\n"));
     }
 
     /// Every member of `served` exists in `original`, checked recursively

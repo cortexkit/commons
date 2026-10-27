@@ -54,6 +54,9 @@ A provider set up with a serializer profile says so through
 in each Setup's `params.serializer_profile` and serves its transcript in the
 profile's own stored format (`anthropic-messages`, `opencode-aisdk`,
 `owned-broca` or `pi`), with `tags` rows as a descriptors read carries them.
+On `opencode-aisdk` and `pi` each `mid` it serves is the host's own message
+id (`info.id`, the journal entry `id`), and every notice ends on a complete
+tool call and result.
 It prunes each part as that profile's rules in `llm-runner/v1` §9.14.1 say,
 and checks views with `CompactionView::restored_pruned_part_in`. A profile
 transcript adds a third conversation that prunes with `opaque_reasoning`,
@@ -62,5 +65,6 @@ where only opaque payloads are removed and readable summaries stay.
 (`conformance::probe_parts`) and prune kinds were checked, and names those
 the profile cannot carry as not applicable: `anthropic-messages` has no
 thought signature, no provider-state signature on text, and so no
-`signature` kind. Without a profile the probe serves the generic transcript of
+`signature` kind, and an `owned-broca` page serves a text-with-state part as
+plain text, so its provider-state signature is never checked there. Without a profile the probe serves the generic transcript of
 0.7.3, with its `text_with_state` in the real `gemini` provider-state shape.

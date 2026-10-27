@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.5
+
+- The `held_copies_follow_reasoning_pruned` probe's profile transcripts
+  are ones a real runner could serve, so a provider that strictly decodes
+  the stored formats reaches the prune. On `opencode-aisdk` and `pi`, every
+  `mid` the runner serves (page entries, `pruned_reasoning` rows, the head's
+  `cut`) is the host's own message id, `info.id` or the journal entry `id`,
+  as `llm-runner/v1` pins for a host-served entry. Every notice now ends on
+  a complete tool call and result (through ordinal 4, and 6 after the cut)
+  rather than on an `anthropic-messages`, `owned-broca` or `pi` answer whose
+  tool call had no result yet, and the prune covers the same range; what
+  the probe checks is unchanged.
+- The probe's `owned-broca` transcript serves the shapes a runner's
+  `session.read` serves. A stored text-with-state part is served as plain
+  `text`, because its provider state never leaves the runner. A tool
+  result's `output` is an object tagged on `kind` with `is_error` beside it,
+  not an array, and the encrypted reasoning item names its real
+  `provider_format`. So on `owned-broca` the report names the
+  `text_with_state` part as not applicable. The `signature` kind stays
+  checked through the tool call's `thought_signature`, which a page serves
+  as stored.
+- A kit test guards these: host mids, notices ending on complete tool
+  calls, and the `owned-broca` served shapes. It failed on the 0.7.4
+  fixtures.
+
 ## 0.7.4
 
 - The probe's `owned-broca` transcript uses the real
