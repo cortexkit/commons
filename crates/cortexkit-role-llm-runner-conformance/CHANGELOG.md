@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.10
+
+- Track llm-runner 0.7.8, which this crate pins exactly. No suite change.
+
 ## 0.15.9
 
 - `compaction_setup_durable_once` no longer decides from one `session.head`

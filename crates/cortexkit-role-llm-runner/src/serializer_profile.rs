@@ -8,9 +8,12 @@
 //! step-transform-provider and compaction-provider contracts, which name
 //! `opencode-aisdk`). This module names the supported profiles and pins
 //! their part containers; `display` holds the supported projections to
-//! display rows.
+//! display rows, and [`error_output`] the `owned-broca` tool error with its
+//! module-outage members and the text every runner renders for it.
 
 use serde_json::Value;
+
+pub mod error_output;
 
 /// A runner serving its transcript in the Anthropic Messages request
 /// format: an entry body is the message exactly as the client sent it in

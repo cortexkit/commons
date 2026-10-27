@@ -11,6 +11,16 @@ cortexkit-role-llm-runner = "0.7.4"
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
 
+Since 0.7.8, an `owned-broca` tool error may say that its provider module
+is restarting or down, with optional `module`, `code`, `detail`,
+`nothing_sent` and `retry` members after `message`. The set is closed and
+readers refuse any violation, naming the member and the rule
+(`serializer_profile::error_output::ErrorOutput::decode`). Every runner,
+whatever its profile, shows the model the same block
+(`serializer_profile::error_output::render`): the message, then one line
+per present member, `nothing was sent` standing for `nothing_sent: true`.
+See contract §4.4 and §11.4 and `test-vectors/owned-broca-tool-outage/`.
+
 Since 0.7.4, `archive_prunes_reasoning` declares the exact pruning kinds a
 runner may apply at rest. Every affected raw/model read and raw/display history
 page repeats `pruned_reasoning`, carrying the original part's JCS byte length

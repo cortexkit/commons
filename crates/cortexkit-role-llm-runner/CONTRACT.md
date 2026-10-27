@@ -715,6 +715,33 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   stability, §4.2). `display::opencode_aisdk` is its decoder (§4.7).
 - [pinned] **`owned-broca`.** An entry's body has a `content` array of parts.
   Descriptors replace payloads inside a part, never the whole array.
+- [pinned] **`owned-broca` error outputs** (`serializer_profile::error_output`).
+  A tool result's error output is `{"kind": "error", "message": ...}`.
+  After `message` it may carry five optional members, encoded in this
+  order, each omitted when absent and never `null`, and never the empty
+  string (a producer with nothing to say omits the member):
+
+  | Member | Value | Limit |
+  |---|---|---|
+  | `module` | the provider's module id | 1 to 128 bytes, every byte printable ASCII 0x21–0x7E: no space, no control character. Covers local ids and re-exported ids such as `fed:<peer>:<module>`. |
+  | `code` | the daemon's refusal code, verbatim | matches `^[a-z][a-z0-9_]{0,63}$`: lowercase snake case, starting with a letter, 1 to 64 bytes |
+  | `detail` | one line about the refusal; compact JSON when the daemon's detail is an object, an opaque string to readers | 1 to 1024 bytes of UTF-8, no `\n` or `\r` |
+  | `nothing_sent` | the literal `true`, only under §11.4's condition | `false` and every other value are invalid |
+  | `retry` | a hint for the model, never parsed | 1 to 256 bytes of UTF-8, no `\n` or `\r` |
+
+  The member set is closed: any other member in an error output is a
+  profile violation, and a new member is a profile revision. A plain
+  error, `kind` and `message` only, is unchanged byte for byte.
+- [pinned] Every rule on these members binds readers as well as
+  producers. Each member renders as exactly one line of the text the model
+  reads (§11.4), so a line break inside `detail` could otherwise forge a
+  `nothing was sent` line. A reader refuses as a profile violation, naming
+  the member and the rule broken (`ErrorOutput::decode`,
+  `ErrorOutputViolation`): `nothing_sent` that is not `true`; an unknown or
+  `null` member; a `module` or `code` outside its grammar; an empty member;
+  any member containing `\n` or `\r`; `detail` over 1 KiB or `retry` over
+  256 bytes. The vectors in `test-vectors/owned-broca-tool-outage/` pin
+  real producer captures and one refusal per rule.
 - [pinned] **`pi`.** An entry's body is the wrapped journal entry
   `{type: "message", id, parentId, message: {role, content, ...}}`, not a
   bare message body. Only `/message/content` holds parts, as specified in
@@ -3888,6 +3915,30 @@ owes.
   `tool_semantics_changed`, `tool_unavailable` and `capability_not_admitted`
   refusals as that call's error result and never re-dispatches the call.
 
+### 11.4 Tool outage errors
+
+When a tool call is refused because its provider module is restarting or
+down, the runner returns a tool error that says so. This section holds for
+every runner, whatever its serializer profile.
+
+- [pinned] **The rendered block.** What the model sees for such an error,
+  and what a runner storing tool errors as plain strings stores, is
+  `message`, then one line per present member in this fixed order:
+  `module: <module>`, `code: <code>`, `detail: <detail>`, `nothing was
+  sent`, `retry: <retry>`, joined by `\n` with no trailing newline
+  (`serializer_profile::error_output::render`). The members and their
+  limits are those of the `owned-broca` error output (§4.4): each is absent
+  or one non-empty line. A plain error renders as its message alone. Every
+  runner that reports a module outage uses this block.
+- [pinned] **`nothing_sent`.** Present, as `true`, only when the refusal
+  proves the call never reached the provider: a refusal at route open, or
+  `module_reloading` before the send. Never on a timeout or a lost reply,
+  where the call may have run. Its rendered line is `nothing was sent`;
+  absence claims nothing either way.
+- [pinned] `code` is the daemon's refusal code verbatim, and `detail` the
+  daemon's detail as one line, compact JSON when it is an object. `retry`
+  is a hint for the model; no reader parses it.
+
 ## 12. Error codes
 
 Error codes ride as the `code` of an `ERROR` frame's body `{code, message,
@@ -4052,6 +4103,9 @@ above.
 - [pinned] **Closed live hint**: `step.finished.v1` refuses every unknown
   member (§14.3), while its status and classification strings stay open.
   `role.describe.step_events` is likewise closed and checked by name.
+- [pinned] **Closed error output**: an `owned-broca` tool result's error
+  output refuses every member outside `kind`, `message` and the five
+  outage members, and every member breaking its rules (§4.4).
 - [pinned] **Strict on unknown fields** wherever absence changes the
   question: `session.read`, `session.head`, `session.history`, `run.result`, `run.status`,
   `run.tool_calls`, `session.subscribe`, `session.baseline`,

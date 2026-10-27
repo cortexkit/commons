@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.8
+
+- Add the tool-outage members of an `owned-broca` error output: optional
+  `module`, `code`, `detail`, `nothing_sent` and `retry` after `message`,
+  each omitted when absent, never `null` and never empty. `module` is 1-128
+  bytes of printable ASCII 0x21-0x7E, `code` matches
+  `^[a-z][a-z0-9_]{0,63}$`, `detail` is one line of at most 1 KiB, `retry`
+  one line of at most 256 bytes, and `nothing_sent` only the literal `true`.
+  The member set is closed, and readers refuse every violation by member
+  and rule. A plain error is unchanged byte for byte (§4.4, §13).
+- Pin the runner-neutral rendered block every runner uses for a module
+  outage, and the exact `nothing_sent` condition: a refusal at route open,
+  or `module_reloading` before the send, never a timeout or a lost reply
+  (§11.4).
+- Add `serializer_profile::error_output`: `ErrorOutput` with `decode`,
+  `check`, `render` and an encoder in the wire order, the non-exhaustive
+  `ErrorOutputRule`, `ErrorOutputViolation`, `is_valid_module` and
+  `is_valid_code`. Add `test-vectors/owned-broca-tool-outage/` with real
+  producer captures, valid boundary samples and one refusal per rule.
+
 ## 0.7.7
 
 - Include compaction-provider's `account_change` among the rewrite causes
