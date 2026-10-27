@@ -27,7 +27,7 @@ pub const KIND_ERROR: &str = "error";
 pub const MEMBERS: [&str; 5] = ["module", "code", "detail", "nothing_sent", "retry"];
 
 /// The longest `module`, in bytes.
-pub const MODULE_MAX: usize = 128;
+pub const MODULE_MAX: usize = 255;
 
 /// The longest `code`, in bytes.
 pub const CODE_MAX: usize = 64;
@@ -41,12 +41,12 @@ pub const RETRY_MAX: usize = 256;
 /// The rendered line standing for `nothing_sent: true`.
 pub const NOTHING_SENT_LINE: &str = "nothing was sent";
 
-/// Whether `module` is a valid `module` member: 1 to [`MODULE_MAX`] bytes,
-/// each printable ASCII 0x21–0x7E (no space, no control character). This
-/// covers local module ids and re-exported ones such as `fed:peer:module`.
+/// Whether `module` is a valid `module` member: 1 to [`MODULE_MAX`] bytes
+/// of UTF-8 with no control character. The member is one line in the
+/// model's text, so the only property it needs is "no line break"; spaces,
+/// non-ASCII text and path separators are all accepted.
 pub fn is_valid_module(module: &str) -> bool {
-    (1..=MODULE_MAX).contains(&module.len())
-        && module.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+    (1..=MODULE_MAX).contains(&module.len()) && !module.chars().any(char::is_control)
 }
 
 /// Whether `code` is a valid `code` member: it matches
@@ -627,7 +627,7 @@ mod tests {
         let file = load("valid-error-outputs.json");
         assert_eq!(file["profile"], crate::serializer_profile::OWNED_BROCA);
         let cases = file["valid"].as_array().unwrap();
-        assert_eq!(cases.len(), 3);
+        assert_eq!(cases.len(), 7);
         for case in cases {
             let name = case["name"].as_str().unwrap();
             let decoded =
@@ -658,7 +658,9 @@ mod tests {
             "retry_over_256_bytes",
             "detail_empty",
             "retry_empty",
-            "module_with_space",
+            "module_with_newline",
+            "module_with_c1_control",
+            "module_over_255_bytes",
             "code_uppercase",
         ] {
             assert!(
@@ -723,7 +725,7 @@ mod tests {
                 ErrorOutputRule::Grammar,
             ),
             (
-                ok.clone().with_module("a module"),
+                ok.clone().with_module("a\tmodule"),
                 "module",
                 ErrorOutputRule::Grammar,
             ),
@@ -735,14 +737,24 @@ mod tests {
 
     #[test]
     fn grammars_match_their_definitions() {
-        for module in ["aft", "fed:peer-1:aft", "!", "~", &"m".repeat(MODULE_MAX)] {
+        for module in [
+            "aft",
+            "fed:peer-1:aft",
+            "!",
+            "~",
+            "aft module",
+            "aft-\u{e9}",
+            "a/b",
+            &"m".repeat(MODULE_MAX),
+        ] {
             assert!(is_valid_module(module), "{module}");
         }
         for module in [
             "",
-            " aft",
+            "aft\tmodule",
             "aft\u{7f}",
-            "a\u{e9}",
+            "aft\u{85}",
+            "a\nb",
             &"m".repeat(MODULE_MAX + 1),
         ] {
             assert!(!is_valid_module(module), "{module:?}");

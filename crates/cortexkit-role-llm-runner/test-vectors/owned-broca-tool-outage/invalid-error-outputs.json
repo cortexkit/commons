@@ -240,23 +240,6 @@
       }
     },
     {
-      "name": "module_with_space",
-      "output": {
-        "kind": "error",
-        "message": "tool plane unavailable",
-        "module": "aft module",
-        "code": "target_unavailable",
-        "detail": "supervised_not_registered",
-        "nothing_sent": true,
-        "retry": "the module is restarting or unavailable; retry the call in a minute"
-      },
-      "expect": {
-        "outcome": "reader_refuses",
-        "member": "module",
-        "rule": "grammar"
-      }
-    },
-    {
       "name": "module_with_tab",
       "output": {
         "kind": "error",
@@ -271,40 +254,6 @@
         "outcome": "reader_refuses",
         "member": "module",
         "rule": "grammar"
-      }
-    },
-    {
-      "name": "module_non_ascii",
-      "output": {
-        "kind": "error",
-        "message": "tool plane unavailable",
-        "module": "aft-é",
-        "code": "target_unavailable",
-        "detail": "supervised_not_registered",
-        "nothing_sent": true,
-        "retry": "the module is restarting or unavailable; retry the call in a minute"
-      },
-      "expect": {
-        "outcome": "reader_refuses",
-        "member": "module",
-        "rule": "grammar"
-      }
-    },
-    {
-      "name": "module_over_128_bytes",
-      "output": {
-        "kind": "error",
-        "message": "tool plane unavailable",
-        "module": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
-        "code": "target_unavailable",
-        "detail": "supervised_not_registered",
-        "nothing_sent": true,
-        "retry": "the module is restarting or unavailable; retry the call in a minute"
-      },
-      "expect": {
-        "outcome": "reader_refuses",
-        "member": "module",
-        "rule": "too_long"
       }
     },
     {
@@ -425,6 +374,57 @@
         "outcome": "reader_refuses",
         "member": "message",
         "rule": "missing"
+      }
+    },
+    {
+      "name": "module_over_255_bytes",
+      "output": {
+        "kind": "error",
+        "message": "tool plane unavailable",
+        "module": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+        "code": "target_unavailable",
+        "detail": "supervised_not_registered",
+        "nothing_sent": true,
+        "retry": "the module is restarting or unavailable; retry the call in a minute"
+      },
+      "expect": {
+        "outcome": "reader_refuses",
+        "member": "module",
+        "rule": "too_long"
+      }
+    },
+    {
+      "name": "module_with_newline",
+      "output": {
+        "kind": "error",
+        "message": "tool plane unavailable",
+        "module": "aft\nmodule",
+        "code": "target_unavailable",
+        "detail": "supervised_not_registered",
+        "nothing_sent": true,
+        "retry": "the module is restarting or unavailable; retry the call in a minute"
+      },
+      "expect": {
+        "outcome": "reader_refuses",
+        "member": "module",
+        "rule": "line_break"
+      }
+    },
+    {
+      "name": "module_with_c1_control",
+      "output": {
+        "kind": "error",
+        "message": "tool plane unavailable",
+        "module": "aft\u0085module",
+        "code": "target_unavailable",
+        "detail": "supervised_not_registered",
+        "nothing_sent": true,
+        "retry": "the module is restarting or unavailable; retry the call in a minute"
+      },
+      "expect": {
+        "outcome": "reader_refuses",
+        "member": "module",
+        "rule": "grammar"
       }
     }
   ]

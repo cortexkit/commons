@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.9
+
+- Widen the `owned-broca` error output's `module` member: it is now 1 to
+  255 bytes of UTF-8 with no control character, instead of 1 to 128 bytes
+  of printable ASCII. Readers used to refuse a whole history page over a
+  module id with a space, non-ASCII text, or 129-255 bytes, even though
+  such ids occur in real deployments; the member's only job is one line in
+  the model's text, so the only property it needs is no line break. A
+  reader that refuses less cannot break a producer that followed the
+  narrower rule, so this change is compatible (§4.4, §13).
+- Move the space, non-ASCII and 129-byte module samples from
+  `invalid-error-outputs.json` to `valid-error-outputs.json`. Add a valid
+  sample with a module of exactly 255 bytes spelled with multi-byte
+  characters, so the limit is exercised in bytes, and invalid samples for
+  a 256-byte module, a module with a newline, and one with a C1 control
+  character. The tab sample stays invalid. `code`, `detail`, `retry` and
+  `nothing_sent` are unchanged.
+
 ## 0.7.8
 
 - Add the tool-outage members of an `owned-broca` error output: optional

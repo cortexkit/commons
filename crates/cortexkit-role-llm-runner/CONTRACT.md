@@ -723,7 +723,7 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
 
   | Member | Value | Limit |
   |---|---|---|
-  | `module` | the provider's module id | 1 to 128 bytes, every byte printable ASCII 0x21–0x7E: no space, no control character. Covers local ids and re-exported ids such as `fed:<peer>:<module>`. |
+  | `module` | the provider's module id | 1 to 255 bytes of UTF-8 with no control character, so the member stays one line: spaces, non-ASCII text and separators are accepted. Covers local ids and re-exported ids such as `fed:<peer>:<module>`. |
   | `code` | the daemon's refusal code, verbatim | matches `^[a-z][a-z0-9_]{0,63}$`: lowercase snake case, starting with a letter, 1 to 64 bytes |
   | `detail` | one line about the refusal; compact JSON when the daemon's detail is an object, an opaque string to readers | 1 to 1024 bytes of UTF-8, no `\n` or `\r` |
   | `nothing_sent` | the literal `true`, only under §11.4's condition | `false` and every other value are invalid |

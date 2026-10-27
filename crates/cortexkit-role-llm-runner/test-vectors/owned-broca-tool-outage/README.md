@@ -27,8 +27,10 @@ error output carries all five members, `nothing_sent` included.
 rendered block: a plain error, which re-encodes as exactly
 `{"kind":"error","message":"plain failure"}`; every member at its byte
 limit, with multi-byte UTF-8 and the members in another JSON order, which
-still render in the fixed order; and a lost reply, which carries no
-`nothing_sent`, with a compact-JSON `detail`.
+still render in the fixed order; a lost reply, which carries no
+`nothing_sent`, with a compact-JSON `detail`; modules with a space,
+non-ASCII text, or 129 bytes; and a module of exactly 255 bytes spelled
+with multi-byte characters, so the limit is exercised in bytes.
 
 `invalid-error-outputs.json` has outputs that break one rule each. Every
 case's expected outcome is `reader_refuses`, naming the member and the
@@ -36,6 +38,6 @@ rule (`ErrorOutputRule::as_str`): `nothing_sent` false, a string or `null`;
 an unknown member; a `null` member; `\n` or `\r` in `detail` or `retry`,
 one of them forging a `nothing was sent` line; `detail` over 1 KiB and
 `retry` over 256 bytes; an empty `module`, `code`, `detail` or `retry`;
-`module` with a space, a tab, a non-ASCII byte or over 128 bytes; `code` in
+`module` with a tab, a newline, a C1 control character or over 255 bytes; `code` in
 upper case, with a leading digit, with a hyphen or over 64 bytes; a
 non-string `detail`; a `kind` other than `error`; and a missing `message`.
