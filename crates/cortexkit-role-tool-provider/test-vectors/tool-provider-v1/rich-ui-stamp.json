@@ -1,0 +1,175 @@
+{
+  "description": "The optional rich UI stamp on a tool.catalog system-text answer (`system_text.rich_ui`, `RichUiStamp`). `answers` decode and re-encode to the same JSON; the unstamped answer carries no `rich_ui` member, so answers without a stamp keep their bytes. `valid` stamps decode and round-trip. `refused` stamps fail to decode, and the error names `field` as `rich_ui.<field>`. `dialect` is the rich UI language dialect the catalog declares about itself, not the rich UI syntax crate's `rich-ui/1` reference scan mode.",
+  "answers": [
+    {
+      "name": "unstamped",
+      "system_text": {
+        "text": "Reply with rich UI tags from the catalog when a view helps.",
+        "item_digest": "97d8c5bad2bf898ba33e6975745b22f357d3ca9ca9cd9e69906d3d14e753c3e4",
+        "preflight_digest": "0e58174223a95a2c3c9cb67a0e658daca9123290cc5422f2451bc81e04c11911",
+        "tool_names": [
+          "show_ui"
+        ]
+      },
+      "rich_ui": null
+    },
+    {
+      "name": "stamped",
+      "system_text": {
+        "text": "Reply with rich UI tags from the catalog when a view helps.",
+        "item_digest": "97d8c5bad2bf898ba33e6975745b22f357d3ca9ca9cd9e69906d3d14e753c3e4",
+        "preflight_digest": "0e58174223a95a2c3c9cb67a0e658daca9123290cc5422f2451bc81e04c11911",
+        "tool_names": [
+          "show_ui"
+        ],
+        "rich_ui": {
+          "dialect": "1.0",
+          "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+        }
+      },
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    }
+  ],
+  "valid": [
+    {
+      "name": "dialect_1_0",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    },
+    {
+      "name": "dialect_one_character",
+      "rich_ui": {
+        "dialect": "2",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    },
+    {
+      "name": "dialect_thirty_two_printable",
+      "rich_ui": {
+        "dialect": "!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    },
+    {
+      "name": "unknown_member_ignored",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c",
+        "note": "later member"
+      },
+      "encoded": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "dialect_empty",
+      "rich_ui": {
+        "dialect": "",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "dialect_thirty_three",
+      "rich_ui": {
+        "dialect": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "dialect_space",
+      "rich_ui": {
+        "dialect": "1 0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "dialect_non_ascii",
+      "rich_ui": {
+        "dialect": "1.0é",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "dialect_control",
+      "rich_ui": {
+        "dialect": "1.0\n",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "dialect_not_string",
+      "rich_ui": {
+        "dialect": 1,
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "dialect_missing",
+      "rich_ui": {
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "digest_uppercase",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2B8CF2A58E69AEE8016627E9EDD23B5931751DC8AA9A715EB291FA07195F585C"
+      },
+      "field": "catalog_digest"
+    },
+    {
+      "name": "digest_prefixed",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "sha256:2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "catalog_digest"
+    },
+    {
+      "name": "digest_short",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585"
+      },
+      "field": "catalog_digest"
+    },
+    {
+      "name": "digest_long",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c0"
+      },
+      "field": "catalog_digest"
+    },
+    {
+      "name": "digest_not_hex",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "gb8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "catalog_digest"
+    },
+    {
+      "name": "digest_missing",
+      "rich_ui": {
+        "dialect": "1.0"
+      },
+      "field": "catalog_digest"
+    }
+  ]
+}

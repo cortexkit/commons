@@ -280,6 +280,12 @@ pub struct RunStarted {
     pub run_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_id: Option<String>,
+    /// On a runner declaring `rich_ui_stamp`: the rich UI stamp the run's
+    /// frozen plan carries, which every assistant row the run writes repeats
+    /// (CONTRACT §9.17). Absent there means the run is unstamped; on any
+    /// other runner absence says nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rich_ui: Option<crate::rich_ui::RichUiStamp>,
 }
 
 impl RunStarted {
@@ -287,7 +293,14 @@ impl RunStarted {
         Self {
             run_id: run_id.into(),
             send_id: None,
+            rich_ui: None,
         }
+    }
+
+    /// Name the rich UI stamp the run's frozen plan carries.
+    pub fn with_rich_ui(mut self, rich_ui: crate::rich_ui::RichUiStamp) -> Self {
+        self.rich_ui = Some(rich_ui);
+        self
     }
 
     /// Name the send that started the run.

@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.7.14
+
+- Add the `rich_ui_stamp` describe group (contract §9.17), listing
+  `session.read` and `session.head`. A runner declaring it copies the rich UI
+  stamp `{dialect, catalog_digest}` verbatim from its frozen plan's fetched
+  system-text answers (tool-provider 0.13.2's `system_text.rich_ui`) and serves
+  it, fixed per run, on every assistant display row the run writes, on the
+  run's `run_started`, on `session.head` as `last_run_rich_ui` while
+  `last_run_state` names the run, and on the run's assistant `session.read`
+  entries when the read opts in with `include_rich_ui: true`. Never on user,
+  steered, tool, imported or adopted rows. Absent from such a runner means
+  unstamped; from any other runner it says nothing.
+- Two fetched system-text answers declaring different stamps are refused at
+  admission `plan_stale`, writing nothing, with one `{kind: "rich_ui",
+  provider, rich_ui}` difference per stamped answer.
+- Add `rich_ui::RichUiStamp` (the same wire form and validation as
+  tool-provider's type: a malformed stamp is refused naming
+  `rich_ui.dialect` or `rich_ui.catalog_digest`), `rich_ui::plan_stamp` and
+  `rich_ui::RichUiConflict`; optional `DisplayRow::rich_ui`,
+  `RunStarted::rich_ui`, `ReadMessage::rich_ui` and
+  `HeadMeta::last_run_rich_ui`, omitted when absent, with `with_*` setters;
+  `ReadRequest::include_rich_ui`, omitted when false, with
+  `ReadRequest::check_rich_ui` naming it for a runner without the group.
+  `HeadMeta::lineage_consistent` refuses a last-run stamp without
+  `last_run_state`. `LastRunState` is unchanged.
+- Without the opt-in, `session.read` replies keep their bytes, and every
+  existing vector is unchanged. New `rich-ui-stamp.json`.
+
 ## 0.7.13
 
 - `reasoning-pruned-profiles.json`: the `owned-broca` `applied_edits`

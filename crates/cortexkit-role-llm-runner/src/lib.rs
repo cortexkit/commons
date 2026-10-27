@@ -38,6 +38,7 @@ pub mod output_refs;
 pub mod points;
 pub mod read;
 pub mod retract;
+pub mod rich_ui;
 pub mod run;
 pub mod send;
 pub mod send_status;
@@ -212,6 +213,16 @@ pub mod capabilities {
     /// requires [`HISTORY_DISPLAY`] or [`LIVE_EVENTS`], whose entries it
     /// extends.
     pub const CALL_IDENTITY: &str = "call_identity";
+    /// The rich UI stamp (`rich_ui::RichUiStamp`): the runner copies it,
+    /// verbatim, from the system-text answers a run's frozen plan fetched,
+    /// and serves it on every assistant display row the run writes, on the
+    /// run's `run_started`, as `session.head`'s `last_run_rich_ui` while
+    /// `last_run_state` names the run, and on the run's assistant
+    /// `session.read` entries when the read asks with `include_rich_ui`. A
+    /// plan whose fetched answers declare two different stamps is refused at
+    /// admission `plan_stale`. Absent means unstamped on a runner declaring
+    /// it, and says nothing on any other runner.
+    pub const RICH_UI_STAMP: &str = "rich_ui_stamp";
     /// `run.result` and per-message run attribution.
     pub const RUN_OPS: &str = "run_ops";
     /// Poll a run's current state, independent of transcript reads.
@@ -363,6 +374,10 @@ pub mod capabilities {
         // Extends whichever display surface the runner serves; `check_describe`
         // requires at least one of them by name.
         (CALL_IDENTITY, &[]),
+        // Extends `session.read` (the opt-in entry member) and `session.head`
+        // (the last run's stamp); the display and live surfaces carry it
+        // where the runner serves them.
+        (RICH_UI_STAMP, &[ops::SESSION_READ, ops::SESSION_HEAD]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
         (HELD_CALLS, &[ops::RUN_STATUS]),

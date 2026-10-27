@@ -155,8 +155,9 @@ to them. Nothing here names a particular implementation.
     filtered answer still contains exactly the tools selected by any requested
     tag.
   - `system_text`, when requested, is `{text, item_digest, preflight_digest,
-    composition_digest, tool_names}`, from the same configuration resolution
-    as the catalog in the same reply. `item_digest` is the SHA-256 of the
+    composition_digest, tool_names, rich_ui?}` (`SystemTextAnswer`), from the
+    same configuration resolution as the catalog in the same reply.
+    `item_digest` is the SHA-256 of the
     exact UTF-8 bytes of the text this answer resolved to, as 64 lowercase
     hex characters (`system_text_digest` in this crate), never a digest of a
     JSON object wrapping it, and is present whether or not `text` is. A
@@ -173,6 +174,33 @@ to them. Nothing here names a particular implementation.
     plan as `plan_stale` with a `text_tool_names` difference (`missing`,
     `unexpected`) when they differ, so text written for one tool set is
     never served beside another.
+  - `system_text.rich_ui` is optional: `{dialect, catalog_digest}`
+    (`rich_ui::RichUiStamp`), the rich UI stamp of the system-text answer.
+    It names the rich UI dialect the text teaches and the catalog it teaches
+    it against, so that a runner can stamp the replies of a run that froze
+    this answer and a reader can render them as rich UI. Omitted when
+    absent, so an answer without a stamp keeps its bytes and digests.
+    - `dialect` is 1 to 32 printable ASCII characters with no whitespace
+      (each 0x21-0x7E), for example `"1.0"`. It is the rich UI language
+      dialect the catalog declares about itself. It is not the rich UI
+      syntax crate's `rich-ui/1` reference scan mode (`reference_slots`
+      kind `source:rich-ui/1`): the two are versioned separately, so a
+      revision of the scanner never looks like a new language.
+    - `catalog_digest` is exactly 64 lowercase hex characters with no
+      prefix: the SHA-256 the catalog's owner publishes over its canonical
+      catalog.
+    - A decoder refuses a malformed stamp, naming `rich_ui.dialect` or
+      `rich_ui.catalog_digest`; a missing or non-string member is malformed.
+      Members a release does not know are ignored.
+    - A provider declares `rich_ui` only on a system-text answer whose text
+      teaches that dialect against that catalog. In practice that is the
+      module that owns the rich UI catalog. It copies both values from the
+      catalog's own published export and never re-derives them.
+    - A plan composer includes a stamped teaching item only in a plan for a
+      runner that declares the `llm-runner/v1` `rich_ui_stamp` describe
+      group, which copies the stamp onto the replies of each run that froze
+      the answer.
+    - Pinned by `test-vectors/tool-provider-v1/rich-ui-stamp.json`.
   - A provider with only system text answers an empty `tools` list.
 - `digest_only: true` answers `{generation, catalog_digest}` with no tools.
 - Each tool (`CatalogTool`): `{name, schema_digest, semantics, result_ops?,

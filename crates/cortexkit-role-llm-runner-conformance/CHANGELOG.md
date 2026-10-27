@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.15.16
+
+- Track llm-runner 0.7.14, which this crate pins exactly.
+- Add the `rich_ui_stamp` cases: `rich_ui_stamp_served_on_stamped_run`,
+  `rich_ui_stamp_absent_on_unstamped_run`, `rich_ui_stamp_read_needs_opt_in`,
+  `rich_ui_stamp_conflict_refused` and `rich_ui_stamp_head_follows_last_run`.
+  They check that a run serves its frozen plan's rich UI stamp verbatim on every
+  assistant display row, `run_started`, `head.last_run_rich_ui` and opt-in
+  `session.read` entry, and nowhere else. They also check that a read without
+  `include_rich_ui` is unchanged, that two different stamps are refused
+  `plan_stale` before anything is written, and that the head follows the last
+  run after a replan. They are not applicable without the describe group.
+- Add the optional subject hooks `rich_ui_plan_fields` (a plan whose fetched
+  system-text answers declare chosen stamps) and `replan_rich_ui`. Without
+  them the cases are not applicable, by name. Add `rich_ui_stamp::fixture_stamp`
+  and `conflicting_stamp`.
+- Faulty runners prove the cases fail when a runner stamps an unstamped run,
+  serves another value, leaves an assistant row unstamped, stamps a user row
+  or user read entry, serves the stamp without the read opt-in, omits or
+  leaves over the head's stamp, or accepts two conflicting stamps.
+
 ## 0.15.15
 
 - Track llm-runner 0.7.13, which this crate pins exactly. Its

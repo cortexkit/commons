@@ -463,6 +463,8 @@ is unchanged and prints nothing.
 | `call_identity_key_matches_attribution` | `call_identity` (otherwise not applicable), `queue`, `transcript_reads`, `dispatch_attribution`, and display history or live events |
 | `call_identity_pin_frozen_at_dispatch` | as above, and `dispatched_schema_pin`; the catalog rule is named unchecked without `change_tool_definition` |
 | `call_identity_denied_call_has_no_pin` | as above; not applicable without `deny_tool_call` |
+| `rich_ui_stamp_served_on_stamped_run`, `rich_ui_stamp_absent_on_unstamped_run`, `rich_ui_stamp_read_needs_opt_in`, `rich_ui_stamp_conflict_refused` | `rich_ui_stamp` (otherwise not applicable), `queue`, `transcript_reads`; display history and live events are read where declared; not applicable without `rich_ui_plan_fields` |
+| `rich_ui_stamp_head_follows_last_run` | as above; not applicable without `replan_rich_ui` |
 | `baseline_owner_only`, `baseline_matches_admission_reply` | `queue` |
 | `tail_read_is_newest_page`, `range_read_stops_by_count`, `range_read_stops_by_bytes`, `oversize_message_alone_on_its_page`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `head_has_no_bodies` | `transcript_reads`, `queue` |
 | `unknown_read_field_refused`, `never_written_session_empty_page`, `never_written_session_empty_head` | `transcript_reads` |
@@ -942,6 +944,43 @@ all three cases are not applicable, never skipped.
 `call_identity::DISPATCHED_DEFINITION` is the definition an adapter's provider
 serves for the scripted tool; a test checks both fixture pins against the
 tool-provider crate.
+
+## Rich UI stamp (0.15.16)
+
+Version 0.15.16 depends on the llm-runner 0.7.14 wire contract (§9.17). On a
+runner whose `role.describe` declares `rich_ui_stamp`, five cases check that a
+run carries its frozen plan's rich UI stamp and nothing else. They need
+`queue` and `transcript_reads`; with `history_display` and `host_history` they
+also read every display history row, and with `live_events` and `streaming`
+the run's replayed `run_started`.
+
+The adapter builds each plan with `rich_ui_plan_fields(session, stamps)`: the
+first-send fields of a plan holding one system-text item per entry, each
+from its own scripted provider whose `tool.catalog` answer declares that
+entry's stamp as `system_text.rich_ui`. The runner must fetch them itself.
+The stamps are `rich_ui_stamp::fixture_stamp()` and, for the conflict case,
+`rich_ui_stamp::conflicting_stamp()`. `replan_rich_ui(session, stamp)`
+changes the plan through the runner's own replan path so the next run's plan
+carries `stamp`. Without `rich_ui_plan_fields` every case is not applicable,
+by name; without `replan_rich_ui` only the head case is.
+
+- `rich_ui_stamp_served_on_stamped_run`: two answers declaring the same
+  stamp beside an unstamped one. Every assistant display row and every
+  assistant `session.read` entry read with `include_rich_ui` carries the
+  stamp verbatim, as do `run_started` and `head.last_run_rich_ui`. No user,
+  tool or other row carries it.
+- `rich_ui_stamp_absent_on_unstamped_run`: an unstamped teaching item; no
+  surface carries a stamp.
+- `rich_ui_stamp_read_needs_opt_in`: a read without `include_rich_ui`
+  carries no stamp, and its entries are the opt-in entries without the
+  member.
+- `rich_ui_stamp_conflict_refused`: two different stamps are refused
+  `plan_stale`, naming both, and nothing is written.
+- `rich_ui_stamp_head_follows_last_run`: after a replan without a stamp,
+  the next run is unstamped and the head drops `last_run_rich_ui`, while
+  the earlier run's assistant rows and entries keep their stamp.
+
+On a runner without the group, all five are not applicable, never skipped.
 
 ## Step-finished bus hints
 

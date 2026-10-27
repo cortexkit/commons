@@ -147,6 +147,7 @@ shipping runner with this document.
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
+| `rich_ui_stamp` | `session.read` (the `include_rich_ui` opt-in), `session.head` (`last_run_rich_ui`); also the rich UI stamp on assistant display rows and `run_started` where those are served | §9.17 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
 | `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
 | `attachments` | `session.upload_begin`, `session.upload_append`, `session.upload_status`, `session.upload_commit`, `session.media_read`, `session.send`, `session.read` | §9.12 |
@@ -248,6 +249,12 @@ shipping runner with this document.
   members, because absence has to mean something: from a runner declaring
   it, an absent `call_key` or `schema_pin` follows §9.16's presence rules;
   from any other runner it says nothing.
+- [pinned] `rich_ui_stamp` is a group of its own (added in 0.7.14, §9.17)
+  for the same reason: from a runner declaring it, an absent stamp on an
+  assistant row, `run_started`, the head's last run or an opt-in read entry
+  means that run is unstamped; from any other runner absence says nothing.
+  It lists `session.read` and `session.head`, the ops whose requests and
+  answers it extends.
 - [pinned] A caller MUST NOT send `budget.max_input_tokens` unless the runner
   advertises `input_token_cap`. Like the other optional groups, it is checked
   by `check_describe` for its required op; it adds no discovery metadata.
@@ -327,7 +334,7 @@ shipping runner with this document.
 ### 4.1 The request
 
 `{from_ordinal?, after_mid?, lineage_id?, limit?, max_bytes?,
-include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
+include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 
 - [pinned] **Tail.** With no cursor, the newest page within the current
   lineage (§4.5). This is a contract, not a default a runner may change; the
@@ -354,6 +361,12 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   are stated in `role.describe` (§2).
 - [pinned] `include_originals: true` adds `originals` to each message a hook
   changed (§4.2).
+- [pinned] `include_rich_ui: true` adds `rich_ui` to each assistant entry a
+  stamped run wrote (§9.17). Absent means `false`, and an encoder omits a
+  `false` value. Only a runner declaring `rich_ui_stamp` serves it; any
+  other runner refuses it as an unknown field (below), `invalid_params`
+  naming `include_rich_ui` (`ReadRequest::check_rich_ui`), so a caller
+  sends it only to a runner declaring the group.
 - [pinned] `media` is `"inline"` (the default), `"descriptors"`, or, on an
   `attachments` runner, `"blocks"` (§9.12). Unknown values are refused
   `invalid_params {field: "media"}`. Inline preserves existing non-media
@@ -522,6 +535,10 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   on every lineage that still holds it (§4.5).
 - [pinned] With `include_originals`, a hooked message carries `originals:
   [{field, value, provider}]` (`Original`), oldest first.
+- [pinned] With `include_rich_ui`, an assistant entry a stamped run wrote
+  carries `rich_ui: {dialect, catalog_digest}` (`ReadMessage::rich_ui`)
+  beside `mid`, never inside `message` (§9.17). Without the opt-in no entry
+  carries it, so a page is byte for byte what it was before the group.
 - [pinned] `head` is the last durable event covered by the same snapshot as
   the page (§7). It is a JSON object, opaque to consumers, and absent on a
   session with no events.
@@ -531,8 +548,9 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
 ### 4.3 Head metadata
 
 - [pinned] Head metadata without bodies: `{lineage_id, last_ordinal,
-  first_ordinal, cut?, history_version, head, last_run_state, last_run_error?, updated_at,
-  input?, model?, usage?, sender?, incarnation?, reasoning_pruned?}`
+  first_ordinal, cut?, history_version, head, last_run_state, last_run_error?,
+  last_run_rich_ui?, updated_at, input?, model?, usage?, sender?, incarnation?,
+  reasoning_pruned?}`
   (`HeadMeta`). `reasoning_pruned` is the session's prune state, only on a
   runner that declares `archive_prunes_reasoning` and only after the
   session's first prune (§9.14.1).
@@ -580,6 +598,14 @@ include_originals?, view?, media?}` (`ReadRequest`). Three modes (`ReadRequest::
   `status`, `account_ref` and provider diagnostics. A client app needs only
   class and timing for its retry decision; a reader wanting the text calls
   `run.status` once.
+- [pinned] `last_run_rich_ui?: {dialect, catalog_digest}`
+  (`read::HeadMeta::last_run_rich_ui`, added in 0.7.14) is the rich UI
+  stamp of the run `last_run_state` names, on a runner declaring
+  `rich_ui_stamp` (§9.17). It is present exactly while that run's frozen
+  plan carries a stamp and describes that same run, so a later unstamped
+  run removes it. It sits beside `last_run_state`, as `last_run_error`
+  does, so code building `LastRunState` directly keeps compiling. A head
+  carrying it without `last_run_state` is not `lineage_consistent`.
 - [pinned] An error state without `last_run_error` means "not reported"
   (for example a runner predating 0.7.5), never "permanent". No describe
   group is needed. `class` is an open string: known examples today are
@@ -3753,6 +3779,81 @@ display tool-call entry it serves.
   prepared then denied) and neither (a call denied before it was keyed), on
   display rows and on both live events, and the discovery answers.
 
+### 9.17 `rich_ui_stamp`: the rich UI stamp on a run's assistant replies
+
+A reader such as the phone renders an assistant reply as rich UI only when
+the reply carries a stamp naming the rich UI dialect the model was taught
+and the digest of the catalog it was taught against. An unstamped reply
+renders as plain Markdown. The teaching comes from a system-text plan item:
+the module that owns the rich UI catalog serves a `tool-provider/v1`
+system-text answer that teaches the catalog's tags and declares the stamp
+on it as `system_text.rich_ui` (tool-provider §3). A runner declaring
+`rich_ui_stamp` (added in 0.7.14) carries that stamp from the answer it
+froze for a run to every assistant reply the run writes.
+
+- [pinned] The stamp is `{dialect, catalog_digest}`
+  (`rich_ui::RichUiStamp`), with exactly the wire form and validation of
+  tool-provider's `rich_ui::RichUiStamp`. `dialect` is 1 to 32 printable
+  ASCII characters with no whitespace (each 0x21-0x7E), the rich UI
+  language dialect the catalog declares about itself, for example `"1.0"`.
+  It is not the rich UI syntax crate's `rich-ui/1` reference scan mode: the
+  two are versioned separately, so a revision of the scanner never looks
+  like a new language. `catalog_digest` is exactly 64 lowercase hex
+  characters with no prefix, the SHA-256 the catalog's owner publishes over
+  its canonical catalog. A malformed stamp is refused on decode naming
+  `rich_ui.dialect` or `rich_ui.catalog_digest`.
+- [pinned] **Source.** The runner copies the stamp, verbatim, from the
+  system-text answers of the run's frozen plan: the answers it fetched and
+  froze, kept with the frozen answer wherever it caches answers, so the run
+  that froze an answer serves that answer's stamp. It never derives,
+  defaults or guesses one. Answers declaring no stamp take no part. When
+  every stamped answer declares the same stamp, that is the plan's stamp
+  (`rich_ui::plan_stamp`).
+- [pinned] **Conflict.** When two fetched system-text answers in one plan
+  declare different stamps, the runner refuses the send at admission as
+  `plan_stale`, before anything is written, with `detail.differences`
+  listing every stamped answer as `{kind: "rich_ui", provider, rich_ui}`
+  in plan order (`rich_ui::RichUiConflict`). `plan_stale` is the code for
+  fetched items that cannot be frozen together as composed; like any
+  `plan_stale` it is not retried with the same plan: the starter preflights
+  again and composes a new one. Identical stamps are not a conflict.
+- [pinned] **Fixed per run.** A run's stamp is fixed when the run starts,
+  from the plan frozen for it. A later replan (`session.refresh`, §10.2)
+  affects only runs that start after it applies; the rows of earlier runs
+  keep their stamp. A runner may derive the stamp per run from the run's
+  start record.
+- [pinned] **Where it is served**, each optional and omitted when absent:
+  - `rich_ui` on every display row (`display::DisplayRow`, §4.7) of an
+    assistant message written by a run whose frozen plan carries a stamp,
+    on `session.history` with `form: "display"` and on the live surface;
+  - `rich_ui` on that run's `run_started` (`live::RunStarted`, §7.1);
+  - `last_run_rich_ui` on `session.head` (§4.3) while `last_run_state`
+    names that run;
+  - `rich_ui` on that run's assistant `session.read` entries
+    (`read::ReadMessage`), beside `mid` and never inside `message`, only
+    when the request sets `include_rich_ui` (§4.1). Without the opt-in,
+    read replies are byte for byte what they were before the group, and no
+    body, profile or digest changes either way.
+- [pinned] **Never** on a user, steered, tool, imported or adopted row or
+  entry, and never on a message a run did not write: the stamp marks the
+  replies a stamped run's model wrote, nothing else.
+- [pinned] **Absence.** From a runner declaring the group, an absent stamp
+  on an assistant row, `run_started`, the head's last run or an opt-in read
+  entry means that run is unstamped: a reader renders plain Markdown and
+  never infers a stamp from anything else. From a runner without the group
+  absence says nothing.
+- [pinned] **Readers first.** Readers of display rows, `run_started` and
+  `session.head` accept the member, and decode it leniently, before any
+  runner declares the group; the member is optional on every type here.
+- [pinned] **Composers.** A plan composer includes a stamped teaching item
+  only in a plan for a runner whose `role.describe` declares
+  `rich_ui_stamp`, so a runner that would drop the stamp never runs a model
+  taught to write rich UI.
+- [pinned] `rich-ui-stamp.json` pins the discovery answers, the stamp's
+  wire form and refusals, stamped and unstamped display rows, `run_started`,
+  heads and opt-in read entries, the read opt-in, plan stamps and the
+  conflict refusal.
+
 
 ## 10. `session.baseline` and the admission reply
 
@@ -3836,6 +3937,10 @@ display tool-call entry it serves.
   `session.adopt` refuses a plan other than the one applied at host start
   with the same `plan_drift {frozen, sent}` (§9.5).
 - [pinned] Any refusal during admission writes nothing.
+- [pinned] A runner declaring `rich_ui_stamp` refuses a plan whose fetched
+  system-text answers declare two different rich UI stamps as `plan_stale`,
+  with one `{kind: "rich_ui", provider, rich_ui}` difference per stamped
+  answer (§9.17).
 - [pinned] A runner declaring `system_text_default` checks at plan admission
   that each provider of a preset-less `system_text` item declares
   `system-text-default/v1` in the daemon catalog. If it does not, the runner
@@ -4157,7 +4262,7 @@ treats it as a terminal refusal of that one request.
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline, including when a `session.refresh` fetch misses its deadline (§10.2) | `provider` | **yes** |
 | `system_text_preset_required` | a preset-less `system_text` item's provider lacks `system-text-default/v1`; nothing is written or forwarded; never timed (§10.1) | `provider` (module id) | no: terminal |
-| `plan_stale` | fetched items disagree with the composition | `differences` | no: re-plan |
+| `plan_stale` | fetched items disagree with the composition, or (on a `rich_ui_stamp` runner) fetched system-text answers declare different rich UI stamps (§9.17) | `differences` | no: re-plan |
 | `tool_name_collision` | tools share a model-facing name | `name`, `providers` (every provider that offered it) | no |
 | `user_command_collision` | plan providers share a command name | `name`, `providers` (every declaring provider) | no |
 | `unknown_user_command` | the session did not freeze this command | `command` | no |

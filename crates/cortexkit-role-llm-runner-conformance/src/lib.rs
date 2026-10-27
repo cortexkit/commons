@@ -107,6 +107,7 @@ mod output_refs;
 pub mod progress;
 mod report;
 mod retention;
+pub mod rich_ui_stamp;
 mod ride_wait;
 mod route;
 mod run_parameters;

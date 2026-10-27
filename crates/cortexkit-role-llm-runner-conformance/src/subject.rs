@@ -705,6 +705,38 @@ pub trait LlmRunnerSubject: Harness {
         Ok(false)
     }
 
+    /// First-send fields for `session` whose plan holds one system-text item
+    /// per entry of `stamps`, each from its own scripted provider, whose
+    /// `tool.catalog` system-text answer declares that entry's rich UI stamp
+    /// as `system_text.rich_ui` (none for `None`). The runner must fetch the
+    /// answers itself at admission, as it fetches any plan item; build the
+    /// plan and the providers' answers only, never the runner's records.
+    /// Called after the session's script is installed and before its first
+    /// send. `Ok(None)` means the adapter cannot build such a plan; the
+    /// `rich_ui_stamp` cases are then not applicable, by name. Wanted only
+    /// when the runner declares `rich_ui_stamp`.
+    async fn rich_ui_plan_fields(
+        &self,
+        _session: &str,
+        _stamps: &[Option<cortexkit_role_llm_runner::rich_ui::RichUiStamp>],
+    ) -> Result<Option<Map<String, Value>>, HarnessError> {
+        Ok(None)
+    }
+
+    /// Change `session`'s plan through the runner's own replan path (a
+    /// `session.refresh` the runner accepts, say), so the next run that
+    /// starts freezes a plan whose single system-text answer declares
+    /// `stamp` (none for `None`). Start no run and touch no record a run
+    /// already wrote. Return false when the adapter cannot; the case that
+    /// needs it is then not applicable, by name.
+    async fn replan_rich_ui(
+        &self,
+        _session: &str,
+        _stamp: Option<&cortexkit_role_llm_runner::rich_ui::RichUiStamp>,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
     /// The attested runner principal's bare module id, exactly as recorded in
     /// `session_binding.runner`, never `reserved:<id>` or any other prefix.
     /// This is not the caller-chosen harness or the project folder. The suite

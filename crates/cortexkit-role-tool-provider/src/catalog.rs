@@ -813,6 +813,14 @@ pub struct SystemTextAnswer {
     /// differ. Required whenever `text` is present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_names: Option<Vec<String>>,
+    /// The rich UI dialect and catalog this text teaches, declared only by
+    /// the module that owns the rich UI catalog, and only on a text that
+    /// teaches that dialect against that catalog. Both values are copied
+    /// from the catalog's own published export, never re-derived. Omitted
+    /// when absent, so an unstamped answer keeps its bytes; a malformed
+    /// stamp is refused on decode naming the member at fault.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rich_ui: Option<crate::rich_ui::RichUiStamp>,
 }
 
 impl SystemTextAnswer {
@@ -848,6 +856,12 @@ impl SystemTextAnswer {
         names.sort();
         names.dedup();
         self.tool_names = Some(names);
+        self
+    }
+
+    /// Declare the rich UI stamp this text teaches.
+    pub fn with_rich_ui(mut self, rich_ui: crate::rich_ui::RichUiStamp) -> Self {
+        self.rich_ui = Some(rich_ui);
         self
     }
 }

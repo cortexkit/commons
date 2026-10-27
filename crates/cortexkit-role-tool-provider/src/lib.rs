@@ -25,6 +25,7 @@ pub mod errors;
 pub mod late_results;
 pub mod points;
 pub mod result;
+pub mod rich_ui;
 pub mod scope;
 pub mod user_command;
 #[cfg(any(test, feature = "test-vectors"))]

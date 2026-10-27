@@ -376,6 +376,11 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    if case.starts_with("rich_ui_stamp_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare rich_ui_stamp")
+    {
+        return;
+    }
     if case == "head_incarnation_survives_cut_and_changes_on_recreation"
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot cut the incarnation log")
     {
@@ -665,6 +670,9 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     // Display rows and live tool events carry call identity, which every
     // other display and live case must still accept.
     subject.call_identity_group = true;
+    // Runs carry their plan's rich UI stamp, which every other case must
+    // still accept on the rows, events and heads it reads.
+    subject.rich_ui_stamp_group = true;
     let started = Instant::now();
     let report = run(&subject).await;
     assert_only_session_retention_skipped(&report);
@@ -672,6 +680,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
         case.name.starts_with("media_")
             || case.name.starts_with("attachments_")
             || case.name.starts_with("call_identity_")
+            || case.name.starts_with("rich_ui_stamp_")
     }) {
         assert_eq!(
             report.outcome(spec.name),
@@ -6711,4 +6720,227 @@ async fn call_identity_pin_on_a_denied_call_on_live_events_alone_fails_by_name()
         "{reason}"
     );
     assert_none_failed_but(&report, &[DENIED_CASE]);
+}
+
+/// A fake declaring `rich_ui_stamp`, with display history and live events
+/// for the cases to read.
+fn rich_ui_subject(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.rich_ui_stamp_group = true;
+    subject.capabilities.extend([
+        Capability::HostHistory,
+        Capability::HistoryDisplay,
+        Capability::LiveEvents,
+    ]);
+    subject
+}
+
+const RICH_UI_SERVED: &str = "rich_ui_stamp_served_on_stamped_run";
+const RICH_UI_UNSTAMPED: &str = "rich_ui_stamp_absent_on_unstamped_run";
+const RICH_UI_OPT_IN: &str = "rich_ui_stamp_read_needs_opt_in";
+const RICH_UI_CONFLICT: &str = "rich_ui_stamp_conflict_refused";
+const RICH_UI_FOLLOWS: &str = "rich_ui_stamp_head_follows_last_run";
+
+#[tokio::test]
+async fn rich_ui_stamp_faithful_runner_passes_every_case() {
+    let report = run(&rich_ui_subject(Defects::default())).await;
+    for name in cases_of(&["rich_ui_stamp_"]) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+/// Without the group the cases are not applicable, never skipped, whatever
+/// else the runner declares.
+#[tokio::test]
+async fn rich_ui_stamp_undeclared_group_is_inapplicable_never_skipped() {
+    let mut declaring_surfaces = rich_ui_subject(Defects::default());
+    declaring_surfaces.rich_ui_stamp_group = false;
+    for subject in [declaring_surfaces, FakeSubject::new(Defects::default())] {
+        let report = run(&subject).await;
+        for name in cases_of(&["rich_ui_stamp_"]) {
+            assert!(
+                matches!(report.outcome(name),
+                    Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare rich_ui_stamp"),
+                "{name}: {:?}",
+                report.outcome(name)
+            );
+        }
+    }
+}
+
+/// An adapter without the plan hook makes every case not applicable, and
+/// one without the replan hook the case that needs it, each by name.
+#[tokio::test]
+async fn rich_ui_stamp_without_the_fixture_hooks_is_inapplicable_by_name() {
+    let mut subject = rich_ui_subject(Defects::default());
+    subject.rich_ui_plan_fixture = false;
+    let report = run(&subject).await;
+    for name in cases_of(&["rich_ui_stamp_"]) {
+        assert!(
+            matches!(report.outcome(name),
+                Some(CaseOutcome::Inapplicable { reason }) if reason.contains("rich_ui_plan_fields")),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+    }
+    let mut subject = rich_ui_subject(Defects::default());
+    subject.rich_ui_replan_fixture = false;
+    let report = run(&subject).await;
+    assert!(
+        matches!(report.outcome(RICH_UI_FOLLOWS),
+            Some(CaseOutcome::Inapplicable { reason }) if reason.contains("replan_rich_ui")),
+        "{:?}",
+        report.outcome(RICH_UI_FOLLOWS)
+    );
+    for name in [
+        RICH_UI_SERVED,
+        RICH_UI_UNSTAMPED,
+        RICH_UI_OPT_IN,
+        RICH_UI_CONFLICT,
+    ] {
+        assert_eq!(report.outcome(name), Some(&CaseOutcome::Passed), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn rich_ui_stamp_on_a_run_whose_plan_has_none_fails_by_name() {
+    let report = run(&rich_ui_subject(Defects {
+        rich_ui_stamps_unstamped_run: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in [RICH_UI_UNSTAMPED, RICH_UI_FOLLOWS] {
+        let reason = failed(&report, name);
+        assert!(
+            reason.contains("carries no stamp")
+                || reason.contains("froze a plan carrying no stamp"),
+            "{name}: {reason}"
+        );
+    }
+    assert_none_failed_but(&report, &[RICH_UI_UNSTAMPED, RICH_UI_FOLLOWS]);
+}
+
+#[tokio::test]
+async fn rich_ui_stamp_another_value_fails_by_name() {
+    let report = run(&rich_ui_subject(Defects {
+        rich_ui_wrong_value: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, RICH_UI_SERVED);
+    assert!(reason.contains("1.1"), "{reason}");
+    assert!(failed(&report, RICH_UI_FOLLOWS).contains("1.1"));
+    assert_none_failed_but(&report, &[RICH_UI_SERVED, RICH_UI_FOLLOWS]);
+}
+
+#[tokio::test]
+async fn rich_ui_stamp_an_unstamped_assistant_row_fails_by_name() {
+    let report = run(&rich_ui_subject(Defects {
+        rich_ui_skips_an_assistant_row: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, RICH_UI_SERVED);
+    assert!(
+        reason.contains("carries no rich_ui") && reason.contains("every assistant row"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[RICH_UI_SERVED]);
+}
+
+#[tokio::test]
+async fn rich_ui_stamp_on_a_user_display_row_fails_by_name() {
+    let report = run(&rich_ui_subject(Defects {
+        rich_ui_on_user_rows: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in [RICH_UI_SERVED, RICH_UI_FOLLOWS] {
+        let reason = failed(&report, name);
+        assert!(
+            reason.contains("display history row of user message"),
+            "{name}: {reason}"
+        );
+    }
+    assert_none_failed_but(&report, &[RICH_UI_SERVED, RICH_UI_FOLLOWS]);
+}
+
+#[tokio::test]
+async fn rich_ui_stamp_on_a_user_read_entry_fails_by_name() {
+    let report = run(&rich_ui_subject(Defects {
+        rich_ui_read_on_user_entry: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in [RICH_UI_SERVED, RICH_UI_FOLLOWS] {
+        let reason = failed(&report, name);
+        assert!(
+            reason.contains("session.read entry read with include_rich_ui of user message"),
+            "{name}: {reason}"
+        );
+    }
+    assert_none_failed_but(&report, &[RICH_UI_SERVED, RICH_UI_FOLLOWS]);
+}
+
+#[tokio::test]
+async fn rich_ui_stamp_served_without_the_read_opt_in_fails_by_name() {
+    let report = run(&rich_ui_subject(Defects {
+        rich_ui_read_without_opt_in: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, RICH_UI_OPT_IN);
+    assert!(reason.contains("without include_rich_ui"), "{reason}");
+    assert_none_failed_but(&report, &[RICH_UI_OPT_IN]);
+}
+
+#[tokio::test]
+async fn rich_ui_stamp_omitted_from_the_head_fails_by_name() {
+    let report = run(&rich_ui_subject(Defects {
+        rich_ui_head_omitted: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in [RICH_UI_SERVED, RICH_UI_FOLLOWS] {
+        let reason = failed(&report, name);
+        assert!(
+            reason.contains("omits last_run_rich_ui"),
+            "{name}: {reason}"
+        );
+    }
+    assert_none_failed_but(&report, &[RICH_UI_SERVED, RICH_UI_FOLLOWS]);
+}
+
+#[tokio::test]
+async fn rich_ui_stamp_left_over_on_the_head_fails_by_name() {
+    let report = run(&rich_ui_subject(Defects {
+        rich_ui_head_leftover: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, RICH_UI_FOLLOWS);
+    assert!(
+        reason.contains("session.head carries last_run_rich_ui")
+            && reason.contains("carries no stamp"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[RICH_UI_FOLLOWS]);
+}
+
+#[tokio::test]
+async fn rich_ui_stamp_two_conflicting_values_accepted_fails_by_name() {
+    let report = run(&rich_ui_subject(Defects {
+        rich_ui_conflict_accepted: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, RICH_UI_CONFLICT);
+    assert!(reason.contains("was admitted"), "{reason}");
+    assert_none_failed_but(&report, &[RICH_UI_CONFLICT]);
 }

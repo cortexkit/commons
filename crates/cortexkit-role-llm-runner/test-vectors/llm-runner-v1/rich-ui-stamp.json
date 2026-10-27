@@ -1,0 +1,528 @@
+{
+  "description": "The rich_ui_stamp group (CONTRACT §9.17). `describe` holds answers declaring the group, one without it, and one declaring it without session.head (refused group_incomplete). `valid_stamps` and `refused_stamps` pin the stamp's wire form exactly as tool-provider/v1's rich-ui-stamp.json does: a refusal names `rich_ui.<field>`. `display_rows`, `run_started`, `heads` and `read_entries` are stamped and unstamped shapes that round-trip; an unstamped shape carries no `rich_ui` member, so its bytes are those of a runner without the group. `read_requests` pins the opt-in: `include_rich_ui: true` round-trips, `false` decodes and encodes as absence. `inconsistent_heads` are heads lineage_consistent refuses. `plans` pin the stamp a run's plan carries from its fetched system-text answers, and the plan_stale refusal of two different stamps.",
+  "describe": {
+    "accept": {
+      "majors": [
+        {
+          "version": "llm-runner/v1",
+          "ops": [
+            "role.describe",
+            "session.baseline",
+            "session.read",
+            "session.head",
+            "session.history",
+            "session.subscribe"
+          ],
+          "stability": "alpha"
+        }
+      ],
+      "implementation_version": "1.0.0",
+      "capabilities": [
+        "history_display",
+        "live_events",
+        "rich_ui_stamp"
+      ],
+      "session_capabilities_from": "baseline"
+    },
+    "read_and_head_only": {
+      "majors": [
+        {
+          "version": "llm-runner/v1",
+          "ops": [
+            "role.describe",
+            "session.baseline",
+            "session.read",
+            "session.head"
+          ],
+          "stability": "alpha"
+        }
+      ],
+      "implementation_version": "1.0.0",
+      "capabilities": [
+        "rich_ui_stamp"
+      ],
+      "session_capabilities_from": "baseline"
+    },
+    "without_group": {
+      "majors": [
+        {
+          "version": "llm-runner/v1",
+          "ops": [
+            "role.describe",
+            "session.baseline",
+            "session.read",
+            "session.head",
+            "session.history",
+            "session.subscribe"
+          ],
+          "stability": "alpha"
+        }
+      ],
+      "implementation_version": "1.0.0",
+      "capabilities": [
+        "history_display",
+        "live_events"
+      ],
+      "session_capabilities_from": "baseline"
+    },
+    "group_incomplete": {
+      "answer": {
+        "majors": [
+          {
+            "version": "llm-runner/v1",
+            "ops": [
+              "role.describe",
+              "session.baseline",
+              "session.read"
+            ],
+            "stability": "alpha"
+          }
+        ],
+        "implementation_version": "1.0.0",
+        "capabilities": [
+          "rich_ui_stamp"
+        ],
+        "session_capabilities_from": "baseline"
+      },
+      "capability": "rich_ui_stamp",
+      "op": "session.head"
+    }
+  },
+  "valid_stamps": [
+    {
+      "name": "dialect_1_0",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    },
+    {
+      "name": "dialect_one_character",
+      "rich_ui": {
+        "dialect": "2",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    },
+    {
+      "name": "dialect_thirty_two_printable",
+      "rich_ui": {
+        "dialect": "!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~!~",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    }
+  ],
+  "refused_stamps": [
+    {
+      "name": "dialect_empty",
+      "rich_ui": {
+        "dialect": "",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "dialect_thirty_three",
+      "rich_ui": {
+        "dialect": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "dialect_space",
+      "rich_ui": {
+        "dialect": "1 0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "dialect_missing",
+      "rich_ui": {
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "dialect"
+    },
+    {
+      "name": "digest_uppercase",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2B8CF2A58E69AEE8016627E9EDD23B5931751DC8AA9A715EB291FA07195F585C"
+      },
+      "field": "catalog_digest"
+    },
+    {
+      "name": "digest_prefixed",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "sha256:2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "field": "catalog_digest"
+    },
+    {
+      "name": "digest_short",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585"
+      },
+      "field": "catalog_digest"
+    },
+    {
+      "name": "digest_not_string",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": 7
+      },
+      "field": "catalog_digest"
+    }
+  ],
+  "display_rows": [
+    {
+      "name": "assistant row of a stamped run",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "row": {
+        "role": "assistant",
+        "text": "Here is the forecast.",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "Here is the forecast."
+          }
+        ],
+        "model": "acme/m1",
+        "rich_ui": {
+          "dialect": "1.0",
+          "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+        }
+      }
+    },
+    {
+      "name": "assistant row of an unstamped run",
+      "row": {
+        "role": "assistant",
+        "text": "Here is the forecast.",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "Here is the forecast."
+          }
+        ],
+        "model": "acme/m1"
+      }
+    },
+    {
+      "name": "user row of a stamped run",
+      "row": {
+        "role": "user",
+        "text": "weather?",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "weather?"
+          }
+        ]
+      }
+    }
+  ],
+  "run_started": [
+    {
+      "name": "a stamped run",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "event": {
+        "type": "run_started",
+        "run_id": "run-7",
+        "send_id": "send-7",
+        "rich_ui": {
+          "dialect": "1.0",
+          "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+        }
+      }
+    },
+    {
+      "name": "an unstamped run",
+      "event": {
+        "type": "run_started",
+        "run_id": "run-8",
+        "send_id": "send-8"
+      }
+    }
+  ],
+  "heads": [
+    {
+      "name": "the last run is stamped",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "answer": {
+        "lineage_id": "L1",
+        "last_ordinal": 3,
+        "first_ordinal": 0,
+        "history_version": 1,
+        "last_run_state": {
+          "run_id": "run-7",
+          "state": "completed"
+        },
+        "last_run_rich_ui": {
+          "dialect": "1.0",
+          "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+        },
+        "updated_at": 1790000000000
+      }
+    },
+    {
+      "name": "the last run is unstamped, after an earlier stamped run",
+      "answer": {
+        "lineage_id": "L1",
+        "last_ordinal": 5,
+        "first_ordinal": 0,
+        "history_version": 1,
+        "last_run_state": {
+          "run_id": "run-8",
+          "state": "completed"
+        },
+        "updated_at": 1790000001000
+      }
+    }
+  ],
+  "inconsistent_heads": [
+    {
+      "name": "a stamp with no last run",
+      "answer": {
+        "lineage_id": "L1",
+        "first_ordinal": 0,
+        "history_version": 1,
+        "last_run_rich_ui": {
+          "dialect": "1.0",
+          "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+        },
+        "updated_at": 1790000000000
+      }
+    },
+    {
+      "name": "a stamp on a session never written",
+      "answer": {
+        "last_run_rich_ui": {
+          "dialect": "1.0",
+          "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+        }
+      }
+    }
+  ],
+  "read_requests": [
+    {
+      "name": "the opt-in",
+      "request": {
+        "from_ordinal": 0,
+        "include_rich_ui": true
+      },
+      "include_rich_ui": true
+    },
+    {
+      "name": "no opt-in",
+      "request": {
+        "from_ordinal": 0
+      },
+      "include_rich_ui": false
+    },
+    {
+      "name": "an explicit false encodes as absence",
+      "request": {
+        "from_ordinal": 0,
+        "include_rich_ui": false
+      },
+      "encoded": {
+        "from_ordinal": 0
+      },
+      "include_rich_ui": false
+    }
+  ],
+  "read_entries": [
+    {
+      "name": "assistant entry of a stamped run, read with the opt-in",
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      },
+      "entry": {
+        "ordinal": 1,
+        "mid": "m1",
+        "message": {
+          "role": "assistant",
+          "text": "Here is the forecast."
+        },
+        "run": {
+          "run_id": "run-7",
+          "episode": "e1",
+          "final": true
+        },
+        "role": "assistant",
+        "rich_ui": {
+          "dialect": "1.0",
+          "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+        }
+      }
+    },
+    {
+      "name": "the same entry read without the opt-in",
+      "entry": {
+        "ordinal": 1,
+        "mid": "m1",
+        "message": {
+          "role": "assistant",
+          "text": "Here is the forecast."
+        },
+        "run": {
+          "run_id": "run-7",
+          "episode": "e1",
+          "final": true
+        },
+        "role": "assistant"
+      }
+    },
+    {
+      "name": "assistant entry of an unstamped run, read with the opt-in",
+      "entry": {
+        "ordinal": 3,
+        "mid": "m3",
+        "message": {
+          "role": "assistant",
+          "text": "Here is the forecast."
+        },
+        "run": {
+          "run_id": "run-8",
+          "episode": "e1",
+          "final": true
+        },
+        "role": "assistant"
+      }
+    },
+    {
+      "name": "user entry of a stamped run, read with the opt-in",
+      "entry": {
+        "ordinal": 0,
+        "mid": "m0",
+        "message": {
+          "role": "user",
+          "text": "weather?"
+        },
+        "run": {
+          "run_id": "run-7",
+          "episode": "e1",
+          "final": false
+        },
+        "role": "user"
+      }
+    }
+  ],
+  "plans": [
+    {
+      "name": "no answer declares a stamp",
+      "answers": [
+        {
+          "provider": "acme.tools"
+        },
+        {
+          "provider": "acme.notes"
+        }
+      ],
+      "rich_ui": null
+    },
+    {
+      "name": "one stamped answer beside an unstamped one",
+      "answers": [
+        {
+          "provider": "acme.tools"
+        },
+        {
+          "provider": "acme.rich-ui",
+          "rich_ui": {
+            "dialect": "1.0",
+            "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+          }
+        }
+      ],
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    },
+    {
+      "name": "two answers declaring the same stamp",
+      "answers": [
+        {
+          "provider": "acme.rich-ui",
+          "rich_ui": {
+            "dialect": "1.0",
+            "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+          }
+        },
+        {
+          "provider": "acme.cards",
+          "rich_ui": {
+            "dialect": "1.0",
+            "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+          }
+        }
+      ],
+      "rich_ui": {
+        "dialect": "1.0",
+        "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+      }
+    },
+    {
+      "name": "two answers declaring different stamps",
+      "answers": [
+        {
+          "provider": "acme.rich-ui",
+          "rich_ui": {
+            "dialect": "1.0",
+            "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+          }
+        },
+        {
+          "provider": "acme.tools"
+        },
+        {
+          "provider": "acme.cards",
+          "rich_ui": {
+            "dialect": "1.0",
+            "catalog_digest": "2f44cf8bda20f171efd332acc40ee15e0ffae13a8caae3b4b11f364582dc1465"
+          }
+        }
+      ],
+      "refusal": {
+        "code": "plan_stale",
+        "detail": {
+          "differences": [
+            {
+              "kind": "rich_ui",
+              "provider": "acme.rich-ui",
+              "rich_ui": {
+                "dialect": "1.0",
+                "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
+              }
+            },
+            {
+              "kind": "rich_ui",
+              "provider": "acme.cards",
+              "rich_ui": {
+                "dialect": "1.0",
+                "catalog_digest": "2f44cf8bda20f171efd332acc40ee15e0ffae13a8caae3b4b11f364582dc1465"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

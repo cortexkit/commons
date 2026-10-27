@@ -71,6 +71,7 @@ mod held_calls;
 mod history;
 mod media;
 mod output_refs;
+mod rich_ui;
 mod session_change;
 mod step_events;
 mod system_text_default;
@@ -156,6 +157,7 @@ fn new_incarnation() -> String {
     format!("{:032x}", u128::from_be_bytes(bytes))
 }
 const READ_FIELDS: &[&str] = &[
+    "include_rich_ui",
     "media",
     "from_ordinal",
     "after_mid",
@@ -561,6 +563,25 @@ pub struct Defects {
     pub output_refs_uncapped_metadata: bool,
     /// Store snapshot fixture results after another tagged text part.
     pub output_refs_result_after_text: bool,
+    /// A run whose rich UI plan carries no stamp is stamped all the same.
+    pub rich_ui_stamps_unstamped_run: bool,
+    /// Every surface serves another valid stamp than the one fetched.
+    pub rich_ui_wrong_value: bool,
+    /// The first of a stamped run's assistant messages is left unstamped on
+    /// display rows and opt-in read entries.
+    pub rich_ui_skips_an_assistant_row: bool,
+    /// The user display rows of a stamped run carry its stamp.
+    pub rich_ui_on_user_rows: bool,
+    /// The user `session.read` entries of a stamped run carry its stamp.
+    pub rich_ui_read_on_user_entry: bool,
+    /// `session.read` entries carry the stamp without `include_rich_ui`.
+    pub rich_ui_read_without_opt_in: bool,
+    /// `session.head` never carries `last_run_rich_ui`.
+    pub rich_ui_head_omitted: bool,
+    /// `session.head` carries the latest stamp any run had, not the last run's.
+    pub rich_ui_head_leftover: bool,
+    /// Two different stamps in one plan are admitted, the first one kept.
+    pub rich_ui_conflict_accepted: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -693,6 +714,12 @@ struct World {
     dispatched_pins: Mutex<BTreeMap<String, Option<String>>>,
     /// The arguments of the calls the runner denies before dispatch.
     denied: Mutex<BTreeSet<String>>,
+    /// The stamp (or JSON `null`) each scripted system-text provider of a
+    /// session's rich UI plan answers, in plan order.
+    rich_ui_answers: Mutex<BTreeMap<String, Vec<Value>>>,
+    /// The stamp (or `null`) a session's next run's plan carries once the
+    /// adapter replanned it.
+    rich_ui_replans: Mutex<BTreeMap<String, Value>>,
 }
 
 /// Route requests in arrival order: the case marked current when each
@@ -878,6 +905,8 @@ struct RunRec {
     ceiling: Option<Value>,
     /// What the scripted model reported for the run's completed steps.
     usage: RunUsage,
+    /// The rich UI stamp the plan carried when the run started, or `None`.
+    rich_ui: Option<Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -993,6 +1022,11 @@ struct Sess {
     /// The typed live events each record maps onto, by the record's index
     /// in `events`.
     live: Vec<(usize, Value)>,
+    /// The session was admitted with a rich UI plan (`plan.system_texts`).
+    rich_ui_plan: bool,
+    /// The rich UI stamp the session's current plan carries, which each run
+    /// freezes when it starts.
+    rich_ui: Option<Value>,
 }
 
 impl Sess {
@@ -1472,6 +1506,11 @@ impl Module {
                     senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
                     render_tags: record["render_tags"] == json!(true),
                     output_refs_enabled: record["output_refs_enabled"] == json!(true),
+                    rich_ui_plan: record["rich_ui_plan"] == json!(true),
+                    rich_ui: record
+                        .get("rich_ui")
+                        .filter(|stamp| !stamp.is_null())
+                        .cloned(),
                     name: session.clone(),
                     history_version,
                     ..Sess::default()
@@ -1529,6 +1568,12 @@ impl Module {
                 }
             }
             "host_meta" => sess.host_meta += 1,
+            "rich_ui_replan" => {
+                sess.rich_ui = record
+                    .get("rich_ui")
+                    .filter(|stamp| !stamp.is_null())
+                    .cloned();
+            }
             "host_compact" => {
                 // The host compacts natively, keeping the last exchange: its
                 // marker cuts at the newest user message, and the runner
@@ -1766,6 +1811,7 @@ impl Module {
                         structured_output_result: None,
                         ceiling: None,
                         usage: RunUsage::new(),
+                        rich_ui: sess.rich_ui.clone(),
                     });
                 }
             }
@@ -3496,6 +3542,14 @@ impl Module {
                 }
             }
         }
+        let (rich_ui_plan, rich_ui) = if admitted {
+            match self.admit_rich_ui(session, request.plan.as_ref()) {
+                Ok(fetched) => fetched,
+                Err(refusal) => return Ok(refusal),
+            }
+        } else {
+            (false, Value::Null)
+        };
         if admitted {
             let lineage = if old.is_some() && defect != RetentionDefect::ReuseLineage {
                 format!("lin-{session}-{}", self.world.now())
@@ -3509,6 +3563,7 @@ impl Module {
                         "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
                         "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
                         "render_tags": request.plan.as_ref().and_then(|plan| plan.get(cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS)),
+                        "rich_ui_plan": rich_ui_plan, "rich_ui": rich_ui,
                         "plan_digest": request.plan.as_ref().map(plan_digest) }),
             )?;
         }
@@ -3545,6 +3600,7 @@ impl Module {
         // A pending change that is due applies here, at the start of the
         // run, never inside one already running.
         self.apply_due_change(session)?;
+        self.apply_rich_ui_replan(session)?;
         // An interrupt into a running turn names the turn it interrupts.
         let interrupted = existing
             .as_ref()
@@ -3770,6 +3826,9 @@ impl Module {
         if request.view == Some(ReadView::Model) && !self.world.serves(groups::MODEL_VIEW) {
             return invalid("view");
         }
+        if let Err(field) = request.check_rich_ui(&self.world.groups) {
+            return invalid(field);
+        }
         let sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get(session) else {
             if request.lineage_id.is_some() {
@@ -3850,7 +3909,11 @@ impl Module {
         };
         let messages = all[start..end]
             .iter()
-            .map(|m| history::served_ordinal(sess, self.read_message(sess, m), &self.world.defects))
+            .map(|m| {
+                let mut entry = self.read_message(sess, m);
+                entry.rich_ui = self.read_stamp(sess, m, request.include_rich_ui);
+                history::served_ordinal(sess, entry, &self.world.defects)
+            })
             .collect();
         let messages = history::served_numbers(self, sess, &all, messages);
         let mut page = ReadPage::new(&sess.lineage, messages).with_head(cursor(sess.events.len()));
@@ -4143,6 +4206,9 @@ impl Module {
                     })
                     .or_else(|| run.reason.clone()),
             });
+            if let Some(stamp) = self.head_stamp(sess) {
+                head = head.with_last_run_rich_ui(stamp);
+            }
             if run.state == "error" && !self.world.defects.head_error_omitted {
                 if let Some(error) = &run.error {
                     let mut summary = cortexkit_role_llm_runner::read::LastRunError::new(
@@ -4932,6 +4998,13 @@ pub struct FakeSubject {
     /// Declare `call_identity`: display tool calls and live tool events
     /// carry each call's `call_key` and dispatched `schema_pin`.
     pub call_identity_group: bool,
+    /// Declare `rich_ui_stamp`: runs carry their plan's rich UI stamp.
+    pub rich_ui_stamp_group: bool,
+    /// The adapter can build a plan whose system-text answers declare
+    /// stamps (`rich_ui_plan_fields`).
+    pub rich_ui_plan_fixture: bool,
+    /// The adapter can replan a session's stamp (`replan_rich_ui`).
+    pub rich_ui_replan_fixture: bool,
     pub held_calls_group: bool,
     pub descriptor_case: Option<&'static str>,
     pub descriptor_fixtures: bool,
@@ -5072,6 +5145,9 @@ impl FakeSubject {
             model_failure_fixture: true,
             output_refs_group: false,
             call_identity_group: false,
+            rich_ui_stamp_group: false,
+            rich_ui_plan_fixture: true,
+            rich_ui_replan_fixture: true,
             descriptor_case: None,
             data_url_media: false,
             descriptor_fixtures: false,
@@ -5171,6 +5247,10 @@ impl FakeSubject {
                             self.call_identity_group
                                 .then(|| groups::CALL_IDENTITY.to_owned()),
                         )
+                        .chain(
+                            self.rich_ui_stamp_group
+                                .then(|| groups::RICH_UI_STAMP.to_owned()),
+                        )
                         .collect(),
                     delivery_order_modes: self.delivery_order_modes.clone(),
                     scripts: Mutex::new(BTreeMap::new()),
@@ -5211,6 +5291,8 @@ impl FakeSubject {
                     tool_pins: Mutex::new(BTreeMap::new()),
                     dispatched_pins: Mutex::new(BTreeMap::new()),
                     denied: Mutex::new(BTreeSet::new()),
+                    rich_ui_answers: Mutex::new(BTreeMap::new()),
+                    rich_ui_replans: Mutex::new(BTreeMap::new()),
                 })
             })
             .clone()
@@ -5335,6 +5417,22 @@ impl LlmRunnerSubject for FakeSubject {
 
     fn runner_id(&self) -> &str {
         FAKE_RUNNER
+    }
+
+    async fn rich_ui_plan_fields(
+        &self,
+        session: &str,
+        stamps: &[Option<cortexkit_role_llm_runner::rich_ui::RichUiStamp>],
+    ) -> Result<Option<Map<String, Value>>, HarnessError> {
+        Ok(self.rich_ui_plan(session, stamps))
+    }
+
+    async fn replan_rich_ui(
+        &self,
+        session: &str,
+        stamp: Option<&cortexkit_role_llm_runner::rich_ui::RichUiStamp>,
+    ) -> Result<bool, HarnessError> {
+        Ok(self.rich_ui_replan(session, stamp))
     }
 
     async fn prepare_system_text_default(

@@ -1,5 +1,19 @@
 # `llm-runner/v1` test vectors
 
+`rich-ui-stamp.json` pins the `rich_ui_stamp` group (§9.17): describe answers
+declaring it, one without it and one refused `group_incomplete` without
+`session.head`; the stamp's wire form, with the same valid and refused stamps
+as `tool-provider/v1`'s `rich-ui-stamp.json`; a stamped and an unstamped
+assistant display row, `run_started`, `session.head` and opt-in
+`session.read` entry, each round-tripping, an unstamped one carrying no
+`rich_ui` member; a user display row and user read entry of a stamped run,
+which carry none; the `include_rich_ui` read request; heads
+`lineage_consistent` refuses because a stamp stands without its run; and the
+stamp a plan's run carries from its fetched system-text answers, with the
+`plan_stale` refusal of two different stamps. The tests in `rich_ui::tests`
+check them, one of them against the tool-provider crate's own stamp type. All
+existing vector files are unchanged.
+
 `head-last-run-error.json` adds an invented error-state head with retry
 classification, a fractional 1.5-second delay and a reset timestamp.
 A unit test checks that the vector decodes and round-trips;
@@ -127,6 +141,7 @@ its SHA-256. These vectors change together with the versioned contract.
 | `display-anthropic-messages.json` | `anthropic-messages` bodies and the display row `display::anthropic_messages` projects from each: a string content, text and reasoning in order, a tool call with its compact JSON arguments, a tool result, an error result joining its text blocks, files and media described by refs (a base64 image, a URL image, a PDF, an image nested in a tool result), blocks shown as `other`, multi-byte arguments, results and error results cut on a UTF-8 boundary with their flags, the same bodies untouched without `limits`, content that fits its bound unflagged; and bodies refused by name | `anthropic_messages_vectors_project` |
 | `display-opencode-aisdk.json` | OpenCode stored messages `{info, parts}` and the display row `display::opencode_aisdk` projects from each: the model from `info.model` and from `providerID`/`modelID`, reasoning and text with bookkeeping parts left out, a completed tool part as its call and result under one part key, an errored and a pending tool part, file parts as refs and URLs, a tool result's attachments, an `other` part, multi-byte cuts on a UTF-8 boundary with their flags and the same message untouched without `limits`; and bodies refused by name | `opencode_aisdk_vectors_project` |
 | `display-requests.json` | `session.history` requests in display form (with and without `limits`) and `raw` spelled out, with the form and position each selects; requests refused naming `limits`, `media`, `include_originals` or `form`; a display page with a host entry, a tagged window entry carrying `client_message_id` and an assistant row with `model`; a display page whose user rows name their `sender` (the owner's, a named sender's beside its `client_message_id`, and none for a prompt typed into the host); `session.head.input` answers (`no`, modalities without types, exact types, `unknown`, an unnamed value read as not known); sends with and without `client_message_id` and sends refused naming it | `display_request_page_head_and_send_vectors` (each row's `sender` checked where a page names them) |
+| `rich-ui-stamp.json` | `rich_ui_stamp` discovery; the stamp's wire form and refusals; stamped and unstamped display rows, `run_started`, heads and opt-in read entries; the read opt-in; plan stamps and the conflict refusal | `rich_ui::tests` |
 | `call-identity.json` | `call_identity` discovery and its refusal without a display surface; display tool calls and live tool events with both `call_key` and `schema_pin`, `call_key` only, and neither | `call_identity_rows_carry_their_members_or_leave_them_out`, `call_identity_events_carry_their_members_or_leave_them_out`, `call_identity_rides_on_a_display_surface` |
 | `live-events.json` | every typed live event (`message_started`, `message_finished`, `tool_started` whole and cut, `tool_finished` with a known and an unnamed outcome, `tool_started` and `tool_finished` of a call replayed from history stored without times, which leave `started_at` and `finished_at` out, `run_started` with and without `send_id`, `run_finished`, `run_paused`, `text_delta` with and without a tool call, `reasoning_delta`, `tool_input_delta`, `display_gap`, `display_reset`); frames with `seq` and `event` on both lanes and a frame of a runner without the group; events a reader reads as `display_reset` (an unknown type, no type, a known type missing a member); `session.subscribe` requests with and without `limits`, which a runner without the group refuses naming `limits`, and requests refused by name; `run_causes`: a `run_started` naming the queued send that started it, one naming the interrupting send, and one without `send_id` for a host turn on an adopted session; `tool_times`: the times a reader gets from a timed call and from the untimed replayed one | `event_vectors_decode_strictly_and_round_trip`, `run_started_names_its_cause_or_none`, `tool_times_are_recorded_or_left_out`, `an_unknown_or_malformed_event_reads_as_display_reset`, `subscribe_requests_with_limits_are_strict` |
 | `subscribe.json` | `session.subscribe` requests (absent, `start`, `live`, after a page's `head`) with their attach point, refused requests with the field, and stream events (durable, best-effort, unknown kind) | the wire crate's subscribe test |

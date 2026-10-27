@@ -9,7 +9,7 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-tool-provider"
-version = "0.13.1"
+version = "0.13.2"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -57,6 +57,10 @@ required-features = ["test-vectors"]
 
 [[test]]
 name = "reply_deadline"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "rich_ui_stamp"
 required-features = ["test-vectors"]
 
 [[test]]

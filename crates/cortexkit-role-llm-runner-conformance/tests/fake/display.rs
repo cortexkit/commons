@@ -149,6 +149,9 @@ pub(super) fn live_events(
                 if let Some(cause) = record["cause"].as_str() {
                     started = started.with_send_id(cause);
                 }
+                if let Some(stamp) = super::rich_ui::run_stamp(defects, sess, run_id) {
+                    started = started.with_rich_ui(stamp);
+                }
                 out.push(event(LiveEvent::RunStarted(started)));
             }
         }
@@ -365,6 +368,7 @@ impl Module {
             }
         }
         output_refs::decorate(sess, &entry.mid, &mut row);
+        self.stamp_row(sess, &entry.mid, &mut row);
         if self.world.serves(groups::CALL_IDENTITY) {
             if let Some(message) = sess.messages.iter().find(|m| m.mid == entry.mid) {
                 for call in row.tool_calls_mut() {

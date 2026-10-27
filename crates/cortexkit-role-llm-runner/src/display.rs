@@ -117,6 +117,15 @@ pub struct DisplayRow {
     /// a person typed into the host directly.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<String>,
+    /// For an assistant message a run wrote, on a runner declaring
+    /// `rich_ui_stamp`: the rich UI stamp that run's frozen plan carries,
+    /// copied verbatim (CONTRACT §9.17). Absent on an assistant row of a
+    /// runner declaring the group means unstamped: render the text as plain
+    /// Markdown and never infer a stamp. Never on a user, steered, tool,
+    /// imported or adopted row. Readers accept the member whether or not the
+    /// runner declares the group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rich_ui: Option<crate::rich_ui::RichUiStamp>,
 }
 
 impl DisplayRow {
@@ -138,7 +147,14 @@ impl DisplayRow {
             model: None,
             client_message_id: None,
             sender: None,
+            rich_ui: None,
         }
+    }
+
+    /// Stamp this assistant row with its run's rich UI stamp.
+    pub fn with_rich_ui(mut self, rich_ui: crate::rich_ui::RichUiStamp) -> Self {
+        self.rich_ui = Some(rich_ui);
+        self
     }
 
     /// Fill `model` where the projection left it absent; a model the body

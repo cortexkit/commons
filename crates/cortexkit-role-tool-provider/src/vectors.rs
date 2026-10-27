@@ -62,6 +62,10 @@ pub const USER_COMMANDS_JSON: &str =
 /// Served-preset lists in catalog answers: absent and present catalogs with
 /// their bytes and digests, valid lists, and lists `check_presets` refuses.
 pub const PRESETS_JSON: &str = include_str!("../test-vectors/tool-provider-v1/presets.json");
+/// The optional rich UI stamp on a system-text answer: stamped and unstamped
+/// answers, valid stamps, and stamps a decoder refuses naming the field.
+pub const RICH_UI_STAMP_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/rich-ui-stamp.json");
 /// The vectors' `README.md`.
 pub const README: &str = include_str!("../test-vectors/tool-provider-v1/README.md");
 
@@ -90,6 +94,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("user-commands.json", USER_COMMANDS_JSON),
     ("reply-shape.json", REPLY_SHAPE_JSON),
     ("presets.json", PRESETS_JSON),
+    ("rich-ui-stamp.json", RICH_UI_STAMP_JSON),
     ("README.md", README),
 ];
 

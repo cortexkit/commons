@@ -11,6 +11,16 @@ cortexkit-role-llm-runner = "0.7.4"
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
 
+Since 0.7.14, a runner declaring the `rich_ui_stamp` group serves the rich UI
+stamp `{dialect, catalog_digest}` (`rich_ui::RichUiStamp`) that a run's frozen
+plan carries, copied from the system-text answers it fetched: on every
+assistant display row the run writes (`DisplayRow::rich_ui`), on its
+`run_started`, as `session.head`'s `last_run_rich_ui` while that run is the
+last, and on its assistant `session.read` entries when the read sets
+`include_rich_ui`. Absent from such a runner means unstamped: render plain
+Markdown. Readers accept the members before any runner declares the group.
+Two different stamps in one plan are refused `plan_stale`. See contract §9.17.
+
 Since 0.7.8, an `owned-broca` tool error may say that its provider module
 is restarting or down, with optional `module`, `code`, `detail`,
 `nothing_sent` and `retry` members after `message`. The set is closed and

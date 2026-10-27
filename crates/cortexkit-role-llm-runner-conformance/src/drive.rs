@@ -26,7 +26,7 @@ use crate::{
 pub const MAX_POLLS: usize = 400;
 
 /// How many pages a full read follows before it gives up.
-const MAX_PAGES: usize = 10_000;
+pub const MAX_PAGES: usize = 10_000;
 
 /// Mints names and markers that are unique within one run, so a session
 /// name, a `send_id` or a marker string is never used twice.

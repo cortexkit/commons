@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.13.2
+
+- Add the optional `rich_ui: {dialect, catalog_digest}` member on the
+  system-text answer (`SystemTextAnswer.rich_ui`, `SystemTextAnswer::with_rich_ui`)
+  and the validated `rich_ui::RichUiStamp` type. `dialect` is 1 to 32 printable
+  ASCII characters with no whitespace, the dialect the rich UI catalog declares
+  about itself and not the syntax crate's `rich-ui/1` scan mode;
+  `catalog_digest` is 64 lowercase hex characters. A malformed stamp is refused
+  on decode naming `rich_ui.dialect` or `rich_ui.catalog_digest`.
+- A provider declares the stamp only on text that teaches that dialect against
+  that catalog, copying both values from the catalog's published export.
+- Absent stamps are omitted, so existing answers keep their bytes. New vector
+  file `rich-ui-stamp.json`; existing vector files are unchanged.
+
 ## 0.13.1
 
 - Add optional `CatalogTool.load`, the open-string `ToolLoad` hint, and

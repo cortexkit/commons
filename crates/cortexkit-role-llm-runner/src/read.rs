@@ -59,6 +59,9 @@ pub mod fields {
     pub const FROM_ORDINAL: &str = "from_ordinal";
     pub const LINEAGE_ID: &str = "lineage_id";
     pub const VIEW: &str = "view";
+    /// The `session.read` opt-in to each assistant entry's rich UI stamp,
+    /// served only by a runner declaring `rich_ui_stamp`.
+    pub const INCLUDE_RICH_UI: &str = "include_rich_ui";
 }
 
 /// Which list of messages a read pages through.
@@ -131,6 +134,13 @@ pub struct ReadRequest {
         deserialize_with = "deserialize_view"
     )]
     pub view: Option<ReadView>,
+    /// Add `rich_ui` to every assistant entry a stamped run wrote. Served
+    /// only by a runner declaring `rich_ui_stamp`; any other runner refuses
+    /// it as it refuses any field it does not serve, `invalid_params` naming
+    /// `include_rich_ui` ([`ReadRequest::check_rich_ui`]). Absent means
+    /// `false`, and a read without it is answered exactly as before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_rich_ui: bool,
 }
 
 /// The mode a well-formed [`ReadRequest`] selects: the newest page, a range
@@ -193,6 +203,26 @@ impl ReadRequest {
     pub fn with_view(mut self, view: ReadView) -> Self {
         self.view = Some(view);
         self
+    }
+
+    /// Ask for each stamped assistant entry's `rich_ui`. Send it only to a
+    /// runner whose `role.describe` declares `rich_ui_stamp`.
+    pub fn with_include_rich_ui(mut self, include_rich_ui: bool) -> Self {
+        self.include_rich_ui = include_rich_ui;
+        self
+    }
+
+    /// The field an `invalid_params` refusal names when the request asks
+    /// for `include_rich_ui` from a runner whose declared `groups` lack
+    /// `rich_ui_stamp`.
+    pub fn check_rich_ui<S: AsRef<str>>(&self, groups: &[S]) -> Result<(), &'static str> {
+        let declared = groups
+            .iter()
+            .any(|group| group.as_ref() == crate::capabilities::RICH_UI_STAMP);
+        if self.include_rich_ui && !declared {
+            return Err(fields::INCLUDE_RICH_UI);
+        }
+        Ok(())
     }
 
     /// The read mode, or the field an `invalid_params` refusal names:
@@ -706,6 +736,15 @@ pub struct ReadMessage {
     /// out with, so readers and a resumed run render exactly what was sent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered_as: Option<crate::delivery_order::EntryDelivery>,
+    /// Only when the request set `include_rich_ui`, on a runner declaring
+    /// `rich_ui_stamp`: the rich UI stamp of the run that wrote this
+    /// assistant message, copied verbatim from that run's frozen plan
+    /// (CONTRACT §9.17). It rides beside `mid`, never inside `message`, so
+    /// no body, profile or digest changes. With the opt-in, absent on an
+    /// assistant entry means unstamped. Never on a user, steered, tool,
+    /// imported or adopted entry, and never without the opt-in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rich_ui: Option<crate::rich_ui::RichUiStamp>,
 }
 
 /// The roles a read entry's `role` names. Decoded as open strings: a
@@ -736,7 +775,15 @@ impl ReadMessage {
             role: None,
             written_at: None,
             delivered_as: None,
+            rich_ui: None,
         }
+    }
+
+    /// Stamp this assistant entry with its run's rich UI stamp, for a read
+    /// that set `include_rich_ui`.
+    pub fn with_rich_ui(mut self, rich_ui: crate::rich_ui::RichUiStamp) -> Self {
+        self.rich_ui = Some(rich_ui);
+        self
     }
 
     pub fn with_delivered_as(mut self, delivered_as: crate::delivery_order::EntryDelivery) -> Self {
@@ -907,6 +954,14 @@ pub struct HeadMeta {
     /// See [`LastRunError`] for the source and intentionally omitted details.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_run_error: Option<LastRunError>,
+    /// On a runner declaring `rich_ui_stamp`: the rich UI stamp of the run
+    /// `last_run_state` names, present exactly while that run's frozen plan
+    /// carries one (CONTRACT §9.17). It describes that same run, so after a
+    /// later unstamped run it is gone. It sits beside `last_run_state` rather
+    /// than inside it, so code that builds [`LastRunState`] directly keeps
+    /// compiling. Absent on a runner without the group says nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run_rich_ui: Option<crate::rich_ui::RichUiStamp>,
     /// When the transcript last changed, in milliseconds since the Unix
     /// epoch. Present whenever `lineage_id` is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1113,6 +1168,7 @@ impl HeadMeta {
             head: None,
             last_run_state: None,
             last_run_error: None,
+            last_run_rich_ui: None,
             updated_at: Some(updated_at),
             input: None,
             model: None,
@@ -1137,6 +1193,7 @@ impl HeadMeta {
             head: None,
             last_run_state: None,
             last_run_error: None,
+            last_run_rich_ui: None,
             updated_at: None,
             input: None,
             model: None,
@@ -1182,6 +1239,12 @@ impl HeadMeta {
 
     pub fn last_run_error(&self) -> Option<&LastRunError> {
         self.last_run_error.as_ref()
+    }
+
+    /// Name the rich UI stamp of the run `last_run_state` names.
+    pub fn with_last_run_rich_ui(mut self, rich_ui: crate::rich_ui::RichUiStamp) -> Self {
+        self.last_run_rich_ui = Some(rich_ui);
+        self
     }
 
     pub fn with_input(mut self, input: HeadInput) -> Self {
@@ -1233,7 +1296,8 @@ impl HeadMeta {
     /// `updated_at`, `first_ordinal` and `history_version` must be present, `first_ordinal` is at most one above
     /// `last_ordinal` when that is present, and a lineage without `cut` has
     /// `first_ordinal` 0; the other members may be absent (an empty
-    /// transcript, no events, no run yet). A consumer
+    /// transcript, no events, no run yet). `last_run_rich_ui` is present only
+    /// beside `last_run_state`, whose run it describes. A consumer
     /// treats an inconsistent answer as malformed; it is not a refusal.
     pub fn lineage_consistent(&self) -> bool {
         match self.lineage_id {
@@ -1244,6 +1308,7 @@ impl HeadMeta {
                     && self.history_version.is_none()
                     && self.head.is_none()
                     && self.last_run_state.is_none()
+                    && self.last_run_rich_ui.is_none()
                     && self.updated_at.is_none()
                     && self.reasoning_pruned.is_none()
             }
@@ -1254,7 +1319,15 @@ impl HeadMeta {
                     (None, Some(_)) => false,
                 };
                 let cut_named = self.cut.is_some() || self.first_ordinal == Some(0);
-                self.updated_at.is_some() && self.history_version.is_some() && bounded && cut_named
+                // The last run's stamp describes the run `last_run_state`
+                // names, so it never stands without one.
+                let stamp_has_run =
+                    self.last_run_rich_ui.is_none() || self.last_run_state.is_some();
+                self.updated_at.is_some()
+                    && self.history_version.is_some()
+                    && bounded
+                    && cut_named
+                    && stamp_has_run
             }
         }
     }

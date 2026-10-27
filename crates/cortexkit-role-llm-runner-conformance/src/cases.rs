@@ -102,6 +102,9 @@ where
             name if name.starts_with("call_identity_") => {
                 crate::call_identity::run(self, name).await
             }
+            name if name.starts_with("rich_ui_stamp_") => {
+                crate::rich_ui_stamp::run(self, name).await
+            }
             name if name.starts_with("system_text_default_") => {
                 crate::system_text_default::run(self, name).await
             }
