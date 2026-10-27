@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.12
+
+- Pin that a prune also rewrites the runner's applied view (CONTRACT
+  §9.14.1, new "Applied edits are pruned with their parts"). A keep-range
+  part edit can re-serialize a part the runner later prunes, such as a drop
+  placeholder on an `opencode-aisdk` tool part that still carries the
+  call's `thoughtSignature`. When it prunes, the runner applies the same
+  per-profile rule to every such edit, in the same commit as the prune, so
+  nothing it sends afterwards carries pre-prune bytes. It never drops the
+  edit, and it refuses to prune a message whose edit holds a pruned part
+  in a form the rule cannot express.
+- Add `archive_prunes_reasoning::prune_part_in` (a part's pruned form for
+  a profile and kind), `prune_edit_in` (an edit's bytes after a prune of
+  its message) and `PruneRefused`, whose `Inexpressible` variant is that
+  refusal. Both functions are tested against every profile's `prunes`,
+  `not_carried` and `edit_refusals` vectors.
+- `reasoning-pruned-profiles.json` gains `applied_edits` per profile: for
+  `owned-broca`, `opencode-aisdk` and `pi`, an applied edit before and
+  after the prune; empty for `anthropic-messages`, which carries no
+  `signature` content. Its checksum is updated.
+
 ## 0.7.11
 
 - Correct the `owned-broca` prune rules, which are what

@@ -48,7 +48,16 @@ a removed Google `textSignature` and an unchanged, allowed Responses
 carried kind, a refused and an allowed replacement and part edit, plus a
 restoring replacement outside the range it stands for. Its `unsupported`
 profiles answer `UnsupportedProfile` from every function. Every id,
-signature and text in it is invented.
+signature and text in it is invented. Since llm-runner 0.7.12 each entry
+also has `applied_edits` (§9.14.1, applied edits are pruned with their
+parts): an applied keep-range part edit that re-serializes a signed part,
+as held before the prune (`edit.bytes`) and as `prune_edit_in` rewrites it
+(`after`). There is one per profile that carries `signature`: an
+`owned-broca` `text_with_state` text edit keeping its `gemini` state, an
+`opencode-aisdk` tool part whose output a drop placeholder replaced but
+whose `metadata.google.thoughtSignature` remains, and a `pi` `toolCall`
+with trimmed arguments and its `thoughtSignature`. The list is empty for
+`anthropic-messages`.
 
 `call-identity.json` pins the `call_identity` group (§9.16): describe answers
 declaring it beside display history or live events alone, its refusal

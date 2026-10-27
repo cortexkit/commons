@@ -43,6 +43,8 @@ enum Fault {
     AcceptsRestoringEdit,
     SkipsSetupAfterPrune,
     KeepsPrePruneInitial,
+    KeepsPrePruneEdit,
+    DropsAppliedEdit,
 }
 
 #[derive(Default)]
@@ -67,6 +69,9 @@ struct Stored {
     pending: Vec<(u64, crate::ScriptedView)>,
     published: u64,
     applied: Option<u64>,
+    /// The part edits of the applied view, which the model view serves in
+    /// place of the stored parts they name.
+    edits: Vec<crate::ScriptedPartEdit>,
     calls: Vec<crate::ProviderCall>,
     notices: Vec<BTreeMap<String, String>>,
 }
@@ -172,6 +177,16 @@ impl Stored {
                     });
                 } else {
                     self.applied = Some(version);
+                    self.edits = view
+                        .ranges
+                        .iter()
+                        .flat_map(|range| match range {
+                            crate::ScriptedRange::KeepWithVerbatimEdits { edits, .. } => {
+                                edits.clone()
+                            }
+                            _ => Vec::new(),
+                        })
+                        .collect();
                 }
             }
         }
@@ -290,7 +305,7 @@ impl NativeRunner {
                 _ => {}
             }
         }
-        if let Some(highest) = touched.into_iter().max() {
+        if let Some(highest) = touched.iter().copied().max() {
             let generation = match session.reasoning_pruned {
                 None => 1,
                 Some(state) if self.fault == Fault::NoGenerationBump => state.generation,
@@ -305,6 +320,28 @@ impl NativeRunner {
                 1_767_225_600_000 + generation,
             ));
             session.setup_due = session.accepts.is_some();
+        }
+        // The applied view's edits of a pruned message take the fixture's
+        // signature rule, as the stored part did: a non-reasoning part
+        // loses its `signature`.
+        match self.fault {
+            Fault::KeepsPrePruneEdit => {}
+            Fault::DropsAppliedEdit => session
+                .edits
+                .retain(|edit| !touched.contains(&edit.ordinal)),
+            _ => {
+                for edit in session
+                    .edits
+                    .iter_mut()
+                    .filter(|edit| touched.contains(&edit.ordinal))
+                {
+                    if edit.part_value["type"] != "reasoning" {
+                        if let Some(part) = edit.part_value.as_object_mut() {
+                            part.remove("signature");
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -379,6 +416,17 @@ impl RunnerRoute for Route {
                 };
                 let mut rows: Vec<_> = session.messages.get(index).cloned().into_iter().collect();
                 if params["view"] == "model" {
+                    for row in &mut rows {
+                        let ordinal = row["ordinal"].as_u64();
+                        for edit in session
+                            .edits
+                            .iter()
+                            .filter(|edit| ordinal == Some(edit.ordinal))
+                        {
+                            let index: usize = edit.part.parse().unwrap();
+                            row["message"]["content"][index] = edit.part_value.clone();
+                        }
+                    }
                     rows = rows.into_iter().map(|r| json!({"source":{"kind":"message","ordinal":r["ordinal"],"mid":r["mid"]},"message":r["message"]})).collect();
                 } else if params["form"] == "display" {
                     rows = rows.into_iter().map(|r| json!({"ordinal":r["ordinal"],"mid":r["mid"],"written_at":r["written_at"],"tags":r["tags"],"row":{"role":"assistant","text":"Open the blue door.","parts":[],"model":"example/model"}})).collect();
@@ -833,3 +881,98 @@ named_proof!(
     AcceptsRestoringEdit,
     "a part edit restoring pruned content was not refused view_refused:1:pruned_reasoning_restored"
 );
+
+named_proof!(
+    positive_applied_edit_pruned,
+    rejects_keeping_an_applied_edits_pre_prune_signature,
+    "archive_pruning_applied_edit_pruned",
+    KeepsPrePruneEdit,
+    "after the prune, the model view still serves the applied part edit with its pre-prune \
+     signature"
+);
+
+#[tokio::test]
+async fn rejects_dropping_an_applied_edit_on_prune() {
+    let Err(failure) = exercise(
+        "archive_pruning_applied_edit_pruned",
+        Fault::DropsAppliedEdit,
+    )
+    .await
+    else {
+        panic!("archive_pruning_applied_edit_pruned must reject DropsAppliedEdit");
+    };
+    assert!(
+        failure.contains("the runner dropped the applied part edit"),
+        "{failure}"
+    );
+}
+
+#[tokio::test]
+async fn applied_edit_case_is_not_applicable_without_the_model_view() {
+    let subject = NativeRunner::default();
+    let directory = tempfile::tempdir().unwrap();
+    let mut driver = CrashDriver::new(&subject);
+    let handle = driver.spawn(directory.path()).await.unwrap();
+    let mut declared = NativeRunner::caps();
+    declared.remove(&Capability::ModelView);
+    let mint = Mint::default();
+    let ending = Case {
+        subject: &subject,
+        handle: &handle,
+        declared: &declared,
+        mint: &mint,
+    }
+    .run("archive_pruning_applied_edit_pruned")
+    .await
+    .unwrap();
+    match ending {
+        Ending::Inapplicable(reason) => assert!(reason.contains("model_view"), "{reason}"),
+        _ => panic!("the case ran without the model view"),
+    }
+}
+
+#[test]
+fn the_expected_edit_follows_the_declared_profile() {
+    // An OpenCode tool part, where call and result share one part: the
+    // provider's edit trims the output and keeps the call's signature.
+    let tool = |output: &str, google: Value| {
+        json!({"id":"prt_tool","type":"tool","callID":"call-example","tool":"open_door",
+            "state":{"status":"completed","input":{"door":"blue"},"output":output},
+            "metadata":{"google":google}})
+    };
+    let oracle = ArchivePruningPart {
+        kind: "signature".into(),
+        original: tool(
+            "The blue door is open.",
+            json!({"thoughtSignature":"invented-signature"}),
+        ),
+        served: tool("The blue door is open.", json!({})),
+    };
+    let edit = provider_edit(&oracle.original);
+    assert_eq!(
+        edit,
+        tool(
+            EDIT_PLACEHOLDER,
+            json!({"thoughtSignature":"invented-signature"})
+        )
+    );
+    let pruned = tool(EDIT_PLACEHOLDER, json!({}));
+    assert_eq!(
+        expected_pruned_edit(
+            Some(cortexkit_role_llm_runner::serializer_profile::OPENCODE_AISDK),
+            &oracle,
+            &edit
+        ),
+        Ok(pruned.clone())
+    );
+    // Without a profile the rules name, the fixture's served form is
+    // edited the same way.
+    assert_eq!(
+        expected_pruned_edit(None, &oracle, &edit),
+        Ok(pruned.clone())
+    );
+    assert_eq!(
+        expected_pruned_edit(Some("future-profile"), &oracle, &edit),
+        Ok(pruned)
+    );
+}

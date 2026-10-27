@@ -764,6 +764,24 @@
           },
           "restored": null
         }
+      ],
+      "applied_edits": [
+        {
+          "name": "text_with_state_text_edit_keeps_signed_state",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"text_with_state\",\"text\":\"The door is blue. [Earlier detail trimmed]\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"{\\\"thoughtSignature\\\":\\\"invented-signature\\\"}\"}}"
+          },
+          "after": "{\"type\":\"text_with_state\",\"text\":\"The door is blue. [Earlier detail trimmed]\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"\"}}"
+        }
       ]
     },
     {
@@ -1250,7 +1268,8 @@
           },
           "restored": null
         }
-      ]
+      ],
+      "applied_edits": []
     },
     {
       "profile": "opencode-aisdk",
@@ -3006,6 +3025,24 @@
           },
           "restored": null
         }
+      ],
+      "applied_edits": [
+        {
+          "name": "tool_drop_placeholder_keeps_call_signature",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"id\":\"prt_tool\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"tool\",\"callID\":\"call-example\",\"tool\":\"open_door\",\"state\":{\"status\":\"completed\",\"input\":{\"door\":\"blue\"},\"output\":\"[Tool output dropped]\",\"title\":\"open_door\",\"metadata\":{},\"time\":{\"start\":1767225600000,\"end\":1767225601000}},\"metadata\":{\"google\":{\"thoughtSignature\":\"invented-signature\"}}}"
+          },
+          "after": "{\"id\":\"prt_tool\",\"sessionID\":\"ses_example\",\"messageID\":\"msg_example\",\"type\":\"tool\",\"callID\":\"call-example\",\"tool\":\"open_door\",\"state\":{\"status\":\"completed\",\"input\":{\"door\":\"blue\"},\"output\":\"[Tool output dropped]\",\"title\":\"open_door\",\"metadata\":{},\"time\":{\"start\":1767225600000,\"end\":1767225601000}},\"metadata\":{\"google\":{}}}"
+        }
       ]
     },
     {
@@ -3690,6 +3727,24 @@
             "bytes": "{\"type\":\"text\",\"text\":\"The door is blue.\",\"textSignature\":\"{\\\"v\\\":1,\\\"id\\\":\\\"msg_example\\\",\\\"phase\\\":\\\"final_answer\\\"}\"}"
           },
           "restored": null
+        }
+      ],
+      "applied_edits": [
+        {
+          "name": "tool_call_arguments_trimmed_keeps_signature",
+          "pruned": [
+            {
+              "ordinal": 3,
+              "part": "m3#0",
+              "kind": "signature"
+            }
+          ],
+          "edit": {
+            "ordinal": 3,
+            "part": "m3#0",
+            "bytes": "{\"type\":\"toolCall\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":{\"door\":\"blue\",\"note\":\"[Earlier detail trimmed]\"},\"thoughtSignature\":\"invented-signature\"}"
+          },
+          "after": "{\"type\":\"toolCall\",\"id\":\"call-example\",\"name\":\"open_door\",\"arguments\":{\"door\":\"blue\",\"note\":\"[Earlier detail trimmed]\"}}"
         }
       ]
     }

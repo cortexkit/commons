@@ -87,6 +87,21 @@ encoding the messages and parts unchanged. The
 provider `archive_pruning_fixture` enrolls is the adapter's scripted
 compaction provider for the session, and it does not hold model answers.
 
+### Applied edits after a prune (0.15.14)
+
+`archive_pruning_applied_edit_pruned` (`compaction`) checks that a prune
+also rewrites the runner's applied view. Before the prune the kit applies a
+view whose keep-range part edit re-serializes a `signature`-kind part of the
+native fixture, signature included, with its `text` or tool `state.output`
+replaced by a placeholder. Right after the prune, before any run, the
+model view must serve that edit with the prune rule applied: by
+`archive_prunes_reasoning::prune_part_in` for the profile
+`serializer_profile` declares, or from the fixture's served form when none
+is declared. Serving the edit with its pre-prune signature fails, and so
+does serving the stored part in its place, which means the runner dropped
+the edit. The case is not applicable by name without `model_view`, or when
+the fixture has no `signature`-kind part.
+
 `display_row_is_the_profile_projection` permits an imported assistant message
 with no recorded model. `display_own_run_records_model` separately drives a
 unique scripted answer through the runner and requires its recorded model.

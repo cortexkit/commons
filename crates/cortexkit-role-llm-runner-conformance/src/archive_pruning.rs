@@ -14,7 +14,9 @@ use crate::{
 };
 use cortexkit_role_compaction_provider::notice::{AdvanceNotice, Event};
 use cortexkit_role_llm_runner::{
-    archive_prunes_reasoning::{kinds as wire_kinds, ReasoningPruned},
+    archive_prunes_reasoning::{
+        kinds as wire_kinds, kinds_carried, prune_part_in, ReasoningPruned,
+    },
     content_digest::content_digest,
     ops,
 };
@@ -147,6 +149,7 @@ where
         | "archive_pruning_restored_edit_refused"
         | "archive_pruning_setup_after_prune"
         | "archive_pruning_setup_initial_replaced" => return enrolled(case, name).await,
+        "archive_pruning_applied_edit_pruned" => return applied_edit(case, name, kinds).await,
         _ => {}
     }
     let mut session = case.open(name, Script::default()).await?;
@@ -984,6 +987,196 @@ where
             )?;
         }
     }
+    Ok(Ending::Passed)
+}
+
+/// The text the kit's provider writes into a signed part it edits. A
+/// `signature` prune keeps that member byte-identical, so the edit stays
+/// distinguishable from the stored part after the prune.
+const EDIT_PLACEHOLDER: &str = "[Earlier content trimmed by the provider]";
+
+/// A provider's keep-range edit of a part it holds: the part with its `text`,
+/// or a tool part's `state.output`, replaced by [`EDIT_PLACEHOLDER`], every
+/// other member, the signature included, re-serialized as held. A part with
+/// neither member is sent unchanged.
+fn provider_edit(part: &Value) -> Value {
+    let mut edit = part.clone();
+    if edit.get("text").is_some_and(Value::is_string) {
+        edit["text"] = json!(EDIT_PLACEHOLDER);
+    } else if edit.pointer("/state/output").is_some_and(Value::is_string) {
+        edit["state"]["output"] = json!(EDIT_PLACEHOLDER);
+    }
+    edit
+}
+
+/// What a runner must hold in place of `edit` once it prunes the part the
+/// edit re-serializes. For a serializer profile the per-profile rules name,
+/// that is the reference rule applied to the edit. Without one it is the
+/// fixture's served form edited the same way, since the prune kind here is
+/// `signature`, which keeps the edited member byte-identical.
+fn expected_pruned_edit(
+    profile: Option<&str>,
+    oracle: &ArchivePruningPart,
+    edit: &Value,
+) -> Result<Value, String> {
+    match profile {
+        Some(profile) if kinds_carried(profile).is_ok() => {
+            prune_part_in(profile, &oracle.kind, edit).map_err(|e| {
+                format!("the fixture's signed part has no pruned form under {profile}: {e}")
+            })
+        }
+        _ => Ok(provider_edit(&oracle.served)),
+    }
+}
+
+/// A view applied before a prune whose keep-range part edit re-serializes a
+/// signed part: right after the prune, before any run, the model view must
+/// serve that edit with the prune rule applied, neither with its pre-prune
+/// signature nor replaced by the stored part.
+async fn applied_edit<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    name: &str,
+    kinds: &[String],
+) -> Result<Ending, String>
+where
+    S::Route: RunnerRoute,
+{
+    if !case.declared.contains(&Capability::ModelView) {
+        return Ok(Ending::Inapplicable(
+            "the runner does not declare model_view, the only read that shows an applied part \
+             edit after a prune"
+                .into(),
+        ));
+    }
+    if !kinds.iter().any(|k| k == wire_kinds::SIGNATURE) {
+        return Ok(Ending::Inapplicable(
+            "the runner does not declare the signature kind, so no applied part edit carries a \
+             signature its prune removes"
+                .into(),
+        ));
+    }
+    let mut session = case.open(name, Script::default()).await?;
+    let oracle = case
+        .subject
+        .archive_pruning_fixture(&session.name, Some(vec![ACCEPTS.into()]))
+        .await
+        .map_err(|e| e.to_string())?;
+    let before = entries(&pages(&session.route, ops::SESSION_READ, json!({})).await?);
+    let head = ok(&session.route, ops::SESSION_HEAD, json!({})).await?;
+    let lineage = head["lineage_id"]
+        .as_str()
+        .ok_or("session.head omits lineage_id")?
+        .to_owned();
+    let first_ordinal = head["first_ordinal"].as_u64().unwrap_or(0);
+    let Some((ordinal, part_mid, key, signed)) = before
+        .iter()
+        .filter(|e| e["ordinal"].as_u64().is_some_and(|o| o >= first_ordinal))
+        .find_map(|entry| {
+            case.subject
+                .read_parts(&entry["message"])
+                .into_iter()
+                .find_map(|(key, value)| {
+                    let signed = oracle.iter().find(|o| {
+                        o.kind == wire_kinds::SIGNATURE
+                            && o.original == value
+                            && o.original != o.served
+                    })?;
+                    Some((
+                        entry["ordinal"].as_u64()?,
+                        mid(entry)?.to_owned(),
+                        key,
+                        signed.clone(),
+                    ))
+                })
+        })
+    else {
+        return Ok(Ending::Inapplicable(
+            "the fixture has no part of the signature kind in the current lineage".into(),
+        ));
+    };
+    let last = before.last().ok_or("the fixture wrote no messages")?;
+    let last_ordinal = last["ordinal"].as_u64().ok_or("entry omitted ordinal")?;
+    let edit = provider_edit(&signed.original);
+    let expected = expected_pruned_edit(
+        case.subject.serializer_profile(&session.name).as_deref(),
+        &signed,
+        &edit,
+    )?;
+    let mut ranges = Vec::new();
+    if first_ordinal > 0 {
+        // A lineage after a cut starts with its head.
+        ranges.push(ScriptedRange::Replace {
+            from: first_ordinal,
+            to: first_ordinal,
+            replacement: vec!["The history before the cut.".into()],
+        });
+    }
+    ranges.push(ScriptedRange::KeepWithVerbatimEdits {
+        from: first_ordinal,
+        to: last_ordinal + 1,
+        edits: vec![ScriptedPartEdit::new(
+            ordinal,
+            part_mid.clone(),
+            key.clone(),
+            edit.clone(),
+        )],
+    });
+    let version = case
+        .subject
+        .publish_compaction_view(
+            &session.name,
+            ScriptedView {
+                lineage_id: lineage,
+                covers_through: last_ordinal,
+                covers_through_mid: mid(last).unwrap_or_default().to_owned(),
+                ranges,
+                cut: None,
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    let text = vec![ScriptedPart::Text("An answer before the prune.".into())];
+    one_run(case, &mut session, text, "archive-applied-edit").await?;
+    check(
+        notices(case.subject, &session.name)
+            .await?
+            .iter()
+            .any(|n| n.applied_view_version == Some(version)),
+        "the runner did not apply a keep-range part edit of a signed part before the prune, so \
+         there is no applied edit to check after it",
+    )?;
+    case.subject
+        .prune_archived_session(&session.name)
+        .await
+        .map_err(|e| e.to_string())?;
+    let model = entries(&pages(&session.route, ops::SESSION_READ, json!({"view":"model"})).await?);
+    let served = model
+        .iter()
+        .find(|entry| mid(entry) == Some(part_mid.as_str()))
+        .and_then(|entry| {
+            case.subject
+                .read_parts(&entry["message"])
+                .into_iter()
+                .find(|(served_key, _)| served_key == &key)
+        })
+        .map(|(_, value)| value)
+        .ok_or("after the prune, the model view does not serve the edited part")?;
+    check(
+        served != edit,
+        "after the prune, the model view still serves the applied part edit with its pre-prune \
+         signature",
+    )?;
+    if edit != signed.original {
+        check(
+            served != signed.served,
+            "after the prune, the runner dropped the applied part edit and serves the stored part \
+             in its place",
+        )?;
+    }
+    check(
+        served == expected,
+        "after the prune, the model view's edited part is not the edit with the prune rule applied",
+    )?;
     Ok(Ending::Passed)
 }
 

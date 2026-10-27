@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.15.14
+
+- Track llm-runner 0.7.12, which this crate pins exactly.
+- Add `archive_pruning_applied_edit_pruned` (`compaction`). Before a prune,
+  the kit applies a view whose keep-range part edit re-serializes a
+  `signature`-kind part of the subject's native fixture, signature
+  included, with its text or tool output replaced. Right after the prune,
+  before any run, the model view must serve that edit with the prune rule
+  applied: by `prune_part_in` for the subject's declared profile, or from
+  the fixture's served form when no profile is declared. Not applicable by
+  name without `archive_prunes_reasoning`, without `model_view`, or when
+  the fixture has no `signature`-kind part. Named faulty runners prove it
+  fails a runner that leaves the edit's pre-prune signature and one that
+  drops the edit.
+
 ## 0.15.13
 
 - Track llm-runner 0.7.11, which this crate pins exactly. The

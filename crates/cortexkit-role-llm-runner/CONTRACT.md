@@ -3501,7 +3501,8 @@ its host's file storage, not a second copy of the host's media store.
   removed; optional members are removed; no block gains a member; the part
   keeps its type and place. `archive_prunes_reasoning::kinds_carried`,
   `carries_pruned_content_in`, `restored_part_in` and `restored_by_edit_in`
-  are the reference, with vectors in `reasoning-pruned-profiles.json`; the
+  are the reference, with `prune_part_in` giving a part's pruned form
+  (since 0.7.12), and vectors in `reasoning-pruned-profiles.json`; the
   functions without `_in` are the `owned-broca` reference and answer exactly
   as their `_in` forms do for it. A profile this table does not name is
   `UnsupportedProfile`, never "nothing pruned". A kind marked "not carried"
@@ -3534,6 +3535,29 @@ its host's file storage, not a second copy of the host's media store.
   the call's result, and dropping text would change the conversation. The
   stored parts are unchanged by this; only the outgoing request leaves them
   out.
+- [pinned] **Applied edits are pruned with their parts** (since 0.7.12). A runner can
+  hold an applied view (compaction-provider §6) whose keep-range part edit
+  re-serializes a part it later prunes: a drop placeholder on an
+  `opencode-aisdk` tool part, where call and result share one part, still
+  carries the call's `thoughtSignature` in `metadata`. When a runner
+  prunes, it MUST apply the same per-profile rule to every part edit of its
+  applied view at a message it prunes whose bytes carry what that prune
+  removes, exactly as it applies the rule to the stored part, in the same
+  commit as the prune. The check is per message, as for a refused view
+  (below): an edit naming any part of the pruned message counts. Nothing
+  the runner sends after the prune, its first request before any provider
+  pass included, carries pre-prune bytes, and the model view it serves
+  shows the rewritten edit. The runner never drops the edit to get there:
+  dropping a drop-placeholder edit would put the original content back.
+  If an edit holds a pruned part in a form the profile's rule cannot
+  express, so that applying the rule would leave the removed content in
+  place, the runner refuses to prune that message.
+  `archive_prunes_reasoning::prune_part_in` (one part, one kind) and
+  `prune_edit_in` (an edit's bytes, every kind recorded at its message) are
+  the reference; `PruneRefused::Inexpressible` is the refusal. The
+  `applied_edits` of `reasoning-pruned-profiles.json` give, for each
+  profile that carries `signature`, an applied edit before and after the
+  prune.
 - [pinned] A pruned part stays at the same index with the same type and key.
   Thus `m<ordinal>#<index>`, tags, resolve's `part`, `part_digests` positions
   and reminder slots never move. Lineage, ordinals, tags, `history_version`
@@ -4553,6 +4577,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops`; Setup-only unavailability and role/finer Setup refusal codes |
 | the runner half of compaction-provider 0.3.0 §3 (notices, views, rides, the ceiling, native markers) | no live case yet; a later conformance release adds them |
 | `archive_pruning_generation`, `archive_pruning_restored_view_refused`, `archive_pruning_restored_edit_refused`, `archive_pruning_setup_after_prune`, `archive_pruning_setup_initial_replaced` | `archive_prunes_reasoning`, `transcript_reads`, `queue`; all but the first also `compaction`, and the last also `model_view`; inapplicable by name without the group (§9.14.1): `reasoning_pruned` is absent before the first prune, generation 1 after it and one higher after a later prune, with `through_ordinal` the highest pruned ordinal, and pages and notices repeat the head; a view whose replace range carries the pruned original is refused `view_refused:<version>:pruned_reasoning_restored` and never rendered, and so is a view whose keep-range part edit sends a pruned part's original bytes; the first provider call after a prune is a Setup carrying the head's `reasoning_pruned`; a post-prune Setup's new `initial` replaces the pre-prune one while no view has applied |
+| `archive_pruning_applied_edit_pruned` (kit 0.15.14) | `archive_prunes_reasoning`, `transcript_reads`, `queue`, `compaction`; inapplicable by name without the group, without `model_view`, or when the fixture has no part of the `signature` kind (§9.14.1): a view whose keep-range part edit re-serializes a signed part applies before the prune, and right after the prune, with no run between, the model view serves that edit with the profile's prune rule applied (`prune_part_in`), neither its pre-prune signature nor the stored part in its place |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete` | — |
 | `extra_op_still_admitted` | — |
 | `baseline_owner_only`, `baseline_matches_admission_reply`, `baseline_not_yet_before_first_request` | — |

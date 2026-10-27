@@ -565,6 +565,255 @@ pub fn restored_by_edit_in<'a>(
     ))
 }
 
+/// Why [`prune_part_in`] or [`prune_edit_in`] gives no pruned form.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PruneRefused {
+    /// The per-profile rules do not name the profile.
+    UnsupportedProfile(UnsupportedProfile),
+    /// A kind this crate does not define, so there is no rule to apply.
+    UnknownKind(String),
+    /// The part carries content the kind removes, in a form the profile's
+    /// rule neither empties nor removes: applying the rule would leave that
+    /// content in place. A runner refuses to prune a message whose applied
+    /// view holds such an edit (CONTRACT §9.14.1).
+    Inexpressible { profile: String, kind: String },
+}
+
+impl From<UnsupportedProfile> for PruneRefused {
+    fn from(unsupported: UnsupportedProfile) -> Self {
+        Self::UnsupportedProfile(unsupported)
+    }
+}
+
+impl std::fmt::Display for PruneRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedProfile(unsupported) => unsupported.fmt(f),
+            Self::UnknownKind(kind) => write!(f, "no archive-pruning rule for kind: {kind}"),
+            Self::Inexpressible { profile, kind } => write!(
+                f,
+                "the {profile} rule for {kind} cannot remove what this part carries"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for PruneRefused {}
+
+/// Set a string member that is present to `""`; an absent member stays
+/// absent, because a prune never adds a member.
+fn empty_member(part: &mut serde_json::Map<String, Value>, member: &str) {
+    if part.get(member).is_some_and(Value::is_string) {
+        part.insert(member.into(), Value::from(""));
+    }
+}
+
+/// Rewrite a string member holding JSON for an object with
+/// `encrypted_content` as the same object without it: an OpenAI Responses
+/// reasoning item keeps its summary and every other member.
+fn strip_encrypted_item(part: &mut serde_json::Map<String, Value>, member: &str) {
+    let Some(mut item) = part
+        .get(member)
+        .and_then(Value::as_str)
+        .and_then(|text| serde_json::from_str::<Value>(text).ok())
+    else {
+        return;
+    };
+    if let Some(object) = item.as_object_mut() {
+        if object.remove("encrypted_content").is_some() {
+            part.insert(member.into(), Value::from(item.to_string()));
+        }
+    }
+}
+
+/// Remove the members `members` picks from every listed provider entry of
+/// an OpenCode part's `metadata`. The entry itself stays, possibly empty.
+fn opencode_metadata_remove(
+    part: &mut serde_json::Map<String, Value>,
+    members: fn(&OpencodeEntry) -> &'static [&'static str],
+) {
+    let Some(metadata) = part.get_mut("metadata").and_then(Value::as_object_mut) else {
+        return;
+    };
+    for listed in OPENCODE_ENTRIES {
+        if let Some(entry) = metadata.get_mut(listed.0).and_then(Value::as_object_mut) {
+            for member in members(listed) {
+                entry.remove(*member);
+            }
+        }
+    }
+}
+
+/// Apply `kind` to each OpenRouter `reasoning_details` entry of an
+/// OpenCode part, as [`openrouter_details_carry`] reads them: `reasoning`
+/// empties `text` and `summary` and removes `signature` and `data`;
+/// `opaque_reasoning` removes a `reasoning.encrypted` detail's `data`;
+/// `signature` removes a `reasoning.text` detail's `signature`.
+fn openrouter_details_prune(part: &mut serde_json::Map<String, Value>, kind: &str) {
+    let Some(details) = part
+        .get_mut("metadata")
+        .and_then(|metadata| metadata.pointer_mut("/openrouter/reasoning_details"))
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for detail in details.iter_mut().filter_map(Value::as_object_mut) {
+        let detail_type = detail
+            .get("type")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        match kind {
+            kinds::REASONING => {
+                empty_member(detail, "text");
+                empty_member(detail, "summary");
+                detail.remove("signature");
+                detail.remove("data");
+            }
+            kinds::OPAQUE_REASONING if detail_type.as_deref() == Some("reasoning.encrypted") => {
+                detail.remove("data");
+            }
+            kinds::SIGNATURE if detail_type.as_deref() == Some("reasoning.text") => {
+                detail.remove("signature");
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `part` as a prune of `kind` leaves it under serializer profile `profile`
+/// (CONTRACT §9.14.1, per-profile table): the bytes a runner stores in
+/// place of a pruned part, and the bytes it holds and sends in place of a
+/// part edit of its applied view that re-serializes a pruned part. Required
+/// members are emptied to `""`, optional members removed; no member is
+/// added and the part keeps its type. A part that carries nothing the kind
+/// removes ([`carries_pruned_content_in`]) comes back unchanged, so a kind a
+/// profile does not carry changes nothing.
+///
+/// [`PruneRefused::Inexpressible`] when the rule would leave content of the
+/// kind in the part: an `owned-broca` non-reasoning part with a `signature`
+/// member, which the profile's table does not name, is one. A profile the
+/// rules do not name is [`PruneRefused::UnsupportedProfile`], a kind this
+/// crate does not define [`PruneRefused::UnknownKind`].
+pub fn prune_part_in(profile: &str, kind: &str, part: &Value) -> Result<Value, PruneRefused> {
+    kinds_carried(profile)?;
+    if !kinds::ALL.contains(&kind) {
+        return Err(PruneRefused::UnknownKind(kind.into()));
+    }
+    if !carries_pruned_content_in(profile, kind, part)? {
+        return Ok(part.clone());
+    }
+    let mut pruned = part.clone();
+    let kind_of = part.get("type").and_then(Value::as_str).unwrap_or_default();
+    if let Some(object) = pruned.as_object_mut() {
+        match (profile, kind, kind_of) {
+            (OWNED_BROCA, kinds::REASONING, "reasoning") => {
+                empty_member(object, "text");
+                object.remove("signature");
+            }
+            (OWNED_BROCA, kinds::REASONING, "redacted_reasoning") => empty_member(object, "data"),
+            (OWNED_BROCA, kinds::OPAQUE_REASONING, "reasoning") => {
+                object.remove("signature");
+            }
+            (OWNED_BROCA, kinds::OPAQUE_REASONING, "redacted_reasoning") => {
+                strip_encrypted_item(object, "data")
+            }
+            (OWNED_BROCA, kinds::SIGNATURE, _) => {
+                object.remove("thought_signature");
+                if provider_state_signed(object.get("provider_state")) {
+                    if let Some(state) = object
+                        .get_mut("provider_state")
+                        .and_then(Value::as_object_mut)
+                    {
+                        empty_member(state, "data");
+                    }
+                }
+            }
+            (ANTHROPIC_MESSAGES, kinds::REASONING, "thinking") => {
+                empty_member(object, "thinking");
+                empty_member(object, "signature");
+            }
+            (ANTHROPIC_MESSAGES, kinds::OPAQUE_REASONING, "thinking") => {
+                empty_member(object, "signature")
+            }
+            (ANTHROPIC_MESSAGES, _, "redacted_thinking") => empty_member(object, "data"),
+            (OPENCODE_AISDK, kinds::REASONING, _) => {
+                empty_member(object, "text");
+                opencode_metadata_remove(object, opencode_signatures);
+                opencode_metadata_remove(object, opencode_opaque);
+                openrouter_details_prune(object, kind);
+            }
+            (OPENCODE_AISDK, kinds::OPAQUE_REASONING, _) => {
+                opencode_metadata_remove(object, opencode_opaque);
+                openrouter_details_prune(object, kind);
+            }
+            (OPENCODE_AISDK, kinds::SIGNATURE, "reasoning") => {
+                openrouter_details_prune(object, kind)
+            }
+            (OPENCODE_AISDK, kinds::SIGNATURE, _) => {
+                opencode_metadata_remove(object, opencode_signatures)
+            }
+            (PI, kinds::REASONING, _) => {
+                empty_member(object, "thinking");
+                object.remove("thinkingSignature");
+            }
+            (PI, kinds::OPAQUE_REASONING, _) => {
+                if object.get("redacted") == Some(&Value::Bool(true)) {
+                    object.remove("thinkingSignature");
+                } else {
+                    strip_encrypted_item(object, "thinkingSignature");
+                }
+            }
+            (PI, kinds::SIGNATURE, _) => {
+                object.remove("thoughtSignature");
+                let text_signature = object.get("textSignature");
+                if non_empty_string(text_signature)
+                    && !pi_text_signature_is_item_state(text_signature)
+                {
+                    object.remove("textSignature");
+                }
+            }
+            _ => {}
+        }
+    }
+    if carries_pruned_content_in(profile, kind, &pruned)? {
+        return Err(PruneRefused::Inexpressible {
+            profile: profile.into(),
+            kind: kind.into(),
+        });
+    }
+    Ok(pruned)
+}
+
+/// A keep-range part edit's bytes as a runner holds and sends them after a
+/// prune (CONTRACT §9.14.1): [`prune_part_in`] applied to `bytes`, the part
+/// the edit sends, once for each kind `pruned` records at the edit's
+/// `ordinal`, in the order given. Like [`restored_by_edit_in`] it is per
+/// message: an edit naming any part of a pruned message is rewritten when
+/// its bytes carry what a prune of that message removed. An edit at an
+/// ordinal with no pruned part comes back unchanged. A `drop` edit sends no
+/// bytes and needs nothing; the runner never drops an edit to get past this
+/// rule, because dropping a drop-placeholder edit would send the original
+/// content again.
+///
+/// An error is one [`prune_part_in`] gives for any of those kinds; on
+/// [`PruneRefused::Inexpressible`] the runner refuses to prune that
+/// message.
+pub fn prune_edit_in(
+    profile: &str,
+    pruned: &[PrunedPartAt],
+    ordinal: u64,
+    bytes: &Value,
+) -> Result<Value, PruneRefused> {
+    kinds_carried(profile)?;
+    pruned
+        .iter()
+        .filter(|entry| entry.ordinal == ordinal)
+        .try_fold(bytes.clone(), |part, entry| {
+            prune_part_in(profile, &entry.kind, &part)
+        })
+}
+
 impl PrunedReasoning {
     pub fn new(
         mid: impl Into<String>,
@@ -1058,6 +1307,163 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn prune_part_in_gives_each_profiles_served_form() {
+        let file = crate::vectors::load("reasoning-pruned-profiles.json");
+        for entry in file["profiles"].as_array().unwrap() {
+            let profile = entry["profile"].as_str().unwrap();
+            for case in entry["prunes"].as_array().unwrap() {
+                let name = format!("{profile}: {}", case["name"].as_str().unwrap());
+                let kind = case["kind"].as_str().unwrap();
+                let (original, served) = (&case["original"], &case["served"]);
+                assert_eq!(
+                    prune_part_in(profile, kind, original).as_ref(),
+                    Ok(served),
+                    "{name}"
+                );
+                assert_eq!(
+                    prune_part_in(profile, kind, served).as_ref(),
+                    Ok(served),
+                    "{name}: a pruned part prunes to itself"
+                );
+            }
+            for case in entry["not_carried"].as_array().unwrap() {
+                let name = format!("{profile}: {}", case["name"].as_str().unwrap());
+                let kind = case["kind"].as_str().unwrap();
+                assert_eq!(
+                    prune_part_in(profile, kind, &case["part"]).as_ref(),
+                    Ok(&case["part"]),
+                    "{name}: a part carrying nothing stays as it is"
+                );
+            }
+        }
+        let pruning = crate::vectors::load("archive-prunes-reasoning.json");
+        for case in pruning["cases"].as_array().unwrap() {
+            let kind = case["kind"].as_str().unwrap();
+            assert_eq!(
+                prune_part_in(
+                    crate::serializer_profile::OWNED_BROCA,
+                    kind,
+                    &case["original"]
+                )
+                .as_ref(),
+                Ok(&case["served"]),
+                "{kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn prune_edit_in_rewrites_an_applied_edit_instead_of_dropping_it() {
+        let file = crate::vectors::load("reasoning-pruned-profiles.json");
+        for entry in file["profiles"].as_array().unwrap() {
+            let profile = entry["profile"].as_str().unwrap();
+            let carried = kinds_carried(profile).unwrap();
+            let applied = entry["applied_edits"].as_array().unwrap();
+            assert_eq!(
+                applied.is_empty(),
+                !carried.contains(&kinds::SIGNATURE),
+                "{profile}: one applied-edit vector per profile that carries a signature"
+            );
+            for case in applied {
+                let name = format!("{profile}: {}", case["name"].as_str().unwrap());
+                let pruned = pruned_rows(&case["pruned"]);
+                let edit = &case["edit"];
+                let (ordinal, key) = (
+                    edit["ordinal"].as_u64().unwrap(),
+                    edit["part"].as_str().unwrap(),
+                );
+                let before: Value = serde_json::from_str(edit["bytes"].as_str().unwrap()).unwrap();
+                let after: Value = serde_json::from_str(case["after"].as_str().unwrap()).unwrap();
+                assert_eq!(
+                    restored_by_edit_in(profile, &pruned, ordinal, key, &before),
+                    Ok(Some(&pruned[0])),
+                    "{name}: the edit as applied holds the pre-prune bytes"
+                );
+                assert_eq!(
+                    prune_edit_in(profile, &pruned, ordinal, &before),
+                    Ok(after.clone()),
+                    "{name}"
+                );
+                assert_eq!(
+                    restored_by_edit_in(profile, &pruned, ordinal, key, &after),
+                    Ok(None),
+                    "{name}: the rewritten edit sends nothing the prune removed"
+                );
+                assert_eq!(before["type"], after["type"], "{name}: same type");
+                assert!(adds_nothing(&before, &after), "{name}: a member was added");
+                assert_eq!(
+                    prune_edit_in(profile, &pruned, ordinal + 1, &before),
+                    Ok(before.clone()),
+                    "{name}: an edit of an unpruned message stays as it is"
+                );
+            }
+            // Every edit that would restore a pruned part, once rewritten,
+            // restores nothing.
+            for case in entry["edit_refusals"].as_array().unwrap() {
+                let name = format!("{profile}: {}", case["name"].as_str().unwrap());
+                let pruned = pruned_rows(&case["pruned"]);
+                let edit = &case["edit"];
+                let (ordinal, key) = (
+                    edit["ordinal"].as_u64().unwrap(),
+                    edit["part"].as_str().unwrap(),
+                );
+                let bytes: Value = serde_json::from_str(edit["bytes"].as_str().unwrap()).unwrap();
+                let rewritten = prune_edit_in(profile, &pruned, ordinal, &bytes).unwrap();
+                assert_eq!(
+                    restored_by_edit_in(profile, &pruned, ordinal, key, &rewritten),
+                    Ok(None),
+                    "{name}"
+                );
+                assert_eq!(bytes["type"], rewritten["type"], "{name}: same type");
+                assert!(adds_nothing(&bytes, &rewritten), "{name}");
+                if case["restored"].is_null() {
+                    assert_eq!(rewritten, bytes, "{name}: an allowed edit is unchanged");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn prune_part_in_refuses_what_its_rule_cannot_remove() {
+        let profile = crate::serializer_profile::OWNED_BROCA;
+        // The owned-broca table names no `signature` member on a
+        // non-reasoning part, yet such a member is signature content.
+        let text =
+            json!({"type":"text","text":"Open the blue door.","signature":"invented-signature"});
+        let inexpressible = PruneRefused::Inexpressible {
+            profile: profile.into(),
+            kind: kinds::SIGNATURE.into(),
+        };
+        assert_eq!(
+            prune_part_in(profile, kinds::SIGNATURE, &text),
+            Err(inexpressible.clone())
+        );
+        let pruned = [PrunedPartAt::new(3, "m3#0", kinds::SIGNATURE)];
+        assert_eq!(
+            prune_edit_in(profile, &pruned, 3, &text),
+            Err(inexpressible.clone())
+        );
+        assert_eq!(
+            inexpressible.to_string(),
+            "the owned-broca rule for signature cannot remove what this part carries"
+        );
+        assert_eq!(
+            prune_part_in(profile, "future-kind", &text),
+            Err(PruneRefused::UnknownKind("future-kind".into()))
+        );
+        let file = crate::vectors::load("reasoning-pruned-profiles.json");
+        for unsupported in file["unsupported"].as_array().unwrap() {
+            let unsupported = unsupported.as_str().unwrap();
+            let refused = PruneRefused::UnsupportedProfile(UnsupportedProfile::new(unsupported));
+            assert_eq!(
+                prune_part_in(unsupported, kinds::SIGNATURE, &text),
+                Err(refused.clone())
+            );
+            assert_eq!(prune_edit_in(unsupported, &pruned, 3, &text), Err(refused));
         }
     }
 
