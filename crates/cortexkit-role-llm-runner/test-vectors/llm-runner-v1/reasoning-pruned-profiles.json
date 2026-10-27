@@ -767,7 +767,7 @@
       ],
       "applied_edits": [
         {
-          "name": "text_with_state_text_edit_keeps_signed_state",
+          "name": "tool_call_input_trimmed_keeps_signature",
           "pruned": [
             {
               "ordinal": 3,
@@ -778,9 +778,9 @@
           "edit": {
             "ordinal": 3,
             "part": "m3#0",
-            "bytes": "{\"type\":\"text_with_state\",\"text\":\"The door is blue. [Earlier detail trimmed]\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"{\\\"thoughtSignature\\\":\\\"invented-signature\\\"}\"}}"
+            "bytes": "{\"type\":\"tool_call\",\"tool_call_id\":\"call-example\",\"tool_name\":\"open_door\",\"input\":{\"door\":\"blue\",\"note\":\"[Earlier detail trimmed]\"},\"thought_signature\":\"invented-signature\"}"
           },
-          "after": "{\"type\":\"text_with_state\",\"text\":\"The door is blue. [Earlier detail trimmed]\",\"provider_state\":{\"format\":\"gemini\",\"data\":\"\"}}"
+          "after": "{\"type\":\"tool_call\",\"tool_call_id\":\"call-example\",\"tool_name\":\"open_door\",\"input\":{\"door\":\"blue\",\"note\":\"[Earlier detail trimmed]\"}}"
         }
       ]
     },

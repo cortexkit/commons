@@ -53,7 +53,9 @@ also has `applied_edits` (§9.14.1, applied edits are pruned with their
 parts): an applied keep-range part edit that re-serializes a signed part,
 as held before the prune (`edit.bytes`) and as `prune_edit_in` rewrites it
 (`after`). There is one per profile that carries `signature`: an
-`owned-broca` `text_with_state` text edit keeping its `gemini` state, an
+`owned-broca` assistant `tool_call` with trimmed input and its
+`thought_signature` (the shape a served page carries: a served
+`owned-broca` text part is plain `text`, never `text_with_state`), an
 `opencode-aisdk` tool part whose output a drop placeholder replaced but
 whose `metadata.google.thoughtSignature` remains, and a `pi` `toolCall`
 with trimmed arguments and its `thoughtSignature`. The list is empty for

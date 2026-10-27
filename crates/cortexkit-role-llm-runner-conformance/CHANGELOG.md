@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.15
+
+- Track llm-runner 0.7.13, which this crate pins exactly. Its
+  `owned-broca` `applied_edits` vector now uses a shape a served page
+  carries (an assistant `tool_call` with its `thought_signature`) instead
+  of `text_with_state`. No rule or check changed.
+
 ## 0.15.14
 
 - Track llm-runner 0.7.12, which this crate pins exactly.

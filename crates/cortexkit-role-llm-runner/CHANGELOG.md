@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.13
+
+- `reasoning-pruned-profiles.json`: the `owned-broca` `applied_edits`
+  example is now a shape a served page carries. It was a `text_with_state`
+  text edit, but a served `owned-broca` page serves text as plain `text`,
+  because provider state never leaves the runner, so a compaction provider
+  building part edits from served parts cannot produce one. It is now
+  `tool_call_input_trimmed_keeps_signature`: an assistant `tool_call` with
+  trimmed `input` and its `thought_signature`, before the prune and as
+  `prune_edit_in` rewrites it (without `thought_signature`). No rule
+  changed. The vectors README is updated, and both checksums with it.
+
 ## 0.7.12
 
 - Pin that a prune also rewrites the runner's applied view (CONTRACT
