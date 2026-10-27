@@ -8,7 +8,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.7.0"
+cortexkit-role-routing-conformance = "0.7.1"
 ```
 
 ```rust,ignore
@@ -77,6 +77,14 @@ against the same state answers the same route and runner.
 Declarations cannot set `iq`: every request supplies it, and only operator
 configuration may override it. Declaration checks use `max_output_tokens`
 for defaults; the operator-precedence check also overrides the request's `iq`.
+
+No check's expected answer depends on how a provider reads `iq`. The contract
+leaves the mapping of `iq` onto model facts to the provider, so a provider may
+read it on an absolute scale or relative to its strongest routable model, for
+which `iq` 100 is always met. Every fixture model has the same `iq`, and every
+`iq` a check's routing decision reads, after operator overrides, is met by all
+of them under either reading; a check that needs a request nothing meets
+raises a `context_window` or `max_output_tokens` floor instead.
 
 ## Checks
 

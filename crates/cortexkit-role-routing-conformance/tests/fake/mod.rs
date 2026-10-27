@@ -169,6 +169,9 @@ pub struct Defects {
     /// Treats prefer as a pin: answers the first listed route even when it
     /// is not a candidate.
     pub admits_prefer: bool,
+    /// Honours prefer among adequate routes, but when no route meets the
+    /// request answers the first listed route instead of refusing.
+    pub admits_prefer_when_nothing_meets: bool,
     /// Accepts prefer without declaring select_prefer.
     pub accepts_undeclared_prefer: bool,
     /// A fenced report blocks every account and route, not just the
@@ -303,6 +306,10 @@ pub struct FakeSubject {
     hold_control: bool,
     harness_control: bool,
     prefer_control: bool,
+    /// Reads a request's iq relative to the strongest routable model instead
+    /// of on the catalog's own 0-100 scale. The contract leaves that mapping
+    /// to the provider, so both readings are correct.
+    relative_iq: bool,
 }
 
 impl FakeSubject {
@@ -313,6 +320,7 @@ impl FakeSubject {
             hold_control: true,
             harness_control: true,
             prefer_control: true,
+            relative_iq: false,
         }
     }
 
@@ -334,6 +342,15 @@ impl FakeSubject {
     pub fn without_prefer_control(defects: Defects) -> Self {
         Self {
             prefer_control: false,
+            ..Self::new(defects)
+        }
+    }
+
+    /// A fake that maps a request's iq relative to its strongest routable
+    /// model: iq 100 asks for that model's ability, so it is always met.
+    pub fn with_relative_iq(defects: Defects) -> Self {
+        Self {
+            relative_iq: true,
             ..Self::new(defects)
         }
     }
@@ -461,6 +478,7 @@ impl RoutingSubject for FakeSubject {
             hold_control: self.hold_control,
             harness_control: self.harness_control,
             prefer_control: self.prefer_control,
+            relative_iq: self.relative_iq,
             stamp: stamp.clone(),
         })
     }
@@ -473,6 +491,7 @@ pub struct FakeRoute {
     hold_control: bool,
     harness_control: bool,
     prefer_control: bool,
+    relative_iq: bool,
     stamp: RouteStamp,
 }
 
@@ -504,8 +523,12 @@ fn to_value<T: Serialize>(answer: T) -> Result<Value, Refusal> {
     Ok(serde_json::to_value(answer).unwrap())
 }
 
-fn meets(requirements: &Requirements, model: &CatalogModel) -> bool {
-    requirements.iq <= model.iq
+/// Whether `model` meets `requirements`. The request's iq is read on a scale
+/// whose 100 is `iq_ceiling` on the catalog's own scale: 100 reads it as an
+/// absolute value, the strongest routable model's iq reads it relative to
+/// that model.
+fn meets(requirements: &Requirements, model: &CatalogModel, iq_ceiling: u8) -> bool {
+    u32::from(requirements.iq) * u32::from(iq_ceiling) <= u32::from(model.iq) * 100
         && requirements
             .context_window
             .is_none_or(|floor| floor <= model.context_window)
@@ -695,8 +718,24 @@ impl FakeRoute {
                 .copied()
                 .filter(|until| *until > now)
         };
+        // The strongest model some session-starting runner runs.
+        let strongest = catalog
+            .models
+            .iter()
+            .filter(|model| {
+                let key = model.route_key();
+                catalog
+                    .runners
+                    .iter()
+                    .any(|runner| runner.starts_sessions && runner.route_keys.contains(&key))
+            })
+            .map(|model| model.iq)
+            .max()
+            .unwrap_or(0);
+        let iq_ceiling = if self.relative_iq { strongest } else { 100 };
         let eligible = |model: &CatalogModel| {
-            (!consumer.priced_only || model.priced_per_token) && meets(&request.requirements, model)
+            (!consumer.priced_only || model.priced_per_token)
+                && meets(&request.requirements, model, iq_ceiling)
         };
         let runner_for = |key: &str| {
             catalog
@@ -878,7 +917,9 @@ impl FakeRoute {
                     .collect();
                 if !defects.ignores_prefer {
                     if let Some(prefer) = &request.prefer {
-                        if defects.admits_prefer {
+                        if defects.admits_prefer
+                            || (defects.admits_prefer_when_nothing_meets && candidates.is_empty())
+                        {
                             if let Some(first) = prefer.first() {
                                 if let Some(model) =
                                     catalog.models.iter().find(|m| &m.route_key() == first)

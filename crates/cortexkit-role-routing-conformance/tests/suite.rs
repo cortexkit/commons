@@ -397,7 +397,23 @@ async fn account_for_ignoring_the_recorded_cap_fails() {
 
 #[tokio::test]
 async fn a_faithful_provider_passes_every_check() {
-    let report = run_suite(&FakeSubject::new(Defects::default())).await;
+    passes_every_check(&FakeSubject::new(Defects::default())).await;
+}
+
+/// The contract leaves the mapping of a request's iq onto model facts to the
+/// provider, so a provider reading iq 100 as "the strongest model I can
+/// route" (always met) is as correct as one reading it as an absolute ability
+/// no fixture model reaches. No check may depend on either reading.
+#[tokio::test]
+async fn a_provider_mapping_iq_relative_to_its_strongest_model_passes_every_check() {
+    passes_every_check(&FakeSubject::with_relative_iq(Defects::default())).await;
+}
+
+/// Run the suite against `subject` and require every check to pass, except
+/// the undeclared-group checks, which a provider declaring every group
+/// cannot be asked.
+async fn passes_every_check(subject: &FakeSubject) {
+    let report = run_suite(subject).await;
     assert_eq!(report.checks.len(), CHECKS.len());
     for check in &report.checks {
         if [
@@ -924,6 +940,19 @@ async fn prefer_admitting_inadequate_fails() {
         },
         "prefer_never_admits_inadequate_route",
         "admitted",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn prefer_admitted_when_nothing_meets_fails() {
+    breaks(
+        Defects {
+            admits_prefer_when_nothing_meets: true,
+            ..Defects::default()
+        },
+        "prefer_never_admits_inadequate_route",
+        "context_window above every fixture model's was answered",
     )
     .await;
 }

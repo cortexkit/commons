@@ -708,6 +708,11 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             .await
             .map_err(|e| format!("configure_consumers: {e}"))?;
         let route = self.route_as(fixture::DECLARING_PRINCIPAL).await?;
+        // The request's max_output_tokens floor of 80000 is above every
+        // fixture model's, so the pin is served only if the operator's 16000
+        // replaces it. The request's iq 100 is overridden too, but it does not
+        // decide the answer: a provider may read iq 100 as "its strongest
+        // model", which model-a, equal in iq to every fixture model, meets.
         let params = json!({"consumer": fixture::DECLARED,
             "requirements": {"iq": 100, "max_output_tokens": 80_000},
             "pin": format!("{}/model-a", fixture::PRICED_PROVIDER)});
@@ -2285,15 +2290,29 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 answered.route.route_key()
             ));
         }
+        // When no route meets the request, the listed route must not be
+        // answered either. Nothing meets it because of a context-window floor
+        // above every fixture model's: a floor is in tokens, so every provider
+        // reads it the same way. iq cannot be used for this, since a provider
+        // may read iq 100 as "its strongest model", which is always met.
+        let above_every_model = fixture::catalog()
+            .models
+            .iter()
+            .map(|model| model.context_window)
+            .max()
+            .unwrap_or_default()
+            + 1;
         let mut impossible = base();
-        impossible["requirements"] = json!({"iq": 100});
+        impossible["requirements"] = json!({"iq": IQ, "context_window": above_every_model});
         impossible["prefer"] = json!([listed]);
         refused(
             &route,
             ops::ROUTE_SELECT,
             &impossible,
             RefusalCode::NoRoute,
-            "a select nothing meets preferring a route",
+            &format!(
+                "a select preferring {listed} with a context_window above every fixture model's"
+            ),
         )
         .await?;
         Ok(())

@@ -8,7 +8,7 @@
 # production build never compiles the kit.
 [package]
 name = "cortexkit-role-routing-conformance"
-version = "0.7.0"
+version = "0.7.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

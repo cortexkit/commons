@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.1
+
+- Fix `prefer_never_admits_inadequate_route`: its request nothing meets now
+  raises `context_window` above every fixture model's instead of asking
+  `iq` 100, which a provider reading `iq` relative to its strongest routable
+  model correctly answers. No check's expected answer depends on an absolute
+  `iq` scale any longer; a test runs the whole kit against such a provider,
+  and a new faulty provider that admits a preferred route only when nothing
+  meets fails the check by name.
+
 ## 0.7.0
 
 - Depend on routing 0.5.0. Breaking Rust minor for the new request and answer
