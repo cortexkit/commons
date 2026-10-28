@@ -1076,8 +1076,10 @@ display-ready row for an app's reader on a runner declaring
   message row's `data`. `tags::opencode1_message_counts_with_parts` is the
   reference predicate, taking the message row's `data` and each stored
   part's `type` in part order.
-  A row with `summary` equal to JSON `true` or the number `1` and `finish`
-  equal to `"stop"` is not counted. These are message counters, not §9.6's
+  A row with `summary` equal to JSON `true` or any JSON number equal to 1
+  (so `1` and `1.0` alike, as SQLite's numeric comparison
+  `json_extract(data, '$.summary') = 1` treats them) and `finish` equal to
+  `"stop"` is not counted. These are message counters, not §9.6's
   part tags.
 - [pinned] For a runner declaring `message_checkpoint` on **OpenCode 1**,
   a message with one or more parts, all of type `compaction`, is also not

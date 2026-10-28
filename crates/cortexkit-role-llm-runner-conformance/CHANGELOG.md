@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.22
+
+- Pin `cortexkit-role-llm-runner` to `=0.7.19`, whose OpenCode 1
+  finished-summary test also excludes a `summary` stored as `1.0`.
+
 ## 0.15.21
 
 - Pin `cortexkit-role-llm-runner` to `=0.7.18`, whose OpenCode 1 counting

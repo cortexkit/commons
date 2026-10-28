@@ -469,8 +469,8 @@ UTF-8 bytes, ordinary lowercase SHA-256 digest and `head_cut.written_at`
 (JSON u64 milliseconds since the Unix epoch). It also pins OpenCode 1
 counting with `rows` mirroring message rows and a separate `parts` array
 of stored part rows (`message_id`, JSON `data`), in part order. The full
-`opencode1_message_counts_with_parts` predicate covers finished summaries,
-malformed message JSON, excluded compaction-only messages, counted mixed
+`opencode1_message_counts_with_parts` predicate covers finished summaries
+(`summary` as `true`, `1` or `1.0`), malformed message JSON, excluded compaction-only messages, counted mixed
 compaction/text messages and counted empty-part messages. The legacy
 `opencode1_message_counts` predicate still checks finished summaries only.
 The vector also pins every revert

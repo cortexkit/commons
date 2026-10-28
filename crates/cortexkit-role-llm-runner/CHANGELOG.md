@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.19
+
+- Fix OpenCode 1's finished-summary test in `opencode1_message_counts` and
+  `opencode1_message_counts_with_parts`: `summary` now matches JSON `true` or
+  any number equal to 1, so a stored `1.0` is excluded like `1`. Before, a
+  `{"summary": 1.0, "finish": "stop"}` row was counted. §4.8 states the rule,
+  and the row-list vector adds that row as not counted.
+
 ## 0.7.18
 
 - Exclude nonempty compaction-only OpenCode 1 messages from §4.8 counts

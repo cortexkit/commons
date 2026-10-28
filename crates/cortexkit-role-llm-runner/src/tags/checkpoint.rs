@@ -110,7 +110,10 @@ pub fn opencode1_message_counts(data: &str) -> bool {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
         return true;
     };
-    !((value["summary"] == true || value["summary"] == 1) && value["finish"] == "stop")
+    // A summary is JSON `true` or any number equal to 1, so `1` and `1.0` both
+    // match, as SQLite's numeric `json_extract(data, '$.summary') = 1` does.
+    let summary = value["summary"] == true || value["summary"].as_f64() == Some(1.0);
+    !(summary && value["finish"] == "stop")
 }
 
 /// Applies OpenCode 1's full §4.8 counting rule to a message and its stored parts.
@@ -235,6 +238,7 @@ mod tests {
             ("marker-and-text", true),
             ("empty-parts", true),
             ("two-markers-only", false),
+            ("summary-float", false),
         ] {
             let row = rows.iter().find(|row| row["id"] == id).unwrap();
             assert_eq!(
@@ -295,6 +299,26 @@ mod tests {
             r#"{"summary":1,"finish":"stop"}"#,
             ["text"]
         ));
+    }
+
+    #[test]
+    fn opencode1_summary_accepts_any_number_equal_to_one() {
+        for data in [
+            r#"{"summary":true,"finish":"stop"}"#,
+            r#"{"summary":1,"finish":"stop"}"#,
+            r#"{"summary":1.0,"finish":"stop"}"#,
+            r#"{"summary":1e0,"finish":"stop"}"#,
+        ] {
+            assert!(!opencode1_message_counts(data), "{data}");
+        }
+        for data in [
+            r#"{"summary":"1","finish":"stop"}"#,
+            r#"{"summary":1.5,"finish":"stop"}"#,
+            r#"{"summary":0,"finish":"stop"}"#,
+            r#"{"summary":1.0,"finish":"length"}"#,
+        ] {
+            assert!(opencode1_message_counts(data), "{data}");
+        }
     }
 
     #[test]

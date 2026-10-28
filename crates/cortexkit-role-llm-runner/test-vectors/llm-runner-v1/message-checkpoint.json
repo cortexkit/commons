@@ -21,7 +21,8 @@
       {"time_created": 15, "id": "marker-only", "data": "{\"role\":\"user\"}"},
       {"time_created": 16, "id": "marker-and-text", "data": "{\"role\":\"user\"}"},
       {"time_created": 17, "id": "empty-parts", "data": "{\"role\":\"user\"}"},
-      {"time_created": 18, "id": "two-markers-only", "data": "{\"role\":\"user\"}"}
+      {"time_created": 18, "id": "two-markers-only", "data": "{\"role\":\"user\"}"},
+      {"time_created": 19, "id": "summary-float", "data": "{\"summary\":1.0,\"finish\":\"stop\"}"}
     ],
     "parts": [
       {"message_id": "marker-only", "data": "{\"type\":\"compaction\"}"},
