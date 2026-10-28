@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.8
+
+- Extend the shared Setup checkpoint with optional paired `message_count`
+  and certified `head_cut`, sent only to `message_checkpoint` runners.
+  Document the permanent moved-session checkpoint, counting and timestamp
+  units, adoption head equality checks, and separate message and tag anchors.
+- Add terminal Setup refusals `message_checkpoint_unsupported`,
+  `moved_session_reverted_below_import` and `moved_session_head_mismatch`,
+  including typed codes, retryability tables and vectors. Setup answers
+  remain lenient for older decoders. Depend on runner 0.7.17.
+- Pin reverse `session.head` during an outstanding Setup for
+  `message_checkpoint` runners: recover the head from a complete marker key
+  or earlier stored Setup checkpoint, without waiting on Setup or its gates.
+- Pin the same Setup-independent access for `session.read` at an adoption
+  cut, serving retained rows from `first_ordinal` and refusing earlier rows.
+  This lets the provider build its Setup answer after adoption-cut recovery;
+  native-cut descent continues to use the provider's held parent-lineage rows.
+
 ## 0.7.7
 
 - The `held_copies_follow_reasoning_pruned` probe's cut conversation

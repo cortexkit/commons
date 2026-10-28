@@ -87,6 +87,9 @@ impl KnownCode {
             | Self::Misconfigured
             | Self::StandaloneSessionNotMigrated
             | Self::TagCheckpointUnsupported
+            | Self::MessageCheckpointUnsupported
+            | Self::MovedSessionRevertedBelowImport
+            | Self::MovedSessionHeadMismatch
             | Self::SetupIdentityMismatch
             | Self::CompactionUnavailable => false,
         }
@@ -106,6 +109,9 @@ impl KnownCode {
             | Self::Misconfigured
             | Self::HistoryUnreadable
             | Self::TagCheckpointUnsupported
+            | Self::MessageCheckpointUnsupported
+            | Self::MovedSessionRevertedBelowImport
+            | Self::MovedSessionHeadMismatch
             | Self::SetupIdentityMismatch
             | Self::StandaloneSessionNotMigrated
             | Self::CompactionUnavailable => true,
@@ -131,6 +137,9 @@ known_codes! {
     HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
     StandaloneSessionNotMigrated => refuse_codes::STANDALONE_SESSION_NOT_MIGRATED,
     TagCheckpointUnsupported => refuse_codes::TAG_CHECKPOINT_UNSUPPORTED,
+    MessageCheckpointUnsupported => refuse_codes::MESSAGE_CHECKPOINT_UNSUPPORTED,
+    MovedSessionRevertedBelowImport => refuse_codes::MOVED_SESSION_REVERTED_BELOW_IMPORT,
+    MovedSessionHeadMismatch => refuse_codes::MOVED_SESSION_HEAD_MISMATCH,
     SetupIdentityMismatch => refuse_codes::SETUP_IDENTITY_MISMATCH,
     CompactionUnavailable => runner_codes::COMPACTION_UNAVAILABLE,
 }
@@ -161,7 +170,7 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
     detail?.get("field")?.as_str()
 }
 
-/// The `code` of a Setup `refuse` answer: one of the seven typed codes, each
+/// The `code` of a Setup `refuse` answer: one of the typed codes, each
 /// with a fixed retryability. A code this crate does not know still decodes,
 /// as [`RefuseCode::Unknown`], so one unfamiliar code never makes the whole
 /// answer undecodable; an unfamiliar code is never retryable. A provider's own, finer reason
@@ -184,6 +193,12 @@ pub enum RefuseCode {
     /// The session was moved from standalone Magic Context and needs its
     /// Setup checkpoint honoured, which the runner does not declare.
     TagCheckpointUnsupported,
+    /// A moved session needs message checkpoints, which the runner lacks.
+    MessageCheckpointUnsupported,
+    /// The moved session has no head cut and its first ordinal is zero.
+    MovedSessionRevertedBelowImport,
+    /// The head otherwise disagrees with the certified move checkpoint.
+    MovedSessionHeadMismatch,
     /// The incoming route is bound to a non-empty session other than
     /// Setup's session. Not retryable; it ends the current run.
     SetupIdentityMismatch,
@@ -200,6 +215,11 @@ impl RefuseCode {
             Self::HistoryUnreadable => refuse_codes::HISTORY_UNREADABLE,
             Self::StandaloneSessionNotMigrated => refuse_codes::STANDALONE_SESSION_NOT_MIGRATED,
             Self::TagCheckpointUnsupported => refuse_codes::TAG_CHECKPOINT_UNSUPPORTED,
+            Self::MessageCheckpointUnsupported => refuse_codes::MESSAGE_CHECKPOINT_UNSUPPORTED,
+            Self::MovedSessionRevertedBelowImport => {
+                refuse_codes::MOVED_SESSION_REVERTED_BELOW_IMPORT
+            }
+            Self::MovedSessionHeadMismatch => refuse_codes::MOVED_SESSION_HEAD_MISMATCH,
             Self::SetupIdentityMismatch => refuse_codes::SETUP_IDENTITY_MISMATCH,
             Self::Unknown(code) => code,
         }
@@ -215,6 +235,11 @@ impl RefuseCode {
             refuse_codes::HISTORY_UNREADABLE => Self::HistoryUnreadable,
             refuse_codes::STANDALONE_SESSION_NOT_MIGRATED => Self::StandaloneSessionNotMigrated,
             refuse_codes::TAG_CHECKPOINT_UNSUPPORTED => Self::TagCheckpointUnsupported,
+            refuse_codes::MESSAGE_CHECKPOINT_UNSUPPORTED => Self::MessageCheckpointUnsupported,
+            refuse_codes::MOVED_SESSION_REVERTED_BELOW_IMPORT => {
+                Self::MovedSessionRevertedBelowImport
+            }
+            refuse_codes::MOVED_SESSION_HEAD_MISMATCH => Self::MovedSessionHeadMismatch,
             refuse_codes::SETUP_IDENTITY_MISMATCH => Self::SetupIdentityMismatch,
             other => Self::Unknown(other.to_owned()),
         }
@@ -255,7 +280,7 @@ impl<'de> Deserialize<'de> for RefuseCode {
 /// never retries, so it is terminal for that lineage.
 pub const UNKNOWN_CUT: &str = "unknown_cut";
 
-/// The spellings of the seven typed [`RefuseCode`]s. On any of them the
+/// The spellings of the typed [`RefuseCode`]s. On any of them the
 /// runner ends the current run as `error` after Setup, but for the one
 /// hand-off of `standalone_session_not_migrated` (CONTRACT.md §4).
 pub mod refuse_codes {
@@ -284,6 +309,12 @@ pub mod refuse_codes {
     /// needs the Setup checkpoint, and the runner does not declare
     /// `llm-runner/v1`'s `tag_checkpoint` group. Terminal: not retryable.
     pub const TAG_CHECKPOINT_UNSUPPORTED: &str = "tag_checkpoint_unsupported";
+    /// A moved session's runner lacks `message_checkpoint`. Terminal.
+    pub const MESSAGE_CHECKPOINT_UNSUPPORTED: &str = "message_checkpoint_unsupported";
+    /// The moved session's head has no cut and first_ordinal is 0. Terminal.
+    pub const MOVED_SESSION_REVERTED_BELOW_IMPORT: &str = "moved_session_reverted_below_import";
+    /// The head otherwise mismatches the certified count or head cut. Terminal.
+    pub const MOVED_SESSION_HEAD_MISMATCH: &str = "moved_session_head_mismatch";
 
     /// A route bound to a non-empty session different from Setup's session.
     /// Not retryable: the runner ends the current run as `error` and calls
@@ -297,6 +328,9 @@ pub mod refuse_codes {
         HISTORY_UNREADABLE,
         STANDALONE_SESSION_NOT_MIGRATED,
         TAG_CHECKPOINT_UNSUPPORTED,
+        MESSAGE_CHECKPOINT_UNSUPPORTED,
+        MOVED_SESSION_REVERTED_BELOW_IMPORT,
+        MOVED_SESSION_HEAD_MISMATCH,
         SETUP_IDENTITY_MISMATCH,
     ];
 
@@ -464,6 +498,9 @@ mod tests {
             (RefuseCode::HistoryUnreadable, true),
             (RefuseCode::StandaloneSessionNotMigrated, false),
             (RefuseCode::TagCheckpointUnsupported, false),
+            (RefuseCode::MessageCheckpointUnsupported, false),
+            (RefuseCode::MovedSessionRevertedBelowImport, false),
+            (RefuseCode::MovedSessionHeadMismatch, false),
             (RefuseCode::SetupIdentityMismatch, false),
         ];
         assert_eq!(expected.len(), refuse_codes::ALL.len());

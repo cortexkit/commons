@@ -47,6 +47,11 @@ pub struct CompactionMessage {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CompactionSetup {
+    /// A permanent moved-session checkpoint including both message members.
+    ReadyWithMessageCheckpoint {
+        initial: CompactionMessage,
+        checkpoint: cortexkit_role_llm_runner::tags::SetupCheckpoint,
+    },
     Ready(CompactionMessage),
     /// Answer `ready` with `initial` and a Setup checkpoint
     /// `{tag_checkpoint, cut}` whose `cut` is the message the Setup request
@@ -747,6 +752,7 @@ where
             } => refusal_error(&error, code.as_str(), reason, provider_code.as_deref())?,
             CompactionSetup::Ready(_)
             | CompactionSetup::ReadyWithCheckpoint { .. }
+            | CompactionSetup::ReadyWithMessageCheckpoint { .. }
             | CompactionSetup::ReadyWithCacheTtl { .. }
             | CompactionSetup::ReadyWithRideWait { .. } => {
                 unreachable!()

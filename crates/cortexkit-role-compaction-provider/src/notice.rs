@@ -106,7 +106,7 @@ pub mod headers {
     pub const VIEW_VERSION: &str = "view_version";
     /// The last ordinal a view covers.
     pub const COVERS_THROUGH: &str = "covers_through";
-    /// A view's digest ([`crate::async_group::view::CompactionView::compute_digest`]).
+    /// A view's digest ([`crate::view::CompactionView::compute_digest`]).
     pub const DIGEST: &str = "digest";
 
     /// The headers of an advance notice, in ascending byte order: the order

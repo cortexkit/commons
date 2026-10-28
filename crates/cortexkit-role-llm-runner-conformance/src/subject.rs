@@ -58,6 +58,8 @@ pub enum Capability {
     /// The `tag_checkpoint` group: the runner honours a compaction
     /// provider's Setup checkpoint `{tag_checkpoint, cut}`.
     TagCheckpoint,
+    /// Separate message and tag anchors in Setup and native markers.
+    MessageCheckpoint,
     /// The `session_change` group: `session.refresh`,
     /// `session.refresh_policy` and `session.flush_prefix`. Its cases need
     /// [`LlmRunnerSubject::refresh_plan`] and
@@ -164,6 +166,7 @@ impl Capability {
         Self::Interrupt,
         Self::Compaction,
         Self::TagCheckpoint,
+        Self::MessageCheckpoint,
         Self::SessionChange,
         Self::Retention,
         Self::SessionRetention,
@@ -227,6 +230,7 @@ impl Capability {
             Self::Interrupt => groups::INTERRUPT,
             Self::Compaction => groups::COMPACTION,
             Self::TagCheckpoint => groups::TAG_CHECKPOINT,
+            Self::MessageCheckpoint => groups::MESSAGE_CHECKPOINT,
             Self::SessionChange => groups::SESSION_CHANGE,
             Self::Retention => groups::RETENTION,
             Self::SessionRetention => groups::SESSION_RETENTION,
@@ -1572,6 +1576,71 @@ pub trait LlmRunnerSubject: Harness {
         _cut: bool,
     ) -> Result<(), HarnessError> {
         Err(HarnessError::new("seeding host history is not implemented"))
+    }
+
+    /// Prepare a moved host session before its first send, and a scripted
+    /// compaction provider answering its permanent Setup checkpoint. Seed
+    /// exactly 42 counted messages before the retained boundary and a tag
+    /// checkpoint of 500. Certify the last folded message from host bytes,
+    /// not from runner replies. Return the checkpoint and first-send plan
+    /// fields naming that provider. Hold model answers until
+    /// `release_compaction_model`, as `install_compaction_setup` does.
+    /// `CutRemoved` removes the retained boundary but keeps the folded
+    /// message; the runner must adopt immediately after it. The missing
+    /// counter scenarios instead reload a native marker with that counter
+    /// absent, no Setup checkpoint fallback and no recoverable runner state.
+    /// They must refuse rather than manufacture zero. `None` means the
+    /// adapter cannot prepare the fixture, making the case Inapplicable.
+    async fn message_checkpoint_fixture(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _scenario: crate::message_checkpoint::Scenario,
+    ) -> Result<Option<crate::message_checkpoint::Fixture>, HarnessError> {
+        Ok(None)
+    }
+
+    /// Plant a complete in-effect marker at the adoption cut before the
+    /// session's first Setup after runner state loss, with tag checkpoint
+    /// 500, message count 42 and a certified head cut. No earlier stored
+    /// Setup checkpoint may exist: the runner must recover from the marker.
+    /// The provider's permanent checkpoint stays in its held Setup answer
+    /// until the suite releases it; this is not native-cut descent.
+    /// Return the marker's checkpoint facts and a tag-rendering first-send
+    /// plan, so the cases exercise any Setup-time tag-numbering read gate.
+    /// Configure the provider and held model answers as for
+    /// `message_checkpoint_fixture`. The suite holds the first Setup using
+    /// the existing Setup-hold hooks. `None` makes the case Inapplicable.
+    async fn plant_message_checkpoint_marker(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<Option<crate::message_checkpoint::Fixture>, HarnessError> {
+        Ok(None)
+    }
+
+    /// Read the newest native marker's actual checkpoint key from the host
+    /// after a cut. Do not reconstruct it from a head or configured answer.
+    /// `None` means observation is unsupported; `Some(null)` means the key
+    /// is absent and fails the case that requires it.
+    async fn native_message_checkpoint(
+        &self,
+        _session: &str,
+    ) -> Result<Option<Value>, HarnessError> {
+        Ok(None)
+    }
+
+    /// Insert a finished host summary row (`summary: true`, `finish:
+    /// "stop") after the newest counted message without changing the
+    /// counted rows. Return its host id so the suite can prove no read
+    /// serves it. Called on both adoption and native-cut lineages, with
+    /// no run active. `None` makes the exclusion case Inapplicable.
+    async fn insert_uncounted_host_summary(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<Option<String>, HarnessError> {
+        Ok(None)
     }
 
     /// Put into `session`'s stored history, after its newest message, a

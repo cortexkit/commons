@@ -186,6 +186,10 @@ pub fn number_parts(checkpoint: u64, parts: &[RenderedPart]) -> Vec<Option<u64>>
 pub struct MarkerCheckpoint {
     pub tag_checkpoint: u64,
     pub session: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_count: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_cut: Option<crate::read::HeadCut>,
 }
 
 impl MarkerCheckpoint {
@@ -193,7 +197,20 @@ impl MarkerCheckpoint {
         Self {
             tag_checkpoint,
             session: session.into(),
+            message_count: None,
+            head_cut: None,
         }
+    }
+
+    /// Add both message-lineage members for a `message_checkpoint` runner.
+    pub fn with_message_checkpoint(
+        mut self,
+        message_count: u64,
+        head_cut: crate::read::HeadCut,
+    ) -> Self {
+        self.message_count = Some(message_count);
+        self.head_cut = Some(head_cut);
+        self
     }
 }
 
@@ -247,8 +264,8 @@ impl Marker {
 }
 
 /// A checkpoint a compaction provider puts on its Setup answer for a
-/// session it moved from standalone Magic Context: `{tag_checkpoint, cut}`,
-/// `cut` the message the standalone marker cuts at. Permanent: it rides
+/// session it moved from a standalone compaction tool. `cut` is the first
+/// retained message. Permanent: it rides
 /// every `ready` Setup answer for that session and never
 /// changes.
 ///
@@ -258,6 +275,15 @@ impl Marker {
 pub struct SetupCheckpoint {
     pub tag_checkpoint: u64,
     pub cut: String,
+    /// Counted messages before `cut`, frozen at the move. Sent with
+    /// `head_cut` only to runners declaring `message_checkpoint`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_count: Option<u64>,
+    /// Certified description of the last folded message. `written_at` is
+    /// a JSON u64 in milliseconds since the Unix epoch; the digest uses
+    /// the runner's ordinary full stored-content digest procedure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_cut: Option<crate::read::HeadCut>,
 }
 
 impl SetupCheckpoint {
@@ -265,7 +291,20 @@ impl SetupCheckpoint {
         Self {
             tag_checkpoint,
             cut: cut.into(),
+            message_count: None,
+            head_cut: None,
         }
+    }
+
+    /// Add the two optional members together, for `message_checkpoint` only.
+    pub fn with_message_checkpoint(
+        mut self,
+        message_count: u64,
+        head_cut: crate::read::HeadCut,
+    ) -> Self {
+        self.message_count = Some(message_count);
+        self.head_cut = Some(head_cut);
+        self
     }
 }
 

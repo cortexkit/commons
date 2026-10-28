@@ -160,7 +160,7 @@ pub fn carries_pruned_content(kind: &str, part: &Value) -> bool {
 }
 
 /// The `format` names an `owned-broca` `provider_state {format, data}`
-/// carries (CONTRACT §9.14.1). Only [`SIGNED`] formats hold a signature in
+/// carries (CONTRACT §9.14.1). Only [`provider_state_formats::SIGNED`] formats hold a signature in
 /// `data`; a format not listed here is not a signature, and a runner
 /// classifies a new one in the contract before it prunes it.
 pub mod provider_state_formats {

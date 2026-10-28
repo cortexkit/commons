@@ -442,6 +442,7 @@ impl Module {
             // (a cut's) fails that Setup: such a lineage continues the old
             // lineage's numbering.
             CompactionSetup::ReadyWithCheckpoint { .. }
+            | CompactionSetup::ReadyWithMessageCheckpoint { .. }
                 if sess.pending_descent.is_some()
                     && self.world.defects.lineage
                         != history::LineageDefect::CheckpointOnDescentApplied =>
@@ -474,6 +475,20 @@ impl Module {
                 self.commit(
                     session,
                     json!({"kind":"compaction_fold","message":encode(&m)}),
+                )
+            }
+            CompactionSetup::ReadyWithMessageCheckpoint {
+                initial: m,
+                checkpoint,
+            } => {
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_message", "setup":true,
+                    "message":encode(&m), "checkpoint":checkpoint, "lineage":sess.lineage}),
+                )?;
+                self.commit(
+                    session,
+                    json!({"kind":"compaction_fold", "message":encode(&m)}),
                 )
             }
             // An answer kind this fake does not know fails Setup, as a

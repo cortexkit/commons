@@ -165,6 +165,7 @@ shipping runner with this document.
 | `system_text_default` | `session.send` with preset-less `system_text` plan items | §10.1 |
 | `compaction` | `session.read`, `session.resolve` (it requires `tags`), and the runner half of compaction-provider 0.3.0 §3 | §11.1 |
 | `tag_checkpoint` | `session.read`, `session.resolve` (it requires `compaction`), and honouring a Setup checkpoint | §9.6 |
+| `message_checkpoint` | message and tag anchors in Setup and native marker checkpoints (requires `tag_checkpoint`) | §4.8, §9.6 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
 | `session_retention` | `session.send`, `session.head`, `session.release`; extends `session.adopt` where declared | §9.14 |
@@ -316,6 +317,10 @@ shipping runner with this document.
   name (`tag_checkpoint_without_compaction`), because the checkpoint rides
   the compaction provider's Setup answer. It lists `compaction`'s ops and
   adds none (§9.6).
+- [pinned] `message_checkpoint` requires `tag_checkpoint` and lists the
+  same ops, adding none. `check_describe` refuses it alone by name
+  (`message_checkpoint_without_tag_checkpoint`). Its message-lineage
+  requirements do not apply to runners that omit the group (§9.6).
 - [pinned] A compaction provider requires `compaction` of any runner it
   serves. A session starter never pairs a plan's `compaction_item` with a
   runner that lacks it, and the runner refuses such a plan at admission
@@ -381,6 +386,17 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   `invalid_params` naming it, because a missing cursor changes the question
   (a misspelled `from_ordinal` would otherwise get the newest page).
 
+- [pinned] At the adoption cut, a runner declaring `message_checkpoint`
+  answers `session.read` for the lineage being set up while its Setup call
+  for that lineage is outstanding, without waiting on that Setup, its lock,
+  or any gate it holds. It serves the lineage from its `first_ordinal`
+  onward and never below it. This lets the provider read surviving rows to
+  build its Setup answer when a moved session recovers at the adoption cut,
+  after a revert removed `cut` or the runner lost its state. Native-cut
+  descent does not need this recovery read: the provider renders kept rows
+  from what it held under the parent lineage. The existing rule that a
+  native-cut Setup never interrupts readers is unchanged (§9.6).
+
 ### 4.2 The page
 
 `{messages, lineage_id, next_from_ordinal?, head?, pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
@@ -423,7 +439,12 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   model (a revert, an edited part) and a recovery that drops or rewrites a
   written message (§14, property 4) start a new lineage, so reads of the old
   one are refused `lineage_changed`; changed bytes never appear under the
-  same lineage except for declared archive pruning (§9.14.1). A recovery that only appends, such as closing a never-sent
+  same lineage except for declared archive pruning (§9.14.1).
+  This includes a change made while the runner was not running. A runner
+  whose host can change stored messages while the runner is stopped checks,
+  when it starts and before its next model call, the messages it froze
+  against the host, and starts a new lineage for any difference.
+  A recovery that only appends, such as closing a never-sent
   call with its never-executed result (§14, property 4, shape (b)), keeps
   the lineage, because no byte already written changes. A reader may treat
   changed bytes under one lineage as a runner defect, except for the
@@ -572,13 +593,22 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   (the digest a cut lineage's `descends_from` names, compaction-provider
   §5.1) and its creation time. A cut made before the runner numbered
   anything, in a host's history before the runner adopted the session,
-  names the host's message, and its lineage's `first_ordinal` may be 0.
+  names the host's message. Other hosts' own pre-adoption compaction,
+  without a message checkpoint, may start at 0.
   That message is the last one the host's compaction folded away: the
   newest message the host no longer carries to the model. It is never a
   message the host keeps visible after compacting, such as its compaction
   marker or the summary that marker shows, so a consumer that drops
   everything up to `cut` never drops the summary with it. A
   lineage with no cut carries no `cut`, and its `first_ordinal` is 0.
+- [pinned] **The adoption cut (`message_checkpoint` only).** For a session
+  moved from a standalone compaction tool, the Setup checkpoint's
+  `message_count` and `head_cut` identify the adoption cut. It survives
+  exactly while `head_cut.mid` survives. A runner declaring
+  `message_checkpoint` MUST start a lineage at that cut with
+  `first_ordinal = message_count` and `session.head.cut = head_cut`, even
+  when `cut` or the marker rows are gone. A revert removing
+  `head_cut.mid` or an earlier message leaves no adoption cut.
 - [pinned] `first_ordinal` is the current lineage's first ordinal (§4.5):
   0 for a lineage no cut started, the cut's first retained ordinal for one a
   cut started. It is present whenever `lineage_id` is, and is at most one
@@ -799,6 +829,11 @@ provider 0.5.0 §6) and to readers only by `session.history` (§4.6).
   applied compaction view's replacements stand for the whole transcript
   (the view's `cut`, compaction-provider §6, §9); the new lineage's first
   ordinal is the cut's first retained ordinal, `cut.through_ordinal + 1`.
+- [pinned] For a runner declaring `message_checkpoint`, the adoption cut
+  follows §4.3: the first retained ordinal is `message_count`, not 0,
+  including after a revert that keeps `head_cut.mid` but removes `cut`.
+  The runner MUST NOT read, serve or journal messages at or before that
+  adoption cut to recover the counters or the certified cut description.
 - [pinned] `lineage_id` changes at a cut, at a revert, and at a recovery
   that drops or rewrites written messages (§14, property 4, shape (a)), and
   at nothing else. A runner may derive the id from its own storage identity
@@ -1025,6 +1060,22 @@ display-ready row for an app's reader on a runner declaring
 - [pinned] Nothing new rides on stored message bodies or on the default
   `session.read` entry: everything this section adds is on the display row
   or the request.
+
+### 4.8 Counting messages per host
+
+- [pinned] A runner declaring `message_checkpoint` MUST use the host's
+  counted-message order for message ordinals and `message_count`. For
+  **OpenCode 1**, rows are ordered by `(time_created, id)`, ascending.
+  A row with `summary` equal to JSON `true` or the number `1` and `finish`
+  equal to `"stop"` is not counted. Every other row counts, including a row
+  whose JSON is malformed. These are message counters, not §9.6's part tags.
+- [pinned] A runner declaring `message_checkpoint` MUST NOT serve on any
+  read a host row that these rules do not count, including the marker's own
+  finished summary row. This applies on every served lineage, at adoption
+  and native cuts alike: served ordinals equal the counted-message positions
+  everywhere, so a native cut's `t + 1` matches the messages the runner holds.
+  Runners without the group keep their existing reads.
+- [pinned] Other hosts receive their counting rules when they are adopted.
 
 ## 5. `dispatch_attribution`
 
@@ -2608,6 +2659,72 @@ part's key and its content digest, never a number.
 
 **`tag_checkpoint`: the Setup checkpoint.**
 
+**`message_checkpoint`: two anchors (opt-in).**
+
+- [pinned] Every rule in this block applies only to runners declaring
+  `message_checkpoint`, which requires `tag_checkpoint`; runners without
+  it, including existing `tag_checkpoint` runners, keep the rules below
+  and their existing conformance verdicts.
+- [pinned] A Setup checkpoint is `{tag_checkpoint, cut, message_count?,
+  head_cut?}`. The new members are sent together or neither, only to a
+  runner declaring `message_checkpoint`. `message_count` is a `u64`: the
+  count of host messages before `cut`, frozen at the move, both `cut`'s
+  ordinal and the adoption lineage's `first_ordinal`. `head_cut` reuses
+  `read::HeadCut`: `{mid, digest, written_at}` for the counted message
+  immediately before `cut`, the last message the move folded. Its digest
+  uses the ordinary §4.2 full stored-content digest procedure; `written_at`
+  is the host creation time as a JSON `u64` in milliseconds since the Unix
+  epoch, not a date string. The provider certifies it offline.
+  For a moved session on a runner declaring the group, a Setup answer
+  carrying the checkpoint includes both members.
+- [pinned] A runner declaring `message_checkpoint` MUST keep the message
+  boundary separate from the tag anchor. Falling back to an older tag
+  anchor or the session start for tags never moves a surviving message
+  lineage's `first_ordinal`. When `cut` is gone but `head_cut.mid`
+  survives, it MUST anchor both counters immediately after `head_cut.mid`:
+  the next counted message has ordinal `message_count`, and the next
+  counted part has tag `tag_checkpoint + 1` (checked for overflow). It
+  never serves `head_cut.mid` or earlier messages on lineage reads, or holds
+  them in its lineage window. This overrides
+  the session-start fallback for moved sessions only. If `head_cut.mid`
+  is also gone, no adoption cut remains; the tag session-start fallback
+  still applies, but the provider refuses Setup before a model call.
+- [pinned] A runner declaring `message_checkpoint` MUST write
+  `message_count` and `head_cut` beside `tag_checkpoint` and `session` on
+  every native marker key, atomically with the marker. For a native cut
+  through ordinal `t`, `message_count = t + 1`, using checked arithmetic
+  (`tags::next_message_count`); it MUST refuse a cut whose addition
+  overflows. `head_cut` describes message `t`, using the same digest and
+  timestamp rules as Setup.
+- [pinned] For a runner declaring `message_checkpoint`, §4.8's uncounted
+  rows, including the marker's finished summary row, MUST NOT appear on
+  any read, on adoption or native lineages. Message ordinals are contiguous
+  over the counted rows; a native marker's `t + 1` uses that same order.
+- [pinned] On reload, a runner declaring `message_checkpoint` MUST restore
+  `first_ordinal` and `session.head.cut` from the marker without walking
+  history. A marker whose key is lost supplies only the existing tag
+  fallback, never a reason to move the current message lineage to an older
+  cut. It MUST NOT interpret a missing message or tag counter as 0; an
+  incomplete checkpoint cannot restore a message lineage. Unknown or
+  inconsistent head or marker state fails Setup closed by name.
+- [pinned] A runner declaring `message_checkpoint` answers `session.head`
+  while its own Setup call for that session is outstanding, without waiting
+  on that Setup, its lock, or any gate the outstanding Setup holds. It takes
+  `first_ordinal` and `cut` from the newest in-effect marker key carrying
+  `message_count` and `head_cut`, or else from the checkpoint it stored from
+  an earlier Setup answer. When it has neither, `session.head` carries no
+  cut and `first_ordinal` 0, and the provider refuses the moved session as
+  compaction-provider §4's head check specifies. The provider's reverse
+  `session.head` uses compaction-provider §4 `compaction.setup`'s existing
+  reverse-call rule: “For calls about the conversation—`session.read`,
+  `session.head`, `session.resolve`, sends into it, and reminders—the provider
+  opens its own route to the runner using exactly the identity above.”
+- [pinned] A moved session on a runner without `message_checkpoint` is
+  refused at Setup with terminal `message_checkpoint_unsupported` (the
+  existing `tag_checkpoint_unsupported` still applies without that group).
+
+**Setup lifetime and legacy tag-only fallback.**
+
 - [pinned] A runner that declares `tag_checkpoint` (it requires
   `compaction`, §3) honours a Setup checkpoint `{tag_checkpoint, cut}`
   (`tags::SetupCheckpoint`) on its compaction provider's Setup answer
@@ -2618,6 +2735,9 @@ part's key and its content digest, never a number.
   the session start with that number, on a new lineage. The checkpoint is
   permanent for the session, needs no report back, and survives a lost
   marker key and runner restarts.
+  The tag-only fallback in this paragraph is unchanged for runners without
+  `message_checkpoint`; the opt-in two-anchor block above overrides it for
+  moved sessions on runners declaring that group.
 - [pinned] Setup runs once per lineage, before the lineage's first model
   call (§11.1), so each Setup checkpoint the runner records belongs to
   exactly one lineage: a lineage's numbering is anchored only by the
@@ -2639,6 +2759,10 @@ part's key and its content digest, never a number.
 - [pinned] While a tag-rendering run waits for the answer to a Setup
   without `descends_from`, whose checkpoint may move the numbering anchor,
   a runner may refuse `session.read` and `session.resolve` `transient`.
+  The adoption-cut `session.read` rule for a runner declaring
+  `message_checkpoint` (§4.1) is an exception: that read must answer while
+  Setup is outstanding. This changes neither the `session.resolve`
+  allowance nor the rules for runners without `message_checkpoint`.
   It never does so while a Setup with `descends_from` (a cut's) is pending:
   a cut's Setup never interrupts readers.
 - [pinned] A compaction provider refuses Setup for a session it moved from

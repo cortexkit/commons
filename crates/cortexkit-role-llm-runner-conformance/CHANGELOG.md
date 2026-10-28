@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.15.19
+
+- Add eight named `message_checkpoint` cases for nonzero adoption numbering,
+  certified head-cut equality, the anchor after a surviving folded message,
+  native marker message and tag counters, missing-counter refusal, and
+  exclusion of uncounted host summaries with contiguous counted ordinals
+  on adoption and native lineages, and marker-derived head metadata while
+  the first Setup is outstanding. Bound the head call so a deadlock fails
+  by name; faulty fakes cover both session-start metadata and waiting on Setup.
+  During adoption-cut Setup, a bounded transcript read starts at
+  `first_ordinal` and refuses earlier rows. Faulty fakes cover both a read
+  waiting on Setup and a read that serves rows below the lineage boundary.
+  Without the describe group each is Inapplicable, preserving old verdicts.
+- Add defaulted moved-session fixture and actual native-marker observation
+  hooks; unavailable hooks make their cases Inapplicable. Add a deliberately
+  faulty fake runner for each named check. Pin runner 0.7.17 and require
+  compaction-provider 0.7.8.
+
 ## 0.15.18
 
 - A subject that cannot configure enforced structured output may refuse

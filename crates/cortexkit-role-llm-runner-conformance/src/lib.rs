@@ -103,6 +103,7 @@ mod last_run_error;
 mod lineage;
 mod live;
 mod media;
+pub mod message_checkpoint;
 mod output_refs;
 pub mod progress;
 mod report;

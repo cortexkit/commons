@@ -21,7 +21,8 @@ the existing `head.json` remains byte-identical, including its older error
 head without retry metadata.
 
 `archive-prunes-reasoning.json` pairs original and served parts with actual
-pages and matching original JCS byte lengths and digests. It covers required
+pages and matching original JCS (JSON Canonicalization Scheme, RFC 8785) byte
+lengths and digests. It covers required
 reasoning text/data emptied rather than removed, optional signatures removed,
 opaque item JSON retaining a readable summary, tool-call arguments unchanged,
 and a required `gemini` provider state whose signed `data` is emptied. The
@@ -461,3 +462,12 @@ results consume no number. The next part follows the whole result.
 Only the existing `minimal` event gains the member; `full` still demonstrates
 that a host-referenced event can omit it. Refusal vectors cover length,
 characters and absence of both identities.
+
+`message-checkpoint.json` pins optional Setup checkpoint members and the
+legacy decoder projection, the full inline sample message and its exact JCS
+UTF-8 bytes, ordinary lowercase SHA-256 digest and `head_cut.written_at`
+(JSON u64 milliseconds since the Unix epoch). It also pins OpenCode 1
+counting, including finished summaries and malformed JSON, and every revert
+anchor outcome: after the retained cut, cut removed with folded message kept,
+folded message removed, marker rows lost, and inconsistent head state.
+The message-lineage rules apply only to `message_checkpoint` runners.

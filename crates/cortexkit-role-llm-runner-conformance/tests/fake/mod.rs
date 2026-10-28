@@ -70,6 +70,7 @@ mod display;
 mod held_calls;
 mod history;
 mod media;
+pub mod message_checkpoint;
 mod output_refs;
 mod rich_ui;
 mod session_change;
@@ -350,6 +351,7 @@ pub struct Defects {
     /// The compaction provider's Setup checkpoint is ignored: numbering
     /// starts at the session start.
     pub tags_setup_checkpoint_ignored: bool,
+    pub message_checkpoint: message_checkpoint::Defect,
     /// A send into, or an adoption of, a fork of a managed session is
     /// served instead of refused `fork_unsupported`.
     pub fork_accepted: bool,
@@ -617,6 +619,7 @@ struct World {
     /// Each session's history in the host before the runner numbered
     /// anything: the host's own storage, outside the runner's log.
     host_prefixes: Mutex<BTreeMap<String, Vec<history::HostEntry>>>,
+    message_checkpoints: Mutex<BTreeMap<String, message_checkpoint::Seed>>,
     /// Sessions whose host history ends in a cut the host made before the
     /// runner adopted them.
     host_cuts: Mutex<BTreeSet<String>>,
@@ -940,6 +943,9 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    moved_head: Option<cortexkit_role_llm_runner::read::HeadCut>,
+    planted_marker: Option<cortexkit_role_llm_runner::tags::Marker>,
+    native_message_key: Option<Value>,
     incarnation: Option<String>,
     session_usage: Option<cortexkit_role_llm_runner::usage::SessionUsage>,
     head_model: Option<cortexkit_role_llm_runner::read::HeadModel>,
@@ -1529,6 +1535,7 @@ impl Module {
         if kind == "start" {
             if let Some(sess) = sessions.get_mut(&session) {
                 history::adopt_host_cut(sess, &self.world);
+                message_checkpoint::adopt(sess, &self.world);
             }
         }
         if kind == "fork" {
@@ -1568,6 +1575,14 @@ impl Module {
             });
         }
         match kind.as_str() {
+            "uncounted_host_summary" => {
+                if self.world.defects.message_checkpoint
+                    == message_checkpoint::Defect::ServesSummaryRow
+                {
+                    let ordinal = sess.push(json!({"role":"assistant", "summary":true, "finish":"stop", "content":[{"type":"text", "text":"host summary row"}]}), "", Vec::new());
+                    sess.at_mut(ordinal).mid = record["mid"].as_str().unwrap().to_owned();
+                }
+            }
             "head-model-switch" => {
                 sess.head_model = Some(serde_json::from_value(record["model"].clone()).unwrap());
             }
@@ -2780,10 +2795,15 @@ impl Module {
                 }
             }
         }
+        let checkpoint_read = self.world.serves(groups::MESSAGE_CHECKPOINT)
+            && (method == ops::SESSION_HEAD
+                || (method == ops::SESSION_READ
+                    && message_checkpoint::marker_setup_outstanding(&self.world, session)));
         if matches!(
             method,
             ops::SESSION_READ | ops::SESSION_HEAD | ops::SESSION_RESOLVE
-        ) && history::reads_held(self, session)
+        ) && !checkpoint_read
+            && history::reads_held(self, session)
         {
             return Ok(refuse(errors::TRANSIENT, None));
         }
@@ -3259,6 +3279,12 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if message_checkpoint::refuse_missing_counter(&self.world, session) {
+            return Ok(Reply::Error(ErrorBody::new(
+                "compaction_unavailable",
+                "message_checkpoint_missing_counter",
+            )));
+        }
         if let Some(reply) = self.admit_system_text_default(session, &params) {
             return Ok(reply);
         }
@@ -4009,6 +4035,7 @@ impl Module {
         if end < all.len() {
             page = page.with_next_from_ordinal(all[end].ordinal);
         }
+        message_checkpoint::inject_below_first(sess, &self.world, &request, &mut page);
         media::page(page, request.media, cap, &self.world.defects)
     }
 
@@ -4252,6 +4279,15 @@ impl Module {
         if let Some(cut) = history::head_cut(sess, &self.world.defects) {
             head = head.with_cut(cut);
         }
+        if let Some(cut) = &sess.moved_head {
+            head = head.with_cut(cut.clone());
+        }
+        if self.world.defects.message_checkpoint == message_checkpoint::Defect::SetupHeadFromStart
+            && message_checkpoint::marker_setup_outstanding(&self.world, session)
+        {
+            head.first_ordinal = Some(0);
+            head.cut = None;
+        }
         if let Some(last) = sess.messages.last() {
             head = head.with_last_ordinal(last.ordinal);
         }
@@ -4401,7 +4437,7 @@ impl Module {
         if run.state == "completed" {
             let ordinal = run.final_ordinal.unwrap_or_default();
             let sess = &sessions[session];
-            let message = &sess.messages[ordinal as usize];
+            let message = &sess.messages[(ordinal - sess.base) as usize];
             result = result.with_final_message(FinalMessage {
                 ordinal,
                 mid: message.mid.clone(),
@@ -5065,6 +5101,21 @@ impl RunnerRoute for FakeRoute {
             .lock()
             .unwrap()
             .push((case, method.to_owned()));
+        let completed = match method {
+            ops::SESSION_HEAD => message_checkpoint::head_wait(world, &self.session),
+            ops::SESSION_READ => message_checkpoint::read_wait(world, &self.session),
+            _ => None,
+        };
+        if let Some(completed) = completed {
+            // This faulty request waits for the Setup answer, without
+            // blocking the executor that must enforce the case timeout.
+            while !completed.load(Ordering::SeqCst) {
+                if !self.module.alive.load(Ordering::SeqCst) {
+                    return Err(RouteFailure::new("the module is not running"));
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }
         self.module
             .handle(&self.stamp, &self.session, method, params)
     }
@@ -5153,6 +5204,7 @@ pub struct FakeSubject {
     /// The adapter can give a session host history before its first send
     /// (`seed_host_history`), as a runner over a host that adopted it.
     pub host_prefix_hook: bool,
+    pub message_checkpoint_hooks: bool,
     /// The adapter can seed finished messages behind a cut
     /// (`seed_session_history`), for the cost case.
     pub seed_hook: bool,
@@ -5271,6 +5323,7 @@ impl FakeSubject {
             pause_for: None,
             turn_system: true,
             host_prefix_hook: false,
+            message_checkpoint_hooks: true,
             seed_hook: false,
             host_prefix_everywhere: 0,
             holds_reads_during_setup: false,
@@ -5301,6 +5354,7 @@ impl FakeSubject {
                     standalone_in_process: self.standalone_in_process,
                     host_prefix_everywhere: self.host_prefix_everywhere,
                     host_prefixes: Mutex::new(BTreeMap::new()),
+                    message_checkpoints: Mutex::new(BTreeMap::new()),
                     host_cuts: Mutex::new(BTreeSet::new()),
                     holds_reads_during_setup: self.holds_reads_during_setup,
                     setup_holds: Mutex::new(BTreeMap::new()),
@@ -5887,6 +5941,68 @@ impl LlmRunnerSubject for FakeSubject {
         Ok(())
     }
 
+    async fn message_checkpoint_fixture(
+        &self,
+        _handle: &FakeHandle,
+        session: &str,
+        scenario: cortexkit_role_llm_runner_conformance::message_checkpoint::Scenario,
+    ) -> Result<
+        Option<cortexkit_role_llm_runner_conformance::message_checkpoint::Fixture>,
+        HarnessError,
+    > {
+        Ok(self
+            .message_checkpoint_hooks
+            .then(|| message_checkpoint::fixture(self, session, scenario)))
+    }
+
+    async fn native_message_checkpoint(
+        &self,
+        session: &str,
+    ) -> Result<Option<Value>, HarnessError> {
+        if !self.message_checkpoint_hooks {
+            return Ok(None);
+        }
+        let modules = self.modules.lock().unwrap();
+        let key = modules.iter().rev().find_map(|module| {
+            module
+                .sessions
+                .lock()
+                .unwrap()
+                .get(session)
+                .and_then(|sess| sess.native_message_key.clone())
+        });
+        Ok(Some(key.unwrap_or(Value::Null)))
+    }
+
+    async fn plant_message_checkpoint_marker(
+        &self,
+        _handle: &FakeHandle,
+        session: &str,
+    ) -> Result<
+        Option<cortexkit_role_llm_runner_conformance::message_checkpoint::Fixture>,
+        HarnessError,
+    > {
+        Ok(self
+            .message_checkpoint_hooks
+            .then(|| message_checkpoint::marker_fixture(self, session)))
+    }
+
+    async fn insert_uncounted_host_summary(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<Option<String>, HarnessError> {
+        if !self.message_checkpoint_hooks {
+            return Ok(None);
+        }
+        let mid = format!("{session}.uncounted-summary");
+        handle
+            .0
+            .commit(session, json!({"kind":"uncounted_host_summary", "mid":mid}))
+            .map_err(|Killed| HarnessError::new("killed inserting host summary"))?;
+        Ok(Some(mid))
+    }
+
     async fn seed_untimed_tool_call(
         &self,
         handle: &FakeHandle,
@@ -5928,7 +6044,9 @@ impl LlmRunnerSubject for FakeSubject {
             .lock()
             .unwrap()
             .insert(session.into(), history::SetupHold::Released);
-        self.drive_compaction_modules(session)
+        let result = self.drive_compaction_modules(session);
+        message_checkpoint::setup_returned(&self.world(), session);
+        result
     }
 
     fn holds_reads_during_setup(&self) -> bool {

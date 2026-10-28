@@ -45,6 +45,8 @@ pub mod problem_names {
     /// The answer declares `tag_checkpoint` without `compaction`, whose
     /// Setup answer carries the checkpoint.
     pub const TAG_CHECKPOINT_WITHOUT_COMPACTION: &str = "tag_checkpoint_without_compaction";
+    pub const MESSAGE_CHECKPOINT_WITHOUT_TAG_CHECKPOINT: &str =
+        "message_checkpoint_without_tag_checkpoint";
     /// The answer declares `run_cause` without `live_events`, whose
     /// `run_started` event carries the run's cause.
     pub const RUN_CAUSE_WITHOUT_LIVE_EVENTS: &str = "run_cause_without_live_events";
@@ -549,6 +551,13 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     {
         problems.push(DescribeProblem::Undecodable(
             problem_names::TAG_CHECKPOINT_WITHOUT_COMPACTION.into(),
+        ));
+    }
+    if describe.declares(capabilities::MESSAGE_CHECKPOINT)
+        && !describe.declares(capabilities::TAG_CHECKPOINT)
+    {
+        problems.push(DescribeProblem::Undecodable(
+            problem_names::MESSAGE_CHECKPOINT_WITHOUT_TAG_CHECKPOINT.into(),
         ));
     }
     if describe.declares(capabilities::RUN_CAUSE) && !describe.declares(capabilities::LIVE_EVENTS) {
@@ -1204,6 +1213,25 @@ mod tags_and_tool_calls_tests {
             check_describe(&file["without_compaction"]),
             Err(vec![DescribeProblem::Undecodable(
                 problem_names::TAG_CHECKPOINT_WITHOUT_COMPACTION.into()
+            )])
+        );
+    }
+
+    #[test]
+    fn message_checkpoint_requires_tag_checkpoint() {
+        let mut value = vectors::load("tag-checkpoint-describe.json")["accept"].clone();
+        value["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .push("message_checkpoint".into());
+        assert!(check_describe(&value)
+            .unwrap()
+            .declares(capabilities::MESSAGE_CHECKPOINT));
+        value["capabilities"] = serde_json::json!(["message_checkpoint"]);
+        assert_eq!(
+            check_describe(&value),
+            Err(vec![DescribeProblem::Undecodable(
+                problem_names::MESSAGE_CHECKPOINT_WITHOUT_TAG_CHECKPOINT.into()
             )])
         );
     }

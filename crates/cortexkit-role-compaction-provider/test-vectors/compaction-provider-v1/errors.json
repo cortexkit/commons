@@ -45,6 +45,21 @@
       "retryable": false
     },
     {
+      "code": "message_checkpoint_unsupported",
+      "named": true,
+      "retryable": false
+    },
+    {
+      "code": "moved_session_reverted_below_import",
+      "named": true,
+      "retryable": false
+    },
+    {
+      "code": "moved_session_head_mismatch",
+      "named": true,
+      "retryable": false
+    },
+    {
       "code": "setup_identity_mismatch",
       "named": true,
       "retryable": false
@@ -96,6 +111,21 @@
     },
     {
       "code": "tag_checkpoint_unsupported",
+      "retryable": false,
+      "ends_run_after_setup": true
+    },
+    {
+      "code": "message_checkpoint_unsupported",
+      "retryable": false,
+      "ends_run_after_setup": true
+    },
+    {
+      "code": "moved_session_reverted_below_import",
+      "retryable": false,
+      "ends_run_after_setup": true
+    },
+    {
+      "code": "moved_session_head_mismatch",
       "retryable": false,
       "ends_run_after_setup": true
     },

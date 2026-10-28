@@ -191,8 +191,8 @@ pub fn rendered_order(messages: &[Msg]) -> Vec<usize> {
 }
 
 /// The numbering a fresh computation gives: empty unless the session's plan
-/// renders tags; otherwise the Setup checkpoint at its cut, when the runner
-/// honours one and it is there, or the session start.
+/// renders tags; otherwise the newest usable marker, the Setup checkpoint
+/// when honoured, or the session start supplies the anchor.
 pub fn fresh(sess: &Sess, defects: &Defects, honour_checkpoint: bool) -> BTreeMap<Key, u64> {
     if !sess.render_tags && !defects.tags_numbered_without_render_tags {
         return BTreeMap::new();
@@ -212,6 +212,9 @@ pub fn fresh(sess: &Sess, defects: &Defects, honour_checkpoint: bool) -> BTreeMa
             }
             Some(marker)
         })
+        // A marker planted before adoption is a host anchor, not an earlier
+        // Setup answer. Later markers in the transcript take precedence.
+        .chain(sess.planted_marker.iter().cloned())
         .collect();
     let setup = sess
         .compaction

@@ -1,0 +1,38 @@
+{
+  "setup": [
+    {"tag_checkpoint": 500, "cut": "u"},
+    {"tag_checkpoint": 500, "cut": "u", "message_count": 42,
+      "head_cut": {"mid": "p", "digest": "189f89a46681c05dac35fe71f4e46c1a8cb5a0c0882b1d5f4cc80ce3f4582ca9", "written_at": 1793145600123}}
+  ],
+  "worked_head_cut": {
+    "message": {"role": "user", "content": [{"type": "text", "text": "Folded history."}]},
+    "jcs_utf8": "{\"content\":[{\"text\":\"Folded history.\",\"type\":\"text\"}],\"role\":\"user\"}",
+    "head_cut": {"mid": "p", "digest": "189f89a46681c05dac35fe71f4e46c1a8cb5a0c0882b1d5f4cc80ce3f4582ca9", "written_at": 1793145600123},
+    "written_at_unit": "JSON u64 milliseconds since the Unix epoch"
+  },
+  "opencode1": {
+    "rows": [
+      {"time_created": 12, "id": "d", "data": "{malformed"},
+      {"time_created": 10, "id": "b", "data": "{\"summary\":true,\"finish\":\"stop\"}"},
+      {"time_created": 10, "id": "a", "data": "{\"role\":\"user\"}"},
+      {"time_created": 11, "id": "c", "data": "{\"summary\":1,\"finish\":\"stop\"}"},
+      {"time_created": 13, "id": "e", "data": "{\"summary\":true,\"finish\":\"length\"}"},
+      {"time_created": 14, "id": "f", "data": "{\"summary\":false,\"finish\":\"stop\"}"}
+    ],
+    "counted_ids": ["a", "d", "e", "f"],
+    "message_count": 4
+  },
+  "anchors": [
+    {"name": "revert_lands_after_cut", "cut_survives": true, "head_survives": true,
+      "position": {"position": "before", "mid": "u"}, "first_ordinal": 42},
+    {"name": "revert_removes_cut_keeps_folded_message", "cut_survives": false, "head_survives": true,
+      "position": {"position": "after", "mid": "p"}, "first_ordinal": 42},
+    {"name": "revert_removes_folded_message_or_earlier", "cut_survives": false, "head_survives": false,
+      "position": {"position": "session_start"}, "first_ordinal": null,
+      "setup_refusal": "moved_session_reverted_below_import"},
+    {"name": "marker_rows_lost_cut_survives", "cut_survives": true, "head_survives": true,
+      "position": {"position": "before", "mid": "u"}, "first_ordinal": 42},
+    {"name": "unlisted_inconsistent_head", "cut_survives": true, "head_survives": false,
+      "error": "head_mismatch", "setup_refusal": "moved_session_head_mismatch"}
+  ]
+}

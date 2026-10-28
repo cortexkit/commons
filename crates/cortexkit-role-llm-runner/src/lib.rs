@@ -275,6 +275,9 @@ pub mod capabilities {
     /// declaring it without `compaction` is malformed. Adds no op of its
     /// own.
     pub const TAG_CHECKPOINT: &str = "tag_checkpoint";
+    /// Message-lineage checkpoints alongside tag anchors. Requires
+    /// [`TAG_CHECKPOINT`]; adds no operation of its own.
+    pub const MESSAGE_CHECKPOINT: &str = "message_checkpoint";
     /// Mid-session changes from the session's owner: `session.refresh`,
     /// `session.refresh_policy` and `session.flush_prefix`. A runner without
     /// it gets no mid-session changes; its owner applies them at the next
@@ -419,6 +422,10 @@ pub mod capabilities {
         (SEND_STATUS, &[ops::SEND_STATUS]),
         (COMPACTION, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (TAG_CHECKPOINT, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
+        (
+            MESSAGE_CHECKPOINT,
+            &[ops::SESSION_READ, ops::SESSION_RESOLVE],
+        ),
         (
             SESSION_CHANGE,
             &[

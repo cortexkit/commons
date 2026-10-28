@@ -1055,3 +1055,44 @@ For step-event observations, populate `RecordedStep::with_attempt_id` from
 the independently read durable record. Published attempt identities must
 match it, and an event without a host reference must carry an attempt ID;
 run, step and attempt display counters are not a restore-safe identity.
+
+### Message checkpoints (0.15.19)
+
+These cases inspect `role.describe` for `message_checkpoint`. Without it
+all eight end **Inapplicable**, by name, and existing verdicts are unchanged.
+They require queue sends, transcript reads and a scripted compaction provider
+when applicable.
+
+| Case | Check |
+|---|---|
+| `message_checkpoint_numbering_starts_at_message_count` | Adoption ordinals start at the offline fixture's 42, not 0. |
+| `message_checkpoint_head_matches_certified_cut` | `session.head.cut` equals the offline-certified `head_cut`, including digest and creation time. |
+| `message_checkpoint_anchors_after_folded_message` | With `cut` removed, a surviving `head_cut.mid` anchors the next message at 42; folded history is not served. |
+| `message_checkpoint_native_marker_carries_both_counters` | The actual native marker key carries the message and tag counters and the folded message's cut description. |
+| `message_checkpoint_missing_counter_is_not_zero` | Reloading a marker missing either counter without recoverable state or a Setup fallback refuses before any model call, never manufactures 0. |
+| `message_checkpoint_uncounted_rows_never_served` | Finished host summary rows never appear in reads and ordinals stay contiguous over counted rows on adoption and native lineages. |
+| `message_checkpoint_head_during_setup_uses_marker` | With a complete marker predating the first Setup, `session.head` answers during that Setup with its message count and certified cut, without waiting on Setup or its gates. A bounded wait fails deadlocks by name. |
+| `message_checkpoint_read_during_adoption_setup` | During adoption-cut Setup, a bounded `session.read` starts at `first_ordinal` without waiting on Setup gates, and a request below the boundary is refused. Blocking reads fail by name. |
+
+Implement `LlmRunnerSubject::message_checkpoint_fixture` to seed host rows,
+certify the folded message independently from the runner's replies, and
+configure the permanent Setup answer and first-send plan. Implement
+`native_message_checkpoint` to read the actual marker key from the host,
+not reconstruct it from the head or a configured answer. Both hooks default
+to unsupported, making dependent cases Inapplicable. Native marker checks
+also use the existing view-publishing hook and a tag-rendering plan.
+`insert_uncounted_host_summary` defaults to unsupported; the exclusion case
+uses it on adoption and native lineages, then appends counted messages to
+check that the uncounted row did not consume an ordinal.
+`plant_message_checkpoint_marker` defaults to unsupported and makes the
+Setup-time head and adoption-read cases Inapplicable by name. Implement it
+with no earlier stored Setup state, and withhold the provider's answer until
+the suite releases Setup, so the cases cannot pass by recovering from the
+current Setup answer instead of the planted marker.
+The planted fixture renders tags so the adoption read also exercises the
+old tag-numbering read gate, not only runners that already allow untagged
+reads during Setup.
+The adoption-read case reuses that hook to recover at the adoption cut
+after runner state loss, without native-cut descent. Its Setup-time reads
+must not share the Setup lock or gate; native-cut descent already has the
+provider's held parent-lineage rows and does not need this recovery read.

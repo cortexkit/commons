@@ -24,8 +24,14 @@ use serde_json::{Map, Value};
 
 use crate::capabilities;
 
+pub mod checkpoint;
 pub mod clean;
 pub mod numbering;
+
+pub use checkpoint::{
+    message_checkpoint_anchors, next_message_count, opencode1_message_counts, CheckpointAnchors,
+    CheckpointPosition, MessageAnchor, MessageCheckpointError,
+};
 
 pub use clean::{clean_model_text, strip_leading_tag_notation};
 // Kept so 0.4.0 callers still build; it saturates, and its own deprecation

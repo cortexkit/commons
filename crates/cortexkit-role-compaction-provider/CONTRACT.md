@@ -351,21 +351,74 @@ the session and freezes that plan for use.
     It never clamps the value. Answers decode leniently (§14), so an older
     runner ignores the member and keeps its own short deadline.
   - `checkpoint` (`setup::SetupCheckpoint`, `llm-runner/v1`'s
-    `tags::SetupCheckpoint`) is `{tag_checkpoint, cut}`: for a session the
-    provider moved from standalone Magic Context, the highest tag number
-    standalone ever allocated for it, and `cut` the message the standalone
-    marker cuts at. The provider MUST send it on every Setup answer
+    `tags::SetupCheckpoint`) is `{tag_checkpoint, cut, message_count?,
+    head_cut?}`: for a session the provider moved from a standalone
+    compaction tool, the highest tag number that tool ever allocated for
+    it, and `cut` the first retained message, carrying the host's compaction
+    marker (§9.6 of `llm-runner/v1`). The provider MUST send it on every `ready` Setup answer
     without `descends_from` for a moved session, permanently and unchanged,
     and never on one with `descends_from`; it is absent for a session
-    that was never moved. The runner anchors its numbering at `cut` only
-    when no in-effect marker carries a checkpoint for the session, so the
-    numbers are the same with or without the marker's key, and numbers from
-    the session start with it, on a new lineage, once `cut` is gone
-    (`llm-runner/v1` §9.6). It needs no report back.
+    that was never moved. Legacy decoders keep their existing tag-only
+    anchoring behavior (`llm-runner/v1` §9.6); that does not authorize the
+    provider to accept a moved-session Setup without `message_checkpoint`.
+    The checkpoint needs no report back.
+    `message_count` is a `u64` count of the host's counted messages before
+    `cut` (`llm-runner/v1` §4.8), frozen at the move: `cut`'s ordinal and
+    the adoption lineage's `first_ordinal`. `head_cut` reuses
+    `llm-runner/v1`'s `read::HeadCut`, `{mid, digest, written_at}` of the
+    counted message immediately before `cut`, the last message the move
+    folded. It is certified offline using the runner's ordinary full
+    stored-content digest procedure (§4.2) and the host's creation time.
+    `written_at` is a JSON `u64` in milliseconds since the Unix epoch,
+    not a date string. The provider MUST send both new members together
+    or neither, and only to a runner declaring `message_checkpoint`.
+    A moved session's `ready` answer carrying this checkpoint to a runner
+    declaring that group MUST include both new members.
+    Setup answers decode leniently (§14), so older decoders ignore them.
+    For that group the message boundary and tag anchor are separate:
+    when `cut` is gone but `head_cut.mid` survives, both counters anchor
+    immediately after `head_cut.mid`; the next message is `message_count`
+    and the next part is `tag_checkpoint + 1`. The runner never reads or
+    journals messages before `cut` to obtain the checkpoint.
+  - [pinned] A runner declaring `message_checkpoint` answers `session.head`
+    while its own Setup call for that session is outstanding, without
+    waiting on that Setup, its lock, or any gate the outstanding Setup
+    holds. It takes `first_ordinal` and `cut` from the newest in-effect
+    marker key carrying `message_count` and `head_cut`, or else from the
+    checkpoint it stored from an earlier Setup answer. When it has neither,
+    `session.head` carries no cut and `first_ordinal` 0, and the provider
+    refuses the moved session as the head check below specifies. The
+    provider's reverse `session.head` uses §4 `compaction.setup`'s existing
+    reverse-call rule: “For calls about the conversation—`session.read`,
+    `session.head`, `session.resolve`, sends into it, and reminders—the
+    provider opens its own route to the runner using exactly the identity
+    above.”
+  - [pinned] At the adoption cut, a runner declaring `message_checkpoint`
+    answers `session.read` for the lineage being set up while its Setup
+    call for that lineage is outstanding, without waiting on that Setup,
+    its lock, or any gate it holds. It serves the lineage from its
+    `first_ordinal` onward and never below it. This lets the provider read
+    surviving rows to build its Setup answer when a moved session recovers
+    at the adoption cut, after a revert removed `cut` or the runner lost
+    its state. Native-cut descent does not need this recovery read: the
+    provider renders kept rows from what it held under the parent lineage.
+    The existing rule that a native-cut Setup never interrupts readers is
+    unchanged (`llm-runner/v1` §9.6).
   - A provider sends `checkpoint` only to a runner that declares
     `llm-runner/v1`'s `tag_checkpoint` group. For a moved session on a
     runner without it, the provider refuses Setup with the terminal
-    `tag_checkpoint_unsupported` (§10). For a session with standalone state
+    `tag_checkpoint_unsupported` (§10). For a moved session on a runner
+    that declares `tag_checkpoint` but not `message_checkpoint`, the
+    provider MUST refuse Setup with terminal
+    `message_checkpoint_unsupported`. For a runner declaring
+    `message_checkpoint`, a Setup returning this moved-session checkpoint
+    (without `descends_from`) checks `session.head.first_ordinal` equals
+    `message_count` and `session.head.cut` equals the certified `head_cut`
+    on all three members. A head with no cut and `first_ordinal = 0`
+    refuses terminal `moved_session_reverted_below_import`; any other
+    mismatch refuses terminal `moved_session_head_mismatch`, before a model
+    call. Recovery after losing the adoption cut is moving the session
+    again offline. For a session with standalone state
     and no completed move, it refuses with the terminal
     `standalone_session_not_migrated`, and what the runner does depends on
     its host:
@@ -1116,9 +1169,12 @@ provider.
 | `history_unreadable` | required history is missing, such as a declared inherited prefix the provider does not hold | yes |
 | `standalone_session_not_migrated` | the session has standalone Magic Context state and no completed move to the provider; a runner that has never served it, on a host running standalone in-process, hands it to standalone and sends no rides; any other runner fails the run by name (§4) | no |
 | `tag_checkpoint_unsupported` | the session was moved from standalone Magic Context and the runner does not declare `llm-runner/v1`'s `tag_checkpoint` group (§4) | no |
+| `message_checkpoint_unsupported` | a moved session's runner lacks `message_checkpoint` (§4) | no |
+| `moved_session_reverted_below_import` | a moved session's head has no cut and `first_ordinal = 0`: the imported prefix was reverted away (§4) | no |
+| `moved_session_head_mismatch` | a moved session's head otherwise disagrees with the certified `message_count` or `head_cut` (§4) | no |
 | `setup_identity_mismatch` | the incoming route is bound to one non-empty session that differs from Setup's session; ends the current run as `error` | no |
 
-`unknown_cut` (`errors::UNKNOWN_CUT`) is not one of the seven typed codes:
+`unknown_cut` (`errors::UNKNOWN_CUT`) is not one of the typed Setup refusal codes:
 a Setup whose `descends_from` names a cut the provider never published is
 refused with it (§4), and a runner decodes it as `RefuseCode::Unknown`,
 terminal for that lineage.
@@ -1227,6 +1283,9 @@ terminal behavior per message.
 | `history_unreadable` | yes | yes |
 | `standalone_session_not_migrated` | no | yes |
 | `tag_checkpoint_unsupported` | no | yes |
+| `message_checkpoint_unsupported` | no | yes |
+| `moved_session_reverted_below_import` | no | yes |
+| `moved_session_head_mismatch` | no | yes |
 | `setup_identity_mismatch` | no | yes |
 | `compaction_unavailable` | no | yes |
 

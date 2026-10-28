@@ -569,6 +569,16 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    // Legacy subjects intentionally omit the opt-in message group. Its new
+    // cases must be named Inapplicable, not treated as passing coverage.
+    if case.starts_with("message_checkpoint_")
+        && report.outcome(case)
+            == Some(&CaseOutcome::Inapplicable {
+                reason: "runner does not declare message_checkpoint".into(),
+            })
+    {
+        return;
+    }
     assert_eq!(
         report.outcome(case),
         Some(&CaseOutcome::Passed),
@@ -7198,4 +7208,128 @@ async fn rich_ui_stamp_two_conflicting_values_accepted_fails_by_name() {
     let reason = failed(&report, RICH_UI_CONFLICT);
     assert!(reason.contains("was admitted"), "{reason}");
     assert_none_failed_but(&report, &[RICH_UI_CONFLICT]);
+}
+
+const MESSAGE_CHECKPOINT_CASES: &[&str] = &[
+    "message_checkpoint_numbering_starts_at_message_count",
+    "message_checkpoint_head_matches_certified_cut",
+    "message_checkpoint_anchors_after_folded_message",
+    "message_checkpoint_native_marker_carries_both_counters",
+    "message_checkpoint_missing_counter_is_not_zero",
+    "message_checkpoint_uncounted_rows_never_served",
+    "message_checkpoint_head_during_setup_uses_marker",
+    "message_checkpoint_read_during_adoption_setup",
+];
+
+#[tokio::test]
+async fn message_checkpoint_conforming_fake_passes_all_cases() {
+    let mut subject = declaring(Capability::MessageCheckpoint, Defects::default());
+    subject.capabilities.insert(Capability::HostHistory);
+    subject.holds_reads_during_setup = true;
+    let report = run(&subject).await;
+    for name in MESSAGE_CHECKPOINT_CASES {
+        assert_passed(&report, name);
+    }
+}
+
+#[tokio::test]
+async fn message_checkpoint_absent_is_inapplicable_and_preserves_verdict() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in MESSAGE_CHECKPOINT_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("does not declare message_checkpoint")),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+    }
+    let with = run(&declaring(
+        Capability::MessageCheckpoint,
+        Defects::default(),
+    ))
+    .await;
+    assert_eq!(report.verdict, with.verdict);
+}
+
+#[tokio::test]
+async fn message_checkpoint_default_hooks_are_inapplicable_by_name() {
+    let mut subject = declaring(Capability::MessageCheckpoint, Defects::default());
+    subject.message_checkpoint_hooks = false;
+    let report = run(&subject).await;
+    for name in MESSAGE_CHECKPOINT_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("adapter lacks")),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+    }
+}
+
+#[tokio::test]
+async fn message_checkpoint_each_faulty_fake_fails_its_named_case() {
+    use fake::message_checkpoint::Defect;
+    for (name, defect) in MESSAGE_CHECKPOINT_CASES.iter().zip([
+        Defect::NumberingFromZero,
+        Defect::HeadMismatch,
+        Defect::RemovedCutFromStart,
+        Defect::MarkerMissingCounters,
+        Defect::MissingCounterFromZero,
+        Defect::ServesSummaryRow,
+        Defect::SetupHeadFromStart,
+        Defect::SetupReadBelowFirstOrdinal,
+    ]) {
+        let report = run(&declaring(
+            Capability::MessageCheckpoint,
+            Defects {
+                message_checkpoint: defect,
+                ..Defects::default()
+            },
+        ))
+        .await;
+        let reason = failed(&report, name);
+        assert!(!reason.is_empty(), "{name} must fail by name");
+        if defect == Defect::SetupReadBelowFirstOrdinal {
+            assert!(
+                reason.contains("session.read during Setup served rows below first_ordinal"),
+                "{reason}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn message_checkpoint_setup_head_deadlock_fails_by_name_without_hanging() {
+    let subject = declaring(
+        Capability::MessageCheckpoint,
+        Defects {
+            message_checkpoint: fake::message_checkpoint::Defect::SetupHeadWaitsForSetup,
+            ..Defects::default()
+        },
+    );
+    let report = tokio::time::timeout(Duration::from_secs(20), run(&subject))
+        .await
+        .expect("a session.head/Setup deadlock must not hang the suite");
+    let reason = failed(&report, "message_checkpoint_head_during_setup_uses_marker");
+    assert!(
+        reason.contains("session.head during Setup did not answer"),
+        "{reason}"
+    );
+}
+
+#[tokio::test]
+async fn message_checkpoint_setup_read_deadlock_fails_by_name_without_hanging() {
+    let subject = declaring(
+        Capability::MessageCheckpoint,
+        Defects {
+            message_checkpoint: fake::message_checkpoint::Defect::SetupReadWaitsForSetup,
+            ..Defects::default()
+        },
+    );
+    let report = tokio::time::timeout(Duration::from_secs(20), run(&subject))
+        .await
+        .expect("a session.read/Setup deadlock must not hang the suite");
+    let reason = failed(&report, "message_checkpoint_read_during_adoption_setup");
+    assert!(
+        reason.contains("session.read during Setup did not answer"),
+        "{reason}"
+    );
 }

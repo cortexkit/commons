@@ -215,6 +215,9 @@ pub const CHECKPOINT_ON_DESCENT: &str = "checkpoint_on_descent";
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(tag = "answer", rename_all = "snake_case")]
 #[non_exhaustive]
+// Keep the public Ready fields unboxed: boxing the extended checkpoint
+// would break callers of the existing public Rust API in a compatible release.
+#[allow(clippy::large_enum_variant)]
 pub enum SetupAnswer {
     /// The session's initial view and ceiling policy.
     #[non_exhaustive]
@@ -231,13 +234,12 @@ pub enum SetupAnswer {
         /// provider but still never sends over the window.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ceiling: Option<CeilingPolicy>,
-        /// For a session the provider moved from standalone Magic Context:
-        /// the tag checkpoint `{tag_checkpoint, cut}`, `cut` the message the
-        /// standalone marker cuts at. The provider sends it on every `ready`
-        /// Setup answer for that session, unchanged, and the runner anchors its
-        /// numbering at `cut` when no in-effect marker carries a checkpoint
-        /// (`llm-runner/v1` §9.6, its `tag_checkpoint` group). Absent for a
-        /// session that was never moved.
+        /// For a session moved from a standalone compaction tool: the
+        /// permanent checkpoint at the first retained message `cut`.
+        /// `message_count` and `head_cut` are sent together only to runners
+        /// declaring `message_checkpoint`; they certify the message boundary
+        /// separately from tag fallback (`llm-runner/v1` §9.6). Absent for
+        /// a session that was never moved, and on descending Setup answers.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         checkpoint: Option<SetupCheckpoint>,
         /// The prompt cache's lifetime for Setup's model (CONTRACT.md

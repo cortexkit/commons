@@ -425,6 +425,9 @@ pub(super) fn apply(sess: &mut Sess, kind: &str, record: &Value, defects: &Defec
             }
         }
         "cut" => {
+            if sess.render_tags {
+                super::message_checkpoint::write_native_key(sess, record, defects);
+            }
             let first = number("first_ordinal");
             let old = sess.lineage.clone();
             if defects.lineage != LineageDefect::CutKeepsLineage {

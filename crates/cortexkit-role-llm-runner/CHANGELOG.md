@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.17
+
+- Add opt-in `message_checkpoint` (requires `tag_checkpoint`), optional
+  paired `message_count` / `head_cut` on Setup and native marker keys, and
+  checked native `next_message_count`. Reuse `read::HeadCut` and its ordinary
+  full inline digest (SHA-256 over JSON Canonicalization Scheme, RFC 8785,
+  bytes) and Unix epoch millisecond timestamp.
+- Pin adoption message numbering, distinct message and tag anchors, the
+  after-folded-message anchor when the retained cut disappears, reload and
+  missing-key behavior, and OpenCode 1 counted-message rules. Runners without
+  the new group keep their existing rules. Add shared anchor and counting
+  helpers with worked digest, backward-decoder and revert-table vectors.
+- For `message_checkpoint` runners, uncounted host rows are never served on
+  any read, on adoption and native lineages alike. Clarify for every runner
+  that read stability includes host changes made while the runner was
+  stopped: check frozen messages before the next model call and change
+  lineage on any difference. No offline certificate format is prescribed.
+- Require `message_checkpoint` runners to answer `session.head` during
+  their own outstanding Setup without waiting on that Setup or its gates,
+  using the newest complete in-effect marker key or earlier Setup checkpoint.
+
 ## 0.7.16
 
 - Add the `best_effort` runner reason `host_unsupported` when the host cannot

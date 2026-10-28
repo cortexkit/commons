@@ -364,6 +364,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/tag-checkpoint-describe.json"),
     ),
     (
+        "message-checkpoint.json",
+        include_str!("../test-vectors/llm-runner-v1/message-checkpoint.json"),
+    ),
+    (
         "tag-cleaning.json",
         include_str!("../test-vectors/llm-runner-v1/tag-cleaning.json"),
     ),
