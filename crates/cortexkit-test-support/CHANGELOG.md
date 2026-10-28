@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.11
+
+- Deleting a published `ckdev-*` entry no longer removes it in place. The entry is first renamed to a unique `.removing-*` name in the same cache root, then the renamed copy is deleted. Readers see either the complete entry or nothing; a deletion that fails partway can no longer leave a sealed entry with no record that wedges every later lookup. A failed deletion leaves the renamed copy for a later prune to retry, and prunes also retry leftover `.removing-*` directories. On Windows, when a running image keeps the rename from succeeding, the entry is left in place as before.
+- A lookup that finds a broken entry (a missing or unusable publication record, or an executable that no longer matches its address) moves the entry aside and publishes afresh from the source build instead of refusing, so one bad entry cannot wedge the cache until someone deletes it by hand. The lookup reports each repair on stderr with the reason the entry failed verification, so a planted or damaged executable stays visible.
+
 ## 0.1.10
 
 - Cache maintenance no longer reports ordinary contention. When several test

@@ -518,9 +518,31 @@ fn publish_with_pruner(
     let dir = root.join(&digest);
     let placed = dir.join(dev_name);
     if dir.exists() {
-        verify_published(&placed, dev_name, &digest, publication)?;
-        record_use(root, &digest, SystemTime::now());
-        return Ok(placed);
+        match verify_published(&placed, dev_name, &digest, publication) {
+            Ok(()) => {
+                record_use(root, &digest, SystemTime::now());
+                return Ok(placed);
+            }
+            Err(broken) => {
+                // A previous deletion may have removed the publication record
+                // but not the executable, or the executable may no longer
+                // match its address. Never trust the leftover bytes: move the
+                // broken entry aside and publish afresh below, still holding
+                // the shared cache lock so an exclusive prune cannot race it.
+                // The report keeps a planted or damaged executable visible
+                // even though the lookup now succeeds.
+                log_cache_error(&dir, &format_args!("republishing a broken entry: {broken}"));
+                match move_aside(&dir, root) {
+                    Ok(aside) => {
+                        if let Err(error) = remove_aside(&aside) {
+                            log_cache_error(&aside, &error);
+                        }
+                    }
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(_) => return Err(broken),
+                }
+            }
+        }
     }
     let nonce = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
     let staging = root.join(format!(".staging-{}-{nonce}", std::process::id()));
@@ -792,44 +814,111 @@ fn seal_dir(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Removes a staging or published directory, restoring the write permission
-/// sealing took away.
-fn remove_published(dir: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
-    }
-    #[cfg(windows)]
-    {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let mut permissions = entry.metadata()?.permissions();
-            // This branch clears a Windows file attribute, not Unix mode bits.
-            #[allow(clippy::permissions_set_readonly_false)]
-            permissions.set_readonly(false);
-            fs::set_permissions(entry.path(), permissions)?;
+/// Prefix for a directory moved out of its content address before deletion.
+/// Readers only ever see a complete entry at its address or nothing; a
+/// partially deleted entry under its address would be reused by every later
+/// lookup. Entries under this prefix are deletion leftovers waiting for a
+/// retry, never reuse candidates.
+const REMOVING_PREFIX: &str = ".removing-";
+
+fn is_removing_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(OsStr::to_str)
+        .is_some_and(|name| name.starts_with(REMOVING_PREFIX))
+}
+
+/// A unique aside name in `root` for a directory being deleted. The name
+/// carries 16 hex digits derived from the process, a counter and the clock,
+/// so concurrent removers in one process or across processes do not collide.
+fn removing_name() -> String {
+    use sha2::{Digest, Sha256};
+    let nonce = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let mut hasher = Sha256::new();
+    hasher.update(std::process::id().to_le_bytes());
+    hasher.update(nonce.to_le_bytes());
+    hasher.update(now.to_le_bytes());
+    hasher.update(format!("{:?}", std::thread::current().id()).as_bytes());
+    let hex: String = hasher.finalize()[..8]
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("{REMOVING_PREFIX}{hex}")
+}
+
+/// Atomically renames `dir` to a unique aside name in `root`, in the same
+/// directory so the rename never crosses filesystems. Returns the aside
+/// path. A reader racing the removal sees either the complete entry or
+/// nothing, never a half-deleted directory.
+fn move_aside(dir: &Path, root: &Path) -> io::Result<PathBuf> {
+    for _ in 0..10 {
+        let aside = root.join(removing_name());
+        if aside.exists() {
+            continue;
+        }
+        match fs::rename(dir, &aside) {
+            Ok(()) => return Ok(aside),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
         }
     }
-    let result = fs::remove_dir_all(dir);
-    if result.is_err() && dir.exists() {
-        if let Err(error) = seal_dir(dir) {
-            log_cache_error(dir, &error);
+    Err(io::Error::other(format!(
+        "could not move {} aside for deletion",
+        dir.display()
+    )))
+}
+
+/// Deletes an aside copy moved out of its address. The caller already
+/// renamed it, so this removes it in place; on failure the aside is left
+/// for a later prune to retry and is never sealed back under its address.
+fn remove_aside(aside: &Path) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(aside)?;
+    if metadata.is_dir() && !metadata.is_symlink() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(aside, fs::Permissions::from_mode(0o700))?;
         }
         #[cfg(windows)]
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                if let Ok(metadata) = entry.metadata() {
-                    let mut permissions = metadata.permissions();
-                    permissions.set_readonly(true);
-                    if let Err(error) = fs::set_permissions(entry.path(), permissions) {
-                        log_cache_error(&entry.path(), &error);
-                    }
-                }
+        {
+            for entry in fs::read_dir(aside)? {
+                let entry = entry?;
+                let mut permissions = entry.metadata()?.permissions();
+                // This branch clears a Windows file attribute, not Unix mode bits.
+                #[allow(clippy::permissions_set_readonly_false)]
+                permissions.set_readonly(false);
+                fs::set_permissions(entry.path(), permissions)?;
             }
         }
+        fs::remove_dir_all(aside)
+    } else {
+        fs::remove_file(aside)
     }
-    result
+}
+
+/// Removes a staging or published directory without ever deleting it in
+/// place. The directory is first renamed to a unique aside name in the same
+/// root, then the aside copy is deleted. If deleting the copy fails, the
+/// aside is left for a later prune to retry; nothing is sealed back under
+/// the address. If the rename itself fails (on Windows an image running
+/// from the entry keeps the rename from succeeding), the entry is left in
+/// place and the error is returned for the caller to report.
+fn remove_published(dir: &Path) -> io::Result<()> {
+    if is_removing_path(dir) {
+        return remove_aside(dir);
+    }
+    let Some(root) = dir.parent() else {
+        return remove_aside(dir);
+    };
+    let aside = match move_aside(dir, root) {
+        Ok(aside) => aside,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    remove_aside(&aside)
 }
 
 // Three days keeps builds warm across ordinary test sessions without retaining
@@ -1052,11 +1141,39 @@ fn prune_entries(
         }
     };
     let mut candidates = Vec::new();
+    let mut leftover_asides = Vec::new();
     for entry in entries {
-        match entry.and_then(|entry| cache_entry(root, entry)) {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                log_cache_error(root, &error);
+                continue;
+            }
+        };
+        let name = entry.file_name();
+        if name
+            .to_str()
+            .is_some_and(|name| name.starts_with(REMOVING_PREFIX))
+        {
+            leftover_asides.push(entry.path());
+            continue;
+        }
+        match cache_entry(root, entry) {
             Ok(Some(entry)) => candidates.push(entry),
             Ok(None) => {}
             Err(error) => log_cache_error(root, &error),
+        }
+    }
+    // Retry aside copies left by an interrupted deletion before choosing new
+    // candidates. They are never reuse candidates and ignore the retention,
+    // grace and size limits; their markers were already cleaned when they
+    // were moved aside.
+    for aside in leftover_asides {
+        if protected.parent() == Some(aside.as_path()) {
+            continue;
+        }
+        if let Err(error) = remove(&aside) {
+            log_cache_error(&aside, &error);
         }
     }
     candidates.sort_by(|a, b| {
@@ -1075,18 +1192,45 @@ fn prune_entries(
         if age <= PUBLISHED_RETENTION && total <= size_limit {
             continue;
         }
-        match remove(&entry.path) {
-            Ok(()) => {
+        // Move the entry out of its address first, so a reader sees either
+        // the complete entry or nothing even if deleting the copy fails
+        // partway through. A failed deletion leaves the aside copy for a
+        // later prune to retry.
+        let aside = match move_aside(&entry.path, root) {
+            Ok(aside) => aside,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 total = total.saturating_sub(entry.bytes);
                 if let Err(error) = fs::remove_file(&entry.marker) {
                     if error.kind() != io::ErrorKind::NotFound {
                         log_cache_error(&entry.marker, &error);
                     }
                 }
+                continue;
+            }
+            // In particular, Windows refuses to rename an executing image.
+            // Leave it in the cache and continue with the next candidate.
+            Err(error) => {
+                log_cache_error(&entry.path, &error);
+                continue;
+            }
+        };
+        // The address is already gone; clean its use marker even if the
+        // aside deletion below fails, so a retry only has the aside left.
+        // A later publication of the same address records a new marker.
+        // The prune holds the exclusive cache lock, so no publisher can
+        // recreate the address between the rename and this removal.
+        if let Err(error) = fs::remove_file(&entry.marker) {
+            if error.kind() != io::ErrorKind::NotFound {
+                log_cache_error(&entry.marker, &error);
+            }
+        }
+        match remove(&aside) {
+            Ok(()) => {
+                total = total.saturating_sub(entry.bytes);
             }
             // In particular, Windows refuses deletion of an executing image.
-            // Leave it in the cache and continue with the next candidate.
-            Err(error) => log_cache_error(&entry.path, &error),
+            // The aside copy stays for a later prune to retry.
+            Err(error) => log_cache_error(&aside, &error),
         }
     }
 }
@@ -1628,7 +1772,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn failed_deletion_does_not_fail_publication_or_stop_pruning() {
+    fn failed_deletion_moves_the_entry_aside_for_a_later_prune() {
         let root = PublishRoot::new("prune-failure");
         let build = crate::ScratchDir::new("prune-failure-build");
         let built = build.join("ck-fixture");
@@ -1641,7 +1785,9 @@ mod tests {
         let placed = publish_with_pruner(&built, "ckdev-fixture", &root.path(), |placed| {
             CachePruner::new().maybe_prune(&root.path(), placed, now, |dir| {
                 attempts += 1;
-                if Some(dir) == failed.parent() {
+                // Candidates are visited oldest-first; the first aside deletion
+                // fails, the second succeeds.
+                if attempts == 1 {
                     Err(io::Error::new(
                         io::ErrorKind::PermissionDenied,
                         "injected deletion failure",
@@ -1653,8 +1799,24 @@ mod tests {
         })
         .unwrap();
         assert_eq!(attempts, 2);
-        assert!(failed.exists());
+        // The address is already gone even though deleting its copy failed;
+        // only the aside copy remains for a later prune to retry.
+        assert!(!failed.exists());
         assert!(!removed.exists());
+        let asides: Vec<PathBuf> = fs::read_dir(root.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| is_removing_path(path))
+            .collect();
+        assert_eq!(asides.len(), 1, "expected one aside copy: {asides:?}");
+        prune_entries(
+            &root.path(),
+            Path::new(""),
+            now,
+            CACHE_SIZE_LIMIT,
+            remove_published,
+        );
+        assert!(!asides[0].exists(), "a later prune retries the aside copy");
         assert!(placed.exists());
         checked_output(&mut dev_command(&placed)).unwrap();
     }
@@ -2067,7 +2229,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn changed_publication_identity_is_reverified_and_corruption_refused() {
+    fn changed_publication_identity_is_reverified_and_corruption_republished() {
         use std::os::unix::fs::PermissionsExt;
 
         let build = crate::ScratchDir::new("ckdev-memo-published-build");
@@ -2095,15 +2257,13 @@ mod tests {
         );
         assert_ne!(old_identity, file_identity(&placed).unwrap());
 
+        // A planted executable used to be refused; the entry is now moved
+        // aside and published afresh from the source build.
         reset_hash_counts();
-        let error = publish(&built, "ckdev-bus", &root.path()).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("does not match its content address"),
-            "{error}"
-        );
-        assert_eq!(hash_counts(), (1, 0, 1, 0));
+        let republished = publish(&built, "ckdev-bus", &root.path()).unwrap();
+        assert_eq!(republished, placed);
+        assert_eq!(fs::read(&republished).unwrap(), fs::read(&built).unwrap());
+        checked_output(&mut dev_command(&republished)).unwrap();
     }
 
     /// The published file is a read-only copy in a read-only directory: its
@@ -2149,11 +2309,12 @@ mod tests {
         assert!(use_marker(&root.path(), dir.file_name().unwrap().to_str().unwrap()).is_file());
     }
 
-    /// A published file that no longer matches its address is refused, not
-    /// run, and so is a publish root other users can write.
+    /// A planted executable is published afresh from the source build, so a
+    /// corrupted entry cannot wedge later lookups; a publish root other
+    /// users can write is still refused.
     #[cfg(unix)]
     #[test]
-    fn altered_publications_and_shared_roots_are_refused() {
+    fn altered_publications_are_republished_and_shared_roots_are_refused() {
         use std::os::unix::fs::PermissionsExt;
         let build = crate::ScratchDir::new("ckdev-refuse-build");
         let root = PublishRoot::new("ckdev-refuse-root");
@@ -2167,13 +2328,11 @@ mod tests {
         write_script(&altered, "#!/bin/sh\necho planted\n");
         fs::remove_file(&placed).unwrap();
         copy_executable(&altered, &placed).unwrap();
-        let error = publish(&built, "ckdev-bus", &root.path()).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("does not match its content address"),
-            "{error}"
-        );
+        let republished = publish(&built, "ckdev-bus", &root.path()).unwrap();
+        assert_eq!(republished, placed);
+        assert_eq!(fs::read(&republished).unwrap(), fs::read(&built).unwrap());
+        let output = dev_command(&republished).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "genuine\n");
 
         let open = PublishRoot::new("ckdev-open-root");
         fs::set_permissions(open.path(), fs::Permissions::from_mode(0o777)).unwrap();
@@ -2434,12 +2593,12 @@ mod tests {
         assert_nothing_published(&root.path(), &built);
     }
 
-    /// Reuse still refuses a stripped publication whose executable no longer
+    /// Reuse repairs a stripped publication whose executable no longer
     /// matches the digest recorded when it was published, or whose record is
-    /// gone.
+    /// gone: the broken entry is moved aside and published afresh.
     #[cfg(target_os = "macos")]
     #[test]
-    fn an_altered_stripped_publication_is_refused() {
+    fn an_altered_stripped_publication_is_republished() {
         use std::os::unix::fs::PermissionsExt;
         let build = crate::ScratchDir::new("ckdev-strip-altered-build");
         let built = built_fixture(&build);
@@ -2452,13 +2611,10 @@ mod tests {
         fs::remove_file(&placed).unwrap();
         // The unstripped build swapped in for its stripped publication.
         copy_executable(&built, &placed).unwrap();
-        let error = publish(&built, &dev_name, &root.path()).unwrap_err();
-        assert!(
-            error
-                .to_string()
-                .contains("does not match its content address"),
-            "{error}"
-        );
+        let republished = publish(&built, &dev_name, &root.path()).unwrap();
+        assert_eq!(republished, placed);
+        assert_eq!(debug_map_entries(&republished), 0);
+        checked_output(&mut fixture_command(&republished)).unwrap();
 
         let root = PublishRoot::new("ckdev-strip-unrecorded-root");
         let placed = ckdev_binary_at(&built, &root.path());
@@ -2471,8 +2627,80 @@ mod tests {
         copy_executable(&placed, &same).unwrap();
         fs::remove_file(&placed).unwrap();
         copy_executable(&same, &placed).unwrap();
-        let error = publish(&built, &dev_name, &root.path()).unwrap_err();
-        assert!(error.to_string().contains("publication record"), "{error}");
+        let republished = publish(&built, &dev_name, &root.path()).unwrap();
+        assert_eq!(republished, placed);
+        let record = fs::read_to_string(placed.parent().unwrap().join(PUBLICATION_RECORD)).unwrap();
+        assert_eq!(
+            record.trim_end(),
+            content_digest(&republished, &dev_name).unwrap()
+        );
+        checked_output(&mut fixture_command(&republished)).unwrap();
+    }
+
+    /// A sealed entry that lost its record is published afresh instead of
+    /// wedging every later lookup. Reproduces the stuck cache where a
+    /// deletion removed the record but not the executable and left the
+    /// directory sealed.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_sealed_entry_without_a_record_is_republished() {
+        use std::os::unix::fs::PermissionsExt;
+        let build = crate::ScratchDir::new("ckdev-strip-missing-record-build");
+        let built = built_fixture(&build);
+        let root = PublishRoot::new("ckdev-strip-missing-record-root");
+        let placed = ckdev_binary_at(&built, &root.path());
+        let dir = placed.parent().unwrap().to_path_buf();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_file(dir.join(PUBLICATION_RECORD)).unwrap();
+        // A fresh inode keeps the per-process verification memo from
+        // answering for the previous bytes; a new publisher process would
+        // have an empty memo and reach the record check the same way.
+        let same = build.join("same");
+        copy_executable(&placed, &same).unwrap();
+        fs::remove_file(&placed).unwrap();
+        copy_executable(&same, &placed).unwrap();
+        seal_dir(&dir).unwrap();
+        assert!(
+            !dir.join(PUBLICATION_RECORD).exists(),
+            "the entry must have no record before republication"
+        );
+        let republished = ckdev_binary_at(&built, &root.path());
+        assert_eq!(republished, placed);
+        checked_output(&mut fixture_command(&republished)).unwrap();
+    }
+
+    /// Empty and garbage records are repaired the same way as a missing one.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_unusable_record_is_republished() {
+        use std::os::unix::fs::PermissionsExt;
+        for (label, contents) in [
+            ("empty", String::new()),
+            ("garbage", String::from("not-a-digest\n")),
+        ] {
+            let build = crate::ScratchDir::new(&format!("ckdev-strip-bad-record-{label}-build"));
+            let built = built_fixture(&build);
+            let dev_name = dev_name_of(&built);
+            let root = PublishRoot::new(&format!("ckdev-strip-bad-record-{label}-root"));
+            let placed = ckdev_binary_at(&built, &root.path());
+            let dir = placed.parent().unwrap().to_path_buf();
+            fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+            let same = build.join("same");
+            copy_executable(&placed, &same).unwrap();
+            fs::remove_file(&placed).unwrap();
+            copy_executable(&same, &placed).unwrap();
+            let _ = fs::remove_file(dir.join(PUBLICATION_RECORD));
+            fs::write(dir.join(PUBLICATION_RECORD), &contents).unwrap();
+            seal_dir(&dir).unwrap();
+            let republished = ckdev_binary_at(&built, &root.path());
+            assert_eq!(republished, placed, "{label} record was not repaired");
+            let record = fs::read_to_string(dir.join(PUBLICATION_RECORD)).unwrap();
+            assert_eq!(
+                record.trim_end(),
+                content_digest(&republished, &dev_name).unwrap()
+            );
+            checked_output(&mut fixture_command(&republished)).unwrap();
+        }
     }
 
     /// Writes through a staging file and a `cp` child, so this multi-threaded
