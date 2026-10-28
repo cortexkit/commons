@@ -490,7 +490,7 @@ is unchanged and prints nothing.
 | `tags_resolve_answers_the_current_lineage` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, kill point `StepRecorded`; inapplicable unless the seal moves the session onto a new lineage |
 | `tags_numbered_in_rendered_order` | `tags`, `queue`, `transcript_reads`, `steer`, `hold_tool_calls`, `rendered_model_input`; inapplicable when the runner renders a steer where it stores it |
 | `tags_renumbering_waits_for_the_step_boundary` | `tags`, `queue`, `transcript_reads`, `steer`, `hold_tool_calls` |
-| `tags_setup_checkpoint_anchors_at_its_cut` | `tags`, `tag_checkpoint`, `compaction`, `queue`, `transcript_reads` |
+| `tags_setup_checkpoint_anchors_at_its_cut` | `tags`, `tag_checkpoint`, `compaction`, `queue`, `transcript_reads`; inapplicable when the runner runs a fresh session's first Setup at send admission, before writing any message (`first_setup_names_newest` answers false) |
 | `tags_fork_of_a_managed_session_refused` | `tags`, `compaction`, `queue`, `transcript_reads`; inapplicable unless the adapter can create a fork the runner can detect (`fork_session`) |
 | `adopt_host_turn_is_a_run` | `adopt`, `transcript_reads`, `run_ops`; inapplicable unless the adapter can start a host turn |
 | `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`, `steer` |
@@ -778,7 +778,11 @@ renumbered part afterwards comes with a new lineage.
 `tags_setup_checkpoint_anchors_at_its_cut` needs `Capability::TagCheckpoint`
 and `compaction`: its scripted provider answers Setup with
 `CompactionSetup::ReadyWithCheckpoint`, a checkpoint cut at the Setup
-request's `newest` message. `tags_fork_of_a_managed_session_refused` needs the
+request's `newest` message. A runner that runs a fresh session's first Setup
+at send admission, before writing any message, names no `newest` on that
+Setup; its adapter answers the defaulted `first_setup_names_newest` hook
+with false and the case is inapplicable, by name, since a Setup checkpoint
+only reaches moved sessions, which the `message_checkpoint` cases cover. `tags_fork_of_a_managed_session_refused` needs the
 defaulted `fork_session(handle, parent, fork)` hook, which makes a fork the
 runner can detect; without one the case is inapplicable, by name, since a
 runner refuses only forks it can know about.

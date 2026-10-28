@@ -3781,6 +3781,42 @@ async fn each_tags_defect_fails_its_case_by_name() {
     }
 }
 
+/// A runner whose fresh session's first Setup runs at send admission, before
+/// any message is written, names no `newest` on that Setup, so the Setup
+/// checkpoint has no cut to anchor. The checkpoint case is then
+/// inapplicable, and every other case's verdict is unchanged.
+#[tokio::test]
+async fn admission_setup_without_newest_leaves_checkpoint_case_inapplicable() {
+    const CASE: &str = "tags_setup_checkpoint_anchors_at_its_cut";
+    const REASON: &str = "the runner runs a fresh session's first Setup at send admission, before \
+         writing any message, so that Setup names no `newest` and has no cut to anchor; a Setup \
+         checkpoint only reaches moved sessions, which the message_checkpoint cases cover";
+    let mut subject = declaring(Capability::Tags, Defects::default());
+    subject.first_setup_names_newest = false;
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome(CASE),
+        Some(&CaseOutcome::Inapplicable {
+            reason: REASON.into()
+        }),
+        "{CASE}\n{}",
+        report.render()
+    );
+    let reference = run(&declaring(Capability::Tags, Defects::default())).await;
+    for spec in CASES {
+        if spec.name == CASE {
+            continue;
+        }
+        assert_eq!(
+            report.outcome(spec.name),
+            reference.outcome(spec.name),
+            "{}",
+            spec.name
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
 /// With `structured_output` declared, the cleaning case also checks that a
 /// structured-output run's final text stays raw.
 #[tokio::test]

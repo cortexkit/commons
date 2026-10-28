@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.20
+
+- Add the defaulted `LlmRunnerSubject::first_setup_names_newest` hook: true
+  when the runner writes a fresh session's first message before its first
+  compaction Setup, so that Setup names `newest`. An adapter whose runner
+  runs the first Setup at send admission, before writing, answers false.
+- `tags_setup_checkpoint_anchors_at_its_cut` is inapplicable, by name, when
+  the hook answers false: that Setup names no `newest` and has no cut to
+  anchor, while a Setup checkpoint only reaches moved sessions, which the
+  `message_checkpoint` cases cover. The contract crate stays at 0.7.17.
+
 ## 0.15.19
 
 - Add eight named `message_checkpoint` cases for nonzero adoption numbering,

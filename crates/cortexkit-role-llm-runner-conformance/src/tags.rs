@@ -57,7 +57,7 @@ where
         "tags_renumbering_waits_for_the_step_boundary" => passed(step_boundary(case).await),
         "tags_count_only_parts_rendered_with_a_number" => counted_parts(case).await,
         "tags_tool_result_blocks_share_one_number" => tool_result_blocks(case).await,
-        "tags_setup_checkpoint_anchors_at_its_cut" => passed(setup_checkpoint(case).await),
+        "tags_setup_checkpoint_anchors_at_its_cut" => setup_checkpoint(case).await,
         "tags_fork_of_a_managed_session_refused" => fork_refused(case).await,
         "tags_lost_marker_key_keeps_numbers" => lost_marker_key(case).await,
         "tags_host_store_cleaned_at_the_save_seam" => save_seam(case).await,
@@ -1415,11 +1415,19 @@ where
 /// A compaction provider's Setup checkpoint at its cut: with no marker
 /// carrying a checkpoint, the cut message, the session's first, is
 /// numbered right after the checkpoint.
-async fn setup_checkpoint<S>(case: &Case<'_, S>) -> Check
+async fn setup_checkpoint<S>(case: &Case<'_, S>) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
+    if !case.subject.first_setup_names_newest() {
+        return Ok(Ending::Inapplicable(
+            "the runner runs a fresh session's first Setup at send admission, before writing any \
+             message, so that Setup names no `newest` and has no cut to anchor; a Setup checkpoint \
+             only reaches moved sessions, which the message_checkpoint cases cover"
+                .into(),
+        ));
+    }
     const CHECKPOINT: u64 = 500;
     let (answer, answer_marker) = case.mint.text("checkpoint-answer");
     let mut session = case
@@ -1467,7 +1475,7 @@ where
             ));
         }
     }
-    Ok(())
+    Ok(Ending::Passed)
 }
 
 /// A session forked from a managed session is refused `fork_unsupported`

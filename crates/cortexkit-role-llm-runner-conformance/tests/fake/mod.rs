@@ -5215,6 +5215,10 @@ pub struct FakeSubject {
     /// Refuse reads `transient` while a tag-rendering run waits for a Setup
     /// without descent, as the contract lets a runner.
     pub holds_reads_during_setup: bool,
+    /// The runner runs a fresh session's first Setup at send admission,
+    /// before writing any message, so that Setup names no `newest`.
+    /// `tags_setup_checkpoint_anchors_at_its_cut` is then inapplicable.
+    pub first_setup_names_newest: bool,
     /// The adapter cannot revert a session: `revert_session` errors.
     pub cannot_revert: bool,
     /// The adapter cannot compact a session in its host: `compact_in_host`
@@ -5327,6 +5331,7 @@ impl FakeSubject {
             seed_hook: false,
             host_prefix_everywhere: 0,
             holds_reads_during_setup: false,
+            first_setup_names_newest: true,
             cannot_revert: false,
             cannot_compact_in_host: false,
             cannot_renumber_output_refs: false,
@@ -6051,6 +6056,10 @@ impl LlmRunnerSubject for FakeSubject {
 
     fn holds_reads_during_setup(&self) -> bool {
         self.holds_reads_during_setup
+    }
+
+    fn first_setup_names_newest(&self) -> bool {
+        self.first_setup_names_newest
     }
 
     async fn revert_session(

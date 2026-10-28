@@ -1703,6 +1703,16 @@ pub trait LlmRunnerSubject: Harness {
         false
     }
 
+    /// Whether a fresh session's first compaction Setup names `newest`.
+    /// True when the runner writes the session's first message before its
+    /// first Setup, so that Setup names that message as `newest` and the
+    /// checkpoint it carries has a cut to anchor. An adapter whose runner
+    /// runs the first Setup at send admission, before writing any message,
+    /// answers false: that Setup names no `newest` and has no cut to anchor.
+    fn first_setup_names_newest(&self) -> bool {
+        true
+    }
+
     /// Advance the session's retention clock by `milliseconds`, completing
     /// expiry and any due deletion work before returning, including letting
     /// declared log readers durably read through the due content. Durable activity
