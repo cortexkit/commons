@@ -1074,7 +1074,7 @@ when applicable.
 | `message_checkpoint_anchors_after_folded_message` | With `cut` removed, a surviving `head_cut.mid` anchors the next message at 42; folded history is not served. |
 | `message_checkpoint_native_marker_carries_both_counters` | The actual native marker key carries the message and tag counters and the folded message's cut description. |
 | `message_checkpoint_missing_counter_is_not_zero` | Reloading a marker missing either counter without recoverable state or a Setup fallback refuses before any model call, never manufactures 0. |
-| `message_checkpoint_uncounted_rows_never_served` | Finished host summary rows never appear in reads and ordinals stay contiguous over counted rows on adoption and native lineages. |
+| `message_checkpoint_uncounted_rows_never_served` | Finished host summary rows and, on OpenCode 1, compaction-only rows never appear in reads and ordinals stay contiguous over counted rows on adoption and native lineages. |
 | `message_checkpoint_head_during_setup_uses_marker` | With a complete marker predating the first Setup, `session.head` answers during that Setup with its message count and certified cut, without waiting on Setup or its gates. A bounded wait fails deadlocks by name. |
 | `message_checkpoint_read_during_adoption_setup` | During adoption-cut Setup, a bounded `session.read` starts at `first_ordinal` without waiting on Setup gates, and a request below the boundary is refused. Blocking reads fail by name. |
 
@@ -1088,6 +1088,10 @@ also use the existing view-publishing hook and a tag-rendering plan.
 `insert_uncounted_host_summary` defaults to unsupported; the exclusion case
 uses it on adoption and native lineages, then appends counted messages to
 check that the uncounted row did not consume an ordinal.
+OpenCode 1 adapters also implement `insert_uncounted_host_compaction_only`
+to insert a user message whose only part is `compaction`. The same case
+checks its exclusion on both lineages. The hook defaults to `None` for
+other hosts, preserving their existing finished-summary checks.
 `plant_message_checkpoint_marker` defaults to unsupported and makes the
 Setup-time head and adoption-read cases Inapplicable by name. Implement it
 with no earlier stored Setup state, and withhold the provider's answer until

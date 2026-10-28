@@ -17,10 +17,21 @@
       {"time_created": 10, "id": "a", "data": "{\"role\":\"user\"}"},
       {"time_created": 11, "id": "c", "data": "{\"summary\":1,\"finish\":\"stop\"}"},
       {"time_created": 13, "id": "e", "data": "{\"summary\":true,\"finish\":\"length\"}"},
-      {"time_created": 14, "id": "f", "data": "{\"summary\":false,\"finish\":\"stop\"}"}
+      {"time_created": 14, "id": "f", "data": "{\"summary\":false,\"finish\":\"stop\"}"},
+      {"time_created": 15, "id": "marker-only", "data": "{\"role\":\"user\"}"},
+      {"time_created": 16, "id": "marker-and-text", "data": "{\"role\":\"user\"}"},
+      {"time_created": 17, "id": "empty-parts", "data": "{\"role\":\"user\"}"},
+      {"time_created": 18, "id": "two-markers-only", "data": "{\"role\":\"user\"}"}
     ],
-    "counted_ids": ["a", "d", "e", "f"],
-    "message_count": 4
+    "parts": [
+      {"message_id": "marker-only", "data": "{\"type\":\"compaction\"}"},
+      {"message_id": "marker-and-text", "data": "{\"type\":\"compaction\"}"},
+      {"message_id": "marker-and-text", "data": "{\"type\":\"text\",\"text\":\"Keep this message.\"}"},
+      {"message_id": "two-markers-only", "data": "{\"type\":\"compaction\"}"},
+      {"message_id": "two-markers-only", "data": "{\"type\":\"compaction\"}"}
+    ],
+    "counted_ids": ["a", "d", "e", "f", "marker-and-text", "empty-parts"],
+    "message_count": 6
   },
   "anchors": [
     {"name": "revert_lands_after_cut", "cut_survives": true, "head_survives": true,

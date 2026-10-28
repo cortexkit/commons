@@ -302,7 +302,7 @@ where
     adoption.first = Some((id, "first counted prompt".into()));
     crate::compaction::release_model(case.subject, &adoption.name).await?;
     crate::compaction::result(case, &adoption, &sent).await?;
-    let ending = exclude_summary(case, &mut adoption).await?;
+    let ending = exclude_uncounted_rows(case, &mut adoption).await?;
     if !matches!(ending, Ending::Passed) {
         return Ok(ending);
     }
@@ -312,10 +312,10 @@ where
         lineage::Fixture::Ready(cut) => cut.session,
         lineage::Fixture::Inapplicable(reason) => return Ok(Ending::Inapplicable(reason)),
     };
-    exclude_summary(case, &mut native).await
+    exclude_uncounted_rows(case, &mut native).await
 }
 
-async fn exclude_summary<S>(
+async fn exclude_uncounted_rows<S>(
     case: &Case<'_, S>,
     session: &mut crate::cases::Session<S::Route>,
 ) -> Result<Ending, String>
@@ -327,7 +327,7 @@ where
     let first = head(&session.route)
         .await?
         .first_ordinal
-        .ok_or("summary fixture has no lineage")?;
+        .ok_or("uncounted-row fixture has no lineage")?;
     let Some(summary_mid) = case
         .subject
         .insert_uncounted_host_summary(case.handle.inner(), &session.name)
@@ -338,7 +338,12 @@ where
             "adapter lacks insert_uncounted_host_summary".into(),
         ));
     };
-    lineage::exchange(case, session, "counted prompt after host summary").await?;
+    let compaction_mid = case
+        .subject
+        .insert_uncounted_host_compaction_only(case.handle.inner(), &session.name)
+        .await
+        .map_err(|e| format!("insert_uncounted_host_compaction_only: {e}"))?;
+    lineage::exchange(case, session, "counted prompt after uncounted host rows").await?;
     let (_, messages) = read_all(&session.route).await?;
     if messages.iter().any(|m| {
         m.mid == summary_mid
@@ -346,6 +351,12 @@ where
                 && m.message["finish"] == "stop")
     }) {
         return Err("uncounted summary row was served on session.read".into());
+    }
+    if messages
+        .iter()
+        .any(|m| compaction_mid.as_ref() == Some(&m.mid))
+    {
+        return Err("uncounted compaction-only row was served on session.read".into());
     }
     if messages.len() != before.len() + 2
         || messages
@@ -362,6 +373,12 @@ where
         let history = crate::host_history::walk_older(&session.route).await?;
         if history.iter().any(|m| m.mid == summary_mid) {
             return Err("uncounted summary row was served on session.history".into());
+        }
+        if history
+            .iter()
+            .any(|m| compaction_mid.as_ref() == Some(&m.mid))
+        {
+            return Err("uncounted compaction-only row was served on session.history".into());
         }
         let ordinals: Vec<_> = history.iter().filter_map(|m| m.ordinal).collect();
         if ordinals.windows(2).any(|pair| pair[1] != pair[0] + 1) {

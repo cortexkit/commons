@@ -411,7 +411,7 @@ pub const CASES: &[CaseSpec] = &[
     case("message_checkpoint_anchors_after_folded_message", &[], "message_checkpoint only: a removed cut anchors after the surviving head_cut.mid"),
     case("message_checkpoint_native_marker_carries_both_counters", &[], "message_checkpoint only: actual native marker keys carry message_count, head_cut and tag_checkpoint"),
     case("message_checkpoint_missing_counter_is_not_zero", &[], "message_checkpoint only: reloading an incomplete marker without fallback refuses, never manufactures zero"),
-    case("message_checkpoint_uncounted_rows_never_served", &[], "message_checkpoint only: finished host summaries are absent from reads on adoption and native lineages, and counted ordinals are contiguous"),
+    case("message_checkpoint_uncounted_rows_never_served", &[], "message_checkpoint only: finished host summaries and, on OpenCode 1, compaction-only rows are absent from reads on adoption and native lineages, and counted ordinals are contiguous"),
     case("message_checkpoint_head_during_setup_uses_marker", &[], "message_checkpoint only: session.head answers during the first outstanding Setup without waiting on its gates, using the pre-existing marker's message_count and head_cut"),
     case("message_checkpoint_read_during_adoption_setup", &[], "message_checkpoint only: session.read answers during adoption-cut Setup from first_ordinal without waiting on Setup gates, and refuses rows below that bound"),
     case("tags_setup_checkpoint_anchors_at_its_cut", &[Capability::Tags, Capability::TagCheckpoint, Capability::Compaction, Queue, TranscriptReads],

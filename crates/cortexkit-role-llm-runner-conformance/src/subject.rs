@@ -1643,6 +1643,21 @@ pub trait LlmRunnerSubject: Harness {
         Ok(None)
     }
 
+    /// On OpenCode 1, insert a user message whose only part is a
+    /// `compaction` part after the newest counted message, without changing
+    /// the counted rows. Return its host id so the suite checks both its
+    /// absence from reads and that it consumes no ordinal. Called with no
+    /// run active on adoption and native-cut lineages. OpenCode 1 adapters
+    /// implement this hook; `None` leaves the existing summary checks in
+    /// force for other hosts without compaction-only rows.
+    async fn insert_uncounted_host_compaction_only(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<Option<String>, HarnessError> {
+        Ok(None)
+    }
+
     /// Put into `session`'s stored history, after its newest message, a
     /// finished call of [`crate::SCRIPTED_TOOL`] with `call`'s id and
     /// arguments and a short text result, the way history stored before the

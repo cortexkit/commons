@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.21
+
+- Pin `cortexkit-role-llm-runner` to `=0.7.18`, whose OpenCode 1 counting
+  rule excludes nonempty compaction-only messages from counts and reads
+  without renumbering retained messages. Mixed compaction/text messages
+  still count.
+- Extend `message_checkpoint_uncounted_rows_never_served` with a defaulted
+  OpenCode 1 compaction-only fixture hook on adoption and native lineages.
+  Add a faulty fake that counts and serves that row and fails the case by
+  name; other hosts retain their existing finished-summary checks.
+
 ## 0.15.20
 
 - Add the defaulted `LlmRunnerSubject::first_setup_names_newest` hook: true

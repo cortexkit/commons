@@ -16,6 +16,7 @@ pub enum Defect {
     MarkerMissingCounters,
     MissingCounterFromZero,
     ServesSummaryRow,
+    CountsCompactionOnlyRow,
     SetupHeadFromStart,
     SetupHeadWaitsForSetup,
     SetupReadWaitsForSetup,

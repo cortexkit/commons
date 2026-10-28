@@ -1583,6 +1583,18 @@ impl Module {
                     sess.at_mut(ordinal).mid = record["mid"].as_str().unwrap().to_owned();
                 }
             }
+            "uncounted_host_compaction_only" => {
+                if self.world.defects.message_checkpoint
+                    == message_checkpoint::Defect::CountsCompactionOnlyRow
+                {
+                    let ordinal = sess.push(
+                        json!({"role":"user", "parts":[{"type":"compaction"}]}),
+                        "",
+                        Vec::new(),
+                    );
+                    sess.at_mut(ordinal).mid = record["mid"].as_str().unwrap().to_owned();
+                }
+            }
             "head-model-switch" => {
                 sess.head_model = Some(serde_json::from_value(record["model"].clone()).unwrap());
             }
@@ -6005,6 +6017,25 @@ impl LlmRunnerSubject for FakeSubject {
             .0
             .commit(session, json!({"kind":"uncounted_host_summary", "mid":mid}))
             .map_err(|Killed| HarnessError::new("killed inserting host summary"))?;
+        Ok(Some(mid))
+    }
+
+    async fn insert_uncounted_host_compaction_only(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+    ) -> Result<Option<String>, HarnessError> {
+        if !self.message_checkpoint_hooks {
+            return Ok(None);
+        }
+        let mid = format!("{session}.uncounted-compaction-only");
+        handle
+            .0
+            .commit(
+                session,
+                json!({"kind":"uncounted_host_compaction_only", "mid":mid}),
+            )
+            .map_err(|Killed| HarnessError::new("killed inserting compaction-only row"))?;
         Ok(Some(mid))
     }
 

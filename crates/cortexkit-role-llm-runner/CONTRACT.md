@@ -390,7 +390,8 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   answers `session.read` for the lineage being set up while its Setup call
   for that lineage is outstanding, without waiting on that Setup, its lock,
   or any gate it holds. It serves the lineage from its `first_ordinal`
-  onward and never below it. This lets the provider read surviving rows to
+  onward and never below it, excluding §4.8's uncounted finished-summary
+  and compaction-only rows. This lets the provider read surviving rows to
   build its Setup answer when a moved session recovers at the adoption cut,
   after a revert removed `cut` or the runner lost its state. Native-cut
   descent does not need this recovery read: the provider renders kept rows
@@ -426,6 +427,10 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   until it completes. This is stricter than, and contains, the final-values
   rule above; streaming progress reaches a consumer through the stream
   (§7), never through a partial entry.
+- [pinned] A runner declaring `message_checkpoint` also excludes §4.8's
+  uncounted host rows from every page: on OpenCode 1, finished summaries
+  and nonempty compaction-only messages. A compaction part alongside any
+  other part does not by itself exclude a message.
 - [pinned] **Read stability.** Read stability is scoped to the lineage
   (§4.5). Once `session.read` has returned an entry
   under a `lineage_id`, its `message` bytes, `ordinal`, `mid`, `role`,
@@ -1066,14 +1071,30 @@ display-ready row for an app's reader on a runner declaring
 - [pinned] A runner declaring `message_checkpoint` MUST use the host's
   counted-message order for message ordinals and `message_count`. For
   **OpenCode 1**, rows are ordered by `(time_created, id)`, ascending.
+  Counting considers each message together with its stored parts: the host
+  stores parts in separate `part` rows keyed by message id, not inside the
+  message row's `data`. `tags::opencode1_message_counts_with_parts` is the
+  reference predicate, taking the message row's `data` and each stored
+  part's `type` in part order.
   A row with `summary` equal to JSON `true` or the number `1` and `finish`
-  equal to `"stop"` is not counted. Every other row counts, including a row
-  whose JSON is malformed. These are message counters, not §9.6's part tags.
+  equal to `"stop"` is not counted. These are message counters, not §9.6's
+  part tags.
+- [pinned] For a runner declaring `message_checkpoint` on **OpenCode 1**,
+  a message with one or more parts, all of type `compaction`, is also not
+  counted and is never served. This excludes a native cut's compaction-only
+  marker: §4.5 forbids renumbering retained messages, so the first retained
+  real message after a cut through `t` keeps `first_ordinal = t + 1`.
+  A message with a `compaction` part plus
+  any other part is still counted unless it is a finished summary as above.
+  A message with zero parts is not compaction-only and keeps its existing
+  treatment: it counts unless it is a finished summary. Every other row
+  counts, including a row whose JSON is malformed.
 - [pinned] A runner declaring `message_checkpoint` MUST NOT serve on any
-  read a host row that these rules do not count, including the marker's own
-  finished summary row. This applies on every served lineage, at adoption
-  and native cuts alike: served ordinals equal the counted-message positions
-  everywhere, so a native cut's `t + 1` matches the messages the runner holds.
+  read a host row that these rules do not count, including a marker's own
+  finished summary or compaction-only row. This applies on every served
+  lineage, at adoption and native cuts alike: served ordinals equal the
+  counted-message positions everywhere, so a native cut's `t + 1` matches
+  the messages the runner holds.
   Runners without the group keep their existing reads.
 - [pinned] Other hosts receive their counting rules when they are adopted.
 
@@ -2668,7 +2689,8 @@ part's key and its content digest, never a number.
 - [pinned] A Setup checkpoint is `{tag_checkpoint, cut, message_count?,
   head_cut?}`. The new members are sent together or neither, only to a
   runner declaring `message_checkpoint`. `message_count` is a `u64`: the
-  count of host messages before `cut`, frozen at the move, both `cut`'s
+  count of host messages before `cut` under §4.8, excluding finished-summary
+  and compaction-only rows on OpenCode 1, frozen at the move, both `cut`'s
   ordinal and the adoption lineage's `first_ordinal`. `head_cut` reuses
   `read::HeadCut`: `{mid, digest, written_at}` for the counted message
   immediately before `cut`, the last message the move folded. Its digest
@@ -2697,9 +2719,10 @@ part's key and its content digest, never a number.
   overflows. `head_cut` describes message `t`, using the same digest and
   timestamp rules as Setup.
 - [pinned] For a runner declaring `message_checkpoint`, §4.8's uncounted
-  rows, including the marker's finished summary row, MUST NOT appear on
-  any read, on adoption or native lineages. Message ordinals are contiguous
-  over the counted rows; a native marker's `t + 1` uses that same order.
+  rows, including a marker's finished summary and compaction-only rows,
+  MUST NOT appear on any read, on adoption or native lineages. Message
+  ordinals are contiguous over the counted rows; a native marker's `t + 1`
+  uses that same order.
 - [pinned] On reload, a runner declaring `message_checkpoint` MUST restore
   `first_ordinal` and `session.head.cut` from the marker without walking
   history. A marker whose key is lost supplies only the existing tag

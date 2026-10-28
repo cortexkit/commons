@@ -7333,6 +7333,25 @@ async fn message_checkpoint_each_faulty_fake_fails_its_named_case() {
 }
 
 #[tokio::test]
+async fn message_checkpoint_counting_compaction_only_row_fails_by_name() {
+    let report = run(&declaring(
+        Capability::MessageCheckpoint,
+        Defects {
+            message_checkpoint: fake::message_checkpoint::Defect::CountsCompactionOnlyRow,
+            ..Defects::default()
+        },
+    ))
+    .await;
+    let name = "message_checkpoint_uncounted_rows_never_served";
+    let reason = failed(&report, name);
+    assert!(
+        reason.contains("uncounted compaction-only row was served on session.read"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
 async fn message_checkpoint_setup_head_deadlock_fails_by_name_without_hanging() {
     let subject = declaring(
         Capability::MessageCheckpoint,

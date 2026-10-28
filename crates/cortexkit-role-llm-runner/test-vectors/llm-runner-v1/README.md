@@ -467,7 +467,13 @@ characters and absence of both identities.
 legacy decoder projection, the full inline sample message and its exact JCS
 UTF-8 bytes, ordinary lowercase SHA-256 digest and `head_cut.written_at`
 (JSON u64 milliseconds since the Unix epoch). It also pins OpenCode 1
-counting, including finished summaries and malformed JSON, and every revert
+counting with `rows` mirroring message rows and a separate `parts` array
+of stored part rows (`message_id`, JSON `data`), in part order. The full
+`opencode1_message_counts_with_parts` predicate covers finished summaries,
+malformed message JSON, excluded compaction-only messages, counted mixed
+compaction/text messages and counted empty-part messages. The legacy
+`opencode1_message_counts` predicate still checks finished summaries only.
+The vector also pins every revert
 anchor outcome: after the retained cut, cut removed with folded message kept,
 folded message removed, marker rows lost, and inconsistent head state.
 The message-lineage rules apply only to `message_checkpoint` runners.

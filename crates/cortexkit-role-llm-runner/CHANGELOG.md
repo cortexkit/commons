@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.18
+
+- Exclude nonempty compaction-only OpenCode 1 messages from §4.8 counts
+  and served reads so native cuts preserve §4.5's session-wide ordinals.
+  Messages with compaction and any other part still count; empty-part
+  messages retain their existing treatment.
+- Add `opencode1_message_counts_with_parts`, taking the message row's data
+  and the types from its separately stored part rows. Keep
+  `opencode1_message_counts`'s existing finished-summary-only behavior for
+  compatibility. Update the row-list vector to cover compaction-only,
+  mixed compaction/text, and empty-part messages with separate message
+  and part rows.
+
 ## 0.7.17
 
 - Add opt-in `message_checkpoint` (requires `tag_checkpoint`), optional

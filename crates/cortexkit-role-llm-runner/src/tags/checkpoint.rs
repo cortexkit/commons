@@ -101,13 +101,33 @@ pub fn message_checkpoint_anchors(
     })
 }
 
-/// OpenCode 1 excludes only finished summary rows. Malformed JSON counts.
-/// Rows are consumed in ascending `(time_created, id)` order (§4.8).
+/// Applies only OpenCode 1's finished-summary rule to a message row's `data`.
+/// This function cannot see the separately stored parts and does not inspect
+/// a `parts` field in the JSON. Malformed JSON counts. Runners declaring
+/// `message_checkpoint` must use [`opencode1_message_counts_with_parts`] for
+/// the full §4.8 rule.
 pub fn opencode1_message_counts(data: &str) -> bool {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(data) else {
         return true;
     };
     !((value["summary"] == true || value["summary"] == 1) && value["finish"] == "stop")
+}
+
+/// Applies OpenCode 1's full §4.8 counting rule to a message and its stored parts.
+/// Pass the message row's `data` and each stored part's `type`, in part order,
+/// from the separate part rows keyed by that message's id.
+/// Finished summaries and nonempty compaction-only messages are excluded from
+/// both counts and served reads. Zero-part messages and malformed message JSON
+/// count unless one of those exclusions applies. Consume message rows in
+/// ascending `(time_created, id)` order.
+pub fn opencode1_message_counts_with_parts<'a>(
+    message_data: &str,
+    part_types: impl IntoIterator<Item = &'a str>,
+) -> bool {
+    let mut part_types = part_types.into_iter();
+    let compaction_only = part_types.next() == Some("compaction")
+        && part_types.all(|part_type| part_type == "compaction");
+    opencode1_message_counts(message_data) && !compaction_only
 }
 
 #[cfg(test)]
@@ -177,9 +197,29 @@ mod tests {
                 row["id"].as_str().unwrap().to_owned(),
             )
         });
+        let parts: Vec<_> = vectors["opencode1"]["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|part| {
+                (
+                    part["message_id"].clone(),
+                    serde_json::from_str::<serde_json::Value>(part["data"].as_str().unwrap())
+                        .unwrap(),
+                )
+            })
+            .collect();
         let ids: Vec<_> = rows
             .iter()
-            .filter(|row| opencode1_message_counts(row["data"].as_str().unwrap()))
+            .filter(|row| {
+                opencode1_message_counts_with_parts(
+                    row["data"].as_str().unwrap(),
+                    parts
+                        .iter()
+                        .filter(|(message_id, _)| *message_id == row["id"])
+                        .map(|(_, part)| part["type"].as_str().unwrap()),
+                )
+            })
             .map(|row| row["id"].clone())
             .collect();
         assert_eq!(
@@ -190,6 +230,71 @@ mod tests {
             ids.len() as u64,
             vectors["opencode1"]["message_count"].as_u64().unwrap()
         );
+        for (id, counts) in [
+            ("marker-only", false),
+            ("marker-and-text", true),
+            ("empty-parts", true),
+            ("two-markers-only", false),
+        ] {
+            let row = rows.iter().find(|row| row["id"] == id).unwrap();
+            assert_eq!(
+                opencode1_message_counts_with_parts(
+                    row["data"].as_str().unwrap(),
+                    parts
+                        .iter()
+                        .filter(|(message_id, _)| *message_id == row["id"])
+                        .map(|(_, part)| part["type"].as_str().unwrap()),
+                ),
+                counts,
+                "{id}"
+            );
+            assert_eq!(ids.iter().any(|served_id| served_id == id), counts, "{id}");
+        }
+        let summary_only_ids: Vec<_> = rows
+            .iter()
+            .filter(|row| opencode1_message_counts(row["data"].as_str().unwrap()))
+            .map(|row| row["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            summary_only_ids,
+            [
+                "a",
+                "d",
+                "e",
+                "f",
+                "marker-only",
+                "marker-and-text",
+                "empty-parts",
+                "two-markers-only",
+            ]
+        );
+    }
+
+    #[test]
+    fn opencode1_summary_only_compatibility_ignores_embedded_parts() {
+        assert!(opencode1_message_counts(
+            r#"{"role":"user","parts":[{"type":"compaction"}]}"#
+        ));
+        assert!(!opencode1_message_counts(
+            r#"{"summary":true,"finish":"stop","parts":[{"type":"text"}]}"#
+        ));
+    }
+
+    #[test]
+    fn opencode1_separate_parts_apply_even_to_malformed_message_data() {
+        assert!(opencode1_message_counts_with_parts("{malformed", []));
+        assert!(!opencode1_message_counts_with_parts(
+            "{malformed",
+            ["compaction"]
+        ));
+        assert!(opencode1_message_counts_with_parts(
+            "{malformed",
+            ["compaction", "text"]
+        ));
+        assert!(!opencode1_message_counts_with_parts(
+            r#"{"summary":1,"finish":"stop"}"#,
+            ["text"]
+        ));
     }
 
     #[test]
