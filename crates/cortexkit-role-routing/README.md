@@ -8,14 +8,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.5.1"
+cortexkit-role-routing = "0.5.2"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.5.1", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.5.2", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -101,6 +101,16 @@ adequate route is from a listed provider the select is the same `no_route`
 an `exclude` listing those routes gets. `exclude` keeps its meaning. A
 provider without the group refuses `exclude_providers` by name, so a caller
 sends it only after `role.describe` declares the group.
+
+`route.account_for` may refuse with `invalid_request`, `unknown_decision`,
+`account_not_authorized`, `auth_required`, `account_hold`,
+`account_quota_unknown`, `account_pool_exhausted`, `account_pool_reserve_limited`,
+`account_selection_disabled`, `account_selection_unavailable`,
+`admission_conflict` or `pin_generation_conflict`. `account_selection_disabled`
+means account selection is off on this router; use your own credential. It is
+module-wide, never per provider or per pool, and untimed: it carries no
+`reset_at_ms`. A caller must not treat it as exhaustion or a hold, or retry
+against another provider expecting a different answer.
 
 With `pin_fallback` (`SelectRequest::with_pin_fallback`) beside a pin, an
 unservable pin routes normally instead of refusing `pin_unavailable`. The

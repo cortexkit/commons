@@ -231,6 +231,18 @@
       "wait_until_ms": null
     },
     {
+      "name": "account_selection_disabled",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "account_selection_disabled",
+        "message": "account selection is off on this router; use your own credential",
+        "detail": {}
+      },
+      "wait_until_ms": null
+    },
+    {
       "name": "account_selection_unavailable",
       "ops": [
         "route.account_for"

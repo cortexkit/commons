@@ -61,6 +61,10 @@ open_set! {
         AccountPoolExhausted => "account_pool_exhausted",
         /// `route.account_for`: the accounts left are held in reserve.
         AccountPoolReserveLimited => "account_pool_reserve_limited",
+        /// `route.account_for`: account selection is off on this router for
+        /// every provider and pool. Use your own credential; never timed,
+        /// not exhaustion or a hold, and not a reason to try another provider.
+        AccountSelectionDisabled => "account_selection_disabled",
         /// `route.account_for`: the allocator cannot choose right now;
         /// transient, but not timed.
         AccountSelectionUnavailable => "account_selection_unavailable",
@@ -396,6 +400,22 @@ mod tests {
             serde_json::to_string(&refusal).unwrap(),
             r#"{"code":"rate_shaped","message":"m","detail":{"reset_at_ms":5}}"#
         );
+    }
+
+    #[test]
+    fn account_selection_disabled_is_declared_and_never_timed() {
+        let mut refusal: Refusal = serde_json::from_str(
+            r#"{"code":"account_selection_disabled","message":"use your own credential","detail":{}}"#,
+        )
+        .unwrap();
+        assert!(refusal.code.is_known());
+        assert_eq!(refusal.code.as_str(), "account_selection_disabled");
+        assert!(refusal.detail.is_empty());
+        assert_eq!(refusal.wait_until_ms(), None);
+        for key in ["reset_at_ms", "until_ms"] {
+            refusal.detail.insert(key.into(), serde_json::json!(99));
+        }
+        assert_eq!(refusal.wait_until_ms(), None);
     }
 
     #[test]

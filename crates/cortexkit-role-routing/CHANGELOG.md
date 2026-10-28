@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2
+
+- Declare `account_selection_disabled` for `route.account_for`: account
+  selection is off on the router, module-wide rather than per provider or
+  per pool, so the caller uses its own credential. The refusal is untimed
+  (no `reset_at_ms`), not exhaustion or a hold, and must not cause a retry
+  against another provider. Add the `RefusalCode::AccountSelectionDisabled`
+  variant, a refusal vector and checksum, and coverage that it is a known
+  code and never timed, even if a peer sends timing fields.
+
 ## 0.5.1
 
 - Add the optional `select_exclude_providers` group: `exclude_providers`

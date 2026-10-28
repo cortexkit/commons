@@ -678,8 +678,14 @@ The answer (`account::AccountForAnswer`):
   `account_not_authorized`, `auth_required`, `account_hold {until_ms}`
   (timed), `account_quota_unknown`, `account_pool_exhausted
   {reset_at_ms?}` (timed when the reset is known),
-  `account_pool_reserve_limited`, `account_selection_unavailable`
+  `account_pool_reserve_limited`, `account_selection_disabled` (not timed),
+  `account_selection_unavailable`
   (transient, not timed), `admission_conflict`, `pin_generation_conflict`.
+- [pinned] `account_selection_disabled` means account selection is off on
+  this router; use your own credential. The switch is module-wide, never
+  per provider or per pool. The refusal is untimed and carries no
+  `reset_at_ms`. A caller must not treat it as exhaustion or a hold, and
+  must not retry against another provider expecting a different answer.
 
 ### 9.2 `route.account_observe`
 
@@ -735,6 +741,7 @@ What a runner saw on an account, so the provider's headroom stays current.
 | `account_quota_unknown` | `route.account_for` (§9.1) | `{}` | no |
 | `account_pool_exhausted` | `route.account_for` (§9.1) | `{reset_at_ms?}` | when `reset_at_ms` is present |
 | `account_pool_reserve_limited` | `route.account_for` (§9.1) | `{}` | no |
+| `account_selection_disabled` | `route.account_for` (§9.1) | `{}` | no (module-wide; use your own credential) |
 | `account_selection_unavailable` | `route.account_for` (§9.1) | `{}` | no (transient) |
 | `admission_conflict` | `route.account_for` (§9.1) | `{}` | no |
 | `pin_generation_conflict` | `route.account_for` (§9.1) | `{}` | no |
