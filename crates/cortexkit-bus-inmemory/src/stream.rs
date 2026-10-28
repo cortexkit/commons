@@ -141,7 +141,7 @@ impl StreamCursor for InMemoryStreamCursor {
             .durable_cursors
             .get_mut(&self.key)
             .expect("durable disappeared after binding");
-        let now = Instant::now();
+        let now = (self.bus.stream_clock)();
         // Another cursor holds the head message and its ack wait has not run out.
         if durable
             .lease
@@ -191,7 +191,7 @@ impl StreamCursor for InMemoryStreamCursor {
         let durable = durable_mut(&mut state.durable_cursors, &self.key);
         if durable.next_index == index && holds_lease(durable, self.id) {
             durable.lease = None;
-            durable.available_at = Some(Instant::now() + delay);
+            durable.available_at = Some((self.bus.stream_clock)() + delay);
         }
         Ok(())
     }
@@ -225,7 +225,7 @@ impl StreamCursor for InMemoryStreamCursor {
         // no longer holds it and its report changes nothing.
         if durable.next_index == index && holds_lease(durable, self.id) {
             if let Some(lease) = durable.lease.as_mut() {
-                lease.deadline = Instant::now() + ack_wait;
+                lease.deadline = (self.bus.stream_clock)() + ack_wait;
             }
         }
         Ok(())

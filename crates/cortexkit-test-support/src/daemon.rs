@@ -346,7 +346,11 @@ mod tests {
         std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o755)).unwrap();
         let staged = crate::stage_test_binary(&source);
         assert_eq!(staged.file_name().unwrap(), "ckdev-name-probe");
-        assert!(staged.starts_with("/tmp"));
+        let temp_base = crate::private_temp_base(std::env::var_os("TMPDIR").as_deref());
+        assert!(staged
+            .canonicalize()
+            .unwrap()
+            .starts_with(temp_base.canonicalize().unwrap()));
         assert_eq!(
             std::fs::read(source).unwrap(),
             std::fs::read(&staged).unwrap()

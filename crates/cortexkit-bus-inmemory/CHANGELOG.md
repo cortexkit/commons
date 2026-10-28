@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Use a bus-local simulated delivery clock in the in-progress conformance probe,
+  so scheduler delays cannot make an extended ack wait appear to expire. Normal
+  delivery clocks and real-bus probes are unchanged.
+
 ## 0.3.0
 
 - **Breaking:** publishing now returns `cortexkit_bus_trait::PublishReceipt`.

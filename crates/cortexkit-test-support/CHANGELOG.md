@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.12
+
+- Check the staged daemon test binary against the canonical staging temporary
+  directory instead of assuming it is `/tmp`, so the test also works with a
+  custom `TMPDIR` while preserving the macOS assessed-directory fallback.
+
 ## 0.1.11
 
 - Deleting a published `ckdev-*` entry no longer removes it in place. The entry is first renamed to a unique `.removing-*` name in the same cache root, then the renamed copy is deleted. Readers see either the complete entry or nothing; a deletion that fails partway can no longer leave a sealed entry with no record that wedges every later lookup. A failed deletion leaves the renamed copy for a later prune to retry, and prunes also retry leftover `.removing-*` directories. On Windows, when a running image keeps the rename from succeeding, the entry is left in place as before.

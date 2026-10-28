@@ -1,4 +1,5 @@
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use cortexkit_bus_trait::{
@@ -183,11 +184,18 @@ async fn stream_term() -> Result<(), String> {
 
 async fn stream_in_progress() -> Result<(), String> {
     let ack_wait = Duration::from_millis(200);
-    let bus = InMemoryBus::new(
+    let clock = Arc::new(Mutex::new(Instant::now()));
+    let mut bus = InMemoryBus::new(
         InMemoryConfig::default()
             .with_durable(DurableOwner::Agent("agent"))
             .with_stream_ack_wait(ack_wait),
     );
+    // Only this bus's delivery clock advances, so scheduler delays cannot
+    // carry the probe past the extended lease or affect other backends.
+    bus.stream_clock = {
+        let clock = Arc::clone(&clock);
+        Arc::new(move || *clock.lock().expect("stream probe clock poisoned"))
+    };
     for id in ["m1", "m2"] {
         let receipt = bus
             .publish(STREAM_SUBJECT, id, digest(id), Headers::new())
@@ -210,7 +218,7 @@ async fn stream_in_progress() -> Result<(), String> {
         .await
         .map_err(debug)?
         .ok_or("m1 was not delivered")?;
-    tokio::time::sleep(ack_wait + Duration::from_millis(100)).await;
+    *clock.lock().expect("stream probe clock poisoned") += ack_wait * 3 / 2;
     let redelivered = other
         .next()
         .await
@@ -229,9 +237,9 @@ async fn stream_in_progress() -> Result<(), String> {
         .await
         .map_err(debug)?
         .ok_or("m2 was not delivered")?;
-    tokio::time::sleep(ack_wait * 3 / 5).await;
+    *clock.lock().expect("stream probe clock poisoned") += ack_wait * 3 / 5;
     slow.in_progress().await.map_err(debug)?;
-    tokio::time::sleep(ack_wait * 3 / 5).await;
+    *clock.lock().expect("stream probe clock poisoned") += ack_wait * 3 / 5;
     require(
         other.next().await.map_err(debug)?.is_none(),
         "a message reported in progress was redelivered past the original ack wait",
@@ -565,6 +573,11 @@ mod tests {
     async fn asserting_nats_only_against_in_memory_is_a_suite_bug() {
         let result = run_conformance(&InMemoryConformance, PropertySet::NatsOnly).await;
         assert_eq!(result, Err(SuiteBug::NatsOnlyAssertedAgainstInMemory));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn in_progress_probe_does_not_wait_for_wall_clock() {
+        stream_in_progress().await.unwrap();
     }
 
     #[tokio::test]

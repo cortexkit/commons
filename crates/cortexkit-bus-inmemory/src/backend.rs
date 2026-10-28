@@ -135,6 +135,7 @@ pub enum BackendEvent {
 pub struct InMemoryBus {
     pub(crate) inner: Arc<Mutex<State>>,
     pub(crate) deduplication_clock: Arc<dyn Fn() -> Instant + Send + Sync>,
+    pub(crate) stream_clock: Arc<dyn Fn() -> Instant + Send + Sync>,
 }
 
 impl InMemoryBus {
@@ -171,6 +172,7 @@ impl InMemoryBus {
                 permission_violations: VecDeque::new(),
             })),
             deduplication_clock: Arc::new(clock),
+            stream_clock: Arc::new(Instant::now),
         }
     }
 
