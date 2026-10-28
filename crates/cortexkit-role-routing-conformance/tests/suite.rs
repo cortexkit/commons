@@ -1100,3 +1100,64 @@ async fn accepting_undeclared_exclude_providers_member_fails() {
         report.render()
     );
 }
+
+#[tokio::test]
+async fn task_ref_faithful_provider_passes_both_checks() {
+    let report = run_suite(&FakeSubject::new(Defects::default())).await;
+    for name in [
+        "task_ref_never_changes_selection",
+        "invalid_task_ref_refused_by_name",
+    ] {
+        assert!(CHECKS.iter().any(|check| check.name == name), "{name}");
+        assert_eq!(
+            report.outcome(name),
+            Some(&CheckOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn task_ref_changing_selection_fails_by_name() {
+    breaks(
+        Defects {
+            task_ref_changes_selection: true,
+            ..Defects::default()
+        },
+        "task_ref_never_changes_selection",
+        "task_ref changed selection",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn task_ref_accepting_invalid_values_fails_by_name() {
+    breaks(
+        Defects {
+            accepts_invalid_task_ref: true,
+            ..Defects::default()
+        },
+        "invalid_task_ref_refused_by_name",
+        "invalid task_ref was answered",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn task_ref_without_group_checks_are_not_applicable_by_name() {
+    let report = run_suite(&FakeSubject::without_task_ref_control(Defects::default())).await;
+    for name in [
+        "task_ref_never_changes_selection",
+        "invalid_task_ref_refused_by_name",
+    ] {
+        match report.outcome(name) {
+            Some(CheckOutcome::NotApplicable { reason }) => {
+                assert_eq!(reason, "role.describe does not declare select_task_ref");
+            }
+            other => panic!("{name} should be not applicable, got {other:?}"),
+        }
+        assert!(report.render().contains(&format!("N/A  {name}:")));
+    }
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}

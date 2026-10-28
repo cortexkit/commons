@@ -161,6 +161,12 @@ pub struct SelectRequest {
     /// Echoed in logs only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correlation_id: Option<String>,
+    /// Opaque task reference for decision attribution and per-task cost profiles,
+    /// never selection. 1–128 bytes, each printable ASCII `0x21..=0x7e`.
+    /// Sent only to a provider declaring [`crate::capabilities::SELECT_TASK_REF`].
+    /// Stored with the decision, never returned in an answer or to another caller.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrency_slots: Option<Vec<ConcurrencySlot>>,
     /// Asks for the provider's explanation object.
@@ -211,6 +217,7 @@ impl SelectRequest {
             runners: None,
             affinity: None,
             correlation_id: None,
+            task_ref: None,
             concurrency_slots: None,
             detail: None,
             hold_ok: None,
@@ -278,6 +285,11 @@ impl SelectRequest {
     /// Set the correlation id the provider echoes in its logs.
     pub fn with_correlation_id(mut self, correlation_id: impl Into<String>) -> Self {
         self.correlation_id = Some(correlation_id.into());
+        self
+    }
+
+    pub fn with_task_ref(mut self, task_ref: impl Into<String>) -> Self {
+        self.task_ref = Some(task_ref.into());
         self
     }
 
@@ -510,7 +522,8 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
 /// declares [`crate::capabilities::SELECT_HARNESS`]. `prefer` is refused by
 /// name unless the provider declares [`crate::capabilities::SELECT_PREFER`],
 /// and `exclude_providers` unless it declares
-/// [`crate::capabilities::SELECT_EXCLUDE_PROVIDERS`].
+/// [`crate::capabilities::SELECT_EXCLUDE_PROVIDERS`]. `task_ref` is refused
+/// by name unless the provider declares [`crate::capabilities::SELECT_TASK_REF`].
 /// Whether the consumer is known and owned, and
 /// whether anything can serve, is the provider's to answer after this.
 pub fn parse_select_request_serving<C: AsRef<str>>(
@@ -584,6 +597,27 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
                 format!(
                     "harness is read only by a provider declaring {}",
                     crate::capabilities::SELECT_HARNESS
+                ),
+            ));
+        }
+    }
+    let task_ref = members.optional_text("task_ref", None)?;
+    if let Some(task_ref) = &task_ref {
+        if task_ref.len() > 128 || !task_ref.bytes().all(|byte| (0x21..=0x7e).contains(&byte)) {
+            return Err(members.refuse(
+                "task_ref",
+                "task_ref must be 1 to 128 bytes, each printable ASCII 0x21-0x7e",
+            ));
+        }
+        if !capabilities
+            .iter()
+            .any(|capability| capability.as_ref() == crate::capabilities::SELECT_TASK_REF)
+        {
+            return Err(members.refuse(
+                "task_ref",
+                format!(
+                    "task_ref is read only by a provider declaring {}",
+                    crate::capabilities::SELECT_TASK_REF
                 ),
             ));
         }
@@ -664,6 +698,7 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         runners,
         affinity: members.optional_text("affinity", Some(AFFINITY_MAX_CHARS))?,
         correlation_id: members.optional_text("correlation_id", Some(CORRELATION_ID_MAX_CHARS))?,
+        task_ref,
         concurrency_slots: members.optional("concurrency_slots")?,
         detail: members.optional("detail")?,
         hold_ok,
@@ -958,6 +993,7 @@ mod tests {
             "detail": null,
             "pin_fallback": null,
             "prefer": null,
+            "task_ref": null,
         }))
         .unwrap();
         let without =
@@ -967,5 +1003,56 @@ mod tests {
             serde_json::to_value(&without).unwrap(),
             json!({"consumer": "flow", "requirements": {"iq": 1}})
         );
+    }
+
+    #[test]
+    fn task_ref_accepts_printable_ascii_within_byte_limits() {
+        let printable: String = (0x21..=0x7e).map(char::from).collect();
+        for task_ref in [
+            "!".into(),
+            "~".into(),
+            "x".repeat(128),
+            "wi:ct_1:0/s17-2.#".into(),
+            printable,
+        ] {
+            let params =
+                json!({"consumer": "flow", "requirements": {"iq": 1}, "task_ref": task_ref});
+            let request =
+                parse_select_request_serving(&params, &[crate::capabilities::SELECT_TASK_REF])
+                    .unwrap();
+            assert_eq!(request.task_ref.as_deref(), Some(task_ref.as_str()));
+            assert_eq!(serde_json::to_value(&request).unwrap(), params);
+        }
+    }
+
+    #[test]
+    fn task_ref_invalid_values_are_refused_by_name() {
+        for task_ref in [
+            json!(""),
+            json!("x".repeat(129)),
+            json!("has space"),
+            json!("wi\u{1f}1"),
+            json!("wi\u{7f}1"),
+            json!("wi_é"),
+            json!(12),
+        ] {
+            let params =
+                json!({"consumer": "flow", "requirements": {"iq": 1}, "task_ref": task_ref});
+            let refusal =
+                parse_select_request_serving(&params, &[crate::capabilities::SELECT_TASK_REF])
+                    .unwrap_err();
+            assert_eq!(refusal.code, RefusalCode::InvalidRequest, "{params}");
+            assert_eq!(field(&refusal), "task_ref", "{params}");
+        }
+    }
+
+    #[test]
+    fn task_ref_requires_the_declared_group() {
+        let refusal = parse_select_request(
+            &json!({"consumer": "flow", "requirements": {"iq": 1}, "task_ref": "wi_1"}),
+        )
+        .unwrap_err();
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest);
+        assert_eq!(field(&refusal), "task_ref");
     }
 }

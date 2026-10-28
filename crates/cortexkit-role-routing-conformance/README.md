@@ -88,10 +88,10 @@ raises a `context_window` or `max_output_tokens` floor instead.
 
 ## Checks
 
-The kit runs 56 checks, including six declaration checks, eight optional-member
+The kit runs 58 checks, including six declaration checks, eight optional-member
 checks, four additional program checks, nine hold checks, eight checks
 for pin fallback, reset fences, prefer and usage, and three for provider
-exclusion. The hold checks cover the optional
+exclusion and two for task references. The hold checks cover the optional
 `select_hold_control` group: against a provider whose `role.describe` does
 not declare it they report not applicable (`CheckOutcome::NotApplicable`,
 printed `N/A`), and the verdict stays `Passed`. The two prefer routing checks
@@ -103,7 +103,9 @@ routing checks are likewise not applicable without `select_prefer`; the
 undeclared-prefer refusal check runs only without that group. The two
 `exclude_providers` checks are likewise not applicable without
 `select_exclude_providers`, and the undeclared-group refusal check for it runs
-only without that group. Default-program
+only without that group. The two task-reference checks are not applicable
+without `select_task_ref`: adding the reference must never change the selected
+route, and malformed references must be refused by field name. Default-program
 and non-starting-runner checks run regardless of the group. `harness_catalog()`
 adds a runner with `["alpha", "beta"]` and default `"alpha"`, a singleton
 `["solo"]` with no default, and an attach-only gateway with
@@ -177,6 +179,8 @@ provider declares `select_harness`.
 | `exclude_providers_answers_another_provider` | §5.1: `select_exclude_providers` never answers a route from a listed provider |
 | `exclude_providers_every_provider_no_route` | §5.1: excluding every provider is the `no_route` an `exclude` of every route gets |
 | `undeclared_exclude_providers_group_refuses_member` | §5.1: without `select_exclude_providers`, refuse `exclude_providers` by field name |
+| `task_ref_never_changes_selection` | §5.1: `select_task_ref` answers the same route with or without `task_ref` |
+| `invalid_task_ref_refused_by_name` | §5.1: malformed `task_ref` is `invalid_request` naming the field |
 
 `CHECKS` in `src/report.rs` states what each check asserts, and `NARROWINGS`
 where it checks less than the contract says; every report prints both.

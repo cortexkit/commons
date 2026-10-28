@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.3
+
+- Add optional `SelectRequest::task_ref` and `with_task_ref` for decision
+  attribution and per-task cost profiles. The opaque reference is 1–128 bytes,
+  each printable ASCII `0x21`–`0x7E` (no spaces, controls or non-ASCII).
+  Callers send it only to a provider declaring the new `select_task_ref`
+  group (`capabilities::SELECT_TASK_REF`); invalid values and use without
+  the group are `invalid_request` naming `task_ref`. It never affects selection:
+  the same select without it answers exactly the same route. It is stored and
+  retained with the decision, never returned in answers or to other callers;
+  reports already name their decision. Omitted requests keep their wire bytes,
+  and `correlation_id` remains log-only. Add request/refusal vectors and checksums.
+
 ## 0.5.2
 
 - Declare `account_selection_disabled` for `route.account_for`: account

@@ -196,6 +196,14 @@ pub const CHECKS: &[CheckSpec] = &[
         "select_exclude_providers: a select excluding every provider is refused no_route, with the reason and reset_at_ms of a select excluding every route key",
     ),
     check("undeclared_exclude_providers_group_refuses_member", "a provider without select_exclude_providers refuses exclude_providers as invalid_request naming the field"),
+    check(
+        "task_ref_never_changes_selection",
+        "select_task_ref: the same select with and without task_ref answers the same route",
+    ),
+    check(
+        "invalid_task_ref_refused_by_name",
+        "select_task_ref: an invalid task_ref is refused as invalid_request naming task_ref",
+    ),
 ];
 
 /// Where the kit checks less than the contract says, and why. Every report
@@ -215,6 +223,7 @@ pub const NARROWINGS: &[&str] = &[
     "Holds are checked with whole-account blocks set through a hook, on ladders of two entries; the operator max_hold limit alone, variants as separate entries, the metered-fallback rule and pooled windows are not checked, and the hold_ok true path past every entry is checked only through hold_ok false.",
     "When account_for holds only within a decision's recorded cap, the kit checks that a wait beyond it is refused with some code other than account_hold; it does not check which.",
     "exclude_providers is checked on demand-mode selects with no pin and nothing cooling down: a pin on an excluded provider, its pin fallback, its interaction with prefer and ladders, and the no_route comparison with a timed cause are not checked.",
+    "task_ref selection neutrality is checked on a fresh demand-mode select; stored attribution, per-task cost profiles, retention and non-disclosure to other callers are not inspected by the kit.",
 ];
 
 /// How one check ended.

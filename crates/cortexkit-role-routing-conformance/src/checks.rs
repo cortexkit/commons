@@ -5,7 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use cortexkit_role_routing::{
     account::AccountForAnswer,
-    capabilities::{self, SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL},
+    capabilities::{
+        self, SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_TASK_REF,
+    },
     describe::{check_describe, RoleDescribe},
     errors::{
         NoRouteDetail, NoRouteReason, PinUnavailableDetail, PinUnavailableReason, Refusal,
@@ -65,6 +67,12 @@ const PREFER_CHECKS: &[&str] = &[
 const EXCLUDE_PROVIDERS_CHECKS: &[&str] = &[
     "exclude_providers_answers_another_provider",
     "exclude_providers_every_provider_no_route",
+];
+
+/// The task attribution checks apply only to providers declaring `select_task_ref`.
+const TASK_REF_CHECKS: &[&str] = &[
+    "task_ref_never_changes_selection",
+    "invalid_task_ref_refused_by_name",
 ];
 
 /// The operator hold settings the hold checks start from, in seconds: the
@@ -232,6 +240,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         }
         if EXCLUDE_PROVIDERS_CHECKS.contains(&name) {
             return self.exclude_providers_check(name).await;
+        }
+        if TASK_REF_CHECKS.contains(&name) {
+            return self.task_ref_check(name).await;
         }
         if matches!(
             name,
@@ -1779,6 +1790,23 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         checked.map(|()| Ending::Passed)
     }
 
+    async fn task_ref_check(&self, name: &str) -> Result<Ending, String> {
+        let route = self.route_as(CONSUMER).await?;
+        let describe: RoleDescribe =
+            answer(&route, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+        if !describe.serves(SELECT_TASK_REF) {
+            return Ok(Ending::NotApplicable(format!(
+                "role.describe does not declare {SELECT_TASK_REF}"
+            )));
+        }
+        let checked = match name {
+            "task_ref_never_changes_selection" => self.task_ref_never_changes_selection().await,
+            "invalid_task_ref_refused_by_name" => self.invalid_task_ref_refused_by_name().await,
+            other => Err(format!("the kit has no task_ref check named {other}")),
+        };
+        checked.map(|()| Ending::Passed)
+    }
+
     /// Run the exclude_providers check `name`, or report it not applicable
     /// when the provider does not declare `select_exclude_providers`.
     async fn exclude_providers_check(&self, name: &str) -> Result<Ending, String> {
@@ -2307,6 +2335,49 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             }
             Ok(_) => Err("the fenced account was answered, though its route was fenced".into()),
         }
+    }
+
+    async fn task_ref_never_changes_selection(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        let without = select(&route, &base(), "a select without task_ref").await?;
+        // Reset so only task_ref differs, not any state left by the first decision.
+        self.fresh().await?;
+        let route = self.route_as(CONSUMER).await?;
+        let params = with(base(), "task_ref", json!("wi:ct_1:0/s17"));
+        let attributed = select(&route, &params, "a select with task_ref").await?;
+        if attributed.route != without.route {
+            return Err(format!(
+                "task_ref changed selection from {:?} to {:?}",
+                without.route, attributed.route
+            ));
+        }
+        Ok(())
+    }
+
+    async fn invalid_task_ref_refused_by_name(&self) -> Check {
+        let route = self.route_as(CONSUMER).await?;
+        for task_ref in [
+            "".into(),
+            "x".repeat(129),
+            "has space".into(),
+            "wi\u{1f}1".into(),
+            "wi_é".into(),
+        ] {
+            let refusal = refused(
+                &route,
+                ops::ROUTE_SELECT,
+                &with(base(), "task_ref", json!(task_ref)),
+                RefusalCode::InvalidRequest,
+                "invalid task_ref",
+            )
+            .await?;
+            if refusal.detail.get("field").and_then(Value::as_str) != Some("task_ref") {
+                return Err(format!(
+                    "invalid task_ref refusal must name task_ref: {refusal:?}"
+                ));
+            }
+        }
+        Ok(())
     }
 
     async fn prefer_prefers_listed_adequate_route(&self) -> Check {

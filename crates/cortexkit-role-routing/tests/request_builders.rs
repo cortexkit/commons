@@ -5,7 +5,10 @@ use cortexkit_role_routing::{
         parse_account_for_request, AccountForRequest, AccountMode, CandidateAccount, Candidates,
         ExpectedPin, RequestedAccount,
     },
-    capabilities::{SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER},
+    capabilities::{
+        SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER,
+        SELECT_TASK_REF,
+    },
     errors::Refusal,
     observe::{parse_account_observe_request, AccountObserveRequest, ObserveKind},
     report::{parse_report_request, Eligibility, EligibilityScope, Outcome, ReportRequest, Usage},
@@ -34,6 +37,22 @@ fn parse_with_hold_control(params: &Value) -> Result<SelectRequest, Refusal> {
         params,
         &[SELECT_HOLD_CONTROL, SELECT_PREFER, SELECT_EXCLUDE_PROVIDERS],
     )
+}
+
+#[test]
+fn task_ref_round_trips_without_changing_requests_that_omit_it() {
+    let request = SelectRequest::new("flow", Requirements::iq(1));
+    let original = r#"{"consumer":"flow","requirements":{"iq":1}}"#;
+    assert_eq!(serde_json::to_string(&request).unwrap(), original);
+    assert_eq!(
+        serde_json::from_str::<SelectRequest>(original).unwrap(),
+        request
+    );
+    round_trip(
+        request.with_task_ref("wi:ct_1:0/s17"),
+        json!({"consumer": "flow", "requirements": {"iq": 1}, "task_ref": "wi:ct_1:0/s17"}),
+        |params| parse_select_request_serving(params, &[SELECT_TASK_REF]),
+    );
 }
 
 #[test]

@@ -48,6 +48,7 @@ const FILES: &[&str] = &[
     "route-select-harness.json",
     "route-select-hold-control.json",
     "route-select-prefer.json",
+    "route-select-task-ref.json",
     "route-select.json",
     "runner-declarations.json",
 ];
@@ -333,6 +334,39 @@ fn route_select_prefer() {
             "{name}"
         );
         parse_select_request_serving(&case["params"], &[capabilities::SELECT_PREFER])
+            .unwrap_or_else(|refusal| panic!("{name} with the group: {refusal}"));
+    }
+}
+
+#[test]
+fn route_select_task_ref() {
+    let file = load("route-select-task-ref.json");
+    let describe: RoleDescribe = round_trip("describe", &file["describe"], &file["describe"]);
+    assert_eq!(check_describe(&describe), Ok(()));
+    assert!(describe.serves(capabilities::SELECT_TASK_REF));
+    check_op::<SelectRequest, SelectAnswer>("route-select-task-ref.json", |params| {
+        parse_select_request_serving(params, &[capabilities::SELECT_TASK_REF])
+    });
+    for case in cases(&file, "requests_without_group") {
+        let name = name(case);
+        let parsed = parse_select_request(&case["params"])
+            .unwrap_or_else(|refusal| panic!("{name}: {refusal}"));
+        assert_eq!(
+            serde_json::to_value(&parsed).unwrap(),
+            case["encodes_as"],
+            "{name}"
+        );
+    }
+    for case in cases(&file, "refused_without_group") {
+        let name = name(case);
+        let refusal = parse_select_request(&case["params"]).expect_err(name);
+        assert_eq!(refusal.code.as_str(), case["refusal"]["code"], "{name}");
+        assert_eq!(
+            Value::Object(refusal.detail),
+            case["refusal"]["detail"],
+            "{name}"
+        );
+        parse_select_request_serving(&case["params"], &[capabilities::SELECT_TASK_REF])
             .unwrap_or_else(|refusal| panic!("{name} with the group: {refusal}"));
     }
 }

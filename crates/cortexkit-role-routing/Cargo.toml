@@ -9,7 +9,7 @@
 # provider's production build never pulls in the kit.
 [package]
 name = "cortexkit-role-routing"
-version = "0.5.2"
+version = "0.5.3"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

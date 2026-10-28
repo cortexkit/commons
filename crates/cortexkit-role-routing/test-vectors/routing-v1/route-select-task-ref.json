@@ -1,0 +1,27 @@
+{
+  "about": "select_task_ref gates optional task attribution, never selection. References are 1 to 128 bytes of printable ASCII 0x21-0x7E and are stored with the decision, never returned in answers.",
+  "describe": {
+    "role": "routing",
+    "version": 1,
+    "ops": ["role.describe", "route.select", "route.report", "route.account_for", "route.account_observe"],
+    "consumers": [{"id": "example_summary", "priced_only": false}],
+    "requirement_fields": ["iq", "eq", "context_window", "max_output_tokens", "tools", "tool_capabilities", "modalities", "structured_output"],
+    "detail_supported": false,
+    "capabilities": ["select_task_ref"]
+  },
+  "requests": [
+    {"name": "work_item_with_punctuation", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "task_ref": "wi:ct_1:0/s17-2.#"}},
+    {"name": "absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}}},
+    {"name": "null_is_absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "task_ref": null}, "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}}
+  ],
+  "refused": [
+    {"name": "space", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "task_ref": "wi has space"}, "refusal": {"code": "invalid_request", "detail": {"field": "task_ref"}}}
+  ],
+  "requests_without_group": [
+    {"name": "null_is_absent", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "task_ref": null}, "encodes_as": {"consumer": "example_summary", "requirements": {"iq": 50}}}
+  ],
+  "refused_without_group": [
+    {"name": "task_ref_without_group", "params": {"consumer": "example_summary", "requirements": {"iq": 50}, "task_ref": "sk_1"}, "refusal": {"code": "invalid_request", "detail": {"field": "task_ref"}}}
+  ],
+  "answers": []
+}

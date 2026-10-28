@@ -52,6 +52,10 @@ pub const ROUTE_SELECT_PREFER_JSON: &str =
 pub const ROUTE_SELECT_EXCLUDE_PROVIDERS_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-select-exclude-providers.json");
 
+/// The optional `select_task_ref` group, task references and field-named refusals.
+pub const ROUTE_SELECT_TASK_REF_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-task-ref.json");
+
 /// Optional account-allocation members added after the original v1 vectors.
 pub const ROUTE_ACCOUNT_FOR_OPTIONAL_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-account-for-optional.json");
@@ -91,6 +95,7 @@ pub const FILES: &[(&str, &str)] = &[
         ROUTE_SELECT_HOLD_CONTROL_JSON,
     ),
     ("route-select-prefer.json", ROUTE_SELECT_PREFER_JSON),
+    ("route-select-task-ref.json", ROUTE_SELECT_TASK_REF_JSON),
     ("route-select.json", ROUTE_SELECT_JSON),
     ("runner-declarations.json", RUNNER_DECLARATIONS_JSON),
 ];

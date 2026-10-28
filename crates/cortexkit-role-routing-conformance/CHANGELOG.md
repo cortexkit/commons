@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.3
+
+- Depend on routing 0.5.3. Add two checks (58 total) for `select_task_ref`:
+  `task_ref_never_changes_selection` compares the route answered with and
+  without a task reference from the same fresh state, and
+  `invalid_task_ref_refused_by_name` requires `invalid_request` naming
+  `task_ref` for malformed references. Both are not applicable by name when
+  the provider does not declare the group. Faulty providers that change
+  selection or accept invalid references each fail only their named check.
+  Document the attribution and retention behavior the kit cannot inspect.
+
 ## 0.7.2
 
 - Depend on routing 0.5.1. Add three checks (56 total) for the optional

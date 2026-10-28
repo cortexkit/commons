@@ -112,12 +112,16 @@ pub mod capabilities {
     /// none of whose routes may be answered.
     pub const SELECT_EXCLUDE_PROVIDERS: &str = "select_exclude_providers";
 
+    /// `route.select` reads `task_ref` for attribution, never selection.
+    pub const SELECT_TASK_REF: &str = "select_task_ref";
+
     /// Every group this version defines.
     pub const KNOWN: &[&str] = &[
         SELECT_HOLD_CONTROL,
         SELECT_HARNESS,
         SELECT_PREFER,
         SELECT_EXCLUDE_PROVIDERS,
+        SELECT_TASK_REF,
     ];
 }
 

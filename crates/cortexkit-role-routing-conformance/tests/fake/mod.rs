@@ -30,6 +30,7 @@ use cortexkit_role_routing_conformance::{
         },
         capabilities::{
             SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER,
+            SELECT_TASK_REF,
         },
         describe::{ConsumerEntry, RoleDescribe},
         errors::{NoRouteReason, PinUnavailableReason, Refusal, RefusalCode},
@@ -197,6 +198,10 @@ pub struct Defects {
     pub answers_excluded_provider_when_nothing_else: bool,
     /// Accepts exclude_providers without declaring select_exclude_providers.
     pub accepts_undeclared_exclude_providers: bool,
+    /// Reverses candidate order when task_ref is present.
+    pub task_ref_changes_selection: bool,
+    /// Drops task_ref before validation, accepting even malformed values.
+    pub accepts_invalid_task_ref: bool,
 }
 
 fn now_ms() -> u64 {
@@ -317,6 +322,7 @@ pub struct FakeSubject {
     harness_control: bool,
     prefer_control: bool,
     exclude_providers_control: bool,
+    task_ref_control: bool,
     /// Reads a request's iq relative to the strongest routable model instead
     /// of on the catalog's own 0-100 scale. The contract leaves that mapping
     /// to the provider, so both readings are correct.
@@ -332,6 +338,7 @@ impl FakeSubject {
             harness_control: true,
             prefer_control: true,
             exclude_providers_control: true,
+            task_ref_control: true,
             relative_iq: false,
         }
     }
@@ -362,6 +369,13 @@ impl FakeSubject {
     pub fn without_exclude_providers_control(defects: Defects) -> Self {
         Self {
             exclude_providers_control: false,
+            ..Self::new(defects)
+        }
+    }
+
+    pub fn without_task_ref_control(defects: Defects) -> Self {
+        Self {
+            task_ref_control: false,
             ..Self::new(defects)
         }
     }
@@ -499,6 +513,7 @@ impl RoutingSubject for FakeSubject {
             harness_control: self.harness_control,
             prefer_control: self.prefer_control,
             exclude_providers_control: self.exclude_providers_control,
+            task_ref_control: self.task_ref_control,
             relative_iq: self.relative_iq,
             stamp: stamp.clone(),
         })
@@ -513,6 +528,7 @@ pub struct FakeRoute {
     harness_control: bool,
     prefer_control: bool,
     exclude_providers_control: bool,
+    task_ref_control: bool,
     relative_iq: bool,
     stamp: RouteStamp,
 }
@@ -612,6 +628,9 @@ impl FakeRoute {
         if self.exclude_providers_control {
             describe = describe.with_capability(SELECT_EXCLUDE_PROVIDERS);
         }
+        if self.task_ref_control {
+            describe = describe.with_capability(SELECT_TASK_REF);
+        }
         to_value(if self.hold_control {
             describe.with_capability(SELECT_HOLD_CONTROL)
         } else {
@@ -634,6 +653,9 @@ impl FakeRoute {
     fn select(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
         let defects = self.defects;
         let mut params = params.clone();
+        if defects.accepts_invalid_task_ref {
+            params.as_object_mut().unwrap().remove("task_ref");
+        }
         if defects.ignores_unknown_requirements {
             if let Some(Value::Object(requirements)) = params.get_mut("requirements") {
                 requirements.retain(|key, _| REQUIREMENT_FIELDS.contains(&key.as_str()));
@@ -651,6 +673,9 @@ impl FakeRoute {
         }
         if self.exclude_providers_control || defects.accepts_undeclared_exclude_providers {
             capabilities.push(SELECT_EXCLUDE_PROVIDERS);
+        }
+        if self.task_ref_control {
+            capabilities.push(SELECT_TASK_REF);
         }
         let mut request = parse_select_request_serving(&params, &capabilities)?;
         let declaration = state.declarations.get(&request.consumer);
@@ -700,7 +725,10 @@ impl FakeRoute {
             demands.extend(declared.as_object().unwrap().clone());
         }
         request.requirements = serde_json::from_value(Value::Object(demands)).unwrap();
-        let catalog = Self::catalog(state);
+        let mut catalog = Self::catalog(state);
+        if defects.task_ref_changes_selection && request.task_ref.is_some() {
+            catalog.models.reverse();
+        }
         if let Some(harness) = &request.harness {
             if !defects.ignores_harness_filter
                 && !catalog.runners.iter().any(|runner| {

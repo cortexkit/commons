@@ -239,7 +239,7 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines four
+  does not know is kept and means nothing to it. This version defines five
   groups:
   - `select_hold_control`: `route.select` reads `hold_ok` and
     `hold_wait_max_s` (§5.1) and decides blocked entries as §5.4 says.
@@ -260,6 +260,9 @@ a module plays.
     it refuses any member it does not read (§2): a router older than the
     group, keeping that rule, fails the select loudly rather than silently
     answering a route from a provider the caller meant to rule out.
+  - `select_task_ref`: `route.select` reads `task_ref` (§5.1) for attribution,
+    never selection. A caller sends it only to a provider declaring the group;
+    a provider without the group refuses the member by name (§2).
 - [pinned] A consumer checks the answer with `describe::check_describe`
   before routing anything to the provider.
 
@@ -351,6 +354,19 @@ a module plays.
 - [pinned] `affinity`: an opaque key of at most 128 characters (§7).
 - [pinned] `correlation_id`: opaque, at most 128 characters, echoed in logs
   only.
+- [pinned] `task_ref`: an optional opaque task reference (group
+  `select_task_ref`), 1 to 128 bytes, each printable ASCII `0x21`–`0x7E`.
+  Spaces, control characters and non-ASCII are invalid; punctuation such as
+  `:` `_` `-` `/` `.` and `#` is allowed. A malformed value is
+  `invalid_request {field: "task_ref"}`. Null is absent and an absent member
+  is not serialized. A caller sends it only to a provider declaring the group;
+  a provider without the group refuses it by that same field path.
+  The provider stores `task_ref` with the decision for attribution and per-task
+  cost profiles; its retention follows the decision row's. It never changes
+  which route is answered: a select with `task_ref` is answered exactly as
+  the same select without it. It never appears in any answer and is never
+  returned to any other caller. `route.report` needs no new member because
+  it already names its decision. `correlation_id` remains log-only.
 - [pinned] `concurrency_slots`: an optional hint,
   `[{key, running, limit, queued?}]`.
 - [pinned] `detail`: bool; asks for the provider's explanation object.
@@ -770,7 +786,9 @@ What a runner saw on an account, so the provider's headroom stays current.
   `accounts_blocked` refusal, and an answer naming its runner's harness.
   `route-select-prefer.json` holds the `select_prefer` members with and
   without the group, and `route-select-exclude-providers.json` the
-  `select_exclude_providers` members. `SHA256SUMS` pins every file.
+  `select_exclude_providers` members. `route-select-task-ref.json` holds
+  task references and field-named refusals with and without `select_task_ref`.
+  `SHA256SUMS` pins every file.
 - [pinned] `cortexkit-role-routing-conformance` drives a live provider
   through these rules. Each check names the rule it holds a provider to;
   the kit's own tests pair every check with a faulty provider that breaks
