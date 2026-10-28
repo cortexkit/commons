@@ -175,6 +175,8 @@ shipping runner with this document.
 | `max_output_tokens` | `session.send` with `generation.max_output_tokens` | §9.3.1 |
 | `no_tools` | `session.send` with `tools: []` | §9.3.1 |
 | `structured_output` | `session.send` with `structured_output`; its answer on `run.result` and `run.status` | §9.4 |
+| `submit_streamed_siblings` | Extends `session.send` in `submit_tool` mode; requires `structured_output`. Earlier siblings may already have been dispatched while the step streamed. A caller requiring that no sibling ever runs must not send `submit_tool` to such a runner, or must offer no tools with side effects in that run. | §6, §9.4 |
+| `structured_output_per_session` | Extends `session.send`; requires `structured_output`. The first admitted send fixes the whole `structured_output` member, present or absent, for the session. A caller wanting a shape only on some runs cannot use such a runner for that session. | §9.4 |
 | `adopt` | `session.adopt` | §9.5 |
 | `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
@@ -1163,11 +1165,32 @@ display-ready row for an app's reader on a runner declaring
   refusal code is the state's name wherever that runner places a refusal
   code. No dispatch
   intent is recorded for these calls.
+
+**Submit steps without `submit_streamed_siblings`.**
+
 - [pinned] The same rule covers a step that calls `submit_result` (§9.4): no
   call of that step is dispatched before the step completes, and every call
   of it other than the counted `submit_result` gets the same never-executed
   result, with refusal code `skipped_after_submit`, in the same durable commit
   as the run's end. No dispatch intent is recorded for them.
+
+**Submit steps with `submit_streamed_siblings`.**
+
+- [pinned] A runner declaring `submit_streamed_siblings` (§2) instead uses
+  the streamed-sibling variant: a call the model emitted before the counted
+  `submit_result` may have been dispatched while the step streamed. If it
+  was, it keeps its own normal dispatched result in the transcript and,
+  when the runner declares `run_tool_calls`, in `run.tool_calls`; it is not
+  listed in `skipped_siblings`. Every other sibling is never dispatched and
+  receives the never-executed result with
+  code `skipped_after_submit` in the same durable commit as the run's end;
+  it is listed in `skipped_siblings` in emission order. In particular, every
+  call emitted after the counted `submit_result`, including any later
+  `submit_result`, is never dispatched. The run still ends `completed`
+  after that step, with the submitted value validated as in §9.4.
+
+**Run errors.**
+
 - [pinned] A run error (`RunResult::error`) is `{class, message,
   provider_code, status?, retry_after_secs?, resets_at_ms?, account_ref?,
   provider?, reason?, provider_detail_code?}`. `class`, `message` and
@@ -2151,6 +2174,21 @@ what the run produced and whether it validated.
   `structured_output` is refused `invalid_params` naming `structured_output`.
   `structured_output` is part of a keyed send's payload: the same `send_id`
   with a different value is refused `send_id_reuse` naming it.
+- [pinned] **Declared session-wide variant.** On a runner declaring
+  `structured_output_per_session`, the session's first admitted send instead
+  fixes `structured_output`, present or absent, for the whole session. Every
+  later send must carry a member whose RFC 8785 (JCS) bytes equal the first
+  one's, comparing the whole `StructuredOutput` member (mode, name and
+  schema), or must also omit it when the first omitted it. Any other send
+  is refused `invalid_params` naming `structured_output` and writes nothing.
+  This includes omitting it after the first send carried one, adding it
+  after the first send omitted it, or sending a different value. The group
+  requires `structured_output`. Without it, the per-run rule above stands
+  unchanged: a send without the member starts a run with none.
+- [pinned] Keeping the same structured-output member on every send, as the
+  Caching rule below advises, is never refused by the session-wide policy.
+  A caller that wants a shape only for some runs of a session cannot use a
+  runner declaring `structured_output_per_session` for that session.
 
 **What a runner refuses at admission.** Each is `invalid_params` and writes
 nothing. `SendRequest::structured_output()` checks the value itself, then
@@ -2204,6 +2242,9 @@ nothing. `SendRequest::structured_output()` checks the value itself, then
   (`SUBMIT_RESULT_TOOL`), whose input schema is the caller's schema and whose
   description says calling it ends the task. It is in the run's tool list
   from its first request, so the prompt prefix never changes mid-run.
+
+**Submit steps without `submit_streamed_siblings`.**
+
 - [pinned] **When the model calls it, the run ends** `completed` after that
   step. With `submit_tool` active, no call of a step that contains
   `submit_result` is dispatched before the step completes, so a sibling the
@@ -2213,6 +2254,32 @@ nothing. `SendRequest::structured_output()` checks the value itself, then
   run's end, and is listed in `skipped_siblings`. The counted `submit_result`
   call gets the runner's own recorded result in that commit, so no call
   dangles.
+
+**Declared streamed-sibling variant.**
+
+- [pinned] A runner declaring `submit_streamed_siblings` must also declare
+  `structured_output`. A runner whose host dispatches calls as they stream
+  can declare this variant: waiting for the whole step before dispatching
+  every call can deadlock a host that holds the stream's finish until those
+  calls return. In place of the strict dispatch rule above, a call of the
+  submit step emitted before the counted `submit_result` may already have
+  been dispatched while the step streamed. If it was, it keeps its own
+  recorded result, a normal dispatched result, in the transcript and,
+  when the runner declares `run_tool_calls`, in `run.tool_calls`; it is not
+  listed in `skipped_siblings`.
+- [pinned] Every other sibling is never dispatched and gets the
+  never-executed `skipped_after_submit` result in the same durable commit as
+  the run's end, and is listed in `skipped_siblings` in emission order.
+  Every call emitted after the counted `submit_result`, including any later
+  `submit_result`, is therefore never dispatched. The counted call gets the
+  runner's own recorded result in that commit. The run ends `completed`
+  after that step, with the value validated, exactly as without the group.
+- [pinned] A caller that needs no sibling of a submit step ever to run must
+  not send `submit_tool` to a runner declaring `submit_streamed_siblings`,
+  or must offer no tools with side effects in that run.
+
+**Rules common to both dispatch variants.**
+
 - [pinned] If the model calls `submit_result` more than once in one step, the
   first call counts; the others are skipped siblings.
 - [pinned] A run that ends any other way (`max_steps`, `stop_when`,
@@ -2227,10 +2294,16 @@ nothing. `SendRequest::structured_output()` checks the value itself, then
 - [pinned] `enforcement` and `reason` are fixed for the run at admission and
   never change mid-run.
 - [pinned] `enforced` means the route supports schema-constrained output for
-  the requested mode and the schema fits that route's supported subset.
+  the requested mode, the schema fits that route's supported subset, and the
+  runner's host lets it send the schema in a constrained form.
   Anything else is `best_effort`: the runner still sends the schema (as the
   tool's input schema, or in instructions) and still validates, but the
   provider gave no guarantee.
+- [pinned] A runner whose host gives it no way to send the schema in a
+  constrained form always reports `best_effort` with reason
+  `host_unsupported` (`structured_output::reasons::HOST_UNSUPPORTED`),
+  whatever the route supports. It still sends the schema and validates the
+  result, but cannot claim enforcement on the host's behalf.
 - [pinned] A runner decides the subset question from its own per-family
   subset profile at admission. It never sends a schema in a provider's strict
   mode when the schema is outside that route's supported subset (some
@@ -2243,8 +2316,10 @@ nothing. `SendRequest::structured_output()` checks the value itself, then
   catalog does not say whether the route supports schemas; Fusiform's per-row
   `capability.structured_output`, where absent means unknown, is that
   source), `route_unsupported` (the catalog says it does not),
-  `schema_outside_subset`, and `mode_not_enforceable` (the route enforces
-  schemas for final text but not for tool input, or the reverse). Consumers
+  `schema_outside_subset`, `mode_not_enforceable` (the route enforces
+  schemas for final text but not for tool input, or the reverse), and
+  `host_unsupported` (the host cannot send the schema in a constrained form).
+  Consumers
   decode it as an open string. Where a route's support comes from, and each
   family's subset profile, is the runner's business, not this contract's.
 
@@ -4718,6 +4793,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `retention_active_run_never_expires` | `retention`, `queue`, `transcript_reads`, `run_ops`, held non-terminal run (active or paused) |
 | `crash_at_RetentionTombstoned` | `retention`, `queue`, `transcript_reads`, `run_ops`, and `RetentionTombstoned`; real process kill, expiry remains readable by name and deletion completion is reported after restart |
 | `structured_output_final_text_enforced_passed`, `structured_output_final_text_with_tools_refused`, `structured_output_submit_tool_ends_run`, `structured_output_reserved_name_refused`, `structured_output_absent_without_submit`, `structured_output_failed_validation_completes`, `structured_output_not_inherited`, `structured_output_external_ref_refused`, `structured_output_sibling_never_dispatched` | `structured_output`, `queue`, `transcript_reads`, `run_ops`; the adapter's tool-set send fields, route support switch and model-request observations; reported as a named skip without `structured_output` |
+| `structured_output_streamed_siblings` | `submit_streamed_siblings`, `structured_output`, `queue`, `transcript_reads`, `run_ops`; checks the streamed-sibling variant instead of `structured_output_sibling_never_dispatched` when the group is declared |
 | `structured_output_frozen_across_restart` | the above, and `ToolResultRecorded`; the next model request after a restart carries the same tools and schema bytes |
 | `adopt_binds_owner_without_a_run`, `adopt_exact_repeat_replays_reply`, `adopt_send_id_reuse_names_plan`, `adopt_plan_drift_refused`, `adopt_other_owner_refused`, `adopt_same_owner_readopts` | `adopt`, `transcript_reads`; the adapter's host-start hook and host plans; the live `role.describe` must declare `adopt` before any `session.adopt` is sent; reported as a named skip without `adopt` |
 | `adopt_during_active_run` | the above, and a held tool call; a run the person started in their own app (§9.5), before any role request, is in progress during the adoption and completes after it |

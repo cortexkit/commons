@@ -18,6 +18,7 @@ use cortexkit_role_llm_runner::{
     ops,
     read::ReadMessage,
     send::SendReply,
+    structured_output::{reasons, validation},
     tags::{self, CharRange, ResolveReply, ResolveRequest, RANGE_FIELD, TAG_FIELD},
     tool_calls::RunToolCall,
 };
@@ -805,10 +806,8 @@ where
             },
         )
         .await?;
-    case.subject
-        .set_structured_output_support(&session.name, Some(true))
-        .await
-        .map_err(|e| format!("setting structured-output support: {e}"))?;
+    let host_unsupported =
+        crate::structured_output::best_effort_support(case.subject, &session.name, None).await?;
     let mut fields = case
         .subject
         .send_fields_with_tools(&session.name, true, &[])
@@ -831,6 +830,16 @@ where
     let prompt = case.mint.next("structured-prompt");
     let run_id = send_and_wait(case, &mut session, Some(&fields), &prompt, &extra).await?;
     let result = run_result(&session.route, &run_id).await?;
+    crate::structured_output::expect(
+        result
+            .structured_output
+            .as_ref()
+            .ok_or("the structured-output run has no structured_output result")?,
+        "final_text",
+        Err(reasons::CATALOG_UNKNOWN),
+        validation::PASSED,
+        host_unsupported,
+    )?;
     let text = result.final_message.as_ref().map(|m| m.text.as_str());
     if text != Some(written.as_str()) {
         return Err(format!(

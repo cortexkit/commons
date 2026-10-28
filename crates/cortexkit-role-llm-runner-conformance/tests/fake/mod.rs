@@ -260,6 +260,12 @@ pub struct Defects {
     /// A step holding `submit_result` still invokes its sibling calls at the
     /// scripted tool provider before the run ends.
     pub structured_output_dispatches_siblings: bool,
+    pub structured_output_dispatches_after_submit: bool,
+    pub structured_output_buffers_siblings: bool,
+    pub structured_output_session_omission_accepted: bool,
+    pub structured_output_host_unsupported: bool,
+    pub structured_output_claims_host_unsupported: bool,
+    pub structured_output_hides_host_unsupported: bool,
     /// role.describe declares `interrupt`, which the runner does not serve
     /// and the subject does not declare.
     pub claim_unserved_group: bool,
@@ -961,6 +967,9 @@ struct Sess {
     adopts: BTreeMap<String, (Value, Value)>,
     /// The session's admitted tool set, from the first send's plan.
     tools: Vec<String>,
+    /// Whole-member JCS bytes fixed by the first admitted send, including
+    /// the JCS bytes for JSON `null` when that send omitted structured output.
+    session_structured_output_jcs: Option<Vec<u8>>,
     messages: Vec<Msg>,
     sends: BTreeMap<String, SendRec>,
     runs: Vec<RunRec>,
@@ -1549,6 +1558,14 @@ impl Module {
                 || sess.last_activity == 0)
         {
             sess.last_activity = record["at"].as_u64().unwrap_or_default();
+        }
+        if let Some(jcs) = record
+            .get("session_structured_output_jcs")
+            .filter(|v| !v.is_null())
+        {
+            sess.session_structured_output_jcs.get_or_insert_with(|| {
+                serde_json::from_value(jcs.clone()).expect("recorded JCS bytes")
+            });
         }
         match kind.as_str() {
             "head-model-switch" => {
@@ -2473,18 +2490,37 @@ impl Module {
             let text: String = turn.text_parts().collect();
             if let Some(frozen) = frozen.as_ref().filter(|f| f["mode"] == "submit_tool") {
                 if let Some(first) = tools.iter().position(|tool| tool == SUBMIT_RESULT_TOOL) {
-                    // No call of a submitting step is dispatched: the submit
-                    // ends the run, and every other call is skipped.
+                    // A runner whose host dispatches calls as they stream can
+                    // finish earlier siblings before the submit ends the run.
+                    let streamed = self.world.serves(groups::SUBMIT_STREAMED_SIBLINGS)
+                        && !self.world.defects.structured_output_buffers_siblings;
+                    if streamed {
+                        for call in calls.iter().take(first) {
+                            let key = &call["call_key"];
+                            self.commit(session, json!({"kind":"intent", "call_key":key}))?;
+                            let content = self
+                                .world
+                                .invoke(&call["arguments"])
+                                .expect("the earlier scripted sibling is not held");
+                            self.commit(
+                                session,
+                                json!({"kind":"result", "call_key":key,
+                                                       "content":content}),
+                            )?;
+                        }
+                    }
                     let skipped: Vec<Value> = calls
                         .iter()
                         .enumerate()
-                        .filter(|(index, _)| *index != first)
+                        .filter(|(index, _)| *index != first && (!streamed || *index > first))
                         .map(|(index, call)| {
                             json!({"call_key":call["call_key"], "tool_call_id":call["tool_call_id"],
                                    "tool":tools[index], "arguments":call["arguments"]})
                         })
                         .collect();
-                    if self.world.defects.structured_output_dispatches_siblings {
+                    if self.world.defects.structured_output_dispatches_siblings
+                        || self.world.defects.structured_output_dispatches_after_submit
+                    {
                         for call in skipped.iter().filter(|c| c["tool"] == SCRIPTED_TOOL) {
                             self.world.invoke(&call["arguments"]);
                         }
@@ -3191,6 +3227,37 @@ impl Module {
         })
     }
 
+    fn session_structured_output_jcs(
+        &self,
+        session: &str,
+        request: &SendRequest,
+    ) -> Result<Option<Vec<u8>>, Reply> {
+        if !self.world.serves(groups::STRUCTURED_OUTPUT_PER_SESSION) {
+            return Ok(None);
+        }
+        let structured_output = request
+            .structured_output()
+            .map_err(|field| invalid(&field))?;
+        let jcs = serde_jcs::to_vec(&structured_output).expect("valid structured-output member");
+        if self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(session)
+            .filter(|s| s.expired_at.is_none())
+            .and_then(|s| s.session_structured_output_jcs.as_ref())
+            .is_some_and(|first| first != &jcs)
+            && !(structured_output.is_none()
+                && self
+                    .world
+                    .defects
+                    .structured_output_session_omission_accepted)
+        {
+            return Err(invalid("structured_output"));
+        }
+        Ok(Some(jcs))
+    }
+
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
         if let Some(reply) = self.admit_system_text_default(session, &params) {
             return Ok(reply);
@@ -3313,6 +3380,11 @@ impl Module {
             Ok(structured_output) => structured_output,
             Err(field) => return Ok(invalid(&field)),
         };
+        let session_structured_output_jcs =
+            match self.session_structured_output_jcs(session, &request) {
+                Ok(jcs) => jcs,
+                Err(reply) => return Ok(reply),
+            };
         let tools: Vec<String> = match &existing {
             Some(sess) => sess.tools.clone(),
             None => request
@@ -3337,11 +3409,20 @@ impl Module {
                     .get(session)
                     .copied()
                     .flatten();
-                let (enforcement, reason) = match support {
-                    Some(true) => ("enforced", None),
-                    Some(false) => ("best_effort", Some("route_unsupported")),
-                    None => ("best_effort", Some("catalog_unknown")),
-                };
+                let (enforcement, reason) =
+                    if (self.world.defects.structured_output_host_unsupported
+                        && !self.world.defects.structured_output_hides_host_unsupported)
+                        || (self.world.defects.structured_output_claims_host_unsupported
+                            && support != Some(true))
+                    {
+                        ("best_effort", Some("host_unsupported"))
+                    } else {
+                        match support {
+                            Some(true) => ("enforced", None),
+                            Some(false) => ("best_effort", Some("route_unsupported")),
+                            None => ("best_effort", Some("catalog_unknown")),
+                        }
+                    };
                 json!({"mode": structured_output.mode.as_str(), "schema": structured_output.schema,
                        "enforcement": enforcement, "reason": reason})
             }
@@ -3508,6 +3589,7 @@ impl Module {
                             "prompt": request.prompt_text(), "delivery": delivery,
                             "run_id": run.run_id, "admitted": false, "retention":request.retention,
                             "sender": stamp.principal,
+                            "session_structured_output_jcs": session_structured_output_jcs,
                             "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens) }),
                 )?;
                 if self.world.defects.held_steer_ends_run
@@ -3643,6 +3725,7 @@ impl Module {
                     "max_steps":max_steps, "max_output_tokens":max_output_tokens,
                     "no_tools":no_tools == Some(true),
                     "structured_output": frozen,
+                    "session_structured_output_jcs": session_structured_output_jcs,
                     "client_message_id": request.client_message_id(&self.world.groups).ok().flatten() }),
         )?;
         if let Some(old) = &interrupted {
@@ -3678,6 +3761,11 @@ impl Module {
             // The fake takes lists only into sessions an owner admitted.
             return Ok(invalid(order::FIELD));
         };
+        let session_structured_output_jcs =
+            match self.session_structured_output_jcs(session, request) {
+                Ok(jcs) => jcs,
+                Err(reply) => return Ok(reply),
+            };
         let caller = stamp.principal.as_str();
         if !self.world.defects.order_admits_any_sender {
             if let Err((code, field)) =
@@ -3772,6 +3860,7 @@ impl Module {
             json!({ "kind": "ordered", "id": id, "send_id": request.send_id, "sender": caller,
                     "text": text, "modes": wanted.modes, "dedupe_key": wanted.dedupe_key,
                     "expires_at_ms": wanted.expires_at_ms, "system": system,
+                    "session_structured_output_jcs": session_structured_output_jcs,
                     "request": params }),
         )?;
         self.deliver_idle(session)?;
@@ -5000,6 +5089,10 @@ pub struct FakeSubject {
     pub call_identity_group: bool,
     /// Declare `rich_ui_stamp`: runs carry their plan's rich UI stamp.
     pub rich_ui_stamp_group: bool,
+    /// Declare the submit-step variant that permits earlier streamed calls.
+    pub submit_streamed_siblings_group: bool,
+    /// Fix structured output, present or absent, on the first admitted send.
+    pub structured_output_per_session_group: bool,
     /// The adapter can build a plan whose system-text answers declare
     /// stamps (`rich_ui_plan_fields`).
     pub rich_ui_plan_fixture: bool,
@@ -5146,6 +5239,8 @@ impl FakeSubject {
             output_refs_group: false,
             call_identity_group: false,
             rich_ui_stamp_group: false,
+            submit_streamed_siblings_group: false,
+            structured_output_per_session_group: false,
             rich_ui_plan_fixture: true,
             rich_ui_replan_fixture: true,
             descriptor_case: None,
@@ -5250,6 +5345,14 @@ impl FakeSubject {
                         .chain(
                             self.rich_ui_stamp_group
                                 .then(|| groups::RICH_UI_STAMP.to_owned()),
+                        )
+                        .chain(
+                            self.submit_streamed_siblings_group
+                                .then(|| groups::SUBMIT_STREAMED_SIBLINGS.to_owned()),
+                        )
+                        .chain(
+                            self.structured_output_per_session_group
+                                .then(|| groups::STRUCTURED_OUTPUT_PER_SESSION.to_owned()),
                         )
                         .collect(),
                     delivery_order_modes: self.delivery_order_modes.clone(),
@@ -5932,6 +6035,9 @@ impl LlmRunnerSubject for FakeSubject {
         session: &str,
         supported: Option<bool>,
     ) -> Result<(), HarnessError> {
+        if supported == Some(true) && self.defects.structured_output_host_unsupported {
+            return Err(HarnessError::new("host cannot constrain structured output"));
+        }
         self.world()
             .structured_output_support
             .lock()

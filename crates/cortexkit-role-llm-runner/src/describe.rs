@@ -54,6 +54,14 @@ pub mod problem_names {
     /// The answer declares `call_identity` with neither `history_display` nor
     /// `live_events`, the two surfaces whose tool-call entries it extends.
     pub const CALL_IDENTITY_WITHOUT_DISPLAY: &str = "call_identity_without_display";
+    /// The answer declares `submit_streamed_siblings` without `structured_output`,
+    /// whose `submit_tool` mode the group extends.
+    pub const SUBMIT_STREAMED_SIBLINGS_WITHOUT_STRUCTURED_OUTPUT: &str =
+        "submit_streamed_siblings_without_structured_output";
+    /// The answer declares `structured_output_per_session` without
+    /// `structured_output`, whose admission policy it narrows.
+    pub const STRUCTURED_OUTPUT_PER_SESSION_WITHOUT_STRUCTURED_OUTPUT: &str =
+        "structured_output_per_session_without_structured_output";
 }
 
 /// The `role.describe` answer: every major of the role the module serves,
@@ -459,6 +467,20 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if describe.declares(capabilities::HELD_CALLS) && !describe.declares(capabilities::RUN_STATUS) {
         problems.push(DescribeProblem::Undecodable(
             "held_calls requires run_status".into(),
+        ));
+    }
+    if describe.declares(capabilities::SUBMIT_STREAMED_SIBLINGS)
+        && !describe.declares(capabilities::STRUCTURED_OUTPUT)
+    {
+        problems.push(DescribeProblem::Undecodable(
+            problem_names::SUBMIT_STREAMED_SIBLINGS_WITHOUT_STRUCTURED_OUTPUT.into(),
+        ));
+    }
+    if describe.declares(capabilities::STRUCTURED_OUTPUT_PER_SESSION)
+        && !describe.declares(capabilities::STRUCTURED_OUTPUT)
+    {
+        problems.push(DescribeProblem::Undecodable(
+            problem_names::STRUCTURED_OUTPUT_PER_SESSION_WITHOUT_STRUCTURED_OUTPUT.into(),
         ));
     }
     match describe.major(PROVIDES) {
@@ -1244,5 +1266,86 @@ mod directive_group_tests {
                 assert!(problems.iter().any(|problem| matches!(problem, DescribeProblem::GroupIncomplete { capability, op: missing } if *capability == group && missing == op)));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod submit_streamed_siblings_tests {
+    use super::*;
+
+    #[test]
+    fn check_describe_submit_streamed_siblings_requires_structured_output() {
+        let mut ops: Vec<String> = crate::REQUIRED_OPS.iter().map(|op| (*op).into()).collect();
+        ops.push(crate::ops::SESSION_SEND.into());
+        let mut describe =
+            RoleDescribe::new(vec![Major::new(crate::PROVIDES, ops, "alpha")], "0.7.16")
+                .with_capabilities(vec![capabilities::SUBMIT_STREAMED_SIBLINGS.into()])
+                .with_session_capabilities_from("baseline");
+        assert_eq!(
+            check_describe(&serde_json::to_value(&describe).unwrap()).unwrap_err(),
+            vec![DescribeProblem::Undecodable(
+                problem_names::SUBMIT_STREAMED_SIBLINGS_WITHOUT_STRUCTURED_OUTPUT.into()
+            )]
+        );
+        describe
+            .capabilities
+            .push(capabilities::STRUCTURED_OUTPUT.into());
+        assert!(check_describe(&serde_json::to_value(&describe).unwrap()).is_ok());
+        assert_eq!(
+            capabilities::group_ops(capabilities::SUBMIT_STREAMED_SIBLINGS),
+            Some(&[crate::ops::SESSION_SEND][..])
+        );
+        let mut strict = describe.clone();
+        strict
+            .capabilities
+            .retain(|group| group != capabilities::SUBMIT_STREAMED_SIBLINGS);
+        assert!(check_describe(&serde_json::to_value(strict).unwrap()).is_ok());
+        describe.majors[0]
+            .ops
+            .retain(|op| op != crate::ops::SESSION_SEND);
+        assert!(check_describe(&serde_json::to_value(describe).unwrap())
+            .unwrap_err()
+            .contains(&DescribeProblem::GroupIncomplete {
+                capability: capabilities::SUBMIT_STREAMED_SIBLINGS,
+                op: crate::ops::SESSION_SEND,
+            }));
+    }
+}
+
+#[cfg(test)]
+mod structured_output_per_session_tests {
+    use super::*;
+
+    #[test]
+    fn check_describe_structured_output_per_session_requires_structured_output() {
+        let describe = RoleDescribe::new(
+            vec![Major::new(
+                crate::PROVIDES,
+                crate::REQUIRED_OPS
+                    .iter()
+                    .map(|op| (*op).into())
+                    .chain([crate::ops::SESSION_SEND.into()])
+                    .collect(),
+                "alpha",
+            )],
+            "0.7.16",
+        )
+        .with_session_capabilities_from("baseline")
+        .with_capabilities(vec![capabilities::STRUCTURED_OUTPUT_PER_SESSION.into()]);
+        assert_eq!(
+            check_describe(&serde_json::to_value(&describe).unwrap()).unwrap_err(),
+            vec![DescribeProblem::Undecodable(
+                problem_names::STRUCTURED_OUTPUT_PER_SESSION_WITHOUT_STRUCTURED_OUTPUT.into()
+            )]
+        );
+        let paired = describe.with_capabilities(vec![
+            capabilities::STRUCTURED_OUTPUT_PER_SESSION.into(),
+            capabilities::STRUCTURED_OUTPUT.into(),
+        ]);
+        assert!(check_describe(&serde_json::to_value(paired).unwrap()).is_ok());
+        assert_eq!(
+            capabilities::group_ops(capabilities::STRUCTURED_OUTPUT_PER_SESSION),
+            Some(&[crate::ops::SESSION_SEND][..])
+        );
     }
 }

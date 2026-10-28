@@ -6,6 +6,7 @@ use std::{collections::BTreeSet, path::Path};
 
 use cortexkit_role_harness::{CrashDriver, KillPoint, Trigger};
 use cortexkit_role_llm_runner::{
+    capabilities as groups,
     errors::{self, tool_result_reasons},
     ops, points,
     run::{RunResult, RunState, RunStatus},
@@ -18,10 +19,10 @@ use cortexkit_role_llm_runner::{
 use serde_json::{json, Map, Value};
 
 use crate::{
-    cases::{Case, Session},
+    cases::{Case, Ending, Session},
     drive::{
-        call, decode, expect_error, expect_field, expect_ok, head, read_all, run_result,
-        wait_run_end, Mint, MAX_POLLS,
+        call, decode, expect_error, expect_field, expect_ok, head, read_all, result_marker,
+        run_result, wait_run_end, Mint, MAX_POLLS,
     },
     route::RunnerRoute,
     subject::{
@@ -95,23 +96,40 @@ fn params<S: LlmRunnerSubject>(
     Ok(Value::Object(params))
 }
 
+/// Probe enforcement setup before configuring the case's actual route support.
+/// A refused `Some(true)` probe requires `host_unsupported` on a best-effort
+/// result, rather than the case's exact catalog or route reason.
+pub(crate) async fn best_effort_support<S: LlmRunnerSubject>(
+    subject: &S,
+    session: &str,
+    supported: Option<bool>,
+) -> Result<bool, String> {
+    let host_unsupported = subject
+        .set_structured_output_support(session, Some(true))
+        .await
+        .is_err();
+    subject
+        .set_structured_output_support(session, supported)
+        .await
+        .map_err(|e| format!("setting structured-output support of {session}: {e}"))?;
+    Ok(host_unsupported)
+}
+
 /// Open a fresh session with `script`, its route reporting `supported`.
+/// Also return whether the session's enforcement setup probe was refused.
 async fn open<S>(
     case: &Case<'_, S>,
     label: &str,
     script: Script,
     supported: Option<bool>,
-) -> Result<Session<S::Route>, String>
+) -> Result<(Session<S::Route>, bool), String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
     let session = case.open(label, script).await?;
-    case.subject
-        .set_structured_output_support(&session.name, supported)
-        .await
-        .map_err(|e| format!("setting structured-output support of {}: {e}", session.name))?;
-    Ok(session)
+    let host_unsupported = best_effort_support(case.subject, &session.name, supported).await?;
+    Ok((session, host_unsupported))
 }
 
 /// Send into `session` and wait for the run to end. Returns `run.result`,
@@ -198,15 +216,17 @@ fn completed(result: &RunResult) -> Result<&StructuredOutputResult, String> {
     Ok(output)
 }
 
-fn expect(
+pub(crate) fn expect(
     output: &StructuredOutputResult,
     mode: &str,
     enforced: Result<(), &str>,
     validated: &str,
+    host_unsupported: bool,
 ) -> Result<(), String> {
-    let (wanted_enforcement, wanted_reason) = match enforced {
-        Ok(()) => (enforcement::ENFORCED, None),
-        Err(reason) => (enforcement::BEST_EFFORT, Some(reason)),
+    let (wanted_enforcement, wanted_reason) = match (enforced, host_unsupported) {
+        (Ok(()), _) => (enforcement::ENFORCED, None),
+        (Err(_), true) => (enforcement::BEST_EFFORT, Some(reasons::HOST_UNSUPPORTED)),
+        (Err(reason), false) => (enforcement::BEST_EFFORT, Some(reason)),
     };
     if output.mode != mode
         || output.enforcement != wanted_enforcement
@@ -295,13 +315,13 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
-    let session = open(
+    let (session, _) = open(
         case,
         label,
         Script {
             turns: vec![must_not_start()],
         },
-        Some(true),
+        None,
     )
     .await?;
     for (structured_output, field) in attempts {
@@ -335,27 +355,35 @@ where
     Ok(())
 }
 
-pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Result<(), String>
+pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
     let answer = json!({ "answer": case.mint.next("answer") });
-    match name {
+    let checked = match name {
         "structured_output_final_text_enforced_passed" => {
             let text = answer.to_string();
-            let mut session = open(
-                case,
-                "so-final-text",
-                Script {
-                    turns: vec![turn(vec![ScriptedPart::Text(text)]), must_not_start()],
-                },
-                Some(true),
-            )
-            .await?;
+            let mut session = case
+                .open(
+                    "so-final-text",
+                    Script {
+                        turns: vec![turn(vec![ScriptedPart::Text(text)]), must_not_start()],
+                    },
+                )
+                .await?;
+            if let Err(error) = case
+                .subject
+                .set_structured_output_support(&session.name, Some(true))
+                .await
+            {
+                return Ok(Ending::Inapplicable(format!(
+                    "set_structured_output_support(Some(true)) refused: {error}"
+                )));
+            }
             let result = send(case, &mut session, &[], Some(&request(Mode::FinalText))).await?;
             let output = completed(&result)?;
-            expect(output, "final_text", Ok(()), validation::PASSED)?;
+            expect(output, "final_text", Ok(()), validation::PASSED, false)?;
             if output.value.as_ref() != Some(&answer) {
                 return Err(format!("value {:?} is not {answer}", output.value));
             }
@@ -412,22 +440,30 @@ where
         }
         "structured_output_submit_tool_ends_run" => {
             let sibling = case.mint.call("so-sibling");
-            let mut session = open(
-                case,
-                "so-submit",
-                Script {
-                    turns: vec![
-                        turn(vec![
-                            case.mint.text("before submitting").0,
-                            submit("so-submit-call", answer.clone()),
-                            ScriptedPart::ToolCall(sibling.clone()),
-                        ]),
-                        must_not_start(),
-                    ],
-                },
-                Some(true),
-            )
-            .await?;
+            let mut session = case
+                .open(
+                    "so-submit",
+                    Script {
+                        turns: vec![
+                            turn(vec![
+                                case.mint.text("before submitting").0,
+                                submit("so-submit-call", answer.clone()),
+                                ScriptedPart::ToolCall(sibling.clone()),
+                            ]),
+                            must_not_start(),
+                        ],
+                    },
+                )
+                .await?;
+            if let Err(error) = case
+                .subject
+                .set_structured_output_support(&session.name, Some(true))
+                .await
+            {
+                return Ok(Ending::Inapplicable(format!(
+                    "set_structured_output_support(Some(true)) refused: {error}"
+                )));
+            }
             let result = send(
                 case,
                 &mut session,
@@ -436,7 +472,7 @@ where
             )
             .await?;
             let output = completed(&result)?;
-            expect(output, "submit_tool", Ok(()), validation::PASSED)?;
+            expect(output, "submit_tool", Ok(()), validation::PASSED, false)?;
             if output.value.as_ref() != Some(&answer) {
                 return Err(format!("value {:?} is not {answer}", output.value));
             }
@@ -463,7 +499,7 @@ where
         "structured_output_sibling_never_dispatched" => {
             let sibling = case.mint.call("so-early-sibling");
             let second = json!({ "answer": case.mint.next("second") });
-            let mut session = open(
+            let (mut session, host_unsupported) = open(
                 case,
                 "so-sibling",
                 Script {
@@ -476,7 +512,7 @@ where
                         must_not_start(),
                     ],
                 },
-                Some(true),
+                None,
             )
             .await?;
             let result = send(
@@ -495,6 +531,13 @@ where
                 ));
             }
             let output = completed(&result)?;
+            expect(
+                output,
+                "submit_tool",
+                Err(reasons::CATALOG_UNKNOWN),
+                validation::PASSED,
+                host_unsupported,
+            )?;
             if output.value.as_ref() != Some(&answer) {
                 return Err(format!(
                     "value {:?} is not the first submit_result's {answer}",
@@ -513,8 +556,9 @@ where
             }
             never_executed(case, &session, &[&sibling.tool_call_id, "so-second-submit"]).await
         }
+        "structured_output_streamed_siblings" => streamed_siblings(case, answer).await,
         "structured_output_absent_without_submit" => {
-            let mut session = open(
+            let (mut session, host_unsupported) = open(
                 case,
                 "so-absent",
                 Script {
@@ -541,6 +585,7 @@ where
                 "submit_tool",
                 Err(reasons::CATALOG_UNKNOWN),
                 validation::ABSENT,
+                host_unsupported,
             )?;
             if output.value.is_some() || output.skipped_siblings.as_deref() != Some(&[]) {
                 return Err(format!(
@@ -551,7 +596,7 @@ where
         }
         "structured_output_failed_validation_completes" => {
             let wrong = json!({ "answer": 42 });
-            let mut session = open(
+            let (mut session, host_unsupported) = open(
                 case,
                 "so-failed",
                 Script {
@@ -576,6 +621,7 @@ where
                 "submit_tool",
                 Err(reasons::ROUTE_UNSUPPORTED),
                 validation::FAILED,
+                host_unsupported,
             )?;
             if output.value.as_ref() != Some(&wrong) {
                 return Err(format!(
@@ -586,7 +632,14 @@ where
             Ok(())
         }
         "structured_output_not_inherited" => {
-            let mut session = open(
+            if case
+                .checked_describe()
+                .await?
+                .declares(groups::STRUCTURED_OUTPUT_PER_SESSION)
+            {
+                return per_session(case, answer).await.map(|()| Ending::Passed);
+            }
+            let (mut session, host_unsupported) = open(
                 case,
                 "so-not-inherited",
                 Script {
@@ -596,7 +649,7 @@ where
                         must_not_start(),
                     ],
                 },
-                Some(true),
+                None,
             )
             .await?;
             let first = send(
@@ -609,8 +662,9 @@ where
             expect(
                 completed(&first)?,
                 "submit_tool",
-                Ok(()),
+                Err(reasons::CATALOG_UNKNOWN),
                 validation::PASSED,
+                host_unsupported,
             )?;
             let second = send(case, &mut session, &[SCRIPTED_TOOL], None).await?;
             if second.run_state() != RunState::Completed || second.structured_output.is_some() {
@@ -636,6 +690,275 @@ where
             }
         }
         other => Err(format!("unknown structured-output case {other}")),
+    };
+    checked.map(|()| Ending::Passed)
+}
+
+async fn refused_session_change<S>(
+    case: &Case<'_, S>,
+    session: &Session<S::Route>,
+    structured_output: Option<&Value>,
+) -> Result<(), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let before = read_all(&session.route).await?;
+    let model_requests = requests(case.subject, &session.name).await?.len();
+    let params = params(
+        case.subject,
+        &session.name,
+        false,
+        &[SCRIPTED_TOOL],
+        &case.mint.next("so-session-change"),
+        structured_output,
+    )?;
+    let error = expect_error(
+        "session-wide structured_output change",
+        call(&session.route, ops::SESSION_SEND, params).await?,
+    )?;
+    expect_field(
+        "session-wide structured_output change",
+        &error,
+        errors::INVALID_PARAMS,
+        "structured_output",
+    )?;
+    if read_all(&session.route).await? != before {
+        return Err(
+            "a refused session-wide structured_output change wrote to the transcript".into(),
+        );
+    }
+    if requests(case.subject, &session.name).await?.len() != model_requests {
+        return Err("a refused session-wide structured_output change reached the model".into());
+    }
+    Ok(())
+}
+
+async fn per_session<S>(case: &Case<'_, S>, answer: Value) -> Result<(), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let (mut session, host_unsupported) = open(
+        case,
+        "so-per-session",
+        Script {
+            turns: vec![
+                turn(vec![submit("so-session-submit", answer.clone())]),
+                turn(vec![ScriptedPart::Text("same session settings".into())]),
+                must_not_start(),
+            ],
+        },
+        None,
+    )
+    .await?;
+    let mut original = request(Mode::SubmitTool);
+    original["schema"]["minProperties"] = json!(1);
+    let first = send(case, &mut session, &[SCRIPTED_TOOL], Some(&original)).await?;
+    expect(
+        completed(&first)?,
+        "submit_tool",
+        Err(reasons::CATALOG_UNKNOWN),
+        validation::PASSED,
+        host_unsupported,
+    )?;
+    if first
+        .structured_output
+        .as_ref()
+        .and_then(|o| o.value.as_ref())
+        != Some(&answer)
+    {
+        return Err("the first session-wide submitted value was not recorded".into());
+    }
+    refused_session_change(case, &session, None).await?;
+    for (field, value) in [
+        ("name", json!("other_result")),
+        ("mode", json!("final_text")),
+    ] {
+        let mut changed = original.clone();
+        changed[field] = value;
+        refused_session_change(case, &session, Some(&changed)).await?;
+    }
+    let mut changed_schema = original.clone();
+    changed_schema["schema"]["minProperties"] = json!(2);
+    refused_session_change(case, &session, Some(&changed_schema)).await?;
+
+    let mut equivalent = original.clone();
+    equivalent["schema"]["minProperties"] = json!(1.0);
+    let repeated = send(case, &mut session, &[SCRIPTED_TOOL], Some(&equivalent)).await?;
+    expect(
+        completed(&repeated)?,
+        "submit_tool",
+        Err(reasons::CATALOG_UNKNOWN),
+        validation::ABSENT,
+        host_unsupported,
+    )?;
+    let seen = requests(case.subject, &session.name).await?;
+    if seen.len() != 2 {
+        return Err(format!(
+            "expected two admitted model requests, got {seen:?}"
+        ));
+    }
+    for observed in &seen {
+        offers_submit(observed)?;
+    }
+
+    let (mut plain, _) = open(
+        case,
+        "so-per-session-absent",
+        Script {
+            turns: vec![
+                turn(vec![ScriptedPart::Text("no session schema".into())]),
+                turn(vec![ScriptedPart::Text("still no session schema".into())]),
+                must_not_start(),
+            ],
+        },
+        None,
+    )
+    .await?;
+    for _ in 0..2 {
+        let result = send(case, &mut plain, &[SCRIPTED_TOOL], None).await?;
+        if result.run_state() != RunState::Completed || result.structured_output.is_some() {
+            return Err(
+                "a session-wide schema-free run did not complete without structured_output".into(),
+            );
+        }
+    }
+    refused_session_change(case, &plain, Some(&original)).await
+}
+
+async fn streamed_siblings<S>(case: &Case<'_, S>, answer: Value) -> Result<(), String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let early = case.mint.call("so-streamed-early");
+    let late = case.mint.call("so-streamed-late");
+    let (mut session, host_unsupported) = open(
+        case,
+        "so-streamed-siblings",
+        Script {
+            turns: vec![
+                turn(vec![
+                    ScriptedPart::ToolCall(early.clone()),
+                    submit("so-streamed-submit", answer.clone()),
+                    ScriptedPart::ToolCall(late.clone()),
+                    submit(
+                        "so-streamed-second-submit",
+                        json!({"answer": "not counted"}),
+                    ),
+                ]),
+                must_not_start(),
+            ],
+        },
+        None,
+    )
+    .await?;
+    let result = send(
+        case,
+        &mut session,
+        &[SCRIPTED_TOOL],
+        Some(&request(Mode::SubmitTool)),
+    )
+    .await?;
+    let invoked = case.subject.tool_invocations(&late.arguments).await;
+    if invoked != 0 {
+        return Err(format!(
+            "the sibling {} emitted after submit_result was invoked {invoked} times",
+            late.tool_call_id
+        ));
+    }
+    let early_invoked = case.subject.tool_invocations(&early.arguments).await;
+    if early_invoked > 1 {
+        return Err(format!(
+            "the earlier sibling was invoked {early_invoked} times"
+        ));
+    }
+    let output = completed(&result)?;
+    expect(
+        output,
+        "submit_tool",
+        Err(reasons::CATALOG_UNKNOWN),
+        validation::PASSED,
+        host_unsupported,
+    )?;
+    if output.value.as_ref() != Some(&answer) {
+        return Err(format!(
+            "value {:?} is not the first submit_result's {answer}",
+            output.value
+        ));
+    }
+    let mut listed = Vec::new();
+    let mut skipped = Vec::new();
+    if early_invoked == 0 {
+        listed.push(SkippedSibling::new(&early.tool_call_id, SCRIPTED_TOOL));
+        skipped.push(early.tool_call_id.as_str());
+    } else {
+        let (_, messages) = read_all(&session.route).await?;
+        let marker = result_marker(&early);
+        if !messages
+            .iter()
+            .any(|m| m.message.to_string().contains(&marker))
+        {
+            return Err(
+                "the dispatched earlier sibling lost its recorded result in the transcript".into(),
+            );
+        }
+        if messages.iter().any(|m| {
+            case.subject
+                .not_executed_tool_result(&m.message, &early.tool_call_id)
+                .is_some_and(|r| !r.executed)
+        }) {
+            return Err("the dispatched earlier sibling also has a never-executed result".into());
+        }
+    }
+    listed.push(SkippedSibling::new(&late.tool_call_id, SCRIPTED_TOOL));
+    listed.push(SkippedSibling::new(
+        "so-streamed-second-submit",
+        SUBMIT_RESULT_TOOL,
+    ));
+    skipped.extend([late.tool_call_id.as_str(), "so-streamed-second-submit"]);
+    if output.skipped_siblings.as_ref() != Some(&listed) {
+        return Err(format!(
+            "skipped_siblings {:?} is not {listed:?}",
+            output.skipped_siblings
+        ));
+    }
+    never_executed(case, &session, &skipped).await?;
+    if case
+        .checked_describe()
+        .await?
+        .declares(groups::RUN_TOOL_CALLS)
+    {
+        let calls = crate::tool_calls::list(&session.route, &result.run_id, 100).await?;
+        for (id, dispatched) in [
+            (early.tool_call_id.as_str(), early_invoked == 1),
+            (late.tool_call_id.as_str(), false),
+            ("so-streamed-second-submit", false),
+        ] {
+            let matching: Vec<_> = calls.iter().filter(|c| c.tool_call_id == id).collect();
+            let outcome = if dispatched {
+                cortexkit_role_llm_runner::tool_calls::outcomes::SUCCEEDED
+            } else {
+                cortexkit_role_llm_runner::tool_calls::outcomes::NOT_EXECUTED
+            };
+            if matching.len() != 1
+                || matching[0].outcome != outcome
+                || matching[0].result_ordinal.is_none()
+                || matching[0].dispatched_to.is_some() != dispatched
+            {
+                return Err(format!(
+                    "run.tool_calls lost the {outcome} result for {id}: {matching:?}"
+                ));
+            }
+        }
+    }
+    let seen = requests(case.subject, &session.name).await?;
+    match seen.as_slice() {
+        [only] => offers_submit(only),
+        other => Err(format!(
+            "submit_result did not end the run after its step: {other:?}"
+        )),
     }
 }
 
@@ -650,7 +973,7 @@ where
 {
     let answer = json!({ "answer": case.mint.next("limit-answer") });
     let sibling = case.mint.call("so-limit-sibling");
-    let mut session = open(
+    let (mut session, host_unsupported) = open(
         case,
         "so-step-limit",
         Script {
@@ -662,7 +985,7 @@ where
                 must_not_start(),
             ],
         },
-        Some(true),
+        None,
     )
     .await?;
     crate::tags::require_declared(
@@ -699,6 +1022,13 @@ where
         ));
     }
     let output = completed(&result)?;
+    expect(
+        output,
+        "submit_tool",
+        Err(reasons::CATALOG_UNKNOWN),
+        validation::PASSED,
+        host_unsupported,
+    )?;
     if output.value.as_ref() != Some(&answer) {
         return Err(format!(
             "value {:?} is not the submitted {answer}",
@@ -758,10 +1088,7 @@ where
         )
         .await
         .map_err(|e| format!("installing the script of {name}: {e}"))?;
-    subject
-        .set_structured_output_support(&name, Some(true))
-        .await
-        .map_err(|e| format!("setting structured-output support of {name}: {e}"))?;
+    let host_unsupported = best_effort_support(subject, &name, None).await?;
     let structured_output = request(Mode::SubmitTool);
     let first = params(
         subject,
@@ -847,6 +1174,13 @@ where
         result = settled(&route, declared, &end.run_id).await?;
     }
     let output = completed(&result)?;
+    expect(
+        output,
+        "submit_tool",
+        Err(reasons::CATALOG_UNKNOWN),
+        validation::PASSED,
+        host_unsupported,
+    )?;
     if output.validation != validation::PASSED || output.value.as_ref() != Some(&answer) {
         return Err(format!(
             "the run after the restart did not submit {answer}: {output:?}"

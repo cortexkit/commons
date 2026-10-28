@@ -1061,6 +1061,14 @@ pub trait LlmRunnerSubject: Harness {
     /// final text and tool input, `Some(false)` not supported, `None` not
     /// stated. Called before the session's first send. Required with
     /// [`Capability::StructuredOutput`].
+    ///
+    /// A subject whose runner can never enforce returns `Err` for `Some(true)`;
+    /// the enforced cases are then inapplicable by name with that error.
+    /// `Some(false)` and `None` remain required: the best-effort and other
+    /// structured-output checks still run.
+    /// Each such session first probes `Some(true)`, then sets the actual
+    /// support value. A refused probe requires reason `host_unsupported`;
+    /// a successful probe requires the case's exact catalog or route reason.
     async fn set_structured_output_support(
         &self,
         _session: &str,

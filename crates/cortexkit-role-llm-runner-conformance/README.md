@@ -510,6 +510,9 @@ is unchanged and prints nothing.
 | `send_status_unknown_send_refused` | `send_status`, `queue`, `transcript_reads` |
 | `max_steps_final_step_completes` | `max_steps`, `queue`, `run_ops`; with `max_steps: 1`, a one-text-step model ends `completed` with its final message, and its directives where `turn_directives` is declared |
 | `max_steps_submit_result_completes` | `max_steps`, `structured_output`, `queue`, `transcript_reads`, `run_ops`; with `max_steps: 1`, a step calling `submit_result` ends `completed` with the value and its sibling `skipped_after_submit` |
+| `structured_output_sibling_never_dispatched` | `structured_output`, `queue`, `transcript_reads`, `run_ops`; without `submit_streamed_siblings`, even an earlier sibling never dispatches. Inapplicable when the runner declares the streamed-sibling variant. |
+| `structured_output_streamed_siblings` | `structured_output`, `queue`, `transcript_reads`, `run_ops`; when the describe answer declares `submit_streamed_siblings`, an earlier sibling may retain its dispatched result and is then not skipped. A later sibling and later `submit_result` never dispatch and are listed in emission order with `skipped_after_submit` results. The run completes with the first value validated. Inapplicable without the group; the strict case checks that runner instead. |
+| `structured_output_not_inherited` | `structured_output`, `queue`, `transcript_reads`, `run_ops`; the default is per run. With `structured_output_per_session` in the describe answer, later sends must preserve the first admitted send's presence or absence and whole-member JCS value; changes are refused naming `structured_output` without writes. |
 | `session_refresh_applies_from_next_run`, `session_refresh_waits_for_its_rung`, `session_refresh_repeat_same_answer`, `session_refresh_generation_stale_refused`, `session_refresh_tool_outside_host_set_refused` | `session_change`, `queue`, `run_ops`, and the adapter's `refresh_plan` and `model_requests`; inapplicable by name when the session states no fitting rung or the adapter has no fitting plan |
 | `session_refresh_never_changes_a_running_run`, `flush_prefix_applies_pending` | the above, and `hold_tool_calls` |
 | `retention_honoured`, `retention_no_content_served`, `retention_equal_noop`, `retention_shorten_continues_lineage`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
@@ -651,12 +654,31 @@ escalation keeps the model held until `now` has ended the run.
 
 ## Structured output
 
-The ten `structured_output_*` cases run only when the subject declares
+The eleven `structured_output_*` cases run only when the subject declares
 `Capability::StructuredOutput` (the `structured_output` group); otherwise the
 report names each one as skipped, never as passed. They also require
 `queue`, `transcript_reads` and `run_ops`, and
 `structured_output_frozen_across_restart` also requires the
 `ToolResultRecorded` kill point.
+
+`structured_output_sibling_never_dispatched` keeps the strict rule for runners
+without `submit_streamed_siblings`. For a runner whose host dispatches calls as
+they stream, the describe answer may declare `submit_streamed_siblings` together
+with `structured_output`: `structured_output_streamed_siblings` then checks
+the declared variant instead. The other case is inapplicable by name; choosing
+either variant does not reduce a fully conforming runner's verdict. A dispatched
+earlier call must keep its actual scripted result in the transcript and,
+where `run_tool_calls` is declared, its
+normal dispatched result in that listing. Every later call is still skipped.
+
+`structured_output_not_inherited` also reads the describe answer. Without
+`structured_output_per_session`, it keeps the per-run non-inheritance check.
+With the group, it checks that the first admitted send fixes the whole member,
+present or absent, for the session: if the first send omitted the member,
+later sends must also omit it; otherwise, they must carry the same whole-member
+JCS value. Changes are refused naming `structured_output`, without writes or
+model requests. Equivalent JCS members remain accepted. Neither declaration is a
+separate kit `Capability`, and neither choice reduces the verdict.
 
 An adapter for such a runner implements three defaulted hooks:
 
@@ -669,6 +691,15 @@ An adapter for such a runner implements three defaulted hooks:
 - `model_requests(session)`: every model request the scripted model
   received, as `ModelRequestObservation`s (offered tool names, the final-text
   schema, the `submit_result` input schema), kept outside the runner.
+
+`structured_output_final_text_enforced_passed` and
+`structured_output_submit_tool_ends_run` request `Some(true)`. A subject whose
+runner can never enforce returns `Err`; those cases are then inapplicable by
+name with the hook's error, without reducing conformance. The other cases first
+probe `Some(true)` on their own session, then set `Some(false)` or `None`, which
+remain required. A refused probe requires `host_unsupported` as the only
+best-effort reason. A successful probe requires the case's exact catalog or
+route reason, and refuses `host_unsupported`.
 
 A scripted call whose `tool` is `submit_result` is the model calling the
 runner's submit tool: its `arguments` are the submitted value, and the

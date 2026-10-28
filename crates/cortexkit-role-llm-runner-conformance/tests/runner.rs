@@ -351,6 +351,15 @@ const INTERRUPT_CASES: &[&str] = &[
 const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    let submit_variant_reason = match case {
+        "structured_output_streamed_siblings" => Some("submit_streamed_siblings is not declared; the strict rule is checked by structured_output_sibling_never_dispatched"),
+        "structured_output_sibling_never_dispatched" => Some("submit_streamed_siblings is declared; the streamed rule is checked by structured_output_streamed_siblings"),
+        _ => None,
+    };
+    if matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if Some(reason.as_str()) == submit_variant_reason)
+    {
+        return;
+    }
     if case.starts_with("head_last_run_error_")
         && matches!(report.outcome(case), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::RunStatus))
     {
@@ -631,8 +640,7 @@ const TIMED_RETENTION_CASES: &[&str] = &[
     "crash_at_RetentionTombstoned",
 ];
 
-#[tokio::test(start_paused = true)]
-async fn a_faithful_runner_whose_kills_end_a_process_passes() {
+fn faithful_runner_with_all_supported_groups() -> FakeSubject {
     let mut subject = FakeSubject::new(Defects::default());
     subject.held_calls_group = true;
     subject.capabilities.insert(Capability::RunStatus);
@@ -673,9 +681,22 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     // Runs carry their plan's rich UI stamp, which every other case must
     // still accept on the rows, events and heads it reads.
     subject.rich_ui_stamp_group = true;
+    subject
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_faithful_runner_whose_kills_end_a_process_passes() {
+    let subject = faithful_runner_with_all_supported_groups();
     let started = Instant::now();
     let report = run(&subject).await;
     assert_only_session_retention_skipped(&report);
+    assert_passed(&report, "structured_output_sibling_never_dispatched");
+    assert!(matches!(
+        report.outcome("structured_output_streamed_siblings"),
+        Some(CaseOutcome::Inapplicable { reason })
+            if reason.contains("submit_streamed_siblings is not declared")
+                && reason.contains("structured_output_sibling_never_dispatched")
+    ));
     for spec in CASES.iter().filter(|case| {
         case.name.starts_with("media_")
             || case.name.starts_with("attachments_")
@@ -703,6 +724,23 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
         TIMED_RETENTION_CASES.len(),
         started.elapsed()
     );
+}
+
+#[tokio::test(start_paused = true)]
+async fn structured_output_streamed_siblings_preserves_faithful_runner_verdict() {
+    let mut subject = faithful_runner_with_all_supported_groups();
+    subject.submit_streamed_siblings_group = true;
+    subject.structured_output_per_session_group = true;
+    let report = run(&subject).await;
+    assert_only_session_retention_skipped(&report);
+    assert_passed(&report, "structured_output_streamed_siblings");
+    assert_passed(&report, "structured_output_not_inherited");
+    assert!(matches!(
+        report.outcome("structured_output_sibling_never_dispatched"),
+        Some(CaseOutcome::Inapplicable { reason })
+            if reason.contains("submit_streamed_siblings is declared")
+                && reason.contains("structured_output_streamed_siblings")
+    ));
 }
 
 #[tokio::test(start_paused = true)]
@@ -2330,6 +2368,139 @@ const STRUCTURED_OUTPUT_CASES: &[&str] = &[
     "structured_output_sibling_never_dispatched",
 ];
 
+#[tokio::test(start_paused = true)]
+async fn structured_output_host_unsupported_keeps_other_cases_and_verdict() {
+    for variants in [false, true] {
+        let mut subject = faithful_runner_with_all_supported_groups();
+        subject.defects.structured_output_host_unsupported = true;
+        subject.submit_streamed_siblings_group = variants;
+        subject.structured_output_per_session_group = variants;
+        let report = run(&subject).await;
+        assert_only_session_retention_skipped(&report);
+        for name in STRUCTURED_OUTPUT_CASES {
+            if matches!(
+                *name,
+                "structured_output_final_text_enforced_passed"
+                    | "structured_output_submit_tool_ends_run"
+            ) {
+                assert!(
+                    matches!(
+                        report.outcome(name),
+                        Some(CaseOutcome::Inapplicable { reason })
+                            if reason == "set_structured_output_support(Some(true)) refused: host cannot constrain structured output"
+                    ),
+                    "{name}: {:?}",
+                    report.outcome(name)
+                );
+            } else if *name == "structured_output_sibling_never_dispatched" && variants {
+                assert!(
+                    matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason })
+                    if reason.contains("submit_streamed_siblings"))
+                );
+            } else {
+                assert_eq!(
+                    report.outcome(name),
+                    Some(&CaseOutcome::Passed),
+                    "{name}: {:?}",
+                    report.outcome(name)
+                );
+            }
+        }
+        if variants {
+            assert_eq!(
+                report.outcome("structured_output_streamed_siblings"),
+                Some(&CaseOutcome::Passed)
+            );
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn structured_output_host_unsupported_passes_every_case_it_runs() {
+    let mut subject = faithful_runner_with_all_supported_groups();
+    subject.defects.structured_output_host_unsupported = true;
+    subject.submit_streamed_siblings_group = true;
+    subject.structured_output_per_session_group = true;
+    let report = run(&subject).await;
+    assert_only_session_retention_skipped(&report);
+    let executed: Vec<_> = report
+        .cases
+        .iter()
+        .filter(|case| {
+            !matches!(
+                case.outcome,
+                CaseOutcome::Inapplicable { .. }
+                    | CaseOutcome::Skipped { .. }
+                    | CaseOutcome::SkippedWithReason { .. }
+            )
+        })
+        .collect();
+    assert!(!executed.is_empty());
+    for case in executed {
+        assert!(
+            matches!(
+                case.outcome,
+                CaseOutcome::Passed | CaseOutcome::PassedWithInapplicableRule { .. }
+            ),
+            "{}: {:?}",
+            case.case,
+            case.outcome
+        );
+    }
+}
+
+#[tokio::test]
+async fn structured_output_false_host_unsupported_fails_reason_cases_by_name() {
+    let mut subject = FakeSubject::new(Defects {
+        structured_output_claims_host_unsupported: true,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::StructuredOutput);
+    let report = run(&subject).await;
+    for name in [
+        "structured_output_absent_without_submit",
+        "structured_output_failed_validation_completes",
+        "structured_output_not_inherited",
+        "structured_output_sibling_never_dispatched",
+        "structured_output_frozen_across_restart",
+    ] {
+        let reason = failed(&report, name);
+        assert!(reason.contains("host_unsupported"), "{name}: {reason}");
+        let expected = if name == "structured_output_failed_validation_completes" {
+            "route_unsupported"
+        } else {
+            "catalog_unknown"
+        };
+        assert!(reason.contains(expected), "{name}: {reason}");
+    }
+    assert_passed(&report, "structured_output_final_text_enforced_passed");
+    assert_passed(&report, "structured_output_submit_tool_ends_run");
+}
+
+#[tokio::test]
+async fn structured_output_hidden_host_unsupported_fails_reason_cases_by_name() {
+    let mut subject = FakeSubject::new(Defects {
+        structured_output_host_unsupported: true,
+        structured_output_hides_host_unsupported: true,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::StructuredOutput);
+    let report = run(&subject).await;
+    for name in [
+        "structured_output_absent_without_submit",
+        "structured_output_failed_validation_completes",
+        "structured_output_not_inherited",
+        "structured_output_sibling_never_dispatched",
+        "structured_output_frozen_across_restart",
+    ] {
+        let reason = failed(&report, name);
+        assert!(
+            reason.contains("expected submit_tool best_effort Some(\"host_unsupported\")"),
+            "{name}: {reason}"
+        );
+    }
+}
+
 async fn structured_output_case(name: &str) {
     let mut subject = FakeSubject::new(Defects::default());
     subject.capabilities.insert(Capability::StructuredOutput);
@@ -2375,12 +2546,96 @@ async fn structured_output_not_inherited() {
     structured_output_case("structured_output_not_inherited").await;
 }
 #[tokio::test]
+async fn structured_output_per_session_checks_session_admission() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::StructuredOutput);
+    subject.structured_output_per_session_group = true;
+    let report = run(&subject).await;
+    assert_passed(&report, "structured_output_not_inherited");
+}
+
+#[tokio::test]
+async fn structured_output_per_session_accepting_omission_fails_by_name() {
+    let mut subject = FakeSubject::new(Defects {
+        structured_output_session_omission_accepted: true,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::StructuredOutput);
+    subject.structured_output_per_session_group = true;
+    let report = run(&subject).await;
+    let reason = failed(&report, "structured_output_not_inherited");
+    assert!(
+        reason.contains("session-wide structured_output change"),
+        "{reason}"
+    );
+}
+#[tokio::test]
 async fn structured_output_external_ref_refused() {
     structured_output_case("structured_output_external_ref_refused").await;
 }
 #[tokio::test]
 async fn structured_output_sibling_never_dispatched() {
     structured_output_case("structured_output_sibling_never_dispatched").await;
+}
+
+#[tokio::test]
+async fn structured_output_streamed_siblings() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.submit_streamed_siblings_group = true;
+    subject
+        .capabilities
+        .extend([Capability::StructuredOutput, Capability::RunToolCalls]);
+    let report = run(&subject).await;
+    assert_passed(&report, "structured_output_streamed_siblings");
+    assert!(matches!(
+        report.outcome("structured_output_sibling_never_dispatched"),
+        Some(CaseOutcome::Inapplicable { reason })
+            if reason.contains("submit_streamed_siblings")
+    ));
+}
+
+#[tokio::test]
+async fn structured_output_streamed_siblings_buffered_early_call() {
+    let mut subject = FakeSubject::new(Defects {
+        structured_output_buffers_siblings: true,
+        ..Defects::default()
+    });
+    subject.submit_streamed_siblings_group = true;
+    subject
+        .capabilities
+        .extend([Capability::StructuredOutput, Capability::RunToolCalls]);
+    let report = run(&subject).await;
+    assert_passed(&report, "structured_output_streamed_siblings");
+}
+
+#[tokio::test]
+async fn structured_output_streamed_siblings_dispatching_after_submit_fails_by_name() {
+    let mut subject = FakeSubject::new(Defects {
+        structured_output_dispatches_after_submit: true,
+        ..Defects::default()
+    });
+    subject.submit_streamed_siblings_group = true;
+    subject.capabilities.insert(Capability::StructuredOutput);
+    let report = run(&subject).await;
+    let reason = failed(&report, "structured_output_streamed_siblings");
+    assert!(
+        reason.contains("emitted after submit_result was invoked 1 times"),
+        "{reason}"
+    );
+}
+
+#[tokio::test]
+async fn structured_output_streamed_siblings_undeclared_is_inapplicable() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::StructuredOutput);
+    let report = run(&subject).await;
+    assert!(matches!(
+        report.outcome("structured_output_streamed_siblings"),
+        Some(CaseOutcome::Inapplicable { reason })
+            if reason.contains("submit_streamed_siblings")
+                && reason.contains("structured_output_sibling_never_dispatched")
+    ));
+    assert_passed(&report, "structured_output_sibling_never_dispatched");
 }
 
 #[tokio::test]

@@ -71,12 +71,16 @@ pub mod reasons {
     /// The route enforces schemas for one mode (final text or tool input)
     /// but not the requested one.
     pub const MODE_NOT_ENFORCEABLE: &str = "mode_not_enforceable";
+    /// The runner's host provides no way to send the schema in a constrained
+    /// form, regardless of what the route supports.
+    pub const HOST_UNSUPPORTED: &str = "host_unsupported";
     /// Every reason a runner may write.
     pub const ALL: &[&str] = &[
         CATALOG_UNKNOWN,
         ROUTE_UNSUPPORTED,
         SCHEMA_OUTSIDE_SUBSET,
         MODE_NOT_ENFORCEABLE,
+        HOST_UNSUPPORTED,
     ];
 }
 
@@ -402,6 +406,8 @@ pub struct StructuredOutputResult {
     /// On `submit_tool`: the calls of the submitting step that were never
     /// dispatched, in the order the model emitted them; `[]` when
     /// `submit_result` came alone or was never called.
+    /// With `submit_streamed_siblings`, an earlier call already dispatched
+    /// while the step streamed keeps its own result and is not listed here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skipped_siblings: Option<Vec<SkippedSibling>>,
 }
@@ -740,6 +746,23 @@ mod tests {
         let open: StructuredOutputResult =
             vectors::round_trip("open", &file["open"]["structured_output"]);
         assert_eq!(open.well_formed(), Ok(()));
+    }
+
+    #[test]
+    fn host_unsupported_round_trips_and_is_well_formed() {
+        let output = StructuredOutputResult::new(
+            modes::SUBMIT_TOOL,
+            enforcement::BEST_EFFORT,
+            validation::PASSED,
+        )
+        .with_reason(reasons::HOST_UNSUPPORTED)
+        .with_value(json!({"answer": "42"}))
+        .with_skipped_siblings(vec![]);
+        let wire = serde_json::to_value(&output).unwrap();
+        assert_eq!(wire["reason"], "host_unsupported");
+        let decoded: StructuredOutputResult = serde_json::from_value(wire).unwrap();
+        assert_eq!(decoded, output);
+        assert_eq!(decoded.well_formed(), Ok(()));
     }
 
     #[test]

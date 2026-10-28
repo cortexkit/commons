@@ -275,6 +275,19 @@ where
             ));
         }
     }
+    let verdict = verdict(&cases, declared, failures);
+    Ok(SuiteReport {
+        cases,
+        kills,
+        verdict,
+    })
+}
+
+fn verdict(
+    cases: &[CaseReport],
+    declared: BTreeSet<Capability>,
+    failures: Vec<String>,
+) -> SuiteVerdict {
     let skipped: BTreeSet<Capability> = cases
         .iter()
         .filter_map(|case| match &case.outcome {
@@ -285,7 +298,7 @@ where
         })
         .flatten()
         .collect();
-    let verdict = if !failures.is_empty() {
+    if !failures.is_empty() {
         SuiteVerdict::Failed { reasons: failures }
     } else if !skipped.is_empty() {
         SuiteVerdict::ConformingForDeclaredCapabilities {
@@ -294,12 +307,50 @@ where
         }
     } else {
         SuiteVerdict::Passed
-    };
-    Ok(SuiteReport {
-        cases,
-        kills,
-        verdict,
-    })
+    }
+}
+
+#[cfg(test)]
+mod submit_variant_verdict_tests {
+    use super::*;
+
+    #[test]
+    fn inapplicable_submit_variant_preserves_fully_conforming_verdict() {
+        for streamed in [false, true] {
+            let cases = [
+                CaseReport {
+                    case: "structured_output_sibling_never_dispatched",
+                    requires: vec![Capability::StructuredOutput],
+                    outcome: if streamed {
+                        CaseOutcome::Inapplicable {
+                            reason: "submit_streamed_siblings is declared".into(),
+                        }
+                    } else {
+                        CaseOutcome::Passed
+                    },
+                },
+                CaseReport {
+                    case: "structured_output_streamed_siblings",
+                    requires: vec![Capability::StructuredOutput],
+                    outcome: if streamed {
+                        CaseOutcome::Passed
+                    } else {
+                        CaseOutcome::Inapplicable {
+                            reason: "submit_streamed_siblings is not declared".into(),
+                        }
+                    },
+                },
+            ];
+            assert_eq!(
+                verdict(
+                    &cases,
+                    BTreeSet::from([Capability::StructuredOutput]),
+                    vec![]
+                ),
+                SuiteVerdict::Passed,
+            );
+        }
+    }
 }
 
 /// The outcome of a case that cannot run against this subject: skipped

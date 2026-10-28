@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.7.16
+
+- Add the `best_effort` runner reason `host_unsupported` when the host cannot
+  send a schema in a constrained form, regardless of route support. Consumers
+  still decode reasons as open strings. Add a canonical result/status vector
+  and a round-trip/well-formedness test.
+- Add the optional `structured_output_per_session` describe group, requiring
+  `structured_output`. Its first admitted send fixes the whole member, present
+  or absent, for the session; later sends must also omit an omitted first
+  member, or match a present first member's whole-member JCS bytes. Changes
+  are refused `invalid_params` naming `structured_output` without writes.
+  `check_describe` refuses the group alone by name. The default per-run rule
+  is unchanged.
+- Add the optional `submit_streamed_siblings` describe group, extending
+  `session.send` and requiring `structured_output`; `check_describe` refuses
+  the group alone with `submit_streamed_siblings_without_structured_output`.
+- Contract §6 and §9.4 declare a variant for a runner whose host dispatches
+  calls as they stream: earlier submit-step siblings may keep their normal
+  dispatched results and are not skipped. Every later call, including later
+  `submit_result` calls, is still never dispatched and receives a durable
+  `skipped_after_submit` result. The first submitted value still ends the run
+  `completed` and is validated. Without the group, the strict rule is unchanged.
+- A caller requiring that no sibling ever runs must avoid `submit_tool` on
+  such a runner, or offer no tools with side effects in that run.
+
 ## 0.7.15
 
 - Text only. Contract §4.3 now says which message `session.head.cut` names

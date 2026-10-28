@@ -301,6 +301,15 @@ pub mod capabilities {
     /// Schema-shaped run output on `session.send` (`structured_output`),
     /// reported on `run.result` and `run.status`.
     pub const STRUCTURED_OUTPUT: &str = "structured_output";
+    /// A runner whose host dispatches calls as they stream may retain
+    /// dispatched results for calls emitted before `submit_result`. Calls
+    /// emitted after it are still never dispatched. Requires [`STRUCTURED_OUTPUT`].
+    pub const SUBMIT_STREAMED_SIBLINGS: &str = "submit_streamed_siblings";
+    /// The first admitted send fixes `structured_output`, present or absent,
+    /// for the whole session. Later sends must also omit an omitted first
+    /// member, or match a present first member's whole-member JCS bytes.
+    /// Requires [`STRUCTURED_OUTPUT`].
+    pub const STRUCTURED_OUTPUT_PER_SESSION: &str = "structured_output_per_session";
     /// `session.adopt`: the owner takes over a session the host started
     /// with a plan already applied, before or during the person's own turns,
     /// without sending a prompt.
@@ -398,6 +407,8 @@ pub mod capabilities {
         (TURN_DIRECTIVES, &[ops::SESSION_SEND, ops::RUN_RESULT]),
         (INTERRUPT_REASON, &[ops::RUN_RESULT]),
         (STRUCTURED_OUTPUT, &[ops::SESSION_SEND]),
+        (SUBMIT_STREAMED_SIBLINGS, &[ops::SESSION_SEND]),
+        (STRUCTURED_OUTPUT_PER_SESSION, &[ops::SESSION_SEND]),
         (ADOPT, &[ops::SESSION_ADOPT]),
         (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),

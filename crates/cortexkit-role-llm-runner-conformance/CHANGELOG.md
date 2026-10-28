@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.15.18
+
+- A subject that cannot configure enforced structured output may refuse
+  `set_structured_output_support(session, Some(true))`. The enforced cases
+  then report inapplicable with the hook's error, without reducing the
+  verdict. Best-effort cases remain required with `Some(false)` and `None`.
+  Non-enforcement checks probe `Some(true)` on their own session before
+  setting the real support value. Only a refused probe permits, and then
+  requires, `host_unsupported`; a successful probe requires the exact catalog
+  or route reason. Faulty runners claiming or hiding host incapability fail
+  the reason checks by name.
+- Read `structured_output_per_session` from the describe answer as another
+  optional rule variant. `structured_output_not_inherited` checks that such
+  a runner refuses changes to the first admitted send's presence or value
+  without writes; an omitted first member must stay omitted, and a present
+  first member must keep the same whole-member JCS value.
+  The default per-run check remains unchanged. A faulty fake accepting an
+  omitted member fails the case by name.
+- Require `cortexkit-role-llm-runner` 0.7.16. Read its optional
+  `submit_streamed_siblings` describe group as a rule variant, not a capability
+  whose absence reduces a runner's conformance verdict.
+- Keep `structured_output_sibling_never_dispatched` strict without the group;
+  with it, check `structured_output_streamed_siblings` instead. Earlier calls
+  may keep dispatched results without being skipped; later calls and later
+  `submit_result` calls must never dispatch and must have never-executed
+  `skipped_after_submit` results listed in emission order. The run must end
+  `completed` with the first submitted value validated.
+- The case for the other dispatch variant is inapplicable by name, without
+  reducing the verdict of a fully conforming runner.
+- A faulty fake runner declaring the group but dispatching a later sibling
+  fails `structured_output_streamed_siblings` by name.
+
 ## 0.15.17
 
 - Requires `cortexkit-role-llm-runner` 0.7.15, a text-only release that says

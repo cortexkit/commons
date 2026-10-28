@@ -223,10 +223,26 @@ where
             name if name.starts_with("input_token_cap_") => crate::input_token_cap::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
+            "structured_output_sibling_never_dispatched"
+            | "structured_output_streamed_siblings" => {
+                let streamed = self
+                    .checked_describe()
+                    .await?
+                    .declares(groups::SUBMIT_STREAMED_SIBLINGS);
+                if name == "structured_output_sibling_never_dispatched" && streamed {
+                    Ok(Ending::Inapplicable(
+                        "submit_streamed_siblings is declared; the streamed rule is checked by structured_output_streamed_siblings".into(),
+                    ))
+                } else if name == "structured_output_streamed_siblings" && !streamed {
+                    Ok(Ending::Inapplicable(
+                        "submit_streamed_siblings is not declared; the strict rule is checked by structured_output_sibling_never_dispatched".into(),
+                    ))
+                } else {
+                    crate::structured_output::run(self, name).await
+                }
+            }
             name if name.starts_with("structured_output_") => {
-                crate::structured_output::run(self, name)
-                    .await
-                    .map(|()| Ending::Passed)
+                crate::structured_output::run(self, name).await
             }
             name if name.starts_with("retention_") => self.retention_case(name).await,
             "cut_starts_a_new_lineage"
