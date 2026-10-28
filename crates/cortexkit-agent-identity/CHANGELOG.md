@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2
+
+- Add strict `agent.session_for_harness` params, a typed request alias and operation
+  constant, and a separate reply with a required nullable `runner`. Runner lookups
+  retain their non-null runner contract.
+- Bundle five byte-identical handler captures covering runner-backed sessions,
+  runnerless heads, remote ended sessions, and existing refusal types, with
+  per-record round-trip tests, a checksum manifest, and missing-runner coverage.
+
 ## 0.1.1
 
 - Add strict params and separate reply types for `agent.session_for_ref` and

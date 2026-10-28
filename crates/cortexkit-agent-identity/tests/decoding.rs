@@ -274,6 +274,7 @@ fn params_refuse_unknown_members() {
     refuses::<AgentWhereManyParams>(json!({"agentIds":["agent_12345678"]}));
     refuses::<AgentSessionForRefParams>(json!({"ref_kind":"future-kind", "ref":"r"}));
     refuses::<AgentSessionForRunnerParams>(json!({"runner":"runner", "session":"s"}));
+    refuses::<AgentSessionForHarnessParams>(json!({"harness":"pi", "session":"s"}));
     refuses::<AgentFleetIdentityParams>(json!({}));
     assert!(serde_json::from_value::<Request<AgentResolveParams>>(
         json!({"method":"agent.resolve", "params":{"agent_id":"agent_12345678", "unknown":true}}),
@@ -334,6 +335,69 @@ fn runner_params_refuse_session_id_alias() {
 }
 
 #[test]
+fn harness_request_uses_strict_params_and_session_spelling() {
+    for params in [
+        json!({"harness":"pi", "session_id":"s"}),
+        json!({"harness":"pi", "session":"s", "session_id":"s"}),
+    ] {
+        assert!(serde_json::from_value::<AgentSessionForHarnessParams>(params).is_err());
+    }
+    let request = AgentSessionForHarnessRequest::new(
+        AGENT_SESSION_FOR_HARNESS,
+        AgentSessionForHarnessParams::new("pi".into(), "s".into()),
+    );
+    round_trip::<AgentSessionForHarnessRequest>(json!({
+        "method":"agent.session_for_harness", "params":{"harness":"pi", "session":"s"}
+    }));
+    assert_eq!(
+        serde_json::to_value(request).unwrap(),
+        json!({"method":"agent.session_for_harness", "params":{"harness":"pi", "session":"s"}})
+    );
+}
+
+#[test]
+fn harness_reply_requires_runner_but_accepts_null() {
+    let expected = json!({
+        "agent_id":"agent_12345678", "ref_kind":"pi-session", "ref":"opaque-ref",
+        "harness":"pi", "session":"head", "project_root":null, "runner":null,
+        "ended_at_ms":null, "network":"unknown", "network_history":[], "incarnation":"instance"
+    });
+    let reply = AgentSessionForHarnessReply::new(
+        "agent_12345678".into(),
+        "pi-session".into(),
+        "opaque-ref".into(),
+        Some("pi".into()),
+        "head".into(),
+        None,
+        None,
+        Presence::Missing,
+        None,
+        SessionNetwork::Unknown,
+        vec![],
+        "instance".into(),
+    );
+    assert_eq!(serde_json::to_value(reply).unwrap(), expected);
+    let decoded: AgentSessionForHarnessReply = round_trip(expected.clone());
+    assert_eq!(decoded.runner, None);
+
+    let mut with_runner = expected.clone();
+    with_runner["runner"] = json!("runner");
+    let decoded: AgentSessionForHarnessReply = round_trip(with_runner);
+    assert_eq!(decoded.runner.as_deref(), Some("runner"));
+
+    let mut missing = expected;
+    assert_eq!(
+        missing.as_object_mut().unwrap().remove("runner"),
+        Some(Value::Null)
+    );
+    let error = serde_json::from_value::<AgentSessionForHarnessReply>(missing).unwrap_err();
+    assert!(
+        error.to_string().contains("missing field `runner`"),
+        "{error}"
+    );
+}
+
+#[test]
 fn session_lookup_required_params() {
     for params in [
         json!({}),
@@ -351,6 +415,17 @@ fn session_lookup_required_params() {
         json!({"runner":"r", "session":null}),
     ] {
         assert!(serde_json::from_value::<AgentSessionForRunnerParams>(params).is_err());
+    }
+    for params in [
+        json!({}),
+        json!({"harness":"pi"}),
+        json!({"session":"s"}),
+        json!({"harness":null, "session":"s"}),
+        json!({"harness":"pi", "session":null}),
+        json!({"harness":1, "session":"s"}),
+        json!({"harness":"pi", "session":1}),
+    ] {
+        assert!(serde_json::from_value::<AgentSessionForHarnessParams>(params).is_err());
     }
     let params = AgentSessionForRefParams::new("future-kind".into(), "opaque-ref".into());
     assert_eq!(

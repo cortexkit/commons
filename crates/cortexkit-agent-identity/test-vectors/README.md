@@ -24,6 +24,11 @@ numeric/malformed-string token cache misses. Fleet log positions are all zero;
 see the crate README for every remaining untested case. All existing JSON
 captures remain unchanged.
 
+`session-for-harness.json` contains five unchanged handler records: a session with
+a runner, an OpenCode head with a null runner, a remote ended session, a `not_found`
+refusal, and an `invalid_request` refusal for an extra `session_id` param. Its
+SHA-256 is `32ec4b73a8571b8d534b76c4858d4d0190063c8343fe5aea5f2630e50a2c9544`.
+
 Record metadata is not part of a reply. Tests decode each reply and serialize
 through a sorted-key JSON value to compare with its exact embedded compact bytes.
 Synthetic compatibility tests live separately in `tests/decoding.rs`.

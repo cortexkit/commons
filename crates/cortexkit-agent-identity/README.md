@@ -2,8 +2,9 @@
 
 Serde-only requests and replies for the agent registry's `context.project`,
 `context.session`, `agent.resolve`, `agent.where`, `agent.where_many`,
-`agent.session_for_ref`, `agent.session_for_runner`, and `agent.fleet_identity` reads.
-Version 0.1.1 adds session lookups and fleet identity compatibly to 0.1.0.
+`agent.session_for_ref`, `agent.session_for_runner`, `agent.session_for_harness`,
+and `agent.fleet_identity` reads. Version 0.1.2 adds harness session lookup
+compatibly to 0.1.1, including sessions without a recorded runner.
 
 The crate does no I/O, ID/path validation, or cross-field validation. Params
 types refuse unknown members, as the handler does; ID syntax, `agentIds` count
@@ -38,7 +39,9 @@ Never infer write or activation permission from an unfamiliar state.
 
 `R` below means writer-required, non-null; `R+N` means writer-required, nullable;
 `O` means omitted when unavailable. Nullable fields use `Option<T>`: as in the
-project crate, readers also accept omission and serialize `None` as null. Optional
+project crate, readers generally also accept omission and serialize `None` as null.
+The harness lookup reply's `runner` is the exception: null is accepted but omission
+is refused. Optional
 members use `Presence<T>` with omission preserved. JSON-valued `Presence<Value>`
 also preserves a present null separately from a missing member. The types do not
 validate the handler's presence/ordering/reachability invariants.
@@ -321,6 +324,31 @@ Published coverage: four `session-for-runner.json` records and records 7–13 of
 current network values. **Untested by captures:** null `harness`, unreachable
 for a found runner row through the real writers. `runner: null` is not a case.
 
+## `agent.session_for_harness`
+
+Request: `AgentSessionForHarnessParams`, required non-null strings `harness` and
+`session`. Unknown members are refused, including `session_id` even when `session`
+is supplied. `AgentSessionForHarnessRequest` aliases
+`Request<AgentSessionForHarnessParams>`; construct it with
+`AgentSessionForHarnessRequest::new(AGENT_SESSION_FOR_HARNESS, params)`.
+`AGENT_SESSION_FOR_HARNESS` is the `"agent.session_for_harness"` operation name.
+Params are data containers; the crate does not validate handler bounds.
+
+Reply: `AgentSessionForHarnessReply`, with the same members and wire spellings as
+`AgentSessionForRunnerReply`, except `runner` is `Option<String>` (R+N). It always
+serializes as a string or explicit null, never as an omitted member. Decoding a
+reply with no `runner` member is refused. The runner lookup reply remains unchanged
+and requires a non-null runner.
+
+The harness and session pair can find runnerless sessions, including OpenCode or
+Pi heads and sessions recorded before runners existed. An absent pair refuses
+`not_found` through the existing `Outcome` and `RefusalCode::NotFound` types;
+malformed params use `RefusalCode::InvalidRequest`.
+
+Published coverage: five `session-for-harness.json` records cover a runner-backed
+session, a null-runner head, a remote ended session with `heldOn`, a lookup miss,
+and an unknown-field request refusal. Each reply round-trips byte-for-byte.
+
 ## `agent.fleet_identity`
 
 Request: `AgentFleetIdentityParams`, either `{}` or `{"token": value}`. `token`
@@ -393,6 +421,7 @@ Domain errors retain their own code/message/detail.
 | `agent.where_many` | Same as where, but skips `unknown_agent`; duplicate/out-of-range/invalid IDs yield `invalid_request`. |
 | `agent.session_for_ref` | `invalid_request` for decode/bounds; `not_found` for an absent exact reference. |
 | `agent.session_for_runner` | `invalid_request` for decode/bounds; `not_found` for an absent pair, including runnerless bindings. |
+| `agent.session_for_harness` | `invalid_request` for malformed params; `not_found` for an absent harness/session pair. |
 | `agent.fleet_identity` | `invalid_request` for extra params/envelope/decode, never a token value. No unknown-agent, bad-token, stale-token or `not_found` refusal; an empty fleet succeeds. |
 
 The lists above are not an exhaustive future refusal vocabulary.
@@ -404,6 +433,6 @@ own exact compact-reply round-trip test through a sorted-key JSON value; SHA-256
 manifests cover exactly the copied JSON files. Separate synthetic tests cover
 unknown enum spellings, ignored object members, open participant JSON, non-string
 pin-state projections, and missing versus present-null payloads.
-The four new JSON files are copied byte-for-byte from the published owner export;
+The session lookup and fleet JSON files are copied byte-for-byte from published handler exports;
 `session-lookup-cases.json` contains nineteen records and has SHA-256
 `5e2a306b6a05bd4ab1c922c0c57541d16e3fb33c2c403a797fe5a34edb774107`.

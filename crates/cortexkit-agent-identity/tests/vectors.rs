@@ -17,6 +17,8 @@ const RESOLVE_MERGED: &str =
     include_str!("../test-vectors/agent-identity-reads-v1/agent-resolve-merged.json");
 const FOR_REF: &str = include_str!("../test-vectors/agent-sessions-v1/session-for-ref.json");
 const FOR_RUNNER: &str = include_str!("../test-vectors/agent-sessions-v1/session-for-runner.json");
+const FOR_HARNESS: &str =
+    include_str!("../test-vectors/agent-sessions-v1/session-for-harness.json");
 const LOOKUPS: &str = include_str!("../test-vectors/agent-sessions-v1/session-lookup-cases.json");
 const FLEET: &str = include_str!("../test-vectors/agent-identity-reads-v1/fleet-identity.json");
 
@@ -512,6 +514,48 @@ read_refusal_sample!(
     NotFound
 );
 read_sample!(
+    harness_with_runner,
+    FOR_HARNESS,
+    0,
+    "agent.session_for_harness",
+    AgentSessionForHarnessParams,
+    AgentSessionForHarnessReply
+);
+read_sample!(
+    harness_null_runner_head,
+    FOR_HARNESS,
+    1,
+    "agent.session_for_harness",
+    AgentSessionForHarnessParams,
+    AgentSessionForHarnessReply
+);
+read_sample!(
+    harness_remote_ended,
+    FOR_HARNESS,
+    2,
+    "agent.session_for_harness",
+    AgentSessionForHarnessParams,
+    AgentSessionForHarnessReply
+);
+read_refusal_sample!(
+    harness_not_found,
+    FOR_HARNESS,
+    3,
+    "agent.session_for_harness",
+    AgentSessionForHarnessParams,
+    AgentSessionForHarnessReply,
+    NotFound
+);
+read_refusal_sample!(
+    harness_malformed_request,
+    FOR_HARNESS,
+    4,
+    "agent.session_for_harness",
+    AgentSessionForHarnessParams,
+    AgentSessionForHarnessReply,
+    InvalidRequest
+);
+read_sample!(
     runner_live_network_history,
     FOR_RUNNER,
     0,
@@ -756,6 +800,7 @@ fn vector_checksums() {
         (
             include_str!("../test-vectors/agent-sessions-v1/SHA256SUMS"),
             &[
+                ("session-for-harness.json", FOR_HARNESS),
                 ("session-for-ref.json", FOR_REF),
                 ("session-for-runner.json", FOR_RUNNER),
                 ("session-lookup-cases.json", LOOKUPS),

@@ -303,6 +303,15 @@ wire_struct!(
     #[serde(deny_unknown_fields)]
     AgentSessionForRunnerParams { runner: String, session: String }
 );
+/// Operation name for a session lookup by harness and session.
+pub const AGENT_SESSION_FOR_HARNESS: &str = "agent.session_for_harness";
+wire_struct!(
+    /// Harness lookup params; unknown members and `session_id` aliases are refused.
+    #[serde(deny_unknown_fields)]
+    AgentSessionForHarnessParams { harness: String, session: String }
+);
+/// Request envelope for a session lookup by harness and session.
+pub type AgentSessionForHarnessRequest = Request<AgentSessionForHarnessParams>;
 wire_struct!(
     /// Reference lookup row, distinct from the runner lookup's lifecycle row.
     AgentSessionForRefReply {
@@ -335,6 +344,29 @@ wire_struct!(
         network_history: Vec<SessionNetworkEntry>, incarnation: String,
     }
 );
+wire_struct!(
+    /// Harness lookup row; `runner` is required but null when no runner is recorded.
+    AgentSessionForHarnessReply {
+        agent_id: String, ref_kind: String,
+        #[serde(rename = "ref")]
+        session_ref: String,
+        harness: Option<String>, session: String, project_root: Option<String>,
+        #[serde(deserialize_with = "deserialize_required_runner")]
+        runner: Option<String>,
+        #[serde(rename = "heldOn", default, skip_serializing_if = "Presence::is_missing")]
+        held_on: Presence<String>,
+        ended_at_ms: Option<i64>, network: SessionNetwork,
+        network_history: Vec<SessionNetworkEntry>, incarnation: String,
+    }
+);
+
+// A custom deserializer without a field default makes omission an error while accepting null.
+fn deserialize_required_runner<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer)
+}
 
 wire_struct!(
     /// Every token value is accepted; only an exact current string is a cache hit.
