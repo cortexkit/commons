@@ -561,6 +561,27 @@ pub struct ProviderUsage {
     /// unlabelled entry is not evidence that a labelled one does not exist.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// The credential-store record this reading was fetched with, when the
+    /// producer read it from one (for example `apikey:<provider>` or
+    /// `oauth:<provider>:<label>`).
+    ///
+    /// **Not an account identity.** It names a stored credential, not the
+    /// upstream account behind it, so never join it to [`Self::account`] or to
+    /// a credential store's account id. It exists for entries that have no
+    /// `account` (a bare API key carries no identity): a consumer that keeps
+    /// per-lane history can key such an entry by `(provider, credential_ref)`,
+    /// so a second key for the same provider shows up as a second lane instead
+    /// of silently merging two accounts' readings under one provider.
+    ///
+    /// The value is a label chosen when the credential was stored, so it can
+    /// read like a nickname. A renderer that hides identifying details should
+    /// hide it too.
+    ///
+    /// Absent when the reading came from anywhere else (a local file, an
+    /// environment variable, a browser session) or from a producer that
+    /// predates this field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub credential_ref: Option<String>,
     /// Which retrieval path produced this (e.g. "oauth") — observability only.
     ///
     /// **Per lane, not per account, and it moves.** One account can be reached
@@ -695,6 +716,7 @@ impl ProviderUsage {
             provider: provider.to_string(),
             api_provider: None,
             account,
+            credential_ref: None,
             source: Some(source.to_string()),
             account_info: None,
             fetched_at: None,
@@ -714,6 +736,7 @@ impl ProviderUsage {
             provider: provider.to_string(),
             api_provider: None,
             account: None,
+            credential_ref: None,
             source: None,
             account_info: None,
             fetched_at: None,
@@ -1331,6 +1354,26 @@ mod tests {
         assert!(json.contains("\"apiProvider\":\"openai\""));
         let back: ProviderUsage = serde_json::from_str(&json).unwrap();
         assert_eq!(back, entry);
+    }
+
+    #[test]
+    fn credential_ref_is_camel_case_present_when_set_and_omitted_when_absent() {
+        let mut entry = ProviderUsage::healthy("codex", None, "vault", Usage::default());
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("credentialRef"),
+            "absent credential_ref must be omitted"
+        );
+
+        entry.credential_ref = Some("apikey:example".to_string());
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(json.contains("\"credentialRef\":\"apikey:example\""));
+        let back: ProviderUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, entry);
+        // An entry from a producer that predates the field still decodes.
+        let older: ProviderUsage =
+            serde_json::from_str(r#"{"provider":"codex","source":"vault"}"#).unwrap();
+        assert_eq!(older.credential_ref, None);
     }
 
     #[test]
