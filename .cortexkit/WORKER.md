@@ -2,11 +2,19 @@
 
 ## Delivery gate
 
-- Before delivering, run `scripts/gate.sh fast` and `scripts/gate.sh lint`, then
-  run `scripts/gate.sh test` on the build server with `runon: "linux,16c"`.
-  In the agent's bash tool, `runon` selects a Linux build host with 16 CPUs.
-  Filtered tests alone are never a gate. When changing a conformance kit or its
-  contract crate, always run the kit's full suite.
+- Before delivering, run `scripts/gate.sh fast` (seconds: formatting,
+  lockfile, versions, vector checksums), then the full test suite and clippy of
+  every crate you changed: `cargo test -p <crate> --all-features` and
+  `cargo clippy -p <crate> --all-targets --all-features -- -D warnings`, plus
+  the same clippy with `--target x86_64-pc-windows-gnu`. Filtered tests alone
+  are never a gate. When changing a conformance kit or its contract crate,
+  run both crates' full suites.
+- Do not run `scripts/gate.sh lint` or `scripts/gate.sh test` (the whole
+  workspace) unless your brief asks. The head runs them once when it lands a
+  batch, because workspace builds unify features across crates and catch what
+  package runs can't. If your brief names a narrower check, the brief wins.
+- Run tests on the build server with `runon: "linux,8c"` (or more CPUs for a
+  large crate). In the agent's bash tool, `runon` selects a Linux build host.
 - Report each stage's verdict, test counts, and every failing test name. If a
   failure is unrelated to your change, show it fails the same way on the base
   commit.
