@@ -4,12 +4,14 @@
 //! dispatched against.
 //!
 //! The cases run only on a runner whose `role.describe` declares the group;
-//! on any other runner they are not applicable, never skipped. They compare
-//! what the display surfaces say with two references the runner cannot
-//! influence after the fact: the call's `session.read` attribution (§5),
-//! which is where its `call_key` is defined, and the `schema_pin` the
-//! scripted tool provider saw on the call when it arrived
-//! ([`LlmRunnerSubject::dispatched_schema_pin`]).
+//! on any other runner they are not applicable, never skipped. For `call_key`
+//! they cross-check what the display surfaces say with another surface the
+//! runner serves for the same call: its `session.read` attribution (§5) when
+//! the runner declares `dispatch_attribution`, otherwise `run.tool_calls`
+//! (§6.3) for the scenario's run. For `schema_pin` they compare with the pin
+//! the scripted tool provider saw on the call when it arrived
+//! ([`LlmRunnerSubject::dispatched_schema_pin`]), which the runner cannot
+//! change after the fact.
 //!
 //! The module also publishes the tool definitions an adapter installs for
 //! these cases ([`DISPATCHED_DEFINITION`], [`CHANGED_DEFINITION`]), with the
@@ -87,21 +89,24 @@ where
             "runner does not declare call_identity".into(),
         ));
     }
-    let missing: Vec<Capability> = [
-        Capability::Queue,
-        Capability::TranscriptReads,
-        Capability::DispatchAttribution,
-    ]
-    .into_iter()
-    .filter(|c| !case.declared.contains(c))
-    .collect();
+    let missing: Vec<Capability> = [Capability::Queue, Capability::TranscriptReads]
+        .into_iter()
+        .filter(|c| !case.declared.contains(c))
+        .collect();
     if !missing.is_empty() {
         return Ok(Ending::Skipped {
             missing,
-            reason: "the call_identity cases compare each call's display entries with its \
-                     session.read attribution"
-                .into(),
+            reason: "the call_identity cases send calls and wait for their runs to end".into(),
         });
+    }
+    if !case.declared.contains(&Capability::DispatchAttribution)
+        && !case.declared.contains(&Capability::RunToolCalls)
+    {
+        return Ok(Ending::Inapplicable(
+            "runner declares neither dispatch_attribution nor run_tool_calls, so call_identity \
+             has no reference for call_key"
+                .into(),
+        ));
     }
     let surfaces = Surfaces::of(case);
     if !surfaces.display && !surfaces.live {
@@ -212,6 +217,49 @@ async fn attribution<R: RunnerRoute>(
     Ok(out)
 }
 
+enum KeyReference {
+    Attribution(BTreeMap<(String, String), ToolCallAttribution>),
+    RunToolCalls {
+        run_id: String,
+        calls: BTreeMap<String, Option<String>>,
+    },
+}
+
+/// Display rows and tool events carry no run id. The two scenarios that check
+/// keys (the key-match case and the denied-call case) each send one run, and
+/// entries_of selects only that run's scripted call ids. So this lists
+/// `run.tool_calls` for the run run_prompt observed through the send reply and
+/// session.head, as the run.tool_calls cases identify the run their send
+/// started, and matches entries to it by tool_call_id.
+async fn key_reference<S>(
+    case: &Case<'_, S>,
+    route: &S::Route,
+    run_id: &str,
+) -> Result<KeyReference, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    if case.declared.contains(&Capability::DispatchAttribution) {
+        return attribution(route).await.map(KeyReference::Attribution);
+    }
+    crate::tags::require_declared(
+        route,
+        groups::RUN_TOOL_CALLS,
+        cortexkit_role_llm_runner::ops::RUN_TOOL_CALLS,
+    )
+    .await?;
+    let calls = crate::tool_calls::list(route, run_id, 1)
+        .await?
+        .into_iter()
+        .map(|call| (call.tool_call_id, call.call_key))
+        .collect();
+    Ok(KeyReference::RunToolCalls {
+        run_id: run_id.to_owned(),
+        calls,
+    })
+}
+
 /// The entries naming `call`, which must be on every declared surface: a
 /// display history `tool_call` part, and with live events a `tool_finished`
 /// (and a `tool_started` when `started` is set).
@@ -246,12 +294,28 @@ fn entries_of<'a>(
     Ok(found)
 }
 
-/// The entry's `call_key` is the one `session.read` attributes to the same
-/// call, absent exactly when that is absent.
-fn same_key(
-    shown: &Shown,
-    attributed: &BTreeMap<(String, String), ToolCallAttribution>,
-) -> Result<(), String> {
+/// The entry's `call_key` equals the selected reference, including absence.
+fn same_key(shown: &Shown, reference: &KeyReference) -> Result<(), String> {
+    let attributed = match reference {
+        KeyReference::Attribution(attributed) => attributed,
+        KeyReference::RunToolCalls { run_id, calls } => {
+            let key = calls.get(&shown.tool_call_id).ok_or_else(|| {
+                format!(
+                    "{} names call {} in message {}, but run.tool_calls lists no such call in run {}",
+                    shown.surface, shown.tool_call_id, shown.mid, run_id
+                )
+            })?;
+            if &shown.call_key != key {
+                return Err(format!(
+                    "{} of call {} in message {} carries call_key {:?}, but run.tool_calls \
+                     exposes call_key {:?} in run {}: a display entry carries the same key \
+                     §6.3 exposes, and leaves it out only while §6.3 does",
+                    shown.surface, shown.tool_call_id, shown.mid, shown.call_key, key, run_id
+                ));
+            }
+            return Ok(());
+        }
+    };
     let Some(attribution) = attributed.get(&(shown.mid.clone(), shown.tool_call_id.clone())) else {
         return Err(format!(
             "{} names call {} of message {}, but session.read attributes no such call to that \
@@ -271,8 +335,7 @@ fn same_key(
 }
 
 /// Two sibling calls, dispatched and finished: every display entry of each
-/// carries the key `session.read` attributes to that call, and a dispatched
-/// call has one.
+/// carries the reference key for that call, and a dispatched call has one.
 async fn key_matches<S>(case: &Case<'_, S>, surfaces: Surfaces) -> Check
 where
     S: LlmRunnerSubject,
@@ -293,9 +356,10 @@ where
             },
         )
         .await?;
-    case.run_prompt(&mut session, &case.mint.next("identity-prompt"))
+    let (_, run) = case
+        .run_prompt(&mut session, &case.mint.next("identity-prompt"))
         .await?;
-    let attributed = attribution(&session.route).await?;
+    let reference = key_reference(case, &session.route, &run.run_id).await?;
     let all = shown(&session.route, surfaces).await?;
     for call in &calls {
         for entry in entries_of(&all, call, surfaces, true)? {
@@ -306,7 +370,7 @@ where
                     entry.surface, call.tool_call_id
                 ));
             }
-            same_key(entry, &attributed)?;
+            same_key(entry, &reference)?;
         }
     }
     Ok(())
@@ -396,7 +460,7 @@ where
 }
 
 /// A call the runner refused before dispatch carries no `schema_pin`, and
-/// its `call_key` only as `session.read` attributes it.
+/// its `call_key` only as the reference exposes it.
 async fn denied<S>(case: &Case<'_, S>, surfaces: Surfaces) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
@@ -424,7 +488,8 @@ where
             "the adapter cannot make the runner deny a call before dispatch".into(),
         ));
     }
-    case.run_prompt(&mut session, &case.mint.next("denied-prompt"))
+    let (_, run) = case
+        .run_prompt(&mut session, &case.mint.next("denied-prompt"))
         .await?;
     if case.subject.tool_invocations(&call.arguments).await != 0 {
         return Err(format!(
@@ -433,7 +498,7 @@ where
             call.tool_call_id
         ));
     }
-    let attributed = attribution(&session.route).await?;
+    let reference = key_reference(case, &session.route, &run.run_id).await?;
     let all = shown(&session.route, surfaces).await?;
     for entry in entries_of(&all, &call, surfaces, false)? {
         if let Some(pin) = &entry.schema_pin {
@@ -443,7 +508,36 @@ where
                 entry.surface, call.tool_call_id
             ));
         }
-        same_key(entry, &attributed)?;
+        same_key(entry, &reference)?;
     }
     Ok(Ending::Passed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn call_identity_run_tool_calls_key_presence_matches_reference() {
+        for (shown_key, reference_key, matches) in [
+            (None, None, true),
+            (Some("call-key"), Some("call-key"), true),
+            (Some("call-key"), None, false),
+            (None, Some("call-key"), false),
+            (Some("wrong-key"), Some("call-key"), false),
+        ] {
+            let entry = Shown {
+                surface: "the display history tool_call",
+                mid: "message".into(),
+                tool_call_id: "call".into(),
+                call_key: shown_key.map(str::to_owned),
+                schema_pin: None,
+            };
+            let reference = KeyReference::RunToolCalls {
+                run_id: "run".into(),
+                calls: BTreeMap::from([("call".into(), reference_key.map(str::to_owned))]),
+            };
+            assert_eq!(same_key(&entry, &reference).is_ok(), matches);
+        }
+    }
 }

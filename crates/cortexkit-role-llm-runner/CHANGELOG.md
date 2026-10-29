@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.22
+
+- Text only: clarify that display `call_key` presence follows either
+  `session.read` attribution (§5) or `run.tool_calls` (§6.3), whose keys have
+  the same lifetime. No rule, wire shape or type changed.
+- Document either reference in the `call_identity` conformance requirements.
+
 ## 0.7.21
 
 - Spell out how `turn_system` renders on each provider route: an in-order

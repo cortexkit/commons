@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.26
+
+- Check `call_identity` on runners declaring `run_tool_calls`
+  without `dispatch_attribution`, comparing display and live call keys with
+  `run.tool_calls`. Runners declaring `dispatch_attribution` are graded exactly
+  as before against `session.read` attribution; runners declaring neither
+  reference group are reported not applicable by name.
+- Add correct and faulty fallback runners to exercise the three cases and
+  reject a display key that differs from `run.tool_calls`.
+- Pin `cortexkit-role-llm-runner` to `=0.7.22`, a text-only clarification of
+  the existing call-key lifetime.
+
 ## 0.15.25
 
 - Add `held_calls_status_event_matches_run_status`, which requires the runner

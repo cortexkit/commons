@@ -4030,7 +4030,7 @@ display tool-call entry it serves.
 - [pinned] **`call_key`** is the call's key (§11.3), the same value
   `session.read`'s attribution (§5) and `run.tool_calls` (§6.3) expose for
   that call, so a call has one key on every surface. It is present on an
-  entry exactly when §5 exposes it: from the moment the call is prepared or
+  entry exactly when §5 or §6.3 exposes it: from the moment the call is prepared or
   dispatched, and absent before. A call prepared and then denied keeps its
   key; a call denied before any record held it alone has none.
 - [pinned] **`schema_pin`** is the `tool-provider/v1` `schema_pin` of the
@@ -5115,9 +5115,9 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `session_usage_unknown_fields_absent` | same groups; reasoning usage no scripted step reported stays absent, never zero |
 | `head_model_reflects_recorded_switch` | `queue`, `transcript_reads`; when the runner reports a model and the adapter can record a switch, the head follows that switch, not the frozen plan |
 | `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; a plan names A with neither flag and B with both; A gets supported modes minus `idle_start`, B gets all supported modes and interrupt, an unnamed caller gets no grant, and the owner gets all supported modes, interrupt and `owner: true`; an undeclared `head_sender` group or defaulted identity hooks are inapplicable, with no supported-mode-based fallback |
-| `call_identity_key_matches_attribution` | `call_identity`, `queue`, `transcript_reads`, `dispatch_attribution`, and `history_display` with `host_history` or `live_events` with `streaming`; every display tool call and live tool event of two dispatched sibling calls carries the `call_key` §5 attributes to that call; not applicable without the group, never skipped |
+| `call_identity_key_matches_attribution` | `call_identity`, `queue`, `transcript_reads`, either `dispatch_attribution` or `run_tool_calls`, and `history_display` with `host_history` or `live_events` with `streaming`; every display tool call and live tool event of two dispatched sibling calls carries the `call_key` §5 exposes for that call when `dispatch_attribution` is declared, otherwise the one `run.tool_calls` (§6.3) lists for the run that scenario's send started, matched by `tool_call_id`; not applicable without `call_identity` or when neither `dispatch_attribution` nor `run_tool_calls` is declared |
 | `call_identity_pin_frozen_at_dispatch` | as above; each entry of a dispatched call carries the `schema_pin` the tool provider received with it, and still does after the catalog changes the tool's definition and another run; the catalog half is reported unchecked when the adapter cannot change the definition |
-| `call_identity_denied_call_has_no_pin` | as above; a call denied before dispatch carries no `schema_pin`, and `call_key` exactly as §5 attributes it; inapplicable without the adapter's denial fixture |
+| `call_identity_denied_call_has_no_pin` | as above; a call denied before dispatch carries no `schema_pin`, and `call_key` exactly as §5 exposes it when `dispatch_attribution` is declared, otherwise as §6.3 exposes it for that run's call with the same `tool_call_id`; inapplicable without the adapter's denial fixture |
 | `head_incarnation_survives_cut_and_changes_on_recreation` | `queue`, `transcript_reads`; a reported incarnation stays equal across a real cut and differs after creation of a new log at the same key; defaulted cut/re-create hooks are inapplicable |
 | `max_steps_seals_pending_calls` | `max_steps`, `queue`, `transcript_reads`, `run_ops`; a tool-calling model stops after the requested number of responses in `max_steps`, with every pending call's never-executed result already readable at the terminal and no pending call dispatched |
 | `max_steps_final_step_completes` | `max_steps`, `queue`, `run_ops`; with `max_steps: 1`, a model whose one step is text ends `completed` with its final message, and with its directives where `turn_directives` is declared, never `max_steps` |

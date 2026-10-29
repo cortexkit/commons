@@ -7150,6 +7150,17 @@ fn call_identity_subject(defects: Defects) -> FakeSubject {
     subject
 }
 
+/// A runner whose display keys can be checked through run.tool_calls,
+/// without claiming session.read's per-call dispatch attribution.
+fn call_identity_run_tool_calls_subject(defects: Defects) -> FakeSubject {
+    let mut subject = call_identity_subject(defects);
+    subject
+        .capabilities
+        .remove(&Capability::DispatchAttribution);
+    subject.capabilities.insert(Capability::RunToolCalls);
+    subject
+}
+
 const CALL_KEY_CASE: &str = "call_identity_key_matches_attribution";
 const PIN_CASE: &str = "call_identity_pin_frozen_at_dispatch";
 const DENIED_CASE: &str = "call_identity_denied_call_has_no_pin";
@@ -7161,6 +7172,81 @@ async fn call_identity_faithful_runner_passes_every_case() {
         assert_eq!(
             report.outcome(name),
             Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn call_identity_run_tool_calls_runner_passes_every_case() {
+    for omitted in [
+        None,
+        Some(Capability::LiveEvents),
+        Some(Capability::HistoryDisplay),
+        Some(Capability::RunOps),
+    ] {
+        let mut subject = call_identity_run_tool_calls_subject(Defects::default());
+        if let Some(capability) = omitted {
+            subject.capabilities.remove(&capability);
+        }
+        let report = run(&subject).await;
+        for name in [CALL_KEY_CASE, PIN_CASE, DENIED_CASE] {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name} without {omitted:?}\n{}",
+                report.render()
+            );
+        }
+        assert_none_failed_but(&report, &[]);
+    }
+}
+
+#[tokio::test]
+async fn call_identity_run_tool_calls_another_calls_key_fails_by_name() {
+    for defects in [
+        Defects {
+            call_identity_swaps_keys: true,
+            ..Defects::default()
+        },
+        Defects {
+            call_identity_live_swaps_keys: true,
+            ..Defects::default()
+        },
+    ] {
+        let report = run(&call_identity_run_tool_calls_subject(defects)).await;
+        let reason = failed(&report, CALL_KEY_CASE);
+        assert!(reason.contains("run.tool_calls exposes"), "{reason}");
+        assert_none_failed_but(&report, &[CALL_KEY_CASE]);
+    }
+}
+
+#[tokio::test]
+async fn call_identity_run_tool_calls_denied_key_omitted_fails_by_name() {
+    let report = run(&call_identity_run_tool_calls_subject(Defects {
+        call_identity_omits_key: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, DENIED_CASE);
+    assert!(reason.contains("run.tool_calls exposes"), "{reason}");
+    assert!(failed(&report, CALL_KEY_CASE).contains("carries no call_key"));
+    assert_none_failed_but(&report, &[CALL_KEY_CASE, DENIED_CASE]);
+}
+
+#[tokio::test]
+async fn call_identity_without_either_reference_is_inapplicable_by_name() {
+    let mut subject = call_identity_subject(Defects::default());
+    subject
+        .capabilities
+        .remove(&Capability::DispatchAttribution);
+    let report = run(&subject).await;
+    for name in [CALL_KEY_CASE, PIN_CASE, DENIED_CASE] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason })
+                if reason.contains("dispatch_attribution") && reason.contains("run_tool_calls")),
             "{name}\n{}",
             report.render()
         );
