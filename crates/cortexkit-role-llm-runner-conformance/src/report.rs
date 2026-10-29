@@ -223,6 +223,8 @@ pub const CASES: &[CaseSpec] = &[
     case("output_refs_read_limits", &[], "metadata, EOF and range refusals obey snapshot bounds"),
     case("held_calls_lists_waiting_call", &[Queue, TranscriptReads, RunOps],
         "when role.describe declares held_calls, a provider's held reply is listed with its call_key, tool, provider, reason and held_at_ms while waiting"),
+    case("held_calls_status_event_matches_run_status", &[Queue, TranscriptReads, RunOps, Capability::RunStatus, Streaming],
+        "when role.describe declares held_calls, run_status, queue, transcript_reads, run_ops and streaming, control events carry the same typed held_calls as run.status while waiting, omit empty lists and never relist the call after its late result applies; the open event schema cannot identify a specific clearing status event"),
     case("held_calls_applies_late_result", &[Queue, TranscriptReads, RunOps, Capability::RenderedModelInput],
         "when role.describe declares held_calls, applying the provider's late result removes the held call and continues the run with that result in model input"),
     case("held_calls_not_started_becomes_tool_result", &[Queue, TranscriptReads, RunOps, Capability::RenderedModelInput],

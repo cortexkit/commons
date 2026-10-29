@@ -214,6 +214,10 @@ pub struct Defects {
     pub output_refs: Option<&'static str>,
     pub held_calls_never_listed: bool,
     pub held_calls_stale: bool,
+    pub held_calls_event_missing: bool,
+    pub held_calls_event_wrong_key: bool,
+    pub held_calls_event_stale: bool,
+    pub held_calls_event_empty: bool,
     pub attachments: &'static str,
     /// Store attachment media in the runner's own schema as a `data:` URL
     /// `file` part, with no digest anywhere in the stored message.
@@ -1046,6 +1050,9 @@ struct Sess {
     /// The typed live events each record maps onto, by the record's index
     /// in `events`.
     live: Vec<(usize, Value)>,
+    /// Status bodies frozen at their durable record positions, not rebuilt
+    /// from the current held-call state when a subscription replays them.
+    held_status_events: BTreeMap<usize, Map<String, Value>>,
     /// The session was admitted with a rich UI plan (`plan.system_texts`).
     rich_ui_plan: bool,
     /// The rich UI stamp the session's current plan carries, which each run
@@ -1584,6 +1591,12 @@ impl Module {
             });
         }
         match kind.as_str() {
+            "held_status" => {
+                sess.held_status_events.insert(
+                    sess.events.len() - 1,
+                    record["body"].as_object().unwrap().clone(),
+                );
+            }
             "uncounted_host_summary" => {
                 if self.world.defects.message_checkpoint
                     == message_checkpoint::Defect::ServesSummaryRow
@@ -2253,6 +2266,12 @@ impl Module {
                 }
                 self.commit(session, intent)?;
                 if self.world.held_first_reply(&call.arguments, key) {
+                    let held = self.held_status(session, run_id);
+                    self.record_held_status(session, run_id, held.clone())?;
+                    // An unrelated control event and a repeated status are
+                    // legal while the provider still waits for consent.
+                    self.commit(session, json!({"kind":"held_progress"}))?;
+                    self.record_held_status(session, run_id, held)?;
                     return Ok(());
                 }
                 match self.world.invoke(&call.arguments) {
@@ -4932,10 +4951,15 @@ impl Module {
                 .enumerate()
                 .skip(after)
                 .flat_map(|(index, kind)| {
-                    [
-                        json!({ "kind": "display", "delta": kind }),
-                        json!({ "kind": "control", "cursor": cursor(index + 1), "record": kind }),
-                    ]
+                    let mut control =
+                        json!({ "kind": "control", "cursor": cursor(index + 1), "record": kind });
+                    if let Some(body) = sessions
+                        .get(session)
+                        .and_then(|s| s.held_status_events.get(&index))
+                    {
+                        control.as_object_mut().unwrap().extend(body.clone());
+                    }
+                    [json!({ "kind": "display", "delta": kind }), control]
                 })
                 .collect(),
         )

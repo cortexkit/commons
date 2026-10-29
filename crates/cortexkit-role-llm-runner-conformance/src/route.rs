@@ -66,6 +66,7 @@ pub trait RunnerRoute: Send + Sync {
     /// runner streams back (each `STREAM_DATA` frame carries one bare event,
     /// never wrapped in `result`), in order, until no event has arrived for a
     /// short quiet window; then close the subscription. The suite only
-    /// subscribes to idle sessions, so the stream it sees is a replay.
+    /// reads finite replays, including while a held tool call waits without
+    /// producing further events, and resumes from durable cursors as needed.
     async fn subscribe(&self, params: Value) -> Result<SubscribeOutcome, RouteFailure>;
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.25
+
+- Add `held_calls_status_event_matches_run_status`, which requires the runner
+  to declare `held_calls`, `run_status`, `queue`, `transcript_reads`,
+  `run_ops` and `streaming` on `role.describe`. It attaches before the send,
+  compares control-event held calls with typed `run.status` values (reading
+  the status again before failing, since the contract doesn't order the two),
+  rejects `held_calls: []` and checks that applying a late result never
+  relists the call. The runner-defined event schema does not let the kit
+  require a specific clearing status event.
+- Add faulty fakes for missing event lists, mismatched call keys, stale lists
+  after a late result and empty lists instead of omission. The contract crate
+  pin remains `=0.7.21`: the case checks an existing streaming obligation.
+
 ## 0.15.24
 
 - Pin `cortexkit-role-llm-runner` to `=0.7.21`, which spells out provider

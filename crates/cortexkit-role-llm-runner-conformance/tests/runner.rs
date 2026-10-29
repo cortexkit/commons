@@ -209,7 +209,7 @@ async fn held_calls_faithful_runner_passes_all_cases() {
 }
 
 #[tokio::test]
-async fn held_calls_never_listed_fails_only_listing_case() {
+async fn held_calls_never_listed_fails_listing_and_status_event_cases() {
     let report = run(&held_call_subject(Defects {
         held_calls_never_listed: true,
         ..Defects::default()
@@ -219,7 +219,117 @@ async fn held_calls_never_listed_fails_only_listing_case() {
     let reason = failed(&report, name);
     println!("{name}: {reason}");
     assert!(reason.contains("never listed"), "{reason}");
-    assert_none_failed_but(&report, &[name]);
+    let event_case = "held_calls_status_event_matches_run_status";
+    assert!(failed(&report, event_case).contains("no control event listed held_calls"));
+    assert_none_failed_but(&report, &[name, event_case]);
+}
+
+const HELD_STATUS_EVENT_CASE: &str = "held_calls_status_event_matches_run_status";
+
+async fn held_calls_event_defect(defects: Defects, expected: &str) {
+    let report = run(&held_call_subject(defects)).await;
+    let reason = failed(&report, HELD_STATUS_EVENT_CASE);
+    println!("{HELD_STATUS_EVENT_CASE}: {reason}");
+    assert!(reason.contains(expected), "{reason}");
+    for name in cases_of(&["held_calls_"]) {
+        if name != HELD_STATUS_EVENT_CASE {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{name}\n{}",
+                report.render()
+            );
+        }
+    }
+    assert_none_failed_but(&report, &[HELD_STATUS_EVENT_CASE]);
+}
+
+#[tokio::test]
+async fn held_calls_missing_event_list_fails_only_status_event_case() {
+    held_calls_event_defect(
+        Defects {
+            held_calls_event_missing: true,
+            ..Defects::default()
+        },
+        "no control event listed held_calls",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn held_calls_wrong_event_key_fails_only_status_event_case() {
+    held_calls_event_defect(
+        Defects {
+            held_calls_event_wrong_key: true,
+            ..Defects::default()
+        },
+        "held_calls differs from run.status",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn held_calls_event_relisted_after_clear_fails_only_status_event_case() {
+    held_calls_event_defect(
+        Defects {
+            held_calls_event_stale: true,
+            ..Defects::default()
+        },
+        "lists the held call after applying its late result",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn held_calls_empty_event_list_fails_only_status_event_case() {
+    held_calls_event_defect(
+        Defects {
+            held_calls_event_empty: true,
+            ..Defects::default()
+        },
+        "held_calls: [] instead of omitting it",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn held_calls_status_event_also_passes_with_typed_live_events() {
+    let mut subject = held_call_subject(Defects::default());
+    subject.capabilities.insert(Capability::LiveEvents);
+    let report = run(&subject).await;
+    for name in cases_of(&["held_calls_"]) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn held_calls_status_event_missing_requirements_are_skipped_by_name() {
+    for missing in [
+        Capability::RunStatus,
+        Capability::Queue,
+        Capability::TranscriptReads,
+        Capability::RunOps,
+        Capability::Streaming,
+    ] {
+        let mut subject = held_call_subject(Defects::default());
+        subject.capabilities.remove(&missing);
+        let report = run(&subject).await;
+        // A capability the adapter doesn't declare skips the case the same
+        // way it skips the other held_calls cases, so a runner's verdict
+        // doesn't change.
+        assert!(
+            matches!(report.outcome(HELD_STATUS_EVENT_CASE),
+            Some(CaseOutcome::Skipped { missing: skipped }) if skipped.contains(&missing)),
+            "{missing:?}\n{}",
+            report.render()
+        );
+    }
 }
 
 #[tokio::test]
@@ -413,6 +523,13 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     if case.starts_with("held_calls_")
         && matches!(report.outcome(case),
         Some(CaseOutcome::Inapplicable { reason }) if reason == "the runner does not declare held_calls")
+    {
+        return;
+    }
+    if case == HELD_STATUS_EVENT_CASE
+        && (matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason.starts_with("the runner does not declare "))
+            || matches!(report.outcome(case), Some(CaseOutcome::Skipped { missing }) if !missing.is_empty()))
     {
         return;
     }

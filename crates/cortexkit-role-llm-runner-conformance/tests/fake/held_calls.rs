@@ -28,6 +28,42 @@ impl World {
 }
 
 impl Module {
+    pub(super) fn record_held_status(
+        &self,
+        session: &str,
+        run_id: &str,
+        mut held: Vec<HeldCall>,
+    ) -> Result<(), Killed> {
+        if !self.world.serves(groups::HELD_CALLS) {
+            return Ok(());
+        }
+        let defects = &self.world.defects;
+        if defects.held_calls_event_missing {
+            held.clear();
+        } else if defects.held_calls_event_wrong_key {
+            held = held
+                .iter()
+                .map(|entry| {
+                    HeldCall::new(
+                        format!("{}-wrong", entry.call_key()),
+                        entry.tool(),
+                        entry.provider(),
+                        entry.reason(),
+                        entry.held_at_ms(),
+                    )
+                })
+                .collect();
+        }
+        let mut frame = cortexkit_role_llm_runner::subscribe::SubscribeEvent::new("control")
+            .with_held_calls(held);
+        frame.body.insert("run_id".into(), json!(run_id));
+        frame.body.insert("state".into(), json!("active"));
+        if defects.held_calls_event_empty && !frame.body.contains_key("held_calls") {
+            frame.body.insert("held_calls".into(), json!([]));
+        }
+        self.commit(session, json!({"kind":"held_status", "body":frame.body}))
+    }
+
     pub(super) fn held_status(&self, session: &str, run_id: &str) -> Vec<HeldCall> {
         if self.world.defects.held_calls_never_listed {
             return vec![];
@@ -94,10 +130,17 @@ impl Module {
             "expired" => json!({"text": "The call's answer expired."}),
             _ => return Ok(()),
         };
+        let held = self.held_status(&session, &run_id);
         self.commit(
             &session,
             json!({"kind":"result", "call_key":key, "content":content}),
         )?;
+        self.record_held_status(&session, &run_id, Vec::new())?;
+        if self.world.defects.held_calls_event_stale {
+            // Relist even after a clear, so stopping at the first omitted
+            // list would hide this contract violation.
+            self.record_held_status(&session, &run_id, held)?;
+        }
         self.drive(&session, &run_id)
     }
 }

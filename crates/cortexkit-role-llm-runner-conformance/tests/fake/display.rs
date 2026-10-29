@@ -467,6 +467,12 @@ impl Module {
                     let mut frame = SubscribeEvent::new(kinds::CONTROL);
                     frame.cursor = Some(cursor(index + 1));
                     frame.body = unit;
+                    if let Some(body) = sessions
+                        .get(session)
+                        .and_then(|s| s.held_status_events.get(&index))
+                    {
+                        frame.body.extend(body.clone());
+                    }
                     frames.push(frame);
                 }
                 continue;
