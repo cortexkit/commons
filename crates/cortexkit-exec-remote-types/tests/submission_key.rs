@@ -225,20 +225,35 @@ fn submission_key_mismatch_vector_is_request_rejected() {
     assert_eq!(terminal.refusal_detail(), Some("submission_key_mismatch"));
 }
 
+// The runner owns submission digests; this mirrors the contract's canonical input.
+fn canonical_submission_request(mut request: Value) -> Vec<u8> {
+    let fields = request.as_object_mut().unwrap();
+    fields.remove("resume_from_seq");
+    fields.remove("progress");
+    serde_json_canonicalizer::to_vec(&request).unwrap()
+}
+
 #[test]
 fn canonical_request_comparison_ignores_field_order_and_resume_cursor() {
     let first: Value = serde_json::from_str(r#"{"workspace_key":"example-task","repository_root":"/example/repo","cwd":"/example/repo","command":"printf hello","env":{},"siblings":[],"submission_key":"example:task-0001"}"#).unwrap();
     let mut resumed: Value = serde_json::from_str(r#"{"resume_from_seq":7,"submission_key":"example:task-0001","siblings":[],"env":{},"command":"printf hello","cwd":"/example/repo","repository_root":"/example/repo","workspace_key":"example-task"}"#).unwrap();
-    resumed.as_object_mut().unwrap().remove("resume_from_seq");
-    let canonical = serde_json_canonicalizer::to_vec(&first).unwrap();
-    assert_eq!(
-        canonical,
-        serde_json_canonicalizer::to_vec(&resumed).unwrap()
-    );
+    resumed["progress"] = json!(true);
+    let canonical = canonical_submission_request(first);
+    assert_eq!(canonical, canonical_submission_request(resumed.clone()));
     resumed["command"] = json!("printf different");
-    assert_ne!(
-        canonical,
-        serde_json_canonicalizer::to_vec(&resumed).unwrap()
+    assert_ne!(canonical, canonical_submission_request(resumed));
+}
+
+#[test]
+fn submission_request_digest_ignores_progress() {
+    let original = request().with_submission_key("example:task-0001");
+    let opted_in = original.clone().with_progress(true);
+    let first = serde_json::to_value(original).unwrap();
+    let second = serde_json::to_value(opted_in).unwrap();
+    assert_ne!(first, second);
+    assert_eq!(
+        Sha256::digest(canonical_submission_request(first)),
+        Sha256::digest(canonical_submission_request(second))
     );
 }
 

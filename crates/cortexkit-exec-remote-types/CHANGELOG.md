@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.15
+
+- Add opt-in `RunRequest::with_progress(bool)` / `progress()` and
+  `PROGRESS_CAPABILITY` (`exec-remote-progress/v1`). Only callers that check the
+  runner's capability may request progress. False or absent is omitted, so
+  request bytes without progress are unchanged. The executor's submission-key
+  request digest must leave `progress` out, because it does not change what runs;
+  this crate states that rule and does not compute the digest.
+- Add nonterminal `StreamRecord::Progress`, which has no `seq` field. As runner
+  rules the types can't check: progress comes only before `Accepted`, is never
+  replayed by `exec.attach`, and is sent at most once per 10 s per run and only
+  after 2 s of waiting. `Started` keeps covering the wait after acceptance.
+- Add open `ProgressPhase` (`upload`, `placement_wait`, `connect`, or a preserved
+  unknown string) and validated `Progress::new` with getters. `phase_elapsed_ms`
+  is a `u64` count of milliseconds since the current phase started. Optional
+  `detail` is one line of at most 120 UTF-8 bytes, with no control characters or
+  line breaks; construction and decoding reject violations. Runners must not put
+  host names, network addresses, tenant or account identifiers, or job contents in
+  `detail`; the types don't check that.
+  Callers render it as plain text, never start, extend or reset timers from
+  progress, and never retry or cancel because of it.
+- Add progress phase, absent detail, 120-byte detail, opted-in request and
+  malformed-record vectors with checksums and byte-for-byte valid round-trips.
+  Malformed known progress records remain decode errors, never `Unknown`.
+
 ## 0.2.14
 
 - Add optional `RunRequest.submission_key` and `resume_from_seq`, with `with_*`

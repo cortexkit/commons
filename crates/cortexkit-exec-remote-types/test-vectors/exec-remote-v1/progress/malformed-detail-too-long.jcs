@@ -1,0 +1,1 @@
+{"detail":"Waiting for available runner capacity. The request remains pending while a host with enough free resources becomes ready.","phase":"placement_wait","phase_elapsed_ms":10000,"type":"progress"}

@@ -34,12 +34,15 @@ retention window: forgetting the key is not evidence that nothing ran.
 ### Same request only
 
 A resubmit carries the same caller-supplied request as originally sent, except
-for `resume_from_seq`. The executor compares a digest of the request with
-`resume_from_seq` cleared, over a canonical encoding using RFC 8785 JSON
-canonicalization (sorted keys and no insignificant whitespace). JSON field order
+for `resume_from_seq` and `progress`. The executor compares a digest of the request
+with `resume_from_seq` and `progress` cleared, over a canonical encoding using
+RFC 8785 JSON canonicalization (sorted keys and no insignificant whitespace). JSON field order
 cannot cause a mismatch. The crate's vector tests use
 `serde_json_canonicalizer` for RFC 8785 encoding; this crate does not compute
 submission digests or add an execution-policy implementation.
+
+`progress` is excluded because it changes only display, not what runs. A caller
+may opt in or out on resubmission without changing the request digest.
 
 The digest covers every caller-supplied field that affects what runs. The
 current set is `command`, `cwd`, `workspace_key`, `repository_root`, `siblings`,
@@ -64,14 +67,14 @@ particular, a mismatch refusal leaves the existing job's state unaffected; that
 state is learned only from the existing job's own stream or an attach to it.
 
 For example, these two requests are the same request for digest comparison:
-only JSON field order and the replay cursor differ.
+only JSON field order, the replay cursor and the display-only progress opt-in differ.
 
 ```json
 {"workspace_key":"example-task","repository_root":"/example/repo","cwd":"/example/repo","command":"printf hello","env":{},"siblings":[],"submission_key":"example:task-0001"}
 ```
 
 ```json
-{"resume_from_seq":7,"submission_key":"example:task-0001","siblings":[],"env":{},"command":"printf hello","cwd":"/example/repo","repository_root":"/example/repo","workspace_key":"example-task"}
+{"resume_from_seq":7,"progress":true,"submission_key":"example:task-0001","siblings":[],"env":{},"command":"printf hello","cwd":"/example/repo","repository_root":"/example/repo","workspace_key":"example-task"}
 ```
 
 ### Replies and replay
@@ -110,6 +113,48 @@ existing expired-replay and outcome rules apply unchanged, including
 `ReturnAssembler::finish_expired_replay` for expired returned bytes (see Replay
 below). There is no new gap mechanism. Expired job history is not a refusal and
 must never cause a caller to start the command again.
+
+## Progress before acceptance
+
+These types define the progress record's shape and check its `detail` syntax.
+Everything else in this section is a rule for the runner or the caller that the
+types cannot check: when progress may be sent, its order and rate, and what
+`detail` may say.
+
+`RunRequest.progress` defaults to false and is serialized only when true, so
+requests without progress keep their existing bytes. A caller sets it only for
+a runner advertising `PROGRESS_CAPABILITY` (`exec-remote-progress/v1`). Older
+runners ignore unknown request fields. The caller never expects progress without
+the opt-in and capability advertisement; a runner must never send it otherwise.
+
+`StreamRecord::Progress` is a known, nonterminal `progress` record. It comes only
+before `Accepted`, never after it. `Started` still reports when an accepted job
+takes runner capacity, covering the wait after acceptance; progress does not
+replace it. The progress record has no `seq` field: a runner never sends one, and
+a caller never advances the resume cursor from progress. An executor never
+replays progress on `exec.attach`. For each run, the runner sends progress at
+most once per 10 s, and only after 2 s of waiting.
+
+```json
+{"type":"progress","phase":"placement_wait","phase_elapsed_ms":61200,"detail":"waiting for a host with 16 free vCPUs"}
+```
+
+`phase` is an open `ProgressPhase`: `upload`, `placement_wait`, or `connect`.
+Unknown phases retain their raw string and are shown generically, as display-only
+progress. `phase_elapsed_ms` is a `u64`, which the runner sets to the milliseconds since the
+**current phase started**, not since it received `exec.run`.
+
+`detail` is optional plain text. When present it is one line of at most 120 UTF-8
+bytes, with no control characters or line breaks (including Unicode line and
+paragraph separators). Both decoding and `Progress::new` reject violations.
+Detail must never carry host names, network addresses, tenant or account
+identifiers, or job contents. The runner is responsible for those privacy rules.
+
+Progress is display only: a caller renders `detail` as plain text, never starts,
+extends or resets a timer from progress, and never retries or cancels because of
+it. A progress record is never terminal, even for an unknown phase. Timing,
+ordering, capability and privacy requirements are runner/caller obligations;
+these types enforce only the record's shape and detail syntax.
 
 ## Hosted placement and billing
 

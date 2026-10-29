@@ -154,6 +154,10 @@ pub struct RunRequest {
     /// beginning. Send only to an executor advertising [`SUBMISSION_KEY_CAPABILITY`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_from_seq: Option<u64>,
+    /// Ask for display-only progress before acceptance. Send `true` only to a
+    /// runner advertising [`PROGRESS_CAPABILITY`]. Omitted when false.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub progress: bool,
 }
 
 #[derive(Deserialize)]
@@ -178,6 +182,8 @@ struct RunRequestInput {
     return_chunked: bool,
     submission_key: Option<String>,
     resume_from_seq: Option<u64>,
+    #[serde(default)]
+    progress: bool,
 }
 
 impl<'de> Deserialize<'de> for RunRequest {
@@ -213,6 +219,7 @@ impl<'de> Deserialize<'de> for RunRequest {
             return_chunked: input.return_chunked,
             submission_key: input.submission_key,
             resume_from_seq: input.resume_from_seq,
+            progress: input.progress,
         })
     }
 }
@@ -247,6 +254,7 @@ impl RunRequest {
             return_chunked: false,
             submission_key: None,
             resume_from_seq: None,
+            progress: false,
         }
     }
 
@@ -277,6 +285,17 @@ impl RunRequest {
     /// Exclusive replay cursor, or `None` to replay from the beginning.
     pub fn resume_from_seq(&self) -> Option<u64> {
         self.resume_from_seq
+    }
+
+    /// Ask for pre-acceptance progress only after checking [`PROGRESS_CAPABILITY`].
+    pub fn with_progress(mut self, progress: bool) -> Self {
+        self.progress = progress;
+        self
+    }
+
+    /// Whether display-only pre-acceptance progress is requested.
+    pub fn progress(&self) -> bool {
+        self.progress
     }
 
     /// Set the scheduling weight hint.
@@ -849,6 +868,9 @@ pub const RETURN_CHUNKED_CAPABILITY: &str = "exec-remote-return/v2";
 /// sends `RunRequest.submission_key` or `RunRequest.resume_from_seq` only after
 /// checking this advertisement: older executors silently ignore those fields.
 pub const SUBMISSION_KEY_CAPABILITY: &str = "exec-remote-submission-key/v1";
+/// Capability a runner advertises when it can send opt-in progress before
+/// acceptance. A caller sends `RunRequest.progress: true` only after checking it.
+pub const PROGRESS_CAPABILITY: &str = "exec-remote-progress/v1";
 /// Maximum requested returned-file bytes with `return_chunked`, also used when
 /// `return_max_bytes` is absent from such a request.
 pub const RETURN_CHUNKED_MAX_BYTES_CAP: u64 = 10_485_760;
@@ -1721,6 +1743,133 @@ impl PathMapping {
     }
 }
 
+/// The pre-acceptance phase currently being reported by the runner.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(from = "String", into = "String")]
+pub enum ProgressPhase {
+    /// Uploading inputs.
+    Upload,
+    /// Waiting for a host with room.
+    PlacementWait,
+    /// Connecting to the selected host.
+    Connect,
+    /// An unrecognised phase. Show generic progress; this is display-only.
+    Unknown(String),
+}
+
+impl From<String> for ProgressPhase {
+    fn from(phase: String) -> Self {
+        match phase.as_str() {
+            "upload" => Self::Upload,
+            "placement_wait" => Self::PlacementWait,
+            "connect" => Self::Connect,
+            _ => Self::Unknown(phase),
+        }
+    }
+}
+
+impl From<ProgressPhase> for String {
+    fn from(phase: ProgressPhase) -> Self {
+        match phase {
+            ProgressPhase::Upload => "upload".into(),
+            ProgressPhase::PlacementWait => "placement_wait".into(),
+            ProgressPhase::Connect => "connect".into(),
+            ProgressPhase::Unknown(phase) => phase,
+        }
+    }
+}
+
+/// A progress detail exceeded 120 UTF-8 bytes or contained a control character
+/// or line break.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ProgressDetailError;
+
+impl std::fmt::Display for ProgressDetailError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(
+            "progress detail must be at most 120 bytes with no control characters or line breaks",
+        )
+    }
+}
+
+impl std::error::Error for ProgressDetailError {}
+
+/// Display-only progress sent before [`Accepted`], never terminal or replayed.
+///
+/// The runner sends it only for an opted-in request with [`PROGRESS_CAPABILITY`],
+/// at most once per 10 seconds and only after 2 seconds of waiting. It carries no
+/// sequence number and never advances a resume cursor. Callers render detail as
+/// plain text, never start, extend or reset timers from progress, and never retry
+/// or cancel because of it. Producers must omit host names, network addresses,
+/// tenant or account identifiers, and job contents from detail.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Progress {
+    phase: ProgressPhase,
+    phase_elapsed_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProgressInput {
+    phase: ProgressPhase,
+    phase_elapsed_ms: u64,
+    detail: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for Progress {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let input = ProgressInput::deserialize(deserializer)?;
+        Self::new(input.phase, input.phase_elapsed_ms, input.detail)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl Progress {
+    /// Report the current phase and milliseconds since that phase started.
+    ///
+    /// Returns an error if detail exceeds 120 UTF-8 bytes or contains a control
+    /// character or line break. Detail is plain text and must not contain host
+    /// names, network addresses, tenant or account identifiers, or job contents.
+    pub fn new(
+        phase: ProgressPhase,
+        phase_elapsed_ms: u64,
+        detail: Option<String>,
+    ) -> Result<Self, ProgressDetailError> {
+        if detail.as_ref().is_some_and(|detail| {
+            detail.len() > 120
+                || detail.chars().any(|character| {
+                    character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
+                })
+        }) {
+            return Err(ProgressDetailError);
+        }
+        Ok(Self {
+            phase,
+            phase_elapsed_ms,
+            detail,
+        })
+    }
+
+    /// The current phase; show unknown phases generically.
+    pub fn phase(&self) -> &ProgressPhase {
+        &self.phase
+    }
+
+    /// Milliseconds since the current phase started, not since submission.
+    pub fn phase_elapsed_ms(&self) -> u64 {
+        self.phase_elapsed_ms
+    }
+
+    /// Optional one-line plain-text detail of at most 120 UTF-8 bytes.
+    pub fn detail(&self) -> Option<&str> {
+        self.detail.as_deref()
+    }
+}
+
 /// The job has taken runner capacity and begun running.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
@@ -2201,6 +2350,9 @@ impl StatusReply {
 // Keep Terminal inline: boxing it would break existing public variant construction.
 #[allow(clippy::large_enum_variant)]
 pub enum StreamRecord {
+    /// Opt-in display-only progress before acceptance. Never terminal, carries
+    /// no sequence number, and is never replayed by `exec.attach`.
+    Progress(Progress),
     Accepted(Accepted),
     /// Emitted once after acceptance when the job takes runner capacity, before
     /// its first output or terminal record. A job refused before starting never
@@ -2239,6 +2391,7 @@ pub enum StreamRecord {
 // Mirror the public inline Terminal variant without an extra allocation on decode.
 #[allow(clippy::large_enum_variant)]
 enum KnownStreamRecord {
+    Progress(Progress),
     Accepted(Accepted),
     Started(Started),
     Output(Output),
@@ -2278,6 +2431,7 @@ enum StreamRecordInput {
 impl Serialize for StreamRecord {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let known = match self {
+            Self::Progress(progress) => KnownStreamRecord::Progress(progress.clone()),
             Self::Accepted(accepted) => KnownStreamRecord::Accepted(accepted.clone()),
             Self::Started(started) => KnownStreamRecord::Started(started.clone()),
             Self::Output(output) => KnownStreamRecord::Output(output.clone()),
@@ -2306,7 +2460,8 @@ impl<'de> Deserialize<'de> for StreamRecord {
             StreamRecordInput::Tag(StreamRecordTag { kind, seq }) => {
                 if matches!(
                     kind.as_str(),
-                    "accepted"
+                    "progress"
+                        | "accepted"
                         | "started"
                         | "output"
                         | "return_result"
@@ -2322,6 +2477,7 @@ impl<'de> Deserialize<'de> for StreamRecord {
             }
         };
         Ok(match known {
+            KnownStreamRecord::Progress(progress) => Self::Progress(progress),
             KnownStreamRecord::Accepted(accepted) => Self::Accepted(accepted),
             KnownStreamRecord::Started(started) => Self::Started(started),
             KnownStreamRecord::Output(output) => Self::Output(output),

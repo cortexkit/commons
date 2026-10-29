@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.14**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.15**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -17,7 +17,7 @@ sibling path-dependency consumers.
 | `workspace.prepare` | `PrepareRequest` | `PrepareReply` |
 | `workspace.drop` | `DropRequest` | `DropReply` |
 
-`StreamRecord` is internally tagged by `type`: known records are `accepted`,
+`StreamRecord` is internally tagged by `type`: known records are `progress`, `accepted`,
 `started`, `output`, `return_result`, `return_chunk`, `return_manifest`, or
 `terminal`, with fields inline beside the discriminator.
 `Started` is emitted once after acceptance when the job takes runner capacity,
@@ -28,6 +28,33 @@ but must not start a timeout of its own from `Started`. Older runners may omit
 it, so callers keep their existing behavior when it is absent. It is progress,
 never a terminal record. Its `seq` counts toward the attach resume cursor;
 `queue_wait_ms` is measured by the runner and `started_at_ms` is for display only.
+
+`Progress` covers only the wait **before** `Accepted`, never after it; `Started`
+keeps covering the wait after acceptance. A runner sends progress only when the
+request set `progress: true` and it advertises `PROGRESS_CAPABILITY`
+(`exec-remote-progress/v1`). A caller uses `RunRequest::with_progress(true)` only
+after checking that capability, and never expects progress otherwise.
+`progress()` reads the opt-in. False or absent means no progress and is omitted
+on serialization, preserving today's request bytes; older runners ignore the
+unknown request field.
+
+`Progress::new(phase, phase_elapsed_ms, detail)` returns a `Result<Progress,
+ProgressDetailError>`; `phase()`, `phase_elapsed_ms()` and `detail()` read its
+validated fields. `ProgressPhase` is open: `Upload`, `PlacementWait` and `Connect`
+encode as `upload`, `placement_wait` and `connect`; unknown phase strings are
+retained and displayed generically. `phase_elapsed_ms` is a `u64` count of
+milliseconds since the **current phase started**, not since submission. Optional
+`detail` is one line of at most 120 UTF-8 bytes, with no control characters or
+line breaks, including Unicode line and paragraph separators. Both construction
+and decoding reject violations. Runners must not put host names, network
+addresses, tenant or account identifiers, or job contents in `detail`; the types
+don't check that.
+
+Progress has no `seq` field and never advances the resume cursor. It is never
+terminal. As runner rules: it is never replayed by `exec.attach`, and it is sent
+at most once per 10 s per run, only after 2 s of waiting. It is display only: render `detail` as plain text;
+never start, extend or reset a timer from progress, and never retry or cancel
+because of it. See [`CONTRACT.md`](CONTRACT.md) for the runner/caller obligations.
 
 `return_result` carries returned files requested through `RunRequest.return_paths`
 or a file-collection failure. It appears immediately before `terminal` and only
@@ -61,9 +88,10 @@ The executor must scope keys to the attested caller principal, durably record
 them before submitting to any runner, and retain them at least as long as the
 job record (24 hours today). A caller must not resubmit an unresolved key after
 that window: an executor that forgot it cannot distinguish a retry from new work.
-Resubmissions must carry the same caller-supplied request except for the cursor;
-the executor compares an RFC 8785 canonical request digest, never a derived
-snapshot or bundle. A mismatch is `request_rejected` with `refusal_detail`
+Resubmissions must carry the same caller-supplied request except for the cursor
+and `progress`; the executor clears both before comparing an RFC 8785 canonical
+request digest, since progress does not change what runs. The digest never covers
+a derived snapshot or bundle. A mismatch is `request_rejected` with `refusal_detail`
 `submission_key_mismatch`. See [`CONTRACT.md`](CONTRACT.md) for the covered fields,
 principal isolation, and unchanged expired-replay rules.
 
@@ -198,8 +226,9 @@ build-server jobs omit this field.
 
 Public named structs and enums are `#[non_exhaustive]`. Construct structs with
 `new`, then use `with_*` setters for optional fields, or deserialize them. Fields
-remain public for inspection and mutation. `Uuid` is re-exported from uuid major
-version 1, with only serde support enabled: syntax is validated on decode, while
+generally remain public for inspection and mutation; `Progress` keeps its fields
+private so construction and decoding always validate detail. `Uuid` is re-exported
+from uuid major version 1, with only serde support enabled: syntax is validated on decode, while
 UUID generation, version and retention policy belong to the executor.
 
 ## Additive decoding and outcome safety
@@ -212,6 +241,7 @@ tags into a catch-all with a stated grading:**
 | `RefusalReason` | `Unknown(String)` | Inside `refused_before_start`, the command still did not start. |
 | `Network` | `Unknown(String)` | Never assume outbound access from an unknown acknowledgement. Runners must refuse unknown requests before start. |
 | `Platform` | `Unknown(String)` | Runners must refuse unknown requests before start. Callers requesting non-Linux platforms must require an exact acknowledgement or cancel without trusting the result. |
+| `ProgressPhase` | `Unknown(String)` | Display only; show unknown phases generically. Never change timers or retry/cancel decisions. |
 | `Outcome` | `Unknown { kind: String }` | Grade like `outcome_unknown`: never assume the command did not run, and never re-run it locally. |
 | `StreamRecord` | `Unknown { kind: String, seq: Option<u64> }` | Skip and keep reading; count its seq toward the resume cursor; never treat it as terminal. |
 | `Killed` | `Unknown(String)` | The command was killed for a reason this version does not recognise. |
@@ -335,6 +365,13 @@ as their individual `.sha256` companions. The vector README lists them.
 `submission-key-mismatch`. Each has a `.jcs` request/stream object and a
 `.sha256` companion; the directory's `SHA256SUMS` pins both. Tests check the
 inventory, hashes and typed canonical round-trips without changing older vectors.
+
+`test-vectors/exec-remote-v1/progress/` adds ten crate-local cases: each known
+phase, an unknown phase, no detail, exactly 120 bytes of detail, an opted-in
+request, and three malformed records (121-byte detail, newline detail, non-`u64`
+phase time). Each has a `.sha256` companion and is pinned by the folder's
+`SHA256SUMS`. Valid requests and records round-trip byte for byte; malformed
+known progress records must fail decoding rather than becoming `Unknown`.
 
 ## Verification
 

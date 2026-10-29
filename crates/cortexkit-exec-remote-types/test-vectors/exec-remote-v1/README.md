@@ -275,5 +275,40 @@ Refusals, each by its error code:
 
 The directory's `SHA256SUMS` covers each `.jcs` and `.sha256` file with relative
 paths. Tests pin its inventory, hashes and typed RFC 8785 round-trips. The
-contract's field-order example also has a test: clearing `resume_from_seq` makes
-the two requests canonically identical, while changing the command does not.
+contract's field-order example also has a test: clearing `resume_from_seq` and
+`progress` makes the two requests canonically identical, while changing the
+command does not. A separate test checks equal request digests when only the
+display-only progress opt-in differs.
+
+## Pre-acceptance progress
+
+`progress/` contains ten invented-value cases in the same `.jcs`/`.sha256` format.
+`request-progress` is a `RunRequest`; all other files are individual stream
+records, not whole streams:
+
+- `upload`, `placement-wait`, `connect`: one `progress` record per known phase.
+- `unknown-phase`: `future_phase` round-trips as `ProgressPhase::Unknown` and is
+  shown generically, as display-only progress.
+- `no-detail`: optional detail omitted.
+- `detail-120-bytes`: valid detail at exactly the 120-byte UTF-8 limit.
+- `request-progress`: an opt-in request with `progress: true`.
+- `malformed-detail-too-long`: 121-byte detail, refused on decode.
+- `malformed-detail-newline`: a line break in detail, refused on decode.
+- `malformed-phase-elapsed-ms`: a string instead of a `u64`, refused on decode.
+
+The runner sets `phase_elapsed_ms` to the milliseconds since the current phase
+started, not since submission. Detail is at most 120 bytes, one line, with no
+control characters or line breaks; decoding refuses anything else. Runners must
+not put host names, network addresses, tenant or account identifiers, or job
+contents in it. A caller renders it as plain text and never starts, extends or
+resets timers or retries/cancels because of progress. A progress record has no
+`seq` field and is never terminal. The rest are runner rules these individual
+records can't show: progress needs the request opt-in and
+`PROGRESS_CAPABILITY`, comes only before `Accepted`, is never replayed by
+`exec.attach`, and is sent at most once per 10 s per run, only after 2 s of
+waiting.
+
+The directory's `SHA256SUMS` covers every `.jcs` and `.sha256` file. Tests check
+the exact inventory and hashes, round-trip all seven valid cases through typed
+values byte for byte, and require the three malformed known records to fail
+decoding rather than becoming `Unknown`.
