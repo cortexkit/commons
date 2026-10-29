@@ -7,15 +7,13 @@ Keep shared APIs small and changes covered by tests. Crates in this workspace ar
 Use stable Rust with the `rustfmt` and `clippy` components. From the repository root:
 
 ```sh
-cargo build --workspace --locked
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --all-targets --locked
-bash scripts/no-external-path-deps.test.sh
-bash scripts/check-cortexkit-layout.sh
+scripts/gate.sh fast
+scripts/gate.sh lint
+scripts/gate.sh test
 ```
 
-[CI](.github/workflows/ci.yml) runs the format, Clippy, test, and script checks across its Linux, macOS, and Windows jobs. The path-dependency check also verifies its own rejection cases; dependencies must not point outside this repository. The layout check prevents tracking internal tooling state.
+Use `scripts/gate.sh --help` for prerequisites and CI-only coverage; `test` is slow and belongs on a Linux build machine, not a filtered package run (the agent bash tool selects a Linux host with 16 CPUs via `runon: "linux,16c"`).
+[CI](.github/workflows/ci.yml) shares the fast/lint entry points; native OS tests, live PostgreSQL, and the required-nextest positive controls retain their workflow coverage.
 
 PostgreSQL integration tests need a running PostgreSQL instance and `CORTEXKIT_TEST_PG_DSN`. To require a live database rather than skip those tests:
 

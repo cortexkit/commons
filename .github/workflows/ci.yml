@@ -35,23 +35,31 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: ${{ matrix.os == 'ubuntu-latest' && 'x86_64-pc-windows-gnu' || '' }}
 
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.os }}
 
-      - name: Check path dependencies stay inside the repository
+      - name: Install Windows cross-compiler
         if: matrix.os == 'ubuntu-latest'
-        run: bash scripts/no-external-path-deps.test.sh
+        run: sudo apt-get update && sudo apt-get install -y gcc-mingw-w64-x86-64
 
-      - name: Nothing internal is tracked under .cortexkit
-        run: bash scripts/check-cortexkit-layout.sh
+      # A fresh runner must populate its cache before the offline lockfile check.
+      - name: Populate Cargo cache
+        run: cargo fetch --locked
 
-      - name: Format check
-        run: cargo fmt --all -- --check
+      - name: Fast gate
+        shell: bash
+        env:
+          GATE_CI_OS: ${{ matrix.os }}
+        run: scripts/gate.sh fast
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+        shell: bash
+        env:
+          GATE_CI_OS: ${{ matrix.os }}
+        run: scripts/gate.sh lint
 
       - name: Test
         run: cargo test --workspace --all-targets --locked
