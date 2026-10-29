@@ -13,7 +13,7 @@ Usage: scripts/gate.sh {fast|lint|test|all}
         check for x86_64-pc-windows-gnu and the mutation workflow's package-only
         Windows check. Install that Rust target first; cross compilation may
         also need the platform's MinGW C compiler.
-  test  SLOW: run on the build server with the bash tool's runon: "linux,16c".
+  test  SLOW: best run on a Linux machine with many cores.
         Runs CI's full workspace/all-targets suite, its exact vector-feature
         package selection, and the mutation runner's nextest-required controls.
         Requires cargo-nextest, as does the mutation-runner workflow.
@@ -23,9 +23,9 @@ Usage: scripts/gate.sh {fast|lint|test|all}
 Use stable Rust with rustfmt and clippy, a populated Cargo cache for offline
 metadata, and the existing path check's python3 dependency. No tools are installed
 by this script. Commands run from the repository root, regardless of your cwd.
-CI sets GATE_CI_OS to its matrix OS: path-check self-tests and Windows cross-lint
-run only on ubuntu-latest there, preserving the existing self-test OS scope.
-Outside CI both checks run. Ordinary fmt/lint/tests still run on each CI OS.
+CI sets GATE_CI_OS to its matrix OS: the path checks and the Windows cross-lint
+run only on ubuntu-latest there. Outside CI they always run. Formatting, the
+other fast checks, Clippy and the tests still run on each CI OS.
 
 CI-only coverage (not silently replaced by a local pass):
   - Native Linux/macOS/Windows execution: a host cannot run the other OS kernels.
@@ -35,9 +35,6 @@ CI-only coverage (not silently replaced by a local pass):
   - Release run lookup, tag validation, and publish: need a release ref, GitHub
     credentials, and registry credentials; they are not push/PR source checks.
   - Checkout, toolchain/nextest/MinGW installation and caches are CI provisioning.
-
-No public-text private-name scanner exists in this checkout. No private-name
-list is embedded here; the gate does not claim that coverage.
 USAGE
 }
 
@@ -112,8 +109,10 @@ fast() {
     local manifests=0
     run_step 'Format check' cargo fmt --all -- --check
     run_step 'Locked offline metadata' metadata
-    run_step 'No external path dependencies' bash scripts/no-external-path-deps.sh
+    # The path checks need python3, which CI's Windows image doesn't put on
+    # Git Bash's PATH, so CI runs them on Linux only. Locally they always run.
     if [ -z "${GATE_CI_OS:-}" ] || [ "$GATE_CI_OS" = ubuntu-latest ]; then
+        run_step 'No external path dependencies' bash scripts/no-external-path-deps.sh
         run_step 'Path-dependency checker self-tests' bash scripts/no-external-path-deps.test.sh
     fi
     run_step 'Repository tooling layout' bash scripts/check-cortexkit-layout.sh

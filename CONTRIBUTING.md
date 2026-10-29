@@ -12,8 +12,8 @@ scripts/gate.sh lint
 scripts/gate.sh test
 ```
 
-Use `scripts/gate.sh --help` for prerequisites and CI-only coverage; `test` is slow and belongs on a Linux build machine, not a filtered package run (the agent bash tool selects a Linux host with 16 CPUs via `runon: "linux,16c"`).
-[CI](.github/workflows/ci.yml) shares the fast/lint entry points; native OS tests, live PostgreSQL, and the required-nextest positive controls retain their workflow coverage.
+`scripts/gate.sh --help` lists the prerequisites and what only CI covers. The `test` stage is slow, so run it on a Linux machine with many cores rather than settling for a filtered package run.
+[CI](.github/workflows/ci.yml) calls the same `fast` and `lint` stages. Native tests on each OS, the live PostgreSQL job and the mutation runner's controls keep their own workflow steps.
 
 PostgreSQL integration tests need a running PostgreSQL instance and `CORTEXKIT_TEST_PG_DSN`. To require a live database rather than skip those tests:
 

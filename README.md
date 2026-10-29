@@ -62,7 +62,7 @@ cortexkit-paths = "0.1.2"
 
 Crate READMEs above describe usage; unpublished crates are used from a source checkout. See [role contracts and conformance](docs/role-contracts.md) for the contract/vector/runner pattern, [CONTRIBUTING](CONTRIBUTING.md) for checks and releases, and [SECURITY](SECURITY.md) to report a vulnerability.
 
-Run `scripts/gate.sh fast` and `scripts/gate.sh lint` before delivering; run the slow `scripts/gate.sh test` on the build server.
+Run `scripts/gate.sh fast` and `scripts/gate.sh lint` before opening a pull request, and the slower `scripts/gate.sh test` on a Linux machine with many cores.
 See `scripts/gate.sh --help` for prerequisites and CI-only coverage.
 
 ## License
