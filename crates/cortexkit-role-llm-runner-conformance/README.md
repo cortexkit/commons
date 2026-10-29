@@ -1,5 +1,50 @@
 # cortexkit-role-llm-runner-conformance
 
+## Opt-in cancellation and host relaunch (0.15.23)
+
+Each `run_cancel_by_interrupt_*` case and
+`refresh_relaunch_preserves_runs_and_history` reads the runner's live
+`role.describe`. Without its group it is **not applicable**, by name, rather
+than a new skipped or failed obligation. These cases inspect each runner's
+live declaration, so the adapter needs no enum variant for these groups.
+Declaring runners use the existing plan-sender, held-model/tool,
+refresh-plan and model-request hooks. The cancellation cases check `now`
+ends `cancelled`, and refuse missing interrupt grants, non-`now` cancellation
+and authority borrowed from another session. Faulty runners exercise each.
+
+The relaunch case uses `RefreshVariant::OutsideHostSet` as an addition fixture
+at both `immediately` and `on_prefix_rebuild`. It checks current-run isolation,
+the flush boundary, new tools at the model, applied-generation reporting, and
+unchanged earlier history bytes, ordinals and lineage. Declaring runners get
+`session_refresh_tool_outside_host_set_refused` reported not applicable.
+Faulty runners apply mid-run, rewrite history or advance the generation while
+retaining old tools, and fail the relaunch case by name.
+
+For a runner declaring `compaction`, the case also installs the existing
+compaction fixture. Set `ModelRequestObservation.surface_change_rides` to
+the number of that session's `surface_change` rides received **before** the
+model request arrived. Capture the ride and model ingresses with one shared
+counter, outside the runner; reconstructing it from configuration or separate
+post-run lists cannot establish ordering. The first new-tools request must
+have seen another ride. The fake's missing ride is caught by name. An adapter
+without this observation gets the ride-order rule explicitly reported
+unchecked; a runner without `compaction` has no such obligation.
+
+There is **no adapter hook that makes a host relaunch fail**. A scripted model
+provider failure is not a host-start failure. The following amended rules
+therefore have contract-text coverage only, not invented executable cases or
+faulty runners: a non-required failure completes on old definitions while
+removed/unoffered tools are refused `tool_not_selected`; additions, changed
+definitions and system text remain pending; `pending_failure` beside
+`pending` records generation, reason, attempt count and last-attempt time;
+the owner receives durable control event `session_refresh_failed`; a required
+failure ends the run with class `host_relaunch_failed`; failed changes retry
+at the next boundary without moving `applied_generation` or `effective`.
+An unchanged-surface fallback sends no `surface_change` ride; a fallback
+that changes the model's tool list rides first. Catching runners that fail a
+non-required turn, offer removed tools after failure, or ride on unchanged
+fallback must wait for a real relaunch-failure fixture.
+
 ## Last-run retry metadata (0.15.6)
 
 The optional `head.last_run_error` cases need no new capability group in

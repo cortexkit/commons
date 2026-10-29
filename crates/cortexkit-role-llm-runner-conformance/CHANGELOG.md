@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.15.23
+
+- Pin `cortexkit-role-llm-runner` to `=0.7.20`. Read the live declaration for
+  opt-in `run_cancel_by_interrupt` and `refresh_relaunch` cases; report each
+  by name as not applicable when absent, preserving existing verdicts.
+- Check interrupt-granted `now` cancellation and named refusals for missing
+  interrupt authority, non-`now` cancellation and a different session. Keep
+  faulty runners demonstrating each refusal check.
+- Check out-of-host-set additions at `immediately` and `on_prefix_rebuild`,
+  no relaunch during a run, and byte/ordinal/lineage-stable reads. The old
+  `session_refresh_tool_outside_host_set_refused` case is not applicable to
+  declaring runners. Faulty runners cover mid-run apply, history rewriting
+  and old tools reported as a new generation.
+- Add optional model-ingress `surface_change_rides` observations to check
+  successful relaunch ride ordering using a shared provider-arrival counter,
+  with a faulty runner caught by name. Missing observation support is reported
+  as an unchecked rule. The adapter has no host-relaunch failure hook; fallback,
+  required-failure, failure notices and no-fallback-ride rules remain contract
+  coverage only, as documented in the README.
+
 ## 0.15.22
 
 - Pin `cortexkit-role-llm-runner` to `=0.7.19`, whose OpenCode 1

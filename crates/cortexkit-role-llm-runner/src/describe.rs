@@ -27,6 +27,12 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_RUN_CANCEL: &str =
+        "run_cancel_by_interrupt_without_run_cancel";
+    pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_DELIVERY_ORDER: &str =
+        "run_cancel_by_interrupt_without_delivery_order";
+    pub const REFRESH_RELAUNCH_WITHOUT_SESSION_CHANGE: &str =
+        "refresh_relaunch_without_session_change";
     pub const MISSING_SESSION_RETENTION: &str = "missing_session_retention";
     pub const INVALID_SESSION_RETENTION: &str = "invalid_session_retention";
     pub const RUN_CANCEL_UNDECLARED: &str = "run_cancel_undeclared";
@@ -434,6 +440,27 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    for (group, dependency, problem) in [
+        (
+            capabilities::RUN_CANCEL_BY_INTERRUPT,
+            capabilities::RUN_CANCEL,
+            problem_names::RUN_CANCEL_BY_INTERRUPT_WITHOUT_RUN_CANCEL,
+        ),
+        (
+            capabilities::RUN_CANCEL_BY_INTERRUPT,
+            capabilities::DELIVERY_ORDER,
+            problem_names::RUN_CANCEL_BY_INTERRUPT_WITHOUT_DELIVERY_ORDER,
+        ),
+        (
+            capabilities::REFRESH_RELAUNCH,
+            capabilities::SESSION_CHANGE,
+            problem_names::REFRESH_RELAUNCH_WITHOUT_SESSION_CHANGE,
+        ),
+    ] {
+        if describe.declares(group) && !describe.declares(dependency) {
+            problems.push(DescribeProblem::Undecodable(problem.into()));
+        }
+    }
     match (
         describe.declares(capabilities::ARCHIVE_PRUNES_REASONING),
         &describe.archive_prunes_reasoning,
@@ -637,6 +664,80 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Ok(describe)
     } else {
         Err(problems)
+    }
+}
+
+#[cfg(test)]
+mod opt_in_dependency_tests {
+    use super::*;
+
+    #[test]
+    fn opt_in_groups_require_their_dependencies() {
+        for (group, dependencies) in [
+            (
+                capabilities::RUN_CANCEL_BY_INTERRUPT,
+                vec![capabilities::RUN_CANCEL, capabilities::DELIVERY_ORDER],
+            ),
+            (
+                capabilities::REFRESH_RELAUNCH,
+                vec![capabilities::SESSION_CHANGE],
+            ),
+        ] {
+            let mut raw = serde_json::json!({
+                "majors": [{"version": crate::PROVIDES, "ops": crate::REQUIRED_OPS,
+                            "stability": "stable"}],
+                "implementation_version": "test",
+                "capabilities": [group],
+                "session_capabilities_from": "baseline"
+            });
+            let problems = check_describe(&raw).unwrap_err();
+            for dependency in &dependencies {
+                assert!(problems.contains(&DescribeProblem::Undecodable(format!(
+                    "{group}_without_{dependency}"
+                ))));
+            }
+            raw["capabilities"] = serde_json::json!(dependencies);
+            raw["capabilities"]
+                .as_array_mut()
+                .unwrap()
+                .push(group.into());
+            let mut ops = crate::REQUIRED_OPS.to_vec();
+            for dependency in dependencies {
+                ops.extend_from_slice(capabilities::group_ops(dependency).unwrap());
+            }
+            ops.extend_from_slice(capabilities::group_ops(group).unwrap());
+            raw["majors"][0]["ops"] = serde_json::json!(ops);
+            assert!(check_describe(&raw).is_ok(), "{:?}", check_describe(&raw));
+            if group == capabilities::REFRESH_RELAUNCH {
+                let mut no_subscribe = raw.clone();
+                no_subscribe["majors"][0]["ops"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|op| op != crate::ops::SESSION_SUBSCRIBE);
+                assert!(check_describe(&no_subscribe).unwrap_err().contains(
+                    &DescribeProblem::GroupIncomplete {
+                        capability: capabilities::REFRESH_RELAUNCH,
+                        op: crate::ops::SESSION_SUBSCRIBE
+                    }
+                ));
+            }
+            for dependency in raw["capabilities"].as_array().unwrap().clone() {
+                if dependency == group {
+                    continue;
+                }
+                let mut missing = raw.clone();
+                missing["capabilities"]
+                    .as_array_mut()
+                    .unwrap()
+                    .retain(|c| c != &dependency);
+                assert!(check_describe(&missing).unwrap_err().contains(
+                    &DescribeProblem::Undecodable(format!(
+                        "{group}_without_{}",
+                        dependency.as_str().unwrap()
+                    ))
+                ));
+            }
+        }
     }
 }
 

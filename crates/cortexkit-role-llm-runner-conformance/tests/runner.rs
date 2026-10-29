@@ -579,6 +579,20 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    // Undeclared opt-in groups add named non-obligations, not passing coverage.
+    if (case.starts_with("run_cancel_by_interrupt_")
+        && report.outcome(case)
+            == Some(&CaseOutcome::Inapplicable {
+                reason: "run_cancel_by_interrupt is not declared".into(),
+            }))
+        || (case == "refresh_relaunch_preserves_runs_and_history"
+            && report.outcome(case)
+                == Some(&CaseOutcome::Inapplicable {
+                    reason: "refresh_relaunch is not declared".into(),
+                }))
+    {
+        return;
+    }
     assert_eq!(
         report.outcome(case),
         Some(&CaseOutcome::Passed),
@@ -4851,6 +4865,172 @@ const SESSION_CHANGE_CASES: &[&str] = &[
     "session_refresh_tool_outside_host_set_refused",
     "flush_prefix_applies_pending",
 ];
+
+const INTERRUPT_CANCEL_CASES: &[&str] = &[
+    "run_cancel_by_interrupt_now_cancelled",
+    "run_cancel_by_interrupt_without_grant_refused",
+    "run_cancel_by_interrupt_non_now_refused",
+    "run_cancel_by_interrupt_other_session_refused",
+];
+
+fn interrupt_cancelling(mut defects: Defects) -> FakeSubject {
+    defects.declare_run_cancel_by_interrupt = true;
+    declaring(Capability::DeliveryOrder, defects)
+}
+
+fn relaunching(mut defects: Defects) -> FakeSubject {
+    defects.declare_refresh_relaunch = true;
+    changing(defects)
+}
+
+#[tokio::test]
+async fn opt_in_cancel_and_relaunch_are_inapplicable_without_declarations() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in INTERRUPT_CANCEL_CASES
+        .iter()
+        .copied()
+        .chain(["refresh_relaunch_preserves_runs_and_history"])
+    {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+        assert!(report.render().contains(&format!("N/A  {name}")));
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn run_cancel_by_interrupt_correct_runner_passes() {
+    let report = run(&interrupt_cancelling(Defects::default())).await;
+    for name in INTERRUPT_CANCEL_CASES {
+        assert_passed(&report, name);
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+async fn interrupt_cancel_fault(defects: Defects, name: &str) {
+    let report = run(&interrupt_cancelling(defects)).await;
+    assert!(failed(&report, name).contains("was answered"));
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn run_cancel_by_interrupt_without_grant_fails_by_name() {
+    interrupt_cancel_fault(
+        Defects {
+            cancel_sender_without_interrupt: true,
+            ..Defects::default()
+        },
+        "run_cancel_by_interrupt_without_grant_refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn run_cancel_by_interrupt_non_now_fails_by_name() {
+    interrupt_cancel_fault(
+        Defects {
+            cancel_sender_non_now: true,
+            ..Defects::default()
+        },
+        "run_cancel_by_interrupt_non_now_refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn run_cancel_by_interrupt_other_session_fails_by_name() {
+    interrupt_cancel_fault(
+        Defects {
+            cancel_sender_other_session: true,
+            ..Defects::default()
+        },
+        "run_cancel_by_interrupt_other_session_refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn refresh_relaunch_correct_runner_passes() {
+    let report = run(&relaunching(Defects::default())).await;
+    assert_passed(&report, "refresh_relaunch_preserves_runs_and_history");
+    assert!(matches!(
+        report.outcome("session_refresh_tool_outside_host_set_refused"),
+        Some(CaseOutcome::Inapplicable { .. })
+    ));
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn refresh_relaunch_mid_run_fails_by_name() {
+    let report = run(&relaunching(Defects {
+        refresh_applies_mid_run: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        failed(&report, "refresh_relaunch_preserves_runs_and_history")
+            .contains("inside a running run")
+    );
+    assert_none_failed_but(
+        &report,
+        &[
+            "refresh_relaunch_preserves_runs_and_history",
+            "session_refresh_never_changes_a_running_run",
+        ],
+    );
+}
+
+#[tokio::test]
+async fn refresh_relaunch_history_rewrite_fails_by_name() {
+    let report = run(&relaunching(Defects {
+        relaunch_rewrites_history: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        failed(&report, "refresh_relaunch_preserves_runs_and_history").contains("history bytes")
+    );
+    assert_none_failed_but(&report, &["refresh_relaunch_preserves_runs_and_history"]);
+}
+
+#[tokio::test]
+async fn refresh_relaunch_old_tools_with_new_generation_fails_by_name() {
+    let report = run(&relaunching(Defects {
+        relaunch_keeps_old_tools: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        failed(&report, "refresh_relaunch_preserves_runs_and_history")
+            .contains("kept the old tool set")
+    );
+    assert_none_failed_but(
+        &report,
+        &[
+            "refresh_relaunch_preserves_runs_and_history",
+            "session_refresh_applies_from_next_run",
+            "session_refresh_never_changes_a_running_run",
+            "flush_prefix_applies_pending",
+        ],
+    );
+}
+
+#[tokio::test]
+async fn refresh_relaunch_ride_after_request_fails_by_name() {
+    let report = run(&relaunching(Defects {
+        relaunch_omits_ride: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        failed(&report, "refresh_relaunch_preserves_runs_and_history")
+            .contains("before the first new-tools")
+    );
+    assert_none_failed_but(&report, &["refresh_relaunch_preserves_runs_and_history"]);
+}
 
 fn changing(defects: Defects) -> FakeSubject {
     declaring(Capability::SessionChange, defects)

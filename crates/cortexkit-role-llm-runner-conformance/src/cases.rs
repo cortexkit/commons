@@ -89,6 +89,12 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("run_cancel_by_interrupt_") => {
+                crate::cancel::by_interrupt(self, name).await
+            }
+            "refresh_relaunch_preserves_runs_and_history" => {
+                crate::session_change::relaunch(self).await
+            }
             name if name.starts_with("message_checkpoint_") => {
                 crate::message_checkpoint::run(self, name).await
             }

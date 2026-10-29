@@ -642,6 +642,15 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
+    if case
+        .checked_describe()
+        .await?
+        .declares(cortexkit_role_llm_runner::capabilities::REFRESH_RELAUNCH)
+    {
+        return Ok(Ending::Inapplicable(
+            "refresh_relaunch accepts changes outside the fixed host set".into(),
+        ));
+    }
     let (session, stated) = idle(case, "change-host-set").await?;
     let outside = plan_for(case, &session.name, RefreshVariant::OutsideHostSet);
     let changed = plan_for(case, &session.name, RefreshVariant::ChangedDefinition);
@@ -694,4 +703,204 @@ where
         }
     }
     Ok(Ending::Passed)
+}
+
+/// Exercise an addition outside the host's fixed set at both rung points.
+/// Frozen reads are compared with their original bytes and ordinals, never
+/// reconstructed from the new host's view of the conversation.
+pub(crate) async fn relaunch<S: LlmRunnerSubject>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S::Route: RunnerRoute,
+{
+    use crate::drive::{head, read_all};
+    use crate::subject::Capability;
+    use cortexkit_role_llm_runner::capabilities;
+    if !case
+        .checked_describe()
+        .await?
+        .declares(capabilities::REFRESH_RELAUNCH)
+    {
+        return Ok(Ending::Inapplicable(
+            "refresh_relaunch is not declared".into(),
+        ));
+    }
+    let missing: Vec<_> = [
+        Capability::SessionChange,
+        Capability::Queue,
+        Capability::RunOps,
+        Capability::TranscriptReads,
+        Capability::HoldToolCalls,
+    ]
+    .into_iter()
+    .filter(|cap| !case.declared.contains(cap))
+    .collect();
+    if !missing.is_empty() {
+        return Ok(Ending::Skipped {
+            missing,
+            reason: "the relaunch probe needs held tools and frozen reads".into(),
+        });
+    }
+    for policy in [rungs::IMMEDIATELY, rungs::ON_PREFIX_REBUILD] {
+        let mut tool = case.mint.call("relaunch-held-tool");
+        tool.hold = true;
+        let mut session = case
+            .open(
+                "relaunch",
+                Script {
+                    turns: vec![
+                        ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool.clone())]),
+                        text("current run finishes on old tools"),
+                        text("next run"),
+                        text("after flush"),
+                    ],
+                },
+            )
+            .await?;
+        let reply = send(case, &mut session, "hold the current run").await?;
+        case.subject
+            .await_tool_call(&tool.arguments)
+            .await
+            .map_err(|e| e.to_string())?;
+        let checked = async {
+            let old = baseline(&session.route).await?;
+            if !tool_rungs(&old)?.iter().any(|rung| rung == policy) {
+                return Ok(Err(format!("the session supports no {policy} tools rung")));
+            }
+            let Some(plan) = plan_for(case, &session.name, RefreshVariant::OutsideHostSet) else {
+                return Ok(Err(
+                    "the adapter supplies no OutsideHostSet addition fixture".into(),
+                ));
+            };
+            let before = request_at(&requests(case, &session.name).await?, 0, "held run")?;
+            changed_plan(&before, &plan)?;
+            let (answer, _) = accepted(&session.route, &plan.plan, policy, 1).await?;
+            if !answer.run_in_progress
+                || (policy == rungs::IMMEDIATELY && !answer.applies_from_next_run)
+            {
+                return Err("relaunch refresh did not report the next-run rule".into());
+            }
+            if baseline(&session.route).await?.applied_generation != 0 {
+                return Err("a pending relaunch applied inside a running run".into());
+            }
+            Ok::<_, String>(Ok((plan, before)))
+        }
+        .await;
+        case.subject
+            .release_tool_call(&tool.arguments)
+            .await
+            .map_err(|e| e.to_string())?;
+        let (plan, before) = match checked? {
+            Ok(values) => values,
+            Err(reason) => {
+                wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+                return Ok(Ending::Inapplicable(reason));
+            }
+        };
+        wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+        if request_at(
+            &requests(case, &session.name).await?,
+            1,
+            "current run's later step",
+        )? != before
+        {
+            return Err("a pending relaunch changed tools inside a running run".into());
+        }
+        if policy == rungs::ON_PREFIX_REBUILD {
+            run_once(case, &mut session).await?;
+            if request_at(&requests(case, &session.name).await?, 2, "run before flush")? != before
+                || baseline(&session.route).await?.applied_generation != 0
+            {
+                return Err("a deferred relaunch applied before session.flush_prefix".into());
+            }
+        }
+        let frozen = read_all(&session.route).await?.1;
+        let lineage = head(&session.route).await?.lineage_id;
+        if policy == rungs::ON_PREFIX_REBUILD {
+            expect_ok(
+                "flush relaunch",
+                call(
+                    &session.route,
+                    ops::SESSION_FLUSH_PREFIX,
+                    serde_json::to_value(FlushPrefixRequest::new(case.mint.next("relaunch-flush")))
+                        .unwrap(),
+                )
+                .await?,
+            )?;
+        }
+        run_once(case, &mut session).await?;
+        let seen = requests(case, &session.name).await?;
+        if !uses_new_plan(
+            seen.last().ok_or("no post-relaunch request")?,
+            &before,
+            &plan,
+        ) {
+            return Err("the relaunched run kept the old tool set".into());
+        }
+        applied(&session.route, 1).await?;
+        let after = read_all(&session.route).await?.1;
+        if head(&session.route).await?.lineage_id != lineage || !after.starts_with(&frozen) {
+            return Err("relaunch changed history bytes, message ordinals or lineage".into());
+        }
+    }
+    if case.declared.contains(&Capability::Compaction) {
+        relaunch_ride(case).await
+    } else {
+        Ok(Ending::PassedWithInapplicableRule(
+            "compaction is not declared; surface_change ride ordering is not applicable".into(),
+        ))
+    }
+}
+
+async fn relaunch_ride<S: LlmRunnerSubject>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S::Route: RunnerRoute,
+{
+    use crate::compaction::{self, CompactionSetup};
+    let mut session = compaction::install(
+        case,
+        "relaunch-ride",
+        CompactionSetup::Ready(compaction::initial("relaunch-ride")),
+        Script {
+            turns: vec![text("old tools"), text("new tools")],
+        },
+    )
+    .await?;
+    let mut next_plan = None;
+    for generation in 0..=1 {
+        if generation == 1 {
+            let plan = plan_for(case, &session.name, RefreshVariant::OutsideHostSet)
+                .ok_or("no OutsideHostSet addition fixture")?;
+            accepted(&session.route, &plan.plan, rungs::IMMEDIATELY, 1).await?;
+            next_plan = Some(plan);
+        }
+        let reply = compaction::send(case, &mut session, "ride ordering").await?;
+        compaction::release_model(case.subject, &session.name).await?;
+        compaction::result(case, &session, &reply).await?;
+    }
+    let seen = case
+        .subject
+        .model_requests(&session.name)
+        .await
+        .map_err(|e| e.to_string())?;
+    if seen.len() != 2 {
+        return Err("ride probe expected two model requests".into());
+    }
+    let before = seen[0].tools.iter().cloned().collect();
+    let after = seen[1].tools.iter().cloned().collect();
+    if !uses_new_plan(
+        &after,
+        &before,
+        next_plan.as_ref().ok_or("ride probe has no new plan")?,
+    ) {
+        return Err("the ride probe did not reach the model with new tools".into());
+    }
+    match (seen[0].surface_change_rides, seen[1].surface_change_rides) {
+        (Some(before), Some(after)) if after > before => Ok(Ending::Passed),
+        (Some(_), Some(_)) => {
+            Err("no surface_change ride arrived before the first new-tools model request".into())
+        }
+        _ => Ok(Ending::PassedWithInapplicableRule(
+            "the adapter supplies no shared-ingress surface_change ride counter".into(),
+        )),
+    }
 }

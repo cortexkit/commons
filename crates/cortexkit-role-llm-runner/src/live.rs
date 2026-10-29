@@ -36,6 +36,7 @@ pub const EVENT_FIELD: &str = "event";
 
 /// The event types, as `type` spells them.
 pub mod event_types {
+    pub const SESSION_REFRESH_FAILED: &str = "session_refresh_failed";
     pub const MESSAGE_STARTED: &str = "message_started";
     pub const MESSAGE_FINISHED: &str = "message_finished";
     pub const TOOL_STARTED: &str = "tool_started";
@@ -416,6 +417,7 @@ impl DisplayGap {
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum LiveEvent {
+    SessionRefreshFailed(SessionRefreshFailed),
     MessageStarted(MessageEvent),
     MessageFinished(MessageEvent),
     ToolStarted(ToolStarted),
@@ -444,6 +446,7 @@ impl LiveEvent {
             serde_json::from_value(value.clone()).map_err(|e| format!("{kind}: {e}"))
         }
         Ok(match kind {
+            t::SESSION_REFRESH_FAILED => Self::SessionRefreshFailed(typed(kind, value)?),
             t::MESSAGE_STARTED => Self::MessageStarted(typed(kind, value)?),
             t::MESSAGE_FINISHED => Self::MessageFinished(typed(kind, value)?),
             t::TOOL_STARTED => Self::ToolStarted(typed(kind, value)?),
@@ -464,6 +467,7 @@ impl LiveEvent {
     pub fn type_name(&self) -> &'static str {
         use event_types as t;
         match self {
+            Self::SessionRefreshFailed(_) => t::SESSION_REFRESH_FAILED,
             Self::MessageStarted(_) => t::MESSAGE_STARTED,
             Self::MessageFinished(_) => t::MESSAGE_FINISHED,
             Self::ToolStarted(_) => t::TOOL_STARTED,
@@ -476,6 +480,26 @@ impl LiveEvent {
             Self::ToolInputDelta(_) => t::TOOL_INPUT_DELTA,
             Self::DisplayGap(_) => t::DISPLAY_GAP,
             Self::DisplayReset => t::DISPLAY_RESET,
+        }
+    }
+}
+
+/// Owner-only durable control notice; `session.baseline.pending_failure`
+/// remains the recovery record when the owner misses the live notice.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct SessionRefreshFailed {
+    pub session: String,
+    pub generation: u64,
+    pub reason: String,
+}
+
+impl SessionRefreshFailed {
+    pub fn new(session: impl Into<String>, generation: u64, reason: impl Into<String>) -> Self {
+        Self {
+            session: session.into(),
+            generation,
+            reason: reason.into(),
         }
     }
 }
@@ -759,5 +783,29 @@ mod tests {
             (cut.arguments.as_str(), cut.arguments_truncated),
             ("{\"t\":\"é", true)
         );
+    }
+}
+
+#[cfg(test)]
+mod refresh_failure_tests {
+    use super::*;
+
+    #[test]
+    fn session_refresh_failed_control_event_round_trips() {
+        let event = LiveEvent::SessionRefreshFailed(SessionRefreshFailed::new(
+            "session-a",
+            4,
+            "host_start_failed",
+        ));
+        let wire = serde_json::json!({"type":"session_refresh_failed", "session":"session-a",
+            "generation":4, "reason":"host_start_failed"});
+        assert_eq!(serde_json::to_value(&event).unwrap(), wire);
+        assert_eq!(LiveEvent::decode_strict(&wire).unwrap(), event);
+        assert_eq!(event.type_name(), event_types::SESSION_REFRESH_FAILED);
+        assert_eq!(serde_json::from_value::<LiveEvent>(wire).unwrap(), event);
+        assert!(LiveEvent::decode_strict(&serde_json::json!({
+            "type":"session_refresh_failed", "session":"session-a", "generation":4
+        }))
+        .is_err());
     }
 }

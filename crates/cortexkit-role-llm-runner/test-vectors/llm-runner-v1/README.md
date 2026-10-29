@@ -1,5 +1,10 @@
 # `llm-runner/v1` test vectors
 
+`refresh-relaunch-required.json` is the opt-in `session.refresh` body with
+`required: true`. The session-change unit test round-trips it through
+`RelaunchRefreshRequest` and checks that the unchanged strict
+`RefreshRequest` refuses the extra field.
+
 `rich-ui-stamp.json` pins the `rich_ui_stamp` group (§9.17): describe answers
 declaring it, one without it and one refused `group_incomplete` without
 `session.head`; the stamp's wire form, with the same valid and refused stamps

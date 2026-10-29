@@ -75,6 +75,17 @@ async fn start_held<S: LlmRunnerSubject>(
 where
     S::Route: RunnerRoute,
 {
+    start_held_after(case, session, 0).await
+}
+
+async fn start_held_after<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    session: &Session<S::Route>,
+    before: usize,
+) -> Result<(SendReply, String), String>
+where
+    S::Route: RunnerRoute,
+{
     case.subject
         .hold_next_model_step(&session.name)
         .await
@@ -118,10 +129,123 @@ where
         .model_invocations(&session.name)
         .await
         .map_err(|e| e.to_string())?;
-    if count != 1 {
-        return Err(format!("the held model received {count} requests, not one"));
+    if count != before + 1 {
+        return Err(format!(
+            "the held model received {} new requests, not one",
+            count.saturating_sub(before)
+        ));
     }
     Ok((reply, run_id))
+}
+
+pub(crate) async fn by_interrupt<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    name: &str,
+) -> Result<Ending, String>
+where
+    S::Route: RunnerRoute,
+{
+    use cortexkit_role_llm_runner::capabilities;
+    if !case
+        .checked_describe()
+        .await?
+        .declares(capabilities::RUN_CANCEL_BY_INTERRUPT)
+    {
+        return Ok(Ending::Inapplicable(
+            "run_cancel_by_interrupt is not declared".into(),
+        ));
+    }
+    let missing: Vec<_> = [
+        Capability::RunCancel,
+        Capability::DeliveryOrder,
+        Capability::Queue,
+        Capability::RunOps,
+        Capability::TranscriptReads,
+    ]
+    .into_iter()
+    .filter(|cap| !case.declared.contains(cap))
+    .collect();
+    if !missing.is_empty() {
+        return Ok(Ending::Skipped {
+            missing,
+            reason: "the cancellation probe needs held runs and reads".into(),
+        });
+    }
+    let grant = name != "run_cancel_by_interrupt_without_grant_refused";
+    let (session, sender) = crate::delivery_order::sender_session(
+        case,
+        "interrupt-cancel",
+        vec![ScriptedTurn::new(vec![ScriptedPart::Text("held".into())])],
+        false,
+        grant,
+    )
+    .await?;
+    let (target, route) = if name == "run_cancel_by_interrupt_other_session_refused" {
+        let other = case
+            .open(
+                "interrupt-cancel-other",
+                Script {
+                    turns: vec![ScriptedTurn::new(vec![ScriptedPart::Text(
+                        "other held".into(),
+                    )])],
+                },
+            )
+            .await?;
+        let identity = case.subject.plan_sender().ok_or("no plan sender")?;
+        let route = case
+            .subject
+            .session_route(case.handle.inner(), &other.name, &identity.stamp)
+            .await
+            .map_err(|e| e.to_string())?;
+        (other, route)
+    } else {
+        (session, sender)
+    };
+    let opening_requests = usize::from(name != "run_cancel_by_interrupt_other_session_refused");
+    let (reply, run_id) = start_held_after(case, &target, opening_requests).await?;
+    let at = if name == "run_cancel_by_interrupt_non_now_refused" {
+        cancel_at::STEP_BOUNDARY
+    } else {
+        cancel_at::NOW
+    };
+    let response = call(&route, ops::RUN_CANCEL, json!({"run_id":run_id, "at":at})).await?;
+    let checked = async {
+        if name == "run_cancel_by_interrupt_now_cancelled" {
+            let answer: RunCancelReply =
+                decode("sender cancel", expect_ok("sender cancel", response)?)?;
+            if answer != RunCancelReply::Ack {
+                return Err("sender cancel did not acknowledge".into());
+            }
+            // The model stays held: reaching cancelled must not depend on its answer.
+            wait_run_end(case.subject, &target.route, case.declared, None, &reply).await?;
+            if run_result(&target.route, &run_id).await?.state != states::CANCELLED {
+                return Err("sender cancel did not end cancelled".into());
+            }
+        } else {
+            let error = expect_error("ungranted sender cancel", response)?;
+            expect_code(
+                "ungranted sender cancel",
+                &error,
+                errors::SCOPE_OWNER_MISMATCH,
+            )?;
+            if run_result(&target.route, &run_id)
+                .await?
+                .run_state()
+                .is_terminal()
+            {
+                return Err("refused sender cancel ended the run".into());
+            }
+            cancel(&target.route, &run_id, cancel_at::NOW).await?;
+        }
+        Ok::<(), String>(())
+    }
+    .await;
+    case.subject
+        .release_model_step(&target.name)
+        .await
+        .map_err(|e| e.to_string())?;
+    checked?;
+    Ok(Ending::Passed)
 }
 
 async fn boundary<S: LlmRunnerSubject>(case: &Case<'_, S>) -> Result<(), String>

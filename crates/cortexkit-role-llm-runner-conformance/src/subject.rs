@@ -334,6 +334,11 @@ impl ToolResultObservation {
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ModelRequestObservation {
+    /// Number of `surface_change` rides received for this session before
+    /// this request reached the model. Capture both ingresses with a shared
+    /// counter; separate after-the-fact call lists cannot establish ordering.
+    /// None when the adapter cannot observe cross-provider arrival order.
+    pub surface_change_rides: Option<u64>,
     /// The output-token maximum actually sent to the model, if any.
     pub max_output_tokens: Option<u64>,
     /// The names of the tools the request offered, in request order.
@@ -352,6 +357,10 @@ pub struct ModelRequestObservation {
 }
 
 impl ModelRequestObservation {
+    pub fn with_surface_change_rides(mut self, count: u64) -> Self {
+        self.surface_change_rides = Some(count);
+        self
+    }
     pub fn with_max_output_tokens(mut self, limit: u64) -> Self {
         self.max_output_tokens = Some(limit);
         self

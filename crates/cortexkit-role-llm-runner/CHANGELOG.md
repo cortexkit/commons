@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.7.20
+
+- Add opt-in `run_cancel_by_interrupt`, requiring `run_cancel` and
+  `delivery_order`: a session's currently interrupt-granted plan sender may
+  cancel `now`, without starting another turn. Other callers and cancellation
+  points remain refused; `session.retract` stays owner-only.
+- Add opt-in `refresh_relaunch`, requiring `session_change` and
+  `session.subscribe`, for a runner whose host fixes its tool set at start.
+  Apply tool-set changes by relaunch at the rung's run boundary, preserving
+  history, lineage and ordinals. Optional failures fall back to the old
+  definitions while immediately gating removed tools; required failures end
+  the run `host_relaunch_failed`. Failed changes remain pending, with an
+  optional `Baseline.pending_failure` record and a durable owner control event,
+  `session_refresh_failed`. Baseline decoding remains lenient for rollback.
+- Preserve exhaustive `RefreshRequest` struct literals with additive strict,
+  non-exhaustive `RelaunchRefreshRequest`, carrying optional `required` on the
+  same wire body. The next breaking release folds `required` into
+  `RefreshRequest` and marks that type non-exhaustive. Add a required request
+  vector and old-shape baseline compatibility coverage.
+- Make `surface_change` ride ordering explicit: after successful relaunch,
+  before the first new-surface request, also for system-text changes without
+  restart; no ride on unchanged-surface fallback. Runners declaring neither
+  new group retain their existing behavior.
+
 ## 0.7.19
 
 - Fix OpenCode 1's finished-summary test in `opencode1_message_counts` and

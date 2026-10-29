@@ -231,6 +231,9 @@ pub mod capabilities {
     pub const HELD_CALLS: &str = "held_calls";
     /// Cancel an active or paused run.
     pub const RUN_CANCEL: &str = "run_cancel";
+    /// Plan-named senders with a current interrupt grant may cancel `now`.
+    /// Requires [`RUN_CANCEL`] and [`DELIVERY_ORDER`].
+    pub const RUN_CANCEL_BY_INTERRUPT: &str = "run_cancel_by_interrupt";
     /// Withdraw a queued submission or a pending steer on a confirm runner.
     pub const RETRACT: &str = "retract";
     /// Per tool call: the module it was dispatched to, its `call_key`, and
@@ -283,6 +286,9 @@ pub mod capabilities {
     /// it gets no mid-session changes; its owner applies them at the next
     /// session instead.
     pub const SESSION_CHANGE: &str = "session_change";
+    /// Relaunch a session's private host to apply tools outside its fixed set.
+    /// Requires [`SESSION_CHANGE`] and the `session.subscribe` operation.
+    pub const REFRESH_RELAUNCH: &str = "refresh_relaunch";
     /// Caller-chosen whole-session transcript retention, with limits in
     /// `role.describe.retention`.
     pub const RETENTION: &str = "retention";
@@ -394,6 +400,8 @@ pub mod capabilities {
         (RUN_STATUS, &[ops::RUN_STATUS]),
         (HELD_CALLS, &[ops::RUN_STATUS]),
         (RUN_CANCEL, &[ops::RUN_CANCEL]),
+        (RUN_CANCEL_BY_INTERRUPT, &[ops::RUN_CANCEL]),
+        (REFRESH_RELAUNCH, &[ops::SESSION_SUBSCRIBE]),
         (RETRACT, &[ops::SESSION_RETRACT]),
         (DISPATCH_ATTRIBUTION, &[ops::SESSION_READ]),
         (STREAMING, &[ops::SESSION_READ, ops::SESSION_SUBSCRIBE]),

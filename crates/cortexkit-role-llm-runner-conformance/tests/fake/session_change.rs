@@ -157,11 +157,21 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                     record["applied_by"].as_str().unwrap_or_default().to_owned(),
                     pending.digest.clone(),
                 ));
-                sess.tools = pending.tools;
+                if record["keep_old_tools"] != true {
+                    sess.tools = pending.tools;
+                }
                 sess.senders = pending.senders;
                 sess.plan_digest = Some(pending.digest);
             }
             sess.change.flush = false;
+            if record["surface_change_ride"] == true {
+                sess.surface_change_rides += 1;
+            }
+            if record["rewrite_history"] == true {
+                if let Some(message) = sess.messages.first_mut() {
+                    message.body = json!({"text":"rewritten by host relaunch"});
+                }
+            }
         }
         _ => {}
     }
@@ -269,7 +279,7 @@ impl Module {
         } else {
             outside_host_set(&host_tools(), &definitions)
         };
-        if !outside.is_empty() {
+        if !outside.is_empty() && !self.world.serves(groups::REFRESH_RELAUNCH) {
             return Ok(refuse(
                 errors::TOOL_OUTSIDE_HOST_SET,
                 Some(json!(ToolOutsideHostSetDetail::new(outside))),
@@ -304,10 +314,7 @@ impl Module {
                     "answer": answer }),
         )?;
         if running && request.policy == rungs::IMMEDIATELY && defects.refresh_applies_mid_run {
-            self.commit(
-                session,
-                json!({ "kind": "change_applied", "applied_by": "append" }),
-            )?;
+            self.apply_change(session, "append")?;
         }
         Ok(Reply::Response(answer))
     }
@@ -432,12 +439,22 @@ impl Module {
         });
         if flush || immediate {
             let applied_by = if flush { "fold" } else { "append" };
-            self.commit(
-                session,
-                json!({ "kind": "change_applied", "applied_by": applied_by }),
-            )?;
+            self.apply_change(session, applied_by)?;
         }
         Ok(())
+    }
+
+    fn apply_change(&self, session: &str, applied_by: &str) -> Result<(), Killed> {
+        let relaunch = self.world.serves(groups::REFRESH_RELAUNCH);
+        self.commit(
+            session,
+            json!({
+                "kind": "change_applied", "applied_by": applied_by,
+                "keep_old_tools": relaunch && self.world.defects.relaunch_keeps_old_tools,
+                "rewrite_history": relaunch && self.world.defects.relaunch_rewrites_history,
+                "surface_change_ride": relaunch && !self.world.defects.relaunch_omits_ride
+            }),
+        )
     }
 
     /// `base` with the session's change state: the rungs it supports, the

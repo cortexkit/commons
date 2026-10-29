@@ -90,6 +90,9 @@ pub struct Baseline {
     /// The pending change and its policy, when one is pending.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending: Option<PendingChange>,
+    /// Most recent failed relaunch of `pending`; cleared on apply or supersession.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_failure: Option<RelaunchFailure>,
     /// The change-policy rungs this session supports, per surface. Absent
     /// when the runner declares none yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -161,6 +164,11 @@ impl Baseline {
 
     pub fn with_pending(mut self, pending: PendingChange) -> Self {
         self.pending = Some(pending);
+        self
+    }
+
+    pub fn with_pending_failure(mut self, failure: RelaunchFailure) -> Self {
+        self.pending_failure = Some(failure);
         self
     }
 
@@ -309,6 +317,45 @@ pub struct PendingChange {
     pub policy: String,
 }
 
+/// A failed attempt to relaunch the pending generation, not an applied change.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RelaunchFailure {
+    pub generation: u64,
+    pub reason: String,
+    pub attempts: u64,
+    /// Unix epoch milliseconds of the most recent attempt.
+    pub last_attempt_ms: u64,
+}
+
+impl RelaunchFailure {
+    pub fn new(
+        generation: u64,
+        reason: impl Into<String>,
+        attempts: u64,
+        last_attempt_ms: u64,
+    ) -> Self {
+        Self {
+            generation,
+            reason: reason.into(),
+            attempts,
+            last_attempt_ms,
+        }
+    }
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+    pub fn attempts(&self) -> u64 {
+        self.attempts
+    }
+    pub fn last_attempt_ms(&self) -> u64 {
+        self.last_attempt_ms
+    }
+}
+
 /// The rungs a session supports, per surface ([`crate::rungs`]).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Rungs {
@@ -447,5 +494,83 @@ mod tests {
             serde_json::from_value::<BaselineReply>(encoded).unwrap(),
             reply
         );
+    }
+
+    #[test]
+    fn pending_failure_is_an_optional_lenient_baseline_extension() {
+        let failure = RelaunchFailure::new(3, "host_start_failed", 2, 1700000000000);
+        let mut wire = serde_json::to_value(
+            Baseline::plan_less(vec![])
+                .with_pending(PendingChange {
+                    generation: 3,
+                    policy: "immediately".into(),
+                })
+                .with_pending_failure(failure.clone()),
+        )
+        .unwrap();
+        wire["future"] = true.into();
+        wire["pending"]["future"] = true.into();
+        let baseline: Baseline = serde_json::from_value(wire).unwrap();
+        assert_eq!(baseline.pending_failure, Some(failure.clone()));
+        assert_eq!(
+            (
+                failure.generation(),
+                failure.reason(),
+                failure.attempts(),
+                failure.last_attempt_ms()
+            ),
+            (3, "host_start_failed", 2, 1700000000000)
+        );
+        assert!(serde_json::to_value(Baseline::default())
+            .unwrap()
+            .get("pending_failure")
+            .is_none());
+    }
+
+    #[test]
+    fn pending_failure_is_ignored_by_the_0_7_19_baseline_shape() {
+        // A rollback may read a session record written by a newer runner.
+        // Keep the old fields here rather than using Baseline, whose shape
+        // would otherwise grow with the producer and hide a compatibility bug.
+        #[derive(Deserialize, Serialize)]
+        struct OldBaseline {
+            items: Vec<BaselineItem>,
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            absent_items: Vec<AbsentItem>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            composition_digest: Option<String>,
+            tool_names: Vec<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            effective: Option<EffectiveBaseline>,
+            #[serde(default)]
+            accepted_generation: u64,
+            #[serde(default)]
+            applied_generation: u64,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            pending: Option<PendingChange>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            rungs: Option<Rungs>,
+            #[serde(default, skip_serializing_if = "Map::is_empty")]
+            session_capabilities: Map<String, Value>,
+            #[serde(default, skip_serializing_if = "Vec::is_empty")]
+            user_commands: Vec<crate::user_commands::FrozenUserCommand>,
+        }
+        let baseline = Baseline::plan_less(vec!["old_tool".into()])
+            .with_generations(3, 0)
+            .with_pending(PendingChange {
+                generation: 3,
+                policy: "immediately".into(),
+            });
+        let expected = serde_json::to_value(&baseline).unwrap();
+        let wire = serde_json::to_value(baseline.with_pending_failure(RelaunchFailure::new(
+            3,
+            "host_start_failed",
+            1,
+            1700000000000,
+        )))
+        .unwrap();
+        assert!(wire.get("pending_failure").is_some());
+        let old: OldBaseline = serde_json::from_value(wire).unwrap();
+        assert_eq!(serde_json::to_value(old).unwrap(), expected);
     }
 }

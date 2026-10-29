@@ -44,6 +44,57 @@ pub struct RefreshRequest {
     pub generation: u64,
 }
 
+/// Strict `session.refresh` body for a runner declaring `refresh_relaunch`.
+/// Owners must never send `required` to a runner without that group: those
+/// runners continue decoding [`RefreshRequest`] and refuse unknown fields.
+/// The next breaking release will fold `required` into `RefreshRequest` and
+/// mark that type non-exhaustive; this separate type preserves struct literals.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct RelaunchRefreshRequest {
+    pub plan: Map<String, Value>,
+    pub policy: String,
+    pub generation: u64,
+    /// Absent means false: an unsuccessful relaunch may run on the old plan.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
+}
+
+impl RelaunchRefreshRequest {
+    pub fn new(plan: Map<String, Value>, policy: impl Into<String>, generation: u64) -> Self {
+        RefreshRequest::new(plan, policy, generation).into()
+    }
+
+    pub fn with_required(mut self, required: bool) -> Self {
+        self.required = Some(required);
+        self
+    }
+
+    pub fn required(&self) -> bool {
+        self.required.unwrap_or(false)
+    }
+
+    pub fn check_policy(&self) -> Result<(), &'static str> {
+        check_policy(&self.policy)
+    }
+
+    pub fn check_output_refs(&self, advertised: bool) -> Result<(), &'static str> {
+        crate::output_refs::check_plan(&Value::Object(self.plan.clone()), advertised)
+    }
+}
+
+impl From<RefreshRequest> for RelaunchRefreshRequest {
+    fn from(request: RefreshRequest) -> Self {
+        Self {
+            plan: request.plan,
+            policy: request.policy,
+            generation: request.generation,
+            required: None,
+        }
+    }
+}
+
 impl RefreshRequest {
     /// Check output-reference plan members before fetching or storing a change.
     pub fn check_output_refs(&self, advertised: bool) -> Result<(), &'static str> {
@@ -571,5 +622,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn relaunch_refresh_required_is_additive_and_strict() {
+        let wire: Value =
+            serde_json::from_str(crate::vectors::file("refresh-relaunch-required.json").unwrap())
+                .unwrap();
+        let request: RelaunchRefreshRequest = serde_json::from_value(wire.clone()).unwrap();
+        assert!(request.required());
+        assert_eq!(serde_json::to_value(request).unwrap(), wire);
+        assert!(serde_json::from_value::<RefreshRequest>(wire.clone()).is_err());
+        let plain = RefreshRequest::new(Map::new(), crate::rungs::IMMEDIATELY, 1);
+        let extended = RelaunchRefreshRequest::from(plain.clone());
+        assert!(!extended.required());
+        assert_eq!(
+            serde_json::to_value(extended).unwrap(),
+            serde_json::to_value(plain).unwrap()
+        );
+        let built = RelaunchRefreshRequest::new(Map::new(), crate::rungs::IMMEDIATELY, 1)
+            .with_required(true);
+        assert!(built.required());
+        let mut unknown = wire;
+        unknown["unexpected"] = true.into();
+        assert!(serde_json::from_value::<RelaunchRefreshRequest>(unknown).is_err());
     }
 }

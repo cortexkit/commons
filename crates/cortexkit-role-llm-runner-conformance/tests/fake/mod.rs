@@ -173,6 +173,14 @@ const READ_FIELDS: &[&str] = &[
 /// case must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub declare_run_cancel_by_interrupt: bool,
+    pub declare_refresh_relaunch: bool,
+    pub cancel_sender_without_interrupt: bool,
+    pub cancel_sender_non_now: bool,
+    pub cancel_sender_other_session: bool,
+    pub relaunch_rewrites_history: bool,
+    pub relaunch_keeps_old_tools: bool,
+    pub relaunch_omits_ride: bool,
     pub head_error_on_completed: bool,
     pub head_error_on_fresh: bool,
     pub head_error_on_paused: bool,
@@ -943,6 +951,7 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    surface_change_rides: u64,
     moved_head: Option<cortexkit_role_llm_runner::read::HeadCut>,
     planted_marker: Option<cortexkit_role_llm_runner::tags::Marker>,
     native_message_key: Option<Value>,
@@ -2358,6 +2367,9 @@ impl Module {
                         self.world.honours_checkpoint(),
                     ));
                 observation.max_output_tokens = output_cap;
+                if self.world.serves(groups::REFRESH_RELAUNCH) {
+                    observation.surface_change_rides = Some(sess.surface_change_rides);
+                }
                 self.world
                     .model_requests
                     .lock()
@@ -2912,10 +2924,21 @@ impl Module {
         let Some(sess) = sess else {
             return Ok(respond("not_active"));
         };
-        if stamp.principal != sess.owner {
+        let at = request.at();
+        let sender = sess
+            .senders
+            .iter()
+            .find(|sender| sender.module == stamp.principal);
+        let sender_allowed = self.world.serves(groups::RUN_CANCEL_BY_INTERRUPT)
+            && ((sender.is_some_and(|sender| sender.interrupt)
+                || (sender.is_some() && self.world.defects.cancel_sender_without_interrupt))
+                && (at == "now" || self.world.defects.cancel_sender_non_now)
+                || (self.world.defects.cancel_sender_other_session
+                    && sender.is_none()
+                    && stamp.principal == SENDER_MODULE));
+        if stamp.principal != sess.owner && !sender_allowed {
             return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
         }
-        let at = request.at();
         if self.world.cancel_step_boundary
             && !matches!(at, "now" | "step_boundary")
             && !self.world.defects.cancel_accepts_unlisted_at
@@ -5401,6 +5424,16 @@ impl FakeSubject {
                         .filter_map(|c| c.group())
                         .map(str::to_owned)
                         .chain(self.held_calls_group.then(|| groups::HELD_CALLS.to_owned()))
+                        .chain(
+                            self.defects
+                                .declare_run_cancel_by_interrupt
+                                .then(|| groups::RUN_CANCEL_BY_INTERRUPT.to_owned()),
+                        )
+                        .chain(
+                            self.defects
+                                .declare_refresh_relaunch
+                                .then(|| groups::REFRESH_RELAUNCH.to_owned()),
+                        )
                         .chain(
                             self.head_sender_group
                                 .then(|| groups::HEAD_SENDER.to_owned()),

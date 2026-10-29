@@ -155,6 +155,7 @@ shipping runner with this document.
 | `run_status` | `run.status` | §6.1 |
 | `held_calls` | `run.status` and run status events with held tool calls | §6.1 |
 | `run_cancel` | `run.cancel` | §6.2 |
+| `run_cancel_by_interrupt` | no additional op; requires `run_cancel` and `delivery_order` | §6.2 |
 | `dispatch_attribution` | `session.read` (per-call fields) | §5 |
 | `streaming` | `session.read` (`head`), `session.subscribe` | §7 |
 | `model_view` | `session.read` (`view: "model"`) | §8 |
@@ -167,6 +168,7 @@ shipping runner with this document.
 | `tag_checkpoint` | `session.read`, `session.resolve` (it requires `compaction`), and honouring a Setup checkpoint | §9.6 |
 | `message_checkpoint` | message and tag anchors in Setup and native marker checkpoints (requires `tag_checkpoint`) | §4.8, §9.6 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
+| `refresh_relaunch` | `session.subscribe`; requires `session_change` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
 | `session_retention` | `session.send`, `session.head`, `session.release`; extends `session.adopt` where declared | §9.14 |
 | `archive_prunes_reasoning` | `session.read`; extends every served `session.read` and `session.history` page form | §9.14.1 |
@@ -1437,7 +1439,8 @@ run.
   the scope stamp's `owner`, never from a request field. The check
   compares principals, not routes: an owner is admitted on any route,
   scoped or unscoped, and at any scope epoch, because cleanup cancels
-  often arrive after the scope has ended or reopened. Any other caller is
+  often arrive after the scope has ended or reopened. Except for the
+  `run_cancel_by_interrupt` grant below, any other caller is
   refused `scope_owner_mismatch`. A local process presenting no consumer
   identity (`direct`) is not an owner, and no operator principal is
   admitted beside them.
@@ -1449,6 +1452,20 @@ run.
   first episode.
 - [pinned] A run a caller cancels ends `cancelled`, never `interrupted`
   (§6).
+- [pinned] Opt-in `run_cancel_by_interrupt` requires `run_cancel` and
+  `delivery_order`; `check_describe` refuses it without either. It also
+  admits `run.cancel` with `at: "now"` (including the default when absent)
+  from a sender named by that session's current plan (§9.7) whose current
+  grant has `interrupt: true`. Identity is matched exactly as in §9.7,
+  from the route bind's attested principal and the plan, never a request
+  field. No other cancellation point is admitted from that sender.
+  A named sender without `interrupt`, a revoked grant, a cancel for another
+  session, and every other non-owner caller are refused
+  `scope_owner_mismatch`. A plan change dropping `interrupt` takes effect
+  at the next cancel. `session.retract` remains owner-only. This adds no
+  authority: the sender can already end the running turn with
+  `delivery: "interrupt"`; the group lets it stop without starting a new
+  turn. Without the group the existing cancellation rules are unchanged.
 - [pinned] On an expired session, `run.cancel` answers `expired`, writes
   nothing, and never acts on a lineage started after the expiry (§9.1).
 
@@ -4274,6 +4291,66 @@ every request, answer and refusal.
     name is refused the same way, naming those tools. `names` is sorted.
     System text, and which of the set's tools the plan offers, may change.
 
+**Opt-in `refresh_relaunch`.**
+
+- [pinned] This group requires `session_change` and the `session.subscribe`
+  operation, not all of `live_events`. `check_describe` refuses a declaration
+  missing either. A runner declaring neither new group retains its existing
+  behavior and conformance verdict.
+- [pinned] A runner whose host fixes its tool set at start accepts refreshes
+  requiring new tools, changed definitions or removal from the fixed set,
+  instead of refusing `tool_outside_host_set`. Fetch, admission refusals,
+  generations and drift remain as above. Removing a tool from the offered
+  subset without changing the host's fixed set needs no restart; neither
+  does changing only system text or which registered tools are offered.
+- [pinned] A relaunch happens only at a run boundary with no run in progress,
+  at the pending change's rung point under the next-run rule: `immediately`
+  means the next run; deferred rungs wait for the `session.flush_prefix` or
+  rebuild reaching their point. The runner restarts only that session's
+  private host with the new plan, preserving history bytes, lineage and
+  message ordinals. Several pending changes cost one restart. After success,
+  `applied_generation` moves and `effective` names the new plan as usual.
+- [pinned] Only declaring runners accept optional `required` on
+  `session.refresh`, absent meaning false. Owners never send that field to
+  a runner without `refresh_relaunch`: `RefreshRequest` stays strict and
+  rejects it. `RelaunchRefreshRequest` is the additive strict Rust type for
+  the same body with the optional marker. An identical repeat also has the
+  same required boolean (absent and false are equivalent); changing it at
+  the accepted generation is `generation_stale`.
+- [pinned] On a failed non-required relaunch the runner restores the host
+  on the effective old tool definitions and runs the turn on them. Additions,
+  changed definitions and system text remain pending. Tools the pending plan
+  removes or no longer offers are refused at once by the existing offered-set
+  gate, `tool_not_selected`, including during fallback: authority removal
+  never waits for a successful restart. `applied_generation` does not move
+  and `effective` still names the old plan. The runner must never report the
+  new generation while quietly using the old tool set.
+- [pinned] A required change whose relaunch fails instead ends the run
+  `error` with class `host_relaunch_failed`; nothing runs on old definitions.
+  For either failure the change remains pending and is retried at the next
+  boundary. The run failure is not a request refusal or a provider error.
+- [pinned] A failed relaunch records `pending_failure` beside `pending` in
+  `session.baseline`: `{generation, reason, attempts, last_attempt_ms}`
+  (`baseline::RelaunchFailure`). `attempts` is the positive count of failed
+  relaunch attempts for that generation; `last_attempt_ms` is the last
+  attempt's Unix epoch time in milliseconds. Its generation always equals
+  `pending.generation`; it clears when the change applies or is superseded.
+  The owner also receives a new `session_refresh_failed {session, generation,
+  reason}` event on the durable `session.subscribe` control lane, even
+  without `live_events`. No existing session-change event fits this notice.
+  The event is prompt notice; the lenient baseline is the recovery record.
+- [pinned] For runners declaring `compaction`, a changed tool surface changes
+  the provider prefix: after the relaunch succeeds and before the new host's
+  first model request, send `compaction.ride` with cause `surface_change`,
+  so queued provider work lands in that same rebuild. The same ride-before-
+  request rule applies to system-text-only changes applied without a restart.
+  An unsuccessful relaunch that falls back to unchanged model tools sends
+  no ride: its provider surface and cached prefix did not change, and removals
+  are enforced at the offered-set gate only. If fallback does change the tool
+  list the model receives, it is a surface change and its ride goes first.
+  These rules make the existing compaction rewrite-ride ordering explicit
+  for session changes; an attempted relaunch alone is never a ride cause.
+
 **`session.refresh_policy {generation, policy, send_id}`**
 (`RefreshPolicyRequest`, strict).
 
@@ -4486,7 +4563,7 @@ treats it as a terminal refusal of that one request.
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose legacy delivery mode is undeclared, or a `delivery_order` list with no declared member (§9.7) | `delivery`: the mode string or the ordered list as sent | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
-| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel`, `session.retract`, `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
+| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel` (except `now` from that session's current interrupt-granted plan sender on a `run_cancel_by_interrupt` runner, §6.2), `session.retract`, `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline, including when a `session.refresh` fetch misses its deadline (§10.2) | `provider` | **yes** |
@@ -4506,7 +4583,7 @@ treats it as a terminal refusal of that one request.
 | `pending_superseded` | a `session.refresh_policy` for a generation a later refresh superseded | `{generation, pending}` | no |
 | `already_applied` | a `session.refresh_policy` for a generation already applied | `{generation, applied_by}` | no |
 | `generation_stale` | a `session.refresh` at or below the accepted generation that is not an identical repeat (§10.2) | `{accepted}` | no |
-| `tool_outside_host_set` | a `session.refresh` plan naming a tool outside the tool set the host fixed at start, a changed definition under a kept name included (§10.2) | `{names}` | no |
+| `tool_outside_host_set` | without `refresh_relaunch`, a `session.refresh` plan naming a tool outside the tool set the host fixed at start, a changed definition under a kept name included (§10.2) | `{names}` | no |
 
 - [pinned] Only the codes marked retryable are retried with the same request
   (`errors::is_retryable`). A refusal is an answer: retrying it unchanged
@@ -4521,6 +4598,14 @@ treats it as a terminal refusal of that one request.
   role.
 
 ### 12.2 Run errors (`errors::provider_codes`)
+
+Runner-side error classes are open strings, not a closed enum. In addition
+to the provider codes below, this role names the following runner-side class
+(`errors::run_error_classes`):
+
+| Error class | When |
+|---|---|
+| `host_relaunch_failed` | a required `refresh_relaunch` change could not start the new host; the run ends `error` without using old definitions, and the change remains pending (§10.2) |
 
 [pinned] A run that ends `error` because of a provider names the code
 callers branch on as `provider_code` in its run error, and any finer

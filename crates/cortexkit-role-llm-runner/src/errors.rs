@@ -15,6 +15,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Named runner-side run error classes. Classes remain open strings.
+pub mod run_error_classes {
+    /// A required refresh could not start the session host with its new plan.
+    pub const HOST_RELAUNCH_FAILED: &str = "host_relaunch_failed";
+}
+
 /// A request field is malformed, unknown, or combined with a field it
 /// excludes. `detail.field` names it.
 pub const INVALID_PARAMS: &str = "invalid_params";
