@@ -1,0 +1,175 @@
+{
+  "contract": "llm-runner/v1",
+  "cases": [
+    {
+      "id": "openai-responses-developer-in-order",
+      "route": { "protocol": "openai_responses", "turn_system_supported": true },
+      "rendered_text": "Keep the summary concise.",
+      "delivery": ["turn_system", "steer"],
+      "attempts": [
+        {
+          "conversation": [
+            { "role": "user", "content": [{ "type": "input_text", "text": "Summarize the notes." }] }
+          ],
+          "insertion_index": 1,
+          "expect": {
+            "outcome": "delivered",
+            "authority": "system",
+            "delivered_as": { "mode": "turn_system" },
+            "request": {
+              "input": [
+                { "role": "user", "content": [{ "type": "input_text", "text": "Summarize the notes." }] },
+                { "role": "developer", "content": [{ "type": "input_text", "text": "Keep the summary concise." }] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "anthropic-native-after-tool-result",
+      "route": { "protocol": "anthropic_messages", "turn_system_supported": true },
+      "rendered_text": "Keep the summary concise.",
+      "delivery": ["turn_system"],
+      "attempts": [
+        {
+          "conversation": [
+            { "role": "assistant", "content": [{ "type": "tool_use", "id": "call_1", "name": "read_notes", "input": {} }] },
+            { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "call_1", "content": "Public notes." }] }
+          ],
+          "insertion_index": 2,
+          "expect": {
+            "outcome": "delivered",
+            "authority": "system",
+            "delivered_as": { "mode": "turn_system" },
+            "request": {
+              "messages": [
+                { "role": "assistant", "content": [{ "type": "tool_use", "id": "call_1", "name": "read_notes", "input": {} }] },
+                { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "call_1", "content": "Public notes." }] },
+                { "role": "system", "content": "Keep the summary concise." }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "anthropic-native-waits-after-model-reply",
+      "route": { "protocol": "anthropic_messages", "turn_system_supported": true },
+      "rendered_text": "Keep the summary concise.",
+      "delivery": ["turn_system"],
+      "attempts": [
+        {
+          "conversation": [
+            { "role": "user", "content": "Summarize the notes." },
+            { "role": "assistant", "content": "Here is the summary." }
+          ],
+          "insertion_index": 2,
+          "expect": {
+            "outcome": "not_possible_at_this_boundary",
+            "send_state": "pending",
+            "request": null
+          }
+        },
+        {
+          "conversation": [
+            { "role": "user", "content": "Summarize the notes." },
+            { "role": "assistant", "content": "Here is the summary." },
+            { "role": "user", "content": "Include the action items." }
+          ],
+          "insertion_index": 3,
+          "expect": {
+            "outcome": "delivered",
+            "authority": "system",
+            "delivered_as": { "mode": "turn_system" },
+            "request": {
+              "messages": [
+                { "role": "user", "content": "Summarize the notes." },
+                { "role": "assistant", "content": "Here is the summary." },
+                { "role": "user", "content": "Include the action items." },
+                { "role": "system", "content": "Keep the summary concise." }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "anthropic-native-never-between-tool-call-and-result",
+      "route": { "protocol": "anthropic_messages", "turn_system_supported": true },
+      "rendered_text": "Keep the summary concise.",
+      "delivery": ["turn_system"],
+      "attempts": [
+        {
+          "conversation": [
+            { "role": "assistant", "content": [{ "type": "tool_use", "id": "call_1", "name": "read_notes", "input": {} }] },
+            { "role": "user", "content": [{ "type": "tool_result", "tool_use_id": "call_1", "content": "Public notes." }] }
+          ],
+          "insertion_index": 1,
+          "expect": {
+            "outcome": "not_possible_at_this_boundary",
+            "send_state": "pending",
+            "request": null
+          }
+        }
+      ]
+    },
+    {
+      "id": "unsupported-route-falls-through-at-user-authority",
+      "route": { "protocol": "gemini", "turn_system_supported": false },
+      "rendered_text": "Keep the summary concise.",
+      "delivery": ["turn_system", "steer"],
+      "attempts": [
+        {
+          "conversation": [
+            { "role": "user", "parts": [{ "text": "Summarize the notes." }] }
+          ],
+          "insertion_index": 1,
+          "expect": {
+            "outcome": "delivered",
+            "authority": "user",
+            "delivered_as": { "mode": "steer" },
+            "request": {
+              "contents": [
+                { "role": "user", "parts": [{ "text": "Summarize the notes." }] },
+                { "role": "user", "parts": [{ "text": "<context-note>Keep the summary concise.</context-note>" }] }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "stored-entry-replayed-without-model-support",
+      "route": { "protocol": "anthropic_messages", "turn_system_supported": false },
+      "rendered_text": "Keep the summary concise.",
+      "stored_entry": {
+        "role": "system",
+        "text": "Keep the summary concise.",
+        "delivered_as": { "mode": "turn_system" }
+      },
+      "attempts": [
+        {
+          "conversation": [
+            { "role": "user", "content": "Summarize the notes." },
+            { "role": "assistant", "content": "Here is the summary." }
+          ],
+          "insertion_index": 1,
+          "expect": {
+            "outcome": "replayed",
+            "authority": "user",
+            "delivered_as": { "mode": "turn_system" },
+            "stored_entry_unchanged": true,
+            "request": {
+              "messages": [
+                { "role": "user", "content": "Summarize the notes." },
+                { "role": "user", "content": "<context-note>Keep the summary concise.</context-note>" },
+                { "role": "assistant", "content": "Here is the summary." }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

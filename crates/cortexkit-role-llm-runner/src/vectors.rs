@@ -416,6 +416,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/run_status.held_absent.json"),
     ),
     (
+        "turn-system-rendering.json",
+        include_str!("../test-vectors/llm-runner-v1/turn-system-rendering.json"),
+    ),
+    (
         "README.md",
         include_str!("../test-vectors/llm-runner-v1/README.md"),
     ),
@@ -512,6 +516,149 @@ mod tests {
 
     fn dir() -> String {
         format!("{}/test-vectors/{DIR}", env!("CARGO_MANIFEST_DIR"))
+    }
+
+    #[test]
+    fn turn_system_rendering_vectors_preserve_order_placement_and_authority() {
+        use serde_json::Value;
+
+        fn legal_anthropic_boundary(before: &[Value], after: &[Value]) -> bool {
+            let mut pending_tools = BTreeSet::new();
+            for message in before {
+                if let Some(blocks) = message["content"].as_array() {
+                    for block in blocks {
+                        match block["type"].as_str().unwrap() {
+                            "tool_use" | "server_tool_use" => {
+                                pending_tools.insert(block["id"].as_str().unwrap());
+                            }
+                            kind if kind == "tool_result" || kind.ends_with("_tool_result") => {
+                                pending_tools.remove(block["tool_use_id"].as_str().unwrap());
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+            let follows_user_or_server_result = before.last().is_some_and(|message| {
+                message["role"] == "user"
+                    || (message["role"] == "assistant"
+                        && message["content"]
+                            .as_array()
+                            .and_then(|blocks| blocks.last())
+                            .and_then(|block| block["type"].as_str())
+                            .is_some_and(|kind| kind.ends_with("_tool_result")))
+            });
+            pending_tools.is_empty()
+                && follows_user_or_server_result
+                && after
+                    .first()
+                    .is_none_or(|message| message["role"] == "assistant")
+        }
+
+        let vectors = load("turn-system-rendering.json");
+        let cases = cases(&vectors, "cases");
+        assert_eq!(cases.len(), 6);
+        let mut ids = BTreeSet::new();
+        let mut held = 0;
+        for case in cases {
+            let id = case["id"].as_str().unwrap();
+            assert!(ids.insert(id), "duplicate case: {id}");
+            let protocol = case["route"]["protocol"].as_str().unwrap();
+            let supported = case["route"]["turn_system_supported"].as_bool().unwrap();
+            let text = case["rendered_text"].as_str().unwrap();
+            let attempts = case["attempts"].as_array().unwrap();
+            assert!(!attempts.is_empty(), "{id}");
+            for attempt in attempts {
+                let conversation = attempt["conversation"].as_array().unwrap();
+                let index = attempt["insertion_index"].as_u64().unwrap() as usize;
+                assert!(index <= conversation.len(), "{id}");
+                let expected = &attempt["expect"];
+                if expected["outcome"] == "delivered" {
+                    assert_eq!(index, conversation.len(), "{id}: delivery must append");
+                }
+                if expected["outcome"] == "not_possible_at_this_boundary" {
+                    held += 1;
+                    assert_eq!(protocol, "anthropic_messages", "{id}");
+                    assert!(supported, "{id}");
+                    assert!(
+                        !legal_anthropic_boundary(&conversation[..index], &conversation[index..]),
+                        "{id}: the held boundary must be illegal"
+                    );
+                    assert_eq!(expected["send_state"], "pending", "{id}");
+                    assert!(expected["request"].is_null(), "{id}");
+                    continue;
+                }
+
+                let request = &expected["request"];
+                let key = match protocol {
+                    "openai_responses" => "input",
+                    "anthropic_messages" => "messages",
+                    "gemini" => "contents",
+                    _ => panic!("{id}: unknown protocol"),
+                };
+                let messages = request[key].as_array().unwrap();
+                assert_eq!(messages.len(), conversation.len() + 1, "{id}");
+                let mut without_entry = messages.clone();
+                let entry = without_entry.remove(index);
+                assert_eq!(&without_entry, conversation, "{id}: conversation order");
+                assert!(request.get("instructions").is_none(), "{id}");
+                if supported {
+                    assert_eq!(expected["outcome"], "delivered", "{id}");
+                    assert_eq!(expected["authority"], "system", "{id}");
+                    assert_eq!(expected["delivered_as"]["mode"], "turn_system", "{id}");
+                    if protocol == "openai_responses" {
+                        assert_eq!(entry["role"], "developer", "{id}");
+                        assert_eq!(entry["content"][0]["type"], "input_text", "{id}");
+                        assert_eq!(entry["content"][0]["text"], text, "{id}");
+                    } else {
+                        assert_eq!(protocol, "anthropic_messages", "{id}");
+                        assert_eq!(entry["role"], "system", "{id}");
+                        assert_eq!(entry["content"], text, "{id}");
+                        for (position, message) in messages.iter().enumerate() {
+                            if message["role"] == "system" {
+                                assert!(
+                                    legal_anthropic_boundary(
+                                        &messages[..position],
+                                        &messages[position + 1..]
+                                    ),
+                                    "{id}: illegal native system position"
+                                );
+                            }
+                        }
+                    }
+                } else {
+                    assert_eq!(expected["authority"], "user", "{id}");
+                    assert_eq!(entry["role"], "user", "{id}");
+                    assert!(
+                        messages.iter().all(|message| {
+                            message["role"] != "system" && message["role"] != "developer"
+                        }),
+                        "{id}: unsupported route must not elevate authority"
+                    );
+                    let rendered = if protocol == "gemini" {
+                        entry["parts"][0]["text"].as_str().unwrap()
+                    } else {
+                        entry["content"].as_str().unwrap()
+                    };
+                    assert_eq!(
+                        rendered,
+                        format!("<context-note>{text}</context-note>"),
+                        "{id}"
+                    );
+                    if let Some(stored) = case.get("stored_entry") {
+                        assert_eq!(expected["outcome"], "replayed", "{id}");
+                        assert_eq!(stored["role"], "system", "{id}");
+                        assert_eq!(stored["text"], text, "{id}");
+                        assert_eq!(expected["delivered_as"], stored["delivered_as"], "{id}");
+                        assert_eq!(expected["stored_entry_unchanged"], true, "{id}");
+                    } else {
+                        assert_eq!(expected["outcome"], "delivered", "{id}");
+                        assert_eq!(expected["delivered_as"]["mode"], "steer", "{id}");
+                    }
+                }
+            }
+        }
+        assert_eq!(held, 2);
     }
 
     /// The compiled-in bytes are exactly the files on disk, and every file

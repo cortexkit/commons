@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.24
+
+- Pin `cortexkit-role-llm-runner` to `=0.7.21`, which spells out provider
+  rendering and legal placement for `turn_system` and ships rendering vectors
+  for runners' own tests. The kit still observes `delivered_as`, not provider
+  requests; its rendering coverage has not changed.
+
 ## 0.15.23
 
 - Pin `cortexkit-role-llm-runner` to `=0.7.20`. Read the live declaration for

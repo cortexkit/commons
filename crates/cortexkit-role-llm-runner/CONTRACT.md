@@ -2989,8 +2989,8 @@ say who may send and which texts are system text.
   (`delivery_order::Mode`):
   - `tool_result`: rendered with the next tool result, the first time that
     result is sent;
-  - `turn_system`: a turn-scoped system message (Anthropic's `clear_at:
-    next_user_message`), for template text only (below);
+  - `turn_system`: turn-scoped system text, rendered for its provider route
+    by the rules below, for template text only;
   - `steer`: a user message into the run in progress, at its next step;
   - `idle_start`: a user message that starts a run on an idle session.
 - [pinned] `delivery` is decoded once, as a string or a list
@@ -3019,8 +3019,9 @@ say who may send and which texts are system text.
 - [pinned] At each request boundary, the runner takes the first mode in the
   list that is possible there (`delivery_order::choose`,
   `delivery_order::Boundary`): `tool_result` needs a tool result about to be
-  sent for the first time; `turn_system` needs a provider that supports it,
-  a runner that owns the request, and the authority rule below; `steer`
+  sent for the first time; `turn_system` needs a supported provider route
+  and a legal position under the rendering rules below, a runner that owns
+  the request, and the authority rule below; `steer`
   needs a run in progress; `idle_start` needs an idle session. When none is
   possible, the send stays queued, durably, for the next boundary.
   Without `delivery_order_modes`, `turn_system` counts as declared wherever
@@ -3144,12 +3145,44 @@ say who may send and which texts are system text.
   for byte.
 - [pinned] `tool_result`, `steer` and `idle_start` deliver at user
   authority. `turn_system` is possible only for a rendered template, and
-  only where the provider supports a turn-scoped system message and the
-  runner owns the request. Where it is not, the runner falls through to the
-  next mode in the list, carrying the same rendered text at user authority.
-  A send without a template never goes out as `turn_system`.
+  only where the provider route and position support it under the rules
+  below and the runner owns the request. Where it is not, the runner falls
+  through to the next mode in the list, carrying the same rendered text at
+  user authority. A send without a template never goes out as `turn_system`.
+- [pinned] On OpenAI Responses routes, including subscription routes that
+  speak the Responses protocol, `turn_system` renders as a `developer`-role
+  input item at its position in the conversation. It never uses the
+  top-level `instructions` field: those instructions apply only to the
+  current request and are not carried forward with `previous_response_id`.
+  OpenAI lists `developer` as an accepted input role; its documentation gives
+  no rule about where that item may appear in the conversation.
+- [pinned] On Anthropic Messages, `turn_system` renders as a `role:
+  "system"` message inside `messages` only on models the provider lists as
+  accepting mid-conversation system messages. The runner's model catalog
+  takes that support from the provider's published model list, never from
+  version arithmetic: for example, at the time of writing, Opus 4.8 and
+  specific named Claude 5 models are listed, not every major-5 model.
+- [pinned] An Anthropic mid-conversation system message goes immediately
+  after a user turn (a user turn carrying tool results counts), or after an
+  assistant turn ending in a server-tool result. It never goes between a
+  tool call and its tool result; Anthropic refuses that placement with 400.
+  It must end the request or be followed immediately by an assistant turn.
+  Thus `turn_system` is not possible at a boundary directly after the
+  model's own reply. The first-possible-mode rule above still applies:
+  the next listed mode wins, or the send stays queued. A queued send can
+  wait for the next user turn or tool result and be placed right after it.
+- [pinned] On every other route, including Gemini, Anthropic models not
+  on the published support list, and any route whose support the runner
+  cannot confirm, `turn_system` is never possible. The runner falls
+  through in list order, carrying the same rendered text at user
+  authority, or keeps the send queued when no mode is possible. A runner
+  may wrap that user-authority text in its own wrapper; no provider's
+  wrapper is required.
 - [pinned] A stored `turn_system` entry is part of the session's history:
   its stored bytes, role and `delivered_as` mode never change.
+  On a route that can accept it, the entry renders in the provider form
+  above at its stored position. That position is legal because it was
+  legal when the entry was delivered.
   If a later request goes to a model or provider that cannot accept a
   turn-scoped system message (after a model switch, for example), the runner
   renders that entry's bytes in the request as user-authority text. It never

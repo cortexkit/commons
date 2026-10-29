@@ -348,6 +348,53 @@ Its declared and undeclared expectations are checked by
 Checked by the `delivery_order::tests` and
 `describe::tags_and_tool_calls_tests` modules of the wire crate.
 
+## Turn-system rendering
+
+`turn-system-rendering.json` pins the provider rendering rules in CONTRACT.md
+§9.7 for runners' own parser and renderer tests. These are provider-shaped
+conversation fragments, not new wire types or complete authenticated requests.
+The conformance kit sees `delivered_as`, not provider requests, so it cannot
+check this rendering itself.
+
+Each case names a route protocol and whether its support is confirmed,
+the already-rendered template text, and either a delivery list or a stored
+entry. Each attempt supplies the conversation without the entry and its
+zero-based `insertion_index`. `expect.request` shows the fragment with the
+entry inserted. A `not_possible_at_this_boundary` outcome has no request and
+leaves the send pending; attempts in one case are successive boundaries for
+the same send. A `delivered` entry is appended at the end of the conversation
+at that request boundary; only a `replayed` stored entry may sit earlier in
+the history. `authority` describes the provider rendering, while
+`delivered_as` records the selected mode (or the unchanged stored mode on
+replay). `stored_entry` is only the relevant stored-entry excerpt.
+
+The six cases cover:
+
+- OpenAI Responses appending a `developer` item after the latest user turn,
+  without top-level `instructions`; subscription routes speaking Responses
+  use the same form.
+- Supported Anthropic Messages inserting a system message after a user turn
+  carrying a tool result.
+- Supported Anthropic Messages holding a send after the model's reply, then
+  inserting it after the next user turn.
+- Supported Anthropic Messages refusing to insert between a tool call and
+  its result: the mode is not possible at that boundary, rather than sending
+  an invalid provider request.
+- An unsupported Gemini route falling through to `steer` at user authority.
+- A stored system entry replayed at user authority on an Anthropic model
+  without support, preserving its stored role, text and `delivered_as`.
+
+Anthropic support comes from the provider's published model list through the
+runner's catalog, never from a model-version comparison. The example
+`<context-note>` wrapper illustrates user text only; runners may choose their
+own wrapper. The crate test
+`vectors::tests::turn_system_rendering_vectors_preserve_order_placement_and_authority`
+checks conversation order, delivery only at the end of history, native
+Anthropic positions (including unresolved tool calls and what may follow a
+system message), held boundaries, and user
+authority on every unsupported case. It checks the data's structural
+invariants, not a runner's provider adapter.
+
 # Run tool calls
 
 `run-tool-calls.json` pins `run.tool_calls`: requests, requests refused by

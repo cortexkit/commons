@@ -889,6 +889,13 @@ the session does not show is refused `template_part_gone`. The list rides in
 when the subject does not declare the group: such a runner must refuse a
 list naming `delivery`.
 
+The kit observes delivery through `delivered_as`; it does not inspect the
+provider request. `turn_system_supported()` therefore does not check the
+provider's message role or placement. The contract crate's
+`test-vectors/llm-runner-v1/turn-system-rendering.json` supplies provider-shaped
+fragments for runners' own parser and renderer tests, following CONTRACT.md
+§9.7.
+
 ## Following a queued send
 
 `delivery_order_steer_receipt_durable_across_restart` needs

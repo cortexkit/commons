@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.21
+
+- Spell out how `turn_system` renders on each provider route: an in-order
+  developer input item on OpenAI Responses, a mid-conversation system message
+  only on listed Anthropic models and at legal boundaries, and user-authority
+  fall-through elsewhere. Keep stored entries at their recorded positions,
+  using user authority when the later route cannot accept system text.
+- Add six provider-shaped rendering vectors and a structural test for order,
+  Anthropic placement and unsupported-route authority. No wire or type change.
+
 ## 0.7.20
 
 - Add opt-in `run_cancel_by_interrupt`, requiring `run_cancel` and
