@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.24
+
+- Clarify the runner's optional `history_edit_cost` notices and pre-render
+  `chain_reset` rides. Deploy readers first: every compaction provider that
+  receives a runner's notices must pin compaction-provider 0.7.9 (or a later
+  release defining the header) before that runner sends it, or notice
+  digests disagree. No runner wire types
+  or behavior outside these optional signals change.
+
 ## 0.7.23
 
 Text only; no type, wire shape or test vector changes.

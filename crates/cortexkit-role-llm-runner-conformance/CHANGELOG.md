@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.28
+
+- Pin runner 0.7.24 and require compaction-provider 0.7.9 for the optional
+  edit-pricing notice and chain-reset ride documentation. Providers must
+  upgrade their readers before runners send `history_edit_cost`, because
+  older readers leave the header out of notice digests. No checks change.
+
 ## 0.15.27
 
 - Pins `cortexkit-role-llm-runner` `=0.7.23`, a text-only release. No case,

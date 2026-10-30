@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.9
+
+- Add the optional `history_edit_cost` notice header for suffix-only or
+  full-input edit pricing. Unknown values keep their wire spelling but read
+  as no hint; absence keeps existing pricing. Deploy readers first: every
+  provider that receives a runner's notices must pin this release (or a later
+  one defining the header) before that runner sends it, because older readers
+  leave it out of notice digests.
+- Add the `chain_reset` rewrite ride for full input already known to be
+  needed before rendering, never for send-time discoveries. It uses the
+  normal rewrite wait and answers, without requiring the `cache_ttl` refresh
+  that `model_change` requires. Older providers read it as an unknown cause,
+  and a rewrite ride never ends a run.
+- Regenerate async vectors for both pricing modes, absent and unknown hints,
+  their different digests, and chain-reset rides. The notice-size bound for
+  the defined headers rises from 2,391 to 3,432 bytes, still under the
+  4,096-byte cap.
+
 ## 0.7.8
 
 - Extend the shared Setup checkpoint with optional paired `message_count`

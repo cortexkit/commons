@@ -59,8 +59,9 @@ M = {
     6: ("m6", ["prt_6a"], {"role": "assistant", "content": [text("Added three tests.")]}),
 }
 
-NOTICE_ORDER = ["applied_view_version", "descends_from", "est_tokens", "events", "first_ordinal", "last_usage", "lineage_id",
-                "model", "seq", "session_ref", "through_digest", "through_ordinal", "window"]
+NOTICE_ORDER = ["applied_view_version", "descends_from", "est_tokens", "events", "first_ordinal", "history_edit_cost",
+                "last_usage", "lineage_id", "model", "reasoning_pruned", "seq", "session_ref", "through_digest",
+                "through_ordinal", "window"]
 
 
 def notice_digest(h):
@@ -76,7 +77,7 @@ def digest_of(o):
 
 
 def notice(name, seq, through, events=None, applied=None, usage=None, window="200000", est="1200", model=MODEL,
-           lineage="lin_a", descends_from=None, first_ordinal=None):
+           lineage="lin_a", descends_from=None, first_ordinal=None, history_edit_cost=None):
     h = {"session_ref": SR, "seq": str(seq), "lineage_id": lineage, "through_ordinal": str(through),
          "through_digest": sha(jcs(M[through][2])), "est_tokens": est, "model": model}
     if window is not None:
@@ -91,6 +92,8 @@ def notice(name, seq, through, events=None, applied=None, usage=None, window="20
         h["descends_from"] = descends_from
     if first_ordinal is not None:
         h["first_ordinal"] = str(first_ordinal)
+    if history_edit_cost is not None:
+        h["history_edit_cost"] = history_edit_cost
     return {
         "name": name,
         "subject": f"ck.{ACCT}.event.{RUNNER}.compaction.advanced.v1",
@@ -406,6 +409,12 @@ def mutate(base, name, problem=None, drop=(), **set_):
 
 
 N1, N2 = notices[0], notices[1]
+history_edit_cost = [
+    {**notice(f"history edit pricing: {cost or 'absent'}", 1, 1, history_edit_cost=cost),
+     "effective": effective, "without_header_digest": N1["digest"]}
+    for cost, effective in [(None, None), ("suffix", "suffix"), ("full_resend", "full_resend"),
+                            ("future_cost", None)]
+]
 extra = dict(N1["headers"])
 extra["trace_id"] = "abc"
 unknown_event = dict(N2["headers"])
@@ -517,6 +526,7 @@ ride = {
         {"name": "model changed", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "model_change", "deadline_ms": 1500}}},
         {"name": "account changed before sending", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "account_change", "account": "Route_1.a-b", "deadline_ms": 1500}}},
         {"name": "surface changed", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "surface_change", "deadline_ms": 1500}}},
+        {"name": "response chain reset known before rendering", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "chain_reset", "deadline_ms": 1500}}},
         {"name": "ceiling reached", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "ceiling", "deadline_ms": 30000}}},
         {"name": "cause this crate does not know, kept as received", "request": {"method": "compaction.ride", "params": {"session_ref": SR, "cause": "provider_switch", "deadline_ms": 1500}}},
     ],
@@ -552,6 +562,8 @@ ride = {
          "params": {"session_ref": SR, "cause": "account_change", "account": "Route_1.a-b", "deadline_ms": 300000}},
         {"name": "a surface-change ride just past the runner's own 10,000 ms default",
          "params": {"session_ref": SR, "cause": "surface_change", "deadline_ms": 10001}},
+        {"name": "a chain-reset ride waiting the most a ride may: 300,000 ms",
+         "params": {"session_ref": SR, "cause": "chain_reset", "deadline_ms": 300000}},
     ],
     "requests_refused": [
         {"name": "account change without an account", "params": {"session_ref": SR, "cause": "account_change", "deadline_ms": 1500}, "problem": "account"},
@@ -734,6 +746,7 @@ doc = {
                 "account": ACCT, "runner_module_id": RUNNER, "provider_module_id": PROVIDER},
     "transcript": {"lineage_id": "lin_a", "messages": transcript},
     "notices": notices,
+    "history_edit_cost": history_edit_cost,
     "notices_accepted": notices_accepted,
     "notices_refused": notices_refused,
     "view_ready": view_ready,

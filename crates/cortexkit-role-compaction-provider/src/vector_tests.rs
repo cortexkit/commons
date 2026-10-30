@@ -122,6 +122,56 @@ fn notice_builders_match_the_vector() {
 }
 
 #[test]
+fn history_edit_cost_is_optional_pricing_and_digest_bound() {
+    use crate::notice::HistoryEditCost;
+
+    let file = file();
+    assert!(notice::headers::NOTICE
+        .windows(2)
+        .all(|pair| pair[0] < pair[1]));
+    for case in vectors::cases(&file, "history_edit_cost") {
+        let name = name(case);
+        let map = headers(&case["headers"]);
+        let notice = AdvanceNotice::from_headers(&map).expect(name);
+        assert_eq!(notice.to_headers(), map, "{name}");
+        assert_eq!(notice.digest(), case["digest"].as_str().unwrap(), "{name}");
+        let expected = match case["effective"].as_str() {
+            Some("suffix") => Some(HistoryEditCost::Suffix),
+            Some("full_resend") => Some(HistoryEditCost::FullResend),
+            None => None,
+            Some(other) => panic!("unexpected pricing hint: {other}"),
+        };
+        assert_eq!(notice.history_edit_cost(), expected.as_ref(), "{name}");
+
+        let mut without_header = map.clone();
+        let raw = without_header.remove(notice::headers::HISTORY_EDIT_COST);
+        let old_digest = case["without_header_digest"].as_str().unwrap();
+        let absent = AdvanceNotice::from_headers(&without_header).expect(name);
+        assert_eq!(absent.digest(), old_digest, "{name}");
+        assert_eq!(absent.history_edit_cost(), None, "{name}");
+        if let Some(raw) = raw {
+            assert_ne!(notice.digest(), old_digest, "{name}");
+            let cost = HistoryEditCost::parse(&raw);
+            assert_eq!(cost.as_str(), raw, "{name}");
+            assert_eq!(
+                absent.with_history_edit_cost(cost).to_headers(),
+                map,
+                "{name}"
+            );
+        } else {
+            assert_eq!(notice.digest(), old_digest, "{name}");
+        }
+        if case["effective"].is_null() && notice.history_edit_cost.is_some() {
+            assert_eq!(
+                notice.history_edit_cost,
+                Some(HistoryEditCost::Unknown("future_cost".into())),
+                "{name}"
+            );
+        }
+    }
+}
+
+#[test]
 fn notices_accepted_ignore_what_they_do_not_know() {
     let file = file();
     for case in vectors::cases(&file, "notices_accepted") {
@@ -179,18 +229,22 @@ fn the_largest_well_formed_notice_fits_the_header_bound() {
     .with_first_ordinal(max)
     .with_descends_from(NoticeDescent::new("p".repeat(256), max, "b".repeat(64)))
     .with_reasoning_pruned(notice::ReasoningPruned::new(max, max, max))
+    .with_history_edit_cost(notice::HistoryEditCost::Unknown("x".repeat(1024)))
     .with_events(events);
     let encoded = notice.to_headers();
     assert!(encoded[notice::headers::EVENTS].len() <= notice::MAX_HEADER_VALUE_BYTES);
     assert_eq!(notice.check(), Ok(()));
-    // Every value at its bound: `events` at 1,024 bytes, both lineage ids at
-    // 256, and the rest at their widest encodings.
+    // The widest notice the per-value bounds allow: `events` and an unknown
+    // pricing hint at 1,024 bytes each, both lineage ids at 256, and the rest
+    // at their widest encodings. The fixture above stays under that bound
+    // (its nine event tokens join to 1,007 bytes), so this checks that the
+    // computed bound fits the cap and that a near-maximal notice fits it.
     let names: usize = notice::headers::NOTICE.iter().map(|n| n.len()).sum();
     let descent = 256 + 1 + 20 + 1 + 64;
     let reasoning_pruned = 3 * 20 + 2;
     let widest =
-        names + 1024 + 4 * 20 + 3 + 256 + 32 + 64 + 6 * 20 + 256 + descent + reasoning_pruned;
-    assert_eq!(widest, 2391);
+        names + 2 * 1024 + 4 * 20 + 3 + 256 + 32 + 64 + 6 * 20 + 256 + descent + reasoning_pruned;
+    assert_eq!(widest, 3432);
     assert!(widest <= notice::MAX_NOTICE_HEADER_BYTES);
     assert!(notice::header_bytes(&encoded) <= widest);
 }
@@ -457,6 +511,7 @@ fn ride_vectors() {
             RideCause::ModelChange,
             RideCause::AccountChange,
             RideCause::SurfaceChange,
+            RideCause::ChainReset,
             RideCause::Ceiling,
             RideCause::Unknown("provider_switch".into()),
         ]
@@ -736,6 +791,7 @@ fn overflow_on_a_non_ceiling_ride_is_ignored() {
         RideCause::TtlExpired,
         RideCause::ModelChange,
         RideCause::SurfaceChange,
+        RideCause::ChainReset,
         RideCause::Unknown("provider_switch".into()),
     ] {
         let request = RideRequest::new(session_ref, cause.clone(), 1500)

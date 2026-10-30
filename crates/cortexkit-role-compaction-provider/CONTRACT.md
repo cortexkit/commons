@@ -235,8 +235,8 @@ the session and freezes that plan for use.
   `ride::MAX_RIDE_WAIT_MS`; added in 0.5.1,
   `SetupRequest::with_ride_wait_max_ms`) is the longest this runner can
   hold a step for a rewrite ride (cause `ttl_expired`, `model_change`,
-  `account_change` or
-  `surface_change`, §8). Absent means the runner does not honour a
+  `account_change`, `surface_change` or `chain_reset`, §8). Absent means
+  the runner does not honour a
   provider-set ride wait. It declares runner support in the request, as
   `view_apply` does; a provider that predates the member ignores it (§14).
 - [pinned] Optional `reasoning_pruned: {generation, through_ordinal, at_ms}`
@@ -520,6 +520,20 @@ provider.
 | `last_usage` | no | the last response's measured usage, `<input>:<cache_read>:<cache_write>:<output>`; omitted before the first response |
 | `first_ordinal` | no | the current lineage's first ordinal (`llm-runner/v1`'s `session.head.first_ordinal`), at most one above `through_ordinal` |
 | `reasoning_pruned` | no | the session's prune state when the notice was recorded, `<generation>:<through_ordinal>:<at_ms>`, as `llm-runner/v1`'s `session.head.reasoning_pruned` reports it (§4); `generation` at least 1; sent only by a runner declaring `archive_prunes_reasoning`, for a session it has pruned. A convenience copy: `session.head` stays the authority |
+| `history_edit_cost` | no | pricing hint for the request the runner's next model call would send on the session's current route: `suffix` means an edit to already-sent history re-costs only from the edited message onward because the provider's prompt cache is keyed on prefix bytes; `full_resend` means the runner continues a provider-side response chain and any edit to already-sent content breaks it, forcing a request carrying the full input |
+
+- [pinned] A runner sets `history_edit_cost` on every notice when it knows
+  the next call's cost mode on the current route, and omits it when it does
+  not. An unknown value reads as absent for pricing. A provider uses this
+  header only as a pricing hint, never as a correctness signal; absent means
+  pricing as before. `AdvanceNotice::history_edit_cost` returns only known
+  hints; the raw value is retained for digest-preserving round trips.
+- [pinned] Deploy readers first: every provider that receives a runner's
+  notices must pin compaction-provider 0.7.9 (or a later release defining
+  `history_edit_cost`) before that runner sends this header. Older providers
+  leave undefined headers out of the notice digest, so sending it to a
+  provider that doesn't understand the header makes the digests disagree. This release accepts notices both with and
+  without the header.
 
 - [pinned] Event tokens (`notice::Event`). Every token follows one grammar:
   a name `[a-z][a-z0-9_]*`, then zero or more `:<argument>` segments of
@@ -573,7 +587,7 @@ provider.
 - [pinned] Size bound: the headers this contract defines total at most
   4,096 bytes (`MAX_NOTICE_HEADER_BYTES`), counting every name's and value's
   length as the bus counts a message's headers. The per-value bounds keep
-  every well-formed notice at or under 2,391 bytes; a runner with more events
+  every well-formed notice at or under 3,432 bytes; a runner with more events
   than fit splits them across consecutive notices.
 - [pinned] Notice digest (`AdvanceNotice::digest`, `notice::notice_digest`):
   lowercase hexadecimal SHA-256 over a sequence of frames, each an 8-byte
@@ -983,12 +997,13 @@ provider.
 - [pinned] `compaction.ride {session_ref, cause, deadline_ms, account?, overflow?}`
   (`ride::RideRequest`) is a synchronous call on the compaction route. The
   runner sends it only when its prefix is being rewritten anyway (`cause`
-  `ttl_expired`, `model_change`, `account_change` or `surface_change`), or
+  `ttl_expired`, `model_change`, `account_change`, `surface_change` or
+  `chain_reset`), or
   when a request
   reached the ceiling (`cause` `ceiling`, below). `cause` decodes open
   (`RideCause::Unknown`); a provider answers `nothing` to a cause it does not
   know. `deadline_ms` is how long the runner waits for the answer, counted
-  from sending, and is above 0. For the four rewrite causes it is Setup's
+  from sending, and is above 0. For the rewrite causes it is Setup's
   `ride_wait_ms` when the answer carried one (§4), and otherwise the
   runner's own short deadline, at most 10,000
   (`ride::MAX_REWRITE_RIDE_DEADLINE_MS`). The ride sits in front of a
@@ -1001,6 +1016,26 @@ provider.
   of 0 or above 300,000 (`ride::MAX_RIDE_WAIT_MS`) for any cause
   (`deadline_out_of_range`); the request does not carry the session's
   `ride_wait_ms`, so bounding a session's rides by it is the runner's job.
+
+| Ride cause | Meaning |
+|---|---|
+| `ttl_expired` | the prompt cache expired under the lifetime rules of §8.1 |
+| `model_change` | the session's model changed |
+| `account_change` | the runner knows the next request will use another provider account, as detailed below |
+| `surface_change` | the frozen system text or tool surface changed |
+| `chain_reset` | before rendering the step, the runner already knows the next request will carry the full input whatever the provider does; uses the same bounded wait and answers as `model_change`, but does not require its model-specific `cache_ttl` refresh |
+| `ceiling` | the request reached the ceiling or overflowed, as detailed below |
+
+- [pinned] The runner sends `chain_reset` through `compaction.ride` before
+  rendering a step, never after rendering. Examples are a kept connection
+  with no usable response chain because it was retired for age or closed
+  after idling, or a run starting with no kept connection. Resends discovered
+  only at send time, such as a retry or a continuation the provider refuses,
+  cannot ride. If the runner sends `history_edit_cost`, it sends
+  `chain_reset` only when that value is `full_resend`. An older provider
+  decodes this cause as `RideCause::Unknown`. Whatever it answers, a rewrite
+  ride never ends a run and a missed deadline counts as `nothing`, so adding
+  the cause alone needs no readers-first rollout gate.
 - [pinned] `account_change` means the runner is about to send the session's
   next request from a different provider account than its previous request.
   A provider's prompt cache belongs to one account; for example, Anthropic

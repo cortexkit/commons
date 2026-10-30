@@ -3,9 +3,10 @@
 //!
 //! The runner sends it only when its prefix is being rewritten anyway (the
 //! prompt cache expired, the model or account changed, the system text or tool
-//! surface changed), or when a request reached the Setup ceiling. The provider
+//! surface changed, or a response chain must restart), or when a request
+//! reached the Setup ceiling. The provider
 //! answers with a view or with nothing; a missed deadline counts as nothing.
-//! For the four rewrite causes, nothing means the runner proceeds with its
+//! For the rewrite causes, nothing means the runner proceeds with its
 //! current view and the run goes on: those rides never end a run. Only the
 //! `ceiling` cause waits up to the ceiling policy's `wait_ms` and can end in
 //! the run being refused.
@@ -15,7 +16,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::{notice::is_session_ref, view::CompactionView};
 
 /// Upper bound on the runner's own `deadline_ms` for the rewrite causes
-/// `ttl_expired`, `model_change`, `account_change` and `surface_change` when
+/// `ttl_expired`, `model_change`, `account_change`, `surface_change` and
+/// `chain_reset` when
 /// Setup's answer set no `ride_wait_ms`: without the provider's word, such a
 /// ride stays short, because it sits in front of a request the user is
 /// waiting for.
@@ -44,6 +46,14 @@ pub enum RideCause {
     AccountChange,
     /// `surface_change`: the frozen system text or tool surface changed.
     SurfaceChange,
+    /// `chain_reset`: before rendering, the runner already knows the next
+    /// request will carry full input regardless of the provider's answer.
+    /// Send-time retries or refused continuations cannot ride. If the runner
+    /// sends `history_edit_cost`, it must be `full_resend` for this cause.
+    /// Uses the same bounded wait and answers as `model_change`, but does not
+    /// require its model-specific `cache_ttl` refresh. Older providers read
+    /// it as unknown.
+    ChainReset,
     /// `ceiling`: the request reached the share of the context window that
     /// Setup's ceiling policy names, or overflowed (CONTRACT.md §8).
     Ceiling,
@@ -58,6 +68,7 @@ impl RideCause {
             Self::ModelChange => "model_change",
             Self::AccountChange => "account_change",
             Self::SurfaceChange => "surface_change",
+            Self::ChainReset => "chain_reset",
             Self::Ceiling => "ceiling",
             Self::Unknown(cause) => cause,
         }
@@ -69,6 +80,7 @@ impl RideCause {
             "model_change" => Self::ModelChange,
             "account_change" => Self::AccountChange,
             "surface_change" => Self::SurfaceChange,
+            "chain_reset" => Self::ChainReset,
             "ceiling" => Self::Ceiling,
             other => Self::Unknown(other.to_owned()),
         }

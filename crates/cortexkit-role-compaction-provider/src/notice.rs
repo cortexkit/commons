@@ -30,7 +30,7 @@ pub const EVENT_VERSION: u32 = 1;
 /// Upper bound on a notice's headers: the sum over every header this contract
 /// defines of the name's and the value's length in bytes, the way the bus
 /// counts a message's header size. The per-value bounds below keep every
-/// well-formed notice under it (at most 2,391 bytes); a runner with more
+/// well-formed notice under it (at most 3,432 bytes); a runner with more
 /// events than fit in `events` splits them across consecutive notices.
 pub const MAX_NOTICE_HEADER_BYTES: usize = 4096;
 /// Upper bound on one header value, in bytes.
@@ -102,6 +102,9 @@ pub mod headers {
     /// only a runner declaring `archive_prunes_reasoning` sends it, and only
     /// for a session it has pruned ([`super::ReasoningPruned`]).
     pub const REASONING_PRUNED: &str = "reasoning_pruned";
+    /// Optional pricing hint for editing already-sent history on the current
+    /// route: `suffix` or `full_resend`. Never a correctness signal.
+    pub const HISTORY_EDIT_COST: &str = "history_edit_cost";
     /// A view's version.
     pub const VIEW_VERSION: &str = "view_version";
     /// The last ordinal a view covers.
@@ -117,6 +120,7 @@ pub mod headers {
         EST_TOKENS,
         EVENTS,
         FIRST_ORDINAL,
+        HISTORY_EDIT_COST,
         LAST_USAGE,
         LINEAGE_ID,
         MODEL,
@@ -627,6 +631,38 @@ fn is_model(value: &str) -> bool {
         && value.bytes().all(|b| b.is_ascii_graphic())
 }
 
+/// The cost of editing already-sent history on the next call's current route.
+/// Unknown values survive a header round trip but supply no pricing hint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HistoryEditCost {
+    /// Only the edited message and its suffix are re-costed; the prompt cache
+    /// is keyed on prefix bytes.
+    Suffix,
+    /// An edit breaks a provider-side response chain and forces full input.
+    FullResend,
+    /// A future value, treated like an absent hint for pricing.
+    Unknown(String),
+}
+
+impl HistoryEditCost {
+    pub fn parse(value: &str) -> Self {
+        match value {
+            "suffix" => Self::Suffix,
+            "full_resend" => Self::FullResend,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Suffix => "suffix",
+            Self::FullResend => "full_resend",
+            Self::Unknown(value) => value,
+        }
+    }
+}
+
 /// The runner's advance notice: `ck.{acct}.event.<runner_module_id>.compaction.advanced.v1`,
 /// id [`AdvanceNotice::message_id`], digest [`AdvanceNotice::digest`], and
 /// these fields as string headers ([`AdvanceNotice::to_headers`]).
@@ -654,6 +690,9 @@ pub struct AdvanceNotice {
     /// `session.head` reports it. A convenience copy: `session.head` stays
     /// the authority.
     pub reasoning_pruned: Option<ReasoningPruned>,
+    /// Raw pricing hint, including unknown values for digest-preserving round
+    /// trips. Use [`Self::history_edit_cost`] to read only known hints.
+    pub history_edit_cost: Option<HistoryEditCost>,
 }
 
 impl AdvanceNotice {
@@ -681,12 +720,26 @@ impl AdvanceNotice {
             descends_from: None,
             first_ordinal: None,
             reasoning_pruned: None,
+            history_edit_cost: None,
         }
     }
 
     pub fn with_reasoning_pruned(mut self, state: ReasoningPruned) -> Self {
         self.reasoning_pruned = Some(state);
         self
+    }
+
+    pub fn with_history_edit_cost(mut self, cost: HistoryEditCost) -> Self {
+        self.history_edit_cost = Some(cost);
+        self
+    }
+
+    /// The next call's known pricing hint. Absent and unknown values both
+    /// retain the provider's existing pricing behavior, never correctness.
+    pub fn history_edit_cost(&self) -> Option<&HistoryEditCost> {
+        self.history_edit_cost
+            .as_ref()
+            .filter(|cost| matches!(cost, HistoryEditCost::Suffix | HistoryEditCost::FullResend))
     }
 
     pub fn with_first_ordinal(mut self, first_ordinal: u64) -> Self {
@@ -767,6 +820,9 @@ impl AdvanceNotice {
                 encode_reasoning_pruned(state),
             );
         }
+        if let Some(cost) = &self.history_edit_cost {
+            map.insert(headers::HISTORY_EDIT_COST.into(), cost.as_str().into());
+        }
         map
     }
 
@@ -818,6 +874,8 @@ impl AdvanceNotice {
                         .ok_or(NoticeProblem::Malformed(headers::REASONING_PRUNED))
                 })
                 .transpose()?,
+            history_edit_cost: optional(map, headers::HISTORY_EDIT_COST)?
+                .map(HistoryEditCost::parse),
         };
         notice.check()?;
         Ok(notice)

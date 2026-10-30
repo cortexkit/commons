@@ -8,7 +8,7 @@
 # These production wire types do not depend on a conformance harness or suite.
 [package]
 name = "cortexkit-role-compaction-provider"
-version = "0.7.8"
+version = "0.7.9"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

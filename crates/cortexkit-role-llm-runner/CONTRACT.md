@@ -1210,7 +1210,8 @@ display-ready row for an app's reader on a runner declaring
   `cause: view_timeout`.
 - [pinned] **Waiting for a rewrite ride** (added in 0.5.2) is another. A
   runner holding a step for a rewrite ride (compaction-provider §8: cause
-  `ttl_expired`, `model_change`, `account_change` or `surface_change`) reports
+  `ttl_expired`, `model_change`, `account_change`, `surface_change` or
+  `chain_reset`) reports
   the wait once
   the ride's answer has been pending for 1 s
   (`run::COMPACTION_WAIT_REPORT_AFTER_MS`): the run stays `active` and names
@@ -4460,7 +4461,15 @@ owes.
     (§4) and `session.resolve` (§9.6), within the current lineage, never
     with `session.history`. The first notice of a lineage a cut started
     carries `descends_from` naming the previous lineage at the cut
-    (compaction-provider §5.1);
+    (compaction-provider §5.1). Optional `history_edit_cost` describes the
+    next model call on the session's current route: `suffix` re-costs from
+    an edited already-sent message onward (prefix-byte prompt caching), and
+    `full_resend` breaks a provider-side response chain on any such edit,
+    forcing full input. Send it on every notice when known, omit it when
+    unknown; unfamiliar values read as absent. It is pricing-only, never a
+    correctness signal, and absence keeps existing pricing. Every provider
+    must first pin compaction-provider 0.7.9 or later defining the header:
+    older readers omit undefined headers from the notice digest;
   - views: fetched with `view.get` on `view_ready`, checked, written durably
     to the runner's write-ahead log and applied only at a step boundary,
     then rendered for every request until a newer view applies, including
@@ -4471,7 +4480,17 @@ owes.
     restore pruned content (`view_refused:<version>:pruned_reasoning_restored`,
     §9.14.1). A view with a cut starts a new lineage once it applies (§4.5);
   - rides (`compaction.ride`) when the runner's prefix is being rewritten
-    anyway, and at the ceiling;
+    anyway, and at the ceiling. `chain_reset` is a rewrite cause sent before
+    rendering only when the runner already knows the next request carries
+    full input whatever the provider does, such as no usable chain on a
+    kept connection retired for age or closed after idling, or no kept
+    connection at run start. It never rides after rendering or for resends
+    discovered only at send time (a retry or a refused continuation). If
+    `history_edit_cost` is sent, `chain_reset` is sent only with
+    `full_resend`. It uses the same bounded wait and answers as
+    `model_change`, without requiring its model-specific `cache_ttl`
+    refresh. Older providers decode it as an unknown cause and answer
+    `nothing`;
   - the ceiling Setup sets, with the `context_ceiling` refusal and run state
     and the `context_ceiling_wait` status (§6) wherever those surfaces are
     served. A runner that serves none of them, such as one without
