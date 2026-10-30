@@ -14,6 +14,10 @@
 use serde_json::Value;
 
 pub mod error_output;
+pub(crate) mod pi;
+pub use pi::{
+    pi_session_projection, PiJournalError, PiNativeCut, PiOrdinalEntry, PiSessionProjection,
+};
 
 /// A runner serving its transcript in the Anthropic Messages request
 /// format: an entry body is the message exactly as the client sent it in
@@ -37,16 +41,18 @@ pub const OPENCODE_AISDK: &str = "opencode-aisdk";
 /// array. Descriptors replace payloads inside a part, never the whole array.
 pub const OWNED_BROCA: &str = "owned-broca";
 
-/// The `pi` profile: an entry body is a wrapped journal message with its parts
-/// at `/message/content`, not a bare message body. String content or a
-/// whole-content `text_ref` is one part; array content holds parts in order.
+/// The `pi` profile: bodies are wrapped journal entries, not bare messages.
+/// See [`pi_session_projection`] for active paths, ordinals, edits and cuts.
 pub const PI: &str = "pi";
 
 /// Count top-level parts without deriving their runner-defined keys.
 /// `anthropic-messages` uses `content`, `opencode-aisdk` uses `parts`,
-/// `owned-broca` uses a `content` array, and `pi` uses `/message/content`.
+/// `owned-broca` uses a `content` array. `pi` counts projected blocks of wrapped
+/// `message`, `custom_message` and `branch_summary` entries, including shell text.
 /// Arrays count only their immediate elements. For `anthropic-messages` and
-/// `pi`, a string (even empty) or a whole-content `text_ref` is one part.
+/// `pi`, a string (even empty) or a whole-content `text_ref` is one part, except
+/// that a `pi` `branch_summary` with an empty `summary` projects nothing and
+/// counts zero.
 /// Unknown profiles and malformed part containers are refused by name.
 pub fn top_level_part_count(profile: &str, message: &Value) -> Result<usize, String> {
     match profile {
@@ -72,16 +78,7 @@ pub fn top_level_part_count(profile: &str, message: &Value) -> Result<usize, Str
             .and_then(Value::as_array)
             .map(Vec::len)
             .ok_or_else(|| "owned-broca message content must be an array".into()),
-        PI => match message.pointer("/message/content") {
-            Some(Value::Array(parts)) => Ok(parts.len()),
-            Some(Value::String(_)) => Ok(1),
-            Some(Value::Object(reference))
-                if reference.get("type").and_then(Value::as_str) == Some("text_ref") =>
-            {
-                Ok(1)
-            }
-            _ => Err("pi wrapped message content must be a string, array or text_ref".into()),
-        },
+        PI => pi::projected_content(message).and_then(|content| pi::content_count(&content)),
         _ => Err(format!("unknown serializer profile: {profile}")),
     }
 }

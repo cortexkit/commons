@@ -5,7 +5,7 @@
 //! in order (text, reasoning, tool calls with their arguments, tool results,
 //! files), with media described by the same refs descriptors mode serves and
 //! never inlined. Each serializer profile has one pure projection from a
-//! stored body to a row ([`anthropic_messages`], [`opencode_aisdk`], or
+//! stored body to a row ([`anthropic_messages`], [`opencode_aisdk`], [`pi`], or
 //! [`project`] by profile name). A runner calls the projection and then fills
 //! the fields its stored body lacks ([`DisplayRow::with_model`],
 //! [`DisplayRow::with_client_message_id`], [`DisplayRow::with_sender`], and
@@ -22,7 +22,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 use crate::read::descriptors::Reference;
-use crate::serializer_profile::{ANTHROPIC_MESSAGES, OPENCODE_AISDK};
+use crate::serializer_profile::{ANTHROPIC_MESSAGES, OPENCODE_AISDK, PI};
 
 /// Byte bounds on a display row's tool payloads, chosen by the caller of a
 /// display read or a live subscription. Strict: a misspelled member would
@@ -474,6 +474,7 @@ pub fn project(
     match profile {
         ANTHROPIC_MESSAGES => anthropic_messages(body, limits),
         OPENCODE_AISDK => opencode_aisdk(body, limits),
+        PI => pi(body, limits),
         other => Err(ProjectionError::new(format!(
             "{other} is not a serializer profile this crate projects"
         ))),
@@ -817,6 +818,115 @@ pub fn opencode_aisdk(
     Ok(row)
 }
 
+/// A Pi image is described, never inlined. Existing descriptor payloads are
+/// kept rather than treated as base64 again.
+fn pi_image(image: &Value, part: String) -> Result<FilePart, ProjectionError> {
+    if image["type"] == "media_ref" {
+        let reference = serde_json::from_value(image.clone())
+            .map_err(|e| ProjectionError::new(format!("invalid pi media_ref: {e}")))?;
+        return Ok(FilePart::media(part, reference));
+    }
+    if image["data"].is_object() {
+        return pi_image(&image["data"], part);
+    }
+    let bytes = base64_decode(str_of(image, "data"))
+        .ok_or_else(|| ProjectionError::new("a pi image's data is not base64"))?;
+    let mime = str_of(image, "mimeType");
+    Ok(FilePart::media(
+        part.clone(),
+        Reference::media(
+            (!part.is_empty()).then_some(part),
+            "image",
+            mime,
+            &bytes,
+            None,
+        ),
+    ))
+}
+
+/// A wrapped Pi journal row, using its runtime role, not the user role produced
+/// for model requests. `custom_message` is `custom`, `branch_summary` is
+/// `branchSummary`, and shell executions remain `bashExecution`. Shell text
+/// shows command, output and status. Images use refs descriptors. Control rows,
+/// including compaction summaries, are refused because they are never served.
+/// Context edits belong to session projection/lineage handling, not raw rows.
+pub fn pi(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, ProjectionError> {
+    let role = match str_of(body, "type") {
+        "custom_message" => "custom",
+        "branch_summary" => "branchSummary",
+        "message" => match str_of(&body["message"], "role") {
+            role @ ("system" | "user" | "assistant" | "toolResult" | "bashExecution") => role,
+            _ => {
+                return Err(ProjectionError::new(
+                    "a pi message has no supported runtime role",
+                ))
+            }
+        },
+        _ => {
+            return Err(ProjectionError::new(
+                "a pi display body is not an ordinal-bearing entry",
+            ))
+        }
+    };
+    // Exclusion controls model context, not visibility of a persisted shell run.
+    let mut visible = body.clone();
+    if role == "bashExecution" {
+        visible["message"]["excludeFromContext"] = Value::Bool(false);
+    }
+    let content =
+        crate::serializer_profile::pi::projected_content(&visible).map_err(ProjectionError::new)?;
+    let blocks = match content {
+        Value::String(text) => vec![serde_json::json!({"type":"text", "text":text})],
+        Value::Array(blocks) => blocks,
+        Value::Null => Vec::new(),
+        reference => vec![reference],
+    };
+    let mut parts = Vec::new();
+    for (index, block) in blocks.iter().enumerate() {
+        let key = index.to_string();
+        parts.push(match str_of(block, "type") {
+            "text" => DisplayPart::Text(TextPart::new(key, str_of(block, "text"))),
+            "thinking" => DisplayPart::Reasoning(TextPart::new(key, str_of(block, "thinking"))),
+            "toolCall" => arguments_part(
+                key,
+                str_of(block, "id").to_owned(),
+                str_of(block, "name").to_owned(),
+                &block["arguments"],
+                limits,
+            ),
+            "image" | "media_ref" => DisplayPart::File(pi_image(
+                block,
+                if role == "toolResult" {
+                    String::new()
+                } else {
+                    key
+                },
+            )?),
+            kind => other(key, kind),
+        });
+    }
+    if role == "toolResult" {
+        let mut texts = Vec::new();
+        let mut files = Vec::new();
+        for part in parts {
+            match part {
+                DisplayPart::Text(text) => texts.push(text.text),
+                DisplayPart::File(file) => files.push(file),
+                _ => {}
+            }
+        }
+        parts = vec![result_part(
+            "0".into(),
+            str_of(&body["message"], "toolCallId").to_owned(),
+            body["message"]["isError"] == true,
+            &crate::run::join_text_parts(texts),
+            files,
+            limits,
+        )];
+    }
+    Ok(DisplayRow::new(role, parts))
+}
+
 /// Standard base64 (RFC 4648 §4), padding optional. `None` for anything
 /// else, whitespace included.
 fn base64_decode(text: &str) -> Option<Vec<u8>> {
@@ -1001,13 +1111,15 @@ mod tests {
             assert_eq!(serde_json::to_value(&row).unwrap(), case["row"], "{name}");
             let decoded: DisplayRow = vectors::round_trip(name, &case["row"]);
             assert_eq!(decoded, row, "{name}");
+            let has_cut = row.parts.iter().any(|part| match part {
+                DisplayPart::ToolCall(call) => call.arguments_truncated,
+                DisplayPart::ToolResult(result) => result.truncated,
+                _ => false,
+            });
             if limits.is_none() {
-                assert!(
-                    !case["row"].to_string().contains("truncated"),
-                    "{name}: an uncut row carries no flag"
-                );
+                assert!(!has_cut, "{name}: an uncut row carries no flag");
             } else {
-                cut_any |= case["row"].to_string().contains("truncated");
+                cut_any |= has_cut;
             }
         }
         assert!(cut_any, "{profile}: no vector cuts anything");
@@ -1020,6 +1132,11 @@ mod tests {
     #[test]
     fn anthropic_messages_vectors_project() {
         check_profile("display-anthropic-messages.json", ANTHROPIC_MESSAGES);
+    }
+
+    #[test]
+    fn pi_vectors_project() {
+        check_profile("display-pi.json", PI);
     }
 
     #[test]

@@ -496,6 +496,10 @@ pub struct Defects {
     /// A display row of an assistant message whose stored body names no
     /// model is served without `model`.
     pub display_drops_model: bool,
+    /// Exercise the display projection case using wrapped Pi journal bodies.
+    pub display_pi_profile: bool,
+    /// Incorrectly relabel Pi tool-result runtime rows as user rows.
+    pub display_pi_wrong_role: bool,
     /// A cut keeps exactly its bound's bytes, splitting a character and
     /// patching the split with U+FFFD.
     pub display_cut_lossy: bool,
@@ -6618,8 +6622,14 @@ impl LlmRunnerSubject for FakeSubject {
     }
 
     fn serializer_profile(&self, session: &str) -> Option<String> {
-        profiled(session)
-            .then(|| cortexkit_role_llm_runner::serializer_profile::ANTHROPIC_MESSAGES.to_owned())
+        profiled(session).then(|| {
+            if self.defects.display_pi_profile {
+                cortexkit_role_llm_runner::serializer_profile::PI
+            } else {
+                cortexkit_role_llm_runner::serializer_profile::ANTHROPIC_MESSAGES
+            }
+            .to_owned()
+        })
     }
 
     async fn hold_next_model_stream(

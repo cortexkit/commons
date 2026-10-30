@@ -807,6 +807,11 @@ impl Module {
                 entry.mid = format!("h-{}", entry.mid);
             }
         }
+        if self.world.defects.display_pi_profile && profiled(session) {
+            for entry in &mut numbered {
+                entry.message = display::pi_body(&entry.mid, &entry.message);
+            }
+        }
         if defect == LineageDefect::HistoryPrefixAfterNumbered {
             numbered.extend(host);
             numbered

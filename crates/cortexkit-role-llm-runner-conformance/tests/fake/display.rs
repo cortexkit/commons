@@ -52,6 +52,31 @@ pub(super) fn result_text(content: &Value) -> String {
     }
 }
 
+/// Convert the fake's Anthropic fixture into a wrapped Pi body for the
+/// profile-projection case. The fixture's stored source remains unchanged.
+pub(super) fn pi_body(id: &str, body: &Value) -> Value {
+    let mut message = body.clone();
+    if body["role"] == "user" {
+        if let Some(result) = body["content"]
+            .as_array()
+            .and_then(|parts| parts.first())
+            .filter(|part| part["type"] == "tool_result")
+        {
+            message = json!({"role":"toolResult", "toolCallId":result["tool_use_id"],
+                "content":[{"type":"text", "text":result["content"]}]});
+        }
+    }
+    if let Some(parts) = message["content"].as_array_mut() {
+        for part in parts {
+            if part["type"] == "tool_use" {
+                *part = json!({"type":"toolCall", "id":part["id"],
+                    "name":part["name"], "arguments":part["input"]});
+            }
+        }
+    }
+    json!({"type":"message", "id":id, "parentId":null, "message":message})
+}
+
 /// The message holding the call `key`, and the name of the tool it calls.
 fn call_holder(sess: &Sess, key: &str) -> (String, String) {
     let Some(message) = sess
@@ -315,13 +340,24 @@ impl Module {
         };
         let project = |limits: Option<&Limits>| {
             if profiled(session) {
-                display_rows::anthropic_messages(&entry.message, limits)
-                    .unwrap_or_else(|_| DisplayRow::new("unknown", Vec::new()))
+                display_rows::project(
+                    if defects.display_pi_profile {
+                        "pi"
+                    } else {
+                        "anthropic-messages"
+                    },
+                    &entry.message,
+                    limits,
+                )
+                .unwrap_or_else(|_| DisplayRow::new("unknown", Vec::new()))
             } else {
                 own_row(&entry.message, limits)
             }
         };
         let mut row = project(limits);
+        if defects.display_pi_wrong_role && row.role == "toolResult" {
+            row.role = "user".into();
+        }
         if let Some(bounds) =
             limits.filter(|_| defects.display_cut_lossy || defects.display_cut_unflagged)
         {

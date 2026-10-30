@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.25
+
+- Complete the Pi profile: share durable active-path selection, edited part
+  counts, ordinals and native cuts between runners and offline planners.
+  Excluded shell runs and removed content retain zero-part ordinals.
+- Add Pi display projection with runtime roles, shell command/output text,
+  and image descriptors. Keep ordinary image parts and count shell images
+  separately from shell text. Raw journal rows remain unchanged.
+- Document template sends as visible custom messages, other sends as user
+  entries, and late context edits as step-boundary lineage changes.
+- Ship checksum-pinned Pi 1.3.0/1.4.0 recordings and independent expected
+  session/display results, with clearly labelled synthetic edge cases.
+
 ## 0.7.24
 
 - Clarify the runner's optional `history_edit_cost` notices and pre-render

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.29
+
+- Pin runner `=0.7.25`. The display profile-projection case now supports Pi
+  through the shared projector, including its distinct runtime roles.
+- Exercise the case with Pi-shaped bodies and verify that it rejects a
+  runner that incorrectly labels a tool-result row as user text.
+
 ## 0.15.28
 
 - Pin runner 0.7.24 and require compaction-provider 0.7.9 for the optional

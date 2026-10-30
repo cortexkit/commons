@@ -454,7 +454,11 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   call with its never-executed result (§14, property 4, shape (b)), keeps
   the lineage, because no byte already written changes. A reader may treat
   changed bytes under one lineage as a runner defect, except for the
-  precisely listed archive-pruning changes of §9.14.1. That exception changes
+  precisely listed archive-pruning changes of §9.14.1. Like an OpenCode 1
+  host edit, a late Pi `context_edit` that changes a served message's
+  model-visible content permits a new lineage from the target's ordinal at
+  a step boundary. The runner never renumbers it or changes served bytes
+  in place. The archive-pruning exception changes
   only listed part payloads, never identity, ordering, tags or write-time digests.
 - [pinned] **Bookkeeping stays out.** Host records a runner writes for its
   own compaction bookkeeping (a host's native compaction message, summary or
@@ -550,7 +554,7 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   | `anthropic-messages` | `content`: array length, or one part for a string (even empty) or whole-content `text_ref`. |
   | `opencode-aisdk` | `parts`: array length. |
   | `owned-broca` | `content`: array length only; strings, missing content and whole-content `text_ref` are malformed. |
-  | `pi` | `/message/content` in a wrapped journal entry: array length, or one part for a string (even empty) or whole-content `text_ref`. Bare bodies and other content types are malformed. |
+  | `pi` | Projected blocks of wrapped `message`, `custom_message` and `branch_summary` entries (§4.4): `/message/content`, top-level `content`, or rendered `summary`, respectively. Strings (even empty) and whole-content `text_ref` count one. Included shell execution is one text block plus any attached image blocks; excluded shell execution counts zero. Bare bodies and malformed containers are refused. |
 
   Arrays count only their immediate elements, never nested media. No other
   member contributes parts, including `role`, `origin` or `tool_calls` for
@@ -813,10 +817,83 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   any member containing `\n` or `\r`; `detail` over 1 KiB or `retry` over
   256 bytes. The vectors in `test-vectors/owned-broca-tool-outage/` pin
   real producer captures and one refusal per rule.
-- [pinned] **`pi`.** An entry's body is the wrapped journal entry
-  `{type: "message", id, parentId, message: {role, content, ...}}`, not a
-  bare message body. Only `/message/content` holds parts, as specified in
-  §4.2; a whole-content `text_ref` replaces a single string part.
+- [pinned] **`pi`.** A served body is the wrapped journal entry as Pi wrote
+  it, not a bare message or the model-request projection. Served entry types
+  are `message` (`/message/content`, except shell executions), `custom_message`
+  (top-level `content`) and `branch_summary` (top-level `summary`, rendered as
+  branch-summary text). Only `type: "message"` with `message.role: "user"`
+  identifies the user's own text; custom and branch-summary text is not the
+  user's own text even though Pi sends it to the model with user authority.
+  Pi 1.3.0 and 1.4.0 source, checksum-pinned with the public vectors:
+  `dist/core/session-manager.js` (SM) :166-191 and
+  `dist/core/messages.js` (MSG) :40-66,89-115.
+- [pinned] **Pi active path and ordinals.** For a stored session the leaf is
+  the last non-`session` entry in file order, of any type, including `label`.
+  Walk its `parentId` chain back to the root and reverse it. An in-memory
+  branch switch with no subsequent append is not stored; abandoned branches
+  are not on the active path (SM:124-145,732-753,815-820,1034-1046,1155-1174).
+  A journal may hold more than one root, because an append after Pi's
+  `resetLeaf()` starts a new one (SM:1167-1174); only the leaf's chain is
+  active, and entries under any other root are abandoned like any other
+  branch.
+  Each active-path `message`, `custom_message` and `branch_summary` consumes
+  exactly one ordinal in path order. Every other entry type consumes none:
+  the session header, model/thinking settings, labels, context edits and
+  compactions included. An entry that projects nothing still consumes its
+  ordinal, with zero parts.
+- [pinned] **Pi parts and tags.** Count the blocks produced by Pi's runtime
+  entry projection and `convertToLlm`, after applying active-path context
+  edits in path order (last edit per target wins). A null replacement removes
+  the target's projected content. Non-null replacements change user,
+  assistant, toolResult and custom content, not system, shell or branch-summary
+  content; assistant/tool-result string replacements become one text block
+  (SM:235-273). Strings, including empty strings, and whole-content `text_ref`
+  descriptors count as one part; arrays count their immediate blocks. The one
+  exception is a `branch_summary` whose `summary` is empty: Pi projects nothing
+  for it, so it keeps its ordinal with zero parts. Ordinary
+  image blocks remain parts, just as in other profiles. Details, settings and
+  other metadata never become parts. A plain `bashExecution` projects exactly
+  one text block, containing its command and output (including the no-output,
+  cancellation, exit-status and truncation text); `excludeFromContext: true`
+  (Pi's `!!` shell-command prefix) projects nothing (MSG:21-38,75-122).
+  A shell image attachment, as in Oh My Pi, is a separate image block,
+  never another text part and never merged
+  into the shell text: one text part plus one part per image. Verified in
+  Oh My Pi `packages/coding-agent/src/session/messages.ts:962-976,1120-1133`
+  at revision `95db18ef9936bff96fbd33268b2363ab25a9bb9d`.
+  `serializer_profile::top_level_part_count("pi", body)` counts a standalone
+  ordinal-bearing row; `serializer_profile::pi_session_projection(entries)`
+  computes the active path, edited content, ordinals and counts together for
+  runners and offline planners. The latter returns `PiSessionProjection`,
+  with each `PiOrdinalEntry`'s id, type, ordinal, projected content and count,
+  and an optional `PiNativeCut`; malformed journals are refused by the named
+  `PiJournalError` (`pi_malformed_journal`), never repaired by guessing a path.
+- [pinned] **Pi native cut.** The latest active-path `compaction` is the
+  native cut, like OpenCode 1's native cut (§4.8, §9.6). Neither the record
+  nor its `compactionSummary` projection consumes an ordinal or is ever
+  served. Entries before its `firstKeptEntryId` are outside the served
+  range; the retained tail keeps its ordinals (SM:193-229, MSG:48-55,103-109).
+- [pinned] **Pi sends.** A `session.send` naming a template (`template:
+  {id, digest, slots}`, §9.7) is stored as `custom_message` with
+  `customType: "cortexkit:<template id>"`, its rendered text in `content`,
+  and `display: true`. Pi sends that content as user text while its host UI
+  keeps showing it. Every other prompt/content send is stored as a `message`
+  user entry, whoever sent it; text typed directly into Pi's UI is also a
+  user entry. Classify by the send's template form, never by its sender:
+  an owner can send notices, and a person's phone can relay their words from
+  a different sender. Providers distinguish the person's words from notices
+  by the stored top-level `type`.
+- [pinned] **Pi display.** `display::pi(body, limits)` and
+  `display::project(serializer_profile::PI, body, limits)` keep runtime roles:
+  `custom_message` is `custom` (MSG:57-66), `branch_summary` is `branchSummary`
+  (MSG:40-46), and a shell row is `bashExecution` (MSG:79-87).
+  `system`, `user`, `assistant` and `toolResult` keep their own roles
+  (MSG:111-115). None of custom/branch/shell becomes `user` in display just
+  because `convertToLlm` uses user authority. A native cut's unserved summary
+  has runtime role `compactionSummary` (MSG:48-55). Shell rows show the command
+  and output, even when excluded from model context. Images use the existing
+  refs descriptors, never inline bytes. Context edits are applied for model
+  projection and lineage decisions, not by changing a raw served row.
 - [pinned] Read stability (§4.2) applies: the runner serves the form it
   first ingested (`serializer_profile::ingest`). A client re-sending the
   same message with its cache marker moved (a string `content` turning
@@ -840,7 +917,8 @@ provider 0.5.0 §6) and to readers only by `session.history` (§4.6).
   including after a revert that keeps `head_cut.mid` but removes `cut`.
   The runner MUST NOT read, serve or journal messages at or before that
   adoption cut to recover the counters or the certified cut description.
-- [pinned] `lineage_id` changes at a cut, at a revert, and at a recovery
+- [pinned] `lineage_id` changes at a cut, at a revert, at a model-visible
+  host edit (§4.2), and at a recovery
   that drops or rewrites written messages (§14, property 4, shape (a)), and
   at nothing else. A runner may derive the id from its own storage identity
   plus the cut, as long as every lineage of the session gets an id of its

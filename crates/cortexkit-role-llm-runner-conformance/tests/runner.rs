@@ -5879,6 +5879,28 @@ async fn a_faithful_runner_passes_the_display_live_and_cache_ttl_cases() {
 }
 
 #[tokio::test]
+async fn pi_display_projection_accepts_runtime_roles_and_rejects_user_relabeling() {
+    let report = run(&displaying(Defects {
+        display_pi_profile: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.outcome("display_row_is_the_profile_projection"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    let report = run(&displaying(Defects {
+        display_pi_profile: true,
+        display_pi_wrong_role: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "display_row_is_the_profile_projection").contains("pi's projection"));
+}
+
+#[tokio::test]
 async fn a_runner_written_display_row_without_model_fails_by_name() {
     let report = run(&displaying(Defects {
         display_drops_model: true,

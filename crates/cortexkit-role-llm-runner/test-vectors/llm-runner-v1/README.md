@@ -529,3 +529,10 @@ The vector also pins every revert
 anchor outcome: after the retained cut, cut removed with folded message kept,
 folded message removed, marker rows lost, and inconsistent head state.
 The message-lineage rules apply only to `message_checkpoint` runners.
+
+## Pi journal projection
+
+`pi-1.3.0-1.4.0.jsonl`, `pi-session.json` and `display-pi.json` pin durable
+active paths, ordinal-bearing entries, context edits, native cuts and runtime
+role display rows. [README-pi.md](README-pi.md) records the public provenance,
+source checks, expected results and explicitly synthetic edge cases.
