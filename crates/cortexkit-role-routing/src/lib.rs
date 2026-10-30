@@ -42,6 +42,7 @@ pub mod errors;
 pub mod observe;
 pub mod report;
 pub mod select;
+pub mod spellings;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
 pub mod wire;

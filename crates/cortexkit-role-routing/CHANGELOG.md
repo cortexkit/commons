@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.4
+
+- Give runner pair values one shared spelling each (CONTRACT §1.2), so a
+  runner's declared pairs can be matched against the catalog's routes and
+  the vault's credentials. Seven `wire_api` tokens
+  name wire formats (`anthropic.messages`, `openai.responses`,
+  `openai.chat_completions`, `openai.chatgpt_responses`,
+  `google.generate_content`, `google.code_assist`, `aws.bedrock_converse`),
+  and four `auth_method` tokens are the vault's own credential kinds
+  (`apikey`, `oauth`, `chatgpt`, `antigravity`). The model catalog serves a
+  route's `wire_api` as a per-route `wire.family` fact; a route without it
+  matches no runner pair. The provider is never part of an `auth_method`. Validation is
+  unchanged: any token of the right shape still decodes. Add
+  `spellings::WIRE_APIS` and `spellings::AUTH_METHODS`, with a test that keeps
+  them equal to the contract's tables.
+
 ## 0.5.3
 
 - Add optional `SelectRequest::task_ref` and `with_task_ref` for decision

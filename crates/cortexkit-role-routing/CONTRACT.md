@@ -111,6 +111,53 @@ a module plays.
   available provider credentials and the catalog's routes. A declaration
   promises which combinations the runner module can drive; it creates no
   credential or route and grants no authority to use one.
+- [pinned] Each `wire_api` and `auth_method` value has one shared spelling.
+  Decoding still checks only the token shape, so accepting a new value
+  never needs a validation change. The tables below are a requirement on
+  the systems that produce these values, not something a decoder enforces:
+  a runner declares, the model catalog serves and the vault reports only
+  spellings listed there. A new spelling is added to its table first, in a
+  text release, before anything uses it. The tables are also exported as
+  `spellings::WIRE_APIS` and `spellings::AUTH_METHODS`.
+- [pinned] `wire_api` names the bytes on the wire: the endpoint shape and
+  the request and reply format. When a backend's wire format differs because
+  of the credential that reaches it, it has its own `wire_api`, and the pair
+  says which credential that is.
+
+  | `wire_api` | Wire format |
+  |---|---|
+  | `anthropic.messages` | Anthropic Messages API |
+  | `openai.responses` | OpenAI Responses API, the public shape, also served by other providers |
+  | `openai.chat_completions` | OpenAI-compatible Chat Completions, from any provider |
+  | `openai.chatgpt_responses` | The ChatGPT backend's Responses variant, reached with a ChatGPT subscription |
+  | `google.generate_content` | Gemini `generateContent` |
+  | `google.code_assist` | The Code Assist envelope around `generateContent`, reached with a Google Antigravity sign-in |
+  | `aws.bedrock_converse` | Amazon Bedrock Converse |
+
+- [pinned] The model catalog serves a route's `wire_api` as a per-route fact
+  named `wire.family`, a string whose value is one of the table's tokens, in
+  the route's catalog reply. A token there means the
+  route's request format is verified as that wire format; it says nothing
+  about which runner can drive it. A route the catalog serves without
+  `wire.family` has no verified wire format and matches no runner pair: a
+  routing provider never infers one.
+- [pinned] `auth_method` names how a request is authorised. The spellings
+  are the vault's own names for its credential kinds:
+
+  | `auth_method` | Credential |
+  |---|---|
+  | `apikey` | An API key |
+  | `oauth` | A provider's OAuth sign-in, such as a Claude subscription |
+  | `chatgpt` | A ChatGPT subscription sign-in |
+  | `antigravity` | A Google Antigravity sign-in |
+
+- [pinned] The provider is never part of an `auth_method`: routing matches
+  a credential's provider separately, so a Claude subscription and another
+  provider's OAuth sign-in are both `oauth`, told apart by provider. A
+  credential the vault reports without an `auth_method` is never routed. A
+  spelling missing from the table still decodes, but nothing may use it
+  until it is added to the table; a provider that meets one matches it only
+  by exact equality, never as a near spelling of a listed one.
 - [pinned] `follows_account_choice` defaults to `false`. When `true`, the
   runner module calls `route.account_for` and uses its answer. Absence or
   `false` makes no such promise; a routing provider must not infer it.
