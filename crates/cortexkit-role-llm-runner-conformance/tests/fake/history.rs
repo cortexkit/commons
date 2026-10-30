@@ -812,6 +812,11 @@ impl Module {
                 entry.message = display::pi_body(&entry.mid, &entry.message);
             }
         }
+        if self.world.defects.display_opencode_v2_profile && profiled(session) {
+            for entry in &mut numbered {
+                entry.message = display::opencode_v2_body(&entry.mid, &entry.message);
+            }
+        }
         if defect == LineageDefect::HistoryPrefixAfterNumbered {
             numbered.extend(host);
             numbered

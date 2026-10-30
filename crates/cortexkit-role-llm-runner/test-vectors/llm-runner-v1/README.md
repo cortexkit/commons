@@ -536,3 +536,14 @@ The message-lineage rules apply only to `message_checkpoint` runners.
 active paths, ordinal-bearing entries, context edits, native cuts and runtime
 role display rows. [README-pi.md](README-pi.md) records the public provenance,
 source checks, expected results and explicitly synthetic edge cases.
+
+## OpenCode 2 session projection
+
+`opencode-v2-rows-2.0.26.json`, `opencode-v2-rows-2.2.3.json`,
+`opencode-v2-session.json` and `display-opencode-v2.json` pin native
+sequence-ordered ordinals, slot counts, inclusive compaction boundaries and
+native-role display. The two `opencode-v2-reinjection-rows-VERSION.json` files
+add recorded self-referencing runner markers and revert fallback, without
+inferring the runner's cut from native rows.
+[README-opencode-v2.md](README-opencode-v2.md) records the
+source pins, capture hashes, deterministic extraction and synthetic coverage.

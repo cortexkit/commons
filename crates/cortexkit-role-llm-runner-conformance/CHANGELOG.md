@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.32
+
+- Pin runner `=0.7.28`. The display projection case supports `opencode-v2`
+  through the shared projector, including native notice roles and tool outcomes.
+- Check that the case rejects a runner that relabels a system notice as user text.
+
 ## 0.15.31
 
 - Pin runner `=0.7.27`, which adds `pi_served_body`. No kit case changes.

@@ -14,10 +14,15 @@
 use serde_json::Value;
 
 pub mod error_output;
+pub(crate) mod opencode_v2;
+pub use opencode_v2::{
+    opencode_v2_session_projection, OpenCodeV2NativeCut, OpenCodeV2OrdinalEntry,
+    OpenCodeV2RunnerMarker, OpenCodeV2SessionError, OpenCodeV2SessionProjection,
+};
 pub(crate) mod pi;
 pub use pi::{
-    pi_served_body, pi_session_projection, PiEdit, PiJournalError, PiNativeCut, PiOrdinalEntry,
-    PiSessionProjection,
+    pi_projected_content, pi_served_body, pi_session_projection, PiEdit, PiJournalError,
+    PiNativeCut, PiOrdinalEntry, PiSessionProjection,
 };
 
 /// A runner serving its transcript in the Anthropic Messages request
@@ -38,6 +43,10 @@ pub const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
 /// finished stay as the runner first read them.
 pub const OPENCODE_AISDK: &str = "opencode-aisdk";
 
+/// OpenCode 2's decoded native message: hydrated SQL `data` plus `id` and
+/// `type`, without `seq`. See [`opencode_v2_session_projection`] for ordinals.
+pub const OPENCODE_V2: &str = "opencode-v2";
+
 /// The `owned-broca` profile: an entry body stores its parts in a `content`
 /// array. Descriptors replace payloads inside a part, never the whole array.
 pub const OWNED_BROCA: &str = "owned-broca";
@@ -50,6 +59,8 @@ pub const PI: &str = "pi";
 /// `anthropic-messages` uses `content`, `opencode-aisdk` uses `parts`,
 /// `owned-broca` uses a `content` array. `pi` counts projected blocks of wrapped
 /// `message`, `custom_message` and `branch_summary` entries, including shell text.
+/// `opencode-v2` counts native units of decoded messages, not expanded provider
+/// messages; model-switched and never-sent rows count zero.
 /// Arrays count only their immediate elements. For `anthropic-messages` and
 /// `pi`, a string (even empty) or a whole-content `text_ref` is one part, except
 /// that a `pi` `branch_summary` with an empty `summary` projects nothing and
@@ -80,6 +91,8 @@ pub fn top_level_part_count(profile: &str, message: &Value) -> Result<usize, Str
             .map(Vec::len)
             .ok_or_else(|| "owned-broca message content must be an array".into()),
         PI => pi::projected_content(message).and_then(|content| pi::content_count(&content)),
+        OPENCODE_V2 => opencode_v2::projected_content(message)
+            .map(|content| content.as_array().expect("projected native units").len()),
         _ => Err(format!("unknown serializer profile: {profile}")),
     }
 }

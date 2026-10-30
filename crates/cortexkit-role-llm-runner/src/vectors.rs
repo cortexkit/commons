@@ -439,6 +439,38 @@ pub const FILES: &[(&str, &str)] = &[
         "README.md",
         include_str!("../test-vectors/llm-runner-v1/README.md"),
     ),
+    (
+        "opencode-v2-rows-2.0.26.json",
+        include_str!("../test-vectors/llm-runner-v1/opencode-v2-rows-2.0.26.json"),
+    ),
+    (
+        "opencode-v2-rows-2.2.3.json",
+        include_str!("../test-vectors/llm-runner-v1/opencode-v2-rows-2.2.3.json"),
+    ),
+    (
+        "opencode-v2-session.json",
+        include_str!("../test-vectors/llm-runner-v1/opencode-v2-session.json"),
+    ),
+    (
+        "display-opencode-v2.json",
+        include_str!("../test-vectors/llm-runner-v1/display-opencode-v2.json"),
+    ),
+    (
+        "extract-opencode-v2.py",
+        include_str!("../test-vectors/llm-runner-v1/extract-opencode-v2.py"),
+    ),
+    (
+        "README-opencode-v2.md",
+        include_str!("../test-vectors/llm-runner-v1/README-opencode-v2.md"),
+    ),
+    (
+        "opencode-v2-reinjection-rows-2.0.26.json",
+        include_str!("../test-vectors/llm-runner-v1/opencode-v2-reinjection-rows-2.0.26.json"),
+    ),
+    (
+        "opencode-v2-reinjection-rows-2.2.3.json",
+        include_str!("../test-vectors/llm-runner-v1/opencode-v2-reinjection-rows-2.2.3.json"),
+    ),
 ];
 
 /// `sha256sum` output over [`FILES`]: one `<hex>  <name>` line per file.

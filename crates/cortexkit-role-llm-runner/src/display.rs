@@ -5,7 +5,7 @@
 //! in order (text, reasoning, tool calls with their arguments, tool results,
 //! files), with media described by the same refs descriptors mode serves and
 //! never inlined. Each serializer profile has one pure projection from a
-//! stored body to a row ([`anthropic_messages`], [`opencode_aisdk`], [`pi`], or
+//! stored body to a row ([`anthropic_messages`], [`opencode_aisdk`], [`opencode_v2`], [`pi`], or
 //! [`project`] by profile name). A runner calls the projection and then fills
 //! the fields its stored body lacks ([`DisplayRow::with_model`],
 //! [`DisplayRow::with_client_message_id`], [`DisplayRow::with_sender`], and
@@ -22,7 +22,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
 use crate::read::descriptors::Reference;
-use crate::serializer_profile::{ANTHROPIC_MESSAGES, OPENCODE_AISDK, PI};
+use crate::serializer_profile::{ANTHROPIC_MESSAGES, OPENCODE_AISDK, OPENCODE_V2, PI};
 
 /// Byte bounds on a display row's tool payloads, chosen by the caller of a
 /// display read or a live subscription. Strict: a misspelled member would
@@ -474,6 +474,7 @@ pub fn project(
     match profile {
         ANTHROPIC_MESSAGES => anthropic_messages(body, limits),
         OPENCODE_AISDK => opencode_aisdk(body, limits),
+        OPENCODE_V2 => opencode_v2(body, limits),
         PI => pi(body, limits),
         other => Err(ProjectionError::new(format!(
             "{other} is not a serializer profile this crate projects"
@@ -844,6 +845,149 @@ fn pi_image(image: &Value, part: String) -> Result<FilePart, ProjectionError> {
     ))
 }
 
+fn opencode_v2_file(file: &Value, key: String) -> Result<FilePart, ProjectionError> {
+    if let Some(uri) = file.get("uri").and_then(Value::as_str) {
+        return opencode_file(
+            &serde_json::json!({"url":uri, "mime":file["mime"], "filename":file["name"]}),
+            key,
+        );
+    }
+    let payload = file.get("data").unwrap_or(file);
+    if payload["type"] == "media_ref" {
+        let reference = serde_json::from_value(payload.clone()).map_err(|error| {
+            ProjectionError::new(format!("invalid opencode-v2 media_ref: {error}"))
+        })?;
+        let mut output = FilePart::media(key, reference);
+        output.filename = file.get("name").and_then(Value::as_str).map(str::to_owned);
+        return Ok(output);
+    }
+    let mime = str_of(file, "mime");
+    let data = payload
+        .as_str()
+        .ok_or_else(|| ProjectionError::new("an opencode-v2 file has no hydrated data"))?;
+    let bytes = base64_decode(data)
+        .ok_or_else(|| ProjectionError::new("an opencode-v2 file's data is not base64"))?;
+    let mut output = FilePart::media(
+        key.clone(),
+        Reference::media(
+            (!key.is_empty()).then_some(key),
+            media_kind(mime),
+            mime,
+            &bytes,
+            None,
+        ),
+    );
+    output.filename = file.get("name").and_then(Value::as_str).map(str::to_owned);
+    Ok(output)
+}
+
+/// OpenCode 2's decoded message (`data` plus native `id` and `type`). Notices
+/// keep their native type rather than adopting their model-request authority.
+/// Compaction checkpoints are never served. Tool calls and outcomes share a
+/// native slot, although display uses two parts to show them separately.
+pub fn opencode_v2(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, ProjectionError> {
+    let role = str_of(body, "type");
+    if role == "compaction" {
+        return Err(ProjectionError::new(
+            "an opencode-v2 compaction is never served",
+        ));
+    }
+    let mut visible = body.clone();
+    if role == "shell" {
+        // Background execution is omitted from model context, not from display.
+        visible["metadata"] = serde_json::json!({"background":false});
+    }
+    let content = crate::serializer_profile::opencode_v2::projected_content(&visible)
+        .map_err(ProjectionError::new)?;
+    let mut parts = Vec::new();
+    for (index, slot) in content
+        .as_array()
+        .expect("projected native units")
+        .iter()
+        .enumerate()
+    {
+        let key = index.to_string();
+        if role == "user" && slot.get("mime").is_some() {
+            parts.push(DisplayPart::File(opencode_v2_file(slot, key)?));
+            continue;
+        }
+        match str_of(slot, "type") {
+            "text" => {
+                let value = if role == "system" {
+                    body.get("description").unwrap_or(&slot["text"])
+                } else {
+                    &slot["text"]
+                };
+                parts.push(match value.as_str() {
+                    Some(text) => DisplayPart::Text(TextPart::new(key, text)),
+                    None => other(key, "text_ref"),
+                });
+            }
+            "reasoning" => parts.push(DisplayPart::Reasoning(TextPart::new(
+                key,
+                str_of(slot, "text"),
+            ))),
+            "tool" => {
+                let state = &slot["state"];
+                let call_id = str_of(slot, "id").to_owned();
+                parts.push(arguments_part(
+                    key.clone(),
+                    call_id.clone(),
+                    str_of(slot, "name").to_owned(),
+                    &state["input"],
+                    limits,
+                ));
+                let status = str_of(state, "status");
+                if matches!(status, "completed" | "error") {
+                    let mut texts = Vec::new();
+                    let mut files = Vec::new();
+                    if let Some(content) = state["content"].as_array() {
+                        for item in content {
+                            if item["type"] == "text" {
+                                texts.push(str_of(item, "text").to_owned());
+                            } else if item.get("mime").is_some() || item["type"] == "media_ref" {
+                                files.push(opencode_v2_file(item, String::new())?);
+                            }
+                        }
+                    }
+                    if status == "error" {
+                        let error = &state["error"];
+                        let message = error
+                            .as_str()
+                            .or_else(|| error["message"].as_str())
+                            .or_else(|| error["data"]["message"].as_str());
+                        texts.push(
+                            message
+                                .map(str::to_owned)
+                                .unwrap_or_else(|| error.to_string()),
+                        );
+                    }
+                    parts.push(result_part(
+                        key,
+                        call_id,
+                        status == "error",
+                        &crate::run::join_text_parts(texts),
+                        files,
+                        limits,
+                    ));
+                }
+            }
+            "media_ref" => parts.push(DisplayPart::File(opencode_v2_file(slot, key)?)),
+            kind => parts.push(other(key, kind)),
+        }
+    }
+    let mut row = DisplayRow::new(role, parts);
+    if role == "assistant" {
+        if let (Some(provider), Some(model)) = (
+            body["model"]["providerID"].as_str(),
+            body["model"]["id"].as_str(),
+        ) {
+            row.model = Some(format!("{provider}/{model}"));
+        }
+    }
+    Ok(row)
+}
+
 /// A wrapped Pi journal row, using its runtime role, not the user role produced
 /// for model requests. `custom_message` is `custom`, `branch_summary` is
 /// `branchSummary`, and shell executions remain `bashExecution`. Shell text
@@ -1137,6 +1281,11 @@ mod tests {
     #[test]
     fn pi_vectors_project() {
         check_profile("display-pi.json", PI);
+    }
+
+    #[test]
+    fn opencode_v2_vectors_project() {
+        check_profile("display-opencode-v2.json", OPENCODE_V2);
     }
 
     #[test]

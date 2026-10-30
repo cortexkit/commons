@@ -77,6 +77,39 @@ pub(super) fn pi_body(id: &str, body: &Value) -> Value {
     json!({"type":"message", "id":id, "parentId":null, "message":message})
 }
 
+/// Synthetic decoded OpenCode 2 fixtures for the profile-projection case.
+/// Ordinary prompts become system notices to exercise notice-role preservation.
+pub(super) fn opencode_v2_body(id: &str, body: &Value) -> Value {
+    let blocks = body["content"].as_array().cloned().unwrap_or_default();
+    if body["role"] == "user" {
+        if let Some(result) = blocks.first().filter(|part| part["type"] == "tool_result") {
+            return json!({"id":id, "type":"assistant", "content":[{
+                "type":"tool", "id":result["tool_use_id"], "name":"fixture_tool",
+                "state":{"status":"completed", "input":{}, "content":[{"type":"text", "text":result["content"]}]}
+            }]});
+        }
+        let text = body["content"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                blocks
+                    .iter()
+                    .filter_map(|part| part["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
+        return json!({"id":id, "type":"system", "text":text, "description":"Synthetic instruction notice"});
+    }
+    let content: Vec<Value> = blocks.into_iter().map(|part| {
+        if part["type"] == "tool_use" {
+            json!({"type":"tool", "id":part["id"], "name":part["name"], "state":{"status":"running", "input":part["input"]}})
+        } else if part["type"] == "thinking" {
+            json!({"type":"reasoning", "text":part["thinking"]})
+        } else { part }
+    }).collect();
+    json!({"id":id, "type":"assistant", "content":content})
+}
+
 /// The message holding the call `key`, and the name of the tool it calls.
 fn call_holder(sess: &Sess, key: &str) -> (String, String) {
     let Some(message) = sess
@@ -343,6 +376,8 @@ impl Module {
                 display_rows::project(
                     if defects.display_pi_profile {
                         "pi"
+                    } else if defects.display_opencode_v2_profile {
+                        "opencode-v2"
                     } else {
                         "anthropic-messages"
                     },
@@ -356,6 +391,9 @@ impl Module {
         };
         let mut row = project(limits);
         if defects.display_pi_wrong_role && row.role == "toolResult" {
+            row.role = "user".into();
+        }
+        if defects.display_opencode_v2_wrong_role && row.role == "system" {
             row.role = "user".into();
         }
         if let Some(bounds) =

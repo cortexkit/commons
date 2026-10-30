@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.28
+
+- Add the compatible `opencode-v2` serializer profile for OpenCode 2's decoded
+  native messages, with dense sequence-ordered ordinals, native-slot part
+  counts and inclusive compaction boundaries. Never-sent rows retain ordinals.
+- Report self-referencing runner cut markers separately from native cuts;
+  the runner's own checkpoint determines their served range. Pin marker
+  removal and fallback with recorded revert rows.
+- Follow OpenCode 2.2's loader, with 2.0.x support best effort. Preserve
+  recorded 2.0.26 stale fork references as named refusals, not repaired rows.
+- Share session projection and display helpers. Notices keep their native
+  roles; tool calls and outcomes share one native slot; images use descriptors.
+- Ship extracted OpenCode 2.0.26 and 2.2.3 stored rows, a deterministic extractor,
+  independent session/display expectations and labelled synthetic cases.
+- Add `serializer_profile::pi_projected_content(row)`: one served Pi row's
+  model-visible content, including synthesized shell text and branch
+  summaries, so a codec computes part digests and tag text from the served
+  row alone. A test checks it against `projected_content` for every
+  projected entry in `pi-session.json`.
+
 ## 0.7.27
 
 - Add `serializer_profile::pi_served_body(entry, PiEdit)`, the served body

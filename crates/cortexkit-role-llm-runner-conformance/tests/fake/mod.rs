@@ -500,6 +500,10 @@ pub struct Defects {
     pub display_pi_profile: bool,
     /// Incorrectly relabel Pi tool-result runtime rows as user rows.
     pub display_pi_wrong_role: bool,
+    /// Exercise decoded OpenCode 2 bodies, including system notices.
+    pub display_opencode_v2_profile: bool,
+    /// Incorrectly relabel OpenCode 2 system notices as user rows.
+    pub display_opencode_v2_wrong_role: bool,
     /// A cut keeps exactly its bound's bytes, splitting a character and
     /// patching the split with U+FFFD.
     pub display_cut_lossy: bool,
@@ -6625,6 +6629,8 @@ impl LlmRunnerSubject for FakeSubject {
         profiled(session).then(|| {
             if self.defects.display_pi_profile {
                 cortexkit_role_llm_runner::serializer_profile::PI
+            } else if self.defects.display_opencode_v2_profile {
+                cortexkit_role_llm_runner::serializer_profile::OPENCODE_V2
             } else {
                 cortexkit_role_llm_runner::serializer_profile::ANTHROPIC_MESSAGES
             }

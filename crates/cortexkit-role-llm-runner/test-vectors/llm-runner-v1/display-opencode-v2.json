@@ -1,0 +1,1115 @@
+{
+  "profile": "opencode-v2",
+  "rows": [
+    {
+      "name": "2.0.26-seq-4",
+      "body": {
+        "time": {
+          "created": 1793365538821
+        },
+        "text": "S0_OLDER_DISCARD",
+        "id": "msg_18cea76ab001R3hctArc6xCv4c",
+        "type": "user"
+      },
+      "row": {
+        "role": "user",
+        "text": "S0_OLDER_DISCARD",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "S0_OLDER_DISCARD"
+          }
+        ]
+      }
+    },
+    {
+      "name": "2.0.26-seq-5",
+      "body": {
+        "time": {
+          "created": 1793365538841,
+          "streamed": 1793365538865,
+          "completed": 1793365538867
+        },
+        "agent": "build",
+        "model": {
+          "id": "probe",
+          "providerID": "probe",
+          "variant": "default"
+        },
+        "content": [
+          {
+            "type": "reasoning",
+            "text": "S0_REASONING",
+            "state": {
+              "reasoningField": "reasoning_content"
+            },
+            "time": {
+              "created": 1793365538856,
+              "completed": 1793365538861
+            }
+          },
+          {
+            "type": "text",
+            "text": "S0_RAW_TAG S0_FINAL"
+          }
+        ],
+        "finish": "stop",
+        "rawFinish": "stop",
+        "cost": 0,
+        "tokens": {
+          "input": 10,
+          "output": 4,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "id": "msg_18cea780e001xOuZcIgOMVxrVw",
+        "type": "assistant"
+      },
+      "row": {
+        "role": "assistant",
+        "text": "S0_RAW_TAG S0_FINAL",
+        "parts": [
+          {
+            "type": "reasoning",
+            "part": "0",
+            "text": "S0_REASONING"
+          },
+          {
+            "type": "text",
+            "part": "1",
+            "text": "S0_RAW_TAG S0_FINAL"
+          }
+        ],
+        "model": "probe/probe"
+      }
+    },
+    {
+      "name": "2.0.26-seq-16",
+      "body": {
+        "time": {
+          "created": 1793365538942,
+          "streamed": 1793365538961,
+          "completed": 1793365538974
+        },
+        "agent": "build",
+        "model": {
+          "id": "probe",
+          "providerID": "probe",
+          "variant": "default"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_s0_2",
+            "name": "s0_echo",
+            "executed": false,
+            "state": {
+              "status": "completed",
+              "input": {
+                "fail": false
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "S0_TOOL_RESULT"
+                }
+              ],
+              "metadata": {
+                "truncated": false
+              }
+            },
+            "time": {
+              "created": 1793365538955,
+              "ran": 1793365538960,
+              "completed": 1793365538971
+            }
+          }
+        ],
+        "finish": "tool-calls",
+        "rawFinish": "tool_calls",
+        "cost": 0,
+        "tokens": {
+          "input": 10,
+          "output": 4,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "id": "msg_18cea7872001a57Hi9OX9dPCdA",
+        "type": "assistant"
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "call_s0_2",
+            "name": "s0_echo",
+            "arguments": "{\"fail\":false}"
+          },
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "call_s0_2",
+            "content": "S0_TOOL_RESULT"
+          }
+        ],
+        "model": "probe/probe"
+      }
+    },
+    {
+      "name": "2.0.26-seq-33",
+      "body": {
+        "metadata": {
+          "notice": "instructions",
+          "instructionSources": [
+            "api/s0"
+          ]
+        },
+        "time": {
+          "created": 1793365539081
+        },
+        "text": "<context key=\"s0\">\nS0_INVENTED_SYSTEM_INSTRUCTION\n</context>",
+        "description": "Instructions updated: api/s0",
+        "id": "msg_18cea7909001DCDi4TwSTGgAfW",
+        "type": "system"
+      },
+      "row": {
+        "role": "system",
+        "text": "Instructions updated: api/s0",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "Instructions updated: api/s0"
+          }
+        ]
+      }
+    },
+    {
+      "name": "2.0.26-seq-35",
+      "body": {
+        "time": {
+          "created": 1793365539100,
+          "streamed": 1793365539130,
+          "completed": 1793365539142
+        },
+        "agent": "build",
+        "model": {
+          "id": "probe",
+          "providerID": "probe",
+          "variant": "default"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_s0_4",
+            "name": "s0_echo",
+            "executed": false,
+            "state": {
+              "status": "error",
+              "input": {
+                "fail": true
+              },
+              "error": {
+                "type": "unknown",
+                "message": "S0_TOOL_ERROR"
+              }
+            },
+            "time": {
+              "created": 1793365539112,
+              "ran": 1793365539128,
+              "completed": 1793365539140
+            }
+          }
+        ],
+        "finish": "tool-calls",
+        "rawFinish": "tool_calls",
+        "cost": 0,
+        "tokens": {
+          "input": 10,
+          "output": 4,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "id": "msg_18cea7911001BTZ4WoTnMd0RNK",
+        "type": "assistant"
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "call_s0_4",
+            "name": "s0_echo",
+            "arguments": "{\"fail\":true}"
+          },
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "call_s0_4",
+            "is_error": true,
+            "content": "S0_TOOL_ERROR"
+          }
+        ],
+        "model": "probe/probe"
+      }
+    },
+    {
+      "name": "2.0.26-seq-53",
+      "body": {
+        "time": {
+          "created": 1793365539232
+        },
+        "text": "S0_SYNTHETIC",
+        "id": "msg_18cea7979001f5BG6trjQ7BIGq",
+        "type": "synthetic"
+      },
+      "row": {
+        "role": "synthetic",
+        "text": "S0_SYNTHETIC",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "S0_SYNTHETIC"
+          }
+        ]
+      }
+    },
+    {
+      "name": "2.0.26-seq-54",
+      "body": {
+        "time": {
+          "created": 1793365539233
+        },
+        "text": "S0_TAIL_KEEP",
+        "files": [
+          {
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+            "mime": "image/png",
+            "source": {
+              "type": "inline"
+            },
+            "name": "pixel.png"
+          }
+        ],
+        "id": "msg_18cea7982001oBCBIGEEorfs3d",
+        "type": "user"
+      },
+      "row": {
+        "role": "user",
+        "text": "S0_TAIL_KEEP",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "S0_TAIL_KEEP"
+          },
+          {
+            "type": "file",
+            "part": "1",
+            "media": {
+              "type": "media_ref",
+              "part": "1",
+              "kind": "image",
+              "mime": "image/png",
+              "byte_size": 69,
+              "sha256": "b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640"
+            },
+            "filename": "pixel.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "2.2.3-seq-4",
+      "body": {
+        "time": {
+          "created": 1793365552703
+        },
+        "text": "S0_OLDER_DISCARD",
+        "id": "msg_18ceaac39001GMrAsMrjxryJAp",
+        "type": "user"
+      },
+      "row": {
+        "role": "user",
+        "text": "S0_OLDER_DISCARD",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "S0_OLDER_DISCARD"
+          }
+        ]
+      }
+    },
+    {
+      "name": "2.2.3-seq-5",
+      "body": {
+        "time": {
+          "created": 1793365552719,
+          "streamed": 1793365552781,
+          "completed": 1793365552784
+        },
+        "agent": "build",
+        "model": {
+          "id": "probe",
+          "providerID": "probe",
+          "variant": "default"
+        },
+        "content": [
+          {
+            "type": "reasoning",
+            "text": "S0_REASONING",
+            "native": {
+              "reasoningField": "reasoning_content"
+            },
+            "time": {
+              "created": 1793365552744,
+              "completed": 1793365552773
+            }
+          },
+          {
+            "type": "text",
+            "text": "S0_RAW_TAG S0_FINAL"
+          }
+        ],
+        "finish": "stop",
+        "rawFinish": "stop",
+        "cost": 0,
+        "tokens": {
+          "input": 10,
+          "output": 4,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "id": "msg_18ceaae470016inz2Bj6hhaPSF",
+        "type": "assistant"
+      },
+      "row": {
+        "role": "assistant",
+        "text": "S0_RAW_TAG S0_FINAL",
+        "parts": [
+          {
+            "type": "reasoning",
+            "part": "0",
+            "text": "S0_REASONING"
+          },
+          {
+            "type": "text",
+            "part": "1",
+            "text": "S0_RAW_TAG S0_FINAL"
+          }
+        ],
+        "model": "probe/probe"
+      }
+    },
+    {
+      "name": "2.2.3-seq-16",
+      "body": {
+        "time": {
+          "created": 1793365552828,
+          "streamed": 1793365552853,
+          "completed": 1793365552861
+        },
+        "agent": "build",
+        "model": {
+          "id": "probe",
+          "providerID": "probe",
+          "variant": "default"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_s0_2",
+            "name": "s0_echo",
+            "executed": false,
+            "state": {
+              "status": "completed",
+              "input": {
+                "fail": false
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "S0_TOOL_RESULT"
+                }
+              ],
+              "metadata": {
+                "truncated": false
+              }
+            },
+            "time": {
+              "created": 1793365552845,
+              "ran": 1793365552851,
+              "completed": 1793365552858
+            }
+          }
+        ],
+        "finish": "tool-calls",
+        "rawFinish": "tool_calls",
+        "cost": 0,
+        "tokens": {
+          "input": 10,
+          "output": 4,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "id": "msg_18ceaaeb7001GEmxULhe5Q6zah",
+        "type": "assistant"
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "call_s0_2",
+            "name": "s0_echo",
+            "arguments": "{\"fail\":false}"
+          },
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "call_s0_2",
+            "content": "S0_TOOL_RESULT"
+          }
+        ],
+        "model": "probe/probe"
+      }
+    },
+    {
+      "name": "2.2.3-seq-33",
+      "body": {
+        "metadata": {
+          "notice": "instructions",
+          "instructionSources": [
+            "api/s0"
+          ]
+        },
+        "time": {
+          "created": 1793365552952
+        },
+        "text": "<context key=\"s0\">\nS0_INVENTED_SYSTEM_INSTRUCTION\n</context>",
+        "description": "Instructions updated: api/s0",
+        "id": "msg_18ceaaf38001Z10vwtJ5L1Ku81",
+        "type": "system"
+      },
+      "row": {
+        "role": "system",
+        "text": "Instructions updated: api/s0",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "Instructions updated: api/s0"
+          }
+        ]
+      }
+    },
+    {
+      "name": "2.2.3-seq-35",
+      "body": {
+        "time": {
+          "created": 1793365552961,
+          "streamed": 1793365552976,
+          "completed": 1793365552981
+        },
+        "agent": "build",
+        "model": {
+          "id": "probe",
+          "providerID": "probe",
+          "variant": "default"
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_s0_4",
+            "name": "s0_echo",
+            "executed": false,
+            "state": {
+              "status": "error",
+              "input": {
+                "fail": true
+              },
+              "error": {
+                "type": "unknown",
+                "message": "S0_TOOL_ERROR"
+              }
+            },
+            "time": {
+              "created": 1793365552970,
+              "ran": 1793365552975,
+              "completed": 1793365552979
+            }
+          }
+        ],
+        "finish": "tool-calls",
+        "rawFinish": "tool_calls",
+        "cost": 0,
+        "tokens": {
+          "input": 10,
+          "output": 4,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        },
+        "id": "msg_18ceaaf3d0011M7CNyoAO1JMwe",
+        "type": "assistant"
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "call_s0_4",
+            "name": "s0_echo",
+            "arguments": "{\"fail\":true}"
+          },
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "call_s0_4",
+            "is_error": true,
+            "content": "S0_TOOL_ERROR"
+          }
+        ],
+        "model": "probe/probe"
+      }
+    },
+    {
+      "name": "2.2.3-seq-53",
+      "body": {
+        "time": {
+          "created": 1793365553097
+        },
+        "text": "S0_SYNTHETIC",
+        "id": "msg_18ceaaf91001MbLNVgUH7KfuBs",
+        "type": "synthetic"
+      },
+      "row": {
+        "role": "synthetic",
+        "text": "S0_SYNTHETIC",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "S0_SYNTHETIC"
+          }
+        ]
+      }
+    },
+    {
+      "name": "2.2.3-seq-54",
+      "body": {
+        "time": {
+          "created": 1793365553098
+        },
+        "text": "S0_TAIL_KEEP",
+        "files": [
+          {
+            "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+            "mime": "image/png",
+            "source": {
+              "type": "inline"
+            },
+            "name": "pixel.png"
+          }
+        ],
+        "id": "msg_18ceaaf9b001Rl5B11hUEWnVhE",
+        "type": "user"
+      },
+      "row": {
+        "role": "user",
+        "text": "S0_TAIL_KEEP",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "S0_TAIL_KEEP"
+          },
+          {
+            "type": "file",
+            "part": "1",
+            "media": {
+              "type": "media_ref",
+              "part": "1",
+              "kind": "image",
+              "mime": "image/png",
+              "byte_size": 69,
+              "sha256": "b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640"
+            },
+            "filename": "pixel.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-system",
+      "synthetic": true,
+      "body": {
+        "text": "<context key=\"instructions\">Fixture instruction</context>",
+        "description": "Instruction updated",
+        "id": "synthetic-20",
+        "type": "system"
+      },
+      "row": {
+        "role": "system",
+        "text": "Instruction updated",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "Instruction updated"
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-synthetic",
+      "synthetic": true,
+      "body": {
+        "text": "Fixture rendered template notice",
+        "id": "synthetic-30",
+        "type": "synthetic"
+      },
+      "row": {
+        "role": "synthetic",
+        "text": "Fixture rendered template notice",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "Fixture rendered template notice"
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-skill",
+      "synthetic": true,
+      "body": {
+        "skill": "fixture",
+        "name": "fixture",
+        "text": "Fixture skill text",
+        "id": "synthetic-40",
+        "type": "skill"
+      },
+      "row": {
+        "role": "skill",
+        "text": "Fixture skill text",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "Fixture skill text"
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-location-switched",
+      "synthetic": true,
+      "body": {
+        "location": {
+          "directory": "/fixture/next"
+        },
+        "id": "synthetic-50",
+        "type": "location-switched"
+      },
+      "row": {
+        "role": "location-switched",
+        "text": "The working directory has been changed to /fixture/next.",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "The working directory has been changed to /fixture/next."
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-model-switched",
+      "synthetic": true,
+      "body": {
+        "model": {
+          "providerID": "fixture",
+          "id": "other"
+        },
+        "id": "synthetic-60",
+        "type": "model-switched"
+      },
+      "row": {
+        "role": "model-switched",
+        "text": "",
+        "parts": []
+      }
+    },
+    {
+      "name": "synthetic-agent-switched",
+      "synthetic": true,
+      "body": {
+        "agent": "fixture",
+        "id": "synthetic-70",
+        "type": "agent-switched"
+      },
+      "row": {
+        "role": "agent-switched",
+        "text": "",
+        "parts": []
+      }
+    },
+    {
+      "name": "synthetic-idle",
+      "synthetic": true,
+      "body": {
+        "outcome": "succeeded",
+        "id": "synthetic-80",
+        "type": "idle"
+      },
+      "row": {
+        "role": "idle",
+        "text": "",
+        "parts": []
+      }
+    },
+    {
+      "name": "synthetic-shell",
+      "synthetic": true,
+      "body": {
+        "shellID": "sh_fixture",
+        "command": "echo fixture",
+        "status": "exited",
+        "exit": 0,
+        "output": {
+          "output": "fixture\n",
+          "cursor": 8,
+          "size": 8,
+          "truncated": false
+        },
+        "time": {
+          "created": 1,
+          "completed": 2
+        },
+        "id": "synthetic-90",
+        "type": "shell"
+      },
+      "row": {
+        "role": "shell",
+        "text": "The following shell command was executed by the user:\n\nCommand:\necho fixture\n\nOutput:\nfixture\n",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "The following shell command was executed by the user:\n\nCommand:\necho fixture\n\nOutput:\nfixture\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-shell-background",
+      "synthetic": true,
+      "body": {
+        "shellID": "sh_background",
+        "command": "echo background",
+        "status": "exited",
+        "exit": 0,
+        "metadata": {
+          "background": true
+        },
+        "output": {
+          "output": "background\n",
+          "cursor": 11,
+          "size": 11,
+          "truncated": false
+        },
+        "time": {
+          "created": 1,
+          "completed": 2
+        },
+        "id": "synthetic-100",
+        "type": "shell"
+      },
+      "row": {
+        "role": "shell",
+        "text": "The following shell command was executed by the user:\n\nCommand:\necho background\n\nOutput:\nbackground\n",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "The following shell command was executed by the user:\n\nCommand:\necho background\n\nOutput:\nbackground\n"
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-system-without-description",
+      "synthetic": true,
+      "body": {
+        "type": "system",
+        "text": "Fallback body"
+      },
+      "row": {
+        "role": "system",
+        "text": "Fallback body",
+        "parts": [
+          {
+            "type": "text",
+            "part": "0",
+            "text": "Fallback body"
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-tool-limits",
+      "synthetic": true,
+      "body": {
+        "type": "assistant",
+        "content": [
+          {
+            "type": "tool",
+            "id": "cut-call",
+            "name": "fixture",
+            "state": {
+              "status": "completed",
+              "input": {
+                "value": "héllo"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "héllo"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "limits": {
+        "arguments_bytes": 12,
+        "result_bytes": 2,
+        "error_result_bytes": 2
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "cut-call",
+            "name": "fixture",
+            "arguments": "{\"value\":\"h",
+            "arguments_truncated": true
+          },
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "cut-call",
+            "content": "h",
+            "truncated": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-existing-image-ref",
+      "synthetic": true,
+      "body": {
+        "type": "user",
+        "text": "",
+        "files": [
+          {
+            "data": {
+              "type": "media_ref",
+              "part": "0",
+              "kind": "image",
+              "mime": "image/png",
+              "byte_size": 69,
+              "sha256": "b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640"
+            },
+            "mime": "image/png",
+            "source": {
+              "type": "inline"
+            },
+            "name": "pixel.png"
+          }
+        ]
+      },
+      "row": {
+        "role": "user",
+        "text": "",
+        "parts": [
+          {
+            "type": "file",
+            "part": "0",
+            "media": {
+              "type": "media_ref",
+              "part": "0",
+              "kind": "image",
+              "mime": "image/png",
+              "byte_size": 69,
+              "sha256": "b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640"
+            },
+            "filename": "pixel.png"
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-tool-image",
+      "synthetic": true,
+      "body": {
+        "type": "assistant",
+        "content": [
+          {
+            "type": "tool",
+            "id": "image-call",
+            "name": "fixture",
+            "state": {
+              "status": "completed",
+              "input": {},
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Image result"
+                },
+                {
+                  "type": "file",
+                  "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+                  "mime": "image/png",
+                  "name": "pixel.png"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "image-call",
+            "name": "fixture",
+            "arguments": "{}"
+          },
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "image-call",
+            "content": "Image result",
+            "files": [
+              {
+                "media": {
+                  "type": "media_ref",
+                  "kind": "image",
+                  "mime": "image/png",
+                  "byte_size": 69,
+                  "sha256": "b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640"
+                },
+                "filename": "pixel.png"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "synthetic-error-limits",
+      "synthetic": true,
+      "body": {
+        "type": "assistant",
+        "content": [
+          {
+            "type": "tool",
+            "id": "error-call",
+            "name": "fixture",
+            "state": {
+              "status": "error",
+              "input": {},
+              "error": {
+                "message": "héllo"
+              }
+            }
+          }
+        ]
+      },
+      "limits": {
+        "arguments_bytes": 12,
+        "result_bytes": 20,
+        "error_result_bytes": 2
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "error-call",
+            "name": "fixture",
+            "arguments": "{}"
+          },
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "error-call",
+            "is_error": true,
+            "content": "h",
+            "truncated": true
+          }
+        ]
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "synthetic-unserved-checkpoint",
+      "synthetic": true,
+      "body": {
+        "type": "compaction",
+        "status": "completed",
+        "summary": "Never shown"
+      }
+    },
+    {
+      "name": "synthetic-idless-tool-projection",
+      "synthetic": true,
+      "body": {
+        "role": "tool",
+        "tool_call_id": "call",
+        "content": "not a stored row"
+      }
+    }
+  ]
+}

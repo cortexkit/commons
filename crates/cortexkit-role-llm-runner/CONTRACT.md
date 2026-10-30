@@ -558,6 +558,7 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   | `opencode-aisdk` | `parts`: array length. |
   | `owned-broca` | `content`: array length only; strings, missing content and whole-content `text_ref` are malformed. |
   | `pi` | Projected blocks of wrapped `message`, `custom_message` and `branch_summary` entries (§4.4): `/message/content`, top-level `content`, or rendered `summary`, respectively. Strings (even empty) and whole-content `text_ref` count one. Included shell execution is one text block plus any attached image blocks; excluded shell execution counts zero. Bare bodies and malformed containers are refused. |
+  | `opencode-v2` | Native units of a decoded OpenCode 2 message (§4.4): user text/files/supplied skill text, notice text, foreground shell text, or assistant `content` slots. Model-switched and never-sent rows count zero. Compactions are uncounted controls. |
 
   Arrays count only their immediate elements, never nested media. No other
   member contributes parts, including `role`, `origin` or `tool_calls` for
@@ -772,7 +773,8 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   `opencode-aisdk`. This role names `anthropic-messages`
   (`serializer_profile::ANTHROPIC_MESSAGES`), `opencode-aisdk`
   (`serializer_profile::OPENCODE_AISDK`), `owned-broca`
-  (`serializer_profile::OWNED_BROCA`) and `pi` (`serializer_profile::PI`).
+  (`serializer_profile::OWNED_BROCA`), `pi` (`serializer_profile::PI`) and
+  `opencode-v2` (`serializer_profile::OPENCODE_V2`).
 - [pinned] **`anthropic-messages`.** An entry's body is the message exactly
   as the client sent it in its Anthropic Messages request, with
   `cache_control` members removed in two places only: at the message's
@@ -903,7 +905,11 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   computation as `pi_session_projection`, so for an entry of a journal the
   projection accepts and that entry's correctly chosen last edit it returns
   the same `served_body`. It doesn't check journal relationships (ids,
-  parents, edit targets), and choosing the last edit is the caller's job. A planner that reads Pi's
+  parents, edit targets), and choosing the last edit is the caller's job.
+  `pi_projected_content(row)` returns one served row's model-visible content,
+  the units its parts count, including synthesized shell text and branch
+  summaries, so a codec can compute part digests and tag text from the
+  served row alone. A planner that reads Pi's
   journal directly, such as an offline move, uses `pi_session_projection`
   on the full journal, so its counts and part positions match what the
   runner serves afterwards; malformed journals are refused by the named
@@ -934,6 +940,107 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   and output, even when excluded from model context. Images use the existing
   refs descriptors, never inline bytes. Context edits are applied to the
   served body (above), never by changing the stored journal row.
+- [pinned] **`opencode-v2`.** A served body is OpenCode 2's decoded native
+  message: the stored `session_message.data` with native `id` and `type` added,
+  exactly as OpenCode's history decoder builds it. `seq` is not in the body;
+  the ordinal is served beside it. Every other data field stays unchanged,
+  except that separate `session_part` rows and blob references are hydrated
+  into `content` in part order before serving. Readers never see that storage
+  split. Large payloads use the existing refs descriptors (§4.2, §9.12).
+  Both replay-state shapes are accepted unchanged: 2.0.26's `state`,
+  `providerState` and `providerResultState`, and 2.2.3's `native`. The latter's
+  tool lifecycle still uses `state`. Source pins and read ranges are in
+  `test-vectors/llm-runner-v1/README-opencode-v2.md`: 2.0.26 history.ts:62-76,
+  2.2.3 history.ts:93-135,152-179; session-message.ts:125-236 and :135-246,
+  respectively. As with `opencode-aisdk`, unfinished messages are withheld
+  from reads and history until final (§4.2); streaming is not a partial row.
+- [pinned] **OpenCode 2 ordinals.** Each stored `session_message` row takes
+  exactly one dense zero-based ordinal in ascending native `seq` order, never
+  id or time order. Gaps in `seq` do not create ordinals. The sole exception
+  is `type: "compaction"`: running, failed and completed compactions consume
+  none. Idle, agent-switched and background-shell rows keep ordinals even
+  though they project zero parts. Unfinished rows also reserve their ordinal
+  but are not served until finished. The kept tail is never renumbered.
+- [pinned] **OpenCode 2 parts.** Count native content units, not provider
+  messages. A user row contributes one for nonempty top-level `text`, one per
+  `files` entry, and one per supplied `skills[].text`. Skill text precedes
+  top-level text and files in the projected units. Synthetic, system, skill
+  and location-switched rows contribute one each; foreground shell contributes
+  one. Model-switched always contributes zero: OpenCode sends its notice only
+  for the matching current model, and a served count must not depend on a later
+  model change. Assistant `content[i]` contributes one per native slot (`text`,
+  `reasoning` or `tool`). A tool's call and result share that slot. An id-less
+  hook `role: "tool"` projection is never another row or part. Provider-side
+  expansions (file-image location prefixes), dropped unsupported media and
+  2.2.3's inline-image deduplication never change these counts. These are
+  profile rules, not claims that upstream defines runner ordinals.
+  `serializer_profile::top_level_part_count` takes one decoded body;
+  `serializer_profile::opencode_v2_session_projection(rows)` takes one
+  session's SQL envelopes after part/blob hydration and returns all
+  ordinal-bearing rows' native ids, types, ordinals, projected native units
+  and counts, plus an optional native cut and a separate runner marker.
+  Missing/duplicate `seq`, duplicate
+  ids, conflicting identities, malformed containers and slot types, and
+  unresolved `keepID` references are refused by `OpenCodeV2SessionError`
+  (`opencode_v2_malformed_session`), never repaired by guessing. The helper
+  checks a row's containers and each content slot's `type`, not the full
+  native payload inside a slot or `files` entry: callers pass rows OpenCode
+  wrote, and an invalid payload inside a well-formed slot still counts as
+  that slot's one part.
+- [pinned] **OpenCode 2 native cut.** The native cut is the latest completed
+  compaction by `seq` whose stored `data.metadata.keepID` is absent or names a
+  different existing message row. A named boundary row is kept inclusively.
+  Without `keepID`, the boundary is the compaction itself, so only later
+  ordinal-bearing rows are kept. Rows before the boundary are outside the
+  native served range. Neither the compaction row nor its checkpoint summary
+  is ever served. This profile boundary rule applies to both versions; it is
+  not a promise that their provider-history renderers replay a structured tail.
+- [pinned] **OpenCode 2 version compatibility.** The profile follows OpenCode
+  2.2's loader; 2.0.x support is best effort. OpenCode 2.0.x's own compactions
+  store `data.recent`, not a generated `keepID` (2.0.26
+  session-message.ts:246-266, compaction.ts:643-656). With no `keepID`, the
+  profile's boundary at the compaction matches 2.0.x's native selection.
+  A plugin can supply `keepID` as metadata (compaction.ts:595-608), but 2.0.26
+  does not honor it when loading history (history.ts:83-98). Such a session
+  is best effort: the profile keeps the named row even though 2.0.26 does not
+  load that earlier native row. The 2.0.26 fork projector gives copied rows new
+  ids while copying their data verbatim (projector.ts:217-225), so a fork with
+  a stale `metadata.keepID` is refused by `opencode_v2_malformed_session`, never
+  guessed or normalized. The 2.2.3 projector rewrites those references to the
+  copied ids (projector.ts:226-238). The public vectors preserve both the valid
+  2.2.3 revert/fallback cases and the recorded 2.0.26 stale-reference refusals.
+- [pinned] **OpenCode 2 runner markers.** A completed compaction whose `keepID`
+  names itself is a runner-written cut marker, not a native cut. The helper
+  reports the latest such row separately as `runner_marker` (its native row id),
+  beside `native_cut`. It never derives a cut or served range from that marker.
+  The runner's own message checkpoint, with `message_count` and the head cut
+  (§4.8, §9.6), is the authority for a runner-written cut, as for OpenCode 1.
+  The retained tail comes from the runner's own copies; its placement cannot
+  be inferred from native rows. Even if an older native cut is also reported,
+  a runner marker requires the runner's checkpoint to find the effective range.
+  In 2.2.3, history.ts:239-255 resolves `keepID` to a sequence, then selects
+  `start.seq <= seq < compaction.seq`: a self-reference selects no rows.
+  2.0.26's history.ts:83-98 does not resolve `keepID` at all; it loads only
+  rows at or after the compaction. Neither reconstructs an older structured
+  tail from a self-referencing marker. After a revert deletes a marker, the
+  range follows the previous surviving runner marker; with none left, a
+  surviving native cut still bounds it, and otherwise history is whole, like
+  OpenCode 1's revert below a cut (§4.8, §9.6). This applies to valid
+  remaining rows: a 2.0.26 fork with a stale `keepID` is refused, as above.
+- [pinned] **OpenCode 2 authorship and sends.** Only `type: "user"` is the
+  person's own text. Synthetic, system, skill and location-switched rows are
+  model-visible notices, including 2.2 instruction-entry announcements stored
+  as system rows with a `<context key>` body. A `session.send` naming a
+  template (§9.7) is stored as synthetic; every other send is stored as user,
+  whoever sent it. As for Pi, classify by template form, never by sender.
+- [pinned] **OpenCode 2 display and pruning.** `display::opencode_v2` and
+  `display::project` keep the native OpenCode 2 type as the role; notices never
+  become user text. System notices show `description` when present, otherwise
+  `text`. Tool slots show their call and completed result or error. Images
+  use existing refs descriptors, never inline bytes. No archive pruning is
+  defined: a runner using `opencode-v2` does not declare
+  `archive_prunes_reasoning`, because OpenCode 2 has no separate reasoning
+  archive.
 - [pinned] Read stability (§4.2) applies: the runner serves the form it
   first ingested (`serializer_profile::ingest`). A client re-sending the
   same message with its cache marker moved (a string `content` turning

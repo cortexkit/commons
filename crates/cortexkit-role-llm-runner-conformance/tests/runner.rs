@@ -5901,6 +5901,58 @@ async fn pi_display_projection_accepts_runtime_roles_and_rejects_user_relabeling
 }
 
 #[tokio::test]
+async fn opencode_v2_display_projection_preserves_notices_and_rejects_user_relabeling() {
+    let report = run(&displaying(Defects {
+        display_opencode_v2_profile: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.outcome("display_row_is_the_profile_projection"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    let report = run(&displaying(Defects {
+        display_opencode_v2_profile: true,
+        display_opencode_v2_wrong_role: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "display_row_is_the_profile_projection")
+        .contains("opencode-v2's projection"));
+}
+
+#[tokio::test]
+async fn opencode_v2_display_withholds_unfinished_messages() {
+    let report = run(&displaying(Defects {
+        display_opencode_v2_profile: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.outcome("display_pages_carry_finished_messages_only"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    let report = run(&displaying(Defects {
+        display_opencode_v2_profile: true,
+        display_in_progress_row: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        matches!(
+            report.outcome("display_pages_carry_finished_messages_only"),
+            Some(CaseOutcome::Failed { .. })
+        ),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
 async fn a_runner_written_display_row_without_model_fails_by_name() {
     let report = run(&displaying(Defects {
         display_drops_model: true,

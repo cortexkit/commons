@@ -183,6 +183,23 @@ pub(crate) fn projected_content(entry: &Value) -> Result<Value, String> {
     }
 }
 
+/// The model-visible content of one served Pi row: a `served_body`, or a
+/// stored entry that no edit targets. For such a row it is exactly the
+/// `projected_content` [`pi_session_projection`] reports, including the
+/// synthesized shell text and branch-summary wrapper a codec needs for part
+/// digests and tag text. Legacy missing or null content is normalized first,
+/// as Pi's loader does. One difference: for a message or custom message a
+/// null edit removed, this returns the served body's empty `[]` while the
+/// projection reports `null`; both have zero parts. It checks only the row
+/// itself, not journal relationships.
+pub fn pi_projected_content(entry: &Value) -> Result<Value, PiJournalError> {
+    let id = entry["id"].as_str().unwrap_or("entry");
+    if !ordinal_bearing(entry) {
+        return Err(malformed(format!("{id} is not an ordinal-bearing entry")));
+    }
+    normalized_content(entry).map_err(|detail| malformed(format!("{id}: {detail}")))
+}
+
 fn ordinal_bearing(entry: &Value) -> bool {
     matches!(
         entry["type"].as_str(),
@@ -619,6 +636,45 @@ mod tests {
             checked > 20 && edited >= 6,
             "checked {checked}, edited {edited}"
         );
+    }
+
+    #[test]
+    fn pi_projected_content_of_each_served_body_matches_the_projection() {
+        let file = vectors::load("pi-session.json");
+        let recording: Vec<Value> = vectors::file(file["recording"].as_str().unwrap())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut journals = vec![recording];
+        for case in file["synthetic"].as_array().unwrap() {
+            journals.push(case["journal"].as_array().unwrap().clone());
+        }
+        let (mut checked, mut synthesized, mut removed) = (0, 0, 0);
+        for journal in &journals {
+            for entry in pi_session_projection(journal).unwrap().entries {
+                let content = pi_projected_content(&entry.served_body).unwrap();
+                if entry.projected_content.is_null() && content == json!([]) {
+                    // A removed message or custom message: served as `[]`.
+                    removed += 1;
+                } else {
+                    assert_eq!(content, entry.projected_content, "{}", entry.entry_id);
+                }
+                if entry.entry_type == "branch_summary"
+                    || entry.served_body["message"]["role"] == "bashExecution"
+                {
+                    synthesized += 1;
+                }
+                assert_eq!(content_count(&content).unwrap(), entry.part_count);
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 20 && synthesized >= 2 && removed >= 1,
+            "checked {checked}, synthesized {synthesized}, removed {removed}"
+        );
+        let control = json!({"type":"label","id":"l","parentId":null});
+        assert!(pi_projected_content(&control).is_err());
     }
 
     #[test]
