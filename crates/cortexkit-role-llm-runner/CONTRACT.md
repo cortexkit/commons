@@ -391,8 +391,8 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   answers `session.read` for the lineage being set up while its Setup call
   for that lineage is outstanding, without waiting on that Setup, its lock,
   or any gate it holds. It serves the lineage from its `first_ordinal`
-  onward and never below it, excluding §4.8's uncounted finished-summary
-  and compaction-only rows. This lets the provider read surviving rows to
+  onward and never below it, excluding §4.8's uncounted finished-summary,
+  compaction-only and dead-step rows. This lets the provider read surviving rows to
   build its Setup answer when a moved session recovers at the adoption cut,
   after a revert removed `cut` or the runner lost its state. Native-cut
   descent does not need this recovery read: the provider renders kept rows
@@ -429,9 +429,9 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   rule above; streaming progress reaches a consumer through the stream
   (§7), never through a partial entry.
 - [pinned] A runner declaring `message_checkpoint` also excludes §4.8's
-  uncounted host rows from every page: on OpenCode 1, finished summaries
-  and nonempty compaction-only messages. A compaction part alongside any
-  other part does not by itself exclude a message.
+  uncounted host rows from every page: on OpenCode 1, finished summaries,
+  nonempty compaction-only messages and dead steps. A compaction part
+  alongside any other part does not by itself exclude a message.
 - [pinned] **Read stability.** Read stability is scoped to the lineage
   (§4.5). Once `session.read` has returned an entry
   under a `lineage_id`, its `message` bytes, `ordinal`, `mid`, `role`,
@@ -979,11 +979,16 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   session's SQL envelopes after part/blob hydration and returns all
   ordinal-bearing rows' native ids, types, ordinals, projected native units
   and counts, plus an optional native cut and a separate runner marker.
-  Missing/duplicate `seq`, duplicate
-  ids, conflicting identities, malformed containers and slot types, and
-  unresolved `keepID` references are refused by `OpenCodeV2SessionError`
-  (`opencode_v2_malformed_session`), never repaired by guessing. The helper
-  checks a row's containers and each content slot's `type`, not the full
+  `serializer_profile::opencode_v2_projected_content(row)` takes one
+  decoded served row and returns the same projected native units for it,
+  so a codec holding one row at a time computes part digests and tag text
+  without wrapping it in a one-row session; it refuses compaction rows and
+  checks only the row itself.
+  `opencode_v2_session_projection` refuses missing/duplicate `seq`,
+  duplicate ids, conflicting identities, malformed containers and slot
+  types, and unresolved `keepID` references with `OpenCodeV2SessionError`
+  (`opencode_v2_malformed_session`), never repairing by guessing. Both
+  helpers check a row's containers and each content slot's `type`, not the full
   native payload inside a slot or `files` entry: callers pass rows OpenCode
   wrote, and an invalid payload inside a well-formed slot still counts as
   that slot's one part.
@@ -1314,9 +1319,22 @@ display-ready row for an app's reader on a runner declaring
   real message after a cut through `t` keeps `first_ordinal = t + 1`.
   A message with a `compaction` part plus
   any other part is still counted unless it is a finished summary as above.
-  A message with zero parts is not compaction-only and keeps its existing
-  treatment: it counts unless it is a finished summary. Every other row
-  counts, including a row whose JSON is malformed.
+- [pinned] For a runner declaring `message_checkpoint` on **OpenCode 1**,
+  a dead step is also not counted and is never served. A dead step is an
+  assistant message with no parts, no `time.completed` and no `error`
+  (absent or `null`): a step whose loop ended before the model call.
+  OpenCode 1, checked against 1.18.35 (`toModelMessages` and the prompt
+  loop in `prompt.ts`), skips a part-less message when it builds model
+  messages, so the model never sees it, and never adds a part to a dead
+  step later. The rule applies to settled rows: while a step may still
+  write to its assistant, that assistant is unfinished, even when a later
+  row such as a queued prompt already exists, so it is never served (§4.2)
+  and the runner never numbers past it. Any other message with zero parts
+  keeps its existing treatment and counts unless it is a finished summary,
+  including a part-less assistant that finished with an `error`. Keeping
+  those counted confines this rule to dead steps, so ordinals a runner
+  served for such rows stay valid. Every other row counts, including a row
+  whose JSON is malformed.
 - [pinned] A runner declaring `message_checkpoint` MUST NOT serve on any
   read a host row that these rules do not count, including a marker's own
   finished summary or compaction-only row. This applies on every served
@@ -2955,8 +2973,9 @@ part's key and its content digest, never a number.
 - [pinned] A Setup checkpoint is `{tag_checkpoint, cut, message_count?,
   head_cut?}`. The new members are sent together or neither, only to a
   runner declaring `message_checkpoint`. `message_count` is a `u64`: the
-  count of host messages before `cut` under §4.8, excluding finished-summary
-  and compaction-only rows on OpenCode 1, frozen at the move, both `cut`'s
+  count of host messages before `cut` under §4.8, excluding its uncounted
+  rows (on OpenCode 1, finished summaries, compaction-only rows and dead
+  steps), frozen at the move, both `cut`'s
   ordinal and the adoption lineage's `first_ordinal`. `head_cut` reuses
   `read::HeadCut`: `{mid, digest, written_at}` for the counted message
   immediately before `cut`, the last message the move folded. Its digest
@@ -2985,7 +3004,8 @@ part's key and its content digest, never a number.
   overflows. `head_cut` describes message `t`, using the same digest and
   timestamp rules as Setup.
 - [pinned] For a runner declaring `message_checkpoint`, §4.8's uncounted
-  rows, including a marker's finished summary and compaction-only rows,
+  rows, including a marker's finished summary, compaction-only rows and
+  dead steps,
   MUST NOT appear on any read, on adoption or native lineages. Message
   ordinals are contiguous over the counted rows; a native marker's `t + 1`
   uses that same order.

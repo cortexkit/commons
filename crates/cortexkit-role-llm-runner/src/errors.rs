@@ -699,7 +699,7 @@ mod tests {
     use crate::vectors;
 
     #[test]
-    fn prefrontal_plan_drift_bytes_round_trip() {
+    fn upstream_plan_drift_bytes_round_trip() {
         for name in [
             "refuse-later-send-with-different-plan.json",
             "refuse-later-plan-after-planless-first-episode.json",
@@ -716,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn prefrontal_tool_name_collision_bytes_round_trip() {
+    fn upstream_tool_name_collision_bytes_round_trip() {
         let name = "refuse-tool-name-collision.json";
         let file = vectors::load(name);
         assert_eq!(file["expected"]["code"], TOOL_NAME_COLLISION);

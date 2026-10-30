@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.34
+
+- Pin runner `=0.7.30`. No case changes.
+
 ## 0.15.33
 
 - Pin runner `=0.7.29` and check the opt-in `retract_own_send` rule: the

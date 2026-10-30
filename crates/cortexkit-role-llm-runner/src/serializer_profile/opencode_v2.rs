@@ -140,6 +140,24 @@ pub(crate) fn projected_content(body: &Value) -> Result<Value, String> {
     Ok(Value::Array(units))
 }
 
+/// The model-visible native units of one served OpenCode 2 row: the decoded
+/// body (the row's `data` with its `id` and `type` folded in), after part and
+/// blob hydration. For an ordinal-bearing row it is exactly the
+/// `projected_content` [`opencode_v2_session_projection`] reports, including
+/// the synthesized shell and working-directory text, so a codec can compute
+/// part digests and tag text from the served row alone. A compaction row has
+/// no ordinal and is refused. It checks only the row itself: its containers
+/// and slot types, not session relationships such as `seq` or `keepID`.
+pub fn opencode_v2_projected_content(row: &Value) -> Result<Value, OpenCodeV2SessionError> {
+    let id = row["id"].as_str().unwrap_or("row");
+    if row["type"].as_str() == Some("compaction") {
+        return Err(malformed(format!(
+            "{id} is a compaction, not an ordinal-bearing row"
+        )));
+    }
+    projected_content(row).map_err(|error| malformed(format!("{id}: {error}")))
+}
+
 /// Assign ordinals in native `seq` order, never id or timestamp order. The
 /// caller supplies one session's SQL envelopes `{id,type,seq,data,...}`, after
 /// hydrating any separate part rows and blobs. Compactions consume no ordinal.
@@ -316,6 +334,19 @@ mod tests {
                 top_level_part_count(OPENCODE_V2, &decoded(control)).unwrap(),
                 0
             );
+        }
+        // A codec holding one decoded row reaches the same native units.
+        for entry in &actual.entries {
+            let stored = rows.iter().find(|row| row["id"] == entry.entry_id).unwrap();
+            assert_eq!(
+                opencode_v2_projected_content(&decoded(stored)).unwrap(),
+                entry.projected_content,
+                "{}",
+                entry.entry_id
+            );
+        }
+        for control in rows.iter().filter(|row| row["type"] == "compaction") {
+            assert!(opencode_v2_projected_content(&decoded(control)).is_err());
         }
         // Input order is irrelevant; native sequence numbers alone determine it.
         let mut reversed = rows.to_vec();

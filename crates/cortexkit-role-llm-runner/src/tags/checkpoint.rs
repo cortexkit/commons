@@ -119,18 +119,35 @@ pub fn opencode1_message_counts(data: &str) -> bool {
 /// Applies OpenCode 1's full §4.8 counting rule to a message and its stored parts.
 /// Pass the message row's `data` and each stored part's `type`, in part order,
 /// from the separate part rows keyed by that message's id.
-/// Finished summaries and nonempty compaction-only messages are excluded from
-/// both counts and served reads. Zero-part messages and malformed message JSON
-/// count unless one of those exclusions applies. Consume message rows in
-/// ascending `(time_created, id)` order.
+/// Finished summaries, nonempty compaction-only messages and dead steps are
+/// excluded from both counts and served reads. A dead step is an assistant
+/// with no parts, no `time.completed` and no `error`: a step that ended before
+/// the model call, which OpenCode 1 never sends to the model. Apply it to
+/// settled rows only; while a step may still write to its assistant, that
+/// assistant is unfinished and a runner never numbers past it. Other zero-part
+/// messages, such as a finished assistant with an `error`, and malformed
+/// message JSON count unless one of those exclusions applies. Consume message
+/// rows in ascending `(time_created, id)` order.
 pub fn opencode1_message_counts_with_parts<'a>(
     message_data: &str,
     part_types: impl IntoIterator<Item = &'a str>,
 ) -> bool {
     let mut part_types = part_types.into_iter();
-    let compaction_only = part_types.next() == Some("compaction")
-        && part_types.all(|part_type| part_type == "compaction");
+    let Some(first) = part_types.next() else {
+        return opencode1_message_counts(message_data) && !opencode1_dead_step(message_data);
+    };
+    let compaction_only =
+        first == "compaction" && part_types.all(|part_type| part_type == "compaction");
     opencode1_message_counts(message_data) && !compaction_only
+}
+
+/// A part-less assistant row with no `time.completed` and no `error`. Absent
+/// and `null` count as missing. Malformed JSON is never a dead step.
+fn opencode1_dead_step(message_data: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(message_data) else {
+        return false;
+    };
+    value["role"] == "assistant" && value["time"]["completed"].is_null() && value["error"].is_null()
 }
 
 #[cfg(test)]
@@ -237,6 +254,8 @@ mod tests {
             ("marker-only", false),
             ("marker-and-text", true),
             ("empty-parts", true),
+            ("dead-step", false),
+            ("error-step", true),
             ("two-markers-only", false),
             ("summary-float", false),
         ] {
@@ -268,8 +287,10 @@ mod tests {
                 "f",
                 "marker-only",
                 "marker-and-text",
+                "dead-step",
                 "empty-parts",
                 "two-markers-only",
+                "error-step",
             ]
         );
     }
@@ -287,6 +308,26 @@ mod tests {
     #[test]
     fn opencode1_separate_parts_apply_even_to_malformed_message_data() {
         assert!(opencode1_message_counts_with_parts("{malformed", []));
+        assert!(!opencode1_message_counts_with_parts(
+            r#"{"role":"assistant","time":{"created":1}}"#,
+            []
+        ));
+        assert!(opencode1_message_counts_with_parts(
+            r#"{"role":"assistant","time":{"created":1},"error":{"name":"APIError"}}"#,
+            []
+        ));
+        assert!(opencode1_message_counts_with_parts(
+            r#"{"role":"assistant","time":{"created":1,"completed":2}}"#,
+            []
+        ));
+        assert!(opencode1_message_counts_with_parts(
+            r#"{"role":"assistant","time":{"created":1}}"#,
+            ["text"]
+        ));
+        assert!(opencode1_message_counts_with_parts(
+            r#"{"role":"user"}"#,
+            []
+        ));
         assert!(!opencode1_message_counts_with_parts(
             "{malformed",
             ["compaction"]

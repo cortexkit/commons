@@ -20,9 +20,11 @@
       {"time_created": 14, "id": "f", "data": "{\"summary\":false,\"finish\":\"stop\"}"},
       {"time_created": 15, "id": "marker-only", "data": "{\"role\":\"user\"}"},
       {"time_created": 16, "id": "marker-and-text", "data": "{\"role\":\"user\"}"},
+      {"time_created": 17, "id": "dead-step", "data": "{\"role\":\"assistant\",\"time\":{\"created\":17}}"},
       {"time_created": 17, "id": "empty-parts", "data": "{\"role\":\"user\"}"},
       {"time_created": 18, "id": "two-markers-only", "data": "{\"role\":\"user\"}"},
-      {"time_created": 19, "id": "summary-float", "data": "{\"summary\":1.0,\"finish\":\"stop\"}"}
+      {"time_created": 19, "id": "summary-float", "data": "{\"summary\":1.0,\"finish\":\"stop\"}"},
+      {"time_created": 20, "id": "error-step", "data": "{\"role\":\"assistant\",\"time\":{\"created\":20,\"completed\":21},\"error\":{\"name\":\"APIError\"}}"}
     ],
     "parts": [
       {"message_id": "marker-only", "data": "{\"type\":\"compaction\"}"},
@@ -31,8 +33,8 @@
       {"message_id": "two-markers-only", "data": "{\"type\":\"compaction\"}"},
       {"message_id": "two-markers-only", "data": "{\"type\":\"compaction\"}"}
     ],
-    "counted_ids": ["a", "d", "e", "f", "marker-and-text", "empty-parts"],
-    "message_count": 6
+    "counted_ids": ["a", "d", "e", "f", "marker-and-text", "empty-parts", "error-step"],
+    "message_count": 7
   },
   "anchors": [
     {"name": "revert_lands_after_cut", "cut_survives": true, "head_survives": true,

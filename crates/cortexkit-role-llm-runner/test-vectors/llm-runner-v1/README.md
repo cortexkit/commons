@@ -159,19 +159,20 @@ its SHA-256. These vectors change together with the versioned contract.
 | `errors.json` | every refusal code the role defines (`before_lineage_start` with its `first_ordinal` detail and `cursor_expired` among them), plus one it does not, with whether a caller retries it | the wire crate's retryability test |
 | `reply-too-large.json` | terminal `reply_too_large` refusals for an oversized raw message and model-view atomic group, identifying each without content | `reply_too_large_is_named_terminal_and_carries_only_safe_details` |
 
-The following admission fixtures are copied byte-for-byte from the prefrontal
-repository's `test-vectors/fetch-plan-v1/admission/` at commit `7079a4025`. The wire tests
-re-encode the typed detail or absent item inside the unchanged fixture envelope
-and compare the complete bytes, including field order and whitespace.
+The following admission fixtures are copied byte-for-byte from a plan
+composer's `fetch-plan-v1/admission/` fixtures. That source isn't public, so
+each row's source file is informational. The wire tests re-encode the typed
+detail or absent item inside the unchanged fixture envelope and compare the
+complete bytes, including field order and whitespace.
 
-| File | Source commit and file | Checked by |
+| File | Source file | Checked by |
 |---|---|---|
-| `refuse-later-send-with-different-plan.json` | `7079a4025`, `admission/refuse-later-send-with-different-plan.json` | `prefrontal_plan_drift_bytes_round_trip` |
-| `refuse-later-plan-after-planless-first-episode.json` | `7079a4025`, `admission/refuse-later-plan-after-planless-first-episode.json` | `prefrontal_plan_drift_bytes_round_trip` |
-| `refuse-tool-name-collision.json` | `7079a4025`, `admission/refuse-tool-name-collision.json` | `prefrontal_tool_name_collision_bytes_round_trip` |
-| `admit-optional-text-refused.json` | `7079a4025`, `admission/admit-optional-text-refused.json` | `prefrontal_absent_item_bytes_round_trip` |
-| `admit-optional-text-timeout.json` | `7079a4025`, `admission/admit-optional-text-timeout.json` | `prefrontal_absent_item_bytes_round_trip` |
-| `admit-optional-text-unknown-provider.json` | `7079a4025`, `admission/admit-optional-text-unknown-provider.json` | `prefrontal_absent_item_bytes_round_trip` |
+| `refuse-later-send-with-different-plan.json` | `admission/refuse-later-send-with-different-plan.json` | `upstream_plan_drift_bytes_round_trip` |
+| `refuse-later-plan-after-planless-first-episode.json` | `admission/refuse-later-plan-after-planless-first-episode.json` | `upstream_plan_drift_bytes_round_trip` |
+| `refuse-tool-name-collision.json` | `admission/refuse-tool-name-collision.json` | `upstream_tool_name_collision_bytes_round_trip` |
+| `admit-optional-text-refused.json` | `admission/admit-optional-text-refused.json` | `upstream_absent_item_bytes_round_trip` |
+| `admit-optional-text-timeout.json` | `admission/admit-optional-text-timeout.json` | `upstream_absent_item_bytes_round_trip` |
+| `admit-optional-text-unknown-provider.json` | `admission/admit-optional-text-unknown-provider.json` | `upstream_absent_item_bytes_round_trip` |
 
 The `plans.json` plan bodies are illustrative opaque maps, not canonical
 fetch-plan bytes. Their `plan-a`/`plan-b` identities are symbolic; the copied
@@ -181,9 +182,7 @@ crate. The first-send admission test checks only the capability gate, not fetch.
 
 Every pinned vector round-trips: decoding it and encoding the result gives
 back the same JSON. Changing a vector changes the contract: say why in the
-commit. These admission shapes align the unpublished `cortexkit-role-llm-runner`
-0.1.0 draft with prefrontal's fetch-plan consumer; the crate remains
-`publish = false` until review.
+commit.
 # Session input-token caps
 
 `input-token-cap.json` pins accepted sends and every cap/member refusal,
@@ -523,7 +522,10 @@ counting with `rows` mirroring message rows and a separate `parts` array
 of stored part rows (`message_id`, JSON `data`), in part order. The full
 `opencode1_message_counts_with_parts` predicate covers finished summaries
 (`summary` as `true`, `1` or `1.0`), malformed message JSON, excluded compaction-only messages, counted mixed
-compaction/text messages and counted empty-part messages. The legacy
+compaction/text messages, counted empty-part messages, an excluded dead step
+(a part-less assistant with no completion time and no error) between two
+counted messages, and a counted part-less assistant that finished with an
+error. The legacy
 `opencode1_message_counts` predicate still checks finished summaries only.
 The vector also pins every revert
 anchor outcome: after the retained cut, cut removed with folded message kept,

@@ -16,8 +16,9 @@ use serde_json::Value;
 pub mod error_output;
 pub(crate) mod opencode_v2;
 pub use opencode_v2::{
-    opencode_v2_session_projection, OpenCodeV2NativeCut, OpenCodeV2OrdinalEntry,
-    OpenCodeV2RunnerMarker, OpenCodeV2SessionError, OpenCodeV2SessionProjection,
+    opencode_v2_projected_content, opencode_v2_session_projection, OpenCodeV2NativeCut,
+    OpenCodeV2OrdinalEntry, OpenCodeV2RunnerMarker, OpenCodeV2SessionError,
+    OpenCodeV2SessionProjection,
 };
 pub(crate) mod pi;
 pub use pi::{

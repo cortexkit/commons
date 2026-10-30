@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.30
+
+- OpenCode 1 (§4.8): a dead step, an assistant message with no parts, no
+  `time.completed` and no `error`, is no longer counted or served by a
+  runner declaring `message_checkpoint`. OpenCode 1 never sends a part-less
+  message to the model, and never adds a part to a dead step. The rule
+  applies to settled rows; a step that may still write to its assistant is
+  unfinished. Other part-less messages, including a part-less assistant
+  that finished with an `error`, still count, so no other row changes
+  eligibility. A message's ordinal and `message_count` change wherever a
+  dead step precedes it, so anything that counted dead steps recomputes
+  from the predicate. `tags::opencode1_message_counts_with_parts` returns
+  `false` for a dead step; the data-only `opencode1_message_counts` is
+  unchanged. The `message-checkpoint.json` counting vector adds an
+  uncounted `dead-step` between two counted messages and a counted
+  `error-step`; `message_count` is now 7.
+- Add `serializer_profile::opencode_v2_projected_content(row)`: one decoded
+  served OpenCode 2 row's model-visible native units, including synthesized
+  shell and working-directory text, so a codec computes part digests and tag
+  text from that row alone. It refuses compaction rows and checks only the
+  row. A test checks it against `projected_content` for every ordinal-bearing
+  row in the recorded and synthetic `opencode-v2-session.json` cases.
+
 ## 0.7.29
 
 - Add the opt-in `retract_own_send` describe group, which requires `retract`.

@@ -435,7 +435,7 @@ mod tests {
     }
 
     #[test]
-    fn prefrontal_absent_item_bytes_round_trip() {
+    fn upstream_absent_item_bytes_round_trip() {
         for name in [
             "admit-optional-text-refused.json",
             "admit-optional-text-timeout.json",
