@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.27
+
+- Pins `cortexkit-role-llm-runner` `=0.7.23`, a text-only release. No case,
+  report or adapter hook changes.
+
 ## 0.15.26
 
 - Check `call_identity` on runners declaring `run_tool_calls`

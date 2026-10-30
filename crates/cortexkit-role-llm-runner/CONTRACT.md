@@ -34,8 +34,7 @@ revision every numbered question, including Q22 (§6.1), is settled, and
 the `session_change` request, reply and refusal shapes (§10.2) are pinned.
 
 An LLM runner is any module that runs model sessions. Nothing here names a
-particular implementation; "Gaps in broca today" at the end compares the one
-shipping runner with this document.
+particular implementation.
 
 ## 1. Role identity and addressing
 
@@ -573,7 +572,7 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   the page (§7). It is a JSON object, opaque to consumers, and absent on a
   session with no events.
 - [pinned] Decoded leniently: a consumer ignores fields it does not know.
-  Runners may add their own (broca's `lineage_state`, say).
+  Runners may add their own (a runner's `lineage_state`, say).
 
 ### 4.3 Head metadata
 
@@ -1148,7 +1147,7 @@ display-ready row for an app's reader on a runner declaring
 - [pinned] States (`run::states`): `active` and `paused`, which are not
   terminal, and the terminal states `completed`, `max_steps`, `budget_exhausted`,
   `context_ceiling`, `cancelled`, `error` and `interrupted`, each its own variant of the non-exhaustive `RunState`. States are decoded open: a runner's own state
-  (broca's `transform_unavailable`, say) decodes as a plain string, and a
+  (`transform_unavailable`, say) decodes as a plain string, and a
   consumer does not treat an unknown state as terminal.
 - [pinned] Structured output adds no state. A run that calls `submit_result`
   (§9.4) ends `completed` after that step, whether or not the submitted value
@@ -3564,7 +3563,9 @@ its host's file storage, not a second copy of the host's media store.
   check. The kit's unsupported-plan case runs on non-advertisers and is N/A
   for advertisers; positive reference cases have the opposite applicability.
 - [pinned] Scan only the model's own assistant text parts with
-  `cortexkit-rich-ui-syntax` 0.1.1 `scan_references(source, reply)`. The scanner's
+  `scan_references(source, reply)` from the `cortexkit-rich-ui-syntax`
+  version this crate depends on (0.3.0 at this release), the same scanner
+  `output_refs::Resolution` uses. The scanner's
   `rich-ui/1` dialect, including its code, escaping, display-tag and string
   rules, is authoritative; runners never implement a second grammar.
   Record each occurrence in text-part order and scanner encounter order.
@@ -4672,12 +4673,12 @@ provider code: it is the `context_ceiling` refusal or run state (§6).
   `misalignment_policy_violation` and `content_filter` as provider policy
   refusals. `content_filter` is the normalized safety finish.
 - [pinned] A consumer MUST treat a seat whose provider reports
-  `access_terminated_error` as unable to run. The broca runner normalizes a
-  Kimi usage-limit message under that type to `account_limit_exhausted`,
-  rather than reporting access termination.
+  `access_terminated_error` as unable to run. A runner may instead
+  normalize a Kimi usage-limit message under that type to
+  `account_limit_exhausted`, rather than reporting access termination.
 - [pinned] Runners MUST stop emitting `insufficient_quota`. Already
   recorded run errors may still carry it; consumers MUST treat it as
-  `billing_exhausted`. broca emits `billing_exhausted` from 0.3.193 on.
+  `billing_exhausted`.
 
 These are run errors, not request-refusal codes. Plan-fetch refusals, such
 as `plan_param_refused`, are send refusals and do not belong in this list.
@@ -5130,6 +5131,7 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `held_calls_applies_late_result` | the above plus rendered model-input observations; applying the provider's late result removes the entry and continues the run with that result |
 | `held_calls_not_started_becomes_tool_result` | the above plus rendered model-input observations; a `not_started` late entry continues the run with a tool result saying the call never ran |
 | `held_calls_expired_becomes_tool_result` | the above plus rendered model-input observations; an `expired` late entry removes the held call and continues the run with a tool result saying its answer expired |
+| `held_calls_status_event_matches_run_status` | `held_calls`, `run_status`, `queue`, `transcript_reads`, `run_ops`, `streaming`; while a call is held, a durable control event lists exactly the held calls `run.status` lists, and after the late result no event lists that call again. This document does not mark which control events are status events, so the case cannot require the event that clears the list |
 
 The `context_ceiling` refusal and run state (§6, §12.1) have no live case:
 the suite has no way to bring a runner's context to its ceiling. They are
@@ -5260,41 +5262,3 @@ the decision; the items it governs are pinned above.
 - **Q22. `run.status` beyond its pinned members.** Settled: an unknown
   `run_id` answers `{state: "unknown"}`, not an error. The session-level
   form, request `{}`, is optional within `run_status` (§6.1).
-
-## Gaps in broca today
-
-Where broca 0.3.194, at commit `549f678`, differs from this document.
-Paths are in the broca repository. An optional group a broca build does not
-declare is not a gap. None of this is a change request against broca.
-
-1. **Served ops it does not declare as groups.** broca serves `run.status`,
-   `run.cancel` and `session.retract`
-   (`crates/broca-module-serve/src/serve.rs:2159-2243`;
-   `crates/broca-module/src/serve.rs:822-860`), but its `role.describe`
-   declares none of `run_status`, `run_cancel` and `retract`. Its ordinary
-   op list omits all three; a retention-enabled build adds `run.status`
-   as an op, still without its group (`crates/broca-wire/src/role.rs:192-244`).
-2. **No per-message run attribution,** although broca declares `run_ops`:
-   a page message carries no `run: {run_id, episode, final}`
-   (`crates/broca-wire/src/lib.rs:662-673`;
-   `crates/broca-module/src/serve.rs:278-289`). broca will implement §6 run
-   attribution after merge; page-level `lineage_state` is not a substitute.
-3. **No `session_capabilities` in the baseline.** broca declares
-   `session_capabilities_from: "admission"`, but its baseline has no
-   `session_capabilities` member
-   (`crates/broca-wire/src/role.rs:226-238,258-282`). An absent member
-   declares no session-level capability (§13); the baseline does not report
-   `mid_session_appends` or session-level `ordered_hook_phases`.
-4. **`lineage_id` is absent on legacy lineages** until their next write,
-   even on a page that has messages (`crates/broca-wire/src/lib.rs:702-717`;
-   `crates/broca-module/src/serve.rs:278-295`). Identity is minted on append,
-   not read (`crates/broca-wal/src/file_wal.rs:758-798`). §4.2 allows an
-   absent `lineage_id` only on the empty page of a session never written.
-5. **Owner sends do not require both `send_id` and `prompt` in broca's
-   request shape.** `send_id` is optional, and `prompt_blocks` may supply
-   the prompt instead (`crates/broca-wire/src/lib.rs:126-140`;
-   `crates/broca-module-serve/src/wire.rs:112-154`). A send without a key
-   uses a minted run id (`crates/broca-module-serve/src/serve.rs:311-322,2044-2048`);
-   ownership is checked separately (`crates/broca-module/src/actor.rs:2192-2240`).
-   §9's permission for unkeyed non-owner sends does not relax the required
-   members of owner sends.

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.23
+
+Text only; no type, wire shape or test vector changes.
+
+- §9.13 names the `cortexkit-rich-ui-syntax` version this crate depends on
+  (0.3.0 at this release) for `scan_references`, the same scanner
+  `output_refs::Resolution` uses. It said 0.1.1, which this crate never used.
+- The case table lists `held_calls_status_event_matches_run_status`, the
+  conformance case added in kit 0.15.25, with its known limit: this document
+  doesn't mark which control events are status events.
+- Examples that named one implementation now describe the behaviour without
+  naming it, and the closing section comparing one implementation with this
+  document is removed. It was pinned to a release long superseded.
+- `AMENDMENT-NOTES.md`, the review log of an earlier amendment, is no longer
+  shipped in this repository. Its outcomes are recorded in `CONTRACT.md`.
+
 ## 0.7.22
 
 - Text only: clarify that display `call_key` presence follows either
