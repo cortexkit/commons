@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.27
+
+- Add `serializer_profile::pi_served_body(entry, PiEdit)`, the served body
+  for one ordinal-bearing Pi entry given the active path's last context edit
+  for it (`PiEdit::None`, `Removed` or `Replaced`). It shares its code with
+  `pi_session_projection`, so a runner or reader that receives entries one
+  at a time computes the same `served_body` without a second copy of the
+  normalization, removal and string-to-text rules. It checks the entry and
+  the replacement content only, not journal relationships. A test compares
+  it with `served_body` for every projected entry of the recording and the
+  synthetic journals in `pi-session.json`.
+
 ## 0.7.26
 
 - Serve Pi rows with their context edits applied. `PiOrdinalEntry` gains

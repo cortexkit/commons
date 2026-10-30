@@ -16,7 +16,8 @@ use serde_json::Value;
 pub mod error_output;
 pub(crate) mod pi;
 pub use pi::{
-    pi_session_projection, PiJournalError, PiNativeCut, PiOrdinalEntry, PiSessionProjection,
+    pi_served_body, pi_session_projection, PiEdit, PiJournalError, PiNativeCut, PiOrdinalEntry,
+    PiSessionProjection,
 };
 
 /// A runner serving its transcript in the Anthropic Messages request

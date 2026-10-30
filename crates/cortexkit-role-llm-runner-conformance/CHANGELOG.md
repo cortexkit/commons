@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.31
+
+- Pin runner `=0.7.27`, which adds `pi_served_body`. No kit case changes.
+
 ## 0.15.30
 
 - Pin runner `=0.7.26`, which adds the Pi served-body projection

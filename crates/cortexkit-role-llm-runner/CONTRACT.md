@@ -895,7 +895,15 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   `content: []` for a message or custom message, an empty `summary` for a
   `branch_summary`, and, for a shell execution, its command and output
   kept with `excludeFromContext: true` added. The entry keeps its ordinal
-  with zero parts. A planner that reads Pi's
+  with zero parts. A runner or reader that holds one entry at a time, not
+  the whole journal, computes the same body with
+  `pi_served_body(entry, PiEdit)`, passing the active path's last
+  `context_edit` for that entry: `None`, `Removed` for a null replacement,
+  or `Replaced` with the stored `replacement` object. It runs the same body
+  computation as `pi_session_projection`, so for an entry of a journal the
+  projection accepts and that entry's correctly chosen last edit it returns
+  the same `served_body`. It doesn't check journal relationships (ids,
+  parents, edit targets), and choosing the last edit is the caller's job. A planner that reads Pi's
   journal directly, such as an offline move, uses `pi_session_projection`
   on the full journal, so its counts and part positions match what the
   runner serves afterwards; malformed journals are refused by the named

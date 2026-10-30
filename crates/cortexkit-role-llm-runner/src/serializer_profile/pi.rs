@@ -71,6 +71,24 @@ pub struct PiSessionProjection {
     pub native_cut: Option<PiNativeCut>,
 }
 
+/// The active path's last `context_edit` for one ordinal-bearing entry, for
+/// [`pi_served_body`]. The caller resolves it on the active path of the same
+/// journal snapshot the entry comes from; an edit can come after its target,
+/// so a forward walk only knows the last edit once it reaches the leaf.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum PiEdit<'a> {
+    /// No `context_edit` on the active path targets the entry.
+    None,
+    /// The last edit's `replacement` is `null`: the entry's content is removed.
+    Removed,
+    /// The last edit's `replacement` object, as stored in the `context_edit`
+    /// entry. Only its `content` member is used, and only for a custom
+    /// message or a user, assistant or tool-result message; other entries
+    /// keep their stored content.
+    Replaced(&'a Value),
+}
+
 pub(super) fn content_count(content: &Value) -> Result<usize, String> {
     match content {
         Value::Null => Ok(0),
@@ -305,34 +323,12 @@ pub fn pi_session_projection(journal: &[Value]) -> Result<PiSessionProjection, P
             continue;
         }
         let id = entry["id"].as_str().expect("validated id");
-        let mut edited = (*entry).clone();
-        let (content, served_body) = match edits.get(id) {
-            Some(Value::Null) => (Value::Null, removed_body(entry)),
-            Some(replacement) => {
-                if entry["type"] == "custom_message" {
-                    edited["content"] = replacement["content"].clone();
-                } else if matches!(
-                    entry.pointer("/message/role").and_then(Value::as_str),
-                    Some("user" | "assistant" | "toolResult")
-                ) {
-                    let content = &replacement["content"];
-                    edited["message"]["content"] =
-                        if entry["message"]["role"] != "user" && content.is_string() {
-                            json!([{"type":"text", "text":content}])
-                        } else {
-                            content.clone()
-                        };
-                }
-                (
-                    normalized_content(&edited).map_err(malformed)?,
-                    normalized_row(&edited),
-                )
-            }
-            None => (
-                normalized_content(entry).map_err(malformed)?,
-                normalized_row(entry),
-            ),
+        let edit = match edits.get(id) {
+            Some(Value::Null) => PiEdit::Removed,
+            Some(replacement) => PiEdit::Replaced(replacement),
+            None => PiEdit::None,
         };
+        let (content, served_body) = served(entry, edit)?;
         projected.push(PiOrdinalEntry {
             entry_id: id.to_owned(),
             entry_type: entry["type"].as_str().expect("validated type").to_owned(),
@@ -384,6 +380,69 @@ pub fn pi_session_projection(journal: &[Value]) -> Result<PiSessionProjection, P
         entries: projected,
         native_cut,
     })
+}
+
+/// The body a runner serves on `session.read` for one ordinal-bearing stored
+/// entry, given the active path's last `context_edit` for it. It is the same
+/// computation [`pi_session_projection`] uses for `served_body`, for runners
+/// and readers that hold one entry at a time rather than the whole journal.
+/// Count its parts with `top_level_part_count("pi", &served)`.
+///
+/// It checks only that the entry is ordinal-bearing (`message`,
+/// `custom_message` or `branch_summary`) with valid content, and that a
+/// `Replaced` replacement's `content` is a string, array or `text_ref`. It
+/// does not check journal relationships such as ids, parents or edit
+/// targets, which [`pi_session_projection`] does, and it does not choose the
+/// edit: passing the active path's last edit for the entry is the caller's
+/// job. Given that edit and an entry from a journal the projection accepts,
+/// it returns the same `served_body`.
+pub fn pi_served_body(entry: &Value, edit: PiEdit<'_>) -> Result<Value, PiJournalError> {
+    let id = entry["id"].as_str().unwrap_or("entry");
+    if !ordinal_bearing(entry) {
+        return Err(malformed(format!("{id} is not an ordinal-bearing entry")));
+    }
+    normalized_content(entry).map_err(|detail| malformed(format!("{id}: {detail}")))?;
+    if let PiEdit::Replaced(replacement) = edit {
+        valid_content(&replacement["content"])
+            .map_err(|detail| malformed(format!("{id}: {detail}")))?;
+    }
+    served(entry, edit).map(|(_, body)| body)
+}
+
+/// Projected content and served body for one ordinal-bearing entry. A
+/// non-null edit replaces only `/message/content` for user, assistant and
+/// tool-result messages (an assistant or tool-result string becomes one text
+/// block) and top-level `content` for a custom message; other entries keep
+/// their content.
+fn served(entry: &Value, edit: PiEdit<'_>) -> Result<(Value, Value), PiJournalError> {
+    match edit {
+        PiEdit::Removed => Ok((Value::Null, removed_body(entry))),
+        PiEdit::Replaced(replacement) => {
+            let mut edited = entry.clone();
+            if entry["type"] == "custom_message" {
+                edited["content"] = replacement["content"].clone();
+            } else if matches!(
+                entry.pointer("/message/role").and_then(Value::as_str),
+                Some("user" | "assistant" | "toolResult")
+            ) {
+                let content = &replacement["content"];
+                edited["message"]["content"] =
+                    if entry["message"]["role"] != "user" && content.is_string() {
+                        json!([{"type":"text", "text":content}])
+                    } else {
+                        content.clone()
+                    };
+            }
+            Ok((
+                normalized_content(&edited).map_err(malformed)?,
+                normalized_row(&edited),
+            ))
+        }
+        PiEdit::None => Ok((
+            normalized_content(entry).map_err(malformed)?,
+            normalized_row(entry),
+        )),
+    }
 }
 
 /// The served body of an entry a null `context_edit` removed. A message or
@@ -511,6 +570,73 @@ mod tests {
         }
         // The recording's edit, a late edit, a null edit and the four removal shapes.
         assert!(edited >= 6, "only {edited} edited entries covered");
+    }
+
+    #[test]
+    fn pi_served_body_equals_the_projection_for_every_projected_vector_entry() {
+        let file = vectors::load("pi-session.json");
+        let recording: Vec<Value> = vectors::file(file["recording"].as_str().unwrap())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut journals = vec![recording];
+        for case in file["synthetic"].as_array().unwrap() {
+            journals.push(case["journal"].as_array().unwrap().clone());
+        }
+        let (mut checked, mut edited) = (0, 0);
+        for journal in &journals {
+            let projection = pi_session_projection(journal).unwrap();
+            // The last edit per target along the active path, as a runner's
+            // journal walk sees it.
+            let mut last_edit: HashMap<&str, &Value> = HashMap::new();
+            for id in &projection.active_path {
+                let entry = journal.iter().find(|e| e["id"] == *id).unwrap();
+                if entry["type"] == "context_edit" {
+                    last_edit.insert(entry["targetId"].as_str().unwrap(), &entry["replacement"]);
+                }
+            }
+            for entry in &projection.entries {
+                let stored = journal.iter().find(|e| e["id"] == *entry.entry_id).unwrap();
+                let edit = match last_edit.get(entry.entry_id.as_str()) {
+                    Some(Value::Null) => PiEdit::Removed,
+                    Some(replacement) => PiEdit::Replaced(replacement),
+                    None => PiEdit::None,
+                };
+                if edit != PiEdit::None {
+                    edited += 1;
+                }
+                assert_eq!(
+                    pi_served_body(stored, edit).unwrap(),
+                    entry.served_body,
+                    "{}",
+                    entry.entry_id
+                );
+                checked += 1;
+            }
+        }
+        assert!(
+            checked > 20 && edited >= 6,
+            "checked {checked}, edited {edited}"
+        );
+    }
+
+    #[test]
+    fn pi_served_body_refuses_controls_and_invalid_replacements_and_removes_content() {
+        let control = json!({"type":"context_edit","id":"e","parentId":null,"targetId":"u","replacement":null});
+        assert!(pi_served_body(&control, PiEdit::None)
+            .unwrap_err()
+            .detail
+            .contains("not an ordinal-bearing entry"));
+        let user = json!({"type":"message","id":"u","parentId":null,"message":{"role":"user","content":"hi"}});
+        let bad = json!({"content": 7});
+        assert!(pi_served_body(&user, PiEdit::Replaced(&bad)).is_err());
+        let removed = pi_served_body(&user, PiEdit::Removed).unwrap();
+        assert_eq!(removed["message"]["content"], json!([]));
+        assert_eq!(
+            crate::serializer_profile::top_level_part_count("pi", &removed).unwrap(),
+            0
+        );
     }
 
     #[test]
