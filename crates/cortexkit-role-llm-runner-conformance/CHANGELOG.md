@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.35
+
+- Pin runner `=0.7.31`. No case changes.
+
 ## 0.15.34
 
 - Pin runner `=0.7.30`. No case changes.

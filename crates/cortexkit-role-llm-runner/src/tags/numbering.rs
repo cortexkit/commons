@@ -178,9 +178,11 @@ pub fn number_parts(checkpoint: u64, parts: &[RenderedPart]) -> Vec<Option<u64>>
 /// marker's cut, and the session it was written for. A key naming another
 /// session was copied by a fork, and names the fork's parent.
 ///
-/// On OpenCode it is the compaction part's `"cortexkit"` key. A marker that
-/// lost its key (OpenCode's part-update route drops unknown keys) is no
-/// anchor; it never reads as a checkpoint of zero.
+/// On OpenCode it is the compaction part's `"cortexkit"` key. On Pi it is
+/// the `compaction` entry's `details.cortexkit_checkpoint`, read with
+/// [`super::pi_marker_checkpoint`]. A marker that lost its key (OpenCode's
+/// part-update route drops unknown keys) is no anchor; it never reads as a
+/// checkpoint of zero.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct MarkerCheckpoint {

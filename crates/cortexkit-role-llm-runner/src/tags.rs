@@ -30,8 +30,8 @@ pub mod numbering;
 
 pub use checkpoint::{
     message_checkpoint_anchors, next_message_count, opencode1_message_counts,
-    opencode1_message_counts_with_parts, CheckpointAnchors, CheckpointPosition, MessageAnchor,
-    MessageCheckpointError,
+    opencode1_message_counts_with_parts, pi_marker_checkpoint, CheckpointAnchors,
+    CheckpointPosition, MessageAnchor, MessageCheckpointError, PI_MARKER_CHECKPOINT_MEMBER,
 };
 
 pub use clean::{clean_model_text, strip_leading_tag_notation};

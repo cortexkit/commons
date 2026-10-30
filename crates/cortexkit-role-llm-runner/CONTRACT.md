@@ -2922,6 +2922,33 @@ part's key and its content digest, never a number.
   compaction part, `"cortexkit"`; never the summary's metadata, which
   OpenCode forwards to the provider. A marker that lost its key is no
   anchor, never a checkpoint of zero.
+- [pinned] On Pi the key is the member `details.cortexkit_checkpoint` of the
+  runner's `compaction` entry (`tags::PI_MARKER_CHECKPOINT_MEMBER`), written
+  in the same append as the entry. Neither host copies anything from a
+  compaction entry's `details` into model content. Pi builds the
+  compaction-summary message from `summary`, `tokensBefore` and `timestamp`,
+  and the model content from `summary` alone (SM:184-189, MSG:40-55,97-106,
+  as §4.2 cites them). Oh My Pi 18.10.4 builds it from `summary` plus the
+  provider replay and archive blocks it keeps in `preserveData`, and reads
+  only `details.kind`, to decide whether to keep an earlier request
+  (`packages/coding-agent/src/session/session-context.ts:417-418,483-540,557-560`,
+  `packages/agent/src/compaction/messages.ts:243-262`). `details` may hold
+  other members, such as an extension's own record, a runner's private
+  records, or the `details.cortexkit` record of an early draft, which
+  `display-pi.json`'s recorded `entry-021` carries. A reader takes only
+  `details.cortexkit_checkpoint`, so none of those is ever an anchor.
+  `tags::pi_marker_checkpoint(entry, session)` returns the member only when
+  the entry is a `compaction` whose `details.cortexkit_checkpoint` decodes
+  as `tags::MarkerCheckpoint` naming that session, and ignores every other
+  member. Whether the entry is the in-effect compaction on the active path
+  stays the runner's to decide.
+- [pinned] An offline move that adopts a Pi head writes that member on the
+  in-effect `compaction` entry and rewrites only the entry's
+  `firstKeptEntryId`, to the first retained entry, in one atomic replacement
+  of the journal. The entry keeps its `id`, `parentId`, place in the file,
+  `timestamp`, `summary` and every other member, including every other
+  member of `details`. `message-checkpoint.json` pins the entry before and
+  after the apply, and entries that are no anchor.
 - [pinned] Gaps exist only behind the tail: a checkpoint may count parts no
   longer rendered, or numbers an earlier tagger handed out. A part a
   compaction provider dropped keeps its number, rendered as its

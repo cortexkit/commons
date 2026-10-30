@@ -2,9 +2,38 @@
 //! Legacy tag-only anchoring remains in [`super::anchor`].
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
-use super::SetupCheckpoint;
+use super::{MarkerCheckpoint, SetupCheckpoint};
 use crate::read::HeadCut;
+
+/// The member of a Pi `compaction` entry's `details` that holds the
+/// runner's [`MarkerCheckpoint`]. `details` may hold other members: an
+/// extension's own record (standalone Magic Context writes `source` and
+/// `lastCompactedOrdinal`), a runner's private records, or the
+/// `details.cortexkit` record of an early draft, which the recorded
+/// `entry-021` in `display-pi.json` carries. A reader takes only this member,
+/// so none of those can be read as an anchor.
+pub const PI_MARKER_CHECKPOINT_MEMBER: &str = "cortexkit_checkpoint";
+
+/// The runner's checkpoint on one Pi journal entry, when it names `session`.
+///
+/// `None` when the entry isn't a `compaction`, has no
+/// `details.cortexkit_checkpoint`, holds one that doesn't decode as a
+/// [`MarkerCheckpoint`], or holds one naming another session (for example,
+/// after a fork). Every other member of `details`, `details.cortexkit` included, is
+/// ignored. It reads only this entry:
+/// whether the entry is the in-effect compaction on the active path is the
+/// caller's to decide, and a checkpoint missing `message_count` or
+/// `head_cut` still cannot restore a message lineage.
+pub fn pi_marker_checkpoint(entry: &Value, session: &str) -> Option<MarkerCheckpoint> {
+    if entry.get("type").and_then(Value::as_str) != Some("compaction") {
+        return None;
+    }
+    let member = entry.get("details")?.get(PI_MARKER_CHECKPOINT_MEMBER)?;
+    let checkpoint: MarkerCheckpoint = serde_json::from_value(member.clone()).ok()?;
+    (checkpoint.session == session).then_some(checkpoint)
+}
 
 /// The next message ordinal after a native cut. Overflow refuses the cut.
 pub fn next_message_count(through_ordinal: u64) -> Option<u64> {
@@ -400,6 +429,83 @@ mod tests {
                 assert_eq!(message.head_cut, checkpoint.head_cut.clone().unwrap());
                 assert_eq!(message.position, anchors.tag_position);
             }
+        }
+    }
+
+    #[test]
+    fn pi_marker_checkpoint_reads_only_its_own_member() {
+        let vectors = crate::vectors::load("message-checkpoint.json");
+        let pi = &vectors["pi_marker"];
+        let session = pi["session"].as_str().unwrap();
+        let expected: MarkerCheckpoint = serde_json::from_value(pi["checkpoint"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(&expected).unwrap(), pi["checkpoint"]);
+        assert_eq!(pi_marker_checkpoint(&pi["after"], session), Some(expected));
+        assert_eq!(pi_marker_checkpoint(&pi["before"], session), None);
+        let cases = pi["no_anchor"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            assert_eq!(
+                pi_marker_checkpoint(&case["entry"], session),
+                None,
+                "{}",
+                case["name"]
+            );
+        }
+    }
+
+    #[test]
+    fn pi_move_apply_vector_changes_only_the_cut_and_the_member() {
+        let vectors = crate::vectors::load("message-checkpoint.json");
+        let pi = &vectors["pi_marker"];
+        let without_apply = |entry: &Value| {
+            let mut entry = entry.clone();
+            entry.as_object_mut().unwrap().remove("firstKeptEntryId");
+            entry["details"]
+                .as_object_mut()
+                .unwrap()
+                .remove(PI_MARKER_CHECKPOINT_MEMBER);
+            entry
+        };
+        assert_ne!(
+            pi["before"]["firstKeptEntryId"],
+            pi["after"]["firstKeptEntryId"]
+        );
+        assert_eq!(without_apply(&pi["before"]), without_apply(&pi["after"]));
+        assert_eq!(
+            pi["after"]["details"][PI_MARKER_CHECKPOINT_MEMBER],
+            pi["checkpoint"]
+        );
+    }
+
+    #[test]
+    fn recorded_pi_draft_records_are_no_anchor() {
+        // The recorded Pi journal's compaction entry carries an early draft
+        // record under `details.cortexkit`, which must never read as the
+        // runner's checkpoint, whatever session it names.
+        fn compactions<'a>(value: &'a Value, out: &mut Vec<&'a Value>) {
+            match value {
+                Value::Object(map) => {
+                    if map.get("type").and_then(Value::as_str) == Some("compaction")
+                        && map
+                            .get("details")
+                            .and_then(|d| d.get("cortexkit"))
+                            .is_some()
+                    {
+                        out.push(value);
+                    }
+                    map.values().for_each(|v| compactions(v, out));
+                }
+                Value::Array(items) => items.iter().for_each(|v| compactions(v, out)),
+                _ => {}
+            }
+        }
+        let vectors = crate::vectors::load("display-pi.json");
+        let mut found = Vec::new();
+        compactions(&vectors, &mut found);
+        assert!(!found.is_empty());
+        for entry in found {
+            let session = entry["details"]["cortexkit"]["session"].as_str().unwrap();
+            assert_eq!(pi_marker_checkpoint(entry, session), None);
         }
     }
 }

@@ -532,6 +532,21 @@ anchor outcome: after the retained cut, cut removed with folded message kept,
 folded message removed, marker rows lost, and inconsistent head state.
 The message-lineage rules apply only to `message_checkpoint` runners.
 
+Its `pi_marker` section pins where a Pi runner keeps that checkpoint:
+`details.cortexkit_checkpoint` on a `compaction` entry. `before` and `after`
+are one compaction entry before and after an offline move's apply, which
+rewrites only `firstKeptEntryId` and adds the member. The extension record
+already in its `details` (`source`, `lastCompactedOrdinal`) stays as it was.
+`checkpoint` is the member `tags::pi_marker_checkpoint` must return for
+`session`. Each `no_anchor` entry must return nothing: an extension record
+alone, a runner-private member alone, a checkpoint-shaped record under the
+early draft name `details.cortexkit`, a member naming another session, a
+member that doesn't decode, a non-compaction entry and an entry without
+`details`. The section is synthetic. Its entries take the recorded
+`entry-021` shape from `display-pi.json`, whose `details.cortexkit` is that
+early draft record, and its `head_cut` values are illustrative, since
+`worked_head_cut` above pins the digest procedure.
+
 ## Pi journal projection
 
 `pi-1.3.0-1.4.0.jsonl`, `pi-session.json` and `display-pi.json` pin durable

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.31
+
+- Pi (§9.6): a runner's compaction-marker checkpoint is the member
+  `details.cortexkit_checkpoint` of its `compaction` entry, written in the
+  same append. Neither Pi nor Oh My Pi copies anything from a compaction
+  entry's `details` into model content. `details` may hold other members (an
+  extension's record, a runner's private records, an early draft's
+  `details.cortexkit`); a reader takes only this one, so none of them is
+  ever an anchor. An offline move that adopts a Pi head writes the
+  member on the in-effect compaction entry and rewrites only that entry's
+  `firstKeptEntryId`, in one atomic replacement of the journal.
+- Add `tags::PI_MARKER_CHECKPOINT_MEMBER` and
+  `tags::pi_marker_checkpoint(entry, session)`. It returns `None` unless the
+  entry is a `compaction` whose `details.cortexkit_checkpoint` decodes as a
+  `MarkerCheckpoint` naming that session; every other member of `details` is
+  ignored.
+- `message-checkpoint.json` adds a `pi_marker` section: one compaction entry
+  before and after a move's apply, the checkpoint it carries, and seven
+  entries that are no anchor.
+
 ## 0.7.30
 
 - OpenCode 1 (§4.8): a dead step, an assistant message with no parts, no

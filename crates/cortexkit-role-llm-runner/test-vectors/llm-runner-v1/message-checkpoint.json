@@ -48,5 +48,34 @@
       "position": {"position": "before", "mid": "u"}, "first_ordinal": 42},
     {"name": "unlisted_inconsistent_head", "cut_survives": true, "head_survives": false,
       "error": "head_mismatch", "setup_refusal": "moved_session_head_mismatch"}
-  ]
+  ],
+  "pi_marker": {
+    "session": "pi-moved",
+    "before": {"type": "compaction", "id": "entry-021", "parentId": "entry-020", "timestamp": "2026-01-01T00:00:21.000Z",
+      "summary": "Fixture compaction summary.", "firstKeptEntryId": "entry-019", "tokensBefore": 858,
+      "details": {"source": "magic-context", "lastCompactedOrdinal": 41}},
+    "after": {"type": "compaction", "id": "entry-021", "parentId": "entry-020", "timestamp": "2026-01-01T00:00:21.000Z",
+      "summary": "Fixture compaction summary.", "firstKeptEntryId": "entry-020", "tokensBefore": 858,
+      "details": {"source": "magic-context", "lastCompactedOrdinal": 41,
+        "cortexkit_checkpoint": {"tag_checkpoint": 500, "session": "pi-moved", "message_count": 42,
+          "head_cut": {"mid": "entry-019", "digest": "189f89a46681c05dac35fe71f4e46c1a8cb5a0c0882b1d5f4cc80ce3f4582ca9", "written_at": 1793145600123}}}},
+    "checkpoint": {"tag_checkpoint": 500, "session": "pi-moved", "message_count": 42,
+      "head_cut": {"mid": "entry-019", "digest": "189f89a46681c05dac35fe71f4e46c1a8cb5a0c0882b1d5f4cc80ce3f4582ca9", "written_at": 1793145600123}},
+    "no_anchor": [
+      {"name": "extension_record_only", "entry": {"type": "compaction", "id": "c1", "summary": "s", "firstKeptEntryId": "m1",
+        "details": {"source": "magic-context", "lastCompactedOrdinal": 41}}},
+      {"name": "runner_private_member_only", "entry": {"type": "compaction", "id": "c5", "summary": "s", "firstKeptEntryId": "m1",
+        "details": {"runner_cut": {"cut_id": "cut-1", "lineage": "lin-1"}}}},
+      {"name": "early_draft_name_shaped_like_a_checkpoint", "entry": {"type": "compaction", "id": "c6", "summary": "s", "firstKeptEntryId": "m1",
+        "details": {"cortexkit": {"tag_checkpoint": 500, "session": "pi-moved", "message_count": 42,
+          "head_cut": {"mid": "entry-019", "digest": "189f89a46681c05dac35fe71f4e46c1a8cb5a0c0882b1d5f4cc80ce3f4582ca9", "written_at": 1793145600123}}}}},
+      {"name": "names_another_session", "entry": {"type": "compaction", "id": "c2", "summary": "s", "firstKeptEntryId": "m1",
+        "details": {"cortexkit_checkpoint": {"tag_checkpoint": 500, "session": "pi-parent"}}}},
+      {"name": "member_does_not_decode", "entry": {"type": "compaction", "id": "c3", "summary": "s", "firstKeptEntryId": "m1",
+        "details": {"cortexkit_checkpoint": {"tag_checkpoint": "500", "session": "pi-moved"}}}},
+      {"name": "not_a_compaction", "entry": {"type": "branch_summary", "id": "b1", "summary": "s", "fromId": "m1",
+        "details": {"cortexkit_checkpoint": {"tag_checkpoint": 500, "session": "pi-moved"}}}},
+      {"name": "no_details", "entry": {"type": "compaction", "id": "c4", "summary": "s", "firstKeptEntryId": "m1"}}
+    ]
+  }
 }
