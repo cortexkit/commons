@@ -9,15 +9,14 @@ a `SHA256SUMS` pinning every file), and a separate `-conformance` crate
 holds its suite (§15). Paths to vector files below are relative to this
 crate.
 
-Derives from the CK extensibility design r7.3, §3.2–§3.5, §5, §6, §9.3, §10,
-§12.1, §13.2 and §16.7–§16.8, with `session.send` delivery modes replacing
-separate steer and queue ops.
+This contract is self-contained; implementing the role requires no external
+design document.
 
 Every item is marked:
 
-- **[pinned]**: the design states it. A runner must do it, and a consumer may
-  rely on it.
-- **[open: Qn]**: the design is silent or ambiguous, and this document records one
+- **[pinned]**: this contract requires it. A runner must do it, and a consumer
+  may rely on it.
+- **[open: Qn]**: an unresolved choice; this document records one
   option down so the types and vectors have something to pin. Question `Qn`
   under "Open questions" lists the options.
 - **[open]** (no question number): not yet defined, because it depends on a
@@ -172,6 +171,7 @@ particular implementation.
 | `session_retention` | `session.send`, `session.head`, `session.release`; extends `session.adopt` where declared | §9.14 |
 | `archive_prunes_reasoning` | `session.read`; extends every served `session.read` and `session.history` page form | §9.14.1 |
 | `retract` | `session.retract` | §9.2 |
+| `retract_own_send` | no additional op; requires `retract` | §9.2 |
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
 | `max_steps` | `session.send` with `stop_when.max_steps` | §9.3.1 |
 | `max_output_tokens` | `session.send` with `generation.max_output_tokens` | §9.3.1 |
@@ -1687,10 +1687,14 @@ run.
   A named sender without `interrupt`, a revoked grant, a cancel for another
   session, and every other non-owner caller are refused
   `scope_owner_mismatch`. A plan change dropping `interrupt` takes effect
-  at the next cancel. `session.retract` remains owner-only. This adds no
-  authority: the sender can already end the running turn with
+  at the next cancel. `run_cancel_by_interrupt` adds no authority: the
+  sender can already end the running turn with
   `delivery: "interrupt"`; the group lets it stop without starting a new
   turn. Without the group the existing cancellation rules are unchanged.
+- [pinned] On a session with a recorded owner, `session.retract` remains
+  owner-only unless the runner declares `retract_own_send` (§9.2), which
+  also admits the submission's recorded daemon-attested sender on the
+  same session. The existing no-owner rule above is unchanged.
 - [pinned] On an expired session, `run.cancel` answers `expired`, writes
   nothing, and never acts on a lineage started after the expiry (§9.1).
 
@@ -2334,10 +2338,28 @@ A runner that declares `retract` serves `session.retract`.
   - `not_pending`: the session has no pending submission by that id: it
     was already retracted, or never existed. Nothing is written.
   A consumer treats any other answer as not confirming a retraction.
-- [pinned] Owner-only, exactly as for `run.cancel` (§6.2): the session's
+- [pinned] Without `retract_own_send`, the rule is unchanged:
+  Owner-only, exactly as for `run.cancel` (§6.2): the session's
   owner principals on any route and at any epoch, `scope_owner_mismatch`
   for anyone else, and no protection on a session with no recorded
   attested owner.
+- [pinned] Opt-in `retract_own_send` requires `retract`; `check_describe`
+  refuses it without `retract`. On a session with a recorded owner, in
+  addition to the session's owners, it admits a caller whose daemon-stamped
+  principal equals the principal the runner recorded as that submission's
+  sender, for that one submission on
+  the same session. Identity comes only from the daemon-stamped principal,
+  never a request field. Every other non-owner is still refused
+  `scope_owner_mismatch`, including one retracting someone else's submission.
+  A submission with no recorded sender, including one stored before the
+  runner recorded senders, stays owner-only. The answers remain
+  `retracted | already_started | not_pending`; a successful sender retract
+  has the same withdrawal semantics, including durability, as an owner's
+  retract. This authorizes withdrawal only of that caller's own pending
+  submission. It does not authorize withdrawing another sender's submission
+  or cancelling a running turn. The existing no-owner rule (§6.2) is
+  unchanged: a runner MAY admit any caller that can reach a session with no
+  recorded attested owner. Without the group the rule above is unchanged.
 - [pinned] A submission is either retracted or started, never both: the
   runner decides from one durable order, and its answer says which.
 - [pinned] A re-send of a retracted send, with the same `send_id` and
@@ -4841,7 +4863,7 @@ treats it as a terminal refusal of that one request.
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose legacy delivery mode is undeclared, or a `delivery_order` list with no declared member (§9.7) | `delivery`: the mode string or the ordered list as sent | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
-| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel` (except `now` from that session's current interrupt-granted plan sender on a `run_cancel_by_interrupt` runner, §6.2), `session.retract`, `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
+| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel` (except `now` from that session's current interrupt-granted plan sender on a `run_cancel_by_interrupt` runner, §6.2), `session.retract` (except that submission's recorded daemon-attested sender on a `retract_own_send` runner, §9.2), `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline, including when a `session.refresh` fetch misses its deadline (§10.2) | `provider` | **yes** |
@@ -5339,6 +5361,9 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `delivery_order_undeclared_mode_refused` | `delivery_order`, `queue`, `transcript_reads`, held tool call, and `steer` left undeclared; `[steer]` is refused `delivery_unsupported` with the exact list in `detail.delivery` and writes nothing; `[steer, idle_start]` is accepted, skips the undeclared `steer` at the active boundary, then starts at the idle boundary; inapplicable when `steer` is declared |
 | `delivery_order_declared_modes_respected` | `delivery_order`, `queue`, `transcript_reads`, and the live describe member `delivery_order_modes`; all non-empty ordered lists of distinct undeclared modes are refused `delivery_unsupported` with the original list in `detail.delivery` and no writes; every list containing a listed mode is accepted |
 | `delivery_order_retract_pending_tool_result` | `retract`, `delivery_order`, `queue`, `transcript_reads`, and a held tool call; a `[tool_result]` send waits with `pending` and `submission_id`, `session.retract` answers `retracted` then `not_pending`, and after the call is released the send is never delivered |
+| `retract_own_send_sender_retracted` | opt-in `retract_own_send`, `retract`, `delivery_order`, `queue`, `steer`, `transcript_reads`; the daemon-attested sender withdraws its own pending steer, a resend is `send_retracted`, and the submission is not delivered at the next delivery opportunity |
+| `retract_own_send_other_sender_refused` | same requirements; another non-owner is refused `scope_owner_mismatch`, even with a forged `sender` request field; the submission stays pending and is delivered on the owner's next turn; all three cases report not applicable by name without `retract_own_send` |
+| `retract_own_send_shared_send_id_isolated` | same requirements; two non-owner senders reuse a `send_id` for pending steers; sender A withdraws its own submission, its second retract is `not_pending`, and sender B's submission stays pending until the owner's next turn delivers it; not applicable by name without `retract_own_send` |
 | `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, and a held tool call; on a separate storage directory for this case, the harness restart hook (without a process kill): a `[steer]` list sent while a run waits on a held call answers `pending` with a `submission_id`, is delivered once as a steer when the call is released, and a re-send of its `send_id` answers `delivered: {as: "step", ref}` with `run_id` the run it joined, before the restart and unchanged after it; reported as a named skip without `delivery_order`, `steer` or `run_ops` |
 | `send_status_answers_as_a_resend_after_restart` | `send_status`, `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, and a held tool call; `send.status` of the same send answers what a re-send answers, `step` with the joined run's `run_id`, before the restart and after it, never `pending`; the live `role.describe` must declare `send_status` before any `send.status` is sent; reported as a named skip without `send_status`, `delivery_order`, `steer` or `run_ops` |
 | `send_status_unknown_send_refused` | `send_status`, `queue`, `transcript_reads`; `send.status` of a settled send answers what its re-send answers, one of a `send_id` the session has no record of is refused `unknown_send`, and one carrying an unknown field is refused `invalid_params` naming it |

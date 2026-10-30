@@ -1,5 +1,21 @@
 # cortexkit-role-llm-runner-conformance
 
+## Opt-in sender withdrawal (0.15.33)
+
+The `retract_own_send_*` cases read the live `role.describe` group, which
+requires `retract`. All three report **not applicable**, by name, without
+`retract_own_send`, without changing the runner's verdict. They reuse the
+existing plan-named sender and stranger routes, queued steers and transcript
+reads. A sender
+withdraws its own pending submission and it is not delivered at the next
+delivery opportunity; another non-owner
+is refused, including with a forged `sender` request field, and the
+submission stays pending until the owner's next turn delivers it. When two
+senders reuse a `send_id`, repeating A's retract leaves B's submission pending
+for delivery. Faulty runners refuse the sender, admit every non-owner, trust
+request identity or withdraw another sender's entry under a shared `send_id`;
+each is rejected by the corresponding case name.
+
 ## Opt-in cancellation and host relaunch (0.15.23)
 
 Each `run_cancel_by_interrupt_*` case and
@@ -550,6 +566,9 @@ is unchanged and prints nothing.
 | `delivery_order_bad_slot_refused` | `delivery_order`, `queue`, `transcript_reads` |
 | `delivery_order_template_part_gone_refused` | `delivery_order`, `queue`, `transcript_reads`, `tags` |
 | `delivery_order_retract_pending_tool_result` | `retract`, `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls`; retracts a pending `[tool_result]` send, then releases the held call and confirms the send was never delivered |
+| `retract_own_send_sender_retracted` | live `retract_own_send` declaration; `retract`, `delivery_order`, `queue`, `steer`, `transcript_reads`; the plan-named sender retracts its pending steer, a resend is `send_retracted`, and the owner's next turn never delivers it |
+| `retract_own_send_other_sender_refused` | same requirements; another non-owner's retract, with and without a forged `sender`, is `scope_owner_mismatch`; the submission stays pending and is delivered on the owner's next turn |
+| `retract_own_send_shared_send_id_isolated` | same requirements; two non-owner senders reuse a `send_id` for pending steers; A retracts its own submission, A's second retract is `not_pending`, and B's submission remains pending and is delivered on the owner's next turn |
 | `delivery_order_undeclared_mode_refused` | `delivery_order`, `queue`, `transcript_reads`, `hold_tool_calls`; runs when `steer` is not declared, refuses a `[steer]`-only list as `delivery_unsupported` with the sent list in `detail.delivery`, and proves `[steer, idle_start]` waits for and starts an idle turn |
 | `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, `hold_tool_calls`; restarts its own runner |
 | `send_status_answers_as_a_resend_after_restart` | `send_status`, the above; the live `role.describe` must declare `send_status` before any `send.status` is sent |

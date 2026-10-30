@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.29
+
+- Add the opt-in `retract_own_send` describe group, which requires `retract`.
+  A daemon-attested sender may withdraw its own pending submission on the
+  same session, with the same answers and withdrawal semantics, including
+  durability, as an owner's retract. On a session with a recorded owner,
+  other non-owners and submissions without a recorded sender stay
+  owner-only; request fields never supply the caller's identity.
+- Runners that do not declare the group retain the owner-only retract rule
+  on owner-protected sessions. On a session with no recorded attested owner, a
+  runner may admit any reachable caller; that existing rule is unchanged.
+
 ## 0.7.28
 
 - Add the compatible `opencode-v2` serializer profile for OpenCode 2's decoded

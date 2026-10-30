@@ -26,7 +26,9 @@ use crate::{
         wait_run_end,
     },
     route::{Reply, RunnerRoute},
-    subject::{LlmRunnerSubject, PlanSenderIdentity, Script, ScriptedPart, ScriptedTurn},
+    subject::{
+        Capability, LlmRunnerSubject, PlanSenderIdentity, Script, ScriptedPart, ScriptedTurn,
+    },
     tags::{params, require_declared, send_and_wait},
 };
 
@@ -721,6 +723,249 @@ where
             other.len()
         )),
     }
+}
+
+/// Probe sender authority on a queued steer, then start an owner's turn to
+/// check that the withdrawal takes effect at the next delivery opportunity.
+pub(crate) async fn retract_own_send<S>(case: &Case<'_, S>, name: &str) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let describe = case.checked_describe().await?;
+    if !describe.declares(groups::RETRACT_OWN_SEND) {
+        return Ok(Ending::Inapplicable(
+            "retract_own_send is not declared".into(),
+        ));
+    }
+    let missing: Vec<_> = [
+        Capability::Retract,
+        Capability::DeliveryOrder,
+        Capability::Queue,
+        Capability::Steer,
+        Capability::TranscriptReads,
+    ]
+    .into_iter()
+    .filter(|cap| !case.declared.contains(cap))
+    .collect();
+    if !missing.is_empty() {
+        return Ok(Ending::Skipped {
+            missing,
+            reason: "the sender retract probe needs queued steers and reads".into(),
+        });
+    }
+    if !Mode::Steer.is_declared_by(&describe) {
+        return Ok(Ending::Inapplicable(
+            "role.describe does not declare the steer list mode".into(),
+        ));
+    }
+    if name == "retract_own_send_shared_send_id_isolated" {
+        return retract_shared_send_id(case).await.map(|()| Ending::Passed);
+    }
+    let (mut session, sender) = sender_session(
+        case,
+        "retract-own-send",
+        vec![ScriptedTurn::new(vec![case.mint.text("after-retract").0])],
+        false,
+        false,
+    )
+    .await?;
+    let marker = case.mint.next("pending-sender-steer");
+    let send_id = case.mint.next("send");
+    let order = DeliveryOrder::new(vec![Mode::Steer]);
+    let pending: SendReply = decode(
+        "the sender's pending steer",
+        expect_ok(
+            "the sender's pending steer",
+            ordered(case, &session, &sender, &marker, &send_id, &order).await?,
+        )?,
+    )?;
+    if pending.state != send_states::PENDING {
+        return Err(format!(
+            "the sender's steer is {}, not pending",
+            pending.state
+        ));
+    }
+    let submission_id = pending
+        .submission_id
+        .filter(|id| !id.is_empty())
+        .ok_or("the sender's pending steer omitted submission_id")?;
+    let request = serde_json::to_value(RetractRequest::new(&submission_id))
+        .expect("a retract request serializes");
+    let own = name == "retract_own_send_sender_retracted";
+    if own {
+        let reply: RetractReply = decode(
+            "the sender's own retract",
+            expect_ok(
+                "the sender's own retract",
+                call(&sender, ops::SESSION_RETRACT, request).await?,
+            )?,
+        )?;
+        if reply != RetractReply::Retracted {
+            return Err(format!(
+                "the sender's own retract answered {reply:?}, not retracted"
+            ));
+        }
+        let error = expect_error(
+            "resending the withdrawn steer",
+            ordered(case, &session, &sender, &marker, &send_id, &order).await?,
+        )?;
+        expect_code(
+            "resending the withdrawn steer",
+            &error,
+            errors::SEND_RETRACTED,
+        )?;
+    } else {
+        let stranger = case
+            .subject
+            .session_route(
+                case.handle.inner(),
+                &session.name,
+                &case.subject.stranger_stamp(),
+            )
+            .await
+            .map_err(|e| format!("opening {} as another non-owner: {e}", session.name))?;
+        let identity = case.subject.plan_sender().ok_or("no plan sender")?;
+        let mut forged = request.clone();
+        forged["sender"] = json!(identity.stamp.principal);
+        for (what, params) in [
+            ("another non-owner's retract", request),
+            (
+                "another non-owner's retract with a forged sender field",
+                forged,
+            ),
+        ] {
+            let error = expect_error(what, call(&stranger, ops::SESSION_RETRACT, params).await?)?;
+            expect_code(what, &error, errors::SCOPE_OWNER_MISMATCH)?;
+            let still_pending: SendReply = decode(
+                "the sender's pending steer after refusal",
+                expect_ok(
+                    "the sender's pending steer after refusal",
+                    ordered(case, &session, &sender, &marker, &send_id, &order).await?,
+                )?,
+            )?;
+            if still_pending.state != send_states::PENDING
+                || still_pending.submission_id.as_deref() != Some(submission_id.as_str())
+            {
+                return Err("a refused retract changed the pending submission".into());
+            }
+        }
+    }
+    let prompt = case.mint.next("owner-turn-after-retract");
+    send_and_wait(case, &mut session, None, &prompt, &Map::new()).await?;
+    let (_, messages) = read_all(&session.route).await?;
+    if own {
+        never_delivered(&messages, &marker, "the sender's retracted submission")?;
+    } else {
+        delivered_once(&messages, &marker, modes::STEER)?;
+    }
+    Ok(Ending::Passed)
+}
+
+async fn retract_shared_send_id<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let a = sender(case)?;
+    let b = case.subject.stranger_stamp();
+    if a.stamp.principal == b.principal {
+        return Err("the shared-send-id probe needs two distinct non-owner principals".into());
+    }
+    let mut session = case
+        .open(
+            "retract-shared-send-id",
+            Script {
+                turns: vec![
+                    ScriptedTurn::new(vec![case.mint.text("shared-send-id-opening").0]),
+                    ScriptedTurn::new(vec![case.mint.text("shared-send-id-answer").0]),
+                ],
+            },
+        )
+        .await?;
+    let mut members = Map::new();
+    // Plan sender names match attested principals. Naming the stranger here
+    // admits a second non-owner without requiring another adapter fixture.
+    members.insert(
+        "senders".into(),
+        json!([PlanSender::new(&a.module), PlanSender::new(&b.principal)]),
+    );
+    let fields = case
+        .subject
+        .send_fields_with_plan(&session.name, true, &members)
+        .ok_or("the subject builds no plan carrying two senders")?;
+    let opening = case.mint.next("shared-send-id-opening");
+    send_and_wait(case, &mut session, Some(&fields), &opening, &Map::new()).await?;
+    let route_a = case
+        .subject
+        .session_route(case.handle.inner(), &session.name, &a.stamp)
+        .await
+        .map_err(|e| format!("opening sender A's route: {e}"))?;
+    let route_b = case
+        .subject
+        .session_route(case.handle.inner(), &session.name, &b)
+        .await
+        .map_err(|e| format!("opening sender B's route: {e}"))?;
+    let send_id = case.mint.next("shared-send-id");
+    let marker_a = case.mint.next("shared-send-id-a");
+    let marker_b = case.mint.next("shared-send-id-b");
+    let order = DeliveryOrder::new(vec![Mode::Steer]);
+    let mut submission_ids = Vec::new();
+    for (label, route, marker) in [
+        ("sender A's steer", &route_a, &marker_a),
+        ("sender B's steer", &route_b, &marker_b),
+    ] {
+        let pending: SendReply = decode(
+            label,
+            expect_ok(
+                label,
+                ordered(case, &session, route, marker, &send_id, &order).await?,
+            )?,
+        )?;
+        if pending.state != send_states::PENDING {
+            return Err(format!("{label} is {}, not pending", pending.state));
+        }
+        submission_ids.push(
+            pending
+                .submission_id
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| format!("{label} omitted submission_id"))?,
+        );
+    }
+    let request = serde_json::to_value(RetractRequest::new(&submission_ids[0]))
+        .expect("a retract request serializes");
+    for (label, expected) in [
+        ("sender A's first retract", RetractReply::Retracted),
+        ("sender A's second retract", RetractReply::NotPending),
+    ] {
+        let reply: RetractReply = decode(
+            label,
+            expect_ok(
+                label,
+                call(&route_a, ops::SESSION_RETRACT, request.clone()).await?,
+            )?,
+        )?;
+        if reply != expected {
+            return Err(format!("{label} answered {reply:?}, not {expected:?}"));
+        }
+        let pending_b: SendReply = decode(
+            "sender B's steer after A's retract",
+            expect_ok(
+                "sender B's steer after A's retract",
+                ordered(case, &session, &route_b, &marker_b, &send_id, &order).await?,
+            )?,
+        )?;
+        if pending_b.state != send_states::PENDING
+            || pending_b.submission_id.as_deref() != Some(submission_ids[1].as_str())
+        {
+            return Err("sender A's retract changed sender B's pending submission".into());
+        }
+    }
+    let prompt = case.mint.next("owner-turn-after-shared-retract");
+    send_and_wait(case, &mut session, None, &prompt, &Map::new()).await?;
+    let (_, messages) = read_all(&session.route).await?;
+    never_delivered(&messages, &marker_a, "sender A's retracted submission")?;
+    delivered_once(&messages, &marker_b, modes::STEER)
 }
 
 async fn retract_pending_tool_result<S>(case: &Case<'_, S>) -> Check

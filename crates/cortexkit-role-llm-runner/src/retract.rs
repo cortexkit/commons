@@ -1,4 +1,7 @@
 //! Withdraw a submission before it starts, under the session owner's scope.
+//! With `retract_own_send`, the daemon-attested sender recorded on that
+//! submission may also withdraw it on the same session. Request fields
+//! never establish caller identity.
 
 use serde::{Deserialize, Serialize};
 

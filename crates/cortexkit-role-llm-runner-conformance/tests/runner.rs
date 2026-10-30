@@ -702,6 +702,11 @@ fn assert_passed(report: &SuiteReport, case: &str) {
             == Some(&CaseOutcome::Inapplicable {
                 reason: "run_cancel_by_interrupt is not declared".into(),
             }))
+        || (case.starts_with("retract_own_send_")
+            && report.outcome(case)
+                == Some(&CaseOutcome::Inapplicable {
+                    reason: "retract_own_send is not declared".into(),
+                }))
         || (case == "refresh_relaunch_preserves_runs_and_history"
             && report.outcome(case)
                 == Some(&CaseOutcome::Inapplicable {
@@ -4989,6 +4994,147 @@ const INTERRUPT_CANCEL_CASES: &[&str] = &[
     "run_cancel_by_interrupt_non_now_refused",
     "run_cancel_by_interrupt_other_session_refused",
 ];
+
+const RETRACT_OWN_SEND_CASES: &[&str] = &[
+    "retract_own_send_sender_retracted",
+    "retract_own_send_other_sender_refused",
+    "retract_own_send_shared_send_id_isolated",
+];
+
+fn sender_retracting(mut defects: Defects) -> FakeSubject {
+    defects.declare_retract_own_send = true;
+    let mut subject = declaring(Capability::DeliveryOrder, defects);
+    subject.capabilities.insert(Capability::Retract);
+    subject
+}
+
+#[tokio::test]
+async fn retract_own_send_correct_runner_passes() {
+    let report = run(&sender_retracting(Defects::default())).await;
+    for name in RETRACT_OWN_SEND_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn retract_own_send_shared_send_id_correct_runner_passes() {
+    let report = run(&sender_retracting(Defects::default())).await;
+    let name = "retract_own_send_shared_send_id_isolated";
+    assert_eq!(
+        report.outcome(name),
+        Some(&CaseOutcome::Passed),
+        "{name}\n{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn retract_own_send_undeclared_is_inapplicable_and_preserves_verdict() {
+    let mut subject = sender_retracting(Defects::default());
+    subject.defects.declare_retract_own_send = false;
+    let without = run(&subject).await;
+    for name in RETRACT_OWN_SEND_CASES {
+        assert_eq!(
+            without.outcome(name),
+            Some(&CaseOutcome::Inapplicable {
+                reason: "retract_own_send is not declared".into(),
+            })
+        );
+        assert!(without.render().contains(&format!("N/A  {name}")));
+    }
+    let with = run(&sender_retracting(Defects::default())).await;
+    assert_eq!(without.verdict, with.verdict);
+    for spec in CASES {
+        if !RETRACT_OWN_SEND_CASES.contains(&spec.name) {
+            assert_eq!(
+                without.outcome(spec.name),
+                with.outcome(spec.name),
+                "{}",
+                spec.name
+            );
+        }
+    }
+    assert_none_failed_but(&without, &[]);
+}
+
+async fn sender_retract_fault(defects: Defects, name: &str, reason: &str) {
+    let report = run(&sender_retracting(defects)).await;
+    assert!(
+        failed(&report, name).contains(reason),
+        "{}",
+        report.render()
+    );
+    if defects.retract_sender_refused || defects.retract_any_non_owner {
+        let shared = "retract_own_send_shared_send_id_isolated";
+        assert!(
+            failed(&report, shared).contains("sender A's"),
+            "{}",
+            report.render()
+        );
+        assert_none_failed_but(&report, &[name, shared]);
+    } else {
+        assert_none_failed_but(&report, &[name]);
+    }
+}
+
+#[tokio::test]
+async fn retract_own_send_refusing_sender_fails_by_name() {
+    sender_retract_fault(
+        Defects {
+            retract_sender_refused: true,
+            ..Defects::default()
+        },
+        "retract_own_send_sender_retracted",
+        "the sender's own retract",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn retract_own_send_admitting_any_non_owner_fails_by_name() {
+    sender_retract_fault(
+        Defects {
+            retract_any_non_owner: true,
+            ..Defects::default()
+        },
+        "retract_own_send_other_sender_refused",
+        "another non-owner's retract",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn retract_own_send_request_identity_fails_by_name() {
+    sender_retract_fault(
+        Defects {
+            retract_identity_from_request: true,
+            ..Defects::default()
+        },
+        "retract_own_send_other_sender_refused",
+        "another non-owner's retract with a forged sender field",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn retract_own_send_unqualified_lookup_fails_by_name() {
+    sender_retract_fault(
+        Defects {
+            retract_unqualified_lookup: true,
+            ..Defects::default()
+        },
+        "retract_own_send_shared_send_id_isolated",
+        "sender A's second retract answered Retracted, not NotPending",
+    )
+    .await;
+}
 
 fn interrupt_cancelling(mut defects: Defects) -> FakeSubject {
     defects.declare_run_cancel_by_interrupt = true;

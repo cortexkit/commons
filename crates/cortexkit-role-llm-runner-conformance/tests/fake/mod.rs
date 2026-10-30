@@ -169,10 +169,15 @@ const READ_FIELDS: &[&str] = &[
     "view",
 ];
 
-/// Deliberate contract breaks: each field makes the fake violate one rule a
-/// case must catch.
+/// Fixture configuration and deliberate defects. Defect fields make the
+/// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub declare_retract_own_send: bool,
+    pub retract_sender_refused: bool,
+    pub retract_any_non_owner: bool,
+    pub retract_identity_from_request: bool,
+    pub retract_unqualified_lookup: bool,
     pub declare_run_cancel_by_interrupt: bool,
     pub declare_refresh_relaunch: bool,
     pub cancel_sender_without_interrupt: bool,
@@ -4674,8 +4679,15 @@ impl Module {
         }
     }
 
-    /// Withdraw a still-pending `delivery_order` submission durably.
+    /// Record a still-pending `delivery_order` submission's withdrawal in the
+    /// fake log.
     fn retract(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        let caller = if self.world.defects.retract_identity_from_request {
+            params["sender"].as_str().unwrap_or(&stamp.principal)
+        } else {
+            &stamp.principal
+        };
+        let caller = caller.to_owned();
         let request: RetractRequest = match serde_json::from_value(params) {
             Ok(request) => request,
             Err(_) => return Ok(invalid("submission_id")),
@@ -4683,17 +4695,30 @@ impl Module {
         let Some(sess) = self.sessions.lock().unwrap().get(session).cloned() else {
             return Ok(respond(RetractReply::NotPending));
         };
-        if sess.owner != stamp.principal {
+        let own_submission = sess.ordered.iter().find(|(_, queued)| {
+            queued.send_id == request.submission_id
+                && !queued.sender.is_empty()
+                && queued.sender == caller
+        });
+        let sender_admitted = self.world.serves(groups::RETRACT_OWN_SEND)
+            && ((own_submission.is_some() && !self.world.defects.retract_sender_refused)
+                || self.world.defects.retract_any_non_owner);
+        if sess.owner != stamp.principal && !sender_admitted {
             return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
         }
-        let id = sess
-            .ordered
-            .iter()
-            .find(|(_, queued)| {
+        let pending = if sess.owner == stamp.principal
+            || self.world.defects.retract_unqualified_lookup
+            || self.world.defects.retract_any_non_owner
+        {
+            sess.ordered.iter().find(|(_, queued)| {
                 queued.send_id == request.submission_id && queued.state == "pending"
             })
-            .map(|(id, _)| id.clone());
-        let Some(id) = id else {
+        } else {
+            // The authorized sender's entry is also the withdrawal target.
+            // A repeat must not fall through to another sender's shared id.
+            own_submission.filter(|(_, queued)| queued.state == "pending")
+        };
+        let Some((id, _)) = pending else {
             return Ok(respond(RetractReply::NotPending));
         };
         self.commit(
@@ -5456,6 +5481,11 @@ impl FakeSubject {
                         .filter_map(|c| c.group())
                         .map(str::to_owned)
                         .chain(self.held_calls_group.then(|| groups::HELD_CALLS.to_owned()))
+                        .chain(
+                            self.defects
+                                .declare_retract_own_send
+                                .then(|| groups::RETRACT_OWN_SEND.to_owned()),
+                        )
                         .chain(
                             self.defects
                                 .declare_run_cancel_by_interrupt

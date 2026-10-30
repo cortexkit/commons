@@ -236,6 +236,9 @@ pub mod capabilities {
     pub const RUN_CANCEL_BY_INTERRUPT: &str = "run_cancel_by_interrupt";
     /// Withdraw a queued submission or a pending steer on a confirm runner.
     pub const RETRACT: &str = "retract";
+    /// A daemon-attested sender may withdraw its own pending submission,
+    /// identified by the sender principal the runner recorded on it; requires [`RETRACT`].
+    pub const RETRACT_OWN_SEND: &str = "retract_own_send";
     /// Per tool call: the module it was dispatched to, its `call_key`, and
     /// whether it is still indeterminate.
     pub const DISPATCH_ATTRIBUTION: &str = "dispatch_attribution";
@@ -403,6 +406,7 @@ pub mod capabilities {
         (RUN_CANCEL_BY_INTERRUPT, &[ops::RUN_CANCEL]),
         (REFRESH_RELAUNCH, &[ops::SESSION_SUBSCRIBE]),
         (RETRACT, &[ops::SESSION_RETRACT]),
+        (RETRACT_OWN_SEND, &[ops::SESSION_RETRACT]),
         (DISPATCH_ATTRIBUTION, &[ops::SESSION_READ]),
         (STREAMING, &[ops::SESSION_READ, ops::SESSION_SUBSCRIBE]),
         (MODEL_VIEW, &[ops::SESSION_READ]),

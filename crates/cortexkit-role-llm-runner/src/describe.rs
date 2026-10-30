@@ -31,6 +31,7 @@ pub mod problem_names {
         "run_cancel_by_interrupt_without_run_cancel";
     pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_DELIVERY_ORDER: &str =
         "run_cancel_by_interrupt_without_delivery_order";
+    pub const RETRACT_OWN_SEND_WITHOUT_RETRACT: &str = "retract_own_send_without_retract";
     pub const REFRESH_RELAUNCH_WITHOUT_SESSION_CHANGE: &str =
         "refresh_relaunch_without_session_change";
     pub const MISSING_SESSION_RETENTION: &str = "missing_session_retention";
@@ -442,6 +443,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     let mut problems = Vec::new();
     for (group, dependency, problem) in [
         (
+            capabilities::RETRACT_OWN_SEND,
+            capabilities::RETRACT,
+            problem_names::RETRACT_OWN_SEND_WITHOUT_RETRACT,
+        ),
+        (
             capabilities::RUN_CANCEL_BY_INTERRUPT,
             capabilities::RUN_CANCEL,
             problem_names::RUN_CANCEL_BY_INTERRUPT_WITHOUT_RUN_CANCEL,
@@ -674,6 +680,7 @@ mod opt_in_dependency_tests {
     #[test]
     fn opt_in_groups_require_their_dependencies() {
         for (group, dependencies) in [
+            (capabilities::RETRACT_OWN_SEND, vec![capabilities::RETRACT]),
             (
                 capabilities::RUN_CANCEL_BY_INTERRUPT,
                 vec![capabilities::RUN_CANCEL, capabilities::DELIVERY_ORDER],

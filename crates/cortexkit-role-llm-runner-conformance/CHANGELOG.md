@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.15.33
+
+- Pin runner `=0.7.29` and check the opt-in `retract_own_send` rule: the
+  recorded sender can withdraw its pending submission before it runs, while
+  another non-owner cannot, even with a forged identity in the request.
+  All three checks report not applicable by name when the group is undeclared.
+- Exercise faulty runners that refuse the sender, admit every non-owner,
+  or trust a request field for caller identity, and require rejection by name.
+- Add `retract_own_send_shared_send_id_isolated`: two non-owner senders
+  reuse a `send_id`, and retracting one submission twice leaves the other's
+  submission pending for the owner's next turn. Correct the fake's lookup
+  to authorize and withdraw the same sender's entry, and reject a faulty
+  fake retaining the sender-unqualified withdrawal lookup by name.
+
 ## 0.15.32
 
 - Pin runner `=0.7.28`. The display projection case supports `opencode-v2`

@@ -89,6 +89,9 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("retract_own_send_") => {
+                crate::delivery_order::retract_own_send(self, name).await
+            }
             name if name.starts_with("run_cancel_by_interrupt_") => {
                 crate::cancel::by_interrupt(self, name).await
             }

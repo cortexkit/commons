@@ -11,6 +11,16 @@ cortexkit-role-llm-runner = "0.7.4"
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
 
+Since 0.7.29, the opt-in `retract_own_send` group (requiring `retract`)
+allows a daemon-attested sender to withdraw its own pending submission on
+the same session. On a session with a recorded owner, other non-owners and
+submissions without a recorded sender stay owner-only; request fields never
+establish identity. Answers and withdrawal semantics, including durability,
+are unchanged. Without the group the owner-only rule on owner-protected
+sessions is unchanged. On a session with no recorded attested owner, a
+runner may admit any reachable caller; that existing rule is unchanged. See contract §§6.2
+and 9.2.
+
 Since 0.7.14, a runner declaring the `rich_ui_stamp` group serves the rich UI
 stamp `{dialect, catalog_digest}` (`rich_ui::RichUiStamp`) that a run's frozen
 plan carries, copied from the system-text answers it fetched: on every
