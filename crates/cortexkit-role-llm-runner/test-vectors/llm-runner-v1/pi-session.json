@@ -25,14 +25,170 @@
         "entry_type": "message",
         "ordinal": 0,
         "part_count": 1,
-        "projected_content": ""
+        "projected_content": "",
+        "served_body": {
+          "type": "message",
+          "id": "entry-003",
+          "parentId": "entry-002",
+          "timestamp": "2026-01-01T00:00:03.000Z",
+          "message": {
+            "role": "system",
+            "content": "",
+            "sections": {
+              "preamble": "Fixture system prompt.",
+              "cwd": "<cwd>\n/fixture/work\n</cwd>"
+            },
+            "timestamp": 1767225600000,
+            "toolsAdded": [
+              {
+                "name": "read",
+                "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "path"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to read (relative or absolute)"
+                    },
+                    "offset": {
+                      "type": "number",
+                      "description": "Line number to start reading from (1-indexed)"
+                    },
+                    "limit": {
+                      "type": "number",
+                      "description": "Maximum number of lines to read"
+                    }
+                  }
+                },
+                "constrainedSampling": {
+                  "type": "json_schema",
+                  "strict": "prefer"
+                }
+              },
+              {
+                "name": "bash",
+                "description": "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "command"
+                  ],
+                  "properties": {
+                    "command": {
+                      "type": "string",
+                      "description": "Shell command to execute"
+                    },
+                    "timeout": {
+                      "type": "number",
+                      "description": "Timeout in seconds (optional, no default timeout)"
+                    }
+                  }
+                },
+                "constrainedSampling": {
+                  "type": "json_schema",
+                  "strict": "prefer"
+                }
+              },
+              {
+                "name": "edit",
+                "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "path",
+                    "edits"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to edit (relative or absolute)"
+                    },
+                    "edits": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "oldText",
+                          "newText"
+                        ],
+                        "properties": {
+                          "oldText": {
+                            "type": "string",
+                            "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+                          },
+                          "newText": {
+                            "type": "string",
+                            "description": "Replacement text for this targeted edit."
+                          }
+                        }
+                      },
+                      "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+                    }
+                  }
+                },
+                "constrainedSampling": {
+                  "type": "json_schema",
+                  "strict": "prefer"
+                }
+              },
+              {
+                "name": "write",
+                "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
+                "parameters": {
+                  "type": "object",
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "description": "Path to the file to write (relative or absolute)"
+                    },
+                    "content": {
+                      "type": "string",
+                      "description": "Content to write to the file"
+                    }
+                  }
+                },
+                "constrainedSampling": {
+                  "type": "json_schema",
+                  "strict": "prefer"
+                }
+              },
+              {
+                "name": "head_fixture_image",
+                "description": "Return a deterministic image and non-content details for fixture recording.",
+                "parameters": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              }
+            ]
+          }
+        }
       },
       {
         "entry_id": "entry-004",
         "entry_type": "message",
         "ordinal": 1,
         "part_count": 1,
-        "projected_content": "STRING_USER"
+        "projected_content": "STRING_USER",
+        "served_body": {
+          "type": "message",
+          "id": "entry-004",
+          "parentId": "entry-003",
+          "timestamp": "2026-01-01T00:00:04.000Z",
+          "message": {
+            "role": "user",
+            "content": "STRING_USER",
+            "timestamp": 1767225600000
+          }
+        }
       },
       {
         "entry_id": "entry-005",
@@ -44,7 +200,46 @@
             "type": "text",
             "text": "PROBE_DONE"
           }
-        ]
+        ],
+        "served_body": {
+          "type": "message",
+          "id": "entry-005",
+          "parentId": "entry-004",
+          "timestamp": "2026-01-01T00:00:05.000Z",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "PROBE_DONE"
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "probe",
+            "model": "probe",
+            "usage": {
+              "input": 11,
+              "output": 2,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 13,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "chatcmpl-probe",
+            "rawStopReason": "stop",
+            "durationMs": 1,
+            "thinkingLevel": "medium"
+          }
+        }
       },
       {
         "entry_id": "entry-016",
@@ -56,7 +251,23 @@
             "type": "text",
             "text": "BRANCH_USER"
           }
-        ]
+        ],
+        "served_body": {
+          "type": "message",
+          "id": "entry-016",
+          "parentId": "entry-005",
+          "timestamp": "2026-01-01T00:00:16.000Z",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "BRANCH_USER"
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        }
       },
       {
         "entry_id": "entry-017",
@@ -68,7 +279,47 @@
             "type": "text",
             "text": "PROBE_DONE"
           }
-        ]
+        ],
+        "served_body": {
+          "type": "message",
+          "id": "entry-017",
+          "parentId": "entry-016",
+          "timestamp": "2026-01-01T00:00:17.000Z",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "PROBE_DONE"
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "probe",
+            "model": "probe-alternate",
+            "usage": {
+              "input": 11,
+              "output": 2,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 13,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "chatcmpl-probe",
+            "responseModel": "probe",
+            "rawStopReason": "stop",
+            "durationMs": 1,
+            "thinkingLevel": "medium"
+          }
+        }
       },
       {
         "entry_id": "entry-018",
@@ -80,7 +331,23 @@
             "type": "text",
             "text": "CUT_USER"
           }
-        ]
+        ],
+        "served_body": {
+          "type": "message",
+          "id": "entry-018",
+          "parentId": "entry-017",
+          "timestamp": "2026-01-01T00:00:18.000Z",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "CUT_USER"
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        }
       },
       {
         "entry_id": "entry-019",
@@ -92,7 +359,47 @@
             "type": "text",
             "text": "Fixture edited assistant text."
           }
-        ]
+        ],
+        "served_body": {
+          "type": "message",
+          "id": "entry-019",
+          "parentId": "entry-018",
+          "timestamp": "2026-01-01T00:00:19.000Z",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "Fixture edited assistant text."
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "probe",
+            "model": "probe-alternate",
+            "usage": {
+              "input": 11,
+              "output": 2,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 13,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "chatcmpl-probe",
+            "responseModel": "probe",
+            "rawStopReason": "stop",
+            "durationMs": 1,
+            "thinkingLevel": "medium"
+          }
+        }
       },
       {
         "entry_id": "entry-022",
@@ -104,7 +411,23 @@
             "type": "text",
             "text": "AFTER_CUT_USER"
           }
-        ]
+        ],
+        "served_body": {
+          "type": "message",
+          "id": "entry-022",
+          "parentId": "entry-021",
+          "timestamp": "2026-01-01T00:00:22.000Z",
+          "message": {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "AFTER_CUT_USER"
+              }
+            ],
+            "timestamp": 1767225600000
+          }
+        }
       },
       {
         "entry_id": "entry-023",
@@ -116,7 +439,47 @@
             "type": "text",
             "text": "PROBE_DONE"
           }
-        ]
+        ],
+        "served_body": {
+          "type": "message",
+          "id": "entry-023",
+          "parentId": "entry-022",
+          "timestamp": "2026-01-01T00:00:23.000Z",
+          "message": {
+            "role": "assistant",
+            "content": [
+              {
+                "type": "text",
+                "text": "PROBE_DONE"
+              }
+            ],
+            "api": "openai-completions",
+            "provider": "probe",
+            "model": "probe-alternate",
+            "usage": {
+              "input": 11,
+              "output": 2,
+              "cacheRead": 0,
+              "cacheWrite": 0,
+              "reasoning": 0,
+              "totalTokens": 13,
+              "cost": {
+                "input": 0,
+                "output": 0,
+                "cacheRead": 0,
+                "cacheWrite": 0,
+                "total": 0
+              }
+            },
+            "stopReason": "stop",
+            "timestamp": 1767225600000,
+            "responseId": "chatcmpl-probe",
+            "responseModel": "probe",
+            "rawStopReason": "stop",
+            "durationMs": 1,
+            "thinkingLevel": "medium"
+          }
+        }
       }
     ],
     "native_cut": {
@@ -173,7 +536,21 @@
                 "type": "text",
                 "text": "Ran `printf FIXTURE_BASH`\n(no output)"
               }
-            ]
+            ],
+            "served_body": {
+              "type": "message",
+              "message": {
+                "role": "bashExecution",
+                "command": "printf FIXTURE_BASH",
+                "output": "",
+                "exitCode": 0,
+                "cancelled": false,
+                "truncated": false,
+                "timestamp": 1767225600000
+              },
+              "id": "synthetic-0",
+              "parentId": null
+            }
           }
         ],
         "native_cut": null
@@ -214,7 +591,21 @@
                 "type": "text",
                 "text": "Ran `printf FIXTURE_BASH`\n```\nFIXTURE_BASH\n```\n\n(command cancelled)"
               }
-            ]
+            ],
+            "served_body": {
+              "type": "message",
+              "message": {
+                "role": "bashExecution",
+                "command": "printf FIXTURE_BASH",
+                "output": "FIXTURE_BASH",
+                "exitCode": 130,
+                "cancelled": true,
+                "truncated": false,
+                "timestamp": 1767225600000
+              },
+              "id": "synthetic-0",
+              "parentId": null
+            }
           }
         ],
         "native_cut": null
@@ -255,7 +646,21 @@
                 "type": "text",
                 "text": "Ran `printf FIXTURE_BASH`\n```\nFIXTURE_BASH\n```\n\nCommand exited with code 7"
               }
-            ]
+            ],
+            "served_body": {
+              "type": "message",
+              "message": {
+                "role": "bashExecution",
+                "command": "printf FIXTURE_BASH",
+                "output": "FIXTURE_BASH",
+                "exitCode": 7,
+                "cancelled": false,
+                "truncated": false,
+                "timestamp": 1767225600000
+              },
+              "id": "synthetic-0",
+              "parentId": null
+            }
           }
         ],
         "native_cut": null
@@ -297,7 +702,22 @@
                 "type": "text",
                 "text": "Ran `printf FIXTURE_BASH`\n```\nFIXTURE_BASH\n```\n\n[Output truncated. Full output: /fixture/full-output.txt]"
               }
-            ]
+            ],
+            "served_body": {
+              "type": "message",
+              "message": {
+                "role": "bashExecution",
+                "command": "printf FIXTURE_BASH",
+                "output": "FIXTURE_BASH",
+                "exitCode": 0,
+                "cancelled": false,
+                "truncated": true,
+                "timestamp": 1767225600000,
+                "fullOutputPath": "/fixture/full-output.txt"
+              },
+              "id": "synthetic-0",
+              "parentId": null
+            }
           }
         ],
         "native_cut": null
@@ -350,7 +770,28 @@
                 "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
                 "mimeType": "image/png"
               }
-            ]
+            ],
+            "served_body": {
+              "type": "message",
+              "message": {
+                "role": "bashExecution",
+                "command": "printf FIXTURE_BASH",
+                "output": "FIXTURE_BASH",
+                "exitCode": 0,
+                "cancelled": false,
+                "truncated": false,
+                "timestamp": 1767225600000,
+                "images": [
+                  {
+                    "type": "image",
+                    "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC",
+                    "mimeType": "image/png"
+                  }
+                ]
+              },
+              "id": "synthetic-0",
+              "parentId": null
+            }
           }
         ],
         "native_cut": null
@@ -397,14 +838,38 @@
             "entry_type": "message",
             "ordinal": 0,
             "part_count": 0,
-            "projected_content": null
+            "projected_content": null,
+            "served_body": {
+              "type": "message",
+              "message": {
+                "role": "bashExecution",
+                "command": "printf FIXTURE_EXCLUDED",
+                "output": "FIXTURE_EXCLUDED",
+                "exitCode": 0,
+                "cancelled": false,
+                "truncated": false,
+                "timestamp": 1767225600000,
+                "excludeFromContext": true
+              },
+              "id": "synthetic-0",
+              "parentId": null
+            }
           },
           {
             "entry_id": "synthetic-1",
             "entry_type": "message",
             "ordinal": 1,
             "part_count": 1,
-            "projected_content": "next"
+            "projected_content": "next",
+            "served_body": {
+              "type": "message",
+              "message": {
+                "role": "user",
+                "content": "next"
+              },
+              "id": "synthetic-1",
+              "parentId": "synthetic-0"
+            }
           }
         ],
         "native_cut": null
@@ -496,14 +961,41 @@
                 "type": "text",
                 "text": "edit"
               }
-            ]
+            ],
+            "served_body": {
+              "type": "message",
+              "message": {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": "last"
+                  },
+                  {
+                    "type": "text",
+                    "text": "edit"
+                  }
+                ]
+              },
+              "id": "synthetic-0",
+              "parentId": null
+            }
           },
           {
             "entry_id": "synthetic-1",
             "entry_type": "message",
             "ordinal": 1,
             "part_count": 0,
-            "projected_content": null
+            "projected_content": null,
+            "served_body": {
+              "type": "message",
+              "message": {
+                "role": "assistant",
+                "content": []
+              },
+              "id": "synthetic-1",
+              "parentId": "synthetic-0"
+            }
           }
         ],
         "native_cut": null
@@ -537,7 +1029,14 @@
                 "type": "text",
                 "text": "The following is a summary of a branch that this conversation came back from:\n\n<summary>\nSynthetic branch summary.</summary>"
               }
-            ]
+            ],
+            "served_body": {
+              "type": "branch_summary",
+              "summary": "Synthetic branch summary.",
+              "fromId": "abandoned",
+              "id": "synthetic-0",
+              "parentId": null
+            }
           }
         ],
         "native_cut": null
@@ -567,12 +1066,173 @@
             "entry_type": "custom_message",
             "ordinal": 0,
             "part_count": 1,
-            "projected_content": "Synthetic rendered notice."
+            "projected_content": "Synthetic rendered notice.",
+            "served_body": {
+              "type": "custom_message",
+              "customType": "cortexkit:notice",
+              "content": "Synthetic rendered notice.",
+              "display": true,
+              "id": "synthetic-0",
+              "parentId": null
+            }
           }
         ],
         "native_cut": null
       },
       "template_id": "notice"
+    },
+    {
+      "name": "null-removal-shapes-synthetic",
+      "synthetic": true,
+      "journal": [
+        {
+          "type": "message",
+          "id": "u",
+          "parentId": null,
+          "message": {
+            "role": "user",
+            "content": "removed user text"
+          }
+        },
+        {
+          "type": "custom_message",
+          "id": "c",
+          "parentId": "u",
+          "customType": "cortexkit:notice",
+          "content": "removed notice",
+          "display": true
+        },
+        {
+          "type": "branch_summary",
+          "id": "b",
+          "parentId": "c",
+          "fromId": "u",
+          "summary": "removed branch summary"
+        },
+        {
+          "type": "message",
+          "id": "s",
+          "parentId": "b",
+          "message": {
+            "role": "bashExecution",
+            "command": "ls",
+            "output": "a",
+            "exitCode": 0,
+            "cancelled": false,
+            "truncated": false
+          }
+        },
+        {
+          "type": "context_edit",
+          "id": "e1",
+          "parentId": "s",
+          "targetId": "u",
+          "replacement": null
+        },
+        {
+          "type": "context_edit",
+          "id": "e2",
+          "parentId": "e1",
+          "targetId": "c",
+          "replacement": null
+        },
+        {
+          "type": "context_edit",
+          "id": "e3",
+          "parentId": "e2",
+          "targetId": "b",
+          "replacement": null
+        },
+        {
+          "type": "context_edit",
+          "id": "e4",
+          "parentId": "e3",
+          "targetId": "s",
+          "replacement": null
+        }
+      ],
+      "expected": {
+        "leaf_id": "e4",
+        "active_path": [
+          "u",
+          "c",
+          "b",
+          "s",
+          "e1",
+          "e2",
+          "e3",
+          "e4"
+        ],
+        "entries": [
+          {
+            "entry_id": "u",
+            "entry_type": "message",
+            "ordinal": 0,
+            "part_count": 0,
+            "projected_content": null,
+            "served_body": {
+              "type": "message",
+              "id": "u",
+              "parentId": null,
+              "message": {
+                "role": "user",
+                "content": []
+              }
+            }
+          },
+          {
+            "entry_id": "c",
+            "entry_type": "custom_message",
+            "ordinal": 1,
+            "part_count": 0,
+            "projected_content": null,
+            "served_body": {
+              "type": "custom_message",
+              "id": "c",
+              "parentId": "u",
+              "customType": "cortexkit:notice",
+              "content": [],
+              "display": true
+            }
+          },
+          {
+            "entry_id": "b",
+            "entry_type": "branch_summary",
+            "ordinal": 2,
+            "part_count": 0,
+            "projected_content": null,
+            "served_body": {
+              "type": "branch_summary",
+              "id": "b",
+              "parentId": "c",
+              "fromId": "u",
+              "summary": ""
+            }
+          },
+          {
+            "entry_id": "s",
+            "entry_type": "message",
+            "ordinal": 3,
+            "part_count": 0,
+            "projected_content": null,
+            "served_body": {
+              "type": "message",
+              "id": "s",
+              "parentId": "b",
+              "message": {
+                "role": "bashExecution",
+                "command": "ls",
+                "output": "a",
+                "exitCode": 0,
+                "cancelled": false,
+                "truncated": false,
+                "excludeFromContext": true
+              }
+            }
+          }
+        ],
+        "native_cut": null
+      }
     }
   ]
 }

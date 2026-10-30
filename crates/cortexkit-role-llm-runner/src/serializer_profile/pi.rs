@@ -34,8 +34,19 @@ pub struct PiOrdinalEntry {
     pub ordinal: u64,
     pub part_count: usize,
     /// Model-visible content after context edits and `convertToLlm`, or null
-    /// when nothing is projected. This is not a replacement for the served raw row.
+    /// when nothing is projected.
     pub projected_content: Value,
+    /// The body a runner serves for this entry on `session.read`: the stored
+    /// wrapped journal row as Pi's session loader reads it (legacy missing or
+    /// null content normalized), with the active path's last context edit for
+    /// it applied. A non-null edit replaces only the model-visible content
+    /// member. A null edit serves the entry with nothing for the model:
+    /// `content: []` for a message or custom message, an empty `summary` for
+    /// a branch summary, and `excludeFromContext: true` added to a shell row.
+    /// An entry no edit targets is otherwise the stored row's JSON value
+    /// unchanged. `top_level_part_count("pi", served_body)` equals
+    /// `part_count`, and the row's write-time digest covers this body.
+    pub served_body: Value,
 }
 
 /// The latest active-path native compaction. Its summary is never served.
@@ -192,8 +203,8 @@ fn ordinal_bearing(entry: &Value) -> bool {
 /// fall outside the served range; kept ordinals do not change. This helper
 /// describes a snapshot: a late edit of already served model-visible content
 /// requires a new lineage from that target's ordinal at a step boundary, never
-/// in-place changes to served bytes. Serve raw wrapped journal entries, not
-/// `projected_content`. Only `message` with runtime role `user` is the user's
+/// in-place changes to served bytes. Serve each entry's `served_body`, not
+/// `projected_content` and not the raw row when an edit targets it. Only `message` with runtime role `user` is the user's
 /// own text; display keeps `custom`, `branchSummary` and `bashExecution`
 /// runtime roles rather than relabeling them `user`.
 ///
@@ -295,8 +306,8 @@ pub fn pi_session_projection(journal: &[Value]) -> Result<PiSessionProjection, P
         }
         let id = entry["id"].as_str().expect("validated id");
         let mut edited = (*entry).clone();
-        let content = match edits.get(id) {
-            Some(Value::Null) => Value::Null,
+        let (content, served_body) = match edits.get(id) {
+            Some(Value::Null) => (Value::Null, removed_body(entry)),
             Some(replacement) => {
                 if entry["type"] == "custom_message" {
                     edited["content"] = replacement["content"].clone();
@@ -312,9 +323,15 @@ pub fn pi_session_projection(journal: &[Value]) -> Result<PiSessionProjection, P
                             content.clone()
                         };
                 }
-                normalized_content(&edited).map_err(malformed)?
+                (
+                    normalized_content(&edited).map_err(malformed)?,
+                    normalized_row(&edited),
+                )
             }
-            None => normalized_content(entry).map_err(malformed)?,
+            None => (
+                normalized_content(entry).map_err(malformed)?,
+                normalized_row(entry),
+            ),
         };
         projected.push(PiOrdinalEntry {
             entry_id: id.to_owned(),
@@ -322,6 +339,7 @@ pub fn pi_session_projection(journal: &[Value]) -> Result<PiSessionProjection, P
             ordinal: projected.len() as u64,
             part_count: content_count(&content).map_err(malformed)?,
             projected_content: content,
+            served_body,
         });
     }
     let native_cut = path
@@ -368,7 +386,28 @@ pub fn pi_session_projection(journal: &[Value]) -> Result<PiSessionProjection, P
     })
 }
 
-fn normalized_content(entry: &Value) -> Result<Value, String> {
+/// The served body of an entry a null `context_edit` removed. A message or
+/// custom message gets `content: []` and a branch summary an empty `summary`;
+/// a shell row keeps its command and output and gains
+/// `excludeFromContext: true`. Each then projects nothing and keeps its ordinal.
+fn removed_body(entry: &Value) -> Value {
+    let mut body = entry.clone();
+    match entry["type"].as_str() {
+        Some("branch_summary") => body["summary"] = json!(""),
+        Some("custom_message") => body["content"] = json!([]),
+        _ if entry["message"]["role"] == "bashExecution" => {
+            body["message"]["excludeFromContext"] = json!(true)
+        }
+        _ => body["message"]["content"] = json!([]),
+    }
+    body
+}
+
+/// The stored row as Pi's session loader reads it: a missing or null message
+/// content becomes `""` for a system message and `[]` for user, assistant and
+/// tool-result messages, and a missing or null custom content becomes `[]`.
+/// Every other row is returned unchanged.
+fn normalized_row(entry: &Value) -> Value {
     let mut entry = entry.clone();
     if entry["type"] == "message" && entry["message"]["content"].is_null() {
         match entry["message"]["role"].as_str() {
@@ -380,7 +419,11 @@ fn normalized_content(entry: &Value) -> Result<Value, String> {
     if entry["type"] == "custom_message" && entry["content"].is_null() {
         entry["content"] = json!([]);
     }
-    projected_content(&entry)
+    entry
+}
+
+fn normalized_content(entry: &Value) -> Result<Value, String> {
+    projected_content(&normalized_row(entry))
 }
 
 #[cfg(test)]
@@ -423,6 +466,81 @@ mod tests {
                 case["name"]
             );
         }
+    }
+
+    #[test]
+    fn pi_served_bodies_count_as_projected_and_unedited_rows_keep_their_value() {
+        let file = vectors::load("pi-session.json");
+        let recording: Vec<Value> = vectors::file(file["recording"].as_str().unwrap())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let mut journals = vec![recording];
+        for case in file["synthetic"].as_array().unwrap() {
+            journals.push(case["journal"].as_array().unwrap().clone());
+        }
+        let mut edited = 0;
+        for journal in &journals {
+            let projection = pi_session_projection(journal).unwrap();
+            let targets: Vec<&str> = journal
+                .iter()
+                .filter(|e| {
+                    e["type"] == "context_edit"
+                        && projection
+                            .active_path
+                            .contains(&e["id"].as_str().unwrap().to_owned())
+                })
+                .map(|e| e["targetId"].as_str().unwrap())
+                .collect();
+            for entry in &projection.entries {
+                assert_eq!(
+                    crate::serializer_profile::top_level_part_count("pi", &entry.served_body)
+                        .unwrap(),
+                    entry.part_count,
+                    "{}",
+                    entry.entry_id
+                );
+                let stored = journal.iter().find(|e| e["id"] == *entry.entry_id).unwrap();
+                if targets.contains(&entry.entry_id.as_str()) {
+                    edited += 1;
+                } else {
+                    assert_eq!(&entry.served_body, stored, "{}", entry.entry_id);
+                }
+            }
+        }
+        // The recording's edit, a late edit, a null edit and the four removal shapes.
+        assert!(edited >= 6, "only {edited} edited entries covered");
+    }
+
+    #[test]
+    fn pi_served_bodies_normalize_legacy_null_content_so_they_count_like_the_projection() {
+        let journal = vec![
+            json!({"type":"message","id":"s","parentId":null,"message":{"role":"system","content":null}}),
+            json!({"type":"message","id":"u","parentId":"s","message":{"role":"user"}}),
+            json!({"type":"custom_message","id":"c","parentId":"u","customType":"x","content":null,"display":true}),
+        ];
+        let projection = pi_session_projection(&journal).unwrap();
+        let bodies: Vec<_> = projection.entries.iter().map(|e| &e.served_body).collect();
+        assert_eq!(bodies[0]["message"]["content"], json!(""));
+        assert_eq!(bodies[1]["message"]["content"], json!([]));
+        assert_eq!(bodies[2]["content"], json!([]));
+        for entry in &projection.entries {
+            assert_eq!(
+                crate::serializer_profile::top_level_part_count("pi", &entry.served_body).unwrap(),
+                entry.part_count,
+                "{}",
+                entry.entry_id
+            );
+        }
+        assert_eq!(
+            projection
+                .entries
+                .iter()
+                .map(|e| e.part_count)
+                .collect::<Vec<_>>(),
+            [1, 0, 0]
+        );
     }
 
     #[test]

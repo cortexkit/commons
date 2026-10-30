@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.30
+
+- Pin runner `=0.7.26`, which adds the Pi served-body projection
+  (`served_body`) a runner must serve. No kit case changes.
+
 ## 0.15.29
 
 - Pin runner `=0.7.25`. The display profile-projection case now supports Pi

@@ -34,13 +34,21 @@ from the subsequent provider request, while the included output was present.
 ## Expected results and synthetic coverage
 
 `pi-session.json` independently specifies the leaf, full active path, all
-ordinal-bearing entries, projected content and part counts, the native cut,
-and abandoned IDs that must not appear. The helper's test compares every field.
-The retained tail has ordinals 6, 7 and 8, not a new zero-based sequence.
-`display-pi.json` gives raw-body display projections for each retained entry,
-as well as recorded entries before navigation and synthetic coverage.
-Raw display of `entry-019` shows the stored original text, not the context
-edit's model projection: a runner handles already served edits by lineage.
+ordinal-bearing entries, projected content and part counts, served bodies, the
+native cut, and abandoned IDs that must not appear. The helper's test compares
+every field. The retained tail has ordinals 6, 7 and 8, not a new zero-based
+sequence. Each entry's `served_body` is what a runner serves on `session.read`:
+in the recorded journal, `entry-019`'s `/message/content` carries the recorded
+context edit's replacement, and every other entry is its stored row's JSON
+value unchanged. A test checks that the single-row count of every served body,
+recorded and synthetic, equals its part count. The synthetic case
+`null-removal-shapes-synthetic` removes a user message, a custom message, a
+branch summary and a shell run with null edits, pinning each removal shape.
+`display-pi.json` gives display projections of stored bodies for each retained
+entry, as well as recorded entries before navigation and synthetic coverage.
+They test the display function itself; inside the served window a runner
+projects the served body, so `entry-019` displays the edited text there, and
+its original text appears only on host-history pages below the window.
 
 Cases marked `synthetic` are not recordings. Shell cases copy the recorded
 `bashExecution` shape and change fields for empty output, cancellation,

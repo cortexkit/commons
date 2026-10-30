@@ -456,9 +456,12 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   changed bytes under one lineage as a runner defect, except for the
   precisely listed archive-pruning changes of §9.14.1. Like an OpenCode 1
   host edit, a late Pi `context_edit` that changes a served message's
-  model-visible content permits a new lineage from the target's ordinal at
-  a step boundary. The runner never renumbers it or changes served bytes
-  in place. The archive-pruning exception changes
+  model-visible content requires the runner to start a new lineage from the
+  target's ordinal at a step boundary. So within one lineage an entry's
+  served body changes only as §9.14.1's archive pruning allows, and its
+  projection reflects every edit that applied when it was served; an edit
+  that predates ingest is simply part of the body served from the start.
+  The runner never renumbers it or changes served bytes in place. The archive-pruning exception changes
   only listed part payloads, never identity, ordering, tags or write-time digests.
 - [pinned] **Bookkeeping stays out.** Host records a runner writes for its
   own compaction bookkeeping (a host's native compaction message, summary or
@@ -817,8 +820,22 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   any member containing `\n` or `\r`; `detail` over 1 KiB or `retry` over
   256 bytes. The vectors in `test-vectors/owned-broca-tool-outage/` pin
   real producer captures and one refusal per rule.
-- [pinned] **`pi`.** A served body is the wrapped journal entry as Pi wrote
-  it, not a bare message or the model-request projection. Served entry types
+- [pinned] **`pi`.** A served body is the wrapped journal entry, not a bare
+  message or the model-request projection. It is the entry as Pi's session
+  loader reads it, with the active path's context edits applied to its
+  model-visible content (see Pi parts and tags): `id`, `parentId`, `type`
+  and every member an edit does not touch are unchanged, and an entry no
+  edit targets is served as its stored row's JSON value. Read stability
+  (§4.2) applies to this served form: its write-time digest is the
+  digest of the served body, and its parts are counted over it, so a reader
+  that has only the served row recounts the runner's parts; its tags
+  attach to those parts. `context_edit` entries themselves are never
+  served. Inside the served window, `session.history` entries equal
+  `session.read` (§4.6) and display rows (§4.7) project that same served
+  body. Only host-history pages below the served window serve the host's
+  raw stored entries; they assign no new ordinals, and a reader that needs
+  counts for that stored history uses `pi_session_projection` on the full
+  journal. Served entry types
   are `message` (`/message/content`, except shell executions), `custom_message`
   (top-level `content`) and `branch_summary` (top-level `summary`, rendered as
   branch-summary text). Only `type: "message"` with `message.role: "user"`
@@ -865,8 +882,23 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   ordinal-bearing row; `serializer_profile::pi_session_projection(entries)`
   computes the active path, edited content, ordinals and counts together for
   runners and offline planners. The latter returns `PiSessionProjection`,
-  with each `PiOrdinalEntry`'s id, type, ordinal, projected content and count,
-  and an optional `PiNativeCut`; malformed journals are refused by the named
+  with each `PiOrdinalEntry`'s id, type, ordinal, projected content, count
+  and `served_body`, and an optional `PiNativeCut`. A runner serves
+  `served_body` exactly, and `top_level_part_count("pi", served_body)`
+  equals the entry's count. Legacy rows with missing or null content are
+  served normalized, as Pi's loader reads them: `""` for a system message
+  and `[]` otherwise. For a non-null replacement, `served_body` replaces
+  only the member the edit changes: `/message/content` for user, assistant
+  and toolResult messages and top-level `content` for `custom_message`,
+  with an assistant or tool-result string replacement served as one text
+  block. A null replacement serves the entry with nothing for the model:
+  `content: []` for a message or custom message, an empty `summary` for a
+  `branch_summary`, and, for a shell execution, its command and output
+  kept with `excludeFromContext: true` added. The entry keeps its ordinal
+  with zero parts. A planner that reads Pi's
+  journal directly, such as an offline move, uses `pi_session_projection`
+  on the full journal, so its counts and part positions match what the
+  runner serves afterwards; malformed journals are refused by the named
   `PiJournalError` (`pi_malformed_journal`), never repaired by guessing a path.
 - [pinned] **Pi native cut.** The latest active-path `compaction` is the
   native cut, like OpenCode 1's native cut (§4.8, §9.6). Neither the record
@@ -892,8 +924,8 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   because `convertToLlm` uses user authority. A native cut's unserved summary
   has runtime role `compactionSummary` (MSG:48-55). Shell rows show the command
   and output, even when excluded from model context. Images use the existing
-  refs descriptors, never inline bytes. Context edits are applied for model
-  projection and lineage decisions, not by changing a raw served row.
+  refs descriptors, never inline bytes. Context edits are applied to the
+  served body (above), never by changing the stored journal row.
 - [pinned] Read stability (§4.2) applies: the runner serves the form it
   first ingested (`serializer_profile::ingest`). A client re-sending the
   same message with its cache marker moved (a string `content` turning

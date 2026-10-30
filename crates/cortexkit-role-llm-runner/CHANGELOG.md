@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.7.26
+
+- Serve Pi rows with their context edits applied. `PiOrdinalEntry` gains
+  `served_body`: the stored journal row as Pi's loader reads it, with the
+  active path's last edit for it applied to its model-visible content.
+  An entry no edit targets keeps its stored JSON value; legacy missing or
+  null content is normalized as Pi's loader does. A null edit serves the
+  row with nothing for the model: `content: []` for a message or custom
+  message, an empty `summary` for a branch summary, and
+  `excludeFromContext: true` added to a shell run. The row's digest and
+  part count are computed over the served body, so a reader that has only
+  served rows recounts the runner's parts.
+- A late Pi context edit to an entry already served requires the runner to
+  start a new lineage from that entry's ordinal. The contract said
+  "permits"; this aligns it with the helper's documentation, which already
+  said "requires".
+- Inside the served window, history entries and display rows follow the
+  served body. Only host-history pages below the window serve raw stored
+  rows. A planner that reads Pi's journal directly uses
+  `pi_session_projection` on the whole journal.
+- `pi-session.json` pins every entry's served body, including the recorded
+  edit, and adds a synthetic case for each removal shape.
+
 ## 0.7.25
 
 - Complete the Pi profile: share durable active-path selection, edited part
