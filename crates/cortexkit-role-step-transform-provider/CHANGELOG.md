@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1
+
+- Refresh the copied plan-composer admission cases: presets are now session
+  role names or absent, including an admitted presetless item whose
+  subscriptions stay frozen unchanged.
+- Add `check_item_with_optional_preset` and `ItemAdmissionRefusal` for admission
+  with a named preset or the provider's default. Keep `check_item` compatible;
+  both refusal types expose their wire `{code, detail}` body.
+- A presetless item for a provider without a default is a planner error,
+  refused with `invalid_params {field: "preset"}`, not `plan_stale`.
+
 ## 0.4.0
 
 - Pin the state-key/probe runner component as the daemon-attested principal's

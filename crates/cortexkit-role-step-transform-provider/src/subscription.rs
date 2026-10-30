@@ -769,6 +769,56 @@ pub enum ItemRefusal {
     PlanStale(Vec<StaleDifference>),
 }
 
+impl ItemRefusal {
+    /// The refusal's `{code, detail}` fragment; the message and RPC framing
+    /// are added separately.
+    pub fn refusal_body(&self) -> Value {
+        match self {
+            Self::InvalidParams(detail) => serde_json::json!({
+                "code": runner_codes::INVALID_PARAMS,
+                "detail": detail,
+            }),
+            Self::PlanStale(differences) => serde_json::json!({
+                "code": runner_codes::PLAN_STALE,
+                "detail": {"differences": differences},
+            }),
+        }
+    }
+}
+
+/// Why an item with a named preset or the provider's default fails admission.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ItemAdmissionRefusal {
+    /// A malformed or forbidden subscription, refused with `invalid_params`.
+    InvalidSubscription(InvalidSubscriptionDetail),
+    /// The item omits `preset`, but the provider has no default.
+    InvalidPreset,
+    /// The current declaration no longer covers the frozen subscriptions.
+    PlanStale(Vec<StaleDifference>),
+}
+
+impl ItemAdmissionRefusal {
+    /// The refusal's `{code, detail}` fragment; the message and RPC framing
+    /// are added separately. A missing provider default is exactly `invalid_params {field: "preset"}`.
+    pub fn refusal_body(&self) -> Value {
+        match self {
+            Self::InvalidSubscription(detail) => serde_json::json!({
+                "code": runner_codes::INVALID_PARAMS,
+                "detail": detail,
+            }),
+            Self::InvalidPreset => serde_json::json!({
+                "code": runner_codes::INVALID_PARAMS,
+                "detail": {"field": "preset"},
+            }),
+            Self::PlanStale(differences) => serde_json::json!({
+                "code": runner_codes::PLAN_STALE,
+                "detail": {"differences": differences},
+            }),
+        }
+    }
+}
+
 /// Admit plan item `item`, naming `provider` and `preset`, with frozen
 /// subscriptions `planned`, against the provider's current
 /// `declaration` for the item's preset and params. `declaration` is `None`
@@ -790,6 +840,50 @@ pub fn check_item(
     planned: &[Subscription],
     reduction_owner: Option<&str>,
 ) -> Result<Vec<usize>, ItemRefusal> {
+    check_item_with_optional_preset(
+        item,
+        provider,
+        Some(preset),
+        declaration,
+        planned,
+        reduction_owner,
+    )
+    .map_err(|refusal| match refusal {
+        ItemAdmissionRefusal::InvalidSubscription(detail) => ItemRefusal::InvalidParams(detail),
+        ItemAdmissionRefusal::PlanStale(differences) => ItemRefusal::PlanStale(differences),
+        ItemAdmissionRefusal::InvalidPreset => unreachable!("a named preset cannot lack a default"),
+    })
+}
+
+/// Admit a plan item against the current declaration for its preset and params.
+/// The caller supplies that declaration: the one `transform.declare` returned
+/// for the named preset, or for the provider's default when `preset` is `None`
+/// (an absent preset selects the default on that call). `Some(preset)` behaves
+/// exactly like [`check_item`]. Successful admission returns the declaration
+/// index bounding each planned subscription, without changing those frozen
+/// subscriptions.
+///
+/// Pass `declaration: None` only when the provider refused `transform.declare`
+/// with `invalid_params {field: "preset"}`:
+/// - If `preset` is also `None`, the provider has no default. The item is
+///   refused `invalid_params {field: "preset"}` before any subscription is
+///   checked, and planners must leave such an item out.
+/// - With a named preset, malformed or forbidden subscriptions are refused
+///   first; otherwise the item gets one `preset_missing` difference.
+///
+/// Malformed or forbidden subscriptions always win over staleness, as in
+/// [`check_item`].
+pub fn check_item_with_optional_preset(
+    item: usize,
+    provider: &str,
+    preset: Option<&str>,
+    declaration: Option<&Declaration>,
+    planned: &[Subscription],
+    reduction_owner: Option<&str>,
+) -> Result<Vec<usize>, ItemAdmissionRefusal> {
+    if preset.is_none() && declaration.is_none() {
+        return Err(ItemAdmissionRefusal::InvalidPreset);
+    }
     let mut bounds = Vec::new();
     let mut differences = Vec::new();
     for (index, subscription) in planned.iter().enumerate() {
@@ -804,26 +898,33 @@ pub fn check_item(
             });
         match outcome {
             Ok(bound) => bounds.push(bound),
-            Err(problem) => match problem.stale_difference(
-                provider,
-                preset,
-                subscription.hook,
-                subscription.phase,
-            ) {
-                Some(difference) => {
-                    if declaration.is_some() {
-                        differences.push(difference);
-                    }
+            Err(problem) => match problem {
+                SubscriptionProblem::PresetMissing => {}
+                SubscriptionProblem::SubscriptionMissing => {
+                    differences.push(StaleDifference::SubscriptionMissing {
+                        provider: provider.to_owned(),
+                        hook: subscription.hook,
+                        phase: subscription.phase,
+                    });
                 }
-                None => {
-                    return Err(ItemRefusal::InvalidParams(InvalidSubscriptionDetail::new(
-                        item, index, problem,
-                    )))
+                SubscriptionProblem::SubscriptionLoosened(field) => {
+                    differences.push(StaleDifference::SubscriptionLoosened {
+                        provider: provider.to_owned(),
+                        hook: subscription.hook,
+                        phase: subscription.phase,
+                        field,
+                    });
+                }
+                _ => {
+                    return Err(ItemAdmissionRefusal::InvalidSubscription(
+                        InvalidSubscriptionDetail::new(item, index, problem),
+                    ))
                 }
             },
         }
     }
     if declaration.is_none() {
+        let preset = preset.ok_or(ItemAdmissionRefusal::InvalidPreset)?;
         differences.push(StaleDifference::PresetMissing {
             provider: provider.to_owned(),
             preset: preset.to_owned(),
@@ -832,7 +933,7 @@ pub fn check_item(
     if differences.is_empty() {
         Ok(bounds)
     } else {
-        Err(ItemRefusal::PlanStale(differences))
+        Err(ItemAdmissionRefusal::PlanStale(differences))
     }
 }
 
@@ -946,12 +1047,12 @@ mod tests {
     fn admission(
         item: usize,
         provider: &str,
-        preset: &str,
+        preset: Option<&str>,
         declaration: Option<&Declaration>,
         planned: &[Subscription],
         reduction_owner: Option<&str>,
     ) -> Value {
-        match check_item(
+        match check_item_with_optional_preset(
             item,
             provider,
             preset,
@@ -960,14 +1061,7 @@ mod tests {
             reduction_owner,
         ) {
             Ok(bounds) => serde_json::json!({"bounds": bounds}),
-            Err(ItemRefusal::InvalidParams(detail)) => serde_json::json!({
-                "code": runner_codes::INVALID_PARAMS,
-                "detail": detail,
-            }),
-            Err(ItemRefusal::PlanStale(differences)) => serde_json::json!({
-                "code": runner_codes::PLAN_STALE,
-                "detail": {"differences": differences},
-            }),
+            Err(refusal) => refusal.refusal_body(),
         }
     }
 
@@ -989,7 +1083,7 @@ mod tests {
             let outcome = admission(
                 case["item"].as_u64().unwrap_or(0) as usize,
                 case["provider"].as_str().unwrap(),
-                case["preset"].as_str().unwrap(),
+                Some(case["preset"].as_str().unwrap()),
                 declaration,
                 &planned,
                 case["reduction_owner"].as_str(),
@@ -1008,20 +1102,21 @@ mod tests {
         }
     }
 
-    /// These admission cases come from the plan composer's own test cases
-    /// (`fetch-plan-v1`; each case's `source` names the upstream file and
-    /// commit), so both sides must reach the same admission result: the same
-    /// plan and declaration give the same refusal bytes, or admit and freeze
-    /// the plan's subscriptions unchanged.
+    /// These admission cases are copied from the plan composer's own
+    /// `fetch-plan-v1` test cases. That source isn't public, so each case's
+    /// `source` label is informational only. Both sides must reach the same
+    /// admission result: the same plan and declaration give the same refusal
+    /// code and detail, or admit with the plan's subscriptions unchanged.
     #[test]
     fn fetch_plan_admission_vectors_agree() {
         let file = vectors::load("subscriptions.json");
         let cases = vectors::cases(&file, "fetch_plan_v1");
-        assert_eq!(cases.len(), 11);
+        assert_eq!(cases.len(), 14);
         for case in cases {
-            assert!(case["source"].as_str().unwrap().starts_with(
-                "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/"
-            ));
+            assert!(case["source"]
+                .as_str()
+                .unwrap()
+                .starts_with("plan composer test-vectors/fetch-plan-v1/"));
             let name = case["name"].as_str().unwrap();
             let planned: Vec<Subscription> = case["subscriptions"]
                 .as_array()
@@ -1036,7 +1131,7 @@ mod tests {
             let outcome = admission(
                 0,
                 case["provider"].as_str().unwrap(),
-                case["preset"].as_str().unwrap(),
+                case.get("preset").and_then(Value::as_str),
                 declaration.as_ref(),
                 &planned,
                 None,
@@ -1046,10 +1141,95 @@ mod tests {
                 assert!(outcome.get("bounds").is_some(), "{name}: {outcome}");
                 let frozen = &expected["frozen_step_transform_items"][0]["subscriptions"];
                 assert_eq!(frozen, &case["subscriptions"], "{name}");
+                assert_eq!(serde_json::to_value(&planned).unwrap(), *frozen, "{name}");
             } else {
                 assert_eq!(expected["admitted"], false, "{name}");
                 assert_eq!(outcome["code"], expected["code"], "{name}");
                 assert_eq!(outcome["detail"], expected["detail"], "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn named_preset_helpers_have_identical_refusal_bytes() {
+        let file = vectors::load("subscriptions.json");
+        let mut refusals = 0;
+        for case in vectors::cases(&file, "fetch_plan_v1") {
+            let Some(preset) = case.get("preset").and_then(Value::as_str) else {
+                continue;
+            };
+            let provider = case["provider"].as_str().unwrap();
+            let planned: Vec<Subscription> =
+                serde_json::from_value(case["subscriptions"].clone()).unwrap();
+            let declaration: Option<Declaration> =
+                serde_json::from_value(case["declaration"].clone()).unwrap();
+            let old = check_item(0, provider, preset, declaration.as_ref(), &planned, None);
+            let new = check_item_with_optional_preset(
+                0,
+                provider,
+                Some(preset),
+                declaration.as_ref(),
+                &planned,
+                None,
+            );
+            match (old, new) {
+                (Ok(old), Ok(new)) => assert_eq!(old, new),
+                (Err(old), Err(new)) => {
+                    refusals += 1;
+                    assert_eq!(
+                        serde_json::to_vec(&old.refusal_body()).unwrap(),
+                        serde_json::to_vec(&new.refusal_body()).unwrap(),
+                        "{}",
+                        case["name"],
+                    );
+                }
+                outcomes => panic!("{}: {outcomes:?}", case["name"]),
+            }
+        }
+        assert_eq!(refusals, 9);
+    }
+
+    #[test]
+    fn named_preset_without_declaration_still_reports_preset_missing() {
+        let expected = serde_json::json!({
+            "code": "plan_stale",
+            "detail": {"differences": [{
+                "kind": "preset_missing", "provider": "example-provider", "preset": "worker"
+            }]},
+        });
+        let refusal = check_item(0, "example-provider", "worker", None, &[], None).unwrap_err();
+        assert_eq!(refusal.refusal_body(), expected);
+        let refusal =
+            check_item_with_optional_preset(0, "example-provider", Some("worker"), None, &[], None)
+                .unwrap_err();
+        assert_eq!(refusal.refusal_body(), expected);
+    }
+
+    #[test]
+    fn presetless_item_without_default_is_invalid_params() {
+        let file = vectors::load("subscriptions.json");
+        let cases = vectors::cases(&file, "synthetic_admission");
+        assert_eq!(cases.len(), 1);
+        for case in cases {
+            assert!(case["source"].as_str().unwrap().starts_with("synthetic:"));
+            assert!(case.get("preset").is_none());
+            assert!(case["declaration"].is_null());
+            let planned: Vec<Subscription> =
+                serde_json::from_value(case["subscriptions"].clone()).unwrap();
+            let mut malformed = planned.clone();
+            malformed[0].budget_ms = 0;
+            for subscriptions in [planned.as_slice(), &[], malformed.as_slice()] {
+                let refusal = check_item_with_optional_preset(
+                    0,
+                    case["provider"].as_str().unwrap(),
+                    None,
+                    None,
+                    subscriptions,
+                    None,
+                )
+                .unwrap_err();
+                assert_eq!(refusal, ItemAdmissionRefusal::InvalidPreset);
+                assert_eq!(refusal.refusal_body(), case["expected"]);
             }
         }
     }

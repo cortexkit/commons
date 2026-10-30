@@ -782,7 +782,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-step-transform-provider"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",

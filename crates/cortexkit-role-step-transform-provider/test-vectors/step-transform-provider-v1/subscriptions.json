@@ -716,9 +716,9 @@
   "fetch_plan_v1": [
     {
       "name": "admit-pre-tool-declared",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/admit-pre-tool-declared.json with plans/pre-tool-declared.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/admit-pre-tool-declared.json with plans/pre-tool-declared.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_tool",
@@ -744,7 +744,7 @@
         "frozen_step_transform_items": [
           {
             "provider": "magic-context",
-            "preset": "default",
+            "preset": "worker",
             "params": {},
             "subscriptions": [
               {
@@ -761,9 +761,9 @@
     },
     {
       "name": "admit-pre-tool-tightened",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/admit-pre-tool-tightened.json with plans/pre-tool-tightened.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/admit-pre-tool-tightened.json with plans/pre-tool-tightened.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_tool",
@@ -789,7 +789,7 @@
         "frozen_step_transform_items": [
           {
             "provider": "magic-context",
-            "preset": "default",
+            "preset": "worker",
             "params": {},
             "subscriptions": [
               {
@@ -806,9 +806,9 @@
     },
     {
       "name": "refuse-declared-hook-gone",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/refuse-declared-hook-gone.json with plans/pre-tool-declared.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/refuse-declared-hook-gone.json with plans/pre-tool-declared.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_tool",
@@ -839,9 +839,9 @@
     },
     {
       "name": "refuse-declared-preset-gone",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/refuse-declared-preset-gone.json with plans/pre-tool-declared.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/refuse-declared-preset-gone.json with plans/pre-tool-declared.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_tool",
@@ -860,7 +860,7 @@
             {
               "kind": "preset_missing",
               "provider": "magic-context",
-              "preset": "default"
+              "preset": "worker"
             }
           ]
         },
@@ -869,9 +869,9 @@
     },
     {
       "name": "refuse-declared-preset-gone-two-subscriptions",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/refuse-declared-preset-gone-two-subscriptions.json with plans/broca-head.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/refuse-declared-preset-gone-two-subscriptions.json with plans/text-only-and-hook-only.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_user",
@@ -902,7 +902,7 @@
             {
               "kind": "preset_missing",
               "provider": "magic-context",
-              "preset": "default"
+              "preset": "worker"
             }
           ]
         },
@@ -911,9 +911,9 @@
     },
     {
       "name": "refuse-subscription-loosened-budget_ms",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-budget_ms.json with plans/pre-tool-declared.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-budget_ms.json with plans/pre-tool-declared.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_tool",
@@ -953,9 +953,9 @@
     },
     {
       "name": "refuse-subscription-loosened-on_unavailable",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-on_unavailable.json with plans/pre-tool-declared.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-on_unavailable.json with plans/pre-tool-declared.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_tool",
@@ -995,9 +995,9 @@
     },
     {
       "name": "refuse-subscription-loosened-tools",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-tools.json with plans/broca-head.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-tools.json with plans/text-only-and-hook-only.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_user",
@@ -1061,9 +1061,9 @@
     },
     {
       "name": "refuse-subscription-loosened-ops",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-ops.json with plans/broca-head.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-ops.json with plans/text-only-and-hook-only.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_user",
@@ -1127,9 +1127,9 @@
     },
     {
       "name": "refuse-subscription-loosened-validate-phase",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-validate-phase.json with plans/pre-tool-two-phase.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/refuse-subscription-loosened-validate-phase.json with plans/pre-tool-two-phase.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_tool",
@@ -1183,9 +1183,9 @@
     },
     {
       "name": "refuse-pre-tool-append",
-      "source": "prefrontal 3e69ed9d4a048a458db54203bd93a1069598222e test-vectors/fetch-plan-v1/admission/refuse-pre-tool-append.json",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/refuse-pre-tool-append.json",
       "provider": "magic-context",
-      "preset": "default",
+      "preset": "worker",
       "subscriptions": [
         {
           "hook": "pre_tool",
@@ -1218,6 +1218,256 @@
           "problem": "ops_on_pre_tool"
         },
         "writes": "nothing"
+      }
+    },
+    {
+      "name": "admit-pre-tool-two-phase",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/admit-pre-tool-two-phase.json with plans/pre-tool-two-phase.json",
+      "provider": "magic-context",
+      "preset": "worker",
+      "subscriptions": [
+        {
+          "hook": "pre_tool",
+          "phase": "mutate",
+          "ops": [],
+          "on_unavailable": "pass",
+          "budget_ms": 1000
+        },
+        {
+          "hook": "pre_tool",
+          "phase": "validate",
+          "ops": [],
+          "on_unavailable": "pass",
+          "budget_ms": 1000
+        }
+      ],
+      "declaration": {
+        "subscriptions": [
+          {
+            "hook": "pre_tool",
+            "phase": "mutate",
+            "ops": [],
+            "on_unavailable": "pass",
+            "budget_ms": 1000
+          },
+          {
+            "hook": "pre_tool",
+            "phase": "validate",
+            "ops": [],
+            "on_unavailable": "pass",
+            "budget_ms": 1000
+          }
+        ]
+      },
+      "expected": {
+        "admitted": true,
+        "frozen_step_transform_items": [
+          {
+            "provider": "magic-context",
+            "preset": "worker",
+            "params": {},
+            "subscriptions": [
+              {
+                "hook": "pre_tool",
+                "phase": "mutate",
+                "ops": [],
+                "on_unavailable": "pass",
+                "budget_ms": 1000
+              },
+              {
+                "hook": "pre_tool",
+                "phase": "validate",
+                "ops": [],
+                "on_unavailable": "pass",
+                "budget_ms": 1000
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "admit-text-only-and-hook-only",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/admit-text-only-and-hook-only.json with plans/text-only-and-hook-only.json",
+      "provider": "magic-context",
+      "preset": "worker",
+      "subscriptions": [
+        {
+          "hook": "pre_user",
+          "ops": [
+            "append"
+          ],
+          "on_unavailable": "refuse",
+          "budget_ms": 1000
+        },
+        {
+          "hook": "post_tool",
+          "tools": [
+            "read"
+          ],
+          "ops": [
+            "append"
+          ],
+          "on_unavailable": "refuse",
+          "budget_ms": 1000
+        }
+      ],
+      "declaration": {
+        "subscriptions": [
+          {
+            "hook": "pre_user",
+            "ops": [
+              "append"
+            ],
+            "on_unavailable": "refuse",
+            "budget_ms": 1000
+          },
+          {
+            "hook": "post_tool",
+            "tools": [
+              "read"
+            ],
+            "ops": [
+              "append"
+            ],
+            "on_unavailable": "refuse",
+            "budget_ms": 1000
+          }
+        ]
+      },
+      "expected": {
+        "admitted": true,
+        "frozen_step_transform_items": [
+          {
+            "provider": "magic-context",
+            "preset": "worker",
+            "params": {},
+            "subscriptions": [
+              {
+                "hook": "pre_user",
+                "ops": [
+                  "append"
+                ],
+                "on_unavailable": "refuse",
+                "budget_ms": 1000
+              },
+              {
+                "hook": "post_tool",
+                "tools": [
+                  "read"
+                ],
+                "ops": [
+                  "append"
+                ],
+                "on_unavailable": "refuse",
+                "budget_ms": 1000
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "admit-presetless-items",
+      "source": "plan composer test-vectors/fetch-plan-v1/admission/admit-presetless-items.json with plans/presetless-items.json",
+      "provider": "example-provider",
+      "subscriptions": [
+        {
+          "hook": "pre_user",
+          "ops": [
+            "append"
+          ],
+          "on_unavailable": "refuse",
+          "budget_ms": 1000
+        },
+        {
+          "hook": "post_tool",
+          "tools": [
+            "read"
+          ],
+          "ops": [
+            "append"
+          ],
+          "on_unavailable": "refuse",
+          "budget_ms": 1000
+        }
+      ],
+      "declaration": {
+        "subscriptions": [
+          {
+            "hook": "pre_user",
+            "ops": [
+              "append"
+            ],
+            "on_unavailable": "refuse",
+            "budget_ms": 1000
+          },
+          {
+            "hook": "post_tool",
+            "tools": [
+              "read"
+            ],
+            "ops": [
+              "append"
+            ],
+            "on_unavailable": "refuse",
+            "budget_ms": 1000
+          }
+        ]
+      },
+      "expected": {
+        "admitted": true,
+        "frozen_step_transform_items": [
+          {
+            "provider": "example-provider",
+            "params": {},
+            "subscriptions": [
+              {
+                "hook": "pre_user",
+                "ops": [
+                  "append"
+                ],
+                "on_unavailable": "refuse",
+                "budget_ms": 1000
+              },
+              {
+                "hook": "post_tool",
+                "tools": [
+                  "read"
+                ],
+                "ops": [
+                  "append"
+                ],
+                "on_unavailable": "refuse",
+                "budget_ms": 1000
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "synthetic_admission": [
+    {
+      "name": "presetless item for a provider without a default",
+      "source": "synthetic: a planner must omit a presetless item when the provider has no default",
+      "provider": "example-provider",
+      "subscriptions": [
+        {
+          "hook": "pre_user",
+          "ops": [
+            "append"
+          ],
+          "on_unavailable": "refuse",
+          "budget_ms": 1000
+        }
+      ],
+      "declaration": null,
+      "expected": {
+        "code": "invalid_params",
+        "detail": {
+          "field": "preset"
+        }
       }
     }
   ]

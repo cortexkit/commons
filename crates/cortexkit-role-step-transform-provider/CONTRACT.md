@@ -179,6 +179,9 @@ the session and freezes that plan for use.
     knows the item's preset, and refused `transform.declare` with
     `invalid_params {field: "preset"}`. This difference occurs once per item,
     regardless of its subscription count.
+    This is a difference only for a named preset. A presetless item for a
+    provider without a default is not stale: it is refused
+    `invalid_params {field: "preset"}`, and planners must leave such an item out.
   Subscription-scoped differences always carry `phase`, set to `null` for
   hooks without phases. All `plan_stale` differences are internally tagged
   with `kind`; fetched-item kinds are `composition_digest`, `tools`,
@@ -574,7 +577,7 @@ change to ordinary runner admission or observation.
   same frozen params are passed on declaration, Setup and hooks.
 - [pinned] Only an admitted caller in this section may use an empty runner-group set
   without `transcript_reads` or a `compaction.ready` service (removed in compaction-provider 0.3.0). This grants no
-  runner-only operation, runner/Broca transcript read or other session.
+  runner-only operation, runner transcript read or other session.
   A cross-session request refuses `invalid_params`, naming `session` (or
   `project_root` for a project mismatch). Ordinary runners still undergo full
   runner admission, including their required groups and ready service; a
@@ -704,11 +707,11 @@ change to ordinary runner admission or observation.
 
 - [pinned] The new fields default to absent and are omitted when absent, not
   encoded as `null`. Older decoders ignore them; that is not semantic host
-  admission. Existing strict discriminants stay strict. `owned-broca` and
-  absent host opt-ins retain declaration, tag/cadence, subject identity,
+  admission. Existing strict discriminants stay strict. The runner-owned
+  serializer profile (wire value `owned-broca`) and absent host opt-ins retain declaration, tag/cadence, subject identity,
   historian scheduling, observation and answer bytes even with valid extra
   fields; no host promotion, burning or barrier runs there. Pi and OMP keep
-  their existing paths. Rust mode does not require Broca to run.
+  their existing paths. None of this requires a particular runner to be running.
 - [pinned] The request fence, version high-water, structural checks,
   Setup-once rule (including on descent), frozen budgets and
   `on_unavailable` are unchanged. These fields add no operation or answer
