@@ -573,6 +573,12 @@ pub const CASES: &[CaseSpec] = &[
         "Setup [0,0) insertions precede message zero and travel with it over count/byte caps, are not repeated on the next page, and the held model request carries that canonical view"),
     case("compaction_unavailable_distinct_from_refuse", &[Compaction, Queue, TranscriptReads, RunOps],
         "Setup unavailability and a Setup REFUSE end error distinctly, send nothing to the model and leave the session usable"),
+    case("view_due_first_model_uses_view", &[Compaction, Queue, TranscriptReads, RunOps],
+        "an opted-in runner's first model request equals Setup's due view rendering, never initial"),
+    case("view_due_refused_fetch_blocks_model", &[Compaction, Queue, TranscriptReads, RunOps],
+        "a refused due-view fetch makes no model call and ends compaction_unavailable with reason view_due_unapplied"),
+    case("view_due_later_step_retries", &[Compaction, Queue, TranscriptReads, RunOps],
+        "after a refused fetch a later step retries and applies the same due view without repeating Setup"),
     case(
         "role_describe_shape",
         &[],

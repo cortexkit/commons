@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.10
+
+- Let a runner offer `view_due_max_ms` at Setup and a provider answer with
+  `view_due`, naming an already-published view instead of putting its full
+  rendering in Setup. Check the version, digest and runner opt-in.
+- Require the due view to apply before any model call, with no fallback to
+  `initial`. Keep it durable across failed runs and runner restarts, retry
+  later steps, and report `view_due_unapplied` when it cannot apply in time.
+- Require Setup to fit the 4 MiB module-to-caller frame budget. Without
+  due-view support an oversized answer is refused as `misconfigured`.
+- Add round-trip and omission vectors, plus tests for invalid or unrequested
+  due views.
+
 ## 0.7.9
 
 - Add the optional `history_edit_cost` notice header for suffix-only or

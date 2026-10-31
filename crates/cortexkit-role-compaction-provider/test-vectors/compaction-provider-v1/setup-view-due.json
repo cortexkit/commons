@@ -1,0 +1,15 @@
+{
+  "about": "Setup may name an already-published view only when the runner holds its first model step for that view. Absent fields preserve existing Setup bytes.",
+  "cases": [
+    {
+      "name": "without_due_view",
+      "request": {"session":"s","harness":"test","request_id":"setup","params":{},"composition":{},"model":"m","now":1},
+      "answer": {"answer":"ready","request_id":"setup","initial":{"compaction_id":"c","version":0,"range":{"from":0,"to":0},"replacement":[]}}
+    },
+    {
+      "name": "with_due_view",
+      "request": {"session":"s","harness":"test","request_id":"setup","params":{},"composition":{},"model":"m","now":1,"view_due_max_ms":1000},
+      "answer": {"answer":"ready","request_id":"setup","initial":{"compaction_id":"c","version":0,"range":{"from":0,"to":0},"replacement":[]},"view_due":{"version":1,"digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+    }
+  ]
+}

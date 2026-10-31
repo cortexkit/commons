@@ -124,11 +124,12 @@ mod system_text_default;
 mod tags;
 mod tool_calls;
 mod user_commands;
+mod view_due;
 
 pub use compaction::{
     CompactionCall, CompactionMessage, CompactionObservation, CompactionRouteIdentity,
     CompactionSetup, CompactionSetupIdentity, ProviderCall, ScriptedPartEdit, ScriptedRange,
-    ScriptedRide, ScriptedView,
+    ScriptedRide, ScriptedView, SetupViewDueFixture,
 };
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_llm_runner as wire;

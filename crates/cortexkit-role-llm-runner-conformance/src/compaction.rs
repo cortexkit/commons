@@ -219,6 +219,49 @@ pub struct ProviderCall {
     pub params: Value,
 }
 
+/// Independent expectations for a due view prepared at a fresh lineage's
+/// Setup. The adapter builds these from the scripted provider's view, never
+/// from a runner model request or `session.read`'s model projection.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct SetupViewDueFixture {
+    pub session_ref: String,
+    pub version: u64,
+    pub digest: String,
+    /// Last ordinal covered by the prepared view's seeded transcript prefix.
+    pub covers_through: u64,
+    /// The prepared view's rendering, before later user messages are appended.
+    pub rendering: Vec<ModelEntry>,
+    /// Model-only decorations enabled by the fixture's actual plan, such as
+    /// `render_tags`. These cases require none so raw appended messages are
+    /// independent expectations for their model rendering.
+    pub model_only_decorations: Vec<String>,
+}
+
+impl SetupViewDueFixture {
+    pub fn new(
+        session_ref: impl Into<String>,
+        version: u64,
+        digest: impl Into<String>,
+        covers_through: u64,
+        rendering: Vec<ModelEntry>,
+    ) -> Self {
+        Self {
+            session_ref: session_ref.into(),
+            version,
+            digest: digest.into(),
+            covers_through,
+            rendering,
+            model_only_decorations: Vec::new(),
+        }
+    }
+
+    pub fn with_model_only_decorations(mut self, decorations: Vec<String>) -> Self {
+        self.model_only_decorations = decorations;
+        self
+    }
+}
+
 impl ProviderCall {
     pub fn new(method: impl Into<String>, params: Value) -> Self {
         Self {

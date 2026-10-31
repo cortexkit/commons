@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.36
+
+- Pin compaction-provider `=0.7.10`. Add three opt-in Setup due-view cases:
+  render the due view rather than `initial`, stop before the model after a
+  refused fetch with `view_due_unapplied`, and retry and apply at a later step.
+- Add a scripted due-view fixture and fetch control. Runners without the
+  request opt-in, adapters missing the required hooks, and fixture plans with
+  model-only decorations such as rendered tags are not applicable by name;
+  missing coverage does not change their verdict.
+- Check that deliberately faulty runners rendering `initial`, calling the
+  model after a refused fetch, or dropping a due view fail the named cases.
+
 ## 0.15.35
 
 - Pin runner `=0.7.31`. No case changes.

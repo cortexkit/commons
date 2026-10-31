@@ -1509,6 +1509,47 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new("scripted compaction is not implemented"))
     }
 
+    /// Prepare a fresh lineage with a nonempty retained transcript prefix,
+    /// before its first model step. Answer its Setup with well-formed `initial`
+    /// and `view_due` naming a durably published view whose rendering contains
+    /// only `replacement` (translated to the runner's schema) for that prefix.
+    /// Compute the view's own digest and serve it at `view.get`, without
+    /// publishing `view_ready`. When `refuse_fetch` is true, refuse that fetch
+    /// instead. Preserve this provider state across later sends and restarts;
+    /// do not clear or replace the runner's due-view record from the adapter.
+    /// Return expectations built from the scripted view, not the runner output.
+    /// Disable `render_tags` and every other model-only decoration in the
+    /// fixture plan: appended user messages must render as raw reads serve
+    /// them. Report any enabled decorations from the actual fixture plan in
+    /// `SetupViewDueFixture::model_only_decorations`; those fixtures are
+    /// inapplicable by name, not failures.
+    /// The session already has a held scripted model and installed provider,
+    /// but has not received a send. Unsupported adapters are inapplicable by name.
+    async fn install_setup_view_due_fixture(
+        &self,
+        _session: &str,
+        _initial: crate::CompactionMessage,
+        _replacement: Vec<String>,
+        _refuse_fetch: bool,
+    ) -> Result<crate::SetupViewDueFixture, HarnessError> {
+        Err(HarnessError::new(
+            "Setup due-view fixture is not implemented",
+        ))
+    }
+
+    /// Change only whether the scripted provider refuses `view.get` for the
+    /// prepared due version. Do not send `view_ready`, repeat Setup, or change
+    /// the runner's stored due view. Used to verify a later step retries it.
+    async fn set_setup_view_due_fetch_refused(
+        &self,
+        _session: &str,
+        _refused: bool,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "Setup due-view fetch control is not implemented",
+        ))
+    }
+
     /// Return Setup calls observed at the scripted provider and canonical
     /// inputs captured at the scripted model. For each Setup call, capture
     /// `harness` and `session` from the body and the actual `harness`,

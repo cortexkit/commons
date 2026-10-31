@@ -430,8 +430,29 @@ vocabulary section and identifies the governing contract sections.
    the adapter) and returns its version; `compaction_observation` also
    returns every advance notice the runner published, as the header set the
    bus carried (`CompactionObservation::notices`). Without the view hook the
-   cut cases are inapplicable by name. Rides, the ceiling and native markers
-   still have no live case.
+    cut cases are inapplicable by name. The ceiling and native markers still
+    have no live case.
+    The `view_due_*` cases inspect raw Setup requests through
+    `compaction_provider_calls`. A runner sending no `view_due_max_ms` gets
+    all three cases as not applicable by name, without changing its verdict.
+    For an opted-in runner, implement
+    `install_setup_view_due_fixture(session, initial, replacement, refuse_fetch)`:
+    prepare a fresh lineage with a nonempty retained prefix before its first
+    model step, publish a view replacing that prefix with `replacement`, and
+    answer Setup with its version and digest as `view_due`. Never announce
+    `view_ready`. Return `SetupViewDueFixture` with the version, digest,
+    covered ordinal and rendering computed from the scripted view, never
+    from runner output. Keep `initial` well formed but distinct from that
+    rendering. Disable `render_tags` and all other model-only decorations in
+    the fixture plan so appended user messages render as raw reads serve them.
+    Report any enabled names from the actual fixture plan in
+    `SetupViewDueFixture::model_only_decorations`; the kit marks a decorated
+    fixture not applicable by name, rather than comparing decorated model
+    text with undecorated raw text. Capture `view.get` calls and actual model inputs independently.
+    `set_setup_view_due_fetch_refused(session, refused)` changes only whether
+    that version's fetch is refused; it must not repeat Setup, announce a
+    view, or edit runner state. Missing hooks are not applicable by name with
+    the missing hook named, including for an opted-in runner.
 - For `host_history`, nothing beyond the route, plus three optional hooks:
   `revert_session(handle, session, mid)` reverts a session as its host does;
   `seed_host_history(handle, session, count)` gives a session `count`
@@ -516,6 +537,7 @@ is unchanged and prints nothing.
 | `session_ref_uses_runner_identity` | `compaction`, `queue`; required `runner_id` declaration and bus-captured advance notices |
 | `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops` |
 | `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops` |
+| `view_due_first_model_uses_view`, `view_due_refused_fetch_blocks_model`, `view_due_later_step_retries` | `compaction`, `queue`, `transcript_reads`, `run_ops`; raw provider-call capture and the due-view fixture/fetch hooks. The fixture plan disables `render_tags` and every other model-only decoration; any enabled decorations make the case not applicable by name. No `view_due_max_ms`, or a missing adapter hook, is also not applicable by name. |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
 | `describe_states_max_bytes` | `transcript_reads` |
 | `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; inapplicable without the describe group or `head_sender_identities` |

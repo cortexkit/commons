@@ -696,6 +696,15 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    // Legacy adapters without raw provider-call capture name the due-view
+    // coverage gap instead of claiming those optional checks passed.
+    if case.starts_with("view_due_") && report.outcome(case) == Some(&CaseOutcome::Inapplicable {
+        reason:
+            "adapter lacks Setup request observation: compaction provider calls are not implemented"
+                .into(),
+    }) {
+        return;
+    }
     // Undeclared opt-in groups add named non-obligations, not passing coverage.
     if (case.starts_with("run_cancel_by_interrupt_")
         && report.outcome(case)

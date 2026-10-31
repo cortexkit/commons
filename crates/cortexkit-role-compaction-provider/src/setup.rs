@@ -6,9 +6,11 @@
 //! incoming route supplies its bare module id, which together with Setup's
 //! `harness` and `session` keys provider state and later reverse calls. `project_root` is route metadata only.
 //!
-//! Setup returns the initial CompactionMessage, which the runner renders
-//! until it applies the session's first view (a provider with no head
-//! returns an empty replacement), and optionally the ceiling policy. The
+//! Setup returns the initial CompactionMessage and, optionally, the ceiling
+//! policy. The runner renders `initial` until it applies the session's first
+//! view. While Setup's `view_due` is pending it never renders `initial`, and
+//! applies that published view first. A provider with no head returns an
+//! empty replacement. The
 //! runner records the answer before the lineage's first model call, and
 //! Setup does not run again within the lineage while the runner holds that
 //! record; a runner that no longer
@@ -97,6 +99,11 @@ pub struct SetupRequest {
     /// Omitted when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ride_wait_max_ms: Option<u64>,
+    /// The longest the runner holds each model step for a pending due view,
+    /// in milliseconds from that step's start; at least 1. Absent means
+    /// the provider must not send `view_due`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_due_max_ms: Option<u64>,
     /// The session's prune state, exactly as `llm-runner/v1`'s
     /// `session.head` reports it, on every Setup a runner declaring
     /// `archive_prunes_reasoning` calls for a session it has pruned. Absent
@@ -133,6 +140,7 @@ impl SetupRequest {
             now,
             view_apply: Vec::new(),
             ride_wait_max_ms: None,
+            view_due_max_ms: None,
             reasoning_pruned: None,
         }
     }
@@ -184,6 +192,16 @@ impl SetupRequest {
         self
     }
 
+    /// Declare the longest the runner holds a step for Setup's due view.
+    pub fn with_view_due_max_ms(mut self, cap: u64) -> Self {
+        self.view_due_max_ms = Some(cap);
+        self
+    }
+
+    pub fn view_due_max_ms(&self) -> Option<u64> {
+        self.view_due_max_ms
+    }
+
     /// Carry the session's prune state, as `session.head` reports it.
     pub fn with_reasoning_pruned(mut self, state: ReasoningPruned) -> Self {
         self.reasoning_pruned = Some(state);
@@ -203,6 +221,34 @@ pub const RIDE_WAIT_MS: &str = "ride_wait_ms";
 /// because a lineage that descends from another continues that lineage's
 /// numbering and never takes a checkpoint.
 pub const CHECKPOINT_ON_DESCENT: &str = "checkpoint_on_descent";
+
+/// The reason recorded when a pending due view does not apply: its fetch is
+/// refused, its disposal is anything but `applied`, or the wait expires. The
+/// run then ends `error` with `compaction_unavailable` and no model call.
+pub const VIEW_DUE_UNAPPLIED: &str = "view_due_unapplied";
+
+/// The Setup member named when a due view is invalid or was not requested.
+pub const VIEW_DUE: &str = "view_due";
+
+/// An already-published view that must be applied before any model call in
+/// the lineage. Its digest is the view's own CONTRACT.md §6 digest.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ViewDue {
+    /// A published version, at least 1, served by `view.get`.
+    pub version: u64,
+    /// Lowercase hexadecimal SHA-256 of the view.
+    pub digest: String,
+}
+
+impl ViewDue {
+    pub fn new(version: u64, digest: impl Into<String>) -> Self {
+        Self {
+            version,
+            digest: digest.into(),
+        }
+    }
+}
 
 /// The `compaction.setup` answer. Strict on `answer`: a runner treats an
 /// answer it cannot decode as a failed Setup.
@@ -227,7 +273,8 @@ pub enum SetupAnswer {
         /// start of the lineage, `{from: f, to: f}` with `f` the lineage's
         /// first ordinal: the head goes before every message of the lineage,
         /// and on a lineage a cut started it carries what the cut folded. The runner renders it until it applies the
-        /// session's first view.
+        /// session's first view, unless `view_due` is present: then it never
+        /// renders `initial` while that view is due.
         initial: CompactionMessage,
         /// When the runner pauses for a view and, failing one, refuses the
         /// run (CONTRACT.md §8). Absent, the runner never pauses for the
@@ -253,6 +300,10 @@ pub enum SetupAnswer {
         /// `ceiling` (§12). Omitted when absent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ride_wait_ms: Option<u64>,
+        /// An already-published view to apply before the first model call.
+        /// Sent only when the request carried `view_due_max_ms`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        view_due: Option<ViewDue>,
         /// Read transformations the provider accepts for this enrollment.
         /// Empty means no opt-in; unknown names grant no known permission.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -300,6 +351,7 @@ impl SetupAnswer {
             checkpoint: None,
             cache_ttl: None,
             ride_wait_ms: None,
+            view_due: None,
             accepts: Vec::new(),
         }
     }
@@ -352,6 +404,21 @@ impl SetupAnswer {
             *ride_wait_ms = Some(wait);
         }
         self
+    }
+
+    /// Set the due view on a ready answer. A refusal is unchanged.
+    pub fn with_view_due(mut self, due: ViewDue) -> Self {
+        if let Self::Ready { view_due, .. } = &mut self {
+            *view_due = Some(due);
+        }
+        self
+    }
+
+    pub fn view_due(&self) -> Option<&ViewDue> {
+        match self {
+            Self::Ready { view_due, .. } => view_due.as_ref(),
+            Self::Refuse { .. } => None,
+        }
     }
 
     /// A `refuse` answer with the provider's own `provider_code` set. A
@@ -445,7 +512,9 @@ impl SetupAnswer {
     /// `descends_from`, and [`RIDE_WAIT_MS`] for a `ride_wait_ms` that is 0,
     /// above the request's `ride_wait_max_ms`, or present though the
     /// request carried no `ride_wait_max_ms`. A runner never clamps the
-    /// wait. A `refuse` passes, as it ends the run on its own.
+    /// wait. [`VIEW_DUE`] names a due view without a positive request cap,
+    /// with version 0, or without a lowercase hexadecimal SHA-256 digest.
+    /// A `refuse` passes, as it ends the run on its own.
     pub fn check_for(&self, request: &SetupRequest) -> Result<(), &'static str> {
         if request.descends_from.is_some() && self.checkpoint().is_some() {
             return Err(CHECKPOINT_ON_DESCENT);
@@ -458,6 +527,14 @@ impl SetupAnswer {
                 || request.ride_wait_max_ms.is_none_or(|cap| wait > cap)
             {
                 return Err(RIDE_WAIT_MS);
+            }
+        }
+        if let Some(due) = self.view_due() {
+            if request.view_due_max_ms.is_none_or(|cap| cap == 0)
+                || due.version == 0
+                || !crate::digest::is_sha256_hex(&due.digest)
+            {
+                return Err(VIEW_DUE);
             }
         }
         Ok(())
@@ -497,6 +574,82 @@ mod tests {
     }
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn setup_view_due_round_trip_and_absence_preserve_wire_bytes() {
+        let file = vectors::load("setup-view-due.json");
+        for case in vectors::cases(&file, "cases") {
+            let name = case["name"].as_str().unwrap();
+            let request: SetupRequest = vectors::round_trip(name, &case["request"]);
+            let answer: SetupAnswer = vectors::round_trip(name, &case["answer"]);
+            assert_eq!(answer.check_for(&request), Ok(()), "{name}");
+            if let Some(due) = answer.view_due() {
+                assert_eq!(request.view_due_max_ms(), Some(1000));
+                assert_eq!(due, &ViewDue::new(1, "a".repeat(64)));
+                assert_eq!(
+                    SetupAnswer::ready(answer.request_id(), answer.initial().unwrap().clone())
+                        .with_view_due(due.clone()),
+                    answer
+                );
+            } else {
+                let request = SetupRequest::new("s", "test", "setup", Map::new(), "m", 1);
+                assert_eq!(
+                    serde_json::to_string(&request).unwrap(),
+                    r#"{"session":"s","harness":"test","request_id":"setup","params":{},"composition":{},"model":"m","now":1}"#
+                );
+                assert_eq!(
+                    serde_json::to_string(&answer).unwrap(),
+                    r#"{"answer":"ready","request_id":"setup","initial":{"compaction_id":"c","version":0,"range":{"from":0,"to":0},"replacement":[]}}"#
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_or_unrequested_view_due_fails_setup_by_name() {
+        let request = SetupRequest::new("s", "test", "setup", Map::new(), "m", 1);
+        let initial = CompactionMessage::new("c", 0, crate::message::Range::new(0, 0), vec![]);
+        let answer = SetupAnswer::ready("setup", initial);
+        let valid = ViewDue::new(1, "a".repeat(64));
+        assert_eq!(
+            answer
+                .clone()
+                .with_view_due(valid.clone())
+                .check_for(&request),
+            Err(VIEW_DUE)
+        );
+        let zero_cap = request.clone().with_view_due_max_ms(0);
+        assert_eq!(
+            answer
+                .clone()
+                .with_view_due(valid.clone())
+                .check_for(&zero_cap),
+            Err(VIEW_DUE)
+        );
+        let request = request.with_view_due_max_ms(1);
+        assert_eq!(
+            answer.clone().with_view_due(valid).check_for(&request),
+            Ok(())
+        );
+        for due in [
+            ViewDue::new(0, "a".repeat(64)),
+            ViewDue::new(1, ""),
+            ViewDue::new(1, "a".repeat(63)),
+            ViewDue::new(1, "a".repeat(65)),
+            ViewDue::new(1, "A".repeat(64)),
+            ViewDue::new(1, "g".repeat(64)),
+            ViewDue::new(1, "é".repeat(32)),
+        ] {
+            assert_eq!(
+                answer.clone().with_view_due(due).check_for(&request),
+                Err(VIEW_DUE)
+            );
+        }
+        let refused = SetupAnswer::refuse("setup", RefuseCode::Misconfigured, "unavailable");
+        assert_eq!(refused.clone().with_view_due(ViewDue::new(0, "")), refused);
+        assert!(refused.view_due().is_none());
+        assert_eq!(refused.check_for(&request), Ok(()));
+    }
 
     /// The constructors, setters and accessors are the only way to build or
     /// read an answer outside this crate, so each vector answer must come

@@ -219,7 +219,7 @@ the session and freezes that plan for use.
 - [pinned] The request (`SetupRequest`) is `{session, harness, request_id,
   preset?, params, composition, model, variant?, context_window?,
   output_limit?, newest?, lineage_id?, descends_from?, now, view_apply?,
-  ride_wait_max_ms?, reasoning_pruned?}`.
+  ride_wait_max_ms?, view_due_max_ms?, reasoning_pruned?}`.
   `model` is a string; `variant`, `context_window` and `output_limit` are
   sibling fields, not a nested model object. `params` defaults to `{}`; an
   absent `preset` selects the provider's default. `composition` is an opaque
@@ -239,6 +239,12 @@ the session and freezes that plan for use.
   the runner does not honour a
   provider-set ride wait. It declares runner support in the request, as
   `view_apply` does; a provider that predates the member ignores it (§14).
+- [pinned] Optional `view_due_max_ms` (`u64`, at least 1, added in 0.7.10,
+  `SetupRequest::with_view_due_max_ms`, `SetupRequest::view_due_max_ms`) is
+  sent only when the runner will hold each model step for a due view while
+  one is pending, for at most that many milliseconds from that step's start.
+  It is omitted when absent; absence means the provider must not send
+  `view_due`.
 - [pinned] Optional `reasoning_pruned: {generation, through_ordinal, at_ms}`
   (`setup::ReasoningPruned`, `llm-runner/v1`'s
   `archive_prunes_reasoning::ReasoningPruned`; added in 0.7.3,
@@ -321,7 +327,7 @@ the session and freezes that plan for use.
   is not a declaration of support. Later forks within the session are
   announced on advance notices instead (§5).
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
-  initial, ceiling?, checkpoint?, cache_ttl?, ride_wait_ms?, accepts?}` or `{answer: "refuse", request_id, code,
+  initial, ceiling?, checkpoint?, cache_ttl?, ride_wait_ms?, view_due?, accepts?}` or `{answer: "refuse", request_id, code,
   reason, provider_code?}` (§10).
   - `initial` is a CompactionMessage (`message::CompactionMessage`,
     `{compaction_id, version, range: {from, to}, replacement}`): the
@@ -335,7 +341,33 @@ the session and freezes that plan for use.
     replacement. Only `from > to` is malformed (`range_inverted`); a runner
     treats an answer whose `initial` is malformed as a failed Setup.
   - The runner renders `initial` until it applies the session's first view
-    (§7). A view replaces it entirely and is never a delta over it.
+    (§7), except while a view is due: then it never renders `initial`.
+    A view replaces it entirely and is never a delta over it.
+  - `view_due: {version, digest}` (`setup::ViewDue`, added in 0.7.10,
+    `SetupAnswer::with_view_due`, `SetupAnswer::view_due`) names a version
+    the provider has already published and that `view.get` serves. `version`
+    is a `u64` at least 1; `digest` is that view's own §6 digest, 64 lowercase
+    hexadecimal SHA-256 characters. The member is omitted when absent and
+    sent only when the request carried `view_due_max_ms`. An unrequested
+    due view, version 0, or malformed digest fails Setup, with no model call,
+    naming `view_due` (`setup::VIEW_DUE`, `SetupAnswer::check_for`), just as
+    an invalid `ride_wait_ms` does. A zero request cap cannot authorize it.
+    At the start of each step while the view is due, before any model
+    request, the runner fetches it and disposes it under §7, filling
+    `view.get`'s existing `view_version` from `view_due.version`; only
+    `applied` clears it. Each attempt is bounded by `view_due_max_ms` from
+    that step's start. If it does not apply, the run ends `error` with
+    `compaction_unavailable`, reason `view_due_unapplied`
+    (`setup::VIEW_DUE_UNAPPLIED`), without a model call. The due view stays
+    recorded durably for the lineage across runner restarts, so every later
+    step retries until it applies.
+  - A Setup answer must fit one daemon frame: the module-to-caller budget
+    is 4 MiB for the whole encoded frame, its 21-byte header included. If the answer would exceed it and the request carried no
+    `view_due_max_ms`, the provider refuses Setup with `misconfigured`
+    rather than sending the oversized answer. With due-view support it can
+    name a published view instead of carrying its rendering inline.
+    `initial` must still be well formed; a head-only `initial` is fine even
+    though the runner never renders it while a view is due.
   - `ceiling` (`ceiling::CeilingPolicy`) says when the runner pauses for a
     view and, failing one, refuses the run (§8). It is omitted when absent.
   - `ride_wait_ms` (`u64`, added in 0.5.1, `SetupAnswer::with_ride_wait_ms`,
@@ -848,6 +880,18 @@ provider.
 
 ## 7. Applying a view: the runner's side
 
+- [pinned] While Setup's `view_due` is pending, the runner never renders
+  `initial`. At the start of each step while the view is due, before any
+  model request, it fetches `view.get {session_ref, view_version}`, filling `view_version` from
+  Setup's `view_due.version` and using that version and
+  `view_due.digest` as the announcement for the disposal order below.
+  Only `applied` clears the due view. Any other disposal (including a
+  refused fetch or a deferral), or failure to apply within `view_due_max_ms`
+  of that step's start, makes no model call and ends the run `error` with
+  `compaction_unavailable`, reason `view_due_unapplied`. The due view is
+  durable lineage state, retained across runner restarts and retried at
+  every later step until applied. A later `view_ready` whose version is at
+  or below the due version is stale and cannot replace or clear it.
 - [pinned] On a `view_ready` whose version is above the view it renders,
   the runner fetches that view with `view.get` and decides in a fixed order
   (`view::dispose_fetched`):
@@ -1200,7 +1244,7 @@ provider.
 |---|---|---|
 | `window_too_small` | the model's window cannot hold the smallest view the provider can build | no |
 | `provider_busy` | the provider is busy with the session's history and cannot answer Setup now | yes |
-| `misconfigured` | the configuration for this preset and params cannot be used | no |
+| `misconfigured` | the configuration for this preset and params cannot be used, or Setup cannot fit the 4 MiB module-to-caller frame budget without due-view support (§4) | no |
 | `history_unreadable` | required history is missing, such as a declared inherited prefix the provider does not hold | yes |
 | `standalone_session_not_migrated` | the session has standalone Magic Context state and no completed move to the provider; a runner that has never served it, on a host running standalone in-process, hands it to standalone and sends no rides; any other runner fails the run by name (§4) | no |
 | `tag_checkpoint_unsupported` | the session was moved from standalone Magic Context and the runner does not declare `llm-runner/v1`'s `tag_checkpoint` group (§4) | no |
