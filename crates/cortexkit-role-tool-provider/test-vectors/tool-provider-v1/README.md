@@ -55,3 +55,7 @@ lists (up to 16 names of up to 32 bytes) and lists `check_presets` refuses: a
 bad name, a duplicate, 17 entries, and a list in the answer to a request that
 named a preset. The conformance runner's `catalog_listed_presets_served`
 requests every listed preset from a live provider.
+
+`views.json` pins the optional `tool.views` request, an immutable view and an
+unknown pin, plus malformed requests and replies. Record field kinds are owned
+by `tool-display/v1`; that package carries an identical copy of this vector.

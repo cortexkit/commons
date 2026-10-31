@@ -30,6 +30,7 @@ pub mod scope;
 pub mod user_command;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
+pub mod views;
 pub mod withdraw;
 
 /// The daemon's bind-mode vocabulary and the manifest capability promising
@@ -48,6 +49,9 @@ pub const PROVIDES: &str = "tool-provider/v1";
 /// The optional `role.describe` capability for selecting catalog tools by
 /// their capability tags.
 pub const CATALOG_CAPABILITY_FILTER: &str = "tool-catalog-capability-filter/v1";
+
+/// Optional capability promising the `tool.views` operation.
+pub const TOOL_VIEWS_CAPABILITY: &str = "tool-views/v1";
 
 /// The manifest capability promising default text for a `system_text` item
 /// without a preset. Consumers discover it through the daemon's catalog.
@@ -109,6 +113,8 @@ pub mod ops {
     pub const ROLE_DESCRIBE: &str = "role.describe";
     /// The catalog-and-text fetch. Required.
     pub const TOOL_CATALOG: &str = "tool.catalog";
+    /// Fetch immutable display views by schema pin; requires `tool-views/v1`.
+    pub const TOOL_VIEWS: &str = "tool.views";
     /// Invoke a frozen command on behalf of the person driving a session.
     pub const USER_COMMAND_INVOKE: &str = "user_command.invoke";
     /// Withdraw a call the provider holds. Required of a provider that can

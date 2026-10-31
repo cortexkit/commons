@@ -41,7 +41,7 @@ to them. Nothing here names a particular implementation.
   tool list. It depends only on the module build, so a consumer may cache it
   for as long as it talks to the same module incarnation; two answers from one
   incarnation are identical.
-- `tool-provider/v1` defines exactly one optional module-level capability:
+- The optional module-level catalog-filter capability is
   `tool-catalog-capability-filter/v1` (`CATALOG_CAPABILITY_FILTER`). A consumer
   sends `params.capabilities` only after `role.describe` advertises this token.
   An advertising provider also returns `tool_capabilities`: the nonempty union
@@ -54,6 +54,46 @@ to them. Nothing here names a particular implementation.
   intersects it with the tags it wants using
   `describe::select_tool_capabilities`, then builds canonical `params` with
   `catalog::params_for_capabilities`.
+
+### 2.1 Optional display views
+
+A provider declares `tool-views/v1` (`TOOL_VIEWS_CAPABILITY`) when it serves
+`tool.views` (`ops::TOOL_VIEWS`), and lists that operation in `role.describe`.
+It declares the capability in its manifest's `capabilities.provides` and its
+`role.describe.capabilities`. This is opt-in: the required ops and existing
+catalog and describe wire shapes are unchanged.
+
+`tool.views` takes `{pins: [pin]}` (`views::ViewsRequest`), at most 64 pins.
+Each pin must pass subc-protocol's opaque-field rule: 1–256 printable non-space
+ASCII bytes (`0x21`–`0x7e`), compared byte for byte. An invalid request is
+`invalid_request {field}`, naming `pins` or `pins[i]`. Empty requests are valid.
+Its bare answer is `{views: {<pin>: <ViewManifest> | "unknown"}}`, with exactly
+the requested keys (repeated pins share one key). A known view is
+`{record_schema: {name, revision, fields}, reads: [{op, ...}], template}`.
+`revision` is a u64 integer. `fields` declares provider extension fields only,
+using the kinds in [`tool-display/v1`](../cortexkit-role-tool-display/CONTRACT.md).
+Standard display fields retain their fixed validators. `reads` declares the
+provider operations the app server may call to page through a call's details;
+they aren't offered to the model as tools, and their shapes are the
+provider's own. `template` is opaque JSON that only the app server interprets;
+neither contract defines a template format, and this crate never interprets it. A schema pin
+never changes meaning, so a view may be cached indefinitely. An unsupported
+pin is the string `"unknown"`, not a guessed view.
+
+A tool provider discovers display storage by `tool-display/v1`, never by
+module name; it writes records only when exactly one live module declares
+that capability, otherwise writing nothing without failing the call. This
+capability is independent of the `app-server/v1` reader capability.
+A tool provider writes display data only after it has answered a call, asynchronously:
+it never waits for the write and never fails a call because of it. It writes
+only for calls carrying `call_key` (or `origin.call_key` for a relayed call).
+Retries are allowed, never required, and resend the first canonical body bytes
+exactly. A scope carrier is a route opener carrying a daemon-stamped scope on
+behalf of its owner, never a scope taken from request arguments. On a route
+the app server opened as a scope carrier, the provider
+admits only the reads its views declare. The full identity, field, limit,
+idempotency and join requirements are in
+[`tool-display/v1`](../cortexkit-role-tool-display/CONTRACT.md).
 
 ## 3. `tool.catalog`
 
@@ -286,7 +326,7 @@ to them. Nothing here names a particular implementation.
     consumer that matched a defined tag must not depend on any of those. A
     provider that wants consumers to match its specific contract adds its own
     namespaced tag beside the defined one (for example
-    `cerebellum:browser.use/v1`), and a consumer that depends on that contract
+    `example-browser:browser.use/v1`), and a consumer that depends on that contract
     pins the namespaced tag.
 
     The three `llm.*` tags are the exception: each also promises the request

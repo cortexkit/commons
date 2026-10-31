@@ -6,14 +6,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = "0.14.0"
+cortexkit-role-tool-provider = "0.14.1"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = { version = "0.14.0", features = ["test-vectors"] }
+cortexkit-role-tool-provider = { version = "0.14.1", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_tool_provider::vectors::FILES` and a
@@ -60,3 +60,12 @@ serving that default. A composer omits a system-text preset only when both
 the provider declares this fact (read from `catalog.list`) and the runner
 declares `system_text_default`; otherwise it keeps naming the preset.
 Crate versions are not evidence of either promise.
+
+Providers can opt into `TOOL_VIEWS_CAPABILITY` (`tool-views/v1`) and serve
+`ops::TOOL_VIEWS` using the new `views` types. Views describe immutable,
+schema-pinned transcript rows; templates stay opaque. Display writes and the
+shared record-schema validators are defined by
+[`cortexkit-role-tool-display`](../cortexkit-role-tool-display/README.md).
+Providers discover display storage by `tool-display/v1`, independently of the
+`app-server/v1` reader capability, and write nothing unless exactly one live
+module declares display storage. Display writes never fail the tool call.

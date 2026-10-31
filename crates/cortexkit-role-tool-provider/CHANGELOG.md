@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.1
+
+- Add optional `tool-views/v1`, `tool.views`, view manifests and vectors, using
+  the record schemas of `cortexkit-role-tool-display` 0.1.0. Existing public
+  structs, enums, required ops and existing wire shapes are unchanged.
+- Pin the provider obligations for asynchronous display writes and declared
+  reads on app-server-carried routes, with a link to `tool-display/v1`.
+
 ## 0.14.0
 
 - Requires subc-protocol 0.34; breaking because `CallMode` and `ToolCallRequest`

@@ -1,0 +1,17 @@
+{
+  "capabilities":{"app_reader":"app-server/v1","display_storage":"tool-display/v1"},
+  "limits":{"max_record_bytes":16384,"max_detail_bytes":3145728,"max_completion_bytes":16384,"loading_window_ms":1000},
+  "write":{"runner":{"kind":"reserved","module_id":"runner"},"call_key":"call:1","kind":"record","schema_pin":"pin:1","body":{"durationMs":1,"outcome":"success"}},
+  "outcomes":[
+    {"name":"stored","previous":null,"incoming":{"durationMs":1,"outcome":"success"},"reply":{"result":"stored"}},
+    {"name":"already_stored","previous":{"outcome":"success","durationMs":1},"incoming":{"durationMs":1,"outcome":"success"},"reply":{"result":"already_stored"}},
+    {"name":"conflict","previous":{"durationMs":1,"outcome":"success"},"incoming":{"durationMs":2,"outcome":"success"},"code":"display_write_conflict"}
+  ],
+  "refusals":[
+    {"name":"too_large","max_record_bytes":1,"code":"display_too_large","detail":{"kind":"record","max_bytes":1}},
+    {"name":"unknown_kind","kind":"future","code":"invalid_params","detail":{"field":"kind"}},
+    {"name":"invalid_key","call_key":"","code":"invalid_params","detail":{"field":"call_key"}},
+    {"name":"invalid_pin","schema_pin":"","code":"invalid_params","detail":{"field":"schema_pin"}}
+  ],
+  "not_ready_code":"module_warming"
+}

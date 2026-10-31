@@ -1,0 +1,28 @@
+{
+  "schema":{"name":"command","revision":1,"fields":{"paths":"project_path","exit_code":"integer","ready":"boolean","job":"id"}},
+  "cases":[
+    {"name":"required","kind":"record","body":{"durationMs":12,"outcome":"success"},"valid":true},
+    {"name":"missing_duration","kind":"record","body":{"outcome":"success"},"valid":false,"field":"durationMs"},
+    {"name":"missing_outcome","kind":"record","body":{"durationMs":12},"valid":false,"field":"outcome"},
+    {"name":"held_reason","kind":"record","body":{"durationMs":12,"outcome":"held","reason":"consent","queuedMs":4,"heldMs":8},"valid":true},
+    {"name":"outside_project","kind":"record","body":{"durationMs":2,"outcome":"partial","location":"outside_project"},"valid":true},
+    {"name":"invalid_location","kind":"record","body":{"durationMs":2,"outcome":"partial","location":"inside"},"valid":false,"field":"location"},
+    {"name":"valid_array","kind":"record","body":{"durationMs":2,"outcome":"success","paths":["src/a","src/b"]},"valid":true},
+    {"name":"empty_array","kind":"record","body":{"durationMs":2,"outcome":"success","paths":[]},"valid":false,"field":"paths"},
+    {"name":"nested_object","kind":"record","body":{"durationMs":2,"outcome":"success","job":{"id":"job:1"}},"valid":false,"field":"job"},
+    {"name":"nested_array","kind":"record","body":{"durationMs":2,"outcome":"success","paths":[["src/a"]]},"valid":false,"field":"paths"},
+    {"name":"undeclared_integer","kind":"record","body":{"durationMs":2,"outcome":"success","count":3},"valid":false,"field":"count"},
+    {"name":"undeclared_string","kind":"record","body":{"durationMs":2,"outcome":"success","message":"hello"},"valid":false,"field":"message"},
+    {"name":"wrong_type","kind":"record","body":{"durationMs":2,"outcome":"success","exit_code":"0"},"valid":false,"field":"exit_code"},
+    {"name":"null_extension","kind":"record","body":{"durationMs":2,"outcome":"success","ready":null},"valid":false,"field":"ready"},
+    {"name":"invalid_reason","kind":"record","body":{"durationMs":2,"outcome":"error","reason":"free text"},"valid":false,"field":"reason"},
+    {"name":"invalid_outcome","kind":"record","body":{"durationMs":2,"outcome":"pending"},"valid":false,"field":"outcome"},
+    {"name":"float_duration","kind":"record","body":{"durationMs":2.0,"outcome":"success"},"valid":false,"field":"durationMs"},
+    {"name":"negative_duration","kind":"record","body":{"durationMs":-1,"outcome":"success"},"valid":false,"field":"durationMs"},
+    {"name":"negative_queued","kind":"record","body":{"durationMs":0,"outcome":"success","queuedMs":-1},"valid":false,"field":"queuedMs"},
+    {"name":"negative_held","kind":"record","body":{"durationMs":0,"outcome":"success","heldMs":-1},"valid":false,"field":"heldMs"},
+    {"name":"completion_without_duration","kind":"completion","body":{"outcome":"success","exit_code":0},"valid":true},
+    {"name":"completion_with_duration","kind":"completion","body":{"outcome":"error","reason":"killed","durationMs":12},"valid":true},
+    {"name":"completion_missing_outcome","kind":"completion","body":{"exit_code":0},"valid":false,"field":"outcome"}
+  ]
+}

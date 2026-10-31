@@ -1,0 +1,21 @@
+{
+  "request":{"pins":["pin:command:1","pin:missing"]},
+  "reply":{"views":{
+    "pin:command:1":{
+      "record_schema":{"name":"command","revision":1,"fields":{"exit_code":"integer","paths":"project_path","ready":"boolean"}},
+      "reads":[{"op":"command.output","max_items":100}],
+      "template":{"registry":"command-row","revision":1}
+    },
+    "pin:missing":"unknown"
+  }},
+  "invalid_requests":[
+    {"pins":[""],"field":"pins[0]"},
+    {"pins":["pin:ok","bad\u0000pin"],"field":"pins[1]"}
+  ],
+  "invalid_replies":[
+    {"views":{"pin:command:1":"missing","pin:missing":"unknown"}},
+    {"views":{"pin:command:1":"unknown"}},
+    {"views":{"pin:command:1":"unknown","pin:missing":"unknown","pin:extra":"unknown"}},
+    {"views":{"pin:command:1":{"record_schema":{"name":"command","revision":1,"fields":{"outcome":"code"}},"reads":[],"template":null},"pin:missing":"unknown"}}
+  ]
+}

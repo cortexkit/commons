@@ -1,0 +1,7 @@
+[
+  {"body":{"data":{"text":"free-form detail"}},"valid":true},
+  {"body":{"truncated":true,"omittedItems":12,"omittedBytes":4096,"items":["one"]},"valid":true},
+  {"body":{"truncated":false},"valid":false,"field":"truncated"},
+  {"body":{"omittedItems":-1},"valid":false,"field":"omittedItems"},
+  {"body":{"omittedBytes":"4096"},"valid":false,"field":"omittedBytes"}
+]

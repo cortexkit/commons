@@ -29,7 +29,7 @@ pub struct RoleDescribe {
     /// The module's own build identity, for display. Never a cache key.
     pub implementation_version: String,
     /// Optional module-level capabilities. `tool-provider/v1` defines
-    /// [`CATALOG_CAPABILITY_FILTER`]; session capabilities travel in the
+    /// [`CATALOG_CAPABILITY_FILTER`] and [`crate::TOOL_VIEWS_CAPABILITY`]; session capabilities travel in the
     /// catalog answer instead.
     #[serde(default)]
     pub capabilities: Vec<String>,

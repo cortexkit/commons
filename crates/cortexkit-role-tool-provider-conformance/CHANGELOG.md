@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.1
+
+- Update the exact contract pin to cortexkit-role-tool-provider 0.14.1; no runner changes.
+
 ## 0.14.0
 
 - Requires subc-protocol 0.34; breaking because `ObservedFrame::Error` contains
