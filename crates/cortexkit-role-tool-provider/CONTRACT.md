@@ -589,6 +589,10 @@ check the tool opt-in and the call/provider prerequisites below.
   (`result::is_person_wait`). For `running` and for any reason it does not
   know, it shows the provider's interim content only. It still pulls
   `late_results` for every held reply, whatever the reason.
+- With the additional `held-update/v1` bind declaration, the provider may
+  re-state the reason through non-terminal `held` late entries (§7). Consumers
+  apply `result::is_person_wait` to the latest stated reason, not permanently
+  to the first reply. The call still needs a terminal late entry for its answer.
 - Refusals no person can fix, such as busy, validation failure or unavailable
   consent, are ordinary final replies and never carry `held`.
 
@@ -753,11 +757,12 @@ Authorized, DispatchStarted, Settled.
 A provider that settles calls later declares the `late_results` session
 capability. The custodian is always the carrier, the principal that raised
 the call, including a call raised inside a run whose scope another principal
-owns. For example, Broca collects held results for calls it raises inside a
-worker run that core owns. The custodian pulls; the provider never pushes, and serves an
+owns. For example, a runner collects late entries for calls it raises inside
+a scope owned by another principal. The custodian pulls; the provider never pushes, and serves an
 entry only to a caller whose verified principal is its custodian.
-For a held first reply (§4.1, `held-reply/v1`), this entry, not the interim
-`content`, is the call's answer, correlated by `(carrier, call_key)`.
+For a held first reply (§4.1, `held-reply/v1`), a terminal entry of kind
+`result`, `not_started` or `expired`, not the interim `content` or a `held`
+update, is the call's answer, correlated by `(carrier, call_key)`.
 
 - Request: `late_results {since: cursor | null, limit?}`
   (`LateResultsRequest`). `since: null` reads from the start.
@@ -767,8 +772,8 @@ For a held first reply (§4.1, `held-reply/v1`), this entry, not the interim
   start; `seq` is a `u64`, `0` before any entry; `limit` is a `u32`.
 - Entry (`LateEntry`): `{kind, owner, ref, scope_epoch, custodian, call_key,
   invocation_id?, event_id, settled_at, reduced, result? | outcome?}`, plus
-  `reason` on a `not_started` entry.
-  - `kind` is `result`, `not_started` or `expired`, decoded open. An entry of
+  `reason` on a `not_started` entry or `held` on a `held` entry.
+  - `kind` includes `result`, `not_started`, `expired` and non-terminal `held`, decoded open. An entry of
     an unknown kind is recorded and acked like any other, never retried.
   - `not_started` carries `{call_key, event_id, settled_at, reason}`; `reason`
     is an open string whose first value is `restart_before_dispatch`.
@@ -779,11 +784,44 @@ For a held first reply (§4.1, `held-reply/v1`), this entry, not the interim
   - `event_id` is deterministic: the same late result always carries the same
     `event_id` across restarts and lost acks.
   - `settled_at` is milliseconds since the Unix epoch (`u64`). `reduced`
-    defaults to `false`.
+    defaults to `false`. On a `held` entry, `settled_at` is when the stated
+    reason took effect, not when the call settled.
   - Every entry, of any kind including an unknown one, carries `owner`,
     `ref`, `scope_epoch`, `custodian`, `call_key`, `event_id` and
     `settled_at`, because the caller's dedupe key needs them. An entry
     missing one does not decode.
+- Held-reason updates (`kind: "held"`) carry `held: {reason, detail?}` and
+  all the common identity and time members above. `reason` has exactly the
+  held-first-reply snake_case grammar (§4.1), remains open, and unknown reasons
+  are kept. `detail`, if present, must be an object; explicit `null` and every
+  other non-object are malformed. A held entry carries no `result` or `outcome`
+  member, even with a null value, and must not carry `reduced: true`.
+  `LateEntry::held()` exposes the payload as `result::HeldReply`;
+  `LateEntry::new_held` constructs an update and `LateEntry::validate` checks
+  constructed updates. Decoding refuses malformed held entries. Other kinds
+  keep their existing decoding behavior.
+  - **Readers opt in first.** A provider may send a held update only for a call
+    whose first reply was held, and only when that call's route bind declared
+    **all three** of `held-update/v1`, `held-reply/v1` and `tool-result/v1`.
+    `HELD_UPDATE_CAPABILITY` names the new capability;
+    `consumer_reads_held_update_v1` checks the bind declarations. Per-call
+    arguments and `call_mode` do not grant support. On every other bind the
+    provider sends no held updates. A decoder using the 0.13.2 `LateEntry`
+    shape keeps the payload and classifies the kind as `Unknown("held")`, but
+    its consumer may still treat any late entry as the answer, so open
+    decoding alone is not permission to send one.
+  - A held update does not settle the call. Record and ack it like any other
+    entry, with its own deterministic `event_id`: restarts and lost acks replay
+    the same id, while distinct updates have distinct ids. Several updates are
+    allowed, including `consent`, then `running`, then `consent` again.
+  - Consumers apply updates in cursor order. A call counts as waiting on a
+    person only while its latest stated reason is a person-wait reason
+    (`result::is_person_wait`). A `running` update moves it to plain running
+    from its `settled_at`. A terminal `result`, `not_started` or `expired` ends
+    the call regardless of the last reason. Time budgets are consumer policy;
+    this contract prescribes no duration or budgeting algorithm.
+  - `test-vectors/tool-provider-v1/held-update-v1.json` pins the sequence,
+    held payloads, malformed entries and route-bind gate.
 - Ack: `late_results.ack {through: cursor}` (`AckRequest`), per custodian,
   answered with an empty `RESPONSE` body `{}`.
   Each custodian has its own cursor and acks only its own entries.

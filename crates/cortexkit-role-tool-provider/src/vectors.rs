@@ -35,6 +35,9 @@ pub const EMITS_EVENTS_JSON: &str =
 /// The `held-reply-v1.json` vector cases.
 pub const HELD_REPLY_V1_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/held-reply-v1.json");
+/// Non-terminal held updates, malformed entries, and their route-bind gate.
+pub const HELD_UPDATE_V1_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/held-update-v1.json");
 /// The `late-results.json` vector cases.
 pub const LATE_RESULTS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/late-results.json");
@@ -85,6 +88,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("tool-result-v1.json", TOOL_RESULT_V1_JSON),
     ("emits-events.json", EMITS_EVENTS_JSON),
     ("held-reply-v1.json", HELD_REPLY_V1_JSON),
+    ("held-update-v1.json", HELD_UPDATE_V1_JSON),
     ("late-results.json", LATE_RESULTS_JSON),
     ("reply-deadline.json", REPLY_DEADLINE_JSON),
     ("role-describe.json", ROLE_DESCRIBE_JSON),

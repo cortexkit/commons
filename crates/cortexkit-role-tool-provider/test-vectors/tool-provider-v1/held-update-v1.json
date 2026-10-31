@@ -1,0 +1,50 @@
+{
+  "sequence": {
+    "first_reply": {"content": [{"type": "text", "text": "Please approve the build."}], "held": {"reason": "consent"}},
+    "reply": {
+      "entries": [
+        {"kind": "held", "owner": "example:owner", "ref": "build-scope", "scope_epoch": 2, "custodian": "example:runner", "call_key": "build:7", "event_id": "build-7:held-1", "settled_at": 1800000000000, "reduced": false, "held": {"reason": "consent", "detail": {"ask_id": "build-approval", "opaque": [1, null]}}},
+        {"kind": "held", "owner": "example:owner", "ref": "build-scope", "scope_epoch": 2, "custodian": "example:runner", "call_key": "build:7", "event_id": "build-7:held-2", "settled_at": 1800000060000, "reduced": false, "held": {"reason": "running"}},
+        {"kind": "result", "owner": "example:owner", "ref": "build-scope", "scope_epoch": 2, "custodian": "example:runner", "call_key": "build:7", "event_id": "build-7:result", "settled_at": 1800001260000, "reduced": false, "result": {"content": [{"type": "text", "text": "Build complete."}]}}
+      ],
+      "cursor": {"provider_incarnation": "example-start-1", "seq": 3},
+      "more": false
+    },
+    "ack": {"through": {"provider_incarnation": "example-start-1", "seq": 3}},
+    "person_wait": [true, false],
+    "effective_at": [1800000000000, 1800000060000],
+    "answer_event_id": "build-7:result"
+  },
+  "valid": [
+    {"name": "unknown_reason_with_detail", "entry": {"kind": "held", "owner": "example:owner", "ref": "build-scope", "scope_epoch": 2, "custodian": "example:runner", "call_key": "build:8", "invocation_id": "onward-8", "event_id": "build-8:held-1", "settled_at": 1800000000000, "reduced": false, "held": {"reason": "provider_step_v2", "detail": {"nested": {"value": [true, null]}}}}},
+    {"name": "consent_again_without_detail", "entry": {"kind": "held", "owner": "example:owner", "ref": "build-scope", "scope_epoch": 2, "custodian": "example:runner", "call_key": "build:7", "event_id": "build-7:held-3", "settled_at": 1800000120000, "reduced": false, "held": {"reason": "consent"}}}
+  ],
+  "invalid": [
+    {"name": "bad_reason", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {"reason": "login-handoff"}}},
+    {"name": "null_detail", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {"reason": "consent", "detail": null}}},
+    {"name": "nonobject_detail", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {"reason": "consent", "detail": []}}},
+    {"name": "with_result", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {"reason": "consent"}, "result": {"content": [{"type": "text", "text": "Not final."}]}}},
+    {"name": "with_outcome", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {"reason": "consent"}, "outcome": "ok"}},
+    {"name": "with_null_result", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {"reason": "consent"}, "result": null}},
+    {"name": "with_null_outcome", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {"reason": "consent"}, "outcome": null}},
+    {"name": "reduced", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {"reason": "consent"}, "reduced": true}},
+    {"name": "missing_event_id", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "settled_at": 1, "held": {"reason": "consent"}}},
+    {"name": "missing_held", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1}},
+    {"name": "missing_reason", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {}}},
+    {"name": "nonstring_reason", "entry": {"kind": "held", "owner": "example:owner", "ref": "s", "scope_epoch": 1, "custodian": "example:runner", "call_key": "k", "event_id": "e", "settled_at": 1, "held": {"reason": 42}}}
+  ],
+  "gating": [
+    {"name": "absent", "consumer_capabilities": null, "first_reply_held": true, "may_send": false},
+    {"name": "none", "consumer_capabilities": [], "first_reply_held": true, "may_send": false},
+    {"name": "result_only", "consumer_capabilities": ["tool-result/v1"], "first_reply_held": true, "may_send": false},
+    {"name": "reply_only", "consumer_capabilities": ["held-reply/v1"], "first_reply_held": true, "may_send": false},
+    {"name": "update_only", "consumer_capabilities": ["held-update/v1"], "first_reply_held": true, "may_send": false},
+    {"name": "result_reply", "consumer_capabilities": ["tool-result/v1", "held-reply/v1"], "first_reply_held": true, "may_send": false},
+    {"name": "result_update", "consumer_capabilities": ["tool-result/v1", "held-update/v1"], "first_reply_held": true, "may_send": false},
+    {"name": "reply_update", "consumer_capabilities": ["held-reply/v1", "held-update/v1"], "first_reply_held": true, "may_send": false},
+    {"name": "all_three", "consumer_capabilities": ["tool-result/v1", "held-reply/v1", "held-update/v1"], "first_reply_held": true, "may_send": true},
+    {"name": "all_with_other", "consumer_capabilities": ["other/v1", "held-update/v1", "tool-result/v1", "held-reply/v1"], "first_reply_held": true, "may_send": true},
+    {"name": "wrong_update_version", "consumer_capabilities": ["tool-result/v1", "held-reply/v1", "held-update/v2"], "first_reply_held": true, "may_send": false},
+    {"name": "first_reply_not_held", "consumer_capabilities": ["tool-result/v1", "held-reply/v1", "held-update/v1"], "first_reply_held": false, "may_send": false}
+  ]
+}

@@ -97,7 +97,8 @@ impl ToolResult {
     }
 }
 
-/// Why the call's answer arrives later through `late_results`.
+/// Why the call's answer arrives later through `late_results`, or its latest
+/// reason in a non-terminal held update.
 ///
 /// Reasons are open snake_case strings; unknown values are preserved.
 /// [`held_reasons`] names the documented values, and [`is_person_wait`] says
@@ -128,6 +129,21 @@ impl HeldReply {
         self.detail = Some(Value::Object(detail));
         self
     }
+
+    /// Validate the reason and optional opaque detail for a reply or late update.
+    pub fn validate(&self) -> Result<(), ResultProblem> {
+        if !is_snake_case(&self.reason) {
+            return Err(problem("held.reason", "must be a nonempty snake_case code"));
+        }
+        if self
+            .detail
+            .as_ref()
+            .is_some_and(|detail| !detail.is_object())
+        {
+            return Err(problem("held.detail", "must be a JSON object"));
+        }
+        Ok(())
+    }
 }
 
 /// The documented `held.reason` values. The set is open: a consumer keeps any
@@ -152,6 +168,9 @@ pub mod held_reasons {
 /// prompt a person, or count the call as waiting on one, only when this is
 /// true. It is false for `running` and for every reason this crate does not
 /// document. A consumer pulls `late_results` for every held reply either way.
+/// Apply this check to the latest stated reason in cursor order: a `running`
+/// update stops person-wait accounting from its `settled_at`. A terminal entry
+/// ends the call regardless of that reason. Time budgets are consumer policy.
 pub fn is_person_wait(reason: &str) -> bool {
     matches!(
         reason,
@@ -308,16 +327,7 @@ pub fn validate(result: &ToolResult) -> Result<(), ResultProblem> {
         if result.is_error == Some(true) {
             return Err(problem("held", "must not accompany isError: true"));
         }
-        if !is_snake_case(&held.reason) {
-            return Err(problem("held.reason", "must be a nonempty snake_case code"));
-        }
-        if held
-            .detail
-            .as_ref()
-            .is_some_and(|detail| !detail.is_object())
-        {
-            return Err(problem("held.detail", "must be a JSON object"));
-        }
+        held.validate()?;
     }
     match (result.is_error, result.error_code.as_deref()) {
         (Some(true), None) => return Err(problem("errorCode", "required when isError is true")),

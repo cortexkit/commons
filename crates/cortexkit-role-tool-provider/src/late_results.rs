@@ -1,5 +1,4 @@
-//! Late results: calls a provider settles after its reply, pulled by their
-//! custodian.
+//! Late results and non-terminal held updates, pulled by their custodian.
 //!
 //! A provider that settles calls later declares the `late_results` session
 //! capability and serves [`crate::ops::LATE_RESULTS`] and
@@ -13,6 +12,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
+use crate::result::HeldReply;
+
 /// The session capability a provider declares when it may settle calls later.
 pub const CAPABILITY: &str = "late_results";
 
@@ -23,6 +24,8 @@ pub const CURSOR_INCARNATION_CHANGED: &str = "cursor_incarnation_changed";
 
 /// Entry kinds. `kind` is an open string.
 pub mod kinds {
+    /// Non-terminal replacement of the held reason; the entry carries `held`.
+    pub const HELD: &str = "held";
     /// Non-terminal text for the person awaiting an accepted user command.
     pub const PROGRESS: &str = "progress";
     /// The call settled; the entry carries `result` or, when reduced,
@@ -110,7 +113,7 @@ pub struct AckRequest {
 /// `kind` is decoded open: an entry of a kind this crate does not know still
 /// decodes, keeps every member in `extra`, and is recorded and acked like
 /// any other, never retried.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct LateEntry {
     pub kind: String,
@@ -127,8 +130,8 @@ pub struct LateEntry {
     /// Deterministic: the same late result always carries the same id,
     /// across provider restarts and lost acks.
     pub event_id: String,
-    /// When the call settled (or was found not started, or expired), in
-    /// milliseconds since the Unix epoch.
+    /// When the call settled (or was found not started, or expired), or when a
+    /// held update took effect, in milliseconds since the Unix epoch.
     pub settled_at: u64,
     /// The provider kept only the outcome, not the full result.
     #[serde(default)]
@@ -149,11 +152,100 @@ pub struct LateEntry {
     pub extra: Map<String, Value>,
 }
 
+// Keep the existing field decoding for every kind. The raw object is checked
+// first for held updates so even explicit null result/outcome members are refused.
+#[derive(Deserialize)]
+#[serde(remote = "LateEntry")]
+struct LateEntryWire {
+    kind: String,
+    owner: String,
+    #[serde(rename = "ref")]
+    scope_ref: String,
+    scope_epoch: u64,
+    custodian: String,
+    call_key: String,
+    #[serde(default)]
+    invocation_id: Option<String>,
+    event_id: String,
+    settled_at: u64,
+    #[serde(default)]
+    reduced: bool,
+    #[serde(default)]
+    result: Option<Value>,
+    #[serde(default)]
+    outcome: Option<String>,
+    #[serde(default)]
+    reason: Option<String>,
+    #[serde(default)]
+    text: Option<String>,
+    #[serde(flatten)]
+    extra: Map<String, Value>,
+}
+
+impl<'de> Deserialize<'de> for LateEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct EntryObject;
+        impl<'de> serde::de::Visitor<'de> for EntryObject {
+            type Value = Value;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a late-result entry object")
+            }
+
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Value, M::Error> {
+                let mut object = Map::new();
+                while let Some((key, value)) = map.next_entry::<String, Value>()? {
+                    // A raw object must not hide duplicate known fields that the
+                    // original derived decoder would have refused.
+                    if object.contains_key(&key)
+                        && [
+                            "kind",
+                            "owner",
+                            "ref",
+                            "scope_epoch",
+                            "custodian",
+                            "call_key",
+                            "invocation_id",
+                            "event_id",
+                            "settled_at",
+                            "reduced",
+                            "result",
+                            "outcome",
+                            "reason",
+                            "text",
+                        ]
+                        .contains(&key.as_str())
+                    {
+                        return Err(serde::de::Error::custom(format!("duplicate field `{key}`")));
+                    }
+                    object.insert(key, value);
+                }
+                Ok(Value::Object(object))
+            }
+        }
+        let value = deserializer.deserialize_map(EntryObject)?;
+        if value.get("kind").and_then(Value::as_str) == Some(kinds::HELD)
+            && (value.get("result").is_some() || value.get("outcome").is_some())
+        {
+            return Err(serde::de::Error::custom(
+                "held: must not carry result or outcome",
+            ));
+        }
+        let entry = LateEntryWire::deserialize(value).map_err(serde::de::Error::custom)?;
+        entry.validate().map_err(serde::de::Error::custom)?;
+        Ok(entry)
+    }
+}
+
 /// A decoded entry kind.
 /// Additional kinds may be added; consumers keep a wildcard match arm.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum EntryKind {
+    Held,
     Result,
     Progress,
     NotStarted,
@@ -162,6 +254,72 @@ pub enum EntryKind {
 }
 
 impl LateEntry {
+    /// A non-terminal held-reason update. The call's first reply must have been
+    /// held, and its route bind must pass [`crate::consumer_reads_held_update_v1`].
+    /// Give each update its own deterministic event id, retained across replays.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_held(
+        owner: impl Into<String>,
+        scope_ref: impl Into<String>,
+        scope_epoch: u64,
+        custodian: impl Into<String>,
+        call_key: impl Into<String>,
+        event_id: impl Into<String>,
+        settled_at: u64,
+        held: HeldReply,
+    ) -> Self {
+        let mut entry = Self::new(
+            kinds::HELD,
+            owner,
+            scope_ref,
+            scope_epoch,
+            custodian,
+            call_key,
+            event_id,
+            settled_at,
+        );
+        entry.extra.insert("held".into(), json!(held));
+        entry
+    }
+
+    /// Read and validate the held member of a `held` entry using the same rules
+    /// as a held reply. Other kinds keep their extension members uninterpreted.
+    /// Deserialization already validates held entries; call [`Self::validate`]
+    /// after constructing or changing an entry, before sending it. This accessor
+    /// checks only the held payload.
+    pub fn held(&self) -> Result<Option<HeldReply>, serde_json::Error> {
+        if self.kind != kinds::HELD {
+            return Ok(None);
+        }
+        let value = self.extra.get("held").ok_or_else(|| {
+            <serde_json::Error as serde::de::Error>::custom("held: required for a held entry")
+        })?;
+        let held: HeldReply = serde_json::from_value(value.clone())?;
+        held.validate()
+            .map_err(<serde_json::Error as serde::de::Error>::custom)?;
+        Ok(Some(held))
+    }
+
+    /// Validate a decoded or constructed entry before sending or on receipt.
+    /// Existing kinds retain their decoding behavior; only `held` has new checks.
+    pub fn validate(&self) -> Result<(), serde_json::Error> {
+        if self.kind == kinds::HELD {
+            self.held()?;
+            if self.result.is_some()
+                || self.outcome.is_some()
+                || self.reduced
+                || self.extra.contains_key("result")
+                || self.extra.contains_key("outcome")
+                || self.extra.get("reduced").is_some_and(|value| value == true)
+            {
+                return Err(<serde_json::Error as serde::de::Error>::custom(
+                    "held: must not carry result, outcome, or reduced: true",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// An entry with its required identity and settlement time, and no optional content.
     // Accept each required wire member directly rather than bundling unrelated fields to satisfy the argument-count lint.
     #[allow(clippy::too_many_arguments)]
@@ -238,6 +396,7 @@ impl LateEntry {
 
     pub fn kind(&self) -> EntryKind {
         match self.kind.as_str() {
+            kinds::HELD => EntryKind::Held,
             kinds::RESULT => EntryKind::Result,
             kinds::PROGRESS => EntryKind::Progress,
             kinds::NOT_STARTED => EntryKind::NotStarted,

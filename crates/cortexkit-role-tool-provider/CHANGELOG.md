@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.13.3
+
+- Add non-terminal `held` late entries so a provider can say that a call moved
+  from waiting for a person to running, or back again, without answering it.
+  Each update has its own replay-stable event id and takes effect at `settled_at`.
+- Readers opt in first: providers may send updates only for held-first-reply
+  calls whose bind declared `held-update/v1`, `held-reply/v1` and `tool-result/v1`.
+  A decoder using the 0.13.2 shape still classifies the new kind as unknown and
+  keeps its payload.
+- Add `EntryKind::Held`, `LateEntry::new_held`, `LateEntry::held` and
+  `LateEntry::validate`, shared `HeldReply::validate`, `HELD_UPDATE_CAPABILITY`
+  and `consumer_reads_held_update_v1`. The held reason and detail obey the same
+  rules in first replies and late updates. Time budgets remain consumer policy.
+- Add `held-update-v1.json` vectors for the consent-to-running-to-result flow,
+  malformed entries and the three-capability gate. Existing vectors are unchanged.
+
 ## 0.13.2
 
 - Add the optional `rich_ui: {dialect, catalog_digest}` member on the

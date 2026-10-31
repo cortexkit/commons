@@ -59,6 +59,11 @@ pub const TOOL_RESULT_V1_CAPABILITY: &str = "tool-result/v1";
 /// The route-bind capability a consumer declares when it understands held replies.
 pub const HELD_REPLY_V1: &str = "held-reply/v1";
 
+/// The route-bind capability a consumer declares when it understands non-terminal
+/// held-reason updates in `late_results`. Readers must opt in before providers
+/// send them; `held-reply/v1` and `tool-result/v1` are also required.
+pub const HELD_UPDATE_CAPABILITY: &str = "held-update/v1";
+
 /// Whether a route's bind says that its consumer decodes `tool-result/v1` results.
 ///
 /// Providers use this bind-scoped declaration, together with the tool's
@@ -82,6 +87,19 @@ pub fn consumer_reads_held_reply_v1(consumer_capabilities: Option<&[String]>) ->
             capabilities
                 .iter()
                 .any(|capability| capability == HELD_REPLY_V1)
+        })
+}
+
+/// Whether a route's bind permits non-terminal held-reason updates.
+///
+/// All three consumer declarations are required. Providers may send an update
+/// only for a call whose first reply was held; per-call arguments do not opt in.
+pub fn consumer_reads_held_update_v1(consumer_capabilities: Option<&[String]>) -> bool {
+    consumer_reads_held_reply_v1(consumer_capabilities)
+        && consumer_capabilities.is_some_and(|capabilities| {
+            capabilities
+                .iter()
+                .any(|capability| capability == HELD_UPDATE_CAPABILITY)
         })
 }
 
