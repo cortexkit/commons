@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.34
+
+- `display::projects(profile)` says whether this crate has a display
+  projection for a serializer profile: `anthropic-messages`, `opencode-aisdk`,
+  `opencode-v2` and `pi`. CONTRACT.md §4.7 now states that the projected-row
+  rule applies to those profiles only. For any other profile, such as the
+  runner-owned profile, the runner supplies its own projection; the contract
+  doesn't prescribe that profile's raw-body-to-row mapping, and its other
+  display-row requirements still apply. Additive; no wire change.
+
 ## 0.7.33
 
 - Correct two contract sentences and the `try_number_parts` docs, which said a

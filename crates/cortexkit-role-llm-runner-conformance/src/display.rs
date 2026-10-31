@@ -180,6 +180,12 @@ where
                 .into(),
         ));
     };
+    if !display::projects(&profile) {
+        return Ok(Ending::Inapplicable(format!(
+            "{profile} has no shared display projection in llm-runner, so this check cannot \
+             compare its rows with one"
+        )));
+    }
     let raw = walk_older(&session.route).await?;
     for limits in [None, Some(APP_LIMITS)] {
         let what = match limits {

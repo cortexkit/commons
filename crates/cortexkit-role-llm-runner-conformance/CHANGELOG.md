@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.39
+
+- `display_row_is_the_profile_projection` reports not applicable, naming the
+  profile, when llm-runner has no display projection for the session's
+  serializer profile (`cortexkit_role_llm_runner::display::projects`).
+  Previously, the check tried to project rows for such a profile and failed
+  with an unsupported-profile error, regardless of the rows' contents.
+  Runners on a projected profile are graded exactly as before. Pins
+  llm-runner `=0.7.34`.
+
 ## 0.15.38
 
 - Pin llm-runner `=0.7.33`, a wording-only release.

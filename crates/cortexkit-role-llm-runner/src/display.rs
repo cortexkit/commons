@@ -464,8 +464,20 @@ impl std::fmt::Display for ProjectionError {
 
 impl std::error::Error for ProjectionError {}
 
+/// Whether this crate has a display projection for the serializer profile
+/// named `profile`: the profiles [`project`] accepts. For any other profile,
+/// such as the runner-owned profile, the runner supplies its own projection.
+/// The contract doesn't prescribe that profile's raw-body-to-row mapping, but
+/// its other display-row requirements still apply.
+pub fn projects(profile: &str) -> bool {
+    matches!(
+        profile,
+        ANTHROPIC_MESSAGES | OPENCODE_AISDK | OPENCODE_V2 | PI
+    )
+}
+
 /// The row for `body` under the serializer profile named `profile`, cut by
-/// `limits` when given.
+/// `limits` when given. Refused for a profile where [`projects`] is false.
 pub fn project(
     profile: &str,
     body: &Value,
@@ -1236,6 +1248,23 @@ impl DisplayPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projects_is_true_for_the_four_profiles_and_project_refuses_others() {
+        for profile in [ANTHROPIC_MESSAGES, OPENCODE_AISDK, OPENCODE_V2, PI] {
+            assert!(projects(profile), "{profile}");
+        }
+        for profile in [crate::serializer_profile::OWNED_BROCA, "unknown"] {
+            assert!(!projects(profile), "{profile}");
+            let refused = project(profile, &serde_json::json!({}), None).unwrap_err();
+            assert!(
+                refused
+                    .to_string()
+                    .contains("not a serializer profile this crate projects"),
+                "{refused}"
+            );
+        }
+    }
     use crate::vectors;
 
     fn limits_of(case: &Value) -> Option<Limits> {

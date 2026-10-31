@@ -1260,7 +1260,13 @@ display-ready row for an app's reader on a runner declaring
   declaring `call_identity` each tool call's `call_key` and `schema_pin`
   (§9.16). The conformance kit
   checks that a served row equals the function applied to the same entry's
-  raw form, with only those members taken from the served row.
+  raw form, with only those members taken from the served row. This applies
+  to the profiles for which `display::projects(profile)` is true:
+  `anthropic-messages`, `opencode-aisdk`, `opencode-v2` and `pi`. For
+  another profile, such as the runner-owned profile, the runner supplies its
+  own projection. This contract doesn't prescribe that profile's
+  raw-body-to-row mapping, so the kit reports that one check not applicable;
+  the other display-row requirements in this section still apply.
 - [pinned] An assistant row carries `model` whenever the runner recorded
   which model wrote that message. A message written through the runner's
   own run always has a recorded model, so its row always carries it. Only
