@@ -1,0 +1,128 @@
+{
+  "kept": {
+    "record_schema": {
+      "name": "command",
+      "revision": 1,
+      "fields": {
+        "exit_code": "integer"
+      }
+    },
+    "reads": [],
+    "template": {
+      "row": "v1"
+    }
+  },
+  "cases": [
+    {
+      "name": "unchanged",
+      "fetched": {
+        "record_schema": {
+          "name": "command",
+          "revision": 1,
+          "fields": {
+            "exit_code": "integer"
+          }
+        },
+        "reads": [],
+        "template": {
+          "row": "v1"
+        }
+      },
+      "change": "same"
+    },
+    {
+      "name": "newer_template",
+      "fetched": {
+        "record_schema": {
+          "name": "command",
+          "revision": 1,
+          "fields": {
+            "exit_code": "integer"
+          }
+        },
+        "reads": [],
+        "template": {
+          "row": "v2"
+        },
+        "template_revision": 1
+      },
+      "change": "newer_template"
+    },
+    {
+      "name": "older_revision",
+      "fetched": {
+        "record_schema": {
+          "name": "command",
+          "revision": 1,
+          "fields": {
+            "exit_code": "integer"
+          }
+        },
+        "reads": [],
+        "template": {
+          "row": "v2"
+        },
+        "template_revision": 1
+      },
+      "kept_revision": 2,
+      "change": "stale"
+    },
+    {
+      "name": "same_revision_different_template",
+      "fetched": {
+        "record_schema": {
+          "name": "command",
+          "revision": 1,
+          "fields": {
+            "exit_code": "integer"
+          }
+        },
+        "reads": [],
+        "template": {
+          "row": "v2"
+        }
+      },
+      "change": "conflict"
+    },
+    {
+      "name": "record_schema_changed",
+      "fetched": {
+        "record_schema": {
+          "name": "command",
+          "revision": 2,
+          "fields": {
+            "exit_code": "integer"
+          }
+        },
+        "reads": [],
+        "template": {
+          "row": "v1"
+        },
+        "template_revision": 1
+      },
+      "change": "conflict"
+    },
+    {
+      "name": "reads_changed",
+      "fetched": {
+        "record_schema": {
+          "name": "command",
+          "revision": 1,
+          "fields": {
+            "exit_code": "integer"
+          }
+        },
+        "reads": [
+          {
+            "op": "command.output"
+          }
+        ],
+        "template": {
+          "row": "v1"
+        },
+        "template_revision": 1
+      },
+      "change": "conflict"
+    }
+  ]
+}

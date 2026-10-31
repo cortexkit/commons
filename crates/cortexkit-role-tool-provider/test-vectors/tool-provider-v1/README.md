@@ -56,6 +56,14 @@ bad name, a duplicate, 17 entries, and a list in the answer to a request that
 named a preset. The conformance runner's `catalog_listed_presets_served`
 requests every listed preset from a live provider.
 
-`views.json` pins the optional `tool.views` request, an immutable view and an
+`views.json` pins the optional `tool.views` request, a view and an
 unknown pin, plus malformed requests and replies. Record field kinds are owned
 by `tool-display/v1`; that package carries an identical copy of this vector.
+
+`view-revisions.json` pins how a refetched view compares with the view kept
+for the same pin (`ViewManifest::compare_with_kept`): identical, a higher
+template revision, a lower one, and the three conflicts (same revision with a
+different template, changed record schema, changed reads). Each case
+compares its `fetched` view with the shared `kept` view; a case's optional
+`kept_revision` (default 0) is the kept view's `template_revision` for that
+case.

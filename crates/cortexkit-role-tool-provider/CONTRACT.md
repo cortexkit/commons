@@ -76,16 +76,54 @@ Standard display fields retain their fixed validators. `reads` declares the
 provider operations the app server may call to page through a call's details;
 they aren't offered to the model as tools, and their shapes are the
 provider's own. `template` is opaque JSON that only the app server interprets;
-neither contract defines a template format, and this crate never interprets it. A schema pin
-never changes meaning, so a view may be cached indefinitely. An unsupported
-pin is the string `"unknown"`, not a guessed view.
+neither contract defines a template format, and this crate never interprets it. An unsupported pin is the string `"unknown"`, not a guessed view.
+
+A known view may also carry `template_revision`, a u64 that defaults to 0 and
+is omitted when 0. For a pin, `record_schema` and `reads` never change:
+records are validated against `record_schema`, and `reads` bounds which detail
+operations the app server may call on a route it carries. `template` may
+change, but only together with a higher `template_revision`, and one revision
+always carries one template. A template fix can therefore reach rows recorded
+earlier under that pin without minting a new pin, once the display server
+fetches the revised view. It fetches again only when the writer's
+`module_version` changes (below), so a provider ships a template revision in a
+new module version.
+
+A provider that has ever served a view for a pin MUST keep serving a view for
+it, with the same `record_schema` and `reads`, for as long as it declares
+`tool-views/v1`, even after the tool's definition changes. It answers
+`"unknown"` only for a pin it never served. A change to a tool's name, schema
+digest or `semantics` mints a new pin (§4); it never retires the old pin's
+view, so transcripts whose view the display server already fetched and
+checked keep joining. A pin the display server first fetches after the tool
+has left the writer's catalog fails tool-display §6's catalog check and
+doesn't join. One way to meet this obligation is a committed table of every
+view the provider has shipped, with a test that fails if an entry's record
+schema or reads change or the entry is removed.
+
+The display server (tool-display §6) keeps each view with the writer's
+`module_version`, as the daemon's `catalog.list` reports it for that module.
+When that version changes, it fetches the view again, and the same trigger
+re-checks an `"unknown"` answer. `ViewManifest::compare_with_kept` classifies
+the fetched view. A changed `record_schema` or `reads` is a conflict whatever
+its revision. Otherwise a higher revision is accepted, and the display server
+keeps the fetched view, its revision included; a lower revision is stale; and
+the same revision with a different template is a conflict. A stale or
+conflicting view is ignored, keeping the kept one. View decoders on
+tool-provider 0.14.1, the first release with views, ignore
+`template_revision` when decoding and don't compare revisions, so a display
+server adopts 0.14.2, and this comparison, before any provider sends a
+nonzero revision.
 
 A tool provider discovers display storage by `tool-display/v1`, never by
 module name; it writes records only when exactly one live module declares
 that capability, otherwise writing nothing without failing the call. This
 capability is independent of the `app-server/v1` reader capability.
-A tool provider writes display data only after it has answered a call, asynchronously:
-it never waits for the write and never fails a call because of it. It writes
+A tool provider writes display data only after its handler has produced the
+call's reply (a held reply included), asynchronously and off the reply path:
+it never waits for the write, never delays the reply for it, and never fails a
+call because of it. Starting the write once the handler returns the reply is
+enough (tool-display §7). It writes
 only for calls carrying `call_key` (or `origin.call_key` for a relayed call).
 Retries are allowed, never required, and resend the first canonical body bytes
 exactly. A scope carrier is a route opener carrying a daemon-stamped scope on

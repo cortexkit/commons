@@ -27,13 +27,14 @@ With none or more than one, the provider writes nothing and never fails the
 call because of the missing or ambiguous display server. A module may declare
 either capability without the other; neither declaration implies the other.
 
-The provider supplies display data after it has answered a call. The display
+The provider supplies display data after it has produced a call's reply. The display
 server stores it; the app server joins it to the call when an app reads the
 transcript.
 How the two roles share stored data is outside this contract. They may be
 served by the same module. Neither the tool
 result shown to a model nor model-authored content supplies this display data.
-The provider also supplies the row's immutable schema-pinned view.
+The provider also supplies the row's schema-pinned view, whose record schema
+and reads never change for that pin (tool-provider §2.1).
 
 ## 2. `display.write`
 
@@ -152,7 +153,14 @@ of the transcript, showing the call without display data.
 | `web_origin` | lowercase `scheme://host[:port]`, with no userinfo, path (even `/`), query or fragment |
 | `app_id` | nonempty reverse-DNS id or executable base name, at most 255 bytes, matching `[A-Za-z0-9._-]+`, with no path separator |
 
-Apps render every kind as **plain text, never a link**. The crate supplies one
+Apps render every kind as **plain text, never a link**, with one exception:
+an app may pass a value of an `id` field to its own item opener. The opener
+handles only the ids the app already opens from links in chat messages: a
+question for the person (`ask_`), an artifact (`art_`) or a work item
+(`wi_`). Which of those an app can open is the app's own; an id it can't
+resolve stays plain text. The opener shows the app's own card for the item and
+never treats an id as a URL, so a wrong or forged id opens an item the app
+already holds or stays plain text, never a web page. The crate supplies one
 validator per kind, `FieldKind::validate_scalar`, the scalar-or-array
 `FieldKind::validate`, and `validate_record` / `validate_completion` to check
 required fields, fixed fields and provider declarations together.
@@ -203,7 +211,8 @@ a pin never changes meaning, so a call recorded before the provider changed its
 catalog still joins.
 
 The display server fetches `tool.views {pins: [...]}` on the **writer's own route**,
-only for unseen pins and **never on the write path**. The optional operation
+for unseen pins, again when the writer's `module_version` changes
+(tool-provider §2.1), and **never on the write path**. The optional operation
 and `tool-views/v1` capability are defined by the
 [`tool-provider/v1` contract](../cortexkit-role-tool-provider/CONTRACT.md#21-optional-display-views).
 The reply is `{views: {<pin>: <ViewManifest> | "unknown"}}`. A manifest has a
@@ -211,13 +220,20 @@ record schema, declared reads and a template. The template is opaque JSON
 that only the app server interprets; this contract defines no template format,
 so which templates an app server understands is its own choice. An `unknown`
 view cannot authorize a join.
-A pin never changes meaning, so the display server may keep a view forever.
+A pin never changes meaning, so the display server may keep a view's record
+schema and reads forever; it replaces the template only with a higher
+`template_revision` (tool-provider §2.1).
 
 ## 7. Tool-provider obligations
 
-A provider writes only **after it has answered the call** (its reply, held
-reply included, has been sent), asynchronously. It never waits on the write and
-never fails a call because of the write. It takes the runner from the route's
+A provider writes only **after its handler has produced the call's reply**
+(a held reply included), asynchronously, off the reply path. It never waits on
+the write, never delays the reply for it, and never fails a call because of
+it. The rule doesn't require proof that the reply frame was flushed first:
+starting the write once the handler has returned the reply is enough. Records
+are keyed by the call and joined when an app reads, so the order of the write
+and the reply frame doesn't change which call a record joins; at most an app
+sees a record a moment before the runner records the call's answer. It takes the runner from the route's
 attested principal, and the call key and served pin from the call's own
 `call_key` and `schema_pin` members, or `origin.carrier`, `origin.call_key` and
 `origin.schema_pin` for a relayed call; never from tool arguments. Only a call

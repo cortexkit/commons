@@ -1,4 +1,6 @@
-//! Optional immutable display views, fetched by the display server off the write path.
+//! Optional display views, fetched by the display server off the write path.
+//! For a pin, a view's record schema and reads never change; its template can
+//! be replaced with a higher `template_revision` (CONTRACT §2.1).
 
 use std::collections::BTreeMap;
 
@@ -57,12 +59,43 @@ impl ViewRead {
 
 /// Provider schema, the detail reads the app server may call, and a template
 /// that only the app server interprets.
+///
+/// For one pin, `record_schema` and `reads` never change. `template` may be
+/// replaced, but only together with a higher `template_revision` (§2.1).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ViewManifest {
     pub record_schema: RecordSchema,
     pub reads: Vec<ViewRead>,
     pub template: Value,
+    /// Raised by the provider each time it replaces this pin's template.
+    /// Defaults to 0 and is omitted when 0, so a view without revisions
+    /// serializes with the same members as before this field existed.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub template_revision: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
+}
+
+/// How a refetched view relates to the view an app server already keeps for
+/// the same pin (`ViewManifest::compare_with_kept`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ViewChange {
+    /// Identical to the kept view.
+    Same,
+    /// Same record schema and reads with a higher template revision: keep
+    /// the fetched view in place of the kept one, its revision included.
+    NewerTemplate,
+    /// Same record schema and reads with a lower template revision: keep the
+    /// kept view.
+    Stale,
+    /// A changed record schema or reads, whatever the revision, or the kept
+    /// revision with a different template. That breaks the provider's §2.1
+    /// obligation; keep the kept view.
+    Conflict,
 }
 
 impl ViewManifest {
@@ -71,6 +104,25 @@ impl ViewManifest {
             record_schema,
             reads,
             template,
+            template_revision: 0,
+        }
+    }
+
+    pub fn with_template_revision(mut self, template_revision: u64) -> Self {
+        self.template_revision = template_revision;
+        self
+    }
+
+    /// Compare this freshly fetched view with the one kept for the same pin.
+    pub fn compare_with_kept(&self, kept: &ViewManifest) -> ViewChange {
+        if self.record_schema != kept.record_schema || self.reads != kept.reads {
+            return ViewChange::Conflict;
+        }
+        match self.template_revision.cmp(&kept.template_revision) {
+            std::cmp::Ordering::Greater => ViewChange::NewerTemplate,
+            std::cmp::Ordering::Less => ViewChange::Stale,
+            std::cmp::Ordering::Equal if self.template == kept.template => ViewChange::Same,
+            std::cmp::Ordering::Equal => ViewChange::Conflict,
         }
     }
 }

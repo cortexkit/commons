@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.14.2
+
+- Pin tool-provider `=0.14.2`. No new cases.
+
 ## 0.14.1
 
 - Update the exact contract pin to cortexkit-role-tool-provider 0.14.1; no runner changes.

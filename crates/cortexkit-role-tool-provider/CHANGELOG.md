@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.14.2
+
+- A view can carry `template_revision` (u64, default 0, omitted when 0). For
+  a pin, `record_schema` and `reads` never change; `template` changes only
+  with a higher revision, so a template fix can reach rows already recorded
+  under that pin without a `semantics` bump. Added
+  `ViewManifest::with_template_revision`, `ViewManifest::compare_with_kept`
+  and `ViewChange`.
+- Contract text (§2.1): a provider that has ever served a view for a pin
+  keeps serving one, with the same record schema and reads, for as long as
+  it declares `tool-views/v1`, and answers `"unknown"` only for a pin it
+  never served. The display server refetches a writer's views when its
+  `module_version` changes and keeps the highest compatible revision.
+
 ## 0.14.1
 
 - Add optional `tool-views/v1`, `tool.views`, view manifests and vectors, using

@@ -1,7 +1,7 @@
 use cortexkit_role_tool_provider::{
     describe::{check_describe, Major, RoleDescribe},
     ops,
-    views::{ViewEntry, ViewManifest, ViewRead, ViewsReply, ViewsRequest},
+    views::{ViewChange, ViewEntry, ViewManifest, ViewRead, ViewsReply, ViewsRequest},
     PROVIDES, TOOL_VIEWS_CAPABILITY,
 };
 use serde_json::{json, Value};
@@ -100,4 +100,36 @@ fn constructors_preserve_read_extensions_and_opaque_templates() {
         serde_json::from_value::<ViewsReply>(serde_json::to_value(&reply).unwrap()).unwrap(),
         reply
     );
+}
+
+#[test]
+fn template_revisions_replace_only_the_template() {
+    let fixture: Value = serde_json::from_str(include_str!(
+        "../test-vectors/tool-provider-v1/view-revisions.json"
+    ))
+    .unwrap();
+    let base: ViewManifest = serde_json::from_value(fixture["kept"].clone()).unwrap();
+    assert_eq!(base.template_revision, 0);
+    // Revision 0 is omitted, so a view without revisions has the same members.
+    assert_eq!(serde_json::to_value(&base).unwrap(), fixture["kept"]);
+    for case in fixture["cases"].as_array().unwrap() {
+        let fetched: ViewManifest = serde_json::from_value(case["fetched"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(&fetched).unwrap(), case["fetched"]);
+        let kept = base
+            .clone()
+            .with_template_revision(case["kept_revision"].as_u64().unwrap_or(0));
+        let expected = match case["change"].as_str().unwrap() {
+            "same" => ViewChange::Same,
+            "newer_template" => ViewChange::NewerTemplate,
+            "stale" => ViewChange::Stale,
+            "conflict" => ViewChange::Conflict,
+            other => panic!("unknown change {other}"),
+        };
+        assert_eq!(
+            fetched.compare_with_kept(&kept),
+            expected,
+            "{}",
+            case["name"]
+        );
+    }
 }
