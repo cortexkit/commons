@@ -141,3 +141,34 @@ Since 0.6.0, `started_at` on `tool_started` and `finished_at` on
 `tool_finished` are optional. A runner leaves one out only when it recorded
 no time, such as a call replayed from history stored before it kept times,
 and never invents one; a reader shows the call without that time.
+
+## Provider service tiers
+
+The opt-in `service_tier` group publishes a per-wire `service_tiers` map and
+accepts `standard`, `fast` and `ultrafast` on sends. Absence means standard for
+a send that starts a run; a send into a running run inherits its tier. Send
+encoders omit only absence and preserve explicit standard. Unsupported levels
+are refused before model dispatch,
+and an explicit different tier cannot steer or queue into a running run.
+`service_tier` holds the shared types and validators. `ServiceTierUsage` owns
+per-step tier metadata without changing the token-only, Copy `StepUsage`;
+`RunUsage::record_step_with_service_tier` updates `RunServiceTierUsage` state,
+which keeps a constant number of tier strings independent of the number of
+steps and examines only the new step, to aggregate a fixed applied level
+and unanimous reported served values. Persist that state alongside token totals
+so a restart cannot forget disagreement, without re-reading old steps each time.
+Never copy applied into served. Unknown-served wires omit served.
+
+Tier changes are cache-busting and ride before the changed request, like a
+model change. A compaction provider must adopt 0.7.12 before a runner sends a
+non-standard tier, because notice digests cover the new condition. The closed
+`step.finished.v1` event is unchanged; consumers read tier values in usage-steps
+rows. See CONTRACT §9.3.2 for the full rules.
+
+Requests keep the closed `ServiceTier` enum; read the raw member with
+`service_tier::parse_request` so an unknown level receives the named
+`unsupported_tier` refusal before decoding the rest. Tier values on records are
+strings and keep unknown levels on read. Producer checks restrict applied
+records to fast/ultrafast (standard is omitted), while served provider values
+remain open. Pricing at an unfamiliar level is unconfirmed. `WIRE_APIS` exports
+the wire API list; a routing drift test keeps it equal to routing's constants.

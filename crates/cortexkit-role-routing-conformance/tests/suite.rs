@@ -8,6 +8,68 @@
 
 mod fake;
 
+const SERVICE_TIER_CHECKS: &[&str] = &[
+    "service_tier_eligible_account",
+    "service_tier_fallback_order",
+    "service_tier_absent_is_standard",
+    "service_tier_report_members_accepted",
+];
+
+#[tokio::test]
+async fn service_tier_faulty_routers_fail_each_case_by_name() {
+    for (defects, expected, because) in [
+        (
+            Defects {
+                tier_ineligible_account: true,
+                ..Defects::default()
+            },
+            SERVICE_TIER_CHECKS[0],
+            "ineligible account",
+        ),
+        (
+            Defects {
+                tier_skips_fast_fallback: true,
+                ..Defects::default()
+            },
+            SERVICE_TIER_CHECKS[1],
+            "fallback expected",
+        ),
+        (
+            Defects {
+                tier_absent_is_fast: true,
+                ..Defects::default()
+            },
+            SERVICE_TIER_CHECKS[2],
+            "service_tier_chosen",
+        ),
+        (
+            Defects {
+                tier_report_refused: true,
+                ..Defects::default()
+            },
+            SERVICE_TIER_CHECKS[3],
+            "was refused",
+        ),
+    ] {
+        breaks(defects, expected, because).await;
+    }
+}
+
+#[tokio::test]
+async fn service_tier_without_group_is_not_applicable_by_name() {
+    let report = run_suite(&FakeSubject::without_service_tier(Defects::default())).await;
+    for name in SERVICE_TIER_CHECKS {
+        assert!(
+            matches!(
+                report.outcome(name),
+                Some(CheckOutcome::NotApplicable { .. })
+            ),
+            "{name}: {}",
+            report.render()
+        );
+    }
+}
+
 use cortexkit_role_routing_conformance::{run_suite, CheckOutcome, SuiteVerdict, CHECKS};
 use fake::{Defects, FakeSubject};
 

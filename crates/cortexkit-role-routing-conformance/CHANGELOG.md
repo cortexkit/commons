@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.4
+
+- Check tier-eligible account admission, fallback order and recorded chosen
+  levels, absent-as-standard selection, and acceptance of tier report usage.
+- Add plan-fixture configuration and faulty routers rejected by each new
+  check's name. Pin the routing contract to 0.5.5.
+
 ## 0.7.3
 
 - Depend on routing 0.5.3. Add two checks (58 total) for `select_task_ref`:

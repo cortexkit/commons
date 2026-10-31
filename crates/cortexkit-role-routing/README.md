@@ -130,3 +130,33 @@ The [contract](CONTRACT.md) is normative. See the
 [conformance kit](../cortexkit-role-routing-conformance/README.md) and the
 [role/conformance guide](../../docs/role-contracts.md) for implementation
 testing.
+
+## Provider service tiers
+
+A caller sends `route.select.service_tier` and either
+`usage.service_tier_applied` or `usage.service_tier_served` on a report only to
+a router whose `role.describe.capabilities` declares `service_tier`. This gate
+protects older strict report readers and prevents an older router silently
+ignoring a faster-tier request. Unknown report usage members remain refused.
+
+The requested levels are `standard`, `fast` and `ultrafast`, with absence meaning
+standard. Only accounts whose plans include the tier are eligible; plan sources
+are the router's knowledge, not a new configuration schema. Fallback proceeds
+ultrafast to fast to standard, recording `service_tier_chosen`. The runner applies
+the chosen level. A reported wire is a runner discovery entry with
+`served: "reported"`, which permits served metadata only when that response
+states it (runner CONTRACT §9.3.2). Prefer a provider-stated served tier; its
+price stays unconfirmed if that tier or its rate is unrecognised. Without a
+served statement, applied gives only an unconfirmed estimate; absent applied
+means standard. Keep unfamiliar strings rather than inventing a rate. Never
+infer served from applied. See CONTRACT §5.5.
+
+Request levels use a small local enum, with no runtime runner dependency.
+Unknown select levels receive `unsupported_tier` naming `service_tier`.
+Record levels are strings; decoding retains unknown applied, served and chosen
+values, with unfamiliar prices unconfirmed. Producer checks reject unknown
+applied levels. Dev-only drift tests keep enum spellings and wire API lists
+equal to the runner contract.
+`select::check_answer` is stricter than record decoding: it refuses an
+unrecognised chosen tier, a missing chosen level for an explicit request or an
+upgrade, with `AnswerProblem::ServiceTier`.

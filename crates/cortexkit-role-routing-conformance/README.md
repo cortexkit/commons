@@ -215,3 +215,15 @@ the request's `runners` list, both `runners_honoured` and
 `non_starting_runner_never_selected` fail: the gateway-only runner-list case
 exercises the latter. `answering_a_runner_outside_runners_fails` asserts both
 failures.
+
+## Service-tier checks
+
+A router declaring `service_tier` is checked by
+`service_tier_eligible_account`, `service_tier_fallback_order`,
+`service_tier_absent_is_standard` and `service_tier_report_members_accepted`.
+The plan-fixture hook `configure_service_tiers` supplies test-only account plan
+inclusions; it does not prescribe a production plan source. The eligibility
+case follows a decision through account admission, and fallback records its
+chosen level. Report cases send applied-only, served-only and both members.
+Non-declaring routers are not applicable by name, and deliberately faulty
+routers prove each check rejects its named violation.

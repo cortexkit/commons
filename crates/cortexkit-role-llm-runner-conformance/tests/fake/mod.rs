@@ -73,6 +73,7 @@ mod media;
 pub mod message_checkpoint;
 mod output_refs;
 mod rich_ui;
+mod service_tier;
 mod session_change;
 mod step_events;
 mod system_text_default;
@@ -81,6 +82,7 @@ mod user_commands;
 pub use compaction::{CacheTtlDefect, CompactionDefect, CompactionRouteMode};
 use display::{anthropic_assistant, live_events, profiled, result_text};
 pub use history::LineageDefect;
+pub use service_tier::ServiceTierDefect;
 
 pub const TOOL_MODULE: &str = "fake.tools";
 /// The module id (and route principal) of the sender the delivery-order
@@ -173,6 +175,7 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub service_tier: ServiceTierDefect,
     pub part_edits_opt_in: bool,
     pub part_edits_ignore_truncate: bool,
     pub part_edits_untagged_bytes: bool,
@@ -688,6 +691,7 @@ struct World {
     structured_output_support: Mutex<BTreeMap<String, Option<bool>>>,
     /// Every model request the scripted model received, per session.
     model_requests: Mutex<BTreeMap<String, Vec<ModelRequestObservation>>>,
+    service_tiers: Mutex<BTreeMap<String, service_tier::State>>,
     pending_model_holds: Mutex<BTreeSet<String>>,
     held_models: Mutex<BTreeMap<String, String>>,
     staging_holds: Mutex<BTreeSet<String>>,
@@ -2403,6 +2407,7 @@ impl Module {
                         self.world.honours_checkpoint(),
                     ));
                 observation.max_output_tokens = output_cap;
+                self.tier_model_ingress(session, &mut observation);
                 if self.world.serves(groups::REFRESH_RELAUNCH) {
                     observation.surface_change_rides = Some(sess.surface_change_rides);
                 }
@@ -3138,6 +3143,9 @@ impl Module {
         if self.world.serves(groups::STEP_EVENTS) {
             describe = describe.with_step_events(self.world.step_event_policy.clone());
         }
+        if self.world.serves(groups::SERVICE_TIER) {
+            describe = describe.with_service_tiers(service_tier::support());
+        }
         respond(describe)
     }
 
@@ -3350,6 +3358,9 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(reply) = self.tier_send(session, &params) {
+            return Ok(reply);
+        }
         if message_checkpoint::refuse_missing_counter(&self.world, session) {
             return Ok(Reply::Error(ErrorBody::new(
                 "compaction_unavailable",
@@ -4584,6 +4595,7 @@ impl Module {
             && (RunState::parse(&result.state).is_terminal() || run.usage.steps > 0)
         {
             let mut usage = run.usage.clone();
+            self.tier_usage(session, &mut usage);
             if self.world.defects.usage_absent_reasoning_as_zero {
                 usage.reasoning_tokens.get_or_insert(0);
                 for entry in &mut usage.by_model {
@@ -5530,6 +5542,7 @@ impl FakeSubject {
                     model_calls: Mutex::new(BTreeSet::new()),
                     structured_output_support: Mutex::new(BTreeMap::new()),
                     model_requests: Mutex::new(BTreeMap::new()),
+                    service_tiers: Mutex::new(BTreeMap::new()),
                     user_commands: Mutex::new(user_commands::Commands::default()),
                     system_text_default: Mutex::new(BTreeMap::new()),
                     pending_model_holds: Mutex::new(BTreeSet::new()),
@@ -5673,6 +5686,21 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn configure_service_tier(
+        &self,
+        session: &str,
+        _case: &str,
+    ) -> Result<bool, HarnessError> {
+        if self.defects.service_tier == ServiceTierDefect::NoFixture {
+            return Ok(false);
+        }
+        self.world()
+            .service_tiers
+            .lock()
+            .unwrap()
+            .insert(session.into(), service_tier::State::default());
+        Ok(true)
+    }
     fn supports_model_failure_fixture(&self) -> bool {
         self.model_failure_fixture
     }

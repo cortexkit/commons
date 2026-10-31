@@ -159,6 +159,7 @@ particular implementation.
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
+| `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
 | `rich_ui_stamp` | `session.read` (the `include_rich_ui` opt-in), `session.head` (`last_run_rich_ui`); also the rich UI stamp on assistant display rows and `run_started` where those are served | §9.17 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
@@ -1474,7 +1475,7 @@ display-ready row for an app's reader on a runner declaring
   `cause: view_timeout`.
 - [pinned] **Waiting for a rewrite ride** (added in 0.5.2) is another. A
   runner holding a step for a rewrite ride (compaction-provider §8: cause
-  `ttl_expired`, `model_change`, `account_change`, `surface_change` or
+  `ttl_expired`, `model_change`, `account_change`, `service_tier_change`, `surface_change` or
   `chain_reset`) reports
   the wait once
   the ride's answer has been pending for 1 s
@@ -2517,6 +2518,90 @@ A runner that declares `retract` serves `session.retract`.
 - [pinned] A joining steer whose limits differ from its run's is refused
   `invalid_params`, naming the first differing field, under §9's existing
   frozen-settings rule.
+
+### 9.3.2 `service_tier`: provider service levels
+
+- [pinned] The abstract levels are `standard`, `fast` and `ultrafast`.
+  Absence means `standard` for a send that starts a run; a send into a running
+  run inherits its tier. A runner maps these levels to its provider's
+  request fields; the mapping is not a contract value. For example, a runner
+  might map `fast` to OpenAI's `service_tier: "priority"`. It never silently
+  downgrades a requested level.
+- [pinned] A runner declaring the opt-in `service_tier` group sends
+  `role.describe.service_tiers`: a map keyed by routing 0.5.4's `wire_api`
+  spellings, such as `openai.responses` and `openai.chatgpt_responses`.
+  Each value is `{levels: [...], served: "reported" | "unknown"}`. `levels`
+  is a non-empty, duplicate-free list of `fast` and/or `ultrafast`;
+  `standard` is always implied and never listed. `reported` means the runner
+  reads the served tier from the provider's response; `unknown` means it
+  applies the request level but cannot confirm what was served.
+  `check_describe` refuses a missing declared map, an unknown wire spelling,
+  invalid levels or an invalid served policy. Shared types and validators
+  live in `service_tier`.
+- [pinned] Optional `session.send.service_tier` fixes the tier for the run
+  that send starts. A send steering or queueing into that running run
+  inherits its tier when absent. A different explicit tier is refused
+  `invalid_params`, detail `{field: "service_tier", reason: "run_tier_fixed"}`.
+  A level the runner cannot apply on the session's current route is refused
+  before any model call, `invalid_params`, detail
+  `{field: "service_tier", reason: "unsupported_tier"}`. A runner not declaring
+  the group refuses every explicit non-standard level the same way. Send
+  encoders omit only absence and preserve every explicit level, including
+  `standard`, so a steer explicitly asking for standard cannot inherit fast.
+  Today's bytes are unchanged for callers that never set the new member.
+  Older runners ignore the member under their lenient send decoding.
+  An unknown request level is refused by name with `unsupported_tier`, not
+  as a generic decode error. A runner reads the raw member with
+  `service_tier::parse_request` before generic request decoding to retain the
+  required `invalid_params` field/reason detail.
+- [pinned] Tier usage has optional `service_tier_applied`, the abstract level
+  actually put on the request, present for every non-standard applied level
+  and omitted for standard. Optional `service_tier_served` is present only on
+  a `reported` wire and only when the provider stated the served tier. Known
+  values map back to `standard`, `fast` or `ultrafast`; an unmapped value is
+  kept verbatim. **A runner never copies applied into served.** In particular,
+  `unknown` wires never emit served, and absence is not confirmation.
+- [pinned] Tier values on records are strings, not the closed request enum:
+  run usage, step metadata, usage rows, route decisions and reports, notice
+  conditions and tier-change events, and rides retain unfamiliar levels.
+  Producers fill applied values from `ServiceTier::as_str()` and validate
+  them against `fast`/`ultrafast`, omitting standard; rides and change events
+  also allow `standard`. Producer checks never run as part of record decoding.
+  Readers preserve unknown values, notice digests hash them verbatim, and
+  pricing at a level the consumer does not recognize remains unconfirmed.
+  Provider-stated served strings remain open, including unmapped values.
+- [pinned] `RunUsage` carries those two optional wire members. Applied is the
+  run's fixed level. Served is set only when at least one step reported it
+  and every step that reported it reported the same value; disagreement
+  leaves it absent. Missing reports do not vote. Per-step tier values live
+  in usage-steps rows and `service_tier::ServiceTierUsage`. The existing
+  token-only `StepUsage` remains `Copy`. `RunUsage::record_step_with_service_tier`
+  updates a `RunServiceTierUsage` accumulator that keeps a constant number of
+  tier strings, independent of the number of steps, and examines only the new
+  step, preserving the per-step cost rule (§14.2). The runner persists
+  that local accumulator alongside its token totals, so disagreement is not
+  forgotten after a restart; it is not an additional role wire member.
+- [pinned] A runner hosting a compaction provider sends
+  `compaction.ride {session_ref, cause: "service_tier_change", service_tier,
+  deadline_ms}` before rendering the first request whose applied level differs
+  from the previous step in that session. The required `service_tier` carries
+  the new level, including `standard` when returning to standard, just as
+  `account_change` carries its required `account` label. It is ignored on
+  other causes and omitted when absent. With no previous step there is no
+  change to ride. An unchanged level does not trigger a ride.
+  A tier change busts the prompt cache: the provider can fold held edits into
+  that same prefix rebuild. Fold and step-boundary timing follow
+  `model_change`, with the same bounded wait, view/nothing answers, cache TTL
+  information for the current model when available, late-answer handling and
+  rule that a rewrite ride never ends the run. The next notice reports
+  `service_tier_change:<level>` for every change, ridden or not, and its
+  conditions include the next applied `service_tier`, omitted for standard.
+- [pinned] Readers first: a compaction provider adopts compaction-provider
+  0.7.12 before any runner sends a non-standard level. Older providers accept
+  the unknown ride cause, but do not include the new notice header in their
+  digest. `step.finished.v1` does **not** carry tier fields yet; consumers read
+  them from usage-steps rows. Adding them to that closed bus publication is a
+  later readers-first change.
 
 ### 9.4 `structured_output`: schema-shaped run output
 

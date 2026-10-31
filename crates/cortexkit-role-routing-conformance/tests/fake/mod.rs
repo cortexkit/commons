@@ -22,6 +22,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use cortexkit_role_routing_conformance::wire::service_tier::ServiceTier;
 use cortexkit_role_routing_conformance::{
     wire::{
         account::{
@@ -47,7 +48,7 @@ use cortexkit_role_routing_conformance::{
     Reply, RouteFailure, RouteStamp, RoutingRoute, RoutingSubject,
 };
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use subc_protocol::ErrorBody;
 
 /// How long a decision stays current.
@@ -57,6 +58,10 @@ const DECISION_TTL_MS: u64 = 600_000;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub tier_ineligible_account: bool,
+    pub tier_skips_fast_fallback: bool,
+    pub tier_absent_is_fast: bool,
+    pub tier_report_refused: bool,
     /// Keeps the parent's account even when another eligible account exists.
     pub ignores_parent_preference: bool,
     /// Refuses rather than falling back to the sole eligible parent account.
@@ -234,6 +239,8 @@ struct ConversationPin {
 
 #[derive(Default)]
 struct State {
+    tier_plans: BTreeMap<String, Vec<ServiceTier>>,
+    decision_tiers: HashMap<String, ServiceTier>,
     held_credentials: Vec<String>,
     ineligible: Vec<(String, Option<String>)>,
     consumers: Vec<ConsumerConfig>,
@@ -315,6 +322,7 @@ impl State {
 }
 
 pub struct FakeSubject {
+    service_tier_control: bool,
     state: Arc<Mutex<State>>,
     defects: Defects,
     /// Declares select_hold_control.
@@ -330,9 +338,16 @@ pub struct FakeSubject {
 }
 
 impl FakeSubject {
+    pub fn without_service_tier(defects: Defects) -> Self {
+        Self {
+            service_tier_control: false,
+            ..Self::new(defects)
+        }
+    }
     pub fn new(defects: Defects) -> Self {
         Self {
             state: Arc::new(Mutex::new(State::default())),
+            service_tier_control: true,
             defects,
             hold_control: true,
             harness_control: true,
@@ -406,6 +421,14 @@ impl RoutingSubject for FakeSubject {
 
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String> {
         self.state.lock().unwrap().catalog = Some(catalog.clone());
+        Ok(())
+    }
+
+    async fn configure_service_tiers(
+        &self,
+        plans: &BTreeMap<String, Vec<ServiceTier>>,
+    ) -> Result<(), String> {
+        self.state.lock().unwrap().tier_plans = plans.clone();
         Ok(())
     }
 
@@ -507,6 +530,7 @@ impl RoutingSubject for FakeSubject {
 
     async fn route(&self, stamp: &RouteStamp) -> Result<FakeRoute, String> {
         Ok(FakeRoute {
+            service_tier_control: self.service_tier_control,
             state: Arc::clone(&self.state),
             defects: self.defects,
             hold_control: self.hold_control,
@@ -522,6 +546,7 @@ impl RoutingSubject for FakeSubject {
 
 /// A route to the fake, carrying the caller and scope it was opened under.
 pub struct FakeRoute {
+    service_tier_control: bool,
     state: Arc<Mutex<State>>,
     defects: Defects,
     hold_control: bool,
@@ -619,6 +644,9 @@ impl FakeRoute {
             }
         }
         let mut describe = RoleDescribe::new(consumers, true);
+        if self.service_tier_control {
+            describe = describe.with_capability("service_tier");
+        }
         if self.harness_control {
             describe = describe.with_capability(SELECT_HARNESS);
         }
@@ -651,6 +679,49 @@ impl FakeRoute {
     }
 
     fn select(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
+        if !params.is_object() {
+            return Err(Refusal::invalid_request("params", "expected an object"));
+        }
+        let requested = cortexkit_role_routing_conformance::wire::service_tier::parse_request(
+            params.get("service_tier"),
+        )
+        .map_err(|reason| {
+            let mut refusal = Refusal::invalid_request("service_tier", reason);
+            refusal.detail.insert("reason".into(), json!(reason));
+            refusal
+        })?;
+        if requested.is_some() && !self.service_tier_control {
+            return Err(Refusal::invalid_request("service_tier", "undeclared group"));
+        }
+        let mut chosen = requested.unwrap_or_default();
+        if requested.is_none() && !state.tier_plans.is_empty() && self.defects.tier_absent_is_fast {
+            chosen = ServiceTier::Fast;
+        }
+        while !chosen.is_standard()
+            && !state
+                .tier_plans
+                .values()
+                .any(|levels| levels.contains(&chosen))
+        {
+            chosen = match chosen {
+                ServiceTier::Ultrafast if !self.defects.tier_skips_fast_fallback => {
+                    ServiceTier::Fast
+                }
+                _ => ServiceTier::Standard,
+            };
+        }
+        let mut plain = params.clone();
+        plain.as_object_mut().unwrap().remove("service_tier");
+        let mut answer = self.select_untiered(state, &plain)?;
+        let id = answer["decision_id"].as_str().unwrap().to_owned();
+        state.decision_tiers.insert(id, chosen);
+        if requested.is_some() || !chosen.is_standard() {
+            answer["service_tier_chosen"] = json!(chosen);
+        }
+        Ok(answer)
+    }
+
+    fn select_untiered(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
         let defects = self.defects;
         let mut params = params.clone();
         if defects.accepts_invalid_task_ref {
@@ -1354,6 +1425,14 @@ impl FakeRoute {
     }
 
     fn report(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
+        if self.defects.tier_report_refused
+            && params.get("usage").is_some_and(|usage| {
+                usage.get("service_tier_applied").is_some()
+                    || usage.get("service_tier_served").is_some()
+            })
+        {
+            return Err(Refusal::invalid_request("usage", "unknown usage member"));
+        }
         let defects = self.defects;
         let request = match parse_report_request(params) {
             Ok(request) => request,
@@ -1611,6 +1690,20 @@ impl FakeRoute {
             .iter()
             .enumerate()
             .filter(|(_, account)| account.provider == request.provider)
+            .filter(|(_, account)| {
+                let chosen = request
+                    .decision_id
+                    .as_ref()
+                    .and_then(|id| state.decision_tiers.get(id))
+                    .copied()
+                    .unwrap_or_default();
+                self.defects.tier_ineligible_account
+                    || chosen.is_standard()
+                    || state
+                        .tier_plans
+                        .get(&account.account_id)
+                        .is_some_and(|levels| levels.contains(&chosen))
+            })
             .filter(|(_, account)| {
                 !state.ineligible.iter().any(|(credential, model)| {
                     credential == &account.credential_id

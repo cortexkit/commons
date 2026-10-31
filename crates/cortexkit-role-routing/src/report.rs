@@ -53,6 +53,20 @@ pub const MAX_USAGE_COUNT: u64 = (1 << 53) - 1;
 #[non_exhaustive]
 #[serde(deny_unknown_fields)]
 pub struct Usage {
+    /// Applied request level; omitted for standard. Send only to a router
+    /// declaring `service_tier`; older strict usage readers refuse this field.
+    /// Producers use ServiceTier::as_str; readers keep unknown level strings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_applied: Option<String>,
+    /// Provider-stated tier on a reported wire: a runner discovery entry with
+    /// `served: "reported"`, allowing metadata only when that response states it
+    /// (runner CONTRACT §9.3.2). Map known levels; keep others verbatim. Never copy applied.
+    /// Send only to a router declaring `service_tier`. Prefer a provider-stated
+    /// served tier; its price stays unconfirmed if its tier or rate is unrecognised.
+    /// Without served, applied is only an unconfirmed estimate; absent applied
+    /// means standard. Keep unfamiliar strings rather than inventing a rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_served: Option<String>,
     /// Input tokens excluding cache reads and writes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,
@@ -80,6 +94,20 @@ pub struct Usage {
 }
 
 impl Usage {
+    /// Producer check only; report readers retain unfamiliar applied levels.
+    pub fn check_service_tier(&self) -> Result<(), &'static str> {
+        crate::service_tier::check_applied(self.service_tier_applied.as_deref())
+    }
+    pub fn with_service_tier_applied(mut self, tier: crate::service_tier::ServiceTier) -> Self {
+        self.service_tier_applied = (!tier.is_standard()).then(|| tier.as_str().into());
+        self
+    }
+
+    /// Set only from a provider response on a reported wire, never from applied.
+    pub fn with_service_tier_served(mut self, tier: impl Into<String>) -> Self {
+        self.service_tier_served = Some(tier.into());
+        self
+    }
     /// Empty usage: no count known yet.
     pub fn new() -> Self {
         Self::default()

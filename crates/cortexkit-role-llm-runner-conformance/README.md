@@ -54,8 +54,9 @@ retaining old tools, and fail the relaunch case by name.
 For a runner declaring `compaction`, the case also installs the existing
 compaction fixture. Set `ModelRequestObservation.surface_change_rides` to
 the number of that session's `surface_change` rides received **before** the
-model request arrived. Capture the ride and model ingresses with one shared
-counter, outside the runner; reconstructing it from configuration or separate
+model request arrived. Capture arrivals at the scripted compaction and model
+providers with one shared counter, outside the runner; reconstructing it from
+configuration or separate
 post-run lists cannot establish ordering. The first new-tools request must
 have seen another ride. The fake's missing ride is caught by name. An adapter
 without this observation gets the ride-order rule explicitly reported
@@ -421,7 +422,8 @@ vocabulary section and identifies the governing contract sections.
    `compaction_observation` captures the Setup body's `harness` and `session`,
    the actual route bind's `harness`, `session` and `project_root`, and
    canonical model inputs, all outside the runner's process and state root.
-   Route identity must be observed at provider ingress, not reconstructed
+   Route identity must be observed when the request arrives at the scripted
+   provider, not reconstructed
    from Setup or `session.read` responses. A single-session route's bind
    session must equal Setup's session; a shared project route with an empty
    session and a generic harness is valid. The named case
@@ -1213,3 +1215,29 @@ The adoption-read case reuses that hook to recover at the adoption cut
 after runner state loss, without native-cut descent. Its Setup-time reads
 must not share the Setup lock or gate; native-cut descent already has the
 provider's held parent-lineage rows and does not need this recovery read.
+
+## Service-tier checks
+
+`service_tier_unsupported_before_model`, `service_tier_run_fixed`,
+`service_tier_ride_before_changed_request` and `service_tier_unknown_never_echoed`
+check refusal before dispatch, the fixed run tier, cross-provider ride arrival
+order and omission of `service_tier_served` on a wire whose served policy is
+`unknown`. They do not check mapping provider-reported served values back to
+abstract tiers on wires with `served: "reported"`. Each has a deliberately faulty
+runner that
+the suite rejects by name. They are not applicable by name when live discovery
+does not declare `service_tier`, or `LlmRunnerSubject::configure_service_tier`
+returns false.
+
+`LlmRunnerSubject::configure_service_tier` is the defaulted adapter hook. It
+arranges a route supporting fast but not ultrafast,
+with unknown served tier and no served-tier statement in the scripted response.
+The fixed-run case uses `LlmRunnerSubject::hold_next_model_step`,
+`LlmRunnerSubject::await_model_step` and `LlmRunnerSubject::release_model_step`
+to send again while the first model response is held. The ride fixture attaches a
+compaction provider answering nothing. Capture
+`ModelRequestObservation::service_tier_change_rides` when the request arrives at
+the scripted model provider, using the same counter updated when the ride arrives
+at the scripted compaction provider, not from two after-the-fact call lists;
+record applied
+from the actual provider request. The hook must not synthesize runner replies.

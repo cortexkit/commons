@@ -14,6 +14,10 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("service_tier_eligible_account", "service_tier: only an account whose plan includes the chosen tier is admitted for the decision"),
+    check("service_tier_fallback_order", "service_tier: ultrafast falls back to fast then standard, recording service_tier_chosen"),
+    check("service_tier_absent_is_standard", "service_tier: an absent tier means standard"),
+    check("service_tier_report_members_accepted", "service_tier: a declaring router accepts both tier members in report usage"),
     check("parent_account_preference", "an eligible account other than the parent's is preferred"),
     check("parent_account_fallback", "the parent's account is used when it is the only eligible one"),
     check("eligibility_never_holds_or_exhausts", "a model eligibility report never holds or exhausts the account for another model"),

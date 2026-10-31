@@ -230,6 +230,7 @@ fn the_largest_well_formed_notice_fits_the_header_bound() {
     .with_descends_from(NoticeDescent::new("p".repeat(256), max, "b".repeat(64)))
     .with_reasoning_pruned(notice::ReasoningPruned::new(max, max, max))
     .with_history_edit_cost(notice::HistoryEditCost::Unknown("x".repeat(1024)))
+    .with_service_tier(cortexkit_role_llm_runner::service_tier::ServiceTier::Ultrafast)
     .with_events(events);
     let encoded = notice.to_headers();
     assert!(encoded[notice::headers::EVENTS].len() <= notice::MAX_HEADER_VALUE_BYTES);
@@ -242,9 +243,19 @@ fn the_largest_well_formed_notice_fits_the_header_bound() {
     let names: usize = notice::headers::NOTICE.iter().map(|n| n.len()).sum();
     let descent = 256 + 1 + 20 + 1 + 64;
     let reasoning_pruned = 3 * 20 + 2;
-    let widest =
-        names + 2 * 1024 + 4 * 20 + 3 + 256 + 32 + 64 + 6 * 20 + 256 + descent + reasoning_pruned;
-    assert_eq!(widest, 3432);
+    let widest = names
+        + 2 * 1024
+        + 4 * 20
+        + 3
+        + 256
+        + 32
+        + 64
+        + 6 * 20
+        + 256
+        + descent
+        + reasoning_pruned
+        + 9;
+    assert_eq!(widest, 3453);
     assert!(widest <= notice::MAX_NOTICE_HEADER_BYTES);
     assert!(notice::header_bytes(&encoded) <= widest);
 }

@@ -104,6 +104,14 @@ pub struct RunUsage {
     /// always encoded.
     #[serde(default)]
     pub by_model: Vec<ModelUsage>,
+    /// The run's fixed request level, omitted for standard. Producers fill it
+    /// from ServiceTier::as_str; readers retain unknown record levels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_applied: Option<String>,
+    /// Present only when all steps that reported a served tier agreed.
+    /// Never inferred from the applied level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_served: Option<String>,
 }
 
 /// Durable session spend on `session.head`, across runs, rewinds and cuts.
@@ -240,6 +248,42 @@ impl ModelUsage {
 }
 
 impl RunUsage {
+    /// Producer-side tier validation; readers keep unknown record levels.
+    pub fn check_service_tier(&self) -> Result<(), crate::service_tier::TierProblem> {
+        crate::service_tier::check_applied(self.service_tier_applied.as_deref())
+    }
+    /// Record tokens and one step's tier metadata. Durable tier state keeps a
+    /// constant number of tier strings, independent of the number of steps,
+    /// and examines only the new step. Persist `tiers` alongside token totals. Missing
+    /// served values do not vote; disagreement remains absent after a restart.
+    pub fn record_step_with_service_tier(
+        &mut self,
+        provider: &str,
+        model: &str,
+        variant: Option<&str>,
+        step: StepUsage,
+        tier: &crate::service_tier::ServiceTierUsage,
+        tiers: &mut crate::service_tier::RunServiceTierUsage,
+    ) -> Result<(), &'static str> {
+        if tiers.steps() != self.steps {
+            return Err("step_tiers_incomplete");
+        }
+        tier.check().map_err(|problem| problem.reason())?;
+        if self.steps > 0
+            && self.service_tier_applied.as_deref().unwrap_or("standard")
+                != tier.service_tier_applied.as_deref().unwrap_or("standard")
+        {
+            return Err("run_tier_fixed");
+        }
+        tiers
+            .record_step(tier)
+            .map_err(|problem| problem.reason())?;
+        self.record_step(provider, model, variant, step);
+        let metadata = tiers.usage();
+        self.service_tier_applied = metadata.service_tier_applied;
+        self.service_tier_served = metadata.service_tier_served;
+        Ok(())
+    }
     /// The usage of a run with no completed step:
     /// `{"steps":0,"unreported_steps":0,"by_model":[]}`.
     pub fn new() -> Self {

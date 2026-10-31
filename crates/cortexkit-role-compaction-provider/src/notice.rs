@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 
+use cortexkit_role_llm_runner::service_tier::ServiceTier;
 use sha2::{Digest, Sha256};
 
 use crate::digest::{finish, frame, is_sha256_hex, parse_decimal};
@@ -30,7 +31,7 @@ pub const EVENT_VERSION: u32 = 1;
 /// Upper bound on a notice's headers: the sum over every header this contract
 /// defines of the name's and the value's length in bytes, the way the bus
 /// counts a message's header size. The per-value bounds below keep every
-/// well-formed notice under it (at most 3,432 bytes); a runner with more
+/// known-tier producer notice under it (at most 3,453 bytes); a runner with more
 /// events than fit in `events` splits them across consecutive notices.
 pub const MAX_NOTICE_HEADER_BYTES: usize = 4096;
 /// Upper bound on one header value, in bytes.
@@ -86,6 +87,8 @@ pub mod headers {
     pub const WINDOW: &str = "window";
     /// The current model id.
     pub const MODEL: &str = "model";
+    /// Applied level of the next request; omitted for standard.
+    pub const SERVICE_TIER: &str = "service_tier";
     /// The last response's measured usage,
     /// `<input>:<cache_read>:<cache_write>:<output>`; omitted before the first.
     pub const LAST_USAGE: &str = "last_usage";
@@ -126,6 +129,7 @@ pub mod headers {
         MODEL,
         REASONING_PRUNED,
         SEQ,
+        SERVICE_TIER,
         SESSION_REF,
         THROUGH_DIGEST,
         THROUGH_ORDINAL,
@@ -242,6 +246,8 @@ pub enum Event {
     /// The argument is an opaque, stable prompt-cache label, never a secret
     /// or personal identifier (CONTRACT.md §8).
     AccountChange(String),
+    /// `service_tier_change:<level>`: the applied request level changed.
+    ServiceTierChange(String),
     /// `surface_change`: the frozen system text or tool surface changed.
     SurfaceChange,
     /// `ttl_expired`: the prompt cache expired. Declared only by a runner that
@@ -317,6 +323,7 @@ impl Event {
         match self {
             Self::ModelChange => "model_change".into(),
             Self::AccountChange(account) => format!("account_change:{account}"),
+            Self::ServiceTierChange(tier) => format!("service_tier_change:{tier}"),
             Self::SurfaceChange => "surface_change".into(),
             Self::TtlExpired => "ttl_expired".into(),
             Self::RevertBelow(ordinal) => format!("revert_below:{ordinal}"),
@@ -362,6 +369,8 @@ impl Event {
                 Ok(Self::AccountChange(rest.to_owned()))
             }
             "account_change" => Err(malformed()),
+            "service_tier_change" if !rest.is_empty() => Ok(Self::ServiceTierChange(rest.into())),
+            "service_tier_change" => Err(malformed()),
             "surface_change" => Ok(Self::SurfaceChange),
             "ttl_expired" => Ok(Self::TtlExpired),
             "revert_below" => parse_decimal(rest)
@@ -682,6 +691,12 @@ pub struct AdvanceNotice {
     pub events: Vec<Event>,
     pub est_tokens: u64,
     pub model: String,
+    /// Applied level for the next model request. Omitted for standard, and
+    /// covered by the digest just like model. Providers must adopt 0.7.12
+    /// before runners send a non-standard level, so both sides hash the header.
+    /// Readers retain unknown strings and hash them verbatim; check() is a
+    /// producer-side restriction to the current level set.
+    pub service_tier: Option<String>,
     pub window: Option<u64>,
     pub last_usage: Option<LastUsage>,
     pub applied_view_version: Option<u64>,
@@ -716,6 +731,7 @@ impl AdvanceNotice {
             events: Vec::new(),
             est_tokens,
             model: model.into(),
+            service_tier: None,
             window: None,
             last_usage: None,
             applied_view_version: None,
@@ -728,6 +744,11 @@ impl AdvanceNotice {
 
     pub fn with_reasoning_pruned(mut self, state: ReasoningPruned) -> Self {
         self.reasoning_pruned = Some(state);
+        self
+    }
+
+    pub fn with_service_tier(mut self, tier: ServiceTier) -> Self {
+        self.service_tier = (!tier.is_standard()).then(|| tier.as_str().into());
         self
     }
 
@@ -804,6 +825,9 @@ impl AdvanceNotice {
         }
         map.insert(headers::EST_TOKENS.into(), self.est_tokens.to_string());
         map.insert(headers::MODEL.into(), self.model.clone());
+        if let Some(tier) = &self.service_tier {
+            map.insert(headers::SERVICE_TIER.into(), tier.clone());
+        }
         if let Some(window) = self.window {
             map.insert(headers::WINDOW.into(), window.to_string());
         }
@@ -856,6 +880,7 @@ impl AdvanceNotice {
             events,
             est_tokens: decimal(required(map, headers::EST_TOKENS)?, headers::EST_TOKENS)?,
             model: required(map, headers::MODEL)?.to_owned(),
+            service_tier: map.get(headers::SERVICE_TIER).cloned(),
             window: optional(map, headers::WINDOW)?
                 .map(|value| decimal(value, headers::WINDOW))
                 .transpose()?,
@@ -879,12 +904,25 @@ impl AdvanceNotice {
             history_edit_cost: optional(map, headers::HISTORY_EDIT_COST)?
                 .map(HistoryEditCost::parse),
         };
-        notice.check()?;
+        notice.check_fields()?;
         Ok(notice)
     }
 
-    /// Check every rule a built or decoded notice must meet.
+    /// Producer validation: emit only known levels. Readers use from_headers,
+    /// which retains unknown tier strings and includes their exact digest bytes.
     pub fn check(&self) -> Result<(), NoticeProblem> {
+        if cortexkit_role_llm_runner::service_tier::check_applied(self.service_tier.as_deref())
+            .is_err()
+        {
+            return Err(NoticeProblem::Malformed(headers::SERVICE_TIER));
+        }
+        if self.events.iter().any(|event| matches!(event, Event::ServiceTierChange(tier) if ServiceTier::parse(tier).is_none())) {
+            return Err(NoticeProblem::Malformed(headers::EVENTS));
+        }
+        self.check_fields()
+    }
+
+    fn check_fields(&self) -> Result<(), NoticeProblem> {
         if !is_session_ref(&self.session_ref) {
             return Err(NoticeProblem::Malformed(headers::SESSION_REF));
         }

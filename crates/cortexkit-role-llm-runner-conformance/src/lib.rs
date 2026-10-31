@@ -115,6 +115,7 @@ mod route;
 mod run_parameters;
 mod run_usage;
 mod runner;
+mod service_tier;
 mod session_change;
 mod session_retention;
 mod session_usage;

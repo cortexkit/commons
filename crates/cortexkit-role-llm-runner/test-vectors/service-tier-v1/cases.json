@@ -1,0 +1,52 @@
+{
+  "describe_valid": [
+    {"openai.responses":{"levels":["fast","ultrafast"],"served":"reported"}},
+    {"openai.chatgpt_responses":{"levels":["fast"],"served":"unknown"}},
+    {}
+  ],
+  "describe_refused": [
+    {"openai.responses":{"levels":[],"served":"reported"}},
+    {"openai.responses":{"levels":["standard"],"served":"reported"}},
+    {"openai.responses":{"levels":["fast","fast"],"served":"unknown"}},
+    {"openai.responses":{"levels":["rapid"],"served":"reported"}},
+    {"openai.responses":{"levels":["fast"],"served":"guessed"}},
+    {"responses":{"levels":["fast"],"served":"reported"}}
+  ],
+  "sends": [
+    {"prompt":"hi","send_id":"standard","service_tier":"standard"},
+    {"prompt":"hi","send_id":"fast","service_tier":"fast"},
+    {"prompt":"hi","send_id":"ultrafast","service_tier":"ultrafast"},
+    {"prompt":"hi","send_id":"absent"}
+  ],
+  "refusals": [
+    {"code":"invalid_params","detail":{"field":"service_tier","reason":"unsupported_tier"}},
+    {"code":"invalid_params","detail":{"field":"service_tier","reason":"run_tier_fixed"}}
+  ],
+  "usage": [
+    {"service_tier_applied":"fast"},
+    {"service_tier_applied":"fast","service_tier_served":"fast"},
+    {"service_tier_applied":"ultrafast","service_tier_served":"provider-special"},
+    {"service_tier_served":"standard"},
+    {}
+  ],
+  "ride": {"session_ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cause":"service_tier_change","service_tier":"fast","deadline_ms":1000},
+  "notice_without": {
+    "session_ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "seq":"1",
+    "lineage_id":"lineage",
+    "through_ordinal":"1",
+    "through_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "est_tokens":"10",
+    "model":"example-model"
+  },
+  "notice_with": {
+    "session_ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "seq":"1",
+    "lineage_id":"lineage",
+    "through_ordinal":"1",
+    "through_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "est_tokens":"10",
+    "model":"example-model",
+    "service_tier":"fast"
+  }
+}

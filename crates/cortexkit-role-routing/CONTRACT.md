@@ -558,6 +558,55 @@ This section binds a provider declaring `select_hold_control` (§4).
   decision. A `route.account_for` naming that decision applies it too
   (§9.1).
 
+### 5.5 `service_tier`: provider service levels
+
+- [pinned] A router declares the optional `service_tier` group in
+  `role.describe.capabilities`. A caller sends `route.select.service_tier`
+  and either tier member in report usage **only** to a router declaring
+  that group. A non-declaring older router does not know the select member
+  and could otherwise silently answer standard. A new decoder refuses an
+  undeclared select member by name. Report usage remains strict: 0.5.5
+  accepts the two defined members, and still refuses every other unknown
+  member. The capability gate protects older strict report readers.
+- [pinned] `route.select` gains optional `service_tier`: `standard`, `fast`
+  or `ultrafast`, with absence meaning standard. Only accounts whose plans
+  include the tier are eligible. Plan inclusion is the router's knowledge;
+  this contract does not prescribe where plans come from. When no eligible
+  account can serve at the requested level, try `ultrafast` then `fast` then
+  `standard`, starting at the requested level and never upgrading it. A
+  decision records `service_tier_chosen`. An explicit tier request carries
+  that value in the answer, including a fallback to standard. Without a tier
+  request, standard may be omitted to retain existing answer bytes. A runner
+  receiving the decision applies the chosen level, never the original level
+  that the router fell back from; account admission for the decision also
+  honours that level's plan eligibility.
+- [pinned] Report usage gains optional `service_tier_applied` and
+  `service_tier_served`. Applied is the abstract level actually requested,
+  present for non-standard and omitted for standard. Served is present only
+  on a reported wire: a runner discovery entry with `served: "reported"`,
+  permitting metadata only when that response states it (runner CONTRACT §9.3.2).
+  Map known values
+  to `standard`, `fast` or `ultrafast`, otherwise keep the value verbatim.
+  Never copy applied into served. Prefer a provider-stated served tier; its
+  price stays unconfirmed if that tier or its rate is unrecognised. Without a
+  served statement, applied gives only an unconfirmed estimate; absent applied
+  means standard. Keep unfamiliar strings rather than inventing a rate.
+  Both new members are omitted when absent, preserving today's report bytes.
+
+- [pinned] Requests use routing's local `ServiceTier` enum. Unknown select
+  levels are refused `invalid_request`, detail
+  `{field: "service_tier", reason: "unsupported_tier"}`, not as a generic
+  decode error. All tier values in records, including `service_tier_chosen`
+  and report usage, are strings: readers preserve unfamiliar levels. Producers
+  use `ServiceTier::as_str()` and producer-side validation of the known level
+  set; applied usage permits only `fast`/`ultrafast`, with standard omitted.
+  `select::check_answer` is stricter than record decoding: it also refuses an
+  unrecognised `service_tier_chosen` with `AnswerProblem::ServiceTier`, as well
+  as a missing chosen level on an explicit request or an upgrade. Strict report
+  member names remain unchanged; accepting a new level is not accepting a new
+  member. Drift tests compare request spellings and the wire API list against
+  the runner contract, which is a dev-dependency only.
+
 ## 6. Decisions
 
 - [pinned] A decision is bound to the selecting `(principal, consumer)`.

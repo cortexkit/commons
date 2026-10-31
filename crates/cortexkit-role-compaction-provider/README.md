@@ -84,3 +84,21 @@ thought signature, no provider-state signature on text, and so no
 `signature` kind, and an `owned-broca` page serves a text-with-state part as
 plain text, so its provider-state signature is never checked there. Without a profile the probe serves the generic transcript of
 0.7.3, with its `text_with_state` in the real `gemini` provider-state shape.
+
+## Service-tier changes
+
+`service_tier_change` rides carry the new applied `service_tier`, including a
+return to `standard`, as account-change rides carry an account label. They use
+model-change fold and timing rules: a cache-busting tier change lets a compaction
+provider land held edits before the first changed-tier request. Notice conditions
+include the next applied level beside model, omitted for standard and covered by
+the digest. **Readers first:** a compaction provider adopts 0.7.12 before any
+runner sends a non-standard level; an older provider accepts the unknown ride
+cause but computes notice digests without the new header. See CONTRACT §8.
+
+Notices, tier-change events and rides retain tier strings verbatim on read,
+including unfamiliar levels. Notice digests include the exact retained header.
+`AdvanceNotice::check` and `RideRequest::check` are producer-side checks of known
+levels; notice decoding does not run those tier restrictions.
+Ride producers must use a recognised level on `service_tier_change`; readers
+must not use the producer check to reject a newer record's level.

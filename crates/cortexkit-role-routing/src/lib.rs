@@ -42,6 +42,7 @@ pub mod errors;
 pub mod observe;
 pub mod report;
 pub mod select;
+pub mod service_tier;
 pub mod spellings;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
@@ -100,6 +101,9 @@ pub const RUNNER_OPS: &[&str] = &[ops::ROUTE_ACCOUNT_FOR, ops::ROUTE_ACCOUNT_OBS
 /// A caller sends a group's members only to a provider that declares the
 /// group; a provider that does not declare it refuses them as unknown.
 pub mod capabilities {
+    /// Tier-aware selection and tier metadata in report usage. A caller must
+    /// check this group before sending any of those members to a router.
+    pub const SERVICE_TIER: &str = "service_tier";
     /// `route.select` reads the caller's `hold_ok` and `hold_wait_max_s`.
     pub const SELECT_HOLD_CONTROL: &str = "select_hold_control";
 
@@ -118,6 +122,7 @@ pub mod capabilities {
 
     /// Every group this version defines.
     pub const KNOWN: &[&str] = &[
+        SERVICE_TIER,
         SELECT_HOLD_CONTROL,
         SELECT_HARNESS,
         SELECT_PREFER,

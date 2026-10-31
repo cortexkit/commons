@@ -242,7 +242,7 @@ the session and freezes that plan for use.
   `ride::MAX_RIDE_WAIT_MS`; added in 0.5.1,
   `SetupRequest::with_ride_wait_max_ms`) is the longest this runner can
   hold a step for a rewrite ride (cause `ttl_expired`, `model_change`,
-  `account_change`, `surface_change` or `chain_reset`, §8). Absent means
+  `account_change`, `service_tier_change`, `surface_change` or `chain_reset`, §8). Absent means
   the runner does not honour a
   provider-set ride wait. It declares runner support in the request, as
   `view_apply` does; a provider that predates the member ignores it (§14).
@@ -556,6 +556,7 @@ provider.
 | `est_tokens` | yes | the runner's estimate, in tokens, of its next request under its current view plus the messages after it |
 | `window` | no | the current model's context window in tokens; omitted when unknown |
 | `model` | yes | the current model id: 1 to 256 bytes, printable ASCII, no space |
+| `service_tier` | no | next request's applied level as a string; producers send `fast` or `ultrafast`, omitting standard; readers keep unknown values and adopt 0.7.12 before a runner sends a non-standard tier |
 | `last_usage` | no | the last response's measured usage, `<input>:<cache_read>:<cache_write>:<output>`; omitted before the first response |
 | `first_ordinal` | no | the current lineage's first ordinal (`llm-runner/v1`'s `session.head.first_ordinal`), at most one above `through_ordinal` |
 | `reasoning_pruned` | no | the session's prune state when the notice was recorded, `<generation>:<through_ordinal>:<at_ms>`, as `llm-runner/v1`'s `session.head.reasoning_pruned` reports it (§4); `generation` at least 1; sent only by a runner declaring `archive_prunes_reasoning`, for a session it has pruned. A convenience copy: `session.head` stays the authority |
@@ -582,6 +583,7 @@ provider.
 | Token | Meaning |
 |---|---|
 | `model_change` | the session's model changed |
+| `service_tier_change:<level>` | the applied provider level changed; the new level is `standard`, `fast` or `ultrafast`, sent after every change, ridden or not (§8) |
 | `account_change:<account>` | the session's provider account changed; sent in the next notice after every switch, whether the runner rode for it or not (§8). The required account label is 1–64 bytes of `[A-Za-z0-9._-]`, opaque and stable per account; it must never be or contain a credential, token, email address or anything that identifies the person. Equal labels identify the same provider prompt cache, and different labels identify different caches. Providers may compare labels but never interpret their content (§8) |
 | `surface_change` | the frozen system text or tool surface changed |
 | `ttl_expired` | the prompt cache expired |
@@ -626,7 +628,7 @@ provider.
 - [pinned] Size bound: the headers this contract defines total at most
   4,096 bytes (`MAX_NOTICE_HEADER_BYTES`), counting every name's and value's
   length as the bus counts a message's headers. The per-value bounds keep
-  every well-formed notice at or under 3,432 bytes; a runner with more events
+  known-tier producer notices at or under 3,453 bytes; a runner with more events
   than fit splits them across consecutive notices.
 - [pinned] Notice digest (`AdvanceNotice::digest`, `notice::notice_digest`):
   lowercase hexadecimal SHA-256 over a sequence of frames, each an 8-byte
@@ -1137,10 +1139,10 @@ provider.
 
 ## 8. Ride request and ceiling
 
-- [pinned] `compaction.ride {session_ref, cause, deadline_ms, account?, overflow?}`
+- [pinned] `compaction.ride {session_ref, cause, deadline_ms, account?, service_tier?, overflow?}`
   (`ride::RideRequest`) is a synchronous call on the compaction route. The
   runner sends it only when its prefix is being rewritten anyway (`cause`
-  `ttl_expired`, `model_change`, `account_change`, `surface_change` or
+  `ttl_expired`, `model_change`, `account_change`, `service_tier_change`, `surface_change` or
   `chain_reset`), or
   when a request
   reached the ceiling (`cause` `ceiling`, below). `cause` decodes open
@@ -1165,6 +1167,7 @@ provider.
 | `ttl_expired` | the prompt cache expired under the lifetime rules of §8.1 |
 | `model_change` | the session's model changed |
 | `account_change` | the runner knows the next request will use another provider account, as detailed below |
+| `service_tier_change` | before rendering, the runner knows the next request's applied level differs from the previous step's level; carries the new `service_tier`, as detailed below |
 | `surface_change` | the frozen system text or tool surface changed |
 | `chain_reset` | before rendering the step, the runner already knows the next request will carry the full input whatever the provider does; uses the same bounded wait and answers as `model_change`, but does not require its model-specific `cache_ttl` refresh |
 | `ceiling` | the request reached the ceiling or overflowed, as detailed below |
@@ -1209,6 +1212,41 @@ provider.
 - [pinned] No new rollout gate is needed for `account_change`: an older
   provider already decodes an unknown cause and answers `nothing`, ignores
   unknown request fields, and ignores an unknown notice event token.
+- [pinned] On `service_tier_change`, `service_tier` is required and is the
+  new applied level: `standard`, `fast` or `ultrafast`. Like `account` on
+  `account_change`, the optional field is omitted when absent and ignored
+  on other causes; `RideRequest::check` refuses a missing or malformed level
+  by name (`service_tier`), and `RideRequest::service_tier` reads it only on
+  that cause. Before rendering, the runner rides before the first request
+  whose applied level differs from the previous step in the session,
+  including a return to standard. No previous step means no change. Repeating
+  the same level never needs a fold. A tier change is cache-busting, so the
+  provider may land held edits in that same prefix rebuild. Fold and timing
+  follow `model_change`: the same step boundary, bounded wait, view/nothing
+  answers, current-model cache TTL information when available, late-answer
+  handling and rule that a rewrite ride never ends a run apply. Every switch
+  is also reported as `service_tier_change:<level>` in the next notice,
+  ridden or not, as account switches are reported with their labels.
+- [pinned] Notice conditions carry optional `service_tier` next to `model`:
+  the next request's applied abstract level, `fast` or `ultrafast`, absent
+  for standard. It is an ASCII header and is included in `headers::NOTICE`
+  in ascending byte order, covered by the notice digest just like `model`.
+  Sessions that never set a tier retain identical notice bytes and digests.
+  **Readers first:** a compaction provider adopts 0.7.12 before any runner
+  sends a level other than standard. An older provider accepts an unknown
+  ride cause and ignores its extra member, but its notice digest omits the
+  newly defined header. This rollout requirement is for the notice, not a
+  closed ride-cause decoder.
+- [pinned] Tier values on notices, tier-change event tokens and rides are
+  strings. Readers keep unknown levels; `AdvanceNotice::from_headers` retains
+  and hashes the header verbatim, without running producer-only tier checks.
+  `AdvanceNotice::check` restricts producers to `fast`/`ultrafast` on the
+  condition and also permits `standard` on the change event. `RideRequest`
+  decoding preserves the raw string; its producer-side `check` permits
+  `standard`, `fast` and `ultrafast` for the change cause. A reader must not
+  use that producer check or the known-level accessor to reject a newer record
+  with an unfamiliar raw level. Existing
+  header-size and event-token grammar rules still apply.
 - [pinned] Optional `overflow: {reported_limit_tokens?}` (`ride::Overflow`)
   is allowed only with `cause: "ceiling"`. Present, it says the ride follows a
   model provider error stating that the request exceeded the model's context

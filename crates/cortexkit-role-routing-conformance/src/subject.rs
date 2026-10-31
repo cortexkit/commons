@@ -220,6 +220,17 @@ pub trait RoutingSubject: Send + Sync {
     /// principal is not.
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String>;
 
+    /// Test-only plan knowledge for the configured account ids. Standard is
+    /// always included; the list supplies non-standard inclusions. This hook
+    /// does not prescribe where a router gets plans in production. Called only
+    /// for the service_tier group; a declaring router must support the fixture.
+    async fn configure_service_tiers(
+        &self,
+        _plans: &std::collections::BTreeMap<String, Vec<crate::wire::service_tier::ServiceTier>>,
+    ) -> Result<(), String> {
+        Err("service-tier plan fixtures are not supported by this subject".into())
+    }
+
     /// Supply module entries through the daemon catalog, never request params.
     /// Older adapters fail declaration checks explicitly until they implement
     /// this hook; checks that use only the original catalog need no change.

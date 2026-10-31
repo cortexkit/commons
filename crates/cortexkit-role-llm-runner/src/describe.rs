@@ -139,6 +139,9 @@ pub struct RoleDescribe {
     /// kept; a consumer that doesn't recognise it infers nothing from it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step_hooks: Option<Vec<String>>,
+    /// Required with `service_tier`: non-standard levels supported per wire API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tiers: Option<crate::service_tier::ServiceTiers>,
 }
 
 /// Hook names a runner lists in [`RoleDescribe::step_hooks`], spelled as the
@@ -320,6 +323,11 @@ impl RoleDescribe {
         self
     }
 
+    pub fn with_service_tiers(mut self, tiers: crate::service_tier::ServiceTiers) -> Self {
+        self.service_tiers = Some(tiers);
+        self
+    }
+
     /// State the `session.read` byte cap.
     pub fn with_max_bytes(mut self, default: u64, maximum: u64) -> Self {
         self.max_bytes = Some(MaxBytes { default, maximum });
@@ -489,6 +497,16 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    if describe.declares(capabilities::SERVICE_TIER) && describe.service_tiers.is_none() {
+        problems.push(DescribeProblem::Undecodable("service_tiers_missing".into()));
+    }
+    if let Some(tiers) = &describe.service_tiers {
+        if let Err(reason) = crate::service_tier::check_service_tiers(tiers) {
+            problems.push(DescribeProblem::Undecodable(format!(
+                "service_tiers_{reason}"
+            )));
+        }
+    }
     if let Some(hooks) = &describe.step_hooks {
         let mut seen = std::collections::BTreeSet::new();
         if hooks.iter().any(|hook| !seen.insert(hook.as_str())) {

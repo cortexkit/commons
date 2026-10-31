@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-compaction-provider"
-version = "0.7.11"
+version = "0.7.12"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",
@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.7.35"
+version = "0.7.36"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.15.40"
+version = "0.15.41"
 dependencies = [
  "async-trait",
  "base64",
@@ -759,8 +759,9 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
+ "cortexkit-role-llm-runner",
  "cortexkit-role-tool-provider",
  "serde",
  "serde_json",
@@ -770,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing-conformance"
-version = "0.7.3"
+version = "0.7.4"
 dependencies = [
  "async-trait",
  "cortexkit-role-routing",
@@ -855,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-usage-steps"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",

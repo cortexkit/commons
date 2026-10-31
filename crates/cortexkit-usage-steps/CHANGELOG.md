@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.3
+
+- Add optional applied and provider-confirmed served service tiers to step rows.
+  A reported wire is a runner discovery entry with `served: "reported"` and
+  permits served metadata only when that response states it (runner CONTRACT §9.3.2).
+  Prefer a provider-stated served tier; the price stays unconfirmed if its tier
+  or rate is unrecognised. Without served, applied is only an unconfirmed estimate,
+  defaulting to standard when absent. Keep unfamiliar strings; never invent a rate.
+- Keep tier records as strings, with dev-only drift checks against runner
+  0.7.36 and producer validation of applied spellings. Existing rows and the closed
+  step-finished bus event keep their bytes when no tier is supplied.
+  Producers emit fast/ultrafast, omit standard and validate with
+  `StepRow::check_closed`; usage-steps needs no runner crate at runtime.
+
 ## 0.2.2
 
 - Clarify that `input` excludes cache reads and writes, matching the runner's

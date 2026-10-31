@@ -18,6 +18,8 @@ use serde_json::{Map, Value};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Capability {
+    /// Provider service levels; the kit checks omitted served metadata on unknown wires.
+    ServiceTier,
     /// In-place pruning of archived reasoning, with the native fixture hooks.
     ArchivePrunesReasoning,
     /// Preset-less system-text admission checked against the daemon catalog.
@@ -149,6 +151,7 @@ impl Capability {
     /// The role groups represented by this enum, in the order of
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
+        Self::ServiceTier,
         Self::ArchivePrunesReasoning,
         Self::SystemTextDefault,
         Self::Attachments,
@@ -212,6 +215,7 @@ impl Capability {
     /// capability.
     pub fn group(self) -> Option<&'static str> {
         Some(match self {
+            Self::ServiceTier => groups::SERVICE_TIER,
             Self::ArchivePrunesReasoning => groups::ARCHIVE_PRUNES_REASONING,
             Self::SystemTextDefault => groups::SYSTEM_TEXT_DEFAULT,
             Self::Attachments => groups::ATTACHMENTS,
@@ -334,8 +338,15 @@ impl ToolResultObservation {
 #[derive(Clone, Debug, Default, PartialEq)]
 #[non_exhaustive]
 pub struct ModelRequestObservation {
+    /// Applied abstract level decoded from the request actually received by
+    /// the model, not inferred from the send or runner's usage.
+    pub service_tier_applied: Option<String>,
+    /// Number of service_tier_change rides received before this request arrives
+    /// at the scripted model provider. Capture both providers' arrivals with a shared counter, as
+    /// for surface_change_rides; None means arrival order cannot be observed.
+    pub service_tier_change_rides: Option<u64>,
     /// Number of `surface_change` rides received for this session before
-    /// this request reached the model. Capture both ingresses with a shared
+    /// this request reached the model. Capture arrivals at both scripted providers with a shared
     /// counter; separate after-the-fact call lists cannot establish ordering.
     /// None when the adapter cannot observe cross-provider arrival order.
     pub surface_change_rides: Option<u64>,
@@ -607,6 +618,25 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Arrange a current route supporting fast but not ultrafast, with served
+    /// unknown, and a scripted model that does not state a served tier. For
+    /// the ride case, attach a compaction provider answering nothing and count
+    /// rides as they arrive at the scripted compaction provider, before each
+    /// request arrives at the scripted model provider. Record the count in
+    /// [`ModelRequestObservation::service_tier_change_rides`].
+    /// The fixed-run refusal case sends again while the first model response is
+    /// held: implement [`LlmRunnerSubject::hold_next_model_step`],
+    /// [`LlmRunnerSubject::await_model_step`] and [`LlmRunnerSubject::release_model_step`]
+    /// so that the run remains active. Do not synthesize
+    /// refusals, usage, or request observations. Return false when the adapter
+    /// cannot arrange this fixture; each affected case is not applicable by name.
+    async fn configure_service_tier(
+        &self,
+        _session: &str,
+        _case: &str,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
     /// Whether the scripted provider can exercise a real terminal error from
     /// [`ScriptedTurn::model_failure`], including fractional retry timing.
     /// Without this fixture, only the head-error comparison with run.status

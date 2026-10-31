@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.41
+
+- Check unsupported-tier refusal before model dispatch, fixed run tiers,
+  tier-change rides before changed requests, and omission of served on wires
+  whose served policy is unknown. Mapping provider-reported served values back
+  to abstract tiers on wires with `served: "reported"` is not checked.
+- Add defaulted `LlmRunnerSubject::configure_service_tier` and named
+  not-applicable outcomes when a
+  runner does not declare tiers or an adapter cannot script them. Faulty
+  runners prove every new check rejects its named contract violation.
+- Capture `ModelRequestObservation::service_tier_change_rides` at arrival at the
+  scripted model provider, counted with arrivals at the scripted compaction provider.
+  The held response uses `LlmRunnerSubject::hold_next_model_step`,
+  `LlmRunnerSubject::await_model_step` and `LlmRunnerSubject::release_model_step`.
+- Pin runner 0.7.36 and compaction-provider 0.7.12.
+
 
 ## 0.15.40
 
@@ -141,7 +157,7 @@
   `session_refresh_tool_outside_host_set_refused` case is not applicable to
   declaring runners. Faulty runners cover mid-run apply, history rewriting
   and old tools reported as a new generation.
-- Add optional model-ingress `surface_change_rides` observations to check
+- Add optional model-request-arrival `surface_change_rides` observations to check
   successful relaunch ride ordering using a shared provider-arrival counter,
   with a faulty runner caught by name. Missing observation support is reported
   as an unchecked rule. The adapter has no host-relaunch failure hook; fallback,

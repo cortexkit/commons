@@ -119,6 +119,14 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("service_tier_unsupported_before_model", &[Queue, RunOps],
+        "an unsupported level is refused with unsupported_tier before any model call"),
+    case("service_tier_run_fixed", &[Queue, RunOps],
+        "a different explicit tier queued or steered into a running run is refused run_tier_fixed"),
+    case("service_tier_ride_before_changed_request", &[Queue, RunOps],
+        "a service_tier_change ride precedes the first changed-tier model request"),
+    case("service_tier_unknown_never_echoed", &[Queue, RunOps],
+        "an unknown-served wire reports applied but never copies it into served"),
     case("archive_pruning_history_cursor", &[Capability::ArchivePrunesReasoning, TranscriptReads, Capability::HostHistory], "A pre-prune cursor stays valid and its later page lists the pruned parts."),
     case("archive_pruning_reopen", &[Capability::ArchivePrunesReasoning, TranscriptReads, Queue], "Reopening continues without restoring or changing pruned history."),
     case("display_own_run_records_model", DISPLAY, "An assistant message driven through the runner's own run carries its recorded model."),

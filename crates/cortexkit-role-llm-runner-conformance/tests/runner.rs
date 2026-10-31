@@ -821,6 +821,13 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    if SERVICE_TIER_CASES.contains(&case)
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "role.describe does not declare service_tier"
+                || reason == "configure_service_tier cannot script this tier fixture")
+    {
+        return;
+    }
     assert_eq!(
         report.outcome(case),
         Some(&CaseOutcome::Passed),
@@ -4408,6 +4415,86 @@ const RUN_PARAMETER_CASES: &[&str] = &[
     "no_tools_offered_to_model",
     "no_tools_later_plan_send_refused",
 ];
+
+const SERVICE_TIER_CASES: &[&str] = &[
+    "service_tier_unsupported_before_model",
+    "service_tier_run_fixed",
+    "service_tier_ride_before_changed_request",
+    "service_tier_unknown_never_echoed",
+];
+
+fn tier_subject(defect: fake::ServiceTierDefect) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        service_tier: defect,
+        ..Defects::default()
+    });
+    subject
+        .capabilities
+        .extend([Capability::ServiceTier, Capability::RunUsage]);
+    subject
+}
+
+#[tokio::test]
+async fn service_tier_contract_and_named_not_applicable_outcomes() {
+    let report = run(&tier_subject(fake::ServiceTierDefect::None)).await;
+    for name in SERVICE_TIER_CASES {
+        assert_passed(&report, name);
+    }
+    assert_none_failed_but(&report, &[]);
+    for subject in [
+        FakeSubject::new(Defects::default()),
+        tier_subject(fake::ServiceTierDefect::NoFixture),
+    ] {
+        let report = run(&subject).await;
+        for name in SERVICE_TIER_CASES {
+            assert!(
+                matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+                "{name}: {}",
+                report.render()
+            );
+        }
+    }
+}
+
+async fn tier_fault(defect: fake::ServiceTierDefect, expected: &str) {
+    let report = run(&tier_subject(defect)).await;
+    let reason = failed(&report, expected);
+    assert!(!reason.is_empty());
+    assert_none_failed_but(&report, &[expected]);
+    for name in SERVICE_TIER_CASES {
+        if *name != expected {
+            assert_passed(&report, name);
+        }
+    }
+}
+
+#[tokio::test]
+async fn service_tier_faulty_runner_dispatches_before_refusal_fails_by_name() {
+    tier_fault(
+        fake::ServiceTierDefect::CallBeforeUnsupportedRefusal,
+        SERVICE_TIER_CASES[0],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn service_tier_faulty_runner_changes_running_tier_fails_by_name() {
+    tier_fault(
+        fake::ServiceTierDefect::ChangeRunTier,
+        SERVICE_TIER_CASES[1],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn service_tier_faulty_runner_rides_after_request_fails_by_name() {
+    tier_fault(fake::ServiceTierDefect::LateRide, SERVICE_TIER_CASES[2]).await;
+}
+
+#[tokio::test]
+async fn service_tier_faulty_runner_echoes_applied_as_served_fails_by_name() {
+    tier_fault(fake::ServiceTierDefect::EchoServed, SERVICE_TIER_CASES[3]).await;
+}
 
 fn run_parameters(defects: Defects) -> FakeSubject {
     let mut subject = FakeSubject::new(defects);

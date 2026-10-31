@@ -136,6 +136,14 @@ pub struct ConcurrencySlot {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SelectRequest {
+    /// Send only to a router declaring `service_tier`. Absent means standard.
+    /// Only accounts whose plans include the chosen tier are eligible.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::service_tier::deserialize_request"
+    )]
+    pub service_tier: Option<crate::service_tier::ServiceTier>,
     /// A consumer id the provider knows from configuration or declarations.
     pub consumer: String,
     pub requirements: Requirements,
@@ -210,6 +218,7 @@ impl SelectRequest {
     pub fn new(consumer: impl Into<String>, requirements: Requirements) -> Self {
         Self {
             consumer: consumer.into(),
+            service_tier: None,
             requirements,
             pin: None,
             exclude: None,
@@ -230,6 +239,11 @@ impl SelectRequest {
 
     pub fn with_harness(mut self, harness: impl Into<String>) -> Self {
         self.harness = Some(harness.into());
+        self
+    }
+
+    pub fn with_service_tier(mut self, tier: crate::service_tier::ServiceTier) -> Self {
+        self.service_tier = Some(tier);
         self
     }
 
@@ -446,6 +460,11 @@ impl RunnerRef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SelectAnswer {
+    /// The level selected after ultrafast -> fast -> standard fallback. Present
+    /// for an explicit tier request, including a fallback to standard. Producers
+    /// use ServiceTier::as_str; readers retain unfamiliar record levels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_chosen: Option<String>,
     pub decision_id: String,
     pub route: RouteRef,
     pub runner: RunnerRef,
@@ -480,6 +499,7 @@ impl SelectAnswer {
     ) -> Self {
         Self {
             decision_id: decision_id.into(),
+            service_tier_chosen: None,
             route,
             runner,
             context_window,
@@ -494,6 +514,11 @@ impl SelectAnswer {
     /// Set the provider's explanation object.
     pub fn with_detail(mut self, detail: Value) -> Self {
         self.detail = Some(detail);
+        self
+    }
+
+    pub fn with_service_tier_chosen(mut self, tier: crate::service_tier::ServiceTier) -> Self {
+        self.service_tier_chosen = Some(tier.as_str().into());
         self
     }
 
@@ -532,6 +557,24 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
 ) -> Result<SelectRequest, Refusal> {
     let members = Members::of(params)?;
     let consumer = members.text("consumer", None)?;
+    let service_tier = crate::service_tier::parse_request(members.object.get("service_tier"))
+        .map_err(|reason| {
+            let mut refusal = members.refuse("service_tier", reason);
+            refusal
+                .detail
+                .insert("reason".into(), Value::String(reason.into()));
+            refusal
+        })?;
+    if service_tier.is_some()
+        && !capabilities
+            .iter()
+            .any(|capability| capability.as_ref() == crate::capabilities::SERVICE_TIER)
+    {
+        return Err(members.refuse(
+            "service_tier",
+            "service_tier requires the service_tier group",
+        ));
+    }
     let requirements = parse_requirements(members.object.get("requirements"))?;
     let pin = members.optional_text("pin", None)?;
     if let Some(pin) = &pin {
@@ -691,6 +734,7 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
     }
     Ok(SelectRequest {
         consumer,
+        service_tier,
         requirements,
         pin: pin.clone(),
         exclude,
@@ -776,6 +820,10 @@ pub(crate) fn parse_requirements(value: Option<&Value>) -> Result<Requirements, 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AnswerProblem {
+    /// An explicit tier request lacks its chosen level, the chosen level is
+    /// unrecognised, or the answer upgrades the request. This check is stricter
+    /// than record decoding, which retains unfamiliar strings.
+    ServiceTier,
     /// The answer's runner is not one of the request's `runners`.
     RunnerNotListed(String),
     /// The answer's route key is in the request's `exclude`.
@@ -797,6 +845,10 @@ pub enum AnswerProblem {
 impl std::fmt::Display for AnswerProblem {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ServiceTier => write!(
+                f,
+                "service_tier_chosen is missing, unrecognised or exceeds the requested tier"
+            ),
             Self::RunnerNotListed(runner) => {
                 write!(f, "runner {runner:?} is not one of the request's runners")
             }
@@ -835,8 +887,17 @@ impl std::fmt::Display for AnswerProblem {
 /// caller listed, the route is not one it excluded nor from a provider it
 /// excluded, the explanation is within its bound, and a pinned request is
 /// answered with a `pin_outcome` (with `pin_reason` in `detail` on
-/// `fell_back`).
+/// `fell_back`). A chosen tier must be recognised and may not upgrade the
+/// request. This is stricter than record decoding, which retains unknown tiers.
 pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<(), AnswerProblem> {
+    if (request.service_tier.is_some() && answer.service_tier_chosen.is_none())
+        || answer.service_tier_chosen.as_deref().is_some_and(|tier| {
+            crate::service_tier::ServiceTier::parse(tier)
+                .is_none_or(|tier| tier > request.service_tier.unwrap_or_default())
+        })
+    {
+        return Err(AnswerProblem::ServiceTier);
+    }
     if let Some(runners) = &request.runners {
         if !runners.contains(&answer.runner.module) {
             return Err(AnswerProblem::RunnerNotListed(answer.runner.module.clone()));

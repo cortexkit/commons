@@ -98,7 +98,7 @@ pub struct CompactionSetupIdentity {
 
 /// The actual bind identity of the runner-to-provider route that delivered
 /// Setup. Its harness may be generic and its session may be empty on a shared
-/// project route; adapters observe these fields at provider ingress.
+/// project route; adapters observe these fields at arrival at the scripted provider.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompactionRouteIdentity {
     /// The bind harness on the route that delivered Setup.

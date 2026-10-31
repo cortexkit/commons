@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.36
+
+- Add opt-in provider service levels, validated per-wire support in discovery,
+  fixed per-run sends, and applied versus provider-confirmed served usage.
+- Keep record levels open strings and request levels strict, with named
+  unsupported-tier refusals. Export the wire API list for cross-crate drift checks.
+- Preserve explicit standard on sends; only an absent request member is omitted.
+  Absence means standard when starting a run and inherits a running run's tier.
+  Callers that never set the field retain their bytes; older runners ignore it.
+- Keep token-only `StepUsage` Copy; owned step tier metadata and a tier-aware
+  aggregation helper retain only unanimous reported served values for a run.
+- Specify cache-busting tier-change rides and the readers-first notice rollout.
+  The closed step-finished bus event is unchanged; tiers live in usage rows.
+
 
 ## 0.7.35
 

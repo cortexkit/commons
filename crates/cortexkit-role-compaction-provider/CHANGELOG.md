@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.12
+
+- Add service-tier-change rides carrying the new applied level and optional
+  notice service-tier conditions, omitted for standard and covered by the digest.
+- Preserve unknown tier strings on read, hashing notice values verbatim, while
+  producer-side checks enforce the current level set.
+  Readers must not use the recognised-level ride producer check to reject newer records.
+- Require providers to adopt this release before runners send a non-standard
+  tier. Raise the shared runner contract requirement to 0.7.36.
+
 ## 0.7.11
 
 - Add opt-in Setup `view_features` tokens `truncate` and `tag_bytes_edits`,

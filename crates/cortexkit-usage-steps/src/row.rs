@@ -46,6 +46,21 @@ pub struct StepRow {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Applied abstract level. Producers emit fast/ultrafast, omit standard and
+    /// validate with [`crate::StepRow::check_closed`]. A runner may obtain strings
+    /// from `cortexkit_role_llm_runner::service_tier::ServiceTier::as_str`;
+    /// usage-steps needs no runner crate at runtime. Readers keep unfamiliar strings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_applied: Option<String>,
+    /// Provider-stated served tier on a reported wire: a runner discovery entry
+    /// with `served: "reported"`, permitting metadata only when that response
+    /// states it (runner CONTRACT §9.3.2). Map known levels; keep others verbatim.
+    /// Never copy applied into served. Prefer a provider-stated served tier;
+    /// its price is unconfirmed if the tier or its rate is unrecognised. Without
+    /// a served statement, applied is only an unconfirmed estimate, defaulting
+    /// to standard when absent. Keep unfamiliar strings; never invent a rate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_served: Option<String>,
     /// Input tokens neither read from nor written to the prompt cache.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<u64>,
@@ -161,10 +176,12 @@ pub fn live_row_identity(
     }
 }
 
-/// A JSON value that is not within a published v1 member list.
+/// A producer's JSON value outside a published member list or applied-tier set.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum NotClosed {
+    /// A producer emitted an applied tier outside the published level set.
+    InvalidServiceTier,
     /// The value checked is not a JSON object.
     NotAnObject { object: &'static str },
     /// The object carries a member outside its published list.
@@ -177,6 +194,7 @@ pub enum NotClosed {
 impl std::fmt::Display for NotClosed {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidServiceTier => write!(f, "row carries unsupported service_tier_applied"),
             Self::NotAnObject { object } => write!(f, "{object} is not a JSON object"),
             Self::UnknownMember { object, member } => {
                 write!(f, "{object} carries unknown member `{member}`")
@@ -203,6 +221,19 @@ pub(crate) fn check_members(
 }
 
 impl StepRow {
+    /// Applied tier spellings producers may emit; standard is omitted.
+    pub const SERVICE_TIER_APPLIED_LEVELS: &'static [&'static str] = &["fast", "ultrafast"];
+    pub fn with_service_tier_applied(mut self, tier: impl Into<String>) -> Self {
+        let tier = tier.into();
+        self.service_tier_applied = (tier != "standard").then_some(tier);
+        self
+    }
+
+    /// Set only from a provider response on a reported wire, never from applied.
+    pub fn with_service_tier_served(mut self, tier: impl Into<String>) -> Self {
+        self.service_tier_served = Some(tier.into());
+        self
+    }
     /// Members every row carries.
     pub const REQUIRED_MEMBERS: &'static [&'static str] = &[
         "cursor",
@@ -221,6 +252,8 @@ impl StepRow {
         "run_id",
         "provider",
         "model",
+        "service_tier_applied",
+        "service_tier_served",
         "input",
         "cache_read",
         "cache_write",
@@ -258,6 +291,8 @@ impl StepRow {
             occurred_at_ms,
             provider: None,
             model: None,
+            service_tier_applied: None,
+            service_tier_served: None,
             input: None,
             cache_read: None,
             cache_write: None,
@@ -281,7 +316,8 @@ impl StepRow {
         (&self.harness, &self.step_ref)
     }
 
-    /// Reports a member outside the published v1 row list, by name. For the
+    /// Reports a member outside the published v1 row list, or an applied tier
+    /// other than fast/ultrafast. For the
     /// provider's own tests: whatever it emits must stay within the published
     /// list until this crate updates it. Readers ignore unknown members
     /// instead, so decoding never calls this.
@@ -291,7 +327,15 @@ impl StepRow {
             .chain(Self::OPTIONAL_MEMBERS)
             .copied()
             .collect();
-        check_members("row", value, &allowed)
+        check_members("row", value, &allowed)?;
+        if value.get("service_tier_applied").is_some_and(|tier| {
+            !tier
+                .as_str()
+                .is_some_and(|tier| Self::SERVICE_TIER_APPLIED_LEVELS.contains(&tier))
+        }) {
+            return Err(NotClosed::InvalidServiceTier);
+        }
+        Ok(())
     }
 
     /// Reports a row whose `reasoning` exceeds its `output`, naming it by

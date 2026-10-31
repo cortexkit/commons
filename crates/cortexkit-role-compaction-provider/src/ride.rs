@@ -2,7 +2,7 @@
 //! (CONTRACT.md §8).
 //!
 //! The runner sends it only when its prefix is being rewritten anyway (the
-//! prompt cache expired, the model or account changed, the system text or tool
+//! prompt cache expired, the model, account or service tier changed, the system text or tool
 //! surface changed, or a response chain must restart), or when a request
 //! reached the Setup ceiling. The provider
 //! answers with a view or with nothing; a missed deadline counts as nothing.
@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::{notice::is_session_ref, view::CompactionView};
 
 /// Upper bound on the runner's own `deadline_ms` for the rewrite causes
-/// `ttl_expired`, `model_change`, `account_change`, `surface_change` and
+/// `ttl_expired`, `model_change`, `account_change`, `service_tier_change`, `surface_change` and
 /// `chain_reset` when
 /// Setup's answer set no `ride_wait_ms`: without the provider's word, such a
 /// ride stays short, because it sits in front of a request the user is
@@ -44,6 +44,8 @@ pub enum RideCause {
     /// `account_change`: the runner knows the next request's provider account
     /// differs from the previous request's account before sending it.
     AccountChange,
+    /// The next request changes the applied provider level, busting the cache.
+    ServiceTierChange,
     /// `surface_change`: the frozen system text or tool surface changed.
     SurfaceChange,
     /// `chain_reset`: before rendering, the runner already knows the next
@@ -67,6 +69,7 @@ impl RideCause {
             Self::TtlExpired => "ttl_expired",
             Self::ModelChange => "model_change",
             Self::AccountChange => "account_change",
+            Self::ServiceTierChange => "service_tier_change",
             Self::SurfaceChange => "surface_change",
             Self::ChainReset => "chain_reset",
             Self::Ceiling => "ceiling",
@@ -79,6 +82,7 @@ impl RideCause {
             "ttl_expired" => Self::TtlExpired,
             "model_change" => Self::ModelChange,
             "account_change" => Self::AccountChange,
+            "service_tier_change" => Self::ServiceTierChange,
             "surface_change" => Self::SurfaceChange,
             "chain_reset" => Self::ChainReset,
             "ceiling" => Self::Ceiling,
@@ -113,6 +117,10 @@ pub struct RideRequest {
     /// different caches. Read it with [`RideRequest::account`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
+    /// Required on `service_tier_change`, including a return to standard;
+    /// ignored on other causes. Omitted when absent, like `account`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
     /// How long the runner waits for the answer, in milliseconds from when it
     /// sent the request. Above 0 and at most [`MAX_RIDE_WAIT_MS`]. For a
     /// rewrite cause it is Setup's `ride_wait_ms` when the answer carried
@@ -162,6 +170,7 @@ impl Overflow {
 pub enum RideProblem {
     SessionRef,
     Account,
+    ServiceTier,
     DeadlineOutOfRange,
 }
 
@@ -170,6 +179,7 @@ impl RideProblem {
         match self {
             Self::SessionRef => "session_ref",
             Self::Account => "account",
+            Self::ServiceTier => "service_tier",
             Self::DeadlineOutOfRange => "deadline_out_of_range",
         }
     }
@@ -181,6 +191,7 @@ impl RideRequest {
             session_ref: session_ref.into(),
             cause,
             account: None,
+            service_tier: None,
             deadline_ms,
             overflow: None,
         }
@@ -190,6 +201,25 @@ impl RideRequest {
     pub fn with_account(mut self, account: impl Into<String>) -> Self {
         self.account = Some(account.into());
         self
+    }
+
+    pub fn with_service_tier(
+        mut self,
+        tier: cortexkit_role_llm_runner::service_tier::ServiceTier,
+    ) -> Self {
+        self.service_tier = Some(tier.as_str().into());
+        self
+    }
+
+    /// The known level, for producer validation. The raw string field retains
+    /// an unfamiliar level when reading a newer record.
+    pub fn service_tier(&self) -> Option<cortexkit_role_llm_runner::service_tier::ServiceTier> {
+        if self.cause != RideCause::ServiceTierChange {
+            return None;
+        }
+        self.service_tier
+            .as_deref()
+            .and_then(cortexkit_role_llm_runner::service_tier::ServiceTier::parse)
     }
 
     /// The validated account label, only for `account_change`. A malformed or
@@ -224,12 +254,17 @@ impl RideRequest {
     /// not carry, so the per-session bound is the runner's to keep.
     /// `overflow` is never a reason to fail: on a cause other than `ceiling`
     /// it is ignored. `account` is ignored on causes other than `account_change`.
+    /// Producers must use a recognised `service_tier` on `service_tier_change`.
+    /// Readers must not use this producer check to reject a newer record's tier.
     pub fn check(&self) -> Result<(), RideProblem> {
         if !is_session_ref(&self.session_ref) {
             return Err(RideProblem::SessionRef);
         }
         if self.cause == RideCause::AccountChange && self.account().is_none() {
             return Err(RideProblem::Account);
+        }
+        if self.cause == RideCause::ServiceTierChange && self.service_tier().is_none() {
+            return Err(RideProblem::ServiceTier);
         }
         if self.deadline_ms == 0 || self.deadline_ms > MAX_RIDE_WAIT_MS {
             return Err(RideProblem::DeadlineOutOfRange);

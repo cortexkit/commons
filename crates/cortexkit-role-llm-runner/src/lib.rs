@@ -43,6 +43,7 @@ pub mod run;
 pub mod send;
 pub mod send_status;
 pub mod serializer_profile;
+pub mod service_tier;
 pub mod session_change;
 pub mod session_ref;
 pub mod session_retention;
@@ -164,6 +165,8 @@ pub const SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY: &str = "system-text-default/v
 /// the session-level capabilities a session's admission reply or baseline
 /// declares.
 pub mod capabilities {
+    /// Provider service levels, route support and truthful served-tier usage.
+    pub const SERVICE_TIER: &str = "service_tier";
     use crate::ops;
 
     /// In-place pruning of declared reasoning kinds in archived sessions at rest.
@@ -359,6 +362,7 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (SERVICE_TIER, &[ops::SESSION_SEND]),
         (
             SESSION_RETENTION,
             &[ops::SESSION_SEND, ops::SESSION_HEAD, ops::SESSION_RELEASE],

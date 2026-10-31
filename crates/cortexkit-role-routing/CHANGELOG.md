@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.5
+
+- Add the service-tier capability group, plan-eligible selection with ordered
+  fallback, and the chosen level on tier-aware decisions.
+- Accept applied and served tier metadata in strict report usage. Callers send
+  these new members only after discovery declares the group, protecting older
+  readers. All other unknown usage members remain refused.
+  A reported wire is a runner discovery entry with `served: "reported"`, permitting
+  metadata only when that response states it (runner CONTRACT §9.3.2). Prefer a
+  provider-stated served tier, with price unconfirmed if its tier or rate is
+  unrecognised. Without served, applied is only an unconfirmed estimate, defaulting
+  to standard when absent. Keep unfamiliar strings; never invent a rate.
+- Keep a local request-level enum with dev-only drift checks against runner
+  0.7.36. Record tier strings preserve unknown levels; retain old absent-field bytes.
+- The answer checker is stricter than record decoding: `AnswerProblem::ServiceTier`
+  also rejects an unrecognised chosen tier, besides missing choices or upgrades.
+
 ## 0.5.4
 
 - Give runner pair values one shared spelling each (CONTRACT §1.2), so a

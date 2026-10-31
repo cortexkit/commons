@@ -214,6 +214,34 @@ Readers still decode a row whose `reasoning` exceeds its `output`; such a row
 breaks this rule on the provider's side. `StepRow::check_counts` names it, for
 the provider's own tests.
 
+### Provider service tiers
+
+- Optional `service_tier_applied` is the abstract level actually put on the
+  model request: `fast` or `ultrafast`, omitted for `standard` (also the
+  meaning of absence). Provider-specific request mapping belongs to a runner.
+- Optional `service_tier_served` is set only on a reported wire: a runner
+  discovery entry with `served: "reported"`, which permits served metadata only
+  when that response states it (runner CONTRACT §9.3.2). Map known values to `standard`, `fast` or
+  `ultrafast`, otherwise keep the provider's value verbatim. A runner never
+  copies applied into served; unknown wires never report served.
+- Prefer a provider-stated `service_tier_served`. Its price stays unconfirmed
+  if that tier or its rate is unrecognised. Without a served statement,
+  `service_tier_applied` gives only an unconfirmed estimate; absent applied means
+  standard. Keep unfamiliar strings rather than inventing a rate.
+  Both members are omitted when absent, leaving existing
+  row bytes unchanged. They are not carried by `step.finished.v1` yet; a
+  consumer reads them from these rows, not from that closed bus event.
+
+- Tier fields are open strings on
+  [`cortexkit_usage_steps::StepRow`](https://docs.rs/cortexkit-usage-steps/latest/cortexkit_usage_steps/struct.StepRow.html):
+  readers retain unfamiliar levels. Producers emit `fast` or `ultrafast`, omit
+  standard, and validate with `StepRow::check_closed`. A runner may obtain the
+  strings from `cortexkit_role_llm_runner::service_tier::ServiceTier::as_str`.
+  This producer check is not part of decoding.
+  Served remains open for unmapped provider values. The runner contract is a
+  dev-dependency only, used to keep row spellings equal through drift tests;
+  usage-steps needs no runner crate at runtime.
+
 ### Runner steps
 
 A step a runner announces on the bus (`step.finished.v1`, runner contract

@@ -220,6 +220,12 @@ struct WireSendRequest {
         deserialize_with = "crate::session_retention::deserialize_optional"
     )]
     retention_policy: Option<crate::session_retention::RetentionPolicy>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::service_tier::deserialize_request"
+    )]
+    service_tier: Option<crate::service_tier::ServiceTier>,
     #[serde(flatten)]
     runner_params: Map<String, Value>,
 }
@@ -240,6 +246,7 @@ impl From<WireSendRequest> for SendRequest {
             plan: wire.plan,
             retention: wire.retention,
             retention_policy: wire.retention_policy,
+            service_tier: wire.service_tier,
             runner_params: wire.runner_params,
         }
     }
@@ -259,6 +266,7 @@ impl From<SendRequest> for WireSendRequest {
             plan: request.plan,
             retention: request.retention,
             retention_policy: request.retention_policy,
+            service_tier: request.service_tier,
             runner_params: request.runner_params,
         }
     }
@@ -389,11 +397,31 @@ pub struct SendRequest {
     pub retention: Option<u64>,
     /// Per-session storage policy, sent only with the `session_retention` group.
     pub retention_policy: Option<crate::session_retention::RetentionPolicy>,
+    /// Fixed by the send starting a run. Absent means standard for a new run,
+    /// and inherits the run's level when steering or queueing into that run.
+    pub service_tier: Option<crate::service_tier::ServiceTier>,
     /// The runner's own send parameters, kept as received.
     pub runner_params: Map<String, Value>,
 }
 
 impl SendRequest {
+    /// Set an explicit request level, including standard. Only None is omitted
+    /// on the wire, so an explicit standard cannot inherit a running run's tier.
+    pub fn with_service_tier(mut self, tier: crate::service_tier::ServiceTier) -> Self {
+        self.service_tier = Some(tier);
+        self
+    }
+
+    /// Validate before any model call. Pass no map for a runner that does not
+    /// declare the group, and the run's fixed tier only for a send into that run.
+    pub fn check_service_tier(
+        &self,
+        running: Option<crate::service_tier::ServiceTier>,
+        wire: &str,
+        declared: Option<&crate::service_tier::ServiceTiers>,
+    ) -> Result<crate::service_tier::ServiceTier, crate::service_tier::TierProblem> {
+        crate::service_tier::check_send(self.service_tier, running, wire, declared)
+    }
     /// Validate the plan's output-reference opt-in before any durable write.
     pub fn check_output_refs(&self, advertised: bool) -> Result<(), &'static str> {
         match &self.plan {
@@ -421,6 +449,7 @@ impl SendRequest {
             plan: None,
             retention: None,
             retention_policy: None,
+            service_tier: None,
             runner_params: Map::new(),
         }
     }

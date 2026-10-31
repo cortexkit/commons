@@ -232,6 +232,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
     /// Run the check named `name` from a fresh provider.
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         self.fresh().await?;
+        if name.starts_with("service_tier_") {
+            return self.service_tier_check(name).await;
+        }
         if HOLD_CHECKS.contains(&name) {
             return self.hold_check(name).await;
         }
@@ -402,6 +405,108 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             .configure_catalog(&fixture::catalog())
             .await
             .map_err(|e| format!("configure_catalog: {e}"))
+    }
+
+    async fn service_tier_check(&self, name: &str) -> Result<Ending, String> {
+        use crate::wire::service_tier::ServiceTier;
+        let consumer = self.route_as(CONSUMER).await?;
+        let describe: RoleDescribe =
+            answer(&consumer, ops::ROLE_DESCRIBE, &json!({}), "role.describe").await?;
+        if !describe.serves(capabilities::SERVICE_TIER) {
+            return Ok(Ending::NotApplicable(
+                "role.describe does not declare service_tier".into(),
+            ));
+        }
+        if name == "service_tier_report_members_accepted" {
+            for usage in [
+                json!({"service_tier_applied":"fast"}),
+                json!({"service_tier_served":"provider-special"}),
+                json!({"service_tier_applied":"fast", "service_tier_served":"standard"}),
+            ] {
+                let selected = select(&consumer, &base(), "select for tier report").await?;
+                let _: ReportAnswer = answer(&consumer, ops::ROUTE_REPORT,
+                    &json!({"decision_id": selected.decision_id, "outcome":"completed", "usage":usage}),
+                    "a report with service-tier usage").await?;
+            }
+            return Ok(Ending::Passed);
+        }
+        let mut catalog = fixture::catalog();
+        catalog
+            .models
+            .retain(|model| model.provider == fixture::SUBSCRIPTION_PROVIDER);
+        self.subject.configure_catalog(&catalog).await?;
+        let standard = || [("account-1".into(), vec![]), ("account-2".into(), vec![])].into();
+        let mut plans: std::collections::BTreeMap<String, Vec<ServiceTier>> = standard();
+        plans.insert("account-2".into(), vec![ServiceTier::Fast]);
+        self.subject.configure_service_tiers(&plans).await?;
+        match name {
+            "service_tier_eligible_account" => {
+                let selected = select(
+                    &consumer,
+                    &with(base(), "service_tier", json!("fast")),
+                    "fast select",
+                )
+                .await?;
+                if selected.service_tier_chosen.as_deref() != Some(ServiceTier::Fast.as_str()) {
+                    return Err("eligible fast account was not chosen at fast".into());
+                }
+                let runner = self.route_as(&selected.runner.module).await?;
+                let mut params =
+                    Self::account_for("tier-admission", "tier-conversation", &selected.route.model);
+                params["decision_id"] = json!(selected.decision_id);
+                let admitted: AccountForAnswer = answer(
+                    &runner,
+                    ops::ROUTE_ACCOUNT_FOR,
+                    &params,
+                    "tier decision admission",
+                )
+                .await?;
+                if admitted.account.account_id != "account-2" {
+                    return Err(format!(
+                        "tier decision admitted ineligible account {}",
+                        admitted.account.account_id
+                    ));
+                }
+            }
+            "service_tier_fallback_order" => {
+                for expected in [
+                    ServiceTier::Fast,
+                    ServiceTier::Standard,
+                    ServiceTier::Ultrafast,
+                ] {
+                    let selected = select(
+                        &consumer,
+                        &with(base(), "service_tier", json!("ultrafast")),
+                        "ultrafast select",
+                    )
+                    .await?;
+                    if selected.service_tier_chosen.as_deref() != Some(expected.as_str()) {
+                        return Err(format!(
+                            "fallback expected {expected:?}, got {:?}",
+                            selected.service_tier_chosen
+                        ));
+                    }
+                    plans = standard();
+                    if expected == ServiceTier::Standard {
+                        plans.insert("account-2".into(), vec![ServiceTier::Ultrafast]);
+                    }
+                    self.subject.configure_service_tiers(&plans).await?;
+                }
+            }
+            "service_tier_absent_is_standard" => {
+                let selected = select(&consumer, &base(), "select with absent tier").await?;
+                if selected
+                    .service_tier_chosen
+                    .as_deref()
+                    .unwrap_or("standard")
+                    != ServiceTier::Standard.as_str()
+                {
+                    return Err("absent service tier did not mean standard".into());
+                }
+            }
+            _ => return Err(format!("unknown service-tier check {name}")),
+        }
+        Ok(Ending::Passed)
     }
 
     async fn route(&self, stamp: RouteStamp) -> Result<S::Route, String> {

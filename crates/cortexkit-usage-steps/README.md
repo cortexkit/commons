@@ -53,3 +53,25 @@ never an addition to it, so `reasoning <= output` whenever both are present.
 Charge `output` once and never add `reasoning` on top. The provider's tests
 can check this with `StepRow::check_counts`; readers still decode a row that
 breaks it.
+
+## Service tiers and pricing
+
+[`cortexkit_usage_steps::StepRow`](https://docs.rs/cortexkit-usage-steps/latest/cortexkit_usage_steps/struct.StepRow.html)
+optionally carries `service_tier_applied` (`fast` or `ultrafast`, omitted for
+standard) and `service_tier_served`. Served comes only from the provider on a
+reported wire: a runner discovery entry with `served: "reported"`, which permits
+served metadata only when that response states it (runner CONTRACT §9.3.2).
+Known values map to `standard`, `fast` or `ultrafast`, and unmapped values stay
+verbatim. Never copy applied into served. Prefer a provider-stated served tier;
+its price stays unconfirmed if that tier or its rate is unrecognised. Without a
+served statement, applied gives only an unconfirmed estimate, and absent applied
+means standard. Keep unfamiliar strings rather than inventing a rate.
+These values live in step rows, not the unchanged, closed `step.finished.v1`
+event. Existing rows omit both members and keep identical bytes.
+
+Both tier fields are strings, so a new level does not break older row readers.
+Producers emit `fast` or `ultrafast`, omit standard, and validate with
+`StepRow::check_closed`. A runner may obtain the strings from
+`cortexkit_role_llm_runner::service_tier::ServiceTier::as_str`. Readers retain
+unknown applied levels and explicitly emitted standard. The runner crate remains
+a dev-dependency only for drift tests; usage-steps needs no runner crate at runtime.
