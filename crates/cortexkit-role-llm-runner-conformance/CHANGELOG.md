@@ -1,5 +1,9 @@
 # Changelog
 
+
+## 0.15.40
+
+- Pins llm-runner `=0.7.35` (`role.describe.step_hooks`). No case changes.
 ## 0.15.39
 
 - `display_row_is_the_profile_projection` reports not applicable, naming the

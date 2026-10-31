@@ -32,6 +32,8 @@ pub mod problem_names {
     pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_DELIVERY_ORDER: &str =
         "run_cancel_by_interrupt_without_delivery_order";
     pub const RETRACT_OWN_SEND_WITHOUT_RETRACT: &str = "retract_own_send_without_retract";
+    /// `step_hooks` names the same hook more than once.
+    pub const DUPLICATE_STEP_HOOK: &str = "duplicate_step_hook";
     pub const REFRESH_RELAUNCH_WITHOUT_SESSION_CHANGE: &str =
         "refresh_relaunch_without_session_change";
     pub const MISSING_SESSION_RETENTION: &str = "missing_session_retention";
@@ -130,6 +132,28 @@ pub struct RoleDescribe {
     /// Kinds this runner may prune in archived sessions at rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive_prunes_reasoning: Option<crate::archive_prunes_reasoning::ArchivePrunesReasoning>,
+    /// The step-transform hook call sites this runner runs for every session
+    /// (CONTRACT.md §11.2), named as `step-transform-provider/v1` names them
+    /// (see [`step_hooks`]). Absent or empty advertises no hook, so a plan
+    /// composer leaves out every item that subscribes one. An unknown name is
+    /// kept; a consumer that doesn't recognise it infers nothing from it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step_hooks: Option<Vec<String>>,
+}
+
+/// Hook names a runner lists in [`RoleDescribe::step_hooks`], spelled as the
+/// `step-transform-provider/v1` role spells them.
+pub mod step_hooks {
+    /// Runs on every user message and every steered or queued prompt.
+    pub const PRE_USER: &str = "pre_user";
+    /// Runs before each tool call executes.
+    pub const PRE_TOOL: &str = "pre_tool";
+    /// Runs on each tool call's result, before that result is written.
+    pub const POST_TOOL: &str = "post_tool";
+    /// Runs after an assistant message completes.
+    pub const POST_ASSISTANT: &str = "post_assistant";
+    /// Every hook name this release knows.
+    pub const KNOWN: &[&str] = &[PRE_USER, PRE_TOOL, POST_TOOL, POST_ASSISTANT];
 }
 
 /// Limits for per-session storage policies.
@@ -249,6 +273,30 @@ pub enum Stability {
 }
 
 impl RoleDescribe {
+    /// Declare the step-transform hook call sites this runner runs for every
+    /// session (see [`step_hooks`]).
+    pub fn with_step_hooks<I, S>(mut self, hooks: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.step_hooks = Some(hooks.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Whether this runner advertises every hook in `hooks`, comparing names
+    /// literally. It checks the advertisement, not that the runner executes
+    /// the hooks. A plan composer adds a step item only when this holds for
+    /// the hooks its frozen subscriptions name, and a runner admits a plan on
+    /// the same condition. An empty `hooks` always passes, so a composer
+    /// leaves out an item with no subscriptions by its own rule.
+    pub fn serves_step_hooks<'a>(&self, hooks: impl IntoIterator<Item = &'a str>) -> bool {
+        let declared = self.step_hooks.as_deref().unwrap_or_default();
+        hooks
+            .into_iter()
+            .all(|hook| declared.iter().any(|name| name == hook))
+    }
+
     pub fn with_archive_prunes_reasoning(
         mut self,
         settings: crate::archive_prunes_reasoning::ArchivePrunesReasoning,
@@ -441,6 +489,14 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    if let Some(hooks) = &describe.step_hooks {
+        let mut seen = std::collections::BTreeSet::new();
+        if hooks.iter().any(|hook| !seen.insert(hook.as_str())) {
+            problems.push(DescribeProblem::Undecodable(
+                problem_names::DUPLICATE_STEP_HOOK.into(),
+            ));
+        }
+    }
     for (group, dependency, problem) in [
         (
             capabilities::RETRACT_OWN_SEND,
@@ -1483,5 +1539,80 @@ mod structured_output_per_session_tests {
             capabilities::group_ops(capabilities::STRUCTURED_OUTPUT_PER_SESSION),
             Some(&[crate::ops::SESSION_SEND][..])
         );
+    }
+}
+
+#[cfg(test)]
+mod step_hooks_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn raw(step_hooks: Option<Value>) -> Value {
+        let mut raw = json!({
+            "majors": [{"version": crate::PROVIDES, "ops": crate::REQUIRED_OPS,
+                        "stability": "stable"}],
+            "implementation_version": "test",
+            "capabilities": [],
+            "session_capabilities_from": "baseline"
+        });
+        if let Some(hooks) = step_hooks {
+            raw["step_hooks"] = hooks;
+        }
+        raw
+    }
+
+    #[test]
+    fn absent_step_hooks_serve_no_hook_and_remain_omitted() {
+        let describe = check_describe(&raw(None)).unwrap();
+        assert_eq!(describe.step_hooks, None);
+        assert!(!describe.serves_step_hooks([step_hooks::PRE_USER]));
+        assert!(describe.serves_step_hooks([]));
+        assert!(serde_json::to_value(&describe)
+            .unwrap()
+            .get("step_hooks")
+            .is_none());
+    }
+
+    #[test]
+    fn listed_hooks_are_served_and_others_are_not() {
+        let describe =
+            check_describe(&raw(Some(json!([step_hooks::PRE_USER, "future_hook"])))).unwrap();
+        assert!(describe.serves_step_hooks([step_hooks::PRE_USER]));
+        assert!(!describe.serves_step_hooks([step_hooks::PRE_USER, step_hooks::PRE_TOOL]));
+        assert_eq!(
+            describe.step_hooks.as_deref(),
+            Some(&["pre_user".to_owned(), "future_hook".to_owned()][..])
+        );
+        let built = RoleDescribe::new(Vec::new(), "test")
+            .with_step_hooks(step_hooks::KNOWN.iter().copied());
+        assert!(built.serves_step_hooks(step_hooks::KNOWN.iter().copied()));
+    }
+
+    #[test]
+    fn empty_step_hooks_serve_no_hook() {
+        let describe = check_describe(&raw(Some(json!([])))).unwrap();
+        assert!(!describe.serves_step_hooks([step_hooks::PRE_USER]));
+    }
+
+    #[test]
+    fn an_unknown_name_matches_only_itself() {
+        let describe = check_describe(&raw(Some(json!(["future_hook"])))).unwrap();
+        assert!(describe.serves_step_hooks(["future_hook"]));
+        for hook in step_hooks::KNOWN {
+            assert!(!describe.serves_step_hooks([*hook]));
+        }
+    }
+
+    #[test]
+    fn a_duplicate_step_hook_is_a_problem() {
+        let problems = check_describe(&raw(Some(json!(["pre_user", "pre_user"])))).unwrap_err();
+        assert!(problems.contains(&DescribeProblem::Undecodable(
+            problem_names::DUPLICATE_STEP_HOOK.into()
+        )));
+    }
+
+    #[test]
+    fn a_non_array_step_hooks_does_not_decode() {
+        assert!(check_describe(&raw(Some(json!("pre_user")))).is_err());
     }
 }

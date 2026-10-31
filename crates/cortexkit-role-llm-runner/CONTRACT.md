@@ -45,10 +45,12 @@ particular implementation.
   given consumer calls it: it is where a session's owner reads what was
   frozen and the session-level capabilities after a lost admission reply
   or a fold (§10).
-- [pinned] The hook call sites and the tool-call rules (§11.2, §11.3) are
-  required too. They are calls the runner makes, not ops it serves, so
-  `role.describe` does not list them. The compaction interface (§11.1) is
-  not required: it is the `compaction` group.
+- [pinned] The tool-call rules (§11.3) are required too. The hook call
+  sites (§11.2) are calls the runner makes, not ops it serves, so they are
+  not ops in `role.describe`; a runner advertises the ones it runs in
+  `role.describe.step_hooks` (§2), and is bound only by those. The
+  compaction interface (§11.1) is not required: it is the `compaction`
+  group.
 - [pinned] Everything else is a declared capability group (§3), including
   the operations not every runner serves: `run.status`, `run.cancel`,
   `run.tool_calls`, `session.retract`, `session.adopt` and
@@ -83,11 +85,24 @@ particular implementation.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?, archive_prunes_reasoning?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?, archive_prunes_reasoning?, step_hooks?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
   for every session.
+- [pinned] `step_hooks`, when present, is an array of distinct hook names
+  from the `step-transform-provider/v1` role (`describe::step_hooks`:
+  `pre_user`, `pre_tool`, `post_tool`, `post_assistant`), naming the §11.2
+  call sites the runner runs for every session. Absent or empty advertises
+  no hook. An unknown name is kept; a consumer that doesn't recognise it
+  infers nothing from it, and `RoleDescribe::serves_step_hooks` compares
+  names literally. A duplicate name is a malformed answer. A plan composer
+  adds a step-transform item to a session's plan only when the item's frozen
+  subscriptions name at least one hook and the runner lists every hook they
+  name (`RoleDescribe::serves_step_hooks`); otherwise it leaves the item out
+  and doesn't fail the plan. A runner refuses a plan carrying an item that
+  subscribes a hook it doesn't list, `invalid_params` with `detail.field`
+  `plan.step_transform_items`.
 - [pinned] The answer says where session-level capabilities come from (§10):
   the admission reply, on a runner that admits sessions, or
   `session.baseline`, on a runner without an admission reply.
@@ -4840,11 +4855,15 @@ owes.
 
 ### 11.2 Hook call sites
 
-- [pinned] Within a turn: the assistant message completes, PostAssistant
+- [pinned] These call sites bind a runner only for the hooks it lists in
+  `role.describe.step_hooks` (§2); a runner that lists none runs no hook and
+  is sent no step-transform item. Each listed hook runs where this bullet
+  places it: within a turn, the assistant message completes, PostAssistant
   runs and its result is written; then for each tool call PreTool (mutate,
   validate, approve, in that order where `ordered_hook_phases` holds), the
-  tool executes, PostTool runs and the result is written. PreUser runs on
-  every user message and every steered or queued prompt.
+  tool executes, PostTool runs on its result before that result is written.
+  PreUser, when listed, runs on every user message and every steered or
+  queued prompt.
 - [pinned] A hook's output is fields on the one record it transforms,
   written before anything carrying it is sent, applied once and never
   changed afterwards. Resume replays hook outputs and never calls a hook

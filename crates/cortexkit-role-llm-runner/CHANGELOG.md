@@ -1,5 +1,21 @@
 # Changelog
 
+
+## 0.7.35
+
+- `role.describe` gains optional `step_hooks`: the step-transform hook call
+  sites ([CONTRACT.md](CONTRACT.md) §11.2) a runner runs for every session,
+  named as `step-transform-provider/v1` names them (`describe::step_hooks`).
+  Previously §11.2 required every hook call site of every runner, and a plan
+  composer couldn't tell which runners take step-transform items. The
+  contract now requires a composer to add an item only when its
+  subscriptions name at least one hook and the runner lists every hook they
+  name (`RoleDescribe::serves_step_hooks`), leaving it out otherwise, and a
+  runner to refuse a plan whose item subscribes an unlisted hook. Absent or
+  empty advertises no hook. `RoleDescribe::with_step_hooks` builds the
+  member, and `check_describe` reports a duplicate name as
+  `duplicate_step_hook`. Additive: older versions of this crate ignore the
+  member when decoding.
 ## 0.7.34
 
 - `display::projects(profile)` says whether this crate has a display
