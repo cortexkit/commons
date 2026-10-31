@@ -261,6 +261,51 @@ Refusals, each by its error code:
 - `refuse-chunk-count-mismatch`: `chunk_count_mismatch`, because the manifest
   declares 3 chunks but only 2 arrived (with the correct bytes and digest).
 
+## Large returned files
+
+`return-large/` holds 14 crate-local cases for `exec-remote-return/v3`, using
+invented paths and job IDs. Each `.jcs` has a `.sha256` companion;
+`return-large/SHA256SUMS` pins both. Tests read every case, compare cap decisions
+with the independently pinned expectation, and round-trip typed canonical bytes.
+
+Cap cases contain `capabilities`, the runner's `runner_max`, a `request`, and
+`expect`: either `{cap_bytes}` or `{error: {code: "invalid_params", detail:
+{field: "return_max_bytes", max_bytes?}}}`. These errors are submit-call
+refusals before job acceptance, not terminal records, and have no job ID.
+
+- `older-refuse-over-cap`: a pre-0.2.16 v2-only peer refuses 10,485,761 bytes
+  without stating `max_bytes`; decoding reads its limit as not stated.
+- `v2-refuse-over-cap`: a new v2-only runner refuses the same request with
+  numeric `detail.max_bytes` 10,485,760, never clamping.
+- `v3-accept-40-mib`: a macOS request with an explicit 41,943,040-byte cap.
+- `v3-accept-ceiling` and `v3-refuse-over-ceiling`: exactly 134,217,728 is
+  accepted; 134,217,729 is refused with `max_bytes` 134,217,728.
+- `v3-accept-runner-limit` and `v3-refuse-runner-limit`: a runner with its own
+  67,108,864-byte limit accepts exactly that cap and refuses one byte more,
+  stating its own number.
+- `v3-default-chunked` and `v3-default-legacy`: an absent cap still selects
+  10,485,760 or 262,144 bytes, even on a v3 runner.
+- `v3-refuse-large-legacy`: a 40 MiB cap without `return_chunked` is refused
+  with the unchanged 262,144-byte legacy limit.
+- `v2-default-chunked` and `v2-accept-explicit-limit`: the v2 default and explicit
+  10 MiB requests remain accepted unchanged.
+
+Replay cases also carry original `records`, the `replay`, and `expect` with
+base64 `data` and an `expired` flag. Both use a 40 MiB effective cap but only
+five payload bytes, keeping the vectors small. The last output has seq 4 and
+the request reattaches with `resume_from_seq: 4` under the same submission key.
+
+- `replay-resume`: attachment to the existing job replays chunks at seqs 5 and 6
+  and the manifest at seq 7 unchanged; `ReturnAssembler::finish` verifies them.
+- `replay-expired-resume`: after returned bytes expire, no chunks replay. The
+  manifest at seq 7 keeps its size and chunk count, reports `expired`, and has
+  `total_bytes: 0`. `finish_expired_replay` verifies the gap. The terminal job
+  outcome is unchanged.
+
+Callers send caps above 10 MiB only after seeing v3; older peers refuse rather
+than clamp. V3 implies v2. Retention and disk reservation remain the runner's
+responsibility, with the `history_expired` outcome after the job's history expires.
+
 ## Idempotent submission
 
 `submission-key/` contains four invented-value request/stream cases in the same

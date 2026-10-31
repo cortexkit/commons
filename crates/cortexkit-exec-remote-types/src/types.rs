@@ -136,6 +136,8 @@ pub struct RunRequest {
     pub return_paths: Vec<String>,
     /// Total returned-file byte cap. `None` selects [`RETURN_MAX_BYTES_CAP`], or
     /// [`RETURN_CHUNKED_MAX_BYTES_CAP`] when `return_chunked` is set.
+    /// Send values above [`RETURN_CHUNKED_MAX_BYTES_CAP`] only with chunked
+    /// return to a runner advertising [`RETURN_LARGE_CAPABILITY`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub return_max_bytes: Option<u64>,
     /// Return the requested files as `return_chunk` records followed by one
@@ -356,8 +358,10 @@ impl RunRequest {
     }
 
     /// Set the total returned-file byte cap. Without `return_chunked`, the
-    /// runner must reject values above [`RETURN_MAX_BYTES_CAP`]; with it, values
-    /// above [`RETURN_CHUNKED_MAX_BYTES_CAP`].
+    /// runner must reject values above [`RETURN_MAX_BYTES_CAP`]. Send values
+    /// above [`RETURN_CHUNKED_MAX_BYTES_CAP`] only with `return_chunked` to a
+    /// runner advertising [`RETURN_LARGE_CAPABILITY`], up to that runner's
+    /// limit and never above [`RETURN_LARGE_MAX_BYTES_CAP`].
     pub fn with_return_max_bytes(mut self, return_max_bytes: u64) -> Self {
         self.return_max_bytes = Some(return_max_bytes);
         self
@@ -864,6 +868,13 @@ pub const REFUSAL_DETAIL_MAX_BYTES: usize = 1024;
 pub const RETURN_MAX_BYTES_CAP: u64 = 262_144;
 /// Capability a runner advertises when it supports `RunRequest.return_chunked`.
 pub const RETURN_CHUNKED_CAPABILITY: &str = "exec-remote-return/v2";
+/// Capability for explicit chunked return caps above 10 MiB, up to the runner's
+/// own limit. Advertising it implies [`RETURN_CHUNKED_CAPABILITY`] support and
+/// never raises the default cap.
+pub const RETURN_LARGE_CAPABILITY: &str = "exec-remote-return/v3";
+/// Hard ceiling for an explicit chunked return cap on a runner advertising
+/// [`RETURN_LARGE_CAPABILITY`]. This is not a default.
+pub const RETURN_LARGE_MAX_BYTES_CAP: u64 = 134_217_728;
 /// Capability an executor advertises for idempotent keyed submissions. A caller
 /// sends `RunRequest.submission_key` or `RunRequest.resume_from_seq` only after
 /// checking this advertisement: older executors silently ignore those fields.
@@ -871,12 +882,69 @@ pub const SUBMISSION_KEY_CAPABILITY: &str = "exec-remote-submission-key/v1";
 /// Capability a runner advertises when it can send opt-in progress before
 /// acceptance. A caller sends `RunRequest.progress: true` only after checking it.
 pub const PROGRESS_CAPABILITY: &str = "exec-remote-progress/v1";
-/// Maximum requested returned-file bytes with `return_chunked`, also used when
-/// `return_max_bytes` is absent from such a request.
+/// Maximum requested returned-file bytes on a v2-only runner, and the default
+/// when `return_max_bytes` is absent from any `return_chunked` request, even v3.
 pub const RETURN_CHUNKED_MAX_BYTES_CAP: u64 = 10_485_760;
 /// Maximum decoded bytes in one `return_chunk` record. Every chunk carries at
 /// least one byte.
 pub const RETURN_CHUNK_MAX_BYTES: usize = 524_288;
+
+/// JSON `detail` for an `invalid_params` error refusing a returned-file cap.
+///
+/// This is a submit-call error before job acceptance, not a terminal record or
+/// a human-readable `refusal_detail`. Older error details may omit `max_bytes`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ReturnCapRefusal {
+    field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_bytes: Option<u64>,
+}
+
+impl ReturnCapRefusal {
+    /// Name the cap field and the largest value accepted for this request mode.
+    pub fn new(max_bytes: u64) -> Self {
+        Self {
+            field: "return_max_bytes".into(),
+            max_bytes: Some(max_bytes),
+        }
+    }
+
+    /// The request field named by the error, normally `return_max_bytes`.
+    pub fn field(&self) -> &str {
+        &self.field
+    }
+
+    /// The runner's accepted maximum, or `None` when an older runner omitted it.
+    pub fn max_bytes(&self) -> Option<u64> {
+        self.max_bytes
+    }
+}
+
+/// Check a returned-file cap before accepting or starting a job, without IO.
+///
+/// A v2-only runner passes [`RETURN_CHUNKED_MAX_BYTES_CAP`] as `runner_max`.
+/// A v3 runner passes its own limit; the contract ceiling still applies. The
+/// runner must support chunked returns when requested; capability negotiation
+/// belongs to the caller and runner, not this helper.
+///
+/// Defaults remain 10 MiB chunked and 256 KiB otherwise. Neither an explicit cap
+/// nor a default is clamped to fit a lower runner limit. Put a returned refusal
+/// in the submit call's `invalid_params` error `detail`, never a job terminal.
+pub fn check_return_cap(request: &RunRequest, runner_max: u64) -> Result<u64, ReturnCapRefusal> {
+    let (default, ceiling) = if request.return_chunked {
+        (RETURN_CHUNKED_MAX_BYTES_CAP, RETURN_LARGE_MAX_BYTES_CAP)
+    } else {
+        (RETURN_MAX_BYTES_CAP, RETURN_MAX_BYTES_CAP)
+    };
+    let max_bytes = runner_max.min(ceiling);
+    let requested = request.return_max_bytes.unwrap_or(default);
+    if requested > max_bytes {
+        Err(ReturnCapRefusal::new(max_bytes))
+    } else {
+        Ok(requested)
+    }
+}
 
 /// Host or pool that ran a hosted job and its optional billing measurement.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

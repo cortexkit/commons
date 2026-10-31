@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.16
+
+- Add `RETURN_LARGE_CAPABILITY` (`exec-remote-return/v3`) for explicit chunked
+  return caps up to `RETURN_LARGE_MAX_BYTES_CAP` (128 MiB). Callers send more
+  than 10 MiB only to a runner advertising v3, which also supports every v2
+  request. Defaults stay 10 MiB chunked and 256 KiB otherwise; the maximum
+  chunk payload stays 512 KiB and existing returned-file records are unchanged.
+- Add pure `check_return_cap` and typed `ReturnCapRefusal` error detail. Runners
+  refuse caps above their own limit or the ceiling before accepting the job,
+  using `invalid_params` with numeric `detail.max_bytes`, never clamping. Older
+  error details without a stated limit still decode. Terminal refusals and
+  their human-readable details are unchanged.
+- Add large-return cap, older-peer, unchanged-default and resumed-replay vectors
+  with checksums. Large returns use the same retention and expired-replay rules;
+  runners remain responsible for retaining records and reserving disk space.
+
 ## 0.2.15
 
 - Add opt-in `RunRequest::with_progress(bool)` / `progress()` and

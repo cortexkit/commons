@@ -61,8 +61,8 @@ and `refusal_detail` `submission_key_mismatch`. The executor must never attach a
 different command to an existing job. Such a refusal does not change the
 existing job or imply that its earlier command did not run.
 
-A refusal of a keyed request carries a `job_id` of its own, never the existing
-job's ID. A caller must not apply the refusal to any other `job_id`. In
+A terminal refusal of a keyed request carries a `job_id` of its own, never the
+existing job's ID. A caller must not apply the refusal to any other `job_id`. In
 particular, a mismatch refusal leaves the existing job's state unaffected; that
 state is learned only from the existing job's own stream or an attach to it.
 
@@ -92,12 +92,13 @@ For a keyed request, exactly one admission outcome applies:
   existing meaning is still "did not start".
 - Any existing refusal, retaining its existing meaning for this request.
 
-Every refusal of a keyed request, including `submission_key_mismatch`,
+Every terminal refusal of a keyed request, including `submission_key_mismatch`,
 `submission_never_accepted`, and any other refusal of a resubmit, carries a
-`job_id` of its own. It must never name the existing job, and a caller must not
-apply the refusal to any other `job_id`. A mismatch refusal does not affect the
-existing job's state; learn that state only from the existing job's own stream
-or an attach to it.
+`job_id` of its own. Submit-call `invalid_params` errors happen before acceptance
+and have no job ID. A terminal refusal must never name the existing job, and a
+caller must not apply the refusal to any other `job_id`. A mismatch refusal does
+not affect the existing job's state; learn that state only from the existing
+job's own stream or an attach to it.
 
 Here "started" distinguishes a new admission from attachment; `Accepted` still
 does not prove the command has begun execution (`Started` reports that).
@@ -179,8 +180,9 @@ this support through its own `Hello` capability.
 `return_max_bytes` caps the total bytes in the returned files. Without
 `return_chunked`, an absent value selects `RETURN_MAX_BYTES_CAP` (262,144 bytes),
 and requests above that cap must be rejected with `invalid_params` identifying
-`return_max_bytes`. The caller-facing types do not implement runner request
-limit validation; the submission-field syntax checks above run on decode.
+`return_max_bytes`. Decoding does not enforce return caps; runners use
+`check_return_cap` before acceptance. The submission-field syntax checks above
+run on decode.
 
 A successful `return_result` contains `returned_files`, possibly an empty list.
 Each file's `path` is cwd-relative, `sha256` is the lowercase digest of the
@@ -203,8 +205,9 @@ stream.
 ## Returning files in chunks
 
 One `return_result` record carries at most 262,144 bytes of files. Chunked
-return lets a runner send up to 10 MiB, split across records small enough for
-its record size limit. Everything in this section is additive: `return_result`
+return defaults to 10 MiB, with explicit caps up to 128 MiB on a runner that
+advertises large-return support, split across records small enough for its
+record size limit. Everything in this section is additive: `return_result`
 keeps its exact shape and meaning, and a request without `return_chunked`
 behaves as before.
 
@@ -222,8 +225,46 @@ With `return_paths` empty, `return_chunked` has no effect and no returned-file
 record is sent.
 
 With `return_chunked`, an absent `return_max_bytes` selects
-`RETURN_CHUNKED_MAX_BYTES_CAP` (10,485,760 bytes). A value above it is rejected
-with `invalid_params` naming `return_max_bytes`.
+`RETURN_CHUNKED_MAX_BYTES_CAP` (10,485,760 bytes). On a v2-only runner, a value
+above it is rejected with `invalid_params` naming `return_max_bytes`.
+
+**Capability gate:** a caller sends an explicit cap above 10 MiB only with
+`return_chunked` and only to a runner advertising `RETURN_LARGE_CAPABILITY`
+(`exec-remote-return/v3`). Advertising v3 implies v2: the runner accepts every
+v2 request unchanged. V3 allows an explicit cap up to the runner's own limit,
+never above `RETURN_LARGE_MAX_BYTES_CAP` (134,217,728 bytes, 128 MiB). An older
+runner refuses an above-limit request rather than clamping it. V3 never raises
+a default: an absent cap still means 10 MiB chunked or 256 KiB legacy. Chunk
+sizes, `return_chunk`, `return_manifest`, and the meaning of manifest `cap_bytes`
+are unchanged.
+
+A request above the runner's limit or the contract ceiling is refused on the
+submit call, before job acceptance or execution. The executor sends an
+`invalid_params` error with JSON `detail` of exactly this form:
+`{"field":"return_max_bytes","max_bytes":10485760}`. `max_bytes` is a number:
+the largest value the runner accepts for the requested return mode, 10,485,760
+on a v2-only runner in chunked mode, or the v3 runner's own limit (at most
+134,217,728). Without chunked return the maximum remains 262,144. A runner may
+serve less than the ceiling, but must never clamp a request to fit. Advertising
+v3 still commits it to accepting v2 requests.
+
+`ReturnCapRefusal` represents this error `detail`, not a terminal record's
+human-readable `refusal_detail`. A caller reads `max_bytes` when present. Older
+error details may omit it; when it is absent the limit is unstated, so assume
+the v2 cap of 10,485,760 for chunked return unless the runner advertises v3. Decoding
+accepts an absent `max_bytes` and ignores unknown members for future additions.
+The error has no job ID: no job was accepted and nothing started. Existing
+resubmit and outcome rules are unchanged; a submit-call refusal does not say
+anything about a previously submitted job's outcome, just as a
+`submission_key_mismatch` refusal does not change the existing job.
+
+Runners share `check_return_cap(request: &RunRequest, runner_max: u64) ->
+Result<u64, ReturnCapRefusal>` to obtain the effective cap or the error detail.
+A v2-only runner passes `RETURN_CHUNKED_MAX_BYTES_CAP`; a v3 runner passes its
+own limit. The helper enforces the hard ceiling even if given a higher runner
+limit. It preserves defaults, refusing rather than clamping if a runner limit
+is too small even for the default. Capability negotiation and sending the
+submit-call error remain the runner's responsibility.
 
 ### `return_chunk`
 
@@ -279,7 +320,8 @@ Unrecognised causes still decode as `Unknown`, keeping the raw string.
 
 ### Runner rules
 
-These rules bind the runner; the types do not enforce runner policy.
+These rules bind the runner; apart from the shared cap check, the types do not
+enforce runner policy.
 
 - The runner decides the cap for each file before sending any of its bytes and
   reads at most the size it admitted. The total bytes sent never exceed the cap.
@@ -315,8 +357,18 @@ While the runner keeps the job's returned bytes (the executor keeps them for one
 hour), a replay through `exec.attach` re-sends the same `return_chunk` records
 and `return_manifest` at the same `seq` values.
 
-After that, a replay sends no `return_chunk` records. It sends the manifest at
-its original `seq`, with every returned entry replaced by a failed `expired`
+Chunk records are part of the job's replayable record stream, including large
+returns under v3. A keyed reattach with `resume_from_seq` replays those records
+strictly after the cursor, including the manifest. Retention and disk
+reservation are the runner's own concern. When returned bytes expire, the
+expired replay below applies equally to large returns: the manifest marks each
+returned file failed `expired`, and the job's outcome is unchanged. When the
+job's history itself expires, reattach gets the `history_expired` outcome
+(`Outcome::HistoryExpired`); it is not proof that the command never ran and
+must not trigger a fresh execution.
+
+After the returned bytes expire, a replay sends no `return_chunk` records. It
+sends the manifest at its original `seq`, with every returned entry replaced by a failed `expired`
 entry carrying its original `size`. Failed entries keep their causes, and
 `total_bytes` is 0. Retention is all or nothing per job, never part of a path's
 chunks.

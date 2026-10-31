@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.15**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.16**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -137,8 +137,8 @@ requested platform's wire name is reported in `refusal_detail`.
 `RunRequest::with_return_paths` requests files relative to `cwd`; the empty list
 is omitted and disables `return_result`. The optional `return_max_bytes` cap
 defaults to `RETURN_MAX_BYTES_CAP` (262,144 bytes). Without `return_chunked`, a
-larger request must be rejected as `invalid_params` naming that field. The types
-crate has no runner-side limit validator. See [`CONTRACT.md`](CONTRACT.md) for
+larger request must be rejected as `invalid_params` naming that field. See
+[`CONTRACT.md`](CONTRACT.md) for
 the capability check required before sending paths, the stream ordering, and
 the outcome rules.
 
@@ -146,7 +146,7 @@ the outcome rules.
 
 For more than 262,144 bytes, a caller sets `RunRequest::with_return_chunked(true)`,
 but only for a runner that advertises `RETURN_CHUNKED_CAPABILITY`
-(`"exec-remote-return/v2"`). The cap then defaults to, and may not exceed,
+(`"exec-remote-return/v2"`). The cap then defaults to
 `RETURN_CHUNKED_MAX_BYTES_CAP` (10 MiB). Instead of one `return_result`, the
 runner sends the files' bytes as `ReturnChunk` records of at most
 `RETURN_CHUNK_MAX_BYTES` (524,288) bytes each, grouped by path and contiguous,
@@ -154,6 +154,25 @@ followed by one `ReturnManifest` immediately before `terminal`. The manifest
 has one `ReturnManifestEntry` per requested path: returned with its size and
 SHA-256, or failed with a `ReturnPathsFailureCause` (now including `read_error`
 and `expired`).
+
+**Capability gate:** send an explicit `return_max_bytes` above 10 MiB only with
+`return_chunked` to a runner advertising `RETURN_LARGE_CAPABILITY`
+(`"exec-remote-return/v3"`). V3 implies v2 and accepts every v2 request unchanged.
+It permits explicit caps up to the runner's own limit, at most
+`RETURN_LARGE_MAX_BYTES_CAP` (134,217,728 bytes, 128 MiB). Older runners refuse
+rather than clamp. Defaults remain 10 MiB chunked and 256 KiB legacy even on v3;
+the maximum chunk payload remains 512 KiB and returned-file record shapes are
+unchanged.
+
+Runners call `check_return_cap(&RunRequest, runner_max: u64) -> Result<u64,
+ReturnCapRefusal>` before accepting or starting a job. A v2-only runner passes
+10,485,760; a v3 runner passes its own limit. The helper returns the effective
+cap or typed JSON detail for the submit call's `invalid_params` error, for
+example `{"field":"return_max_bytes","max_bytes":10485760}`. Such a refusal
+has no job ID and proves the request never started; it is not a terminal
+refusal and does not change any earlier job's outcome. `max_bytes()` is `None`
+for older error details that omit the limit; callers then assume the v2
+chunked cap unless the runner advertises v3. Unknown detail fields are ignored.
 
 Since 0.2.12, optional `ReturnManifestEntry::with_chunks` / `chunks()` counts
 the records originally sent per path; producers supply it on every entry or none.
@@ -168,6 +187,12 @@ verify that its `seq` gap equals their sum; older manifests without counts keep
 the unverified gap rule. Normal `finish` checks each supplied count against the
 received chunks, including paths that ended `read_error`. Mixed manifests are
 refused by either method. See [`CONTRACT.md`](CONTRACT.md) for the full rules.
+
+Large returns are retained and replayed in the same job record stream, including
+reattachment with `resume_from_seq`. After the returned bytes expire, replay marks
+each file failed `expired`; after the job's history expires, reattach gets the
+`history_expired` outcome. Neither is permission to rerun the command. Disk
+reservation and retention remain the runner's responsibility.
 
 ### Recovery and request refusals
 
@@ -372,6 +397,12 @@ request, and three malformed records (121-byte detail, newline detail, non-`u64`
 phase time). Each has a `.sha256` companion and is pinned by the folder's
 `SHA256SUMS`. Valid requests and records round-trip byte for byte; malformed
 known progress records must fail decoding rather than becoming `Unknown`.
+
+`test-vectors/exec-remote-v1/return-large/` adds cap admission cases for v2-only
+and v3 runners, an older error without a stated limit, unchanged defaults, and
+retained and expired replays after `resume_from_seq`. Each `.jcs` has a `.sha256`
+companion and both are pinned by `SHA256SUMS`. Tests read every case, compare cap
+decisions and numeric error detail, and verify replay with `ReturnAssembler`.
 
 ## Verification
 

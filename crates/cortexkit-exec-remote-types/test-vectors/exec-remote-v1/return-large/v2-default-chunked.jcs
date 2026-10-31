@@ -1,0 +1,1 @@
+{"capabilities":["exec-remote-return/v2"],"expect":{"cap_bytes":10485760},"request":{"command":"printf hello","cwd":"/example/repo","env":{},"repository_root":"/example/repo","return_chunked":true,"return_paths":["dist/app.bin"],"siblings":[],"workspace_key":"example-task"},"runner_max":10485760}
