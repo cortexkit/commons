@@ -197,13 +197,13 @@ where
             let mut fields = case.subject.send_fields(&session.name, true);
             let plan = fields.entry("plan").or_insert_with(|| json!({}));
             if plan
-                .get("items")
+                .get("tool_items")
                 .and_then(Value::as_array)
                 .is_some_and(|items| !items.is_empty())
             {
-                plan["items"][0]["output_refs"] = json!(flag);
+                plan["tool_items"][0]["output_refs"] = json!(flag);
             } else {
-                plan["items"] = json!([{"output_refs":flag}]);
+                plan["tool_items"] = json!([{"output_refs":flag}]);
             }
             let plan = plan.clone();
             fields.insert("send_id".into(), json!(case.mint.next("send")));
@@ -226,7 +226,7 @@ where
                     op,
                     &expect_error(op, call(&session.route, op, params).await?)?,
                     "invalid_params",
-                    "plan.items[].output_refs",
+                    "plan.tool_items[].output_refs",
                 )?;
                 let after = expect_ok(
                     "state after refusal",

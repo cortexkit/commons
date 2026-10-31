@@ -160,7 +160,7 @@ fn output_refs_descriptor_paging_and_read_limits() {
 #[test]
 fn output_refs_plan_refusal_and_group_dependency() {
     for flag in [json!(true), json!(false), json!(null), json!("yes")] {
-        let plan = json!({"items":[{"output_refs":flag}]});
+        let plan = json!({"tool_items":[{"output_refs":flag}]});
         assert_eq!(check_plan(&plan, false), Err(PLAN_FIELD));
         assert_eq!(check_plan(&plan, true).is_ok(), flag.is_boolean());
         let plan = plan.as_object().unwrap().clone();
@@ -181,7 +181,7 @@ fn output_refs_plan_refusal_and_group_dependency() {
             Err(PLAN_FIELD)
         );
     }
-    assert!(check_plan(&json!({"items":[{}]}), false).is_ok());
+    assert!(check_plan(&json!({"tool_items":[{}]}), false).is_ok());
     use cortexkit_role_llm_runner::{
         capabilities,
         describe::{check_describe, Major, RoleDescribe},
@@ -312,4 +312,28 @@ fn output_refs_image_snapshot_is_stored_bytes() {
     assert_eq!(record.mime.as_deref(), Some("image/png"));
     assert_eq!(record.bytes, Some(6));
     assert_eq!(r.snapshots[record.sha256.as_ref().unwrap()], bytes);
+}
+
+#[test]
+fn output_refs_is_checked_on_every_item_list_of_a_composer_shaped_plan() {
+    for (plan, field) in [
+        (json!({"tool_items":[{}, {"output_refs":true}]}), PLAN_FIELD),
+        (
+            json!({"tool_items":[{}], "system_text_items":[{"output_refs":false}]}),
+            SYSTEM_TEXT_PLAN_FIELD,
+        ),
+        (
+            json!({"step_transform_items":[{"output_refs":true}]}),
+            STEP_TRANSFORM_PLAN_FIELD,
+        ),
+        (
+            json!({"compaction_item":{"provider":"example.compaction","output_refs":false}}),
+            COMPACTION_PLAN_FIELD,
+        ),
+    ] {
+        assert_eq!(check_plan(&plan, false), Err(field), "{plan}");
+        assert!(check_plan(&plan, true).is_ok(), "{plan}");
+    }
+    let malformed = json!({"system_text_items":[{"output_refs":"yes"}]});
+    assert_eq!(check_plan(&malformed, true), Err(SYSTEM_TEXT_PLAN_FIELD));
 }

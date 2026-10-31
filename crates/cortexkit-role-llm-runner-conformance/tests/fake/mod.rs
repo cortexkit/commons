@@ -3511,7 +3511,7 @@ impl Module {
                 return Ok(invalid(&field));
             }
             for item in plan
-                .get("items")
+                .get("tool_items")
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
@@ -3781,7 +3781,7 @@ impl Module {
                 session,
                 json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage,
                         "tools": tools,
-                        "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
+                        "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("tool_items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
                         "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
                         "render_tags": request.plan.as_ref().and_then(|plan| plan.get(cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS)),
                         "rich_ui_plan": rich_ui_plan, "rich_ui": rich_ui,
@@ -5917,7 +5917,7 @@ impl LlmRunnerSubject for FakeSubject {
     fn output_refs_fields(&self, session: &str) -> Result<Map<String, Value>, HarnessError> {
         let mut fields = self.send_fields(session, true);
         fields["plan"]["render_tags"] = json!(true);
-        fields["plan"]["items"] = json!([{"provider":TOOL_MODULE,"output_refs":true}]);
+        fields["plan"]["tool_items"] = json!([{"provider":TOOL_MODULE,"output_refs":true}]);
         Ok(fields)
     }
 
@@ -6388,10 +6388,10 @@ impl LlmRunnerSubject for FakeSubject {
             SCRIPTED_TOOL,
             cortexkit_role_llm_runner_conformance::upfront::OTHER_TOOL
         ]);
-        plan["items"] =
+        plan["tool_items"] =
             json!([{"provider": self.tool_provider_module(), "preset": "default", "params": {}}]);
         if let Some(upfront) = upfront {
-            plan["items"][0]["upfront"] = json!(upfront);
+            plan["tool_items"][0]["upfront"] = json!(upfront);
         }
         Some(fields)
     }

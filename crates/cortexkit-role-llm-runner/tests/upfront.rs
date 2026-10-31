@@ -27,12 +27,12 @@ fn tool_upfront_vectors_check_every_sample() {
                 );
             }
             Ok(()) => {
-                if let Some(list) = plan["items"][0].get("upfront") {
+                if let Some(list) = plan["tool_items"][0].get("upfront") {
                     let list: Vec<String> = serde_json::from_value(list.clone()).unwrap();
                     let offered: Vec<String> =
                         serde_json::from_value(sample["offered"].clone()).unwrap();
                     let result = upfront::resolve(
-                        plan["items"][0]["provider"].as_str().unwrap(),
+                        plan["tool_items"][0]["provider"].as_str().unwrap(),
                         &list,
                         offered.iter().map(String::as_str),
                     );
@@ -63,16 +63,16 @@ fn tool_upfront_refusals_name_the_item_even_when_optional() {
         json!(false),
         json!({"read": true}),
     ] {
-        let plan = json!({"items": [{"provider": "example.first"}, {"provider": "example.second", "optional": true, "upfront": value}]});
+        let plan = json!({"tool_items": [{"provider": "example.first"}, {"provider": "example.second", "optional": true, "upfront": value}]});
         assert_eq!(
             upfront::check_plan(&plan, true),
-            Err("plan.items[1].upfront".into())
+            Err("plan.tool_items[1].upfront".into())
         );
     }
-    let plan = json!({"items": [{}, {"upfront": ["read"]}]});
+    let plan = json!({"tool_items": [{}, {"upfront": ["read"]}]});
     assert_eq!(
         upfront::check_plan(&plan, false),
-        Err("plan.items[1].upfront".into())
+        Err("plan.tool_items[1].upfront".into())
     );
 }
 
@@ -84,7 +84,7 @@ fn tool_upfront_uses_exact_names_and_keeps_declaration_order() {
         "読み取り".into(),
         "read".into(),
     ];
-    assert!(upfront::check_plan(&json!({"items": [{"upfront": list}]}), true).is_ok());
+    assert!(upfront::check_plan(&json!({"tool_items": [{"upfront": list}]}), true).is_ok());
     assert_eq!(
         upfront::resolve(
             "example.tools",
@@ -147,4 +147,48 @@ fn tool_upfront_absence_keeps_legacy_wire_bytes() {
             }
         }
     }
+}
+
+#[test]
+fn tool_upfront_is_checked_on_a_composer_shaped_plan() {
+    // A plan composer sends tool items in `tool_items`, beside its other item
+    // lists; the helper must check the hints there.
+    let plan = json!({
+        "system_text_items": [{"provider": "example.text"}],
+        "tool_items": [
+            {"provider": "example.first"},
+            {"provider": "example.second", "upfront": ["read", "read"]}
+        ],
+        "compaction_item": {"provider": "example.compaction"}
+    });
+    assert_eq!(
+        upfront::check_plan(&plan, true),
+        Err("plan.tool_items[1].upfront".into())
+    );
+    let plan = json!({"tool_items": [{"provider": "example.first", "upfront": ["read"]}]});
+    assert!(upfront::check_plan(&plan, true).is_ok());
+    assert_eq!(
+        upfront::check_plan(&plan, false),
+        Err("plan.tool_items[0].upfront".into())
+    );
+}
+
+#[test]
+fn tool_upfront_check_item_matches_check_plan_for_each_item() {
+    let items = [
+        json!({"provider": "example.first"}),
+        json!({"provider": "example.second", "upfront": ["read"]}),
+        json!({"provider": "example.third", "upfront": []}),
+    ];
+    let plan = json!({"tool_items": items});
+    let first_failure = items
+        .iter()
+        .enumerate()
+        .find_map(|(index, item)| upfront::check_item(item, index, true).err());
+    assert_eq!(first_failure, Some("plan.tool_items[2].upfront".into()));
+    assert_eq!(upfront::check_plan(&plan, true).err(), first_failure);
+    assert_eq!(
+        upfront::check_item(&items[1], 1, false),
+        Err("plan.tool_items[1].upfront".into())
+    );
 }

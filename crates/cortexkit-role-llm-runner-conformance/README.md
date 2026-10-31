@@ -1053,7 +1053,7 @@ The exception is `output_refs_unsupported_plan`: it binds exactly runners that
 (or the request's `check_output_refs`) before any durable write, on every
 plan-carrying operation: `session.send`, `session.refresh` and `session.adopt`.
 Both explicit true and explicit false must be refused with
-`invalid_params {field: "plan.items[].output_refs"}` and no state change.
+`invalid_params {field: "plan.tool_items[].output_refs"}` and no state change.
 
 Advertising adapters implement `output_refs_fields` with a tag-rendering plan
 and a scripted tool provider whose slots are `data: token` and

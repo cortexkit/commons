@@ -69,9 +69,9 @@ where
         }
         let items = fields
             .get("plan")
-            .and_then(|plan| plan.get("items"))
+            .and_then(|plan| plan.get("tool_items"))
             .and_then(Value::as_array)
-            .ok_or("upfront_plan_fields must return a plan with items")?;
+            .ok_or("upfront_plan_fields must return a plan with tool_items")?;
         if items.len() != 1 || items[0].get("upfront") != hint.map(|list| json!(list)).as_ref() {
             return Err(
                 "upfront_plan_fields did not apply the requested hint to its single tool item"

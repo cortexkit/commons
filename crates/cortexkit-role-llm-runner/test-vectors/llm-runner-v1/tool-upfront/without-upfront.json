@@ -1,4 +1,4 @@
 {
   "declared": false,
-  "plan": {"items": [{"provider": "example.tools", "preset": "default", "params": {}}]}
+  "plan": {"tool_items": [{"provider": "example.tools", "preset": "default", "params": {}}]}
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.2
+
+- Pins llm-runner `=0.7.40`. The `tool_upfront` and `output_refs` cases put
+  their hint on the plan's `tool_items`, and the output-refs refusal field is
+  `plan.tool_items[].output_refs`.
+
 ## 0.16.1
 
 - Pin llm-runner 0.7.39 and check declared `tool_upfront` plan sessions:

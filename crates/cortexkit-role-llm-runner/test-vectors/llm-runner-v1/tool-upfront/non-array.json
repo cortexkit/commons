@@ -1,5 +1,5 @@
 {
   "declared": true,
-  "plan": {"items": [{"provider": "example.tools", "preset": "default", "params": {}, "upfront": "read"}]},
-  "refusal": {"code": "invalid_params", "detail": {"field": "plan.items[0].upfront"}}
+  "plan": {"tool_items": [{"provider": "example.tools", "preset": "default", "params": {}, "upfront": "read"}]},
+  "refusal": {"code": "invalid_params", "detail": {"field": "plan.tool_items[0].upfront"}}
 }

@@ -20,25 +20,34 @@ pub const DIFFERENCE_KIND: &str = "upfront";
 /// true and the member is a non-empty array of distinct, non-empty strings.
 /// On failure, the returned string is the `field` for the runner's
 /// `invalid_params` refusal; the runner builds that refusal. An absent member
-/// passes. A plan without an `items` array passes too: this checks only the
-/// `upfront` members, and the runner's ordinary plan admission checks the rest.
+/// passes. Only tool items carry `upfront`, so this walks the plan's
+/// `tool_items` list; a plan without one passes. It checks only the `upfront`
+/// members, and the runner's ordinary plan admission checks the rest.
 pub fn check_plan(plan: &Value, declared: bool) -> Result<(), String> {
-    if let Some(items) = plan.get("items").and_then(Value::as_array) {
+    if let Some(items) = plan.get("tool_items").and_then(Value::as_array) {
         for (index, item) in items.iter().enumerate() {
-            if let Some(value) = item.get("upfront") {
-                let mut names = BTreeSet::new();
-                let valid = value.as_array().is_some_and(|values| {
-                    !values.is_empty()
-                        && values.iter().all(|value| {
-                            value
-                                .as_str()
-                                .is_some_and(|name| !name.is_empty() && names.insert(name))
-                        })
-                });
-                if !declared || !valid {
-                    return Err(format!("plan.items[{index}].upfront"));
-                }
-            }
+            check_item(item, index, declared)?;
+        }
+    }
+    Ok(())
+}
+
+/// [`check_plan`] for one tool item, at position `index` in the plan's
+/// `tool_items`, for a caller that admits tool items one at a time. The
+/// rules and the returned field are the same.
+pub fn check_item(item: &Value, index: usize, declared: bool) -> Result<(), String> {
+    if let Some(value) = item.get("upfront") {
+        let mut names = BTreeSet::new();
+        let valid = value.as_array().is_some_and(|values| {
+            !values.is_empty()
+                && values.iter().all(|value| {
+                    value
+                        .as_str()
+                        .is_some_and(|name| !name.is_empty() && names.insert(name))
+                })
+        });
+        if !declared || !valid {
+            return Err(format!("plan.tool_items[{index}].upfront"));
         }
     }
     Ok(())

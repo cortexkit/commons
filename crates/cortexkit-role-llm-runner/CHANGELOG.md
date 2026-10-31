@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.40
+
+- Fix: the plan checks walked `items`, which plans don't carry, so neither
+  checked anything on a real plan.
+  - `upfront::check_plan` walks the plan's `tool_items`, where a plan
+    composer sends tool items. Its refusal field is
+    `plan.tool_items[<i>].upfront`, and §9.18 and §10.1 say the hint sits on
+    tool items. New `upfront::check_item(item, index, declared)` applies the
+    same check to one tool item, for callers that admit items one at a time.
+  - `output_refs::check_plan` walks every item list (`tool_items`,
+    `system_text_items`, `step_transform_items`) and `compaction_item`,
+    since §9.13 refuses the member on any item of a runner without the
+    group. Its fields name the item's place: `output_refs::PLAN_FIELD`
+    (`plan.tool_items[].output_refs`), `SYSTEM_TEXT_PLAN_FIELD`,
+    `STEP_TRANSFORM_PLAN_FIELD` and `COMPACTION_PLAN_FIELD`.
+  - The upfront samples use `tool_items`, and tests check plans shaped like a
+    composer's, with `tool_items` beside the other item lists.
+
 ## 0.7.39
 
 - Add the opt-in `tool_upfront` group and per-plan-item `upfront` list for

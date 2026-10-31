@@ -11,7 +11,12 @@ use serde_json::Value;
 
 use crate::content_digest::sha256_hex;
 
-pub const PLAN_FIELD: &str = "plan.items[].output_refs";
+/// The refusal field for `output_refs` on a tool item. The other item lists
+/// have their own field below; [`check_plan`] returns the one that matches.
+pub const PLAN_FIELD: &str = "plan.tool_items[].output_refs";
+pub const SYSTEM_TEXT_PLAN_FIELD: &str = "plan.system_text_items[].output_refs";
+pub const STEP_TRANSFORM_PLAN_FIELD: &str = "plan.step_transform_items[].output_refs";
+pub const COMPACTION_PLAN_FIELD: &str = "plan.compaction_item.output_refs";
 pub const MAX_REFERENCES: usize = 64;
 pub const MAX_SNAPSHOT_BYTES: usize = 1_048_576;
 pub const MAX_SET_BYTES: usize = 4_194_304;
@@ -48,16 +53,31 @@ impl ReferenceSlot {
 }
 
 /// Check every supplied plan before any write, including explicit false.
-/// An absent member means false; a present member must be a boolean.
+/// An absent member means false; a present member must be a boolean, and is
+/// refused on every item when the runner doesn't advertise the group. This
+/// walks each of the plan's item lists (`tool_items`, `system_text_items`,
+/// `step_transform_items`) and its `compaction_item`, and returns the field for
+/// the first item that fails.
 pub fn check_plan(plan: &Value, advertised: bool) -> Result<(), &'static str> {
-    if let Some(items) = plan.get("items").and_then(Value::as_array) {
-        for item in items {
-            if let Some(value) = item.get("output_refs") {
-                if !advertised || !value.is_boolean() {
-                    return Err(PLAN_FIELD);
-                }
-            }
+    let refused = |item: &Value| {
+        item.get("output_refs")
+            .is_some_and(|value| !advertised || !value.is_boolean())
+    };
+    for (list, field) in [
+        ("tool_items", PLAN_FIELD),
+        ("system_text_items", SYSTEM_TEXT_PLAN_FIELD),
+        ("step_transform_items", STEP_TRANSFORM_PLAN_FIELD),
+    ] {
+        if plan
+            .get(list)
+            .and_then(Value::as_array)
+            .is_some_and(|items| items.iter().any(refused))
+        {
+            return Err(field);
         }
+    }
+    if plan.get("compaction_item").is_some_and(refused) {
+        return Err(COMPACTION_PLAN_FIELD);
     }
     Ok(())
 }

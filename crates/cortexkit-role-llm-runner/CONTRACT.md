@@ -4028,8 +4028,11 @@ its host's file storage, not a second copy of the host's media store.
   session whose frozen plan renders tags. It serves `session.output_refs`
   and `session.output_ref_read`. A plan item may carry `output_refs: bool`,
   absent meaning false. A runner without the group refuses any plan carrying
-  the member, even false, as `invalid_params {field:
-  "plan.items[].output_refs"}`, before writing anything.
+  the member on any item, even false, before writing anything, as
+  `invalid_params` whose `field` names the item's place:
+  `plan.tool_items[].output_refs`, `plan.system_text_items[].output_refs`,
+  `plan.step_transform_items[].output_refs` or
+  `plan.compaction_item.output_refs`.
   This refusal binds non-advertisers on every plan-carrying operation,
   including `session.send`, `session.refresh` and `session.adopt`, whether the
   supplied value is true or false. One call to `output_refs::check_plan` or
@@ -4612,10 +4615,11 @@ froze for a run to every assistant reply the run writes.
 ### 9.18 `tool_upfront`: initially loaded tool definitions
 
 - [pinned] `tool_upfront` is an opt-in `role.describe` group. A plan composer
-  carries `upfront` on an item only for a runner that declares the group.
-  A runner without it refuses a plan carrying the member on any item at
-  admission as `invalid_params {field: "plan.items[<i>].upfront"}`, where
-  `<i>` is the zero-based item index, and writes nothing.
+  carries `upfront` only on tool items, the entries of the plan's
+  `tool_items` list, and only for a runner that declares the group. A runner
+  without it refuses a plan carrying the member on any tool item at admission
+  as `invalid_params {field: "plan.tool_items[<i>].upfront"}`, where `<i>` is
+  the zero-based index in `tool_items`, and writes nothing.
 - [pinned] The member is `upfront: [<tool name>, ...]`, beside the item's
   `provider`, `preset`, `params` and `optional`. It must be a non-empty array
   of distinct, non-empty strings naming the provider's bare tool names, not
@@ -4624,6 +4628,7 @@ froze for a run to every assistant reply the run writes.
   same indexed field, before any write, even on an optional item.
   `upfront::check_plan` checks the declaration and shape; the runner calls it
   before fetching and builds the refusal from the field it returns.
+  `upfront::check_item` applies the same check to one tool item.
 - [pinned] After fetching the item and applying that item's own exclusions,
   every listed name must be a tool that item actually offers. A name not in
   that set is staleness: refuse `plan_stale` whose `detail.differences`
@@ -4734,11 +4739,13 @@ froze for a run to every assistant reply the run writes.
   `session.adopt` refuses a plan other than the one applied at host start
   with the same `plan_drift {frozen, sent}` (§9.5).
 - [pinned] Any refusal during admission writes nothing.
-- [pinned] Any item's `upfront` requires `tool_upfront` and a well-formed
+- [pinned] Any tool item's `upfront` requires `tool_upfront` and a well-formed
   list, or admission refuses `invalid_params` naming
-  `plan.items[<i>].upfront`. After that item's fetch and exclusions, missing
+  `plan.tool_items[<i>].upfront`. After that item's fetch and exclusions, missing
   listed tools refuse `plan_stale` with `{kind: "upfront", provider, name}`
-  differences (§9.18). An optional item that did not arrive drops its list.
+  differences (§9.18). For an optional item that did not arrive, the list is
+  neither checked against offered names nor rendered; the plan as sent is
+  unchanged.
 - [pinned] A runner declaring `rich_ui_stamp` refuses a plan whose fetched
   system-text answers declare two different rich UI stamps as `plan_stale`,
   with one `{kind: "rich_ui", provider, rich_ui}` difference per stamped
