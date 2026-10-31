@@ -40,8 +40,11 @@ pub const ANTHROPIC_MESSAGES: &str = "anthropic-messages";
 /// `reasoning`, `tool` with `callID`, `tool` and `state: {status, input,
 /// output?, error?, attachments?}`, `file` with `mime`, `url` and
 /// `filename?`, and OpenCode's bookkeeping parts). It is not an AI SDK model
-/// message. Read stability applies: fields OpenCode changes after a message
-/// finished stay as the runner first read them.
+/// message. A user message's `info.summary`, which OpenCode writes after the
+/// turn, is left out of served bodies from the release in which a runner
+/// adopts CONTRACT §4.2.1 ([`crate::served_bytes`]). Read stability applies to
+/// every other field: what OpenCode changes after a message finished stays as
+/// the runner first read it.
 pub const OPENCODE_AISDK: &str = "opencode-aisdk";
 
 /// OpenCode 2's decoded native message: hydrated SQL `data` plus `id` and

@@ -99,6 +99,27 @@ pub const BUDGET_EXHAUSTED: &str = "budget_exhausted";
 /// re-reads from the tail; it never retries the same cursor.
 pub const LINEAGE_CHANGED: &str = "lineage_changed";
 
+/// A read would serve a message whose body, rebuilt from the host's store,
+/// no longer matches the digest it was first served with (CONTRACT §4.2.1).
+/// The runner serves no changed bytes under the lineage. It serves that
+/// message again only under a new lineage, so the reader re-reads from the
+/// tail. `detail` is [`ServedBytesChangedDetail`].
+pub const SERVED_BYTES_CHANGED: &str = "served_bytes_changed";
+
+/// The detail of a `served_bytes_changed` refusal: the first message whose
+/// rebuilt body differs. No content or digest is carried.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ServedBytesChangedDetail {
+    pub mid: String,
+}
+
+impl ServedBytesChangedDetail {
+    pub fn new(mid: impl Into<String>) -> Self {
+        Self { mid: mid.into() }
+    }
+}
+
 /// A read's `after_mid` names no message in the lineage the read named, or
 /// a `session.history` request's `from_mid` or `before_mid` names no
 /// message of the session's history.
@@ -546,6 +567,7 @@ pub const CODES: &[&str] = &[
     USER_COMMANDS_UNSUPPORTED,
     INVALID_PARAMS,
     LINEAGE_CHANGED,
+    SERVED_BYTES_CHANGED,
     UNKNOWN_MID,
     BEFORE_LINEAGE_START,
     CURSOR_EXPIRED,

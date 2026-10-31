@@ -475,6 +475,10 @@ pub const FILES: &[(&str, &str)] = &[
         "opencode-v2-reinjection-rows-2.2.3.json",
         include_str!("../test-vectors/llm-runner-v1/opencode-v2-reinjection-rows-2.2.3.json"),
     ),
+    (
+        "served-bytes.json",
+        include_str!("../test-vectors/llm-runner-v1/served-bytes.json"),
+    ),
 ];
 
 /// `sha256sum` output over [`FILES`]: one `<hex>  <name>` line per file.

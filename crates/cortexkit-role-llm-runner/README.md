@@ -142,6 +142,20 @@ Since 0.6.0, `started_at` on `tool_started` and `finished_at` on
 no time, such as a call replayed from history stored before it kept times,
 and never invents one; a reader shows the call without that time.
 
+## Served bytes rebuilt from a host's store
+
+A runner that reads from a host may keep each served message's digest and a
+`stripped` flag instead of its body, and rebuild every read from the host's
+stored row (CONTRACT §4.2.1). For a message flagged `stripped: true`,
+`served_bytes::served_body` removes each member the profile's strip list
+names where its condition holds. With `stripped: false` it returns the host
+row unchanged. `served_bytes::check_served` returns the body only when its
+digest matches the one first served, and otherwise returns an error. The
+runner maps that error to the `served_bytes_changed` refusal, detail
+`{mid}`, and serves the message again only under a new lineage.
+`opencode-aisdk` leaves out a user message's `info.summary`; the other
+profiles' lists are empty.
+
 ## Provider service tiers
 
 The opt-in `service_tier` group publishes a per-wire `service_tiers` map and

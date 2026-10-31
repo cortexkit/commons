@@ -145,6 +145,13 @@
       "retryable": false
     },
     {
+      "code": "served_bytes_changed",
+      "retryable": false,
+      "detail": {
+        "mid": "msg_user_1"
+      }
+    },
+    {
       "code": "a_code_this_role_does_not_define",
       "retryable": false
     }

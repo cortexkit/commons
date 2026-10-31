@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.7.36"
+version = "0.7.37"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.15.41"
+version = "0.15.42"
 dependencies = [
  "async-trait",
  "base64",

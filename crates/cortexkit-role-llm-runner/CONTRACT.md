@@ -456,8 +456,9 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   Envelope members that report later state move forward
   only as their own rules say (`run.final`, §6; `tool_calls`'
   `call_key`, `dispatched_to` and `indeterminate`, §5). A runner that reads
-  from a host freezes the bytes it first ingested and serves its own
-  journal, never the host's live history. A host change that reaches the
+  from a host serves the bytes it first ingested, never the host's live
+  history: from its own journal, or rebuilt from the host's stored rows and
+  checked against their served digest (§4.2.1). A host change that reaches the
   model (a revert, an edited part) and a recovery that drops or rewrites a
   written message (§14, property 4) start a new lineage, so reads of the old
   one are refused `lineage_changed`; changed bytes never appear under the
@@ -597,6 +598,52 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   session with no events.
 - [pinned] Decoded leniently: a consumer ignores fields it does not know.
   Runners may add their own (a runner's `lineage_state`, say).
+
+### 4.2.1 Served bytes rebuilt from a host's store
+
+- [pinned] A runner that reads from a host need not keep the bodies it
+  served when the host's stored row reproduces them. For such an entry it may
+  keep the entry's `digest` instead (the `content_digest` of its `message`,
+  §4.2), together with a `stripped` flag, and rebuild every read from the
+  host's stored row. Read stability (§4.2) still holds: under its lineage, a
+  `mid` stands for one `message` JSON value, so one `content_digest`. A
+  digest only detects a difference and can't restore the body, so a runner
+  keeps the body of any message the host can still change in a way the
+  message's strip rule doesn't remove (see **Adoption**).
+- [pinned] **Rebuild and check.** On every read the runner rebuilds the body
+  with `served_bytes::served_body(profile, row, stripped)` and checks it
+  with `served_bytes::check_served` against the stored digest. On a match it
+  serves the rebuilt body. On any difference it never serves the rebuilt
+  body. It refuses the read `served_bytes_changed`, detail `{mid}` naming
+  the first such message (`errors::ServedBytesChangedDetail`), and logs the
+  difference locally. It then treats the difference as a host change: it
+  serves that message again only under a new lineage (§4.5). Neither digest
+  reaches the reader.
+- [pinned] **Strip lists.** A profile's strip list names the members its host
+  rewrites after a message finished without changing what the model sees.
+  A body served with `stripped: true` leaves out each listed member where
+  its condition holds, so a rebuild still matches its digest. A body served
+  with `stripped: false` is the host row unchanged. The lists belong to this
+  contract and change only in a release of it. `served_bytes::strip_list`
+  returns a profile's list and refuses a profile this crate doesn't name. A
+  listed member the row lacks is not an error.
+
+  | Profile | Left out of a served body |
+  |---|---|
+  | `opencode-aisdk` | `info.summary` on a message whose `info.role` is `user`: the file-change summary OpenCode writes after the turn. An assistant message's `info.summary` is the finished-summary flag (§4.8) and is kept. |
+  | `opencode-v2`, `pi`, `anthropic-messages`, `owned-broca` | nothing |
+
+- [pinned] **Adoption.** A runner of a profile strips every message it
+  ingests from the release in which it implements this section, and records
+  `stripped: true` for it. This holds whether the runner keeps bodies or
+  rebuilds them. A message it served before then keeps the bytes it was
+  served with, members the list now names included. The runner records
+  `stripped: false` for it and keeps serving those exact bytes, keeping that
+  message's body when its host can still rewrite a listed member. So a
+  message's served bytes depend only on the message and its flag, never on
+  when the runner read it. A message ingested by `session.adopt` or by import
+  after that release is stripped, so a tool preparing a moved session
+  computes its served bytes with `served_body(profile, row, true)`.
 
 ### 4.3 Head metadata
 
@@ -806,9 +853,13 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   modelID}` on a user message) and `parts` its parts in order, each `{id,
   type, ...}`: `text`, `reasoning`, `tool` (`callID`, `tool`, `state:
   {status, input, output?, error?, attachments?}`), `file` (`mime`, `url`,
-  `filename?`) and OpenCode's bookkeeping parts. Fields OpenCode changes
-  after a message finished stay as the runner first read them (read
-  stability, §4.2). `display::opencode_aisdk` is its decoder (§4.7).
+  `filename?`) and OpenCode's bookkeeping parts. For a message ingested once
+  the runner implements §4.2.1 (`stripped: true`), a user message's
+  `info.summary`, which OpenCode writes after the turn, is left out. A
+  message served before then (`stripped: false`) keeps its first-served body,
+  that member included. An assistant message's `info.summary` is always
+  kept. Every other field OpenCode changes after a message finished stays as
+  the runner first read it (read stability, §4.2). `display::opencode_aisdk` is its decoder (§4.7).
 - [pinned] **`owned-broca`.** An entry's body has a `content` array of parts.
   Descriptors replace payloads inside a part, never the whole array.
 - [pinned] **`owned-broca` error outputs** (`serializer_profile::error_output`).
@@ -5011,6 +5062,7 @@ treats it as a terminal refusal of that one request.
 |---|---|---|---|
 | `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
+| `served_bytes_changed` | a read would serve a message whose body, rebuilt from the host's store, differs from the digest it was first served with (§4.2.1) | `{mid}` (`errors::ServedBytesChangedDetail`); no content or digest | no: the runner serves that message again only under a new lineage; re-read from the tail |
 | `unknown_mid` | `after_mid` names no message in the lineage; a `session.history` `from_mid` or `before_mid` names no message of the session's history (§4.6) | — | no |
 | `before_lineage_start` | a range read, an after-message read or a `session.resolve` names a position below the current lineage's `first_ordinal` (§4.5) | `{first_ordinal}` (`errors::BeforeLineageStartDetail`) | no: read from `first_ordinal`, or read older history with `session.history` |
 | `unknown_ordinal` | a `session.history` `from_ordinal` or `before_ordinal` names an ordinal the runner never assigned, or one a revert removed (§4.6) | — | no |

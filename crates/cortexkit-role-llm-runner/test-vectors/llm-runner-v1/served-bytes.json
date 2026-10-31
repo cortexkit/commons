@@ -1,0 +1,431 @@
+{
+  "description": "Served bytes rebuilt from a host's store (CONTRACT 4.2.1). Each case rebuilds host_row under profile with served_bytes::check_served and the stored served_digest. All content is invented; digests are SHA-256 over the RFC 8785 encoding.",
+  "strip_lists": {
+    "opencode-aisdk": [
+      {
+        "parent": "/info",
+        "member": "summary",
+        "when": {
+          "pointer": "/info/role",
+          "equals": "user"
+        }
+      }
+    ],
+    "opencode-v2": [],
+    "pi": [],
+    "anthropic-messages": [],
+    "owned-broca": []
+  },
+  "cases": [
+    {
+      "name": "user_row_stripped",
+      "profile": "opencode-aisdk",
+      "stripped": true,
+      "host_row": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          },
+          "summary": {
+            "title": "Parser fix",
+            "diffs": [
+              {
+                "file": "src/parser.rs",
+                "additions": 3,
+                "deletions": 1
+              }
+            ]
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the parser."
+          }
+        ]
+      },
+      "served_digest": "76b44701ca3df77d2f2baeb2a868a8917b1f477f8a3208dd6472ea11927eaf27",
+      "outcome": "served",
+      "served_body": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the parser."
+          }
+        ]
+      }
+    },
+    {
+      "name": "user_row_summary_rewritten_after_serving",
+      "profile": "opencode-aisdk",
+      "stripped": true,
+      "host_row": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          },
+          "summary": {
+            "title": "Parser fix",
+            "diffs": [
+              {
+                "file": "src/parser.rs",
+                "additions": 5,
+                "deletions": 2
+              },
+              {
+                "file": "tests/parser.rs",
+                "additions": 12,
+                "deletions": 0
+              }
+            ]
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the parser."
+          }
+        ]
+      },
+      "served_digest": "76b44701ca3df77d2f2baeb2a868a8917b1f477f8a3208dd6472ea11927eaf27",
+      "outcome": "served",
+      "served_body": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the parser."
+          }
+        ]
+      }
+    },
+    {
+      "name": "user_row_without_summary",
+      "profile": "opencode-aisdk",
+      "stripped": true,
+      "host_row": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the parser."
+          }
+        ]
+      },
+      "served_digest": "76b44701ca3df77d2f2baeb2a868a8917b1f477f8a3208dd6472ea11927eaf27",
+      "outcome": "served",
+      "served_body": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the parser."
+          }
+        ]
+      }
+    },
+    {
+      "name": "user_row_served_before_adoption",
+      "profile": "opencode-aisdk",
+      "stripped": false,
+      "host_row": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          },
+          "summary": {
+            "title": "Parser fix",
+            "diffs": [
+              {
+                "file": "src/parser.rs",
+                "additions": 3,
+                "deletions": 1
+              }
+            ]
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the parser."
+          }
+        ]
+      },
+      "served_digest": "377710bd02e87b713744b2ff92eebea5fac5d973607362996e28b66e4b10495c",
+      "outcome": "served",
+      "served_body": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          },
+          "summary": {
+            "title": "Parser fix",
+            "diffs": [
+              {
+                "file": "src/parser.rs",
+                "additions": 3,
+                "deletions": 1
+              }
+            ]
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the parser."
+          }
+        ]
+      }
+    },
+    {
+      "name": "user_row_served_before_adoption_summary_rewritten",
+      "profile": "opencode-aisdk",
+      "stripped": false,
+      "host_row": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          },
+          "summary": {
+            "title": "Parser fix",
+            "diffs": [
+              {
+                "file": "src/parser.rs",
+                "additions": 5,
+                "deletions": 2
+              },
+              {
+                "file": "tests/parser.rs",
+                "additions": 12,
+                "deletions": 0
+              }
+            ]
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the parser."
+          }
+        ]
+      },
+      "served_digest": "377710bd02e87b713744b2ff92eebea5fac5d973607362996e28b66e4b10495c",
+      "outcome": "changed",
+      "rebuilt_digest": "7bca3d53a606a5e63b77bc4904ffd033aa694a27c31cdea52de52fb1998c9fed"
+    },
+    {
+      "name": "assistant_summary_flag_kept",
+      "profile": "opencode-aisdk",
+      "stripped": true,
+      "host_row": {
+        "info": {
+          "id": "msg_asst_1",
+          "role": "assistant",
+          "time": {
+            "created": 1761904801000,
+            "completed": 1761904803000
+          },
+          "providerID": "example-provider",
+          "modelID": "example-model",
+          "summary": true,
+          "finish": "stop"
+        },
+        "parts": [
+          {
+            "id": "prt_asst_1a",
+            "type": "text",
+            "text": "Summary of the earlier work."
+          }
+        ]
+      },
+      "served_digest": "a5e1d5be75ca2ced9a90c47d83777ee6ea75e672acf7ecf272012ed28d052929",
+      "outcome": "served",
+      "served_body": {
+        "info": {
+          "id": "msg_asst_1",
+          "role": "assistant",
+          "time": {
+            "created": 1761904801000,
+            "completed": 1761904803000
+          },
+          "providerID": "example-provider",
+          "modelID": "example-model",
+          "summary": true,
+          "finish": "stop"
+        },
+        "parts": [
+          {
+            "id": "prt_asst_1a",
+            "type": "text",
+            "text": "Summary of the earlier work."
+          }
+        ]
+      }
+    },
+    {
+      "name": "user_text_edited",
+      "profile": "opencode-aisdk",
+      "stripped": true,
+      "host_row": {
+        "info": {
+          "id": "msg_user_1",
+          "role": "user",
+          "time": {
+            "created": 1761904800000
+          },
+          "model": {
+            "providerID": "example-provider",
+            "modelID": "example-model"
+          },
+          "summary": {
+            "title": "Parser fix",
+            "diffs": [
+              {
+                "file": "src/parser.rs",
+                "additions": 3,
+                "deletions": 1
+              }
+            ]
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_user_1a",
+            "type": "text",
+            "text": "Fix the lexer."
+          }
+        ]
+      },
+      "served_digest": "76b44701ca3df77d2f2baeb2a868a8917b1f477f8a3208dd6472ea11927eaf27",
+      "outcome": "changed",
+      "rebuilt_digest": "095b62c247922391109366677e01ad6a9ef64f834cb381532c85b2ec308cc610"
+    },
+    {
+      "name": "pi_entry_changed",
+      "profile": "pi",
+      "stripped": true,
+      "host_row": {
+        "type": "message",
+        "id": "e1",
+        "parentId": null,
+        "timestamp": "2026-10-31T10:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Hello again"
+            }
+          ],
+          "timestamp": 1761904800000
+        }
+      },
+      "served_digest": "f27a0238cc35fa12bb1cf530579f5da14830a74d126b066a635f27f67a3e2367",
+      "outcome": "changed",
+      "rebuilt_digest": "a1b79c2d23330c64863841dd30dc528ac52abd686cac19dbdcfaea03489019d3"
+    },
+    {
+      "name": "unknown_profile",
+      "profile": "example-profile",
+      "stripped": true,
+      "host_row": {
+        "type": "message",
+        "id": "e1",
+        "parentId": null,
+        "timestamp": "2026-10-31T10:00:00.000Z",
+        "message": {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Hello"
+            }
+          ],
+          "timestamp": 1761904800000
+        }
+      },
+      "served_digest": "f27a0238cc35fa12bb1cf530579f5da14830a74d126b066a635f27f67a3e2367",
+      "outcome": "unsupported_profile"
+    }
+  ]
+}

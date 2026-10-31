@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.37
+
+- Add CONTRACT §4.2.1 and `served_bytes`: a runner that reads from a host
+  may keep each served message's digest and a `stripped` flag instead of its
+  body, rebuild every read from the host's stored row, and serve it only when
+  the rebuilt body's digest matches. Any other difference is refused
+  `served_bytes_changed` (`errors::ServedBytesChangedDetail`, `{mid}`), and
+  that message is served again only under a new lineage.
+- Per-profile strip lists name the members a host rewrites after a message
+  finished without changing what the model sees. `opencode-aisdk` leaves out
+  a user message's `info.summary`; every other profile's list is empty.
+  Messages served before a runner adopts the list keep the bytes they were
+  served with (`stripped: false`).
+- Add `served-bytes.json` and a `served_bytes_changed` row to `errors.json`.
+
 ## 0.7.36
 
 - Add opt-in provider service levels, validated per-wire support in discovery,

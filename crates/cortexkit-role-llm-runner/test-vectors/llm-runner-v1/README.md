@@ -579,3 +579,19 @@ add recorded self-referencing runner markers and revert fallback, without
 inferring the runner's cut from native rows.
 [README-opencode-v2.md](README-opencode-v2.md) records the
 source pins, capture hashes, deterministic extraction and synthetic coverage.
+
+`served-bytes.json` pins CONTRACT §4.2.1. `strip_lists` gives every named
+profile's list, and the runner crate's `strip_lists_match_the_vector` unit
+test in `src/served_bytes.rs` checks it against `served_bytes::strip_list`. Each case rebuilds `host_row`
+with `served_bytes::check_served` and the stored `served_digest`:
+- a stripped user row, served without its `info.summary`;
+- the same row after OpenCode rewrote that summary, still served;
+- a row with no summary;
+- a row served before adoption, kept byte for byte, and refused once its
+  summary changes;
+- an assistant row whose `info.summary` flag is kept;
+- an edited user text, refused;
+- a changed Pi entry, refused because Pi's list is empty;
+- an unknown profile, refused.
+
+All content is invented. `errors.json` gains the `served_bytes_changed` row.

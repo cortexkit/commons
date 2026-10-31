@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.42
+
+- Pin `cortexkit-role-llm-runner` 0.7.37. No conformance-case changes. The
+  runner crate's unit tests check its `served-bytes.json` vector.
+
 ## 0.15.41
 
 - Check unsupported-tier refusal before model dispatch, fixed run tiers,

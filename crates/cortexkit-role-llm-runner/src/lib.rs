@@ -43,6 +43,7 @@ pub mod run;
 pub mod send;
 pub mod send_status;
 pub mod serializer_profile;
+pub mod served_bytes;
 pub mod service_tier;
 pub mod session_change;
 pub mod session_ref;
