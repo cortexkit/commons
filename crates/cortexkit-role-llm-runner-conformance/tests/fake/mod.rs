@@ -160,6 +160,7 @@ fn new_incarnation() -> String {
     format!("{:032x}", u128::from_be_bytes(bytes))
 }
 const READ_FIELDS: &[&str] = &[
+    "include_display_facts",
     "include_rich_ui",
     "media",
     "from_ordinal",
@@ -175,6 +176,8 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub succession: Option<&'static str>,
+    pub read_display_facts: Option<&'static str>,
     pub refreshed_senders_wait_for_next_run: bool,
     pub declare_app_readers: bool,
     pub app_readers_reject_listed: bool,
@@ -645,6 +648,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    read_tool_times: Mutex<BTreeMap<String, Vec<cortexkit_role_llm_runner::read::ToolTime>>>,
     step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents,
     step_publications: Mutex<
         BTreeMap<String, Vec<cortexkit_role_llm_runner_conformance::step_events::PublishedStep>>,
@@ -3430,6 +3434,11 @@ impl Module {
             Err(_) if listed => return Ok(invalid(DELIVERY_FIELD)),
             Err(_) => return Ok(invalid("prompt")),
         };
+        if self.world.defects.succession != Some("undeclared_accepted") {
+            if let Err(field) = request.check_sender_succession(&self.world.groups) {
+                return Ok(invalid(&field));
+            }
+        }
         let attachment_parts = match attachments::admit_send(self, session, &request) {
             Ok(parts) => parts,
             Err(reply) => return Ok(reply),
@@ -3966,12 +3975,56 @@ impl Module {
         }
         let id = format!("{caller} {}", request.send_id);
         let params = serde_json::to_value(request).expect("a send serializes");
-        if let Some(queued) = sess.ordered.get(&id) {
-            if queued.request != params {
+        let predecessor = if self.world.defects.succession == Some("same_fresh") {
+            None
+        } else {
+            cortexkit_role_llm_runner::sender_succession::predecessor(&sess.senders, caller)
+        };
+        let predecessor_key = predecessor.map(|p| format!("{p} {}", request.send_id));
+        let earlier = predecessor_key
+            .as_ref()
+            .and_then(|key| sess.ordered.get(key))
+            .or_else(|| sess.ordered.get(&id))
+            .or_else(|| {
+                (self.world.defects.succession == Some("third_collides"))
+                    .then(|| {
+                        sess.ordered
+                            .values()
+                            .find(|queued| queued.send_id == request.send_id)
+                    })
+                    .flatten()
+            });
+        if let Some(queued) = earlier {
+            let mut accepted_payload = queued.request.clone();
+            let mut retry_payload = params.clone();
+            if self.world.defects.succession != Some("deadline_compared") {
+                accepted_payload
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("expires_at_ms");
+                retry_payload
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("expires_at_ms");
+            }
+            if accepted_payload != retry_payload
+                && self.world.defects.succession != Some("changed_accepted")
+            {
                 return Ok(refuse(
                     errors::SEND_ID_REUSE,
                     Some(json!({ "field": order::FIELD })),
                 ));
+            }
+            if self.world.defects.succession == Some("deadline_extended") {
+                if let Some(stored) = self
+                    .sessions
+                    .lock()
+                    .unwrap()
+                    .get_mut(session)
+                    .and_then(|sess| sess.ordered.get_mut(&id))
+                {
+                    stored.expires_at_ms = wanted.expires_at_ms;
+                }
             }
             if queued.state == "retracted" {
                 return Ok(refuse(errors::SEND_RETRACTED, None));
@@ -4093,6 +4146,11 @@ impl Module {
         if request.view == Some(ReadView::Model) && !self.world.serves(groups::MODEL_VIEW) {
             return invalid("view");
         }
+        if self.world.defects.read_display_facts != Some("undeclared_accepted") {
+            if let Err(field) = request.check_display_facts(&self.world.groups) {
+                return invalid(field);
+            }
+        }
         if let Err(field) = request.check_rich_ui(&self.world.groups) {
             return invalid(field);
         }
@@ -4179,6 +4237,35 @@ impl Module {
             .map(|m| {
                 let mut entry = self.read_message(sess, m);
                 entry.rich_ui = self.read_stamp(sess, m, request.include_rich_ui);
+                if (request.include_display_facts
+                    && self.world.defects.read_display_facts != Some("missing"))
+                    || self.world.defects.read_display_facts == Some("default_leak")
+                {
+                    entry.client_message_id = m.client_message_id.clone();
+                    let times = self.world.read_tool_times.lock().unwrap();
+                    entry.tool_times = m
+                        .calls
+                        .iter()
+                        .map(|key| {
+                            let id = &sess.calls[key].tool_call_id;
+                            times
+                                .get(session)
+                                .and_then(|times| {
+                                    times.iter().find(|time| &time.tool_call_id == id)
+                                })
+                                .cloned()
+                                .unwrap_or_else(|| {
+                                    cortexkit_role_llm_runner::read::ToolTime::new(id)
+                                })
+                        })
+                        .collect();
+                    if self.world.defects.read_display_facts == Some("wrong_times") {
+                        entry.tool_times.reverse();
+                    }
+                    if self.world.defects.read_display_facts == Some("body_changed") {
+                        entry.message["display_facts"] = json!(true);
+                    }
+                }
                 history::served_ordinal(sess, entry, &self.world.defects)
             })
             .collect();
@@ -4745,7 +4832,20 @@ impl Module {
             return refuse(errors::UNKNOWN_SEND, None);
         };
         let id = format!("{} {}", stamp.principal, request.send_id);
-        if let Some(queued) = sess.ordered.get(&id) {
+        let predecessor_key = if self.world.defects.succession == Some("status_hidden") {
+            None
+        } else {
+            cortexkit_role_llm_runner::sender_succession::predecessor(
+                &sess.senders,
+                &stamp.principal,
+            )
+            .map(|p| format!("{p} {}", request.send_id))
+        };
+        if let Some(queued) = predecessor_key
+            .as_ref()
+            .and_then(|key| sess.ordered.get(key))
+            .or_else(|| sess.ordered.get(&id))
+        {
             if self.world.defects.send_status_pending_after_restart
                 && self.replayed.load(Ordering::SeqCst)
                 && queued.state == "delivered"
@@ -5535,6 +5635,7 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    read_tool_times: Mutex::new(BTreeMap::new()),
                     step_event_policy: self.step_event_policy.clone(),
                     step_publications: Mutex::new(BTreeMap::new()),
                     held_replies: Mutex::new(BTreeMap::new()),
@@ -6781,6 +6882,26 @@ impl LlmRunnerSubject for FakeSubject {
     ) -> Result<cortexkit_role_llm_runner_conformance::CompactionObservation, HarnessError> {
         Ok(self.observe_compaction(session))
     }
+    fn delivery_clock_now_ms(&self) -> Option<u64> {
+        (self.defects.succession != Some("missing_clock")).then(|| self.world().now())
+    }
+
+    async fn seed_read_tool_times(
+        &self,
+        session: &str,
+        times: &[cortexkit_role_llm_runner::read::ToolTime],
+    ) -> Result<bool, HarnessError> {
+        if self.defects.read_display_facts == Some("missing_hook") {
+            return Ok(false);
+        }
+        self.world()
+            .read_tool_times
+            .lock()
+            .unwrap()
+            .insert(session.into(), times.to_vec());
+        Ok(true)
+    }
+
     async fn advance_retention_clock(
         &self,
         session: &str,

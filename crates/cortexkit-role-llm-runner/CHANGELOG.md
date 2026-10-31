@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.42
+
+- Add optional sender succession: a plan sender can name one predecessor for
+  keyed retry and status lookup, without delegated sends or withdrawals.
+  Shared checks reject malformed or undeclared succession at admission and
+  refresh, naming the indexed member before any write.
+- Delivery retry comparison ignores `expires_at_ms` for every sender,
+  including same-sender retries. This changes which retries match: a changed
+  deadline no longer conflicts, and the original deadline still governs.
+  `DeliveryOrder::same_payload` compares modes, dedupe key and template.
+- Add opt-in display facts to `session.read`: client message ids and ordered
+  per-call times/outcomes beside unchanged bodies. Missing facts stay omitted;
+  default request and entry bytes are unchanged. All extended types were
+  already non-exhaustive, so the additions preserve existing constructors.
+- Ship wire samples for both groups with checksum and registry entries.
+
 ## 0.7.41
 
 - Refreshed plan senders govern admission as soon as refresh acceptance is

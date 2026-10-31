@@ -52,7 +52,8 @@ pub struct ReadAdmission {
     /// A local operator on a direct connection whose development admission
     /// still stands. A runner not admitting local operators leaves this false.
     pub local_operator: bool,
-    /// The `send.status` request names this caller's own send.
+    /// The `send.status` request names this caller's own send, or one of
+    /// its current plan predecessor's sends under `sender_succession`.
     pub own_send: bool,
 }
 
@@ -87,8 +88,8 @@ impl ReadAdmission {
 /// keeps its current admission, neither opening nor closing it. With a list,
 /// an unlisted non-implicit caller returns false (`scope_owner_mismatch`, before
 /// any work). Listed readers gain no writes, and `send.status` remains limited
-/// to the owner and named senders reading their own sends whenever a
-/// `readers` list is present. Any other operation returns false: its admission
+/// to the owner and named senders reading their own or their current plan
+/// predecessor's sends whenever a `readers` list is present. Any other operation returns false: its admission
 /// is decided by its own rule, not here.
 pub fn admit(
     effective: &Map<String, Value>,

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.16.4
+
+- Pin llm-runner 0.7.42 and add sender-succession cases for matching and
+  conflicting retries, third-sender isolation, predecessor status and
+  undeclared-plan refusals. Existing identity and plan hooks drive them.
+- Add a same-sender changed-deadline retry case checking both the original
+  receipt and original expiry. The optional delivery clock observation pairs
+  with the controlled retention-clock hook; unavailable clocks are inapplicable.
+- Add display-fact cases for opt-in envelope facts with unchanged bodies,
+  default absence and undeclared refusals. An optional stored-time fixture
+  hook defaults to unsupported. Each new case has a faulty-runner control
+  that is rejected under the case's stable name.
+
 ## 0.16.3
 
 - Pin llm-runner 0.7.41. Check that adding or removing a sender takes effect

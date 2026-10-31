@@ -72,6 +72,11 @@ pub struct RelaunchRefreshRequest {
 }
 
 impl RelaunchRefreshRequest {
+    /// Validate sender succession before fetching or storing a refresh.
+    pub fn check_sender_succession<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
+        crate::sender_succession::check_plan(&self.plan, declared)
+    }
+
     pub fn new(plan: Map<String, Value>, policy: impl Into<String>, generation: u64) -> Self {
         RefreshRequest::new(plan, policy, generation).into()
     }
@@ -106,6 +111,11 @@ impl From<RefreshRequest> for RelaunchRefreshRequest {
 }
 
 impl RefreshRequest {
+    /// Validate sender succession before fetching or storing a refresh.
+    pub fn check_sender_succession<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
+        crate::sender_succession::check_plan(&self.plan, declared)
+    }
+
     /// Check output-reference plan members before fetching or storing a change.
     pub fn check_output_refs(&self, advertised: bool) -> Result<(), &'static str> {
         crate::output_refs::check_plan(&Value::Object(self.plan.clone()), advertised)

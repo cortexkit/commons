@@ -155,6 +155,19 @@ where
             "never_written_session_empty_head" => passed(self.never_written_head().await),
             "head_has_no_bodies" => passed(self.head_has_no_bodies().await),
             "head_sender_is_callers_effective_grant" => crate::head_sender::run(self).await,
+            "sender_succession_same_payload_receipt"
+            | "sender_succession_changed_payload_refused"
+            | "sender_succession_third_sender_fresh"
+            | "sender_succession_predecessor_status"
+            | "sender_succession_undeclared_refused"
+            | "delivery_deadline_retry_keeps_original_expiry" => {
+                crate::sender_succession::run(self, name).await
+            }
+            "read_display_facts_opt_in_envelope"
+            | "read_display_facts_default_absent"
+            | "read_display_facts_undeclared_refused" => {
+                crate::read_display_facts::run(self, name).await
+            }
             "refresh_added_sender_admitted_at_acceptance"
             | "refresh_removed_sender_refused_at_acceptance"
             | "app_readers_listed_reader_admitted"

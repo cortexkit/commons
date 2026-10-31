@@ -162,6 +162,8 @@ particular implementation.
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
+| `read_display_facts` | `session.read` (`include_display_facts`, entry client ids and tool times) | §4.2 |
+| `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `send.status` where served | §9.7 |
 | `rich_ui_stamp` | `session.read` (the `include_rich_ui` opt-in), `session.head` (`last_run_rich_ui`); also the rich UI stamp on assistant display rows and `run_started` where those are served | §9.17 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
 | `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
@@ -363,7 +365,7 @@ Read admission follows §9.19 when the plan carries `readers`; without that
 member it keeps that runner's current read admission.
 
 `{from_ordinal?, after_mid?, lineage_id?, limit?, max_bytes?,
-include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
+include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
 
 - [pinned] **Tail.** With no cursor, the newest page within the current
   lineage (§4.5). This is a contract, not a default a runner may change; the
@@ -396,6 +398,11 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   other runner refuses it as an unknown field (below), `invalid_params`
   naming `include_rich_ui` (`ReadRequest::check_rich_ui`), so a caller
   sends it only to a runner declaring the group.
+- [pinned] `include_display_facts: true` adds the entry facts in §4.2. Absent
+  means false, and encoders omit false. A caller sends it only to a runner
+  declaring `read_display_facts`; any other runner refuses `invalid_params
+  {field: "include_display_facts"}` before read work
+  (`ReadRequest::check_display_facts`), just like `include_rich_ui`.
 - [pinned] `media` is `"inline"` (the default), `"descriptors"`, or, on an
   `attachments` runner, `"blocks"` (§9.12). Unknown values are refused
   `invalid_params {field: "media"}`. Inline preserves existing non-media
@@ -491,7 +498,7 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   and are never rendered to the model on top of the view.
 - [pinned] **The envelope.** A read entry is `{ordinal, mid, message, run?,
   originals?, tool_calls?, tags?, role?, written_at?, delivered_as?, digest?,
-  part_digests?}`. Every
+  part_digests?, rich_ui?, client_message_id?, tool_times?}`. Every
   runner-neutral fact a consumer relies on rides in the envelope, never only
   inside `message`: the position (`ordinal`, `mid`), who spoke (`role`,
   `read::role`: `user`, `assistant`, `tool`, `system`, decoded open),
@@ -507,6 +514,22 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
 - [pinned] The message body (`message`) is in the runner's own schema,
   opaque to the role and decoded as JSON. A neutral message schema is not in
   v1 (see "Not in v1").
+
+#### Opt-in display facts
+
+- [pinned] A runner declaring `read_display_facts` serves these facts only
+  when `include_display_facts` is true, beside `mid` on `read::ReadMessage`,
+  never inside `message`. Neither bodies, serializer profiles nor message
+  or part digests change. Without the opt-in both members are absent and
+  default replies keep their exact bytes.
+- [pinned] `client_message_id?: string` is present on an entry written by a
+  send carrying that id, with exactly the value on its display row (§9.11).
+  A host-typed entry or a send without that id carries none.
+- [pinned] `tool_times?: [{tool_call_id, started_at?, finished_at?, unanswered?}]`
+  (`read::ToolTime`) has one item per tool call, in the message's call order.
+  Times and outcomes follow §4.7.1: copy stored per-call facts, never invent
+  a time, omit absent members, and decode `unanswered` as an open string.
+  An entry with no calls omits `tool_times`.
 
 #### Descriptor payloads and identity
 
@@ -2238,6 +2261,13 @@ new members.
   - the same key with a different payload or mode is refused `send_id_reuse`,
     with `detail.field` naming the field that differs when the runner can
     identify it.
+- [pinned] Delivery deadlines are timing, not content, for every sender and
+  every runner, including same-sender retries without `sender_succession`.
+  Leave each delivery's `expires_at_ms` out of the payload comparison;
+  `modes`, `dedupe_key` and `template` stay compared. A matched retry refers
+  to the existing send and answers its current receipt, and the originally
+  accepted deadline still governs: retrying never extends a send's life. A runner may keep one digest or per-member
+  digests, provided it compares the same members (`DeliveryOrder::same_payload`).
 - [pinned] The owner derives `send_id` from what it delivers, never from the
   attempt. The runner keeps it for the session's lifetime, rebuilt from
   replay.
@@ -3564,11 +3594,13 @@ say who may send and which texts are system text.
   (`delivery_order::MEMBERS`). On a runner that declares the group, a send
   carrying any of them with a string or absent `delivery` is refused
   `invalid_params` naming that member, writing nothing.
-- [pinned] The list, with its members, is part of the send's identity
+- [pinned] The list, `dedupe_key` and `template` (but not `expires_at_ms`)
+  are part of the send's identity
   (§9): the same `send_id` with another list is refused `send_id_reuse`
   naming `delivery`. A retry with the same `send_id` is the same send
   and answers its current state. Idempotency is keyed by the sender and
-  `send_id`, so two senders' `send_id`s never collide.
+  `send_id`, except for the explicit predecessor lookup below; unrelated
+  senders' ids never collide.
 
 **Dedupe and expiry.**
 
@@ -3706,7 +3738,7 @@ say who may send and which texts are system text.
 **Senders.**
 
 - [pinned] The plan's optional `senders: [{module, idle_start?, interrupt?,
-  templates?}]` (`delivery_order::PlanSender`) names the modules other than
+  templates?, succeeds?}]` (`delivery_order::PlanSender`) names the modules other than
   the owner whose sends the session admits, and the templates each may use.
   Each entry, its grants included, is frozen at admission with the plan,
   then replaced at durable `session.refresh` acceptance, not at the next run
@@ -3755,6 +3787,44 @@ say who may send and which texts are system text.
   guidance for senders, not a new runner obligation; how long to wait is
   the sender's choice.
 
+#### `sender_succession`: one predecessor's retries and status
+
+- [pinned] A plan sender may carry `succeeds: "<module id>"`, naming one
+  other module, never itself. No two entries name the same predecessor.
+  The predecessor need not be in `senders`. Successions do not chain:
+  check only the named predecessor, never that module's own predecessor.
+- [pinned] A composer sends `succeeds` only to a runner declaring
+  `sender_succession`. Every other runner refuses the plan as
+  `invalid_params {field: "plan.senders[<i>].succeeds"}`, writing nothing.
+  A malformed value or a self/duplicate predecessor is refused naming that
+  same indexed member. Run `sender_succession::check_plan` before ordinary
+  plan checks, at first admission and refresh, through
+  `SendRequest::check_sender_succession` and
+  `RefreshRequest::check_sender_succession` (also on `RelaunchRefreshRequest`).
+- [pinned] A sender's namespace is this session's send records keyed by
+  the attested sender and its `send_id`. A successor's keyed send is
+  looked up in this order:
+  1. The predecessor's namespace, for that `send_id`. If a record exists, it
+     decides, with exactly the comparison a same-sender retry uses: a
+     matching payload answers that send's current receipt, and a different
+     payload is `send_id_reuse`. A mismatch never falls through.
+  2. Only if the predecessor has no record for that id, the successor's own
+     namespace, with ordinary same-sender retry handling.
+  3. Only if neither holds a record, a new send in the successor's own
+     namespace.
+  Send records keep §9's session lifetime, so a client can keep retrying
+  after the switch for as long as the relation stays in the plan.
+- [pinned] The successor may read `send.status` for the predecessor's sends
+  on a runner serving that operation, looked up in the same order; neither
+  namespace holding the id answers `unknown_send`. It
+  gains no sends, stop or withdrawals on the predecessor's behalf, and
+  other senders gain nothing.
+- [pinned] These rules last while `succeeds` is in the current admission
+  plan, even after the predecessor is removed from `senders`. At durable
+  refresh acceptance the new succession governs immediately (§10.2), not
+  at a run boundary. `sender_succession::predecessor` selects one hop from
+  that current list.
+
 ### 9.8 `send_status`: `send.status`
 
 A caller that follows a queued send (§9) re-sends its full body under the
@@ -3778,7 +3848,8 @@ re-send their bodies.
   durable record of the send.
 - [pinned] The `send_id` is looked up as a re-send's is: the caller's
   `send_id` namespace (§9, and per sender on a `delivery_order` runner,
-  §9.7). A `send_id` the session has no record of for the caller is
+  §9.7, including its declared one-hop succession lookup). A `send_id`
+  the session has no record of in either applicable namespace is
   refused `unknown_send`, terminal (§12.1); nothing is written.
 - [pinned] `send.status` writes nothing and dispatches nothing: it never
   admits, delivers, re-queues or retries a send, and it is not activity
@@ -3941,8 +4012,8 @@ re-send their bodies.
   per-message record, never in the host's stored message, so the model
   never sees it. Prompts typed into the host directly carry none.
 - [pinned] It appears on that message's display row (§4.7) and nowhere in
-  the default `session.read` entry. No `session.read` member opts into it in
-  this version.
+  the default `session.read` entry. `include_display_facts` opts into it on
+  a runner declaring `read_display_facts` (§4.2).
 - [pinned] It is part of the send's identity: a re-send under the same
   `send_id` must carry the same `client_message_id`, or none if the first
   send carried none; any other is refused `send_id_reuse {field:
@@ -4709,7 +4780,8 @@ froze for a run to every assistant reply the run writes.
   when the rest of the plan, including `compaction_item`, applies at the next
   run; the old provider keeps read access until that switch, so a running
   compaction is not cut off mid-run. Plan-named senders may also
-  read `send.status` for their own sends only. Local operator tools on a
+  read `send.status` for their own sends and, under `sender_succession`,
+  their current plan predecessor's sends only. Local operator tools on a
   direct connection remain admitted for as long as the development admission
   stands, on runners that admit them; a runner that never admits them need
   not start. Development admission means that runner's existing permission
@@ -4897,7 +4969,7 @@ every request, answer and refusal.
   durable, the refreshed plan's `senders` and `readers` govern admission
   straight away, whatever the policy rung and even while a run is in progress. This
   covers `delivery_order::admit`, `delivery_order::admit_delivery`, the
-  `interrupt` grant, `idle_start` and templates (§9.7), and read admission
+  `interrupt` grant, `idle_start`, templates and sender succession (§9.7), and read admission
   (§9.19). Every other part of the plan keeps the next-run rule above: this
   exception changes who may send or read, not the text or tools a run
   started with. The offered-set gate that refuses calls to removed tools at

@@ -99,6 +99,10 @@ pub enum Capability {
     /// `session.send` with `delivery_order`, plan-named senders and plan
     /// templates.
     DeliveryOrder,
+    /// One-hop retry/status lookup through a plan sender's predecessor.
+    SenderSuccession,
+    /// Opt-in client ids and tool times on raw read entries.
+    ReadDisplayFacts,
     /// `send.status`: what a re-send of a `send_id` would answer, without
     /// its body.
     SendStatus,
@@ -186,6 +190,8 @@ impl Capability {
         Self::RunUsage,
         Self::SessionUsage,
         Self::DeliveryOrder,
+        Self::SenderSuccession,
+        Self::ReadDisplayFacts,
         Self::SendStatus,
         Self::UserCommands,
         Self::HistoryDisplay,
@@ -251,6 +257,8 @@ impl Capability {
             Self::RunUsage => groups::RUN_USAGE,
             Self::SessionUsage => groups::SESSION_USAGE,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
+            Self::SenderSuccession => groups::SENDER_SUCCESSION,
+            Self::ReadDisplayFacts => groups::READ_DISPLAY_FACTS,
             Self::SendStatus => groups::SEND_STATUS,
             Self::HistoryDisplay => groups::HISTORY_DISPLAY,
             Self::LiveEvents => groups::LIVE_EVENTS,
@@ -1855,6 +1863,25 @@ pub trait LlmRunnerSubject: Harness {
     /// answers false: that Setup names no `newest` and has no cut to anchor.
     fn first_setup_names_newest(&self) -> bool {
         true
+    }
+
+    /// Current Unix epoch milliseconds of the clock also governing delivery
+    /// expiry. Paired with `advance_retention_clock` for deterministic retry
+    /// deadline checks; `None` makes those checks inapplicable.
+    fn delivery_clock_now_ms(&self) -> Option<u64> {
+        None
+    }
+
+    /// Seed per-call display metadata independently of the read route. The
+    /// calls already exist in `session`; use the supplied order and preserve
+    /// absent times/outcomes. Return false when the adapter cannot arrange
+    /// stored metadata, so display-fact checks are inapplicable, not passes.
+    async fn seed_read_tool_times(
+        &self,
+        _session: &str,
+        _times: &[cortexkit_role_llm_runner::read::ToolTime],
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
     }
 
     /// Advance the session's retention clock by `milliseconds`, completing

@@ -16,10 +16,20 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-llm-runner = "0.7.38"
+cortexkit-role-llm-runner = "0.7.42"
 ```
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
+
+Since 0.7.42, these optional groups extend existing wire shapes:
+
+| Group | Extension |
+|---|---|
+| `sender_succession` | `PlanSender::succeeds` names one predecessor for keyed retry and status lookup, not delegated sends or withdrawals. Validate with the additive request checks before other plan checks. |
+| `read_display_facts` | `ReadRequest::include_display_facts` adds `ReadMessage::client_message_id` and ordered `tool_times` (`read::ToolTime`) beside unchanged message bodies. |
+
+Delivery retry comparisons now ignore `expires_at_ms` for every sender and
+runner; the accepted send's original deadline still governs.
 
 Since 0.7.29, the opt-in `retract_own_send` group (requiring `retract`)
 allows a daemon-attested sender to withdraw its own pending submission on

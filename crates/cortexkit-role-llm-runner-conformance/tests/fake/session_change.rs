@@ -241,6 +241,9 @@ impl Module {
         sess: &Sess,
         request: RefreshRequest,
     ) -> Result<Reply, Killed> {
+        if let Err(field) = request.check_sender_succession(&self.world.groups) {
+            return Ok(invalid(&field));
+        }
         if let Err(field) = request.check_policy() {
             return Ok(invalid(field));
         }

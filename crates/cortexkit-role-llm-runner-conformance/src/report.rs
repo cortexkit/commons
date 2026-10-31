@@ -63,6 +63,18 @@ const SESSION_USAGE: &[Capability] = &[
     TranscriptReads,
 ];
 const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
+const SUCCESSION: &[Capability] = &[
+    Capability::SenderSuccession,
+    Capability::DeliveryOrder,
+    Queue,
+    TranscriptReads,
+];
+const READ_FACTS: &[Capability] = &[
+    Capability::ReadDisplayFacts,
+    Capability::ClientMessageId,
+    Queue,
+    TranscriptReads,
+];
 const ORDER_STEER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads, Steer];
 const SESSION_CHANGE: &[Capability] = &[Capability::SessionChange, Queue, RunOps];
 const DISPLAY: &[Capability] = &[
@@ -119,6 +131,15 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("sender_succession_same_payload_receipt", SUCCESSION, "a successor's matching keyed retry gets the predecessor's existing receipt, without another transcript write"),
+    case("sender_succession_changed_payload_refused", SUCCESSION, "a successor's conflicting keyed retry is send_id_reuse, with no transcript write"),
+    case("sender_succession_third_sender_fresh", SUCCESSION, "the owner's same send id stays independent of the predecessor and successor"),
+    case("sender_succession_predecessor_status", &[Capability::SenderSuccession, Capability::DeliveryOrder, Capability::SendStatus, Queue, TranscriptReads], "the successor can read the predecessor's send.status"),
+    CaseSpec { name: "sender_succession_undeclared_refused", requires: ORDER, requires_any: &[], requires_undeclared_any: &[Capability::SenderSuccession], checks: "an undeclared succeeds plan is refused naming the indexed field, with no transcript write" },
+    case("delivery_deadline_retry_keeps_original_expiry", ORDER, "a same-sender changed-deadline retry gets the receipt, but the original deadline still expires the send"),
+    case("read_display_facts_opt_in_envelope", READ_FACTS, "client ids and ordered tool times appear beside mid, with the decoded message unchanged"),
+    case("read_display_facts_default_absent", READ_FACTS, "a default read omits both display-fact members"),
+    CaseSpec { name: "read_display_facts_undeclared_refused", requires: READS, requires_any: &[], requires_undeclared_any: &[Capability::ReadDisplayFacts], checks: "an undeclared read opt-in is refused naming include_display_facts" },
     case("service_tier_unsupported_before_model", &[Queue, RunOps],
         "an unsupported level is refused with unsupported_tier before any model call"),
     case("service_tier_run_fixed", &[Queue, RunOps],

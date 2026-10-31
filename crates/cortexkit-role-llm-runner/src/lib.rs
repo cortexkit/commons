@@ -43,6 +43,7 @@ pub mod rich_ui;
 pub mod run;
 pub mod send;
 pub mod send_status;
+pub mod sender_succession;
 pub mod serializer_profile;
 pub mod served_bytes;
 pub mod service_tier;
@@ -198,6 +199,8 @@ pub mod capabilities {
     /// `session.history` with `form: "display"`: each entry as a canonical
     /// row (`display::DisplayRow`), cut only by the caller's `limits`.
     pub const HISTORY_DISPLAY: &str = "history_display";
+    /// Opt-in client ids and per-call times beside `session.read` message bodies.
+    pub const READ_DISPLAY_FACTS: &str = "read_display_facts";
     /// The pinned live events on `session.subscribe` (`live::LiveEvent`):
     /// durable message, tool and run lifecycle events, display deltas with
     /// `mid` and `part`, `seq` on every frame, and the attach replay of the
@@ -354,6 +357,8 @@ pub mod capabilities {
     /// modes, plan-named senders and plan templates for system-authority
     /// text.
     pub const DELIVERY_ORDER: &str = "delivery_order";
+    /// One-hop retry and status lookup through a plan sender's predecessor.
+    pub const SENDER_SUCCESSION: &str = "sender_succession";
     /// Optional plan-named read admission. Adds no read operation of its own.
     pub const APP_READERS: &str = "app_readers";
     /// `send.status`: what a re-send of a `send_id` would answer, read
@@ -401,6 +406,7 @@ pub mod capabilities {
         (TRANSCRIPT_READS, &[ops::SESSION_READ, ops::SESSION_HEAD]),
         (HOST_HISTORY, &[ops::SESSION_HISTORY]),
         (HISTORY_DISPLAY, &[ops::SESSION_HISTORY]),
+        (READ_DISPLAY_FACTS, &[ops::SESSION_READ]),
         (LIVE_EVENTS, &[ops::SESSION_SUBSCRIBE]),
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
@@ -445,6 +451,7 @@ pub mod capabilities {
         (SESSION_USAGE, &[ops::SESSION_HEAD]),
         (HEAD_SENDER, &[ops::SESSION_HEAD]),
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),
+        (SENDER_SUCCESSION, &[ops::SESSION_SEND]),
         (APP_READERS, &[]),
         (SEND_STATUS, &[ops::SEND_STATUS]),
         (COMPACTION, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),

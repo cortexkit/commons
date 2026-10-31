@@ -1,0 +1,13 @@
+{
+  "plan": {"senders": [{"module": "app-new", "idle_start": true, "succeeds": "app-old"}]},
+  "predecessor_send": {"prompt": "hello", "send_id": "phone-1", "delivery": ["tool_result"], "expires_at_ms": 1000},
+  "successor_retry": {"prompt": "hello", "send_id": "phone-1", "delivery": ["tool_result"], "expires_at_ms": 2000},
+  "receipt": {"state": "pending", "submission_id": "submission-1"},
+  "status_request": {"send_id": "phone-1"},
+  "status_at_original_deadline": {"state": "expired"},
+  "different_payload": {"prompt": "different", "send_id": "phone-1", "delivery": ["tool_result"]},
+  "reuse_refusal": {"code": "send_id_reuse", "detail": {"field": "prompt"}},
+  "undeclared_refusal": {"code": "invalid_params", "detail": {"field": "plan.senders[0].succeeds"}},
+  "self_predecessor": {"senders": [{"module": "app-new", "succeeds": "app-new"}]},
+  "duplicate_predecessor": {"senders": [{"module": "app-new", "succeeds": "app-old"}, {"module": "app-third", "succeeds": "app-old"}]}
+}

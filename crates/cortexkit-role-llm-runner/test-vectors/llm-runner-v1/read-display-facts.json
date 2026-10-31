@@ -1,0 +1,19 @@
+{
+  "request": {"from_ordinal": 0, "include_display_facts": true},
+  "default_request": {"from_ordinal": 0},
+  "default_page": {
+    "messages": [
+      {"ordinal": 0, "mid": "m0", "message": {"role": "user", "content": "hello"}},
+      {"ordinal": 1, "mid": "m1", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "call-1"}, {"type": "tool_use", "id": "call-2"}, {"type": "tool_use", "id": "call-3"}]}}
+    ],
+    "lineage_id": "lineage-1"
+  },
+  "page": {
+    "messages": [
+      {"ordinal": 0, "mid": "m0", "message": {"role": "user", "content": "hello"}, "client_message_id": "phone_1"},
+      {"ordinal": 1, "mid": "m1", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "call-1"}, {"type": "tool_use", "id": "call-2"}, {"type": "tool_use", "id": "call-3"}]}, "tool_times": [{"tool_call_id": "call-1", "started_at": 100, "finished_at": 125}, {"tool_call_id": "call-2", "started_at": 101, "unanswered": "future_reason"}, {"tool_call_id": "call-3"}]}
+    ],
+    "lineage_id": "lineage-1"
+  },
+  "undeclared_refusal": {"code": "invalid_params", "detail": {"field": "include_display_facts"}}
+}

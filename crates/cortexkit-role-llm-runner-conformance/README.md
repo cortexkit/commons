@@ -1,5 +1,22 @@
 # cortexkit-role-llm-runner-conformance
 
+Version 0.16.4 pins llm-runner 0.7.42 and adds these cases:
+
+| Cases | Groups and adapter hooks |
+|---|---|
+| `sender_succession_same_payload_receipt`, `sender_succession_changed_payload_refused`, `sender_succession_third_sender_fresh` | `sender_succession`, `delivery_order`, `queue`, `transcript_reads`; `head_sender_identities`, `send_fields_with_plan` and an offered `idle_start` list mode. The fixture has one link (B succeeds A), so the cases check that a retry under A's id resolves against A's record and that the owner's same id stays independent. They don't exercise a predecessor miss falling back to B's own records, a chain, or a succession relation added or changed by refresh: when refresh is served, only the predecessor's removal from `senders` is exercised. |
+| `sender_succession_predecessor_status` | Same requirements plus `send_status`; successor status equals the predecessor receipt. |
+| `sender_succession_undeclared_refused` | Without `sender_succession`, an otherwise supported plan is refused naming its indexed `succeeds` member, with no transcript write. |
+| `delivery_deadline_retry_keeps_original_expiry` | `delivery_order`, `queue`, `transcript_reads`, and the `RetentionClock` capability; controlled clock via `delivery_clock_now_ms` and `advance_retention_clock`, with a non-starting list mode. No named-sender hooks are needed. The receipt matches but the accepted deadline still governs, without requiring `sender_succession`. |
+| `read_display_facts_opt_in_envelope`, `read_display_facts_default_absent` | `read_display_facts`, `client_message_id`, `queue`, `transcript_reads`; `seed_read_tool_times` arranges independently stored per-call metadata. The suite sees decoded answers, so it checks facts beside unchanged decoded bodies, not raw reply bytes. It checks absence on the fixture's user and call entries, not on every entry, and has no host-typed entry. |
+| `read_display_facts_undeclared_refused` | Without `read_display_facts`, the opt-in is refused naming `include_display_facts`. |
+
+Positive cases are not applicable by name without their group or needed
+adapter hooks; the two undeclared-refusal cases instead require the group to
+be absent. New optional hooks have unsupported defaults. Faulty-runner
+self-tests exercise every new case, including deadline comparison and deadline
+extension as separate defects.
+
 The negotiated view cases `part_edits_truncate_renders_with_own_tag` and
 `part_edits_bytes_render_with_own_tag` require compaction, tags, queue,
 transcript reads and run ops. They observe the actual Setup `view_features`

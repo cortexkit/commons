@@ -209,6 +209,16 @@ impl DeliveryOrder {
         self.modes.contains(&Mode::IdleStart)
     }
 
+    /// Compare delivery content for a keyed retry. Deadlines are timing, not
+    /// content, so `expires_at_ms` is left out. This only compares: on a
+    /// match the caller answers the existing send's current receipt and keeps
+    /// its originally accepted deadline.
+    pub fn same_payload(&self, earlier: &Self) -> bool {
+        self.modes == earlier.modes
+            && self.dedupe_key == earlier.dedupe_key
+            && self.template == earlier.template
+    }
+
     /// The members that ride beside the list, as set (`dedupe_key`,
     /// `expires_at_ms`, `template`); the list itself rides in `delivery`.
     pub fn to_members(&self) -> Map<String, Value> {
@@ -416,6 +426,10 @@ impl Template {
 pub struct PlanSender {
     /// The module, matched against the route's attested principal.
     pub module: String,
+    /// One predecessor whose keyed sends this module may retry or inspect.
+    /// Requires `sender_succession`; it grants no action on that module's behalf.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub succeeds: Option<String>,
     /// Whether this sender may list `idle_start`, and so start a run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub idle_start: bool,
@@ -431,6 +445,7 @@ impl PlanSender {
     pub fn new(module: impl Into<String>) -> Self {
         Self {
             module: module.into(),
+            succeeds: None,
             idle_start: false,
             interrupt: false,
             templates: Vec::new(),
@@ -438,6 +453,10 @@ impl PlanSender {
     }
     pub fn with_idle_start(mut self) -> Self {
         self.idle_start = true;
+        self
+    }
+    pub fn with_succeeds(mut self, predecessor: impl Into<String>) -> Self {
+        self.succeeds = Some(predecessor.into());
         self
     }
     /// Grant this sender the `interrupt` delivery string.

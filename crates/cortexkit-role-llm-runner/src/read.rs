@@ -62,6 +62,7 @@ pub mod fields {
     /// The `session.read` opt-in to each assistant entry's rich UI stamp,
     /// served only by a runner declaring `rich_ui_stamp`.
     pub const INCLUDE_RICH_UI: &str = "include_rich_ui";
+    pub const INCLUDE_DISPLAY_FACTS: &str = "include_display_facts";
 }
 
 /// Which list of messages a read pages through.
@@ -141,6 +142,10 @@ pub struct ReadRequest {
     /// `false`, and a read without it is answered exactly as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub include_rich_ui: bool,
+    /// Add client ids and per-call times beside message bodies. Only served
+    /// by a runner declaring `read_display_facts`; absent means false.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub include_display_facts: bool,
 }
 
 /// The mode a well-formed [`ReadRequest`] selects: the newest page, a range
@@ -209,6 +214,24 @@ impl ReadRequest {
     /// runner whose `role.describe` declares `rich_ui_stamp`.
     pub fn with_include_rich_ui(mut self, include_rich_ui: bool) -> Self {
         self.include_rich_ui = include_rich_ui;
+        self
+    }
+
+    /// The field an `invalid_params` refusal names when the request asks
+    /// for display facts without the declared group.
+    pub fn check_display_facts<S: AsRef<str>>(&self, groups: &[S]) -> Result<(), &'static str> {
+        if self.include_display_facts
+            && !groups
+                .iter()
+                .any(|group| group.as_ref() == crate::capabilities::READ_DISPLAY_FACTS)
+        {
+            return Err(fields::INCLUDE_DISPLAY_FACTS);
+        }
+        Ok(())
+    }
+
+    pub fn with_include_display_facts(mut self, include_display_facts: bool) -> Self {
+        self.include_display_facts = include_display_facts;
         self
     }
 
@@ -745,6 +768,56 @@ pub struct ReadMessage {
     /// imported or adopted entry, and never without the opt-in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rich_ui: Option<crate::rich_ui::RichUiStamp>,
+    /// The sent user message's client id, exactly as on its display row.
+    /// Present only with `include_display_facts`, never inside `message`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_message_id: Option<String>,
+    /// One item per tool call, in call order, only with `include_display_facts`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_times: Vec<ToolTime>,
+}
+
+/// A read entry's per-call display facts, copied from stored call metadata.
+/// Missing times are unknown, never inferred from another clock or call.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ToolTime {
+    pub tool_call_id: String,
+    /// Dispatch time in Unix epoch milliseconds, when stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
+    /// Answer-recording time in Unix epoch milliseconds, when stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<u64>,
+    /// Why the provider never answered, decoded as an open string (§4.7.1).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unanswered: Option<String>,
+}
+
+impl ToolTime {
+    pub fn new(tool_call_id: impl Into<String>) -> Self {
+        Self {
+            tool_call_id: tool_call_id.into(),
+            started_at: None,
+            finished_at: None,
+            unanswered: None,
+        }
+    }
+
+    pub fn with_started_at(mut self, started_at: u64) -> Self {
+        self.started_at = Some(started_at);
+        self
+    }
+
+    pub fn with_finished_at(mut self, finished_at: u64) -> Self {
+        self.finished_at = Some(finished_at);
+        self
+    }
+
+    pub fn with_unanswered(mut self, unanswered: impl Into<String>) -> Self {
+        self.unanswered = Some(unanswered.into());
+        self
+    }
 }
 
 /// The roles a read entry's `role` names. Decoded as open strings: a
@@ -761,6 +834,16 @@ pub mod role {
 }
 
 impl ReadMessage {
+    pub fn with_client_message_id(mut self, client_message_id: impl Into<String>) -> Self {
+        self.client_message_id = Some(client_message_id.into());
+        self
+    }
+
+    pub fn with_tool_times(mut self, tool_times: Vec<ToolTime>) -> Self {
+        self.tool_times = tool_times;
+        self
+    }
+
     pub fn new(ordinal: u64, mid: impl Into<String>, message: Value) -> Self {
         Self {
             ordinal,
@@ -776,6 +859,8 @@ impl ReadMessage {
             written_at: None,
             delivered_as: None,
             rich_ui: None,
+            client_message_id: None,
+            tool_times: Vec::new(),
         }
     }
 

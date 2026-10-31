@@ -443,6 +443,18 @@ impl Module {
                 row = row.with_sender(sender);
             }
         }
+        if let Some(times) = self.world.read_tool_times.lock().unwrap().get(session) {
+            for call in row.tool_calls_mut() {
+                if let Some(time) = times
+                    .iter()
+                    .find(|time| time.tool_call_id == call.tool_call_id)
+                {
+                    call.started_at = time.started_at;
+                    call.finished_at = time.finished_at;
+                    call.unanswered = time.unanswered.clone();
+                }
+            }
+        }
         output_refs::decorate(sess, &entry.mid, &mut row);
         self.stamp_row(sess, &entry.mid, &mut row);
         if self.world.serves(groups::CALL_IDENTITY) {

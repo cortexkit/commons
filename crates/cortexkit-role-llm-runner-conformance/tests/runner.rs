@@ -833,6 +833,15 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    // Legacy fixtures do not opt into these groups or supply their optional
+    // metadata/clock hooks. Inapplicable cases are not counted as passing coverage.
+    if (case.starts_with("sender_succession_")
+        || case.starts_with("read_display_facts_")
+        || case == "delivery_deadline_retry_keeps_original_expiry")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { .. }))
+    {
+        return;
+    }
     if SERVICE_TIER_CASES.contains(&case)
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason == "role.describe does not declare service_tier"
@@ -1255,6 +1264,25 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
                 report.outcome(spec.name),
                 Some(&CaseOutcome::Inapplicable {
                     reason: "session_retention is not declared".into(),
+                })
+            );
+            continue;
+        }
+        if spec.name.starts_with("sender_succession_")
+            || spec.name.starts_with("read_display_facts_")
+            || spec.name == "delivery_deadline_retry_keeps_original_expiry"
+        {
+            assert_eq!(
+                report.outcome(spec.name),
+                Some(&CaseOutcome::Inapplicable {
+                    reason: format!(
+                        "missing groups: {}",
+                        spec.requires
+                            .iter()
+                            .map(|capability| capability.name())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
                 })
             );
             continue;
@@ -8455,4 +8483,194 @@ async fn tool_upfront_accepting_stale_names_fails_by_name() {
     .await;
     assert!(failed(&report, UPFRONT_STALE).contains("stale upfront admission"));
     assert_none_failed_but(&report, &[UPFRONT_STALE]);
+}
+
+const SUCCESSION_CASES: &[&str] = &[
+    "sender_succession_same_payload_receipt",
+    "sender_succession_changed_payload_refused",
+    "sender_succession_third_sender_fresh",
+    "sender_succession_predecessor_status",
+];
+
+fn assert_feature_passed(report: &SuiteReport, name: &str) {
+    assert_eq!(
+        report.outcome(name),
+        Some(&CaseOutcome::Passed),
+        "{name}: {}",
+        report.render()
+    );
+}
+
+fn succession_subject(defect: Option<&'static str>) -> FakeSubject {
+    let mut subject = admission_subject(Defects {
+        succession: defect,
+        ..Defects::default()
+    });
+    subject.capabilities.extend([
+        Capability::SenderSuccession,
+        Capability::SendStatus,
+        Capability::RetentionClock,
+    ]);
+    subject
+}
+
+#[tokio::test]
+async fn sender_succession_correct_runner_passes_all_cases() {
+    let report = run(&succession_subject(None)).await;
+    for name in SUCCESSION_CASES {
+        assert_feature_passed(&report, name);
+    }
+    assert_feature_passed(&report, "delivery_deadline_retry_keeps_original_expiry");
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn sender_succession_each_fault_is_rejected_by_case_name() {
+    for (defect, name) in [
+        ("same_fresh", SUCCESSION_CASES[0]),
+        ("changed_accepted", SUCCESSION_CASES[1]),
+        ("third_collides", SUCCESSION_CASES[2]),
+        ("status_hidden", SUCCESSION_CASES[3]),
+        (
+            "deadline_compared",
+            "delivery_deadline_retry_keeps_original_expiry",
+        ),
+        (
+            "deadline_extended",
+            "delivery_deadline_retry_keeps_original_expiry",
+        ),
+    ] {
+        let report = run(&succession_subject(Some(defect))).await;
+        failed(&report, name);
+    }
+}
+
+#[tokio::test]
+async fn sender_succession_undeclared_refusal_has_a_faulty_control() {
+    for defect in [None, Some("undeclared_accepted")] {
+        let mut subject = succession_subject(defect);
+        subject.capabilities.remove(&Capability::SenderSuccession);
+        let report = run(&subject).await;
+        let name = "sender_succession_undeclared_refused";
+        if defect.is_none() {
+            assert_feature_passed(&report, name);
+            assert_feature_passed(&report, "delivery_deadline_retry_keeps_original_expiry");
+        } else {
+            failed(&report, name);
+        }
+        for name in SUCCESSION_CASES {
+            assert!(
+                matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+                "{name}: {}",
+                report.render()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn sender_succession_missing_routes_and_clock_are_inapplicable_by_name() {
+    let mut subject = succession_subject(None);
+    subject.head_sender_fixtures = false;
+    let report = run(&subject).await;
+    assert_feature_passed(&report, "delivery_deadline_retry_keeps_original_expiry");
+    for name in SUCCESSION_CASES
+        .iter()
+        .copied()
+        .chain(["sender_succession_undeclared_refused"])
+    {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{name}: {}",
+            report.render()
+        );
+    }
+    let clockless = succession_subject(Some("missing_clock"));
+    let report = run(&clockless).await;
+    assert!(
+        matches!(report.outcome("delivery_deadline_retry_keeps_original_expiry"), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("clock")),
+        "{}",
+        report.render()
+    );
+}
+
+fn read_facts_subject(defect: Option<&'static str>) -> FakeSubject {
+    let mut subject = declaring(
+        Capability::ReadDisplayFacts,
+        Defects {
+            read_display_facts: defect,
+            ..Defects::default()
+        },
+    );
+    subject.capabilities.insert(Capability::ClientMessageId);
+    subject
+}
+
+#[tokio::test]
+async fn read_display_facts_correct_runner_passes_and_faults_fail_by_name() {
+    for (defect, red) in [
+        (None, None),
+        (Some("missing"), Some("read_display_facts_opt_in_envelope")),
+        (
+            Some("wrong_times"),
+            Some("read_display_facts_opt_in_envelope"),
+        ),
+        (
+            Some("body_changed"),
+            Some("read_display_facts_opt_in_envelope"),
+        ),
+        (
+            Some("default_leak"),
+            Some("read_display_facts_default_absent"),
+        ),
+    ] {
+        let report = run(&read_facts_subject(defect)).await;
+        if let Some(name) = red {
+            failed(&report, name);
+        } else {
+            assert_feature_passed(&report, "read_display_facts_opt_in_envelope");
+            assert_feature_passed(&report, "read_display_facts_default_absent");
+            assert_none_failed_but(&report, &[]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn read_display_facts_undeclared_refusal_has_a_faulty_control() {
+    for defect in [None, Some("undeclared_accepted")] {
+        let mut subject = read_facts_subject(defect);
+        subject.capabilities.remove(&Capability::ReadDisplayFacts);
+        let report = run(&subject).await;
+        let name = "read_display_facts_undeclared_refused";
+        if defect.is_none() {
+            assert_feature_passed(&report, name);
+        } else {
+            failed(&report, name);
+        }
+        for name in [
+            "read_display_facts_opt_in_envelope",
+            "read_display_facts_default_absent",
+        ] {
+            assert!(
+                matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+                "{name}: {}",
+                report.render()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn read_display_facts_missing_metadata_hook_is_inapplicable_by_name() {
+    let report = run(&read_facts_subject(Some("missing_hook"))).await;
+    for name in [
+        "read_display_facts_opt_in_envelope",
+        "read_display_facts_default_absent",
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{name}: {}",
+            report.render()
+        );
+    }
 }

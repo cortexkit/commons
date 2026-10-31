@@ -386,6 +386,21 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
         missing.extend(spec.requires_any);
     }
     if !missing.is_empty() {
+        if spec.name.starts_with("sender_succession_")
+            || spec.name.starts_with("read_display_facts_")
+            || spec.name == "delivery_deadline_retry_keeps_original_expiry"
+        {
+            return Some(CaseOutcome::Inapplicable {
+                reason: format!(
+                    "missing groups: {}",
+                    missing
+                        .iter()
+                        .map(|capability| capability.name())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            });
+        }
         return Some(CaseOutcome::Skipped { missing });
     }
     if !spec.requires_undeclared_any.is_empty()

@@ -806,6 +806,15 @@ impl SendRequest {
         }
     }
 
+    /// Check succession before the other plan checks, so malformed or
+    /// undeclared `succeeds` names its indexed field and writes nothing.
+    pub fn check_sender_succession<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
+        match &self.plan {
+            Some(plan) => crate::sender_succession::check_plan(plan, declared),
+            None => Ok(()),
+        }
+    }
+
     /// The `delivery_order` send: its list (the array in `delivery`) with the
     /// members that ride beside it (`dedupe_key`, `expires_at_ms`,
     /// `template`, read from `runner_params` without moving them). `Ok(None)`
