@@ -38,6 +38,7 @@ const FILES: &[&str] = &[
     "refusals.json",
     "reply-envelope.json",
     "role-describe.json",
+    "route-account-continue.json",
     "route-account-for-optional.json",
     "route-account-for.json",
     "route-account-observe-optional.json",
@@ -119,6 +120,49 @@ fn every_file_is_read() {
     let mut shipped: Vec<&str> = vectors::FILES.iter().map(|(name, _)| *name).collect();
     shipped.sort_unstable();
     assert_eq!(shipped, FILES);
+}
+
+#[test]
+fn continuation_samples_round_trip_and_pin_identical_retry() {
+    use cortexkit_role_routing::account_continue::{parse_continue_request, ContinueAnswer};
+    let describe = RoleDescribe::new(vec![], false).with_capability(capabilities::ACCOUNT_CONTINUE);
+    let vectors = load("route-account-continue.json");
+    let parsed = parse_continue_request(&vectors["request"], &describe).unwrap();
+    assert_eq!(serde_json::to_value(parsed).unwrap(), vectors["request"]);
+    for case in vectors["answers"].as_array().unwrap() {
+        let answer: ContinueAnswer = serde_json::from_value(case["answer"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(answer).unwrap(), case["answer"]);
+    }
+    let retries = vectors["same_id_retry"].as_array().unwrap();
+    assert_eq!(retries.len(), 2);
+    assert_eq!(retries[0], retries[1]);
+    assert_eq!(retries[0]["params"], vectors["request"]);
+    assert_eq!(retries[0]["answer"], vectors["answers"][0]["answer"]);
+    let second = &vectors["second_continuation"];
+    let parsed = parse_continue_request(&second["params"], &describe).unwrap();
+    assert_eq!(serde_json::to_value(&parsed).unwrap(), second["params"]);
+    assert_eq!(
+        parsed.previous_decision_id,
+        retries[0]["answer"]["decision_id"]
+    );
+    assert_eq!(parsed.admission_id, vectors["request"]["admission_id"]);
+    assert_eq!(
+        parsed.exhausted.credential_id,
+        retries[0]["answer"]["credential_id"]
+    );
+    assert_eq!(parsed.exhausted.account, retries[0]["answer"]["account"]);
+    assert_ne!(parsed.selection_id, vectors["request"]["selection_id"]);
+    let answer: ContinueAnswer = serde_json::from_value(second["answer"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(answer).unwrap(), second["answer"]);
+    for case in vectors["refused"].as_array().unwrap() {
+        let refusal = parse_continue_request(&case["params"], &describe).unwrap_err();
+        assert_eq!(refusal.code.as_str(), case["refusal"]["code"]);
+        assert_eq!(json!(refusal.detail), case["refusal"]["detail"]);
+    }
+    let case = &vectors["undeclared_group"];
+    let refusal =
+        parse_continue_request(&case["params"], &RoleDescribe::new(vec![], false)).unwrap_err();
+    assert_eq!(json!(refusal.detail), case["refusal"]["detail"]);
 }
 
 #[test]

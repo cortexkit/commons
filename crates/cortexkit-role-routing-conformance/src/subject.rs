@@ -195,6 +195,22 @@ impl HoldLimits {
     }
 }
 
+/// A continuation credential's known account and eligible models. These facts
+/// let checks detect cross-provider, cross-auth and cross-model offers without
+/// trusting metadata returned by the router being tested.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct ContinueCredential {
+    pub account: CatalogAccount,
+    pub models: Vec<String>,
+}
+
+impl ContinueCredential {
+    pub fn new(account: CatalogAccount, models: Vec<String>) -> Self {
+        Self { account, models }
+    }
+}
+
 /// A routing provider under test.
 ///
 /// Before every check the kit calls [`reset`](Self::reset), then
@@ -219,6 +235,16 @@ pub trait RoutingSubject: Send + Sync {
     /// daemon verified, and the provider knows it as a runner); every other
     /// principal is not.
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String>;
+
+    /// Install these credentials and their exact model eligibility, preserving
+    /// existing admissions and decisions, with selection and failover enabled.
+    /// Called only for `account_continue`; a declaring router must implement it.
+    async fn configure_continue_credentials(
+        &self,
+        _credentials: &[ContinueCredential],
+    ) -> Result<(), String> {
+        Err("continuation credential fixtures are not supported by this subject".into())
+    }
 
     /// Test-only plan knowledge for the configured account ids. Standard is
     /// always included; the list supplies non-standard inclusions. This hook
@@ -284,7 +310,7 @@ pub trait RoutingSubject: Send + Sync {
     /// Block the catalog account `account_id` by a window that ends at
     /// `reset_at_ms` (Unix milliseconds), or at an unknown time when
     /// `None`. A later call replaces the account's block. Used only against
-    /// a provider declaring `select_hold_control`; the default fails those
+    /// a provider declaring `select_hold_control` or `account_continue`; the default fails those
     /// checks.
     async fn block_account(
         &self,

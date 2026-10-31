@@ -8,6 +8,163 @@
 
 mod fake;
 
+#[tokio::test]
+async fn continue_faulty_exhausted_account_fails_by_name() {
+    breaks(
+        Defects {
+            continue_exhausted: true,
+            ..Defects::default()
+        },
+        "continue_offer_excludes_exhausted_account",
+        "exhausted account",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_faulty_provider_fails_by_name() {
+    breaks(
+        Defects {
+            continue_provider: true,
+            ..Defects::default()
+        },
+        "continue_offer_preserves_provider",
+        "changes provider",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_faulty_auth_method_fails_by_name() {
+    breaks(
+        Defects {
+            continue_auth: true,
+            ..Defects::default()
+        },
+        "continue_offer_preserves_auth_method",
+        "changes auth method",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_faulty_model_fails_by_name() {
+    breaks(
+        Defects {
+            continue_model: true,
+            ..Defects::default()
+        },
+        "continue_offer_preserves_model",
+        "changes model",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_faulty_known_hold_fails_by_name() {
+    breaks(
+        Defects {
+            continue_held: true,
+            ..Defects::default()
+        },
+        "continue_offer_excludes_known_hold",
+        "known hold",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_faulty_retry_fails_by_name() {
+    breaks_all(
+        Defects {
+            continue_retry: true,
+            ..Defects::default()
+        },
+        &[
+            "continue_same_id_returns_identical_offer",
+            "continue_changed_question_refused_by_selection_id",
+        ],
+        "retry changed offer",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_changed_question_preserves_first_answer() {
+    let report = run_suite(&FakeSubject::new(Defects::default())).await;
+    assert_eq!(
+        report.outcome("continue_changed_question_refused_by_selection_id"),
+        Some(&CheckOutcome::Passed),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn continue_faulty_changed_question_replay_fails_by_name() {
+    breaks(
+        Defects {
+            continue_changed_question: true,
+            ..Defects::default()
+        },
+        "continue_changed_question_refused_by_selection_id",
+        "not refused invalid_request",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_faulty_unknown_reset_fails_by_name() {
+    breaks(
+        Defects {
+            continue_unknown_now: true,
+            ..Defects::default()
+        },
+        "continue_hold_unknown_until_stays_unknown",
+        "untimed hold",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_faulty_undeclared_group_fails_by_name() {
+    let subject = FakeSubject::without_continue_control(Defects {
+        continue_undeclared: true,
+        ..Defects::default()
+    });
+    let report = run_suite(&subject).await;
+    assert_eq!(
+        report.failing(),
+        ["continue_undeclared_group_refuses_mode"],
+        "{}",
+        report.render()
+    );
+    assert!(
+        matches!(report.outcome("continue_undeclared_group_refuses_mode"),
+        Some(CheckOutcome::Failed { reason }) if reason.contains("not refused invalid_request"))
+    );
+}
+
+#[tokio::test]
+async fn continue_without_group_refuses_and_skips_optional_cases() {
+    let report = run_suite(&FakeSubject::without_continue_control(Defects::default())).await;
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    for check in CHECKS.iter().filter(|c| c.name.starts_with("continue_")) {
+        if check.name == "continue_undeclared_group_refuses_mode" {
+            assert_eq!(report.outcome(check.name), Some(&CheckOutcome::Passed));
+        } else {
+            assert!(
+                matches!(
+                    report.outcome(check.name),
+                    Some(CheckOutcome::NotApplicable { .. })
+                ),
+                "{}",
+                report.render()
+            );
+        }
+    }
+}
+
 const SERVICE_TIER_CHECKS: &[&str] = &[
     "service_tier_eligible_account",
     "service_tier_fallback_order",
@@ -111,7 +268,10 @@ const HOLD_CHECKS: &[&str] = &[
 #[tokio::test]
 async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_passes() {
     let report = run_suite(&FakeSubject::without_hold_control(Defects::default())).await;
-    let mut not_applicable = vec!["undeclared_harness_group_refuses_member"];
+    let mut not_applicable = vec![
+        "continue_undeclared_group_refuses_mode",
+        "undeclared_harness_group_refuses_member",
+    ];
     not_applicable.extend_from_slice(HOLD_CHECKS);
     not_applicable.push("undeclared_prefer_group_refuses_member");
     not_applicable.push("undeclared_exclude_providers_group_refuses_member");
@@ -296,6 +456,7 @@ async fn without_harness_group_requests_are_refused() {
     assert_eq!(
         report.not_applicable(),
         [
+            "continue_undeclared_group_refuses_mode",
             "requested_harness_is_hosted_and_echoed",
             "undeclared_prefer_group_refuses_member",
             "undeclared_exclude_providers_group_refuses_member"
@@ -484,6 +645,7 @@ async fn passes_every_check(subject: &FakeSubject) {
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
             "undeclared_exclude_providers_group_refuses_member",
+            "continue_undeclared_group_refuses_mode",
         ]
         .contains(&check.check)
         {
@@ -1118,6 +1280,7 @@ async fn without_exclude_providers_group_its_checks_are_not_applicable() {
     assert_eq!(
         report.not_applicable(),
         [
+            "continue_undeclared_group_refuses_mode",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
             "exclude_providers_answers_another_provider",

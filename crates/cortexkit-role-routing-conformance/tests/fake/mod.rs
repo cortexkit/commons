@@ -15,6 +15,8 @@
 //!
 //! Each field of [`Defects`] breaks exactly one of those rules.
 
+mod continuation;
+
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex},
@@ -58,6 +60,15 @@ const DECISION_TTL_MS: u64 = 600_000;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub continue_exhausted: bool,
+    pub continue_provider: bool,
+    pub continue_auth: bool,
+    pub continue_model: bool,
+    pub continue_held: bool,
+    pub continue_retry: bool,
+    pub continue_changed_question: bool,
+    pub continue_unknown_now: bool,
+    pub continue_undeclared: bool,
     pub tier_ineligible_account: bool,
     pub tier_skips_fast_fallback: bool,
     pub tier_absent_is_fast: bool,
@@ -239,6 +250,14 @@ struct ConversationPin {
 
 #[derive(Default)]
 struct State {
+    continue_credentials: Vec<cortexkit_role_routing_conformance::ContinueCredential>,
+    continue_answers: HashMap<
+        (String, String),
+        (
+            cortexkit_role_routing_conformance::wire::account_continue::ContinueRequest,
+            cortexkit_role_routing_conformance::wire::account_continue::ContinueAnswer,
+        ),
+    >,
     tier_plans: BTreeMap<String, Vec<ServiceTier>>,
     decision_tiers: HashMap<String, ServiceTier>,
     held_credentials: Vec<String>,
@@ -322,6 +341,7 @@ impl State {
 }
 
 pub struct FakeSubject {
+    continue_control: bool,
     service_tier_control: bool,
     state: Arc<Mutex<State>>,
     defects: Defects,
@@ -338,6 +358,12 @@ pub struct FakeSubject {
 }
 
 impl FakeSubject {
+    pub fn without_continue_control(defects: Defects) -> Self {
+        Self {
+            continue_control: false,
+            ..Self::new(defects)
+        }
+    }
     pub fn without_service_tier(defects: Defects) -> Self {
         Self {
             service_tier_control: false,
@@ -346,6 +372,7 @@ impl FakeSubject {
     }
     pub fn new(defects: Defects) -> Self {
         Self {
+            continue_control: true,
             state: Arc::new(Mutex::new(State::default())),
             service_tier_control: true,
             defects,
@@ -421,6 +448,17 @@ impl RoutingSubject for FakeSubject {
 
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String> {
         self.state.lock().unwrap().catalog = Some(catalog.clone());
+        Ok(())
+    }
+
+    async fn configure_continue_credentials(
+        &self,
+        credentials: &[cortexkit_role_routing_conformance::ContinueCredential],
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap();
+        state.continue_credentials = credentials.to_vec();
+        state.catalog.as_mut().unwrap().accounts =
+            credentials.iter().map(|c| c.account.clone()).collect();
         Ok(())
     }
 
@@ -530,6 +568,7 @@ impl RoutingSubject for FakeSubject {
 
     async fn route(&self, stamp: &RouteStamp) -> Result<FakeRoute, String> {
         Ok(FakeRoute {
+            continue_control: self.continue_control,
             service_tier_control: self.service_tier_control,
             state: Arc::clone(&self.state),
             defects: self.defects,
@@ -546,6 +585,7 @@ impl RoutingSubject for FakeSubject {
 
 /// A route to the fake, carrying the caller and scope it was opened under.
 pub struct FakeRoute {
+    continue_control: bool,
     service_tier_control: bool,
     state: Arc<Mutex<State>>,
     defects: Defects,
@@ -566,6 +606,9 @@ impl RoutingRoute for FakeRoute {
             ops::ROLE_DESCRIBE => self.describe(&state),
             ops::ROUTE_SELECT => self.select(&mut state, params),
             ops::ROUTE_REPORT => self.report(&mut state, params),
+            ops::ROUTE_ACCOUNT_FOR if params.get("mode") == Some(&json!("continue")) => {
+                self.account_continue(&mut state, params)
+            }
             ops::ROUTE_ACCOUNT_FOR => self.account_for(&mut state, params),
             ops::ROUTE_ACCOUNT_OBSERVE => self.observe(&mut state, params),
             other => Err(Refusal::invalid_request("method", format!("no op {other}"))),
@@ -644,6 +687,9 @@ impl FakeRoute {
             }
         }
         let mut describe = RoleDescribe::new(consumers, true);
+        if self.continue_control {
+            describe = describe.with_capability("account_continue");
+        }
         if self.service_tier_control {
             describe = describe.with_capability("service_tier");
         }

@@ -23,6 +23,9 @@ pub const ROLE_DESCRIBE_JSON: &str = include_str!("../test-vectors/routing-v1/ro
 /// `route.account_for` requests, refusals, answers and body comparisons.
 pub const ROUTE_ACCOUNT_FOR_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-account-for.json");
+/// Opt-in continuation requests, all outcomes, retries and mode refusals.
+pub const ROUTE_ACCOUNT_CONTINUE_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-account-continue.json");
 /// `route.account_observe` requests, refusals and answers.
 pub const ROUTE_ACCOUNT_OBSERVE_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-account-observe.json");
@@ -73,6 +76,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("refusals.json", REFUSALS_JSON),
     ("reply-envelope.json", REPLY_ENVELOPE_JSON),
     ("role-describe.json", ROLE_DESCRIBE_JSON),
+    ("route-account-continue.json", ROUTE_ACCOUNT_CONTINUE_JSON),
     (
         "route-account-for-optional.json",
         ROUTE_ACCOUNT_FOR_OPTIONAL_JSON,

@@ -14,6 +14,15 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("continue_offer_excludes_exhausted_account", "account_continue: an offer never names the exhausted account"),
+    check("continue_offer_preserves_provider", "account_continue: the offered credential has the previous provider"),
+    check("continue_offer_preserves_auth_method", "account_continue: the offered credential has the previous auth method"),
+    check("continue_offer_preserves_model", "account_continue: the offered credential is eligible for the previous model"),
+    check("continue_offer_excludes_known_hold", "account_continue: an account under a known hold for the relevant window or pool is not offered; the check blocks a whole account"),
+    check("continue_same_id_returns_identical_offer", "account_continue: retrying the same selection id returns the identical offer"),
+    check("continue_changed_question_refused_by_selection_id", "account_continue: a reused selection id with a changed parsed question is invalid_request naming selection_id; the first answer stands"),
+    check("continue_hold_unknown_until_stays_unknown", "account_continue: a hold with unknown reset omits until_ms, never substitutes now"),
+    check("continue_undeclared_group_refuses_mode", "without account_continue: continue is invalid_request naming mode"),
     check("service_tier_eligible_account", "service_tier: only an account whose plan includes the chosen tier is admitted for the decision"),
     check("service_tier_fallback_order", "service_tier: ultrafast falls back to fast then standard, recording service_tier_chosen"),
     check("service_tier_absent_is_standard", "service_tier: an absent tier means standard"),
@@ -213,11 +222,12 @@ pub const CHECKS: &[CheckSpec] = &[
 /// Where the kit checks less than the contract says, and why. Every report
 /// prints these.
 pub const NARROWINGS: &[&str] = &[
+    "Continuation checks use seeded credential/provider/auth/model facts and whole-account holds to test exclusion of accounts held for the relevant window or pool. They compare complete same-id offers and reject changed parsed questions without replacing the first answer, but cannot count internal reservations, inspect decision ancestry/pricing or exhaustion persistence, advance expiry, verify owner-scope isolation, or observe runner durability, frozen session plans, tools and renderers. Terminal refusal policy, transport retries and pool/window-specific holds are not exercised.",
     "priced_only is checked only as role.describe states it; the kit does not check that a priced_only consumer is never answered with a subscription route.",
     "Tool provider reachability is configured for every project at once, so the kit does not check that reachability is read for the scoped project.",
     "Affinity is checked with one failure outcome (failed); the other failure outcomes, and the rule that a cancelled or completed report keeps the preference, are not checked.",
     "account_observe idempotency is checked for one runner; the kit does not check that another runner's equal event_id is a separate event.",
-    "The kit does not check that the runner ops refuse a caller that is not a runner module, nor the account_for refusals other than admission_conflict, unknown_decision and invalid_request for malformed pools.",
+    "The kit does not check that the runner ops refuse a caller that is not a runner module, nor the account_for refusals other than admission_conflict, unknown_decision and invalid_request for malformed pools, undeclared continuation mode (field: mode), and a changed continuation question under a reused selection id (field: selection_id).",
     "Eligibility is checked with model scope and another model on the same account. Account scope cannot distinguish a legitimate account-wide eligibility fence from an incorrect exhaustion/hold with the current hooks, so that distinction is not checked.",
     "Parent preference and fallback are checked on fresh admit requests; priority against an existing child pin, requested_account, renew or reassign is not checked.",
     "Pool isolation, disabled-window omission by runners, and request-size fencing policy are not exercised by the current catalog and provider hooks; vectors check the wire members only.",
@@ -238,9 +248,9 @@ pub enum CheckOutcome {
     Failed {
         reason: String,
     },
-    /// The check covers an optional group the provider does not declare.
-    /// It leaves the verdict a pass: the provider is not asked to serve
-    /// what it does not declare.
+    /// The check is inapplicable to the provider's declared groups: serving
+    /// rules need the group, while undeclared-group refusal checks need its
+    /// absence. Either kind of skipped check leaves the verdict a pass.
     NotApplicable {
         reason: String,
     },
@@ -256,8 +266,8 @@ pub struct CheckReport {
 /// The run's verdict.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SuiteVerdict {
-    /// No check failed. Checks of optional groups the provider does not
-    /// declare are not applicable and do not change this.
+    /// No check failed. Checks skipped because a group is absent or because
+    /// it is present (for undeclared-group refusal checks) do not change this.
     Passed,
     Failed {
         reasons: Vec<String>,

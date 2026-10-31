@@ -1,6 +1,8 @@
 //! The checks, each run against the live provider through its routes,
 //! from a freshly reset and configured provider.
 
+mod continuation;
+
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cortexkit_role_routing::{
@@ -37,7 +39,8 @@ type Check = Result<(), String>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ending {
     Passed,
-    /// The check covers an optional group the provider does not declare.
+    /// The provider's declared groups make this check inapplicable: either a
+    /// required group is absent or an undeclared-group refusal check sees it present.
     NotApplicable(String),
 }
 
@@ -232,6 +235,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
     /// Run the check named `name` from a fresh provider.
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         self.fresh().await?;
+        if name.starts_with("continue_") {
+            return self.continue_check(name).await;
+        }
         if name.starts_with("service_tier_") {
             return self.service_tier_check(name).await;
         }

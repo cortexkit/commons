@@ -8,7 +8,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.8.0"
+cortexkit-role-routing-conformance = "0.8.1"
 ```
 
 ```rust,ignore
@@ -54,9 +54,10 @@ assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
   - `cool_down(route_key, until_ms)`: the route serves nothing before then.
 
 A provider that declares `select_hold_control` in `role.describe` also
-supplies these hooks for the hold checks. Their defaults return an
-unsupported error, which fails those checks; a provider that does not
-declare the group never has them called.
+supplies these hooks for the hold checks. `block_account` is additionally
+required by `account_continue`, even without `select_hold_control`.
+The default hooks return an unsupported error, which fails the checks that
+need them; providers declaring neither group are never asked for these hooks.
 
   - `configure_consumer_mode(consumer, mode)`: route the consumer by
     `ConsumerMode::Demand` or by `ConsumerMode::Ladder { entries }`, route
@@ -88,7 +89,7 @@ raises a `context_window` or `max_output_tokens` floor instead.
 
 ## Checks
 
-The kit runs 58 checks, including six declaration checks, eight optional-member
+The kit runs the checks listed below, including six declaration checks, eight optional-member
 checks, four additional program checks, nine hold checks, eight checks
 for pin fallback, reset fences, prefer and usage, and three for provider
 exclusion and two for task references. The hold checks cover the optional
@@ -227,3 +228,34 @@ case follows a decision through account admission, and fallback records its
 chosen level. Report cases send applied-only, served-only and both members.
 Non-declaring routers are not applicable by name, and deliberately faulty
 routers prove each check rejects its named violation.
+
+## Account-continuation checks
+
+Routers declaring `account_continue` implement
+`configure_continue_credentials(&[ContinueCredential])`: install the named
+credentials with the fixture's provider, auth method, account and exact model
+eligibility, preserving existing decisions/admissions and enabling selection and
+failover. `block_account` is also required, even if `select_hold_control` is not
+declared. The checks admit a run before adding spares, without pinning an account,
+then send the exhausted account's evidence as the runner.
+
+| Check | Rule (CONTRACT §9.1.1) |
+|---|---|
+| `continue_offer_excludes_exhausted_account` | Never offer the exhausted account |
+| `continue_offer_preserves_provider` | The credential's provider is unchanged |
+| `continue_offer_preserves_auth_method` | The credential's auth method is unchanged |
+| `continue_offer_preserves_model` | The credential can serve the original model |
+| `continue_offer_excludes_known_hold` | Never offer an account under a known hold for the relevant window or pool; this check blocks a whole account |
+| `continue_same_id_returns_identical_offer` | Compare the complete offer on a same-id retry |
+| `continue_changed_question_refused_by_selection_id` | Refuse a changed parsed question under a reused id as `invalid_request {field: "selection_id"}`; preserve the first answer |
+| `continue_hold_unknown_until_stays_unknown` | With no known reset, return hold without `until_ms`, never now |
+| `continue_undeclared_group_refuses_mode` | Without the group, refuse `invalid_request` naming `mode` |
+
+The first eight checks are not applicable without the group; the last runs only
+without it. Tests pair each check with a deliberately faulty router and assert
+its failing name. The kit's exported `NARROWINGS` list, printed in every suite
+report, records the limits: credential facts and whole-account
+holds are observable, but internal reservation counts, expiry release, ancestry,
+pricing, exhaustion persistence, owner isolation and runner durability are not.
+The kit does not inspect frozen session plans, tool sets or renderers, nor exercise terminal
+refusal policy, transport retries or pool/window-specific holds.

@@ -1,0 +1,63 @@
+{
+  "about": "Only runners durably paused on account limits send continue to routers declaring account_continue. Account and credential names are public opaque ids.",
+  "capabilities": ["account_continue"],
+  "request": {
+    "mode": "continue",
+    "run_id": "run-1",
+    "admission_id": "admission-1",
+    "conversation_key": "conversation-1",
+    "previous_decision_id": "decision-1",
+    "exhausted": {
+      "credential_id": "credential-1",
+      "account": "account-1",
+      "limit_window": "five_hour",
+      "pool": "primary",
+      "resets_at_ms": 1900000300000,
+      "retry_after_s": 300,
+      "observed_at_ms": 1900000000000
+    },
+    "selection_id": "selection-1"
+  },
+  "answers": [
+    {"name":"offer","answer":{"kind":"offer","credential_id":"credential-2","account":"account-2","decision_id":"decision-2","valid_until_ms":1900000060000}},
+    {"name":"hold","answer":{"kind":"hold","until_ms":1900000300000,"routing_code":"account_pool_exhausted","detail":{"pool":"primary"}}},
+    {"name":"hold_unknown_until","answer":{"kind":"hold","routing_code":"account_pool_exhausted","detail":{}}},
+    {"name":"caller_pinned_account","answer":{"kind":"refuse","routing_code":"pin_unavailable","detail":{"reason":"caller_pinned"}}},
+    {"name":"policy_forbids_failover","answer":{"kind":"refuse","routing_code":"pin_unavailable","detail":{"reason":"failover_forbidden"}}},
+    {"name":"unknown_previous_decision","answer":{"kind":"refuse","routing_code":"unknown_decision","detail":{}}},
+    {"name":"mismatched_previous_decision","answer":{"kind":"refuse","routing_code":"unknown_decision","detail":{}}},
+    {"name":"account_selection_disabled","answer":{"kind":"refuse","routing_code":"account_selection_disabled","detail":{}}}
+  ],
+  "same_id_retry": [
+    {
+      "params":{"mode":"continue","run_id":"run-1","admission_id":"admission-1","conversation_key":"conversation-1","previous_decision_id":"decision-1","exhausted":{"credential_id":"credential-1","account":"account-1","limit_window":"five_hour","pool":"primary","resets_at_ms":1900000300000,"retry_after_s":300,"observed_at_ms":1900000000000},"selection_id":"selection-1"},
+      "answer":{"kind":"offer","credential_id":"credential-2","account":"account-2","decision_id":"decision-2","valid_until_ms":1900000060000}
+    },
+    {
+      "params":{"mode":"continue","run_id":"run-1","admission_id":"admission-1","conversation_key":"conversation-1","previous_decision_id":"decision-1","exhausted":{"credential_id":"credential-1","account":"account-1","limit_window":"five_hour","pool":"primary","resets_at_ms":1900000300000,"retry_after_s":300,"observed_at_ms":1900000000000},"selection_id":"selection-1"},
+      "answer":{"kind":"offer","credential_id":"credential-2","account":"account-2","decision_id":"decision-2","valid_until_ms":1900000060000}
+    }
+  ],
+  "second_continuation": {
+    "about":"After recording the first switch, the run names its currently used offered decision, while keeping the original admission.",
+    "params":{"mode":"continue","run_id":"run-1","admission_id":"admission-1","conversation_key":"conversation-1","previous_decision_id":"decision-2","exhausted":{"credential_id":"credential-2","account":"account-2","limit_window":"seven_day","pool":"primary","observed_at_ms":1900000005000},"selection_id":"selection-2"},
+    "answer":{"kind":"offer","credential_id":"credential-3","account":"account-3","decision_id":"decision-3","valid_until_ms":1900000065000}
+  },
+  "refused": [
+    {
+      "name":"missing_selection_id",
+      "params":{"mode":"continue","run_id":"run-1","admission_id":"admission-1","conversation_key":"conversation-1","previous_decision_id":"decision-1","exhausted":{"credential_id":"credential-1","account":"account-1","limit_window":"five_hour","observed_at_ms":1900000000000}},
+      "refusal":{"code":"invalid_request","detail":{"field":"selection_id"}}
+    },
+    {
+      "name":"bad_limit_window",
+      "params":{"mode":"continue","run_id":"run-1","admission_id":"admission-1","conversation_key":"conversation-1","previous_decision_id":"decision-1","exhausted":{"credential_id":"credential-1","account":"account-1","limit_window":"one_day","observed_at_ms":1900000000000},"selection_id":"selection-1"},
+      "refusal":{"code":"invalid_request","detail":{"field":"exhausted.limit_window"}}
+    }
+  ],
+  "undeclared_group": {
+    "capabilities": [],
+    "params":{"mode":"continue","run_id":"run-1","admission_id":"admission-1","conversation_key":"conversation-1","previous_decision_id":"decision-1","exhausted":{"credential_id":"credential-1","account":"account-1","limit_window":"five_hour","observed_at_ms":1900000000000},"selection_id":"selection-1"},
+    "refusal":{"code":"invalid_request","detail":{"field":"mode"}}
+  }
+}

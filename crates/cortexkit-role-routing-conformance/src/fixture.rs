@@ -208,6 +208,57 @@ pub fn hold_catalog() -> Catalog {
     }
 }
 
+/// Continuation credentials include a compatible spare and tempting but
+/// incompatible alternatives. Account 6 is compatible but held by the checks.
+pub fn continue_credentials() -> Vec<crate::ContinueCredential> {
+    use crate::ContinueCredential;
+    [
+        (1, SUBSCRIPTION_PROVIDER, "oauth", "model-c"),
+        (2, SUBSCRIPTION_PROVIDER, "oauth", "model-c"),
+        (3, SECOND_SUBSCRIPTION_PROVIDER, "oauth", "model-c"),
+        (4, SUBSCRIPTION_PROVIDER, "apikey", "model-c"),
+        (5, SUBSCRIPTION_PROVIDER, "oauth", "model-d"),
+        (6, SUBSCRIPTION_PROVIDER, "oauth", "model-c"),
+    ]
+    .into_iter()
+    .map(|(n, provider, method, model)| {
+        ContinueCredential::new(
+            CatalogAccount {
+                provider: provider.into(),
+                account_id: format!("account-{n}"),
+                credential_id: format!("credential-{n}"),
+                method: method.into(),
+            },
+            vec![model.into()],
+        )
+    })
+    .collect()
+}
+
+/// Catalog accompanying [`continue_credentials`].
+pub fn continue_catalog() -> Catalog {
+    let mut catalog = catalog();
+    catalog.models.push(model(
+        SECOND_SUBSCRIPTION_PROVIDER,
+        "model-c",
+        200_000,
+        64_000,
+        false,
+    ));
+    catalog.accounts = continue_credentials()
+        .into_iter()
+        .map(|c| c.account)
+        .collect();
+    catalog.runners = runners(
+        &catalog
+            .models
+            .iter()
+            .map(CatalogModel::route_key)
+            .collect::<Vec<_>>(),
+    );
+    catalog
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

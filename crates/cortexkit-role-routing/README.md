@@ -8,14 +8,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.5.6"
+cortexkit-role-routing = "0.5.7"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.5.6", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.5.7", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -33,7 +33,8 @@ What the crate holds:
   groups, and `check_describe`;
 - `capabilities`: the optional groups this version defines
   (`select_hold_control`, `select_harness`, `select_prefer`,
-  `select_exclude_providers`);
+  `select_exclude_providers`, `select_task_ref`, `service_tier`,
+  `account_continue`);
 - `select`: the `route.select` request, `parse_select_request` and
   `parse_select_request_serving` (which reads the members of the groups a
   provider declares), the answer and `check_answer`;
@@ -160,3 +161,24 @@ equal to the runner contract.
 `select::check_answer` is stricter than record decoding: it refuses an
 unrecognised chosen tier, a missing chosen level for an explicit request or an
 upgrade, with `AnswerProblem::ServiceTier`.
+
+## Continuing a paused run
+
+A router declares `account_continue` in `role.describe.capabilities` to opt in
+(see CONTRACT §9.1.1). Only the runner of a durably paused run sends
+`route.account_for` with `mode: "continue"`, the original admission and currently
+used decision,
+exhaustion evidence and a retry-stable `selection_id`. The additive
+`account_continue` module supplies `ContinueRequest`, `ExhaustedAccount`,
+`parse_continue_request(params, describe)` and `ContinueAnswer`. The old account
+request, answer and parser are unchanged; a non-declaring router refuses the mode.
+
+The reply's `kind` is `offer`, `hold` or `refuse`. Offers switch only to the same
+provider, auth method, model and owner scope, never the exhausted account or an
+account under a known hold for the relevant window or pool. The kit's hold check
+blocks a whole account. The runner records a validated switch before sending and never uses an
+expired offer. Unknown hold times remain unknown; a terminal refusal leaves the
+run on its original account until its own reset. Transport retries keep the same
+selection id; asking again after a hold or for another fresh eligibility check
+uses a new one. Shared samples are in
+`route-account-continue.json`, including identical-offer retries and refusals.

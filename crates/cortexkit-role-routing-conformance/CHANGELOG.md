@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.1
+
+- Pin routing 0.5.7 and check opt-in account continuation: compatible offers,
+  stable same-id retries, unknown hold times and refusal without discovery.
+- Add continuation fixtures and deliberately faulty routers for each check.
+- Reject changed questions under reused selection ids while preserving the
+  first answer, with a named faulty-router check. Clarify group applicability,
+  hold-check scope and continuation fixture hooks.
+
 ## 0.8.0
 
 - Requires subc-protocol 0.34; breaking because `Reply::Error` contains its

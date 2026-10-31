@@ -22,11 +22,12 @@
 //! - `vectors` (with the `test-vectors` feature): the role's vector files,
 //!   compiled in, so a module's tests can use the same bytes.
 //!
-//! Every enumeration a reader decodes (refusal codes, report outcomes,
+//! String enumerations a reader decodes (refusal codes, report outcomes,
 //! `pin_unavailable` and `no_route` reasons, observation kinds, account
 //! reason codes) is an open set: an unknown value decodes and is kept as the
 //! string it was sent as. Optional members are omitted when absent, and a
 //! member sent as `null` decodes the same as one left out.
+//! Continuation answers are instead a closed tagged union of three outcomes.
 
 #![forbid(unsafe_code)]
 
@@ -36,6 +37,7 @@ mod capability_names;
 mod members;
 
 pub mod account;
+pub mod account_continue;
 pub mod declarations;
 pub mod describe;
 pub mod errors;
@@ -101,6 +103,8 @@ pub const RUNNER_OPS: &[&str] = &[ops::ROUTE_ACCOUNT_FOR, ops::ROUTE_ACCOUNT_OBS
 /// A caller sends a group's members only to a provider that declares the
 /// group; a provider that does not declare it refuses them as unknown.
 pub mod capabilities {
+    /// Switch a durably paused run to a compatible account via `route.account_for`.
+    pub const ACCOUNT_CONTINUE: &str = "account_continue";
     /// Tier-aware selection and tier metadata in report usage. A caller must
     /// check this group before sending any of those members to a router.
     pub const SERVICE_TIER: &str = "service_tier";
@@ -122,6 +126,7 @@ pub mod capabilities {
 
     /// Every group this version defines.
     pub const KNOWN: &[&str] = &[
+        ACCOUNT_CONTINUE,
         SERVICE_TIER,
         SELECT_HOLD_CONTROL,
         SELECT_HARNESS,

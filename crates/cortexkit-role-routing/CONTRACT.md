@@ -227,7 +227,9 @@ a module plays.
 - [pinned] Refusal codes are an open set (`RefusalCode`, non-exhaustive). A
   reader keeps an unknown code and treats it as a refusal that is not
   timed, whatever its detail carries.
-- [pinned] Every other enumeration a reader decodes is an open set too: a
+- [pinned] Except for `ContinueAnswer.kind` (§9.1.1), which is a closed set
+  of `offer`, `hold` and `refuse`, every other enumeration a reader decodes
+  is an open set too: a
   report's `outcome`, `pin_unavailable`'s and `no_route`'s `reason`, an
   observation's `kind`, a report's `eligibility.scope`, and an account
   answer's `reason.code`. An unknown
@@ -286,8 +288,13 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines five
+  does not know is kept and means nothing to it. This version defines seven
   groups:
+  - `service_tier`: tier-aware selection and tier metadata in report usage
+    (§5.5). A caller sends these members only to a declaring provider.
+  - `account_continue`: `route.account_for` reads `mode: "continue"` for a
+    runner's durably paused run (§9.1.1). A non-declaring provider refuses
+    `invalid_request {field: "mode"}`.
   - `select_hold_control`: `route.select` reads `hold_ok` and
     `hold_wait_max_s` (§5.1) and decides blocked entries as §5.4 says.
     A provider without it refuses both members (§2). That refusal is why
@@ -799,6 +806,104 @@ The answer (`account::AccountForAnswer`):
   `reset_at_ms`. A caller must not treat it as exhaustion or a hold, and
   must not retry against another provider expecting a different answer.
 
+### 9.1.1 `account_continue`: continuing a paused run
+
+- [pinned] A router opts in by declaring `account_continue` in
+  `role.describe.capabilities`. A runner sends `route.account_for` with
+  `mode: "continue"` only to a declaring router. A non-declaring router
+  refuses `invalid_request {field: "mode"}`, as for an unknown mode, never
+  as a continuation answer. Legacy account requests, replies and their parser
+  remain unchanged. The additive `account_continue::ContinueRequest` and
+  `parse_continue_request(params, describe)` handle only this mode.
+- [pinned] Only the runner itself, on its own routing route, sends this
+  request, for a run it has durably paused on an account usage limit. The
+  session's owner and plan composer never send it; the router answers it.
+  The route authenticates the runner under §9; no body member supplies
+  caller identity.
+- [pinned] The request is `{mode: "continue", run_id, admission_id,
+  conversation_key, previous_decision_id, exhausted, selection_id}`.
+  `admission_id` always stays the original admission, not a new one.
+  `previous_decision_id` names the decision the run is currently using:
+  the admitted decision, or, after an earlier switch, the offered decision
+  it switched to. The router
+  binds these to the paused run and takes provider, auth method, model and
+  owner scope only from that decision, never changing them.
+- [pinned] Owner scope is the owner derived under §3 and stamped on the
+  previous decision, together with that decision's scope stamp. An offered
+  decision must keep the same owner and an exactly equal scope stamp: the
+  same present or absent project id, workdir, session and run values.
+  Unscoped selection keeps the selecting module as owner (§3); the runner's
+  request body never replaces the stamped owner or scope.
+- [pinned] `exhausted` is `{credential_id, account, limit_window, pool?,
+  resets_at_ms?, retry_after_s?, observed_at_ms}`. `account` is the public
+  account id, with the meaning and string type of §9.2's `served_account_id`;
+  `credential_id` likewise uses that report's public string id. Window and
+  pool are strings and times are unsigned integers, reusing §9.2's evidence
+  types. `limit_window` must be `five_hour` or `seven_day`; `observed_at_ms`
+  is the original observation time in Unix milliseconds. `resets_at_ms` is
+  Unix milliseconds, and `retry_after_s` is a duration in seconds. The router
+  records this exhaustion evidence too, not merely the selection request.
+- [pinned] Required ids are non-empty opaque strings. `selection_id` has
+  the same syntax as `admission_id`: at most 128 characters, no parsing or
+  case folding. `admission_id` and `conversation_key` retain §9.1's bounds.
+  Pools retain §2's syntax. Malformed requests are `invalid_request` naming
+  the field (nested evidence uses `exhausted.<field>`).
+- [pinned] `selection_id` is stable across transport retries of the same question,
+  scoped to the calling runner. A new id means a fresh eligibility check.
+  A transport failure is not any continuation answer; retry it with the
+  same id.
+- [pinned] The same question means equal parsed `run_id`, `admission_id`,
+  `conversation_key`, `previous_decision_id` and `exhausted`
+  (`ContinueRequest::same_question`). Reusing a selection id with any of
+  these different is refused before replaying a cached answer, using the
+  ordinary refusal envelope: `invalid_request {field: "selection_id"}`.
+  The first answer stands and is not replaced. Comparing after parsing means
+  absent and `null` optional evidence members are equal (§2).
+- [pinned] A valid, authorized continuation request has exactly one of three
+  `account_continue::ContinueAnswer` outcomes. The wire tag is `kind`:
+
+  ```json
+  {"kind":"offer","credential_id":"credential-b","account":"account-b","decision_id":"decision-b","valid_until_ms":1900000000000}
+  {"kind":"hold","routing_code":"account_pool_exhausted","detail":{},"until_ms":1900000000000}
+  {"kind":"refuse","routing_code":"account_selection_disabled","detail":{}}
+  ```
+
+- [pinned] An `offer` authorizes switching only this run to that credential
+  and account pair. It always has the same provider, auth method, model and
+  owner scope as the previous decision. Never cross API-key/subscription
+  boundaries, providers, models or owner scopes; never change the run's
+  frozen session plan (the llm-runner contract's §10.1), tool set or renderer.
+  Never offer the exhausted account before its
+  reset, and never offer it for this selection. Never offer an account under
+  a known hold for the relevant window or pool.
+- [pinned] Reserve an offer once per `selection_id`. A retry with the same
+  id returns the identical offer, including its decision and expiry, and
+  never reserves twice. The offered `decision_id` links to
+  `previous_decision_id`, so pricing and per-task records follow the switch.
+- [pinned] The runner validates that `valid_until_ms` has not passed and
+  that it can load the offered credential for the decision's provider and
+  auth method, then durably records the switch before any send. It uses the
+  offer by reporting its steps under the offered `decision_id` through
+  `route.report`. The router treats the reservation as used on the first
+  such report, and otherwise releases it at `valid_until_ms`. The runner
+  must not use an expired offer, and asks again with a new id instead.
+- [pinned] `hold` is not an error: no compatible account is available right
+  now. It carries `{until_ms?, routing_code, detail}`. The run stays paused;
+  the runner asks again at `until_ms` or on its own wake, with a new selection
+  id for a fresh check. Absent `until_ms` means unknown, never "now".
+  `ContinueAnswer::wait_until_ms` preserves that distinction.
+- [pinned] `refuse` carries `{routing_code, detail}`: the router will not
+  offer a switch for this pause. Examples are a caller-pinned account—an
+  admission whose `requested_account` came from an explicit pin—
+  (`routing_code: "pin_unavailable"`, `detail.reason: "caller_pinned"`),
+  router policy forbidding failover (`"pin_unavailable"`, `"failover_forbidden"`),
+  an unknown or mismatched previous decision (`"unknown_decision"`), or
+  selection disabled (reuse `"account_selection_disabled"`). These are
+  continuation outcomes, not the legacy refusal envelope. The run stays
+  paused on the original account, resumes only after that account's own
+  reset passes, and the runner does not ask again for this pause. A later
+  pause of the same run may ask again with a new selection id.
+
 ### 9.2 `route.account_observe`
 
 What a runner saw on an account, so the provider's headroom stays current.
@@ -884,11 +989,15 @@ What a runner saw on an account, so the provider's headroom stays current.
   without the group, and `route-select-exclude-providers.json` the
   `select_exclude_providers` members. `route-select-task-ref.json` holds
   task references and field-named refusals with and without `select_task_ref`.
-  `SHA256SUMS` pins every file.
+  `route-account-continue.json` holds opt-in continuation requests, all three
+  outcomes, an identical-offer retry, refusal reasons and malformed or
+  undeclared requests (§9.1.1). `SHA256SUMS` pins every file.
 - [pinned] `cortexkit-role-routing-conformance` drives a live provider
   through these rules. Each check names the rule it holds a provider to;
   the kit's own tests pair every check with a faulty provider that breaks
   only that rule and must fail it by name. A check of an optional group's
-  rules reports not applicable against a provider that does not declare
-  the group, and leaves its verdict a pass. Its README lists the checks and
-  where the kit checks less than this contract says.
+  serving rules reports not applicable against a provider that does not
+  declare the group; an undeclared-group refusal check reports not
+  applicable when the provider does declare it. Either leaves its verdict a
+  pass. Its README lists the checks and where the kit checks less than this
+  contract says.

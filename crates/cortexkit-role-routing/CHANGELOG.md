@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.7
+
+- Add the opt-in `account_continue` group for switching a run durably paused
+  on an account limit to a compatible account. Separate request and tagged
+  offer, hold and refuse reply types preserve the legacy account API.
+- Pin continuation eligibility, reservation retries, expiry and refusal rules,
+  with shared wire samples and validation of limit evidence.
+- Refuse changed parsed questions under a reused selection id without replacing
+  the first answer. Clarify later switches, reservation use through reports,
+  scope equality and pause-local refusals; include a second-switch sample.
+
 ## 0.5.6
 
 - Requires subc-protocol 0.34 and tool-provider 0.14 for development checks
