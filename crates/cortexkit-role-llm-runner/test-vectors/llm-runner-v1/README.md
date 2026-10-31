@@ -403,7 +403,19 @@ The six cases cover:
 Anthropic support comes from the provider's published model list through the
 runner's catalog, never from a model-version comparison. The example
 `<context-note>` wrapper illustrates user text only; runners may choose their
-own wrapper. The crate test
+own wrapper.
+
+The fragments pin placement, authority and text, not provider encodings. Each
+entry is written in a short illustrative form: the OpenAI items omit
+`"type": "message"`, and some Anthropic content is a plain string where a
+runner may send an array of blocks. What a runner's own tests should match is,
+for each case: where the new entry lands (or that it is held), the role or
+authority it carries (`developer`, Anthropic `system`, or user text), and its
+text. Ordinary entries are context and are compared by role and content, never
+byte for byte. A runner keeps its provider adapter's existing encoding for
+every message, since changing it to match these fragments would change every
+request and break the provider's prompt cache. The new entry is encoded the
+same way as that adapter's other entries. The crate test
 `vectors::tests::turn_system_rendering_vectors_preserve_order_placement_and_authority`
 checks conversation order, delivery only at the end of history, native
 Anthropic positions (including unresolved tool calls and what may follow a
