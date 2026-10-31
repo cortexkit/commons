@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.13
+
+- Add Setup `view_pending: {version}`, negotiated by `view_pending` in the
+  request's `view_features` with a positive `view_due_max_ms`. Keep
+  `ViewDue.digest` required and reject conflicting announcements by member name.
+- Specify the first durable-write notice before the model hold, exact-version
+  fetch without an announced digest, and `view_due_unapplied` on any failure.
+- Hold a promised first `view.get` for at most Setup's `view_due_max_ms` from
+  fetch arrival; name expiry `view_not_published`. The runner's client deadline
+  never exceeds its remaining step hold, and a local timeout also ends the run
+  with `view_due_unapplied`. Other unpublished versions still refuse immediately.
+  Add wire samples and checksums.
+- Add `view::dispose_pending` with the usual disposal checks, including the
+  served view's own digest, but no announced-digest comparison.
+
 ## 0.7.12
 
 - Add service-tier-change rides carrying the new applied level and optional

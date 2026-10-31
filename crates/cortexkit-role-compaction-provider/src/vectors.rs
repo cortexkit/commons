@@ -71,6 +71,10 @@ pub const FILES: &[(&str, &str)] = &[
         "setup-view-due.json",
         include_str!("../test-vectors/compaction-provider-v1/setup-view-due.json"),
     ),
+    (
+        "setup-view-pending.json",
+        include_str!("../test-vectors/compaction-provider-v1/setup-view-pending.json"),
+    ),
 ];
 
 pub fn file(name: &str) -> Option<&'static str> {

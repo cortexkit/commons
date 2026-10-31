@@ -1,0 +1,24 @@
+{
+  "about": "Setup promises a first view after the first notice only to a runner declaring view_pending and a positive hold cap. Both announcements and undeclared pending views fail Setup by member name.",
+  "cases": [
+    {
+      "name": "pending_first_view",
+      "request": {"session":"s","harness":"test","request_id":"setup","params":{},"composition":{},"model":"m","now":1,"view_features":["view_pending"],"view_due_max_ms":1000},
+      "answer": {"answer":"ready","request_id":"setup","initial":{"compaction_id":"c","version":0,"range":{"from":0,"to":0},"replacement":[]},"view_pending":{"version":1}},
+      "failed_setup": null
+    },
+    {
+      "name": "both_announcements",
+      "request": {"session":"s","harness":"test","request_id":"setup","params":{},"composition":{},"model":"m","now":1,"view_features":["view_pending"],"view_due_max_ms":1000},
+      "answer": {"answer":"ready","request_id":"setup","initial":{"compaction_id":"c","version":0,"range":{"from":0,"to":0},"replacement":[]},"view_due":{"version":1,"digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"view_pending":{"version":1}},
+      "failed_setup": "view_pending"
+    },
+    {
+      "name": "undeclared_pending_view",
+      "request": {"session":"s","harness":"test","request_id":"setup","params":{},"composition":{},"model":"m","now":1,"view_due_max_ms":1000},
+      "answer": {"answer":"ready","request_id":"setup","initial":{"compaction_id":"c","version":0,"range":{"from":0,"to":0},"replacement":[]},"view_pending":{"version":1}},
+      "failed_setup": "view_pending"
+    }
+  ],
+  "view_get_refusal": {"answer":"refuse","code":"view_not_published","reason":"Setup's view_due_max_ms elapsed from fetch arrival before the promised first view was published"}
+}

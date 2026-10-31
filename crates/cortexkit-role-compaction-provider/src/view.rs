@@ -832,7 +832,11 @@ impl TranscriptMessage {
     }
 }
 
-/// What a runner does with a view it fetched.
+/// What a runner does with a view it fetched. Keeping the current view and
+/// fetching again below describe background views only. For an outstanding
+/// Setup `view_due` or `view_pending`, any outcome other than a final apply
+/// ends the run `compaction_unavailable` with `view_due_unapplied`, without
+/// a model call.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ViewDisposition {
     /// Write it durably as the session's next view and render it from the
@@ -900,13 +904,70 @@ pub fn dispose_fetched(
     first_ordinal: u64,
     message_at: impl Fn(u64) -> Option<TranscriptMessage>,
 ) -> ViewDisposition {
-    if view.session_ref != ready.session_ref || view.view_version != ready.view_version {
+    dispose(
+        view,
+        ExpectedView {
+            session_ref: &ready.session_ref,
+            version: ready.view_version,
+            digest: Some(&ready.digest),
+        },
+        current_version,
+        lineage_id,
+        first_ordinal,
+        message_at,
+    )
+}
+
+/// The runner's checks of a view fetched for Setup's pending promise.
+/// Uses the same checks and order as [`dispose_fetched`], taking the expected
+/// session from the caller's conversation and the version from
+/// `view_pending.version`, and skipping only the comparison with
+/// an announced digest. [`CompactionView::check`] still verifies the view's own
+/// digest before checking staleness, coverage, ranges and edits.
+pub fn dispose_pending(
+    view: &CompactionView,
+    session_ref: &str,
+    version: u64,
+    current_version: Option<u64>,
+    lineage_id: &str,
+    first_ordinal: u64,
+    message_at: impl Fn(u64) -> Option<TranscriptMessage>,
+) -> ViewDisposition {
+    dispose(
+        view,
+        ExpectedView {
+            session_ref,
+            version,
+            digest: None,
+        },
+        current_version,
+        lineage_id,
+        first_ordinal,
+        message_at,
+    )
+}
+
+struct ExpectedView<'a> {
+    session_ref: &'a str,
+    version: u64,
+    digest: Option<&'a str>,
+}
+
+fn dispose(
+    view: &CompactionView,
+    expected: ExpectedView<'_>,
+    current_version: Option<u64>,
+    lineage_id: &str,
+    first_ordinal: u64,
+    message_at: impl Fn(u64) -> Option<TranscriptMessage>,
+) -> ViewDisposition {
+    if view.session_ref != expected.session_ref || view.view_version != expected.version {
         return ViewDisposition::Rejected(ViewProblem::NotRequested);
     }
     if let Err(problem) = view.check() {
         return ViewDisposition::Rejected(problem);
     }
-    if view.digest != ready.digest {
+    if expected.digest.is_some_and(|digest| view.digest != digest) {
         return ViewDisposition::Rejected(ViewProblem::DigestMismatch);
     }
     if current_version.is_some_and(|current| view.view_version <= current) {
@@ -941,7 +1002,10 @@ pub fn dispose_fetched(
     }
 }
 
-/// The `view.get` request: fetch one published view. Decoded leniently.
+/// The `view.get` request: fetch one published view, or wait for the first
+/// version Setup announced as pending. That wait is bounded by Setup's
+/// `view_due_max_ms` from fetch arrival, not by a wire deadline. Other
+/// unpublished versions are refused immediately. Decoded leniently.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ViewGetRequest {
@@ -964,13 +1028,22 @@ impl ViewGetRequest {
 }
 
 /// Refusal codes of `view.get`. Open strings: a runner that meets another
-/// code treats it like `unknown_version`.
+/// code treats it like `unknown_version`. For a background view that means
+/// keeping its current view; for an outstanding Setup view any refusal ends
+/// the run with `view_due_unapplied` (CONTRACT.md §7).
 pub mod view_get_codes {
     /// The provider holds no view state for this session reference.
     pub const UNKNOWN_SESSION: &str = "unknown_session";
     /// The provider does not hold this version (never published, or dropped
-    /// after a newer one). The provider never answers another version.
+    /// after a newer one). The first version Setup announced as pending is
+    /// held instead, up to Setup's `view_due_max_ms` from fetch arrival.
+    /// The provider never answers another version.
     pub const UNKNOWN_VERSION: &str = "unknown_version";
+    /// Setup's `view_due_max_ms`, counted from fetch arrival, expired before
+    /// the promised first view was published. The runner's client deadline
+    /// never exceeds its remaining step hold; a local timeout has the same
+    /// `view_due_unapplied` outcome. Other unpublished versions refuse immediately.
+    pub const VIEW_NOT_PUBLISHED: &str = "view_not_published";
 }
 
 /// The `view.get` answer. Strict on `answer`; lenient on fields.
@@ -980,8 +1053,10 @@ pub mod view_get_codes {
 pub enum ViewGetAnswer {
     /// The view, byte for byte as first published.
     View { view: CompactionView },
-    /// No such view. `code` is one of [`view_get_codes`] or a code this crate
-    /// does not know.
+    /// No such view, or the wait for Setup's pending version expired. That
+    /// version is held up to Setup's `view_due_max_ms` from fetch arrival,
+    /// rather than refused immediately. `code` is one of [`view_get_codes`]
+    /// or a code this crate does not know.
     Refuse { code: String, reason: String },
 }
 

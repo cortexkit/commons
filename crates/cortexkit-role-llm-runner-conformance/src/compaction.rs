@@ -219,7 +219,7 @@ pub struct ProviderCall {
     pub params: Value,
 }
 
-/// Independent expectations for a due view prepared at a fresh lineage's
+/// Independent expectations for a due or pending view prepared at a fresh lineage's
 /// Setup. The adapter builds these from the scripted provider's view, never
 /// from a runner model request or `session.read`'s model projection.
 #[derive(Clone, Debug, PartialEq)]
@@ -236,6 +236,20 @@ pub struct SetupViewDueFixture {
     /// `render_tags`. These cases require none so raw appended messages are
     /// independent expectations for their model rendering.
     pub model_only_decorations: Vec<String>,
+}
+
+/// The scripted provider and runner configuration for a pending-first-view case.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum SetupViewPendingScenario {
+    /// Keep the first view unpublished until the suite explicitly publishes it.
+    PublishAfterNotice,
+    /// Never publish; bound the fetch by Setup's `view_due_max_ms` from arrival.
+    HoldExpires,
+    /// Send both `view_due` and `view_pending` in the ready answer.
+    BothMembers,
+    /// Disable the runner's opt-in and send `view_pending` anyway.
+    Undeclared,
 }
 
 impl SetupViewDueFixture {

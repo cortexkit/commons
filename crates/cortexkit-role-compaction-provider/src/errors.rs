@@ -97,7 +97,8 @@ impl KnownCode {
 
     /// Whether a run may end `error` with this code after Setup: the typed
     /// `refuse` codes, and `compaction_unavailable` when Setup failed or
-    /// timed out with no answer. ERROR codes never end a run themselves.
+    /// timed out with no answer, or its due or pending view did not apply.
+    /// ERROR codes never end a run themselves.
     /// `standalone_session_not_migrated` ends the run except in its one
     /// hand-off: on a host running standalone Magic Context in-process, a
     /// runner that has never served the session hands it to standalone in
@@ -357,9 +358,10 @@ pub mod runner_codes {
     /// the plan's compaction item, which a runner without the `compaction`
     /// group cannot serve.
     pub const PLAN_COMPACTION_ITEM: &str = compaction::PLAN_COMPACTION_ITEM_FIELD;
-    /// A `provider_code` the runner writes itself, after Setup only: Setup
-    /// failed or timed out with no answer, so no initial view was recorded
-    /// and no model call was made. The next send calls Setup again.
+    /// A `provider_code` the runner writes itself when Setup failed or timed
+    /// out with no answer, or an outstanding Setup due or pending view did
+    /// not apply. No model call is made. After a failed Setup the next send
+    /// calls Setup again; an outstanding view is retained and retried instead.
     pub const COMPACTION_UNAVAILABLE: &str = errors::provider_codes::COMPACTION_UNAVAILABLE;
     /// The `provider_code` values the runner writes itself on account of
     /// its compaction provider. A `refuse` answer's code is recorded as

@@ -54,8 +54,8 @@ pub enum Capability {
     Queue,
     /// The `interrupt` delivery mode of `session.send`.
     Interrupt,
-    /// The `compaction` group: scripted Setup, step answers, refusals,
-    /// deadlines, request fences and durable replay.
+    /// The `compaction` group: scripted Setup, advance notices, views and
+    /// rides, refusals, deadlines and durable replay.
     Compaction,
     /// The `tag_checkpoint` group: the runner honours a compaction
     /// provider's Setup checkpoint `{tag_checkpoint, cut}`.
@@ -1607,6 +1607,57 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
+    /// Prepare the same seeded prefix, independent rendering expectations and
+    /// undecorated plan as `install_setup_view_due_fixture`, but answer Setup
+    /// with `view_pending: {version}` and no digest. Do not publish the view
+    /// or `view_ready` yet. Hold `view.get` for exactly that version for at most
+    /// the observed Setup request's `view_due_max_ms` from fetch arrival,
+    /// accepting notice and fetch in either order. Answer when published,
+    /// otherwise refuse `view_not_published` when that interval expires. The
+    /// runner's client deadline never exceeds its remaining step hold, and
+    /// a local timeout also ends the run with `view_due_unapplied`. Other
+    /// unpublished versions are refused immediately. Capture notices at the
+    /// bus and calls at the provider, not by reconstructing runner state.
+    ///
+    /// For `HoldExpires`, never publish. The suite observes the fetch request
+    /// and terminal error, not the provider's hold or refusal code; its timing
+    /// check is only a lower bound measured from before the send. For
+    /// `BothMembers`, also put a `view_due` naming the prepared version and
+    /// digest in the answer. That view stays unpublished like the rest of
+    /// this fixture: the answer must fail Setup before any fetch. For `Undeclared`,
+    /// configure the actual runner to omit `view_pending` from Setup's
+    /// `view_features` (do not edit an observed request). Other scenarios
+    /// retain the runner's opt-in. Use a short positive `view_due_max_ms`
+    /// that the suite's polls outlast (it polls up to 400 times, each after
+    /// the adapter's `pause`). The returned fixture's digest is
+    /// an independent expectation, not a member of the pending announcement.
+    /// These controls cannot be expressed by the already-published due-view
+    /// hook. The default makes each affected case not applicable by name.
+    async fn install_setup_view_pending_fixture(
+        &self,
+        _session: &str,
+        _initial: crate::CompactionMessage,
+        _replacement: Vec<String>,
+        _scenario: crate::SetupViewPendingScenario,
+    ) -> Result<crate::SetupViewDueFixture, HarnessError> {
+        Err(HarnessError::new(
+            "Setup pending-view fixture is not implemented",
+        ))
+    }
+
+    /// Publish only the prepared pending version and unblock its held fetch.
+    /// Do not send `view_ready`, alter runner state, or repeat Setup. Omitting
+    /// the normally required publication event is a fixture narrowing, so a
+    /// background announcement cannot satisfy the promise instead. The suite
+    /// calls this only after observing a readable first write, its matching
+    /// bus notice, a fetch request, and no model request; it does not test
+    /// crash durability here. Unsupported adapters are not applicable.
+    async fn publish_setup_view_pending(&self, _session: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "Setup pending-view publication is not implemented",
+        ))
+    }
+
     /// Change only whether the scripted provider refuses `view.get` for the
     /// prepared due version. Do not send `view_ready`, repeat Setup, or change
     /// the runner's stored due view. Used to verify a later step retries it.
@@ -2074,7 +2125,7 @@ pub trait LlmRunnerSubject: Harness {
     async fn script_next_ride(
         &self,
         _session: &str,
-        _ride: crate::compaction::ScriptedRide,
+        _ride: crate::ScriptedRide,
     ) -> Result<(), HarnessError> {
         Err(HarnessError::new(
             "scripting a ride's answer is not implemented",

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.16.5
+
+- Add four opt-in pending-first-view cases: notice before publication and first
+  model rendering, hold expiry without a model call, conflicting announcements,
+  and an undeclared pending member failing Setup by name.
+- Observe Setup's actual `view_features`; report every case not applicable
+  without `view_pending`. Add default-unsupported fixture and publication hooks,
+  with deliberately faulty runners for each case.
+- Pin compaction-provider `=0.7.13` and llm-runner `=0.7.42`.
+- Document pending-view fixture limits: readable writes rather than crash
+  durability, publication without `view_ready`, observed fetches and terminal
+  errors rather than provider holds or refusal codes, and lower-bound timing
+  only. Served-view disposal and later-send retries remain contract obligations.
+
 ## 0.16.4
 
 - Pin llm-runner 0.7.42 and add sender-succession cases for matching and

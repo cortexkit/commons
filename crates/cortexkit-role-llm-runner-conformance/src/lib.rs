@@ -131,11 +131,12 @@ mod tool_calls;
 pub mod upfront;
 mod user_commands;
 mod view_due;
+mod view_pending;
 
 pub use compaction::{
     CompactionCall, CompactionMessage, CompactionObservation, CompactionRouteIdentity,
     CompactionSetup, CompactionSetupIdentity, ProviderCall, ScriptedPartEdit, ScriptedRange,
-    ScriptedRide, ScriptedView, SetupViewDueFixture,
+    ScriptedRide, ScriptedView, SetupViewDueFixture, SetupViewPendingScenario,
 };
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_llm_runner as wire;

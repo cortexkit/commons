@@ -27,6 +27,12 @@ const CASES: &[&str] = &[
     "view_due_refused_fetch_blocks_model",
     "view_due_later_step_retries",
 ];
+const PENDING_CASES: &[&str] = &[
+    "view_pending_first_notice_then_view",
+    "view_pending_hold_expires",
+    "view_pending_both_members_fail_setup",
+    "view_pending_undeclared_fails_setup",
+];
 
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Fault {
@@ -39,6 +45,16 @@ enum Fault {
     NoOptIn,
     MissingHook,
     DecoratedFixture,
+    NoPendingOptIn,
+    MissingPendingHook,
+    MissingPublishHook,
+    CallsBeforePublication,
+    CallsAfterPendingTimeout,
+    AcceptsBoth,
+    AcceptsUndeclared,
+    NoNotice,
+    RefusesEarly,
+    MissingPendingCap,
 }
 
 #[derive(Default)]
@@ -54,6 +70,9 @@ struct Stored {
     messages: Vec<Value>,
     result: Value,
     runs: usize,
+    pending: Option<crate::SetupViewPendingScenario>,
+    notices: Vec<BTreeMap<String, String>>,
+    expires_at: Option<tokio::time::Instant>,
 }
 
 #[derive(Clone, Default)]
@@ -88,7 +107,15 @@ impl Stored {
         if !self.setup_done {
             let mut setup = json!({"session":"example","harness":"test","request_id":"setup"});
             if fault != Fault::NoOptIn {
-                setup["view_due_max_ms"] = json!(1000);
+                setup["view_due_max_ms"] = json!(10);
+            }
+            if !matches!(fault, Fault::NoOptIn | Fault::NoPendingOptIn)
+                && self.pending != Some(crate::SetupViewPendingScenario::Undeclared)
+            {
+                setup["view_features"] = json!(["view_pending"]);
+            }
+            if fault == Fault::MissingPendingCap {
+                setup.as_object_mut().unwrap().remove("view_due_max_ms");
             }
             self.calls.push(crate::ProviderCall::new(
                 provider_ops::COMPACTION_SETUP,
@@ -96,6 +123,52 @@ impl Stored {
             ));
             self.setup_done = true;
             self.due = self.view.is_some();
+        }
+        if let Some(scenario) = self.pending {
+            use crate::SetupViewPendingScenario::*;
+            if matches!(scenario, BothMembers | Undeclared) {
+                if !((scenario == BothMembers && fault == Fault::AcceptsBoth)
+                    || (scenario == Undeclared && fault == Fault::AcceptsUndeclared))
+                {
+                    self.fail_pending(cortexkit_role_compaction_provider::setup::VIEW_PENDING);
+                    return;
+                }
+                self.render_model(fault);
+                return;
+            }
+            if fault != Fault::NoNotice {
+                let last = self.messages.last().unwrap();
+                self.notices.push(
+                    cortexkit_role_compaction_provider::notice::AdvanceNotice::new(
+                        SESSION_REF,
+                        1,
+                        "lineage",
+                        last["ordinal"].as_u64().unwrap(),
+                        last["digest"].as_str().unwrap(),
+                        1,
+                        "model",
+                    )
+                    .to_headers(),
+                );
+            }
+            self.calls.push(crate::ProviderCall::new(
+                provider_ops::VIEW_GET,
+                json!({"session_ref":SESSION_REF,"view_version":1}),
+            ));
+            if scenario == PublishAfterNotice && fault == Fault::CallsBeforePublication {
+                self.render_model(fault);
+                return;
+            }
+            if fault == Fault::RefusesEarly && scenario == HoldExpires {
+                self.fail_pending(VIEW_DUE_UNAPPLIED);
+                return;
+            }
+            self.result = json!({"run_id":format!("run-{}",self.runs),"state":"active"});
+            if scenario == HoldExpires {
+                self.expires_at =
+                    Some(tokio::time::Instant::now() + std::time::Duration::from_millis(10));
+            }
+            return;
         }
         if self.due {
             if fault != Fault::AppliesWithoutRetryFetch || self.runs == 1 {
@@ -117,6 +190,15 @@ impl Stored {
                 self.due = false;
             }
         }
+        self.render_model(fault);
+    }
+
+    fn fail_pending(&mut self, reason: &str) {
+        self.result = json!({"run_id":format!("run-{}",self.runs),"state":"error",
+            "error":{"class":"compaction","message":"pending view refused","provider_code":COMPACTION_UNAVAILABLE,"provider":"example-provider","reason":reason}});
+    }
+
+    fn render_model(&mut self, fault: Fault) {
         let rendered = if self.applied && fault != Fault::RendersInitial {
             let view = self.view.as_ref().unwrap();
             let replacement: Vec<Value> = match &view.ranges[0] {
@@ -222,7 +304,19 @@ impl RunnerRoute for Route {
                 head
             }
             ops::SESSION_READ => json!({"lineage_id":"lineage","messages":stored.messages}),
-            ops::RUN_RESULT => stored.result.clone(),
+            ops::RUN_RESULT => {
+                if stored
+                    .expires_at
+                    .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+                {
+                    if self.runner.fault == Fault::CallsAfterPendingTimeout {
+                        stored.render_model(self.runner.fault);
+                    } else {
+                        stored.fail_pending(VIEW_DUE_UNAPPLIED);
+                    }
+                }
+                stored.result.clone()
+            }
             _ => panic!("unexpected op {method}"),
         };
         Ok(Reply::Response(value))
@@ -317,7 +411,9 @@ impl LlmRunnerSubject for NativeRunner {
     async fn release_tool_call(&self, _: &Value) -> Result<(), HarnessError> {
         Ok(())
     }
-    async fn pause(&self) {}
+    async fn pause(&self) {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
     async fn install_compaction_setup(
         &self,
         name: &str,
@@ -333,8 +429,10 @@ impl LlmRunnerSubject for NativeRunner {
         &self,
         name: &str,
     ) -> Result<crate::CompactionObservation, HarnessError> {
+        let state = self.state.lock().unwrap();
         Ok(crate::CompactionObservation {
-            model_inputs: self.state.lock().unwrap()[name].model_inputs.clone(),
+            model_inputs: state[name].model_inputs.clone(),
+            notices: state[name].notices.clone(),
             ..Default::default()
         })
     }
@@ -410,6 +508,37 @@ impl LlmRunnerSubject for NativeRunner {
         refused: bool,
     ) -> Result<(), HarnessError> {
         self.state.lock().unwrap().get_mut(name).unwrap().refused = refused;
+        Ok(())
+    }
+
+    async fn install_setup_view_pending_fixture(
+        &self,
+        name: &str,
+        initial: crate::CompactionMessage,
+        replacement: Vec<String>,
+        scenario: crate::SetupViewPendingScenario,
+    ) -> Result<SetupViewDueFixture, HarnessError> {
+        if self.fault == Fault::MissingPendingHook {
+            return Err(HarnessError::new("pending fixture is not implemented"));
+        }
+        let fixture = self
+            .install_setup_view_due_fixture(name, initial, replacement, false)
+            .await?;
+        self.state.lock().unwrap().get_mut(name).unwrap().pending = Some(scenario);
+        Ok(fixture)
+    }
+
+    async fn publish_setup_view_pending(&self, name: &str) -> Result<(), HarnessError> {
+        if self.fault == Fault::MissingPublishHook {
+            return Err(HarnessError::new("pending publication is not implemented"));
+        }
+        let mut state = self.state.lock().unwrap();
+        let stored = state.get_mut(name).unwrap();
+        assert!(!stored.notices.is_empty());
+        assert!(stored.model_inputs.is_empty());
+        stored.applied = true;
+        stored.due = false;
+        stored.render_model(self.fault);
         Ok(())
     }
 }
@@ -523,6 +652,102 @@ async fn decorated_fixture_plan_is_inapplicable_by_name() {
         assert!(
             matches!(outcome, Ending::Inapplicable(reason) if reason.contains("model-only decorations: render_tags")),
             "{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn faithful_runner_passes_all_pending_view_cases() {
+    for name in PENDING_CASES {
+        assert!(
+            matches!(exercise(name, Fault::None).await.unwrap(), Ending::Passed),
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn faulty_pending_runners_fail_their_case_by_name() {
+    for (name, fault, expected) in [
+        (
+            PENDING_CASES[0],
+            Fault::CallsBeforePublication,
+            "before the pending view was published",
+        ),
+        (
+            PENDING_CASES[0],
+            Fault::RendersInitial,
+            "must equal the due view rendering, never initial",
+        ),
+        (
+            PENDING_CASES[0],
+            Fault::NoNotice,
+            "did not expose its first readable write's matching notice",
+        ),
+        (
+            PENDING_CASES[1],
+            Fault::CallsAfterPendingTimeout,
+            "called the model after a refused due-view fetch",
+        ),
+        (
+            PENDING_CASES[1],
+            Fault::RefusesEarly,
+            "before its hold expired",
+        ),
+        (
+            PENDING_CASES[2],
+            Fault::AcceptsBoth,
+            "instead of failing Setup naming view_pending",
+        ),
+        (
+            PENDING_CASES[3],
+            Fault::AcceptsUndeclared,
+            "instead of failing Setup naming view_pending",
+        ),
+    ] {
+        let error = exercise(name, fault).await.err().expect(name);
+        assert!(error.contains(expected), "{name}: {error}");
+    }
+}
+
+#[tokio::test]
+async fn undeclaring_runner_has_all_pending_cases_inapplicable_by_name() {
+    for name in PENDING_CASES {
+        let outcome = exercise(name, Fault::NoPendingOptIn).await.unwrap();
+        assert!(
+            matches!(outcome, Ending::Inapplicable(reason) if reason.contains("no view_pending in Setup view_features")),
+            "{name}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn pending_adapter_hooks_default_to_inapplicable_by_name() {
+    for name in PENDING_CASES {
+        let outcome = exercise(name, Fault::MissingPendingHook).await.unwrap();
+        assert!(
+            matches!(outcome, Ending::Inapplicable(reason) if reason.contains("install_setup_view_pending_fixture")),
+            "{name}"
+        );
+    }
+    let outcome = exercise(PENDING_CASES[0], Fault::MissingPublishHook)
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, Ending::Inapplicable(reason) if reason.contains("publish_setup_view_pending"))
+    );
+}
+
+#[tokio::test]
+async fn pending_support_without_cap_is_a_misconfigured_runner() {
+    for name in PENDING_CASES {
+        let error = exercise(name, Fault::MissingPendingCap)
+            .await
+            .err()
+            .expect(name);
+        assert!(
+            error.contains("requires a positive view_due_max_ms"),
+            "{name}: {error}"
         );
     }
 }

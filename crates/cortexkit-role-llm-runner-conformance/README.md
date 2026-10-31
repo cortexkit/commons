@@ -17,6 +17,47 @@ be absent. New optional hooks have unsupported defaults. Faulty-runner
 self-tests exercise every new case, including deadline comparison and deadline
 extension as separate defects.
 
+## Pending first views
+
+The four `view_pending_*` cases observe `view_pending` in the actual Setup
+request's `view_features`, with a positive `view_due_max_ms`. Without the
+token each case is **not applicable**, by name. On an opted-in runner they
+check a readable first write and its matching bus notice while the promised
+view is unpublished, then publish it and compare the first model request with
+its independent rendering; observe a fetch request and a terminal error with
+no model call when the view remains unpublished; and reject
+both conflicting announcements and an undeclared pending member as failed
+Setup naming `view_pending`. The undeclared case configures the runner to
+omit support for that session, rather than altering observed requests.
+
+`install_setup_view_pending_fixture` seeds the prefix and scripts those
+answers; `publish_setup_view_pending` publishes only after the suite sees
+the notice and fetch request. The fixture deliberately publishes without
+`view_ready`: this narrows the provider's normal publication behavior so a
+background announcement cannot satisfy the Setup promise instead. These
+additive hooks default to unsupported, making affected cases not applicable.
+They reuse `SetupViewDueFixture` for
+independent rendering expectations, but never put its digest in the pending
+Setup member. Faulty runners call before publication or after timeout,
+render `initial`, omit the notice, refuse early, or accept invalid Setup;
+each is rejected by the corresponding case name.
+
+The cases do not test crash durability of the readable write, observe the
+provider holding the fetch, or observe its `view_not_published` refusal code.
+The expiry case checks only a lower bound on elapsed time from before the
+send, after the terminal error and provider calls have been observed; it has
+no upper-bound timing assertion. Wrong-session, wrong-version and malformed
+served views, and retries across later sends, are not covered by these pending cases. The
+contract pins those obligations. The provider crate's direct test of
+`cortexkit_role_compaction_provider::view::dispose_pending`
+(`tests/pending_disposal.rs`) covers its session, version and digest
+checks; its other checks are shared with `dispose_fetched` and covered by
+that crate's vector tests. The pending case also counts every fetch in its
+one send, not fetches per step. These fixture and observation limits are also listed
+in `NARROWINGS`.
+
+## Negotiated part edits
+
 The negotiated view cases `part_edits_truncate_renders_with_own_tag` and
 `part_edits_bytes_render_with_own_tag` require compaction, tags, queue,
 transcript reads and run ops. They observe the actual Setup `view_features`

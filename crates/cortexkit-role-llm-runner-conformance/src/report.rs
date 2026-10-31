@@ -626,6 +626,14 @@ pub const CASES: &[CaseSpec] = &[
         "a refused due-view fetch makes no model call and ends compaction_unavailable with reason view_due_unapplied"),
     case("view_due_later_step_retries", &[Compaction, Queue, TranscriptReads, RunOps],
         "after a refused fetch a later step retries and applies the same due view without repeating Setup"),
+    case("view_pending_first_notice_then_view", &[Compaction, Queue, TranscriptReads, RunOps],
+        "a readable first write's matching notice precedes fixture publication without view_ready, and the first model request uses the pending view, never initial"),
+    case("view_pending_hold_expires", &[Compaction, Queue, TranscriptReads, RunOps],
+        "an unpublished first view produces an observed fetch request and terminal view_due_unapplied without a model call, with a lower-bound elapsed-time check from before send"),
+    case("view_pending_both_members_fail_setup", &[Compaction, Queue, TranscriptReads, RunOps],
+        "a ready answer carrying both view_due and view_pending fails Setup naming view_pending"),
+    case("view_pending_undeclared_fails_setup", &[Compaction, Queue, TranscriptReads, RunOps],
+        "a runner configured not to declare view_pending refuses the member as a failed Setup by name"),
     case(
         "role_describe_shape",
         &[],
@@ -949,6 +957,9 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
+    "pending-view cases check a readable first write and its matching bus notice, not crash durability; fixture publication deliberately sends no view_ready, narrowing the provider's normal publication rule so a background announcement cannot satisfy the Setup promise instead",
+    "pending-view cases observe a view.get request and the runner's terminal error, not the provider holding the call or its view_not_published refusal code; the expiry case checks only a lower bound on elapsed time from before send, after observing the terminal error and provider calls, with no upper-bound timing assertion",
+    "pending-view cases do not serve wrong-session, wrong-version or malformed views and do not exercise retries across later sends; the contract pins those obligations; dispose_pending's direct test covers its session, version and digest checks, and its other checks are shared with dispose_fetched",
     "compaction cases check Setup durability, refusals and model-view insertion, plus whether a single-session provider route's session agrees with Setup; adapters must observe the actual route bind separately from Setup, and shared project routes with an empty bind session are valid. The cut cases publish views through the adapter's hook and read advance notices the adapter captured at the bus; rides, the ceiling and native markers still have no live case",
     "read_below_first_ordinal_refused checks range and after-message reads; session.resolve's before_lineage_start is not exercised, because the cut fixture's session renders no tags",
     "per_step_cost_scales_with_new_messages measures wall time over the real route, which includes writing the model request; the two sessions keep the same window, so that part is equal on both sides. Memory is not measured",
@@ -989,7 +1000,7 @@ pub const NARROWINGS: &[&str] = &[
     "a run cut at DispatchIntent is expected to end interrupted, as the role's points list states for that point; StepRecorded accepts either one dispatch with continuation or zero dispatches with interrupted state; ToolResultRecorded checks only that the run has one terminal state that is not cancelled",
     "a StepRecorded seal that keeps the call must hold its never-executed result in the transcript read once the run has ended; a result written in a separate commit that the runner makes before any read can reach it (during its own resume) cannot be told apart from one written in the commit that ended the run",
     "StepRecorded checks transcript ordering rather than model inputs; compaction cases independently capture canonical inputs at the scripted model boundary",
-    "compaction timing cases require an injected runner/provider clock and drain due work exactly at configured deadlines; the engine-wide WAIT cap and prompt-cache lifetime are configured by the script, since the contract pins no numeric cap",
+    "compaction timing cases other than pending-view expiry require an injected runner/provider clock and drain due work exactly at configured deadlines; the engine-wide WAIT cap and prompt-cache lifetime are configured by the script, since the contract pins no numeric cap",
     "Setup durability is inspected from the runner's durable store while its first model request is held, never inferred from the provider script or model view",
     "insertion-before-nonempty-replacement ordering has no v1 producer: compaction-provider §8 applies the newest CompactionMessage alone, §12 gives every replacement its entire range, and hooks transform fields on raw records; only the insertion-before-message half is live conformance",
     "the crash guarantee that messages read before a kill read the same after it (§14, 1) is checked on a second session written before the kill, because the cut session has nothing readable before its trigger",

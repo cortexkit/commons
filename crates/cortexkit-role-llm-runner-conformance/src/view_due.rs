@@ -163,7 +163,7 @@ where
     Ok(Ending::Passed)
 }
 
-async fn require_fetch<S>(
+pub(super) async fn require_fetch<S>(
     case: &Case<'_, S>,
     session: &Session<S::Route>,
     fixture: &SetupViewDueFixture,
@@ -195,7 +195,7 @@ where
     Ok(())
 }
 
-async fn refused_without_model<S>(
+pub(super) async fn refused_without_model<S>(
     case: &Case<'_, S>,
     session: &Session<S::Route>,
     reply: &SendReply,
@@ -249,7 +249,7 @@ where
     Err("run never ended after refused due-view fetch".into())
 }
 
-async fn applied<S>(
+pub(super) async fn applied<S>(
     case: &Case<'_, S>,
     session: &Session<S::Route>,
     reply: &SendReply,

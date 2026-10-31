@@ -8,8 +8,8 @@
 //!
 //! Setup returns the initial CompactionMessage and, optionally, the ceiling
 //! policy. The runner renders `initial` until it applies the session's first
-//! view. While Setup's `view_due` is pending it never renders `initial`, and
-//! applies that published view first. A provider with no head returns an
+//! view. While Setup's `view_due` or `view_pending` is outstanding it never
+//! renders `initial`, and applies the promised view first. A provider with no head returns an
 //! empty replacement. The
 //! runner records the answer before the lineage's first model call, and
 //! Setup does not run again within the lineage while the runner holds that
@@ -27,6 +27,8 @@ pub const ACCEPTS_PRUNED_REASONING: &str = "pruned_reasoning";
 pub const VIEW_FEATURE_TRUNCATE: &str = "truncate";
 /// Setup view feature permitting ordinary tags on counted `bytes` edits.
 pub const VIEW_FEATURE_TAG_BYTES_EDITS: &str = "tag_bytes_edits";
+/// Setup view feature permitting a first view published after the first notice.
+pub const VIEW_FEATURE_VIEW_PENDING: &str = "view_pending";
 
 pub use cortexkit_role_llm_runner::archive_prunes_reasoning::ReasoningPruned;
 pub use cortexkit_role_llm_runner::tags::SetupCheckpoint;
@@ -96,7 +98,7 @@ pub struct SetupRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub view_apply: Vec<String>,
     /// Opt-in view features the runner supports (`truncate`,
-    /// `tag_bytes_edits`). Providers ignore tokens they do not know; decoding
+    /// `tag_bytes_edits`, `view_pending`). Providers ignore tokens they do not know; decoding
     /// keeps them as sent. Omitted when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub view_features: Vec<String>,
@@ -109,9 +111,11 @@ pub struct SetupRequest {
     /// Omitted when absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ride_wait_max_ms: Option<u64>,
-    /// The longest the runner holds each model step for a pending due view,
+    /// The longest the runner holds each model step for an outstanding Setup
+    /// `view_due` or `view_pending`,
     /// in milliseconds from that step's start; at least 1. Absent means
-    /// the provider must not send `view_due`.
+    /// the provider must not send `view_due` or `view_pending`. Declaring
+    /// `view_pending` without a positive cap is misconfigured.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view_due_max_ms: Option<u64>,
     /// The session's prune state, exactly as `llm-runner/v1`'s
@@ -242,13 +246,32 @@ pub const RIDE_WAIT_MS: &str = "ride_wait_ms";
 /// numbering and never takes a checkpoint.
 pub const CHECKPOINT_ON_DESCENT: &str = "checkpoint_on_descent";
 
-/// The reason recorded when a pending due view does not apply: its fetch is
+/// The reason recorded when an outstanding Setup view does not apply: its fetch is
 /// refused, its disposal is anything but `applied`, or the wait expires. The
 /// run then ends `error` with `compaction_unavailable` and no model call.
 pub const VIEW_DUE_UNAPPLIED: &str = "view_due_unapplied";
 
 /// The Setup member named when a due view is invalid or was not requested.
 pub const VIEW_DUE: &str = "view_due";
+
+/// The Setup member named when a pending view is invalid or was not requested.
+pub const VIEW_PENDING: &str = "view_pending";
+
+/// A first view published only after the runner's first durable-write notice
+/// (the advance notice for its first message after this Setup). Unlike
+/// [`ViewDue`], this member announces no digest.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ViewPending {
+    /// The promised version, at least 1, to fetch with `view.get`.
+    pub version: u64,
+}
+
+impl ViewPending {
+    pub fn new(version: u64) -> Self {
+        Self { version }
+    }
+}
 
 /// An already-published view that must be applied before any model call in
 /// the lineage. Its digest is the view's own CONTRACT.md §6 digest.
@@ -293,12 +316,13 @@ pub enum SetupAnswer {
         /// start of the lineage, `{from: f, to: f}` with `f` the lineage's
         /// first ordinal: the head goes before every message of the lineage,
         /// and on a lineage a cut started it carries what the cut folded. The runner renders it until it applies the
-        /// session's first view, unless `view_due` is present: then it never
+        /// session's first view, unless `view_due` or `view_pending` is present: then it never
         /// renders `initial` while that view is due.
         initial: CompactionMessage,
         /// When the runner pauses for a view and, failing one, refuses the
-        /// run (CONTRACT.md §8). Absent, the runner never pauses for the
-        /// provider but still never sends over the window.
+        /// run (CONTRACT.md §8). Absent, the runner never enters the ceiling
+        /// pause (it still waits on rides and an outstanding Setup view), and
+        /// still never sends over the window.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ceiling: Option<CeilingPolicy>,
         /// For a session moved from a standalone compaction tool: the
@@ -324,6 +348,12 @@ pub enum SetupAnswer {
         /// Sent only when the request carried `view_due_max_ms`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         view_due: Option<ViewDue>,
+        /// A first view to publish after the runner's first durable-write
+        /// notice. Mutually
+        /// exclusive with `view_due`; requires the `view_pending` feature
+        /// and a positive `view_due_max_ms` in the request.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        view_pending: Option<ViewPending>,
         /// Read transformations the provider accepts for this enrollment.
         /// Empty means no opt-in; unknown names grant no known permission.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -372,6 +402,7 @@ impl SetupAnswer {
             cache_ttl: None,
             ride_wait_ms: None,
             view_due: None,
+            view_pending: None,
             accepts: Vec::new(),
         }
     }
@@ -437,6 +468,22 @@ impl SetupAnswer {
     pub fn view_due(&self) -> Option<&ViewDue> {
         match self {
             Self::Ready { view_due, .. } => view_due.as_ref(),
+            Self::Refuse { .. } => None,
+        }
+    }
+
+    /// Set the pending first view on a ready answer. A refusal is unchanged.
+    /// Validation, rather than this setter, rejects coexistence with `view_due`.
+    pub fn with_view_pending(mut self, pending: ViewPending) -> Self {
+        if let Self::Ready { view_pending, .. } = &mut self {
+            *view_pending = Some(pending);
+        }
+        self
+    }
+
+    pub fn view_pending(&self) -> Option<&ViewPending> {
+        match self {
+            Self::Ready { view_pending, .. } => view_pending.as_ref(),
             Self::Refuse { .. } => None,
         }
     }
@@ -534,8 +581,24 @@ impl SetupAnswer {
     /// request carried no `ride_wait_max_ms`. A runner never clamps the
     /// wait. [`VIEW_DUE`] names a due view without a positive request cap,
     /// with version 0, or without a lowercase hexadecimal SHA-256 digest.
+    /// [`VIEW_PENDING`] names a pending view with version 0, without the
+    /// request's `view_pending` feature or positive cap, or alongside
+    /// `view_due`. A ready answer to a request declaring that feature
+    /// without a positive cap also fails with [`VIEW_PENDING`].
     /// A `refuse` passes, as it ends the run on its own.
     pub fn check_for(&self, request: &SetupRequest) -> Result<(), &'static str> {
+        let pending_support = request
+            .view_features()
+            .iter()
+            .any(|feature| feature == VIEW_FEATURE_VIEW_PENDING);
+        if self.is_ready()
+            && ((pending_support && request.view_due_max_ms.is_none_or(|cap| cap == 0))
+                || self.view_pending().is_some_and(|pending| {
+                    pending.version == 0 || !pending_support || self.view_due().is_some()
+                }))
+        {
+            return Err(VIEW_PENDING);
+        }
         if request.descends_from.is_some() && self.checkpoint().is_some() {
             return Err(CHECKPOINT_ON_DESCENT);
         }
@@ -594,6 +657,87 @@ mod tests {
     }
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn setup_view_pending_samples_round_trip_and_validate() {
+        let file = vectors::load("setup-view-pending.json");
+        for case in vectors::cases(&file, "cases") {
+            let name = case["name"].as_str().unwrap();
+            let request: SetupRequest = vectors::round_trip(name, &case["request"]);
+            let answer: SetupAnswer = vectors::round_trip(name, &case["answer"]);
+            assert_eq!(
+                answer.check_for(&request).err(),
+                case["failed_setup"].as_str(),
+                "{name}"
+            );
+            assert_eq!(answer.view_pending(), Some(&ViewPending::new(1)));
+            let mut rebuilt =
+                SetupAnswer::ready(answer.request_id(), answer.initial().unwrap().clone())
+                    .with_view_pending(ViewPending::new(1));
+            if let Some(due) = answer.view_due() {
+                rebuilt = rebuilt.with_view_due(due.clone());
+            }
+            assert_eq!(rebuilt, answer, "{name}");
+        }
+        let refusal: crate::view::ViewGetAnswer =
+            vectors::round_trip("unpublished", &file["view_get_refusal"]);
+        assert!(
+            matches!(refusal, crate::view::ViewGetAnswer::Refuse { code, .. }
+            if code == crate::view::view_get_codes::VIEW_NOT_PUBLISHED)
+        );
+    }
+
+    #[test]
+    fn invalid_pending_view_or_missing_cap_fails_setup_by_name() {
+        let request = SetupRequest::new("s", "test", "setup", Map::new(), "m", 1)
+            .with_view_features(vec![VIEW_FEATURE_VIEW_PENDING.into()]);
+        let answer = SetupAnswer::ready(
+            "setup",
+            CompactionMessage::new("c", 0, crate::message::Range::new(0, 0), vec![]),
+        );
+        for request in [request.clone(), request.clone().with_view_due_max_ms(0)] {
+            assert_eq!(answer.check_for(&request), Err(VIEW_PENDING));
+            assert_eq!(
+                answer
+                    .clone()
+                    .with_view_pending(ViewPending::new(1))
+                    .check_for(&request),
+                Err(VIEW_PENDING)
+            );
+        }
+        let request = request.with_view_due_max_ms(1);
+        assert_eq!(
+            answer
+                .clone()
+                .with_view_pending(ViewPending::new(0))
+                .check_for(&request),
+            Err(VIEW_PENDING)
+        );
+        assert_eq!(
+            answer
+                .clone()
+                .with_view_pending(ViewPending::new(1))
+                .check_for(&request),
+            Ok(())
+        );
+        let both = answer
+            .with_view_pending(ViewPending::new(1))
+            .with_view_due(ViewDue::new(0, ""));
+        assert_eq!(both.check_for(&request), Err(VIEW_PENDING));
+        let refusal = SetupAnswer::refuse(
+            "setup",
+            RefuseCode::Misconfigured,
+            "view_pending requires view_due_max_ms",
+        );
+        assert_eq!(
+            refusal.clone().with_view_pending(ViewPending::new(1)),
+            refusal
+        );
+        assert_eq!(refusal.view_pending(), None);
+        assert_eq!(refusal.check_for(&request), Ok(()));
+        // A due view still requires a digest; pending support does not relax its wire shape.
+        assert!(serde_json::from_value::<ViewDue>(serde_json::json!({"version":1})).is_err());
+    }
 
     #[test]
     fn setup_view_due_round_trip_and_absence_preserve_wire_bytes() {

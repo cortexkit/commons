@@ -23,8 +23,10 @@ A compaction provider is any module that decides the shape of the history a
 runner sends to the model. It works off the runner's hot path: the runner
 announces what it wrote over ck-bus (§5); the provider reads it, decides on
 its own when to reshape the history, and publishes a view (§6); the runner
-applies the newest view it holds to every request (§7). The only synchronous
-contacts after Setup are the ride request and the ceiling pause (§8).
+applies the newest view it holds to every request (§7). After Setup, a
+model step waits on the provider only for a ride (§8), for the ceiling
+pause (§8), or to fetch an outstanding Setup `view_due` or `view_pending`
+(§7). A background `view_ready` is fetched without holding any step.
 
 ## Terms
 
@@ -232,12 +234,20 @@ the session and freezes that plan for use.
   mark listed here (§7) and ignores names it does not know. Setup decodes
   leniently (§14), so a provider that predates the member ignores it.
 - [pinned] Optional `view_features: [string]` is omitted when empty. Known
-  tokens are `truncate` (`setup::VIEW_FEATURE_TRUNCATE`) and `tag_bytes_edits`
-  (`setup::VIEW_FEATURE_TAG_BYTES_EDITS`); unknown tokens are ignored.
+  tokens are `truncate` (`setup::VIEW_FEATURE_TRUNCATE`), `tag_bytes_edits`
+  (`setup::VIEW_FEATURE_TAG_BYTES_EDITS`) and `view_pending`
+  (`setup::VIEW_FEATURE_VIEW_PENDING`, added in 0.7.13); unknown tokens are ignored.
   `SetupRequest::with_view_features` sets the list and `view_features` reads
   it. The provider sends `truncate` edits only when the runner listed
   `truncate`, and relies on runner tagging of `bytes` edits only when the
-  runner listed `tag_bytes_edits`. Absence preserves the rules below verbatim.
+  runner listed `tag_bytes_edits`. A provider sends Setup's `view_pending`
+  only when the runner listed `view_pending`; if it needs a pending first
+  view but the runner did not opt in, it refuses Setup with `misconfigured`.
+  A request listing `view_pending` without a positive `view_due_max_ms` is
+  misconfigured: the provider refuses Setup with `misconfigured`, even if
+  it would otherwise return no pending view. A runner rejects a ready
+  answer to that request as a failed Setup naming `view_pending`
+  (`SetupAnswer::check_for`). Absence preserves the rules below verbatim.
 - [pinned] Optional `ride_wait_max_ms` (`u64`, 1 to 300,000,
   `ride::MAX_RIDE_WAIT_MS`; added in 0.5.1,
   `SetupRequest::with_ride_wait_max_ms`) is the longest this runner can
@@ -251,7 +261,7 @@ the session and freezes that plan for use.
   sent only when the runner will hold each model step for a due view while
   one is pending, for at most that many milliseconds from that step's start.
   It is omitted when absent; absence means the provider must not send
-  `view_due`.
+  `view_due` or `view_pending`.
 - [pinned] Optional `reasoning_pruned: {generation, through_ordinal, at_ms}`
   (`setup::ReasoningPruned`, `llm-runner/v1`'s
   `archive_prunes_reasoning::ReasoningPruned`; added in 0.7.3,
@@ -334,7 +344,7 @@ the session and freezes that plan for use.
   is not a declaration of support. Later forks within the session are
   announced on advance notices instead (§5).
 - [pinned] The answer (`SetupAnswer`) is `{answer: "ready", request_id,
-  initial, ceiling?, checkpoint?, cache_ttl?, ride_wait_ms?, view_due?, accepts?}` or `{answer: "refuse", request_id, code,
+  initial, ceiling?, checkpoint?, cache_ttl?, ride_wait_ms?, view_due?, view_pending?, accepts?}` or `{answer: "refuse", request_id, code,
   reason, provider_code?}` (§10).
   - `initial` is a CompactionMessage (`message::CompactionMessage`,
     `{compaction_id, version, range: {from, to}, replacement}`): the
@@ -348,7 +358,7 @@ the session and freezes that plan for use.
     replacement. Only `from > to` is malformed (`range_inverted`); a runner
     treats an answer whose `initial` is malformed as a failed Setup.
   - The runner renders `initial` until it applies the session's first view
-    (§7), except while a view is due: then it never renders `initial`.
+    (§7), except while a view is due or pending: then it never renders `initial`.
     A view replaces it entirely and is never a delta over it.
   - `view_due: {version, digest}` (`setup::ViewDue`, added in 0.7.10,
     `SetupAnswer::with_view_due`, `SetupAnswer::view_due`) names a version
@@ -368,6 +378,23 @@ the session and freezes that plan for use.
     (`setup::VIEW_DUE_UNAPPLIED`), without a model call. The due view stays
     recorded durably for the lineage across runner restarts, so every later
     step retries until it applies.
+  - `view_pending: {version}` (`setup::ViewPending`, added in 0.7.13,
+    `ViewPending::new`, `SetupAnswer::with_view_pending`,
+    `SetupAnswer::view_pending`) promises a first view published after the
+    runner's first durable-write notice (the advance notice, §5, for the
+    first message the runner writes after this Setup), when the provider can
+    read the history. Its `version` is a `u64` at least 1. The member
+    announces no digest; `ViewDue.digest` remains required. The member is omitted when absent.
+    It requires both `view_pending` in the request's `view_features` and a
+    positive `view_due_max_ms`. At most one of `view_due` and `view_pending`
+    may be present. An answer with both, an undeclared pending view, or
+    version 0 fails Setup with no model call, naming `view_pending`
+    (`setup::VIEW_PENDING`, `SetupAnswer::check_for`). The runner never
+    renders `initial` while the promise is outstanding. It durably stores
+    its first write and publishes that write's notice before holding the
+    first model call; it must not wait for the view before publishing the
+    notice that lets the provider build it. The hold, fetch, application
+    and failure rules are in §7 and §8.
   - A Setup answer must fit one daemon frame: the module-to-caller budget
     is 4 MiB for the whole encoded frame, its 21-byte header included. If the answer would exceed it and the request carried no
     `view_due_max_ms`, the provider refuses Setup with `misconfigured`
@@ -890,12 +917,27 @@ provider.
   is served by the provider on the compaction route. Its answer
   (`view::ViewGetAnswer`, strict on `answer`) is `{answer: "view", view}`,
   byte for byte the view first published under that version, or
-  `{answer: "refuse", code, reason}` with `code` `unknown_session` or
-  `unknown_version` (`view::view_get_codes`). The provider never answers a
+  `{answer: "refuse", code, reason}` with `code` `unknown_session`,
+  `unknown_version` or `view_not_published` (`view::view_get_codes`). The provider never answers a
   different version. It keeps at least its newest published view for each
   session, plus every view newer than the latest `applied_view_version` it
-  has seen. A runner treats an unknown refusal code like `unknown_version`:
-  it keeps its current view and waits for the next `view_ready`.
+  has seen. For background views, a runner treats an unknown refusal code
+  like `unknown_version`: it keeps its current view and waits for the next
+  `view_ready`. For an outstanding Setup `view_due` or `view_pending`, any
+  refused fetch instead ends the run `compaction_unavailable` with
+  `view_due_unapplied`, without a model call (§7).
+- [pinned] When `view.get` names the pending first version announced by
+  Setup's `view_pending`, the provider holds the call open for at most the
+  Setup request's `view_due_max_ms`, counted from fetch arrival. If that
+  exact version is published within the interval, it answers with the view;
+  otherwise it refuses `view_not_published`
+  (`view::view_get_codes::VIEW_NOT_PUBLISHED`). The notice and fetch may
+  reach the provider in either order; the runner need not poll. No deadline
+  is carried in `view.get` or its frame. The runner's client deadline never
+  exceeds its own remaining step hold, so it gives up before or at the
+  provider's bound and treats a local timeout like that refusal:
+  `view_due_unapplied` (§7). Every other unpublished version is refused
+  immediately as `unknown_version`, as before.
 - [pinned] `ck-bus`'s module-event consumer table (`cortexkit-bus-naming`)
   must admit the provider as a reader of the runner's events and the runner
   as a reader of the provider's. This role does not change that table.
@@ -966,11 +1008,17 @@ provider.
 - [pinned] Every other profile/kind/mode combination, unknown mode, or
   inconsistent container refuses with `TruncateRefusal::reason()` equal to
   `truncate_kind`; never guess or approximate. The runner reports
-  `view_refused:<version>:truncate_kind` and keeps its current view.
+  `view_refused:<version>:truncate_kind` and keeps its current view for a
+  background view. An outstanding Setup due or pending view instead fails
+  the run with `view_due_unapplied` (§7).
 
 ## 7. Applying a view: the runner's side
 
-- [pinned] While Setup's `view_due` is pending, the runner never renders
+- [pinned] While a Setup view is outstanding (`view_due` or `view_pending`),
+  the rules in this section that keep the current view, defer, render
+  `initial` or fetch again later apply only to background views. An
+  outstanding Setup view either applies or ends the run, as below.
+- [pinned] While Setup's `view_due` is outstanding, the runner never renders
   `initial`. At the start of each step while the view is due, before any
   model request, it fetches `view.get {session_ref, view_version}`, filling `view_version` from
   Setup's `view_due.version` and using that version and
@@ -982,6 +1030,21 @@ provider.
   durable lineage state, retained across runner restarts and retried at
   every later step until applied. A later `view_ready` whose version is at
   or below the due version is stale and cannot replace or clear it.
+- [pinned] Setup's `view_pending` has the same durable hold and retry rules
+  as `view_due`, except the runner first stores and publishes the notice
+  for its first durable write before holding the model call. It fetches
+  exactly `view_pending.version` with `view.get` and applies the served
+  view before any model request, never rendering `initial`. The runner
+  uses `view::dispose_pending` for the disposal order below, taking the
+  expected session from the session it is setting up and the version from
+  `view_pending.version`, and skipping only the
+  announced-digest comparison at step 3. Step 2 still verifies the view's
+  own digest with `CompactionView::check`. The fetch's client deadline
+  never exceeds the runner's remaining step hold (§6).
+  Only `applied` clears the promise. A refusal (including
+  `view_not_published`), timeout, or any other disposal ends the run `error`
+  with `compaction_unavailable`, reason `view_due_unapplied`, and makes no
+  model call. In particular a different served version cannot satisfy it.
 - [pinned] On a `view_ready` whose version is above the view it renders,
   the runner fetches that view with `view.get` and decides in a fixed order
   (`view::dispose_fetched`):
@@ -1016,7 +1079,10 @@ provider.
   every truncate edit must render under `tags::truncate_part` (§6.1), or the
   view is `refused:truncate_kind`.
   Only then does it `apply`. A rejected view is not persisted, not applied
-  and not reported; the runner keeps its current view and may fetch again.
+  and not reported. Keeping the current view and fetching again applies
+  only to background views. For an outstanding Setup `view_due` or
+  `view_pending`, any outcome other than applied instead ends the run
+  `compaction_unavailable` with `view_due_unapplied`, without a model call.
 - [pinned] **A view applies only at a step boundary.** The runner writes it
   durably, as its own record in its write-ahead log, before the step that
   first renders it. So a resumed run renders byte for byte what it rendered
@@ -1138,6 +1204,19 @@ provider.
   and omits `applied_view_version` until a newer view applies.
 
 ## 8. Ride request and ceiling
+
+- [pinned] A first model call held for Setup's `view_pending` is bounded by
+  the request's `view_due_max_ms`, measured from the step's start as for
+  `view_due`. The runner publishes the first durable-write notice before
+  holding the call and fetches the promised version once per model step,
+  with no polling within the step. The provider holds the fetch for at
+  most Setup's `view_due_max_ms` from fetch arrival (§6). The runner's own
+  hold counts from the step's start, which is no later than the fetch's
+  arrival, and its client deadline never exceeds what remains of that
+  hold, so it gives up no later than the provider's bound. It never falls back to `initial`. Only an applied view
+  permits the model call; every other outcome, including local timeout,
+  ends `compaction_unavailable` with `view_due_unapplied` (§7). Later steps
+  retry the outstanding promise under the same rules as `view_due`.
 
 - [pinned] `compaction.ride {session_ref, cause, deadline_ms, account?, service_tier?, overflow?}`
   (`ride::RideRequest`) is a synchronous call on the compaction route. The
@@ -1299,8 +1378,10 @@ provider.
   (`ceiling::CONTEXT_CEILING`, added in `cortexkit-role-llm-runner`
   0.3.0) and detail `{window, size, cause}`, with `cause` from
   `ceiling::context_ceiling_causes`.
-- [pinned] Without `ceiling` the runner never pauses for the provider, and
-  still never sends over the window: such a request is refused
+- [pinned] Without `ceiling` the runner never enters the ceiling pause. It
+  still waits on rides (§8) and on an outstanding Setup `view_due` or
+  `view_pending` (§7). It still never
+  sends over the window: such a request is refused
   `context_ceiling` with `cause: "over_window"`.
 
 ### 8.1 The prompt cache's lifetime
@@ -1357,7 +1438,7 @@ provider.
   In llm-runner run errors, this answer's role `code` maps to `provider_code`
   and its optional finer `provider_code` maps to `provider_detail_code`,
   diagnostics only, never replacing the role code or deciding retryability.
-- [pinned] `code` is one of the seven typed codes below (`RefuseCode`). Each
+- [pinned] `code` is one of the typed codes below (`RefuseCode`). Each
   has a fixed retryability, so an owner knows whether retrying without acting
   can help: a busy provider or unreadable history may clear, while a window or
   configuration refusal needs correction. `RefuseCode` and `KnownCode` are
@@ -1381,7 +1462,7 @@ provider.
 |---|---|---|
 | `window_too_small` | the model's window cannot hold the smallest view the provider can build | no |
 | `provider_busy` | the provider is busy with the session's history and cannot answer Setup now | yes |
-| `misconfigured` | the configuration for this preset and params cannot be used, or Setup cannot fit the 4 MiB module-to-caller frame budget without due-view support (§4) | no |
+| `misconfigured` | the configuration for this preset and params cannot be used, Setup cannot fit the 4 MiB module-to-caller frame budget without due-view support, a needed pending first view was not opted into, or `view_pending` support was declared without a positive `view_due_max_ms` (§4) | no |
 | `history_unreadable` | required history is missing, such as a declared inherited prefix the provider does not hold | yes |
 | `standalone_session_not_migrated` | the session has standalone Magic Context state and no completed move to the provider; a runner that has never served it, on a host running standalone in-process, hands it to standalone and sends no rides; any other runner fails the run by name (§4) | no |
 | `tag_checkpoint_unsupported` | the session was moved from standalone Magic Context and the runner does not declare `llm-runner/v1`'s `tag_checkpoint` group (§4) | no |
@@ -1478,7 +1559,7 @@ to `RefuseCode::Unknown`. `detail` is arbitrary JSON, omitted when absent;
 | Code | When |
 |---|---|
 | `invalid_params {field: "plan.compaction_item"}` | admission, on a runner without the `compaction` group |
-| `compaction_unavailable` | a run's `provider_code`, after Setup only: Setup failed or timed out with no answer, so no initial view exists and no model call is made (§4) |
+| `compaction_unavailable` | a run's `provider_code`: Setup failed or timed out with no answer (§4), or an outstanding Setup `view_due` or `view_pending` did not apply (§7); no model call is made |
 
 The ceiling refusal is `llm-runner/v1`'s `context_ceiling` (§8); that role
 defines its retryability.
@@ -1615,18 +1696,19 @@ The `llm-runner/v1` contract (`cortexkit-role-llm-runner/CONTRACT.md`)
 states the runner's side of this interface. These passages there are out of
 date against this contract and should be changed to match it:
 
-- **The `compaction` group.** `llm-runner/v1` defines the group as serving
-  `compaction.ready` and calling the provider on each step. Here the group is
-  the runner's side of §3: Setup, advance notices, view application, rides
-  and the ceiling. `compaction.ready` no longer exists.
+- **The `compaction` group.** Here the group is the runner's side of §3:
+  Setup, advance notices, view application, rides and the ceiling. The
+  former `compaction.ready` operation no longer exists in either contract.
 - **The plan field naming the provider.** `llm-runner/v1` marks the
   `compaction_item` provider field provisional. The field is settled: the
   plan names the session's compaction provider at
   `plan.compaction_item.provider`, inside `compaction_item: {provider,
   preset, params}` (§3). The runner crate's `plan_compaction_provider`
   helper already reads it there.
-- **When `compaction_unavailable` is written.** It is written after Setup
-  only (§4).
+- **When `compaction_unavailable` is written.** It is written when Setup
+  fails or times out (§4), or when an outstanding Setup `view_due` or
+  `view_pending` does not apply (§7), including a local fetch timeout. No
+  model call is made in either case.
 - **What a refusal records.** A `refuse` carries a role `code` and,
   optionally, the provider's own finer `provider_code` (§10). The runner
   contract should name one member for the role code and a separate one for
