@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.43
+
+- `session.read` display facts: on a runner declaring both
+  `read_display_facts` and `call_identity`, each `tool_times` item also
+  carries `call_key` and `schema_pin`. They're copied from the call's
+  stored facts under §9.16's presence rules, absent when not stored, and
+  never sent by a runner without `call_identity`. A reader that keeps its
+  own records keyed by a call's key and pin, such as an app server's display
+  records, gets both identifiers from the page instead of a second read.
+  Added `ToolTime::with_call_key` and `ToolTime::with_schema_pin`.
+- Contract text: `compaction_unavailable` now names every case it covers: a
+  Setup with no answer, a timeout or a rejected answer, and an outstanding
+  Setup `view_due` or `view_pending` that did not apply. The old text listed
+  only a Setup that failed or timed out with no answer.
+
 ## 0.7.42
 
 - Add optional sender succession: a plan sender can name one predecessor for

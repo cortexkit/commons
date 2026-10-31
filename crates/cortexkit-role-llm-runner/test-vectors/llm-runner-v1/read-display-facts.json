@@ -15,5 +15,11 @@
     ],
     "lineage_id": "lineage-1"
   },
+  "call_identity_page": {
+    "messages": [
+      {"ordinal": 1, "mid": "m1", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "call-1"}, {"type": "tool_use", "id": "call-2"}]}, "tool_times": [{"tool_call_id": "call-1", "started_at": 100, "finished_at": 125, "call_key": "ck-1", "schema_pin": "tp1:read_file:0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0:1"}, {"tool_call_id": "call-2", "unanswered": "denied", "call_key": "ck-2"}]}
+    ],
+    "lineage_id": "lineage-1"
+  },
   "undeclared_refusal": {"code": "invalid_params", "detail": {"field": "include_display_facts"}}
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.6
+
+- Pin llm-runner `=0.7.43`. No new cases. The contract's sample and
+  round-trip test pin only the JSON shape of `call_key` and `schema_pin` on
+  read display facts; the kit doesn't yet check that a runner gates them
+  on `call_identity` or copies them from stored dispatch facts.
+
 ## 0.16.5
 
 - Add four opt-in pending-first-view cases: notice before publication and first

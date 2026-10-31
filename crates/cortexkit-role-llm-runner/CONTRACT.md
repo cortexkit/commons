@@ -525,11 +525,20 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
 - [pinned] `client_message_id?: string` is present on an entry written by a
   send carrying that id, with exactly the value on its display row (§9.11).
   A host-typed entry or a send without that id carries none.
-- [pinned] `tool_times?: [{tool_call_id, started_at?, finished_at?, unanswered?}]`
-  (`read::ToolTime`) has one item per tool call, in the message's call order.
-  Times and outcomes follow §4.7.1: copy stored per-call facts, never invent
-  a time, omit absent members, and decode `unanswered` as an open string.
-  An entry with no calls omits `tool_times`.
+- [pinned] `tool_times?: [{tool_call_id, started_at?, finished_at?, unanswered?,
+  call_key?, schema_pin?}]` (`read::ToolTime`) has one item per tool call,
+  in the message's call order. Times and outcomes follow §4.7.1: copy stored
+  per-call facts, never invent a time, omit absent members, and decode
+  `unanswered` as an open string. An entry with no calls omits `tool_times`.
+- [pinned] `call_key` and `schema_pin` (added in 0.7.43) appear only on a
+  runner that also declares `call_identity`. They are copied from the
+  call's stored facts under §9.16's presence rules, the same values that
+  runner serves on display rows and live tool events where it serves them,
+  and never recomputed at read time. Each is absent when the call has none
+  stored: a call never dispatched has no `schema_pin`, and a call denied
+  before any record held it has no `call_key` either, while one prepared and
+  then denied keeps its key. A runner without `call_identity` never sends
+  either member.
 
 #### Descriptor payloads and identity
 
@@ -1659,7 +1668,9 @@ display-ready row for an app's reader on a runner declaring
   `provider_code` members are different fields: the runner's carries the
   role code, the provider's carries the finer one.
 - [pinned] A run error without a finer code omits `provider_detail_code`.
-  `compaction_unavailable` never carries one, because no answer arrived.
+  `compaction_unavailable` never carries one: it reports a Setup that failed
+  or a Setup view that did not apply, not a provider refusal with a finer
+  code.
 - [pinned] An unknown `run_id` is refused `unknown_run`, by `run.result`
   and `run.tool_calls` alike (§6.3).
 - [pinned] **Run attribution.** Each message records which run and episode
@@ -4604,8 +4615,10 @@ display tool-call entry it serves.
   (`display::ToolCallPart`) on `session.history` with `form: "display"`,
   and every `tool_started` and `tool_finished` event (`live::ToolStarted`,
   `live::ToolFinished`), replays included. `session.read` serves no display
-  form, so it gains nothing; its attribution already carries `call_key`
-  (§5).
+  form, and its attribution already carries `call_key` (§5). Its one
+  addition is on opt-in display facts: with `include_display_facts` on a
+  runner declaring `read_display_facts`, each `tool_times` item carries
+  both members under the presence rules below (§4.2).
 - [pinned] **`call_key`** is the call's key (§11.3), the same value
   `session.read`'s attribution (§5) and `run.tool_calls` (§6.3) expose for
   that call, so a call has one key on every surface. It is present on an
@@ -5219,10 +5232,16 @@ owes.
   becomes the run error's `provider_detail_code` (§6). Nothing is added to
   history, no model call is made, and the session remains usable: the next
   send calls Setup again.
-- [pinned] `compaction_unavailable` is Setup-only: Setup failed or timed
-  out with no answer. No model call is made, the run error carries no
+- [pinned] `compaction_unavailable` means the step has no usable compaction
+  state. Either Setup failed, which covers no answer, a timeout, and an
+  answer this contract rejects (such as `checkpoint_on_descent` or
+  `pruned_reasoning_restored`), or an outstanding Setup `view_due` or
+  `view_pending` did not apply (`compaction-provider/v1` §7, reason
+  `view_due_unapplied`). No model call is made, the run error carries no
   `provider_detail_code`, and the session remains usable: the next send
-  calls Setup again, because no initial CompactionMessage was recorded.
+  calls Setup again. After a failed first Setup no initial CompactionMessage
+  is recorded; after a failed repeat Setup the lineage keeps what it had
+  (§9.14.1).
 - [pinned] The runner serves no compaction op: every call goes from the
   runner to the provider, and the provider learns what changed from
   notices. The shapes are the `compaction-provider/v1` role's, not this
@@ -5383,7 +5402,7 @@ The provider codes this role names:
 
 | Provider code | When |
 |---|---|
-| `compaction_unavailable` | Setup only: Setup failed or timed out with no answer; no model call is made, and no `provider_detail_code` is carried (§11.1) |
+| `compaction_unavailable` | Setup failed (no answer, a timeout, or an answer this contract rejects), or an outstanding Setup `view_due` or `view_pending` did not apply; no model call is made, and no `provider_detail_code` is carried (§11.1) |
 | `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
 | `context_overflow` | the provider refused the request as exceeding the model's context window. Not the ceiling: a stop the runner decides itself before sending is the `context_ceiling` run state or refusal (§6, §12.1), never this code |
 | `output_ceiling` | the provider's output-token ceiling prevents a complete response |

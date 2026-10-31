@@ -779,6 +779,9 @@ pub struct ReadMessage {
 
 /// A read entry's per-call display facts, copied from stored call metadata.
 /// Missing times are unknown, never inferred from another clock or call.
+/// `call_key` and `schema_pin` appear only on a runner that also declares
+/// `call_identity`, copied from the call's stored facts under §9.16's
+/// presence rules.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolTime {
@@ -792,6 +795,15 @@ pub struct ToolTime {
     /// Why the provider never answered, decoded as an open string (§4.7.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unanswered: Option<String>,
+    /// The call's stored `call_key` (§9.16), only on a runner declaring
+    /// `call_identity`, and absent when the call has none stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_key: Option<String>,
+    /// The `schema_pin` stored when the call was dispatched (§9.16), only on
+    /// a runner declaring `call_identity`; a call denied before dispatch has
+    /// none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_pin: Option<String>,
 }
 
 impl ToolTime {
@@ -801,6 +813,8 @@ impl ToolTime {
             started_at: None,
             finished_at: None,
             unanswered: None,
+            call_key: None,
+            schema_pin: None,
         }
     }
 
@@ -816,6 +830,16 @@ impl ToolTime {
 
     pub fn with_unanswered(mut self, unanswered: impl Into<String>) -> Self {
         self.unanswered = Some(unanswered.into());
+        self
+    }
+
+    pub fn with_call_key(mut self, call_key: impl Into<String>) -> Self {
+        self.call_key = Some(call_key.into());
+        self
+    }
+
+    pub fn with_schema_pin(mut self, schema_pin: impl Into<String>) -> Self {
+        self.schema_pin = Some(schema_pin.into());
         self
     }
 }

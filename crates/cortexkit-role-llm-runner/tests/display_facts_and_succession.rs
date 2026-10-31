@@ -107,10 +107,31 @@ fn samples_round_trip_and_pin_unchanged_message_values() {
         let request: ReadRequest = serde_json::from_value(facts[key].clone()).unwrap();
         assert_eq!(serde_json::to_value(request).unwrap(), facts[key]);
     }
-    for key in ["page", "default_page"] {
+    for key in ["page", "default_page", "call_identity_page"] {
         let page: ReadPage = serde_json::from_value(facts[key].clone()).unwrap();
         assert_eq!(serde_json::to_value(page).unwrap(), facts[key]);
     }
+    // The sample page for a runner without call_identity carries neither field.
+    for entry in facts["page"]["messages"].as_array().unwrap() {
+        for time in entry["tool_times"].as_array().into_iter().flatten() {
+            assert!(time.get("call_key").is_none() && time.get("schema_pin").is_none());
+        }
+    }
+    // A call prepared and then denied keeps its call_key but has no
+    // schema_pin, because it was never dispatched.
+    let denied = &facts["call_identity_page"]["messages"][0]["tool_times"][1];
+    assert!(denied.get("call_key").is_some() && denied.get("schema_pin").is_none());
+    let built = ToolTime::new("call-1")
+        .with_started_at(100)
+        .with_finished_at(125)
+        .with_call_key("ck-1")
+        .with_schema_pin(
+            "tp1:read_file:0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0:1",
+        );
+    assert_eq!(
+        serde_json::to_value(built).unwrap(),
+        facts["call_identity_page"]["messages"][0]["tool_times"][0]
+    );
     for (default, decorated) in facts["default_page"]["messages"]
         .as_array()
         .unwrap()
