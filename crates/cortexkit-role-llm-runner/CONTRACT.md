@@ -2954,6 +2954,24 @@ part's key and its content digest, never a number.
   compaction provider dropped keeps its number, rendered as its
   placeholder `[dropped §N§]` (`tags::dropped_placeholder`), so it is
   still counted.
+- [pinned] With compaction Setup's `view_features: ["truncate"]`, the
+  provider may send a part edit containing `truncate` instead of bytes.
+  Render it with `tags::truncate_part(profile: &str, part: &Value,
+  container: PartContainer, mode: TruncateMode, number: Option<u64>,
+  drop_attachments: bool) -> Result<Value, TruncateRefusal>`, then apply the
+  part's ordinary tag. Container context comes from the stored row, never
+  the view; OpenCode tools are result containers, and Pi tool-result blocks
+  need their enclosing message's role. Self-identifying result parts on
+  other profiles must agree with the container. Unknown or inapplicable
+  modes refuse `view_refused:<version>:truncate_kind`. When the part has no
+  number or its plan renders no tags, pass `None` for `[dropped]` without a
+  number. Compaction-provider §6.1 pins the complete per-profile and UTF-16
+  edit-marker rules, and `truncate.json` pins them.
+- [pinned] With Setup's `tag_bytes_edits` token, render a counted bytes-edited
+  part's own tag exactly as if kept as written. The runner adds no tags
+  inside a replace range's bytes; they remain final. A history head never
+  counts. Without the token,
+  replaced bytes remain final under compaction-provider §6.
 - [pinned] A runner never walks the whole session to number it. It keeps
   the tail's numbers and the next number in memory, and what it holds
   always equals a fresh computation from the anchor: a revert or a reorder

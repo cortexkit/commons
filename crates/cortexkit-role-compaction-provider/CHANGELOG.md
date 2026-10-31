@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.11
+
+- Add opt-in Setup `view_features` tokens `truncate` and `tag_bytes_edits`,
+  preserving legacy encoding and final-byte behaviour when absent.
+- Add `PartEdit.truncate` and `drop_attachments`, exact action validation and
+  conditional digest frames. Unknown modes refuse with `truncate_kind`.
+- Specify shared profile rendering, stored-row container checks and ordinary
+  runner tags on opted-in bytes and truncate edits; history heads stay final.
+
 ## 0.7.10
 
 - Let a runner offer `view_due_max_ms` at Setup and a provider answer with

@@ -1,0 +1,5171 @@
+{
+  "cases": [
+    {
+      "name": "opencode-aisdk/text/placeholder/numbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]",
+        "extra": "kept"
+      }
+    },
+    {
+      "name": "opencode-aisdk/text/placeholder/unnumbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]",
+        "extra": "kept"
+      }
+    },
+    {
+      "name": "opencode-aisdk/text/skeleton/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/text/edit_marker/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/text/future_mode/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/text/container_mismatch",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/text/attachments_refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/file/placeholder/numbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "opencode-aisdk/file/placeholder/unnumbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]"
+      }
+    },
+    {
+      "name": "opencode-aisdk/file/skeleton/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/file/edit_marker/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/file/future_mode/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/file/container_mismatch",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/file/attachments_refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/tool/placeholder/numbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "[dropped §17§]",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/tool/placeholder/drop_attachments",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "[dropped §17§]",
+          "attachments": []
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/tool/placeholder/unnumbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "[dropped]",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/tool/skeleton/numbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "[dropped §17§]",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/tool/skeleton/drop_attachments",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "[dropped §17§]",
+          "attachments": []
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/tool/skeleton/unnumbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "[dropped]",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/tool/edit_marker/numbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "[dropped §17§]",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/tool/edit_marker/drop_attachments",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "[dropped §17§]",
+          "attachments": []
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/tool/edit_marker/unnumbered",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "[dropped]",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/tool/future_mode/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/tool/container_mismatch",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/reasoning/placeholder/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/reasoning/skeleton/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/reasoning/edit_marker/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/unknown/placeholder/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/unknown/skeleton/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/unknown/edit_marker/refused",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/text/placeholder/numbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]",
+        "extra": "kept"
+      }
+    },
+    {
+      "name": "opencode-v2/text/placeholder/unnumbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]",
+        "extra": "kept"
+      }
+    },
+    {
+      "name": "opencode-v2/text/skeleton/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/text/edit_marker/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/text/future_mode/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/text/container_mismatch",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/text/attachments_refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/file/placeholder/numbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "opencode-v2/file/placeholder/unnumbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]"
+      }
+    },
+    {
+      "name": "opencode-v2/file/skeleton/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/file/edit_marker/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/file/future_mode/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/file/container_mismatch",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/file/attachments_refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "file",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/tool/placeholder/numbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped §17§]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "opencode-v2/tool/placeholder/drop_attachments",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped §17§]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "opencode-v2/tool/placeholder/unnumbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "opencode-v2/tool/skeleton/numbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped §17§]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "opencode-v2/tool/skeleton/drop_attachments",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped §17§]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "opencode-v2/tool/skeleton/unnumbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "opencode-v2/tool/edit_marker/numbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped §17§]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "opencode-v2/tool/edit_marker/drop_attachments",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped §17§]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "opencode-v2/tool/edit_marker/unnumbered",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "opencode-v2/tool/future_mode/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/tool/container_mismatch",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/reasoning/placeholder/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/reasoning/skeleton/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/reasoning/edit_marker/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/unknown/placeholder/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/unknown/skeleton/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-v2/unknown/edit_marker/refused",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/text/placeholder/numbered",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]",
+        "extra": "kept"
+      }
+    },
+    {
+      "name": "pi/text/placeholder/unnumbered",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]",
+        "extra": "kept"
+      }
+    },
+    {
+      "name": "pi/text/skeleton/refused",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/text/edit_marker/refused",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/text/future_mode/refused",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/text/attachments_refused",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/result_text/placeholder/numbered",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "result"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "pi/result_text/placeholder/drop_attachments",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "result"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "pi/result_text/placeholder/unnumbered",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "result"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]"
+      }
+    },
+    {
+      "name": "pi/result_text/skeleton/numbered",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "result"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "pi/result_text/skeleton/drop_attachments",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "result"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "pi/result_text/skeleton/unnumbered",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "result"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]"
+      }
+    },
+    {
+      "name": "pi/result_text/edit_marker/refused",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "result"
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/result_text/future_mode/refused",
+      "profile": "pi",
+      "part": {
+        "type": "text",
+        "text": "result"
+      },
+      "container": "tool_result",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/result_image/placeholder/numbered",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "pi/result_image/placeholder/drop_attachments",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "pi/result_image/placeholder/unnumbered",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]"
+      }
+    },
+    {
+      "name": "pi/result_image/skeleton/numbered",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "pi/result_image/skeleton/drop_attachments",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "pi/result_image/skeleton/unnumbered",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]"
+      }
+    },
+    {
+      "name": "pi/result_image/edit_marker/refused",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/result_image/future_mode/refused",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "tool_result",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/toolCall/edit_marker/numbered",
+      "profile": "pi",
+      "part": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      }
+    },
+    {
+      "name": "pi/toolCall/edit_marker/unnumbered",
+      "profile": "pi",
+      "part": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      }
+    },
+    {
+      "name": "pi/toolCall/placeholder/refused",
+      "profile": "pi",
+      "part": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/toolCall/skeleton/refused",
+      "profile": "pi",
+      "part": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/toolCall/future_mode/refused",
+      "profile": "pi",
+      "part": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/toolCall/attachments_refused",
+      "profile": "pi",
+      "part": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/reasoning/placeholder/refused",
+      "profile": "pi",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/reasoning/skeleton/refused",
+      "profile": "pi",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/reasoning/edit_marker/refused",
+      "profile": "pi",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/unknown/placeholder/refused",
+      "profile": "pi",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/unknown/skeleton/refused",
+      "profile": "pi",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/unknown/edit_marker/refused",
+      "profile": "pi",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/text/placeholder/numbered",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]",
+        "extra": "kept"
+      }
+    },
+    {
+      "name": "anthropic-messages/text/placeholder/unnumbered",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]",
+        "extra": "kept"
+      }
+    },
+    {
+      "name": "anthropic-messages/text/skeleton/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/text/edit_marker/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/text/future_mode/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/text/container_mismatch",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/text/attachments_refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/tool_result/placeholder/numbered",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": [
+          {
+            "type": "text",
+            "text": "result"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "data": "abc"
+            }
+          }
+        ],
+        "is_error": true
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": "[dropped §17§]",
+        "is_error": true
+      }
+    },
+    {
+      "name": "anthropic-messages/tool_result/placeholder/drop_attachments",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": [
+          {
+            "type": "text",
+            "text": "result"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "data": "abc"
+            }
+          }
+        ],
+        "is_error": true
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": "[dropped §17§]",
+        "is_error": true
+      }
+    },
+    {
+      "name": "anthropic-messages/tool_result/placeholder/unnumbered",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": [
+          {
+            "type": "text",
+            "text": "result"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "data": "abc"
+            }
+          }
+        ],
+        "is_error": true
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": "[dropped]",
+        "is_error": true
+      }
+    },
+    {
+      "name": "anthropic-messages/tool_result/skeleton/numbered",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": [
+          {
+            "type": "text",
+            "text": "result"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "data": "abc"
+            }
+          }
+        ],
+        "is_error": true
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": "[dropped §17§]",
+        "is_error": true
+      }
+    },
+    {
+      "name": "anthropic-messages/tool_result/skeleton/drop_attachments",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": [
+          {
+            "type": "text",
+            "text": "result"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "data": "abc"
+            }
+          }
+        ],
+        "is_error": true
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": "[dropped §17§]",
+        "is_error": true
+      }
+    },
+    {
+      "name": "anthropic-messages/tool_result/skeleton/unnumbered",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": [
+          {
+            "type": "text",
+            "text": "result"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "data": "abc"
+            }
+          }
+        ],
+        "is_error": true
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": "[dropped]",
+        "is_error": true
+      }
+    },
+    {
+      "name": "anthropic-messages/tool_result/edit_marker/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": [
+          {
+            "type": "text",
+            "text": "result"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "data": "abc"
+            }
+          }
+        ],
+        "is_error": true
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/tool_result/future_mode/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": [
+          {
+            "type": "text",
+            "text": "result"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "data": "abc"
+            }
+          }
+        ],
+        "is_error": true
+      },
+      "container": "tool_result",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/tool_result/container_mismatch",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_result",
+        "tool_use_id": "call",
+        "content": [
+          {
+            "type": "text",
+            "text": "result"
+          },
+          {
+            "type": "image",
+            "source": {
+              "type": "base64",
+              "data": "abc"
+            }
+          }
+        ],
+        "is_error": true
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/tool_use/edit_marker/numbered",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/tool_use/edit_marker/unnumbered",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      }
+    },
+    {
+      "name": "anthropic-messages/tool_use/placeholder/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/tool_use/skeleton/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/tool_use/future_mode/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/tool_use/container_mismatch",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/tool_use/attachments_refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/reasoning/placeholder/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/reasoning/skeleton/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/reasoning/edit_marker/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/unknown/placeholder/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/unknown/skeleton/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "anthropic-messages/unknown/edit_marker/refused",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/text/placeholder/numbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "owned-broca/text/placeholder/unnumbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]"
+      }
+    },
+    {
+      "name": "owned-broca/text/skeleton/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/text/edit_marker/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/text/future_mode/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/text/container_mismatch",
+      "profile": "owned-broca",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/text/attachments_refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "text",
+        "text": "original",
+        "extra": "kept"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/media/placeholder/numbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "media",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped §17§]"
+      }
+    },
+    {
+      "name": "owned-broca/media/placeholder/unnumbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "media",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "text",
+        "text": "[dropped]"
+      }
+    },
+    {
+      "name": "owned-broca/media/skeleton/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "media",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/media/edit_marker/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "media",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/media/future_mode/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "media",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/media/container_mismatch",
+      "profile": "owned-broca",
+      "part": {
+        "type": "media",
+        "url": "data:abc"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/media/attachments_refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "media",
+        "url": "data:abc"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/tool_result/placeholder/numbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "parts",
+          "parts": [
+            {
+              "kind": "text",
+              "text": "result"
+            },
+            {
+              "kind": "media",
+              "url": "data:abc"
+            }
+          ]
+        }
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "text",
+          "text": "[dropped §17§]"
+        }
+      }
+    },
+    {
+      "name": "owned-broca/tool_result/placeholder/drop_attachments",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "parts",
+          "parts": [
+            {
+              "kind": "text",
+              "text": "result"
+            },
+            {
+              "kind": "media",
+              "url": "data:abc"
+            }
+          ]
+        }
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "text",
+          "text": "[dropped §17§]"
+        }
+      }
+    },
+    {
+      "name": "owned-broca/tool_result/placeholder/unnumbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "parts",
+          "parts": [
+            {
+              "kind": "text",
+              "text": "result"
+            },
+            {
+              "kind": "media",
+              "url": "data:abc"
+            }
+          ]
+        }
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "text",
+          "text": "[dropped]"
+        }
+      }
+    },
+    {
+      "name": "owned-broca/tool_result/skeleton/numbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "parts",
+          "parts": [
+            {
+              "kind": "text",
+              "text": "result"
+            },
+            {
+              "kind": "media",
+              "url": "data:abc"
+            }
+          ]
+        }
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "text",
+          "text": "[dropped §17§]"
+        }
+      }
+    },
+    {
+      "name": "owned-broca/tool_result/skeleton/drop_attachments",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "parts",
+          "parts": [
+            {
+              "kind": "text",
+              "text": "result"
+            },
+            {
+              "kind": "media",
+              "url": "data:abc"
+            }
+          ]
+        }
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "text",
+          "text": "[dropped §17§]"
+        }
+      }
+    },
+    {
+      "name": "owned-broca/tool_result/skeleton/unnumbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "parts",
+          "parts": [
+            {
+              "kind": "text",
+              "text": "result"
+            },
+            {
+              "kind": "media",
+              "url": "data:abc"
+            }
+          ]
+        }
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "text",
+          "text": "[dropped]"
+        }
+      }
+    },
+    {
+      "name": "owned-broca/tool_result/edit_marker/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "parts",
+          "parts": [
+            {
+              "kind": "text",
+              "text": "result"
+            },
+            {
+              "kind": "media",
+              "url": "data:abc"
+            }
+          ]
+        }
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/tool_result/future_mode/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "parts",
+          "parts": [
+            {
+              "kind": "text",
+              "text": "result"
+            },
+            {
+              "kind": "media",
+              "url": "data:abc"
+            }
+          ]
+        }
+      },
+      "container": "tool_result",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/tool_result/container_mismatch",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "parts",
+          "parts": [
+            {
+              "kind": "text",
+              "text": "result"
+            },
+            {
+              "kind": "media",
+              "url": "data:abc"
+            }
+          ]
+        }
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/tool_call/edit_marker/numbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_call",
+        "tool_call_id": "call",
+        "tool_name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        "thought_signature": "unchanged"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_call",
+        "tool_call_id": "call",
+        "tool_name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        "thought_signature": "unchanged"
+      }
+    },
+    {
+      "name": "owned-broca/tool_call/edit_marker/unnumbered",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_call",
+        "tool_call_id": "call",
+        "tool_name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        "thought_signature": "unchanged"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_call",
+        "tool_call_id": "call",
+        "tool_name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        "thought_signature": "unchanged"
+      }
+    },
+    {
+      "name": "owned-broca/tool_call/placeholder/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_call",
+        "tool_call_id": "call",
+        "tool_name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        "thought_signature": "unchanged"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/tool_call/skeleton/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_call",
+        "tool_call_id": "call",
+        "tool_name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        "thought_signature": "unchanged"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/tool_call/future_mode/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_call",
+        "tool_call_id": "call",
+        "tool_name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        "thought_signature": "unchanged"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/tool_call/container_mismatch",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_call",
+        "tool_call_id": "call",
+        "tool_name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        "thought_signature": "unchanged"
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/tool_call/attachments_refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_call",
+        "tool_call_id": "call",
+        "tool_name": "edit",
+        "input": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        },
+        "thought_signature": "unchanged"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/reasoning/placeholder/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/reasoning/skeleton/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/reasoning/edit_marker/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "reasoning",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/unknown/placeholder/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/unknown/skeleton/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "owned-broca/unknown/edit_marker/refused",
+      "profile": "owned-broca",
+      "part": {
+        "type": "unknown",
+        "text": "secret"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "opencode-aisdk/error/placeholder",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "error",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ],
+          "error": "failure"
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "error",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ],
+          "error": "[dropped §17§]"
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/error/skeleton",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "error",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ],
+          "error": "failure"
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "error",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ],
+          "error": "[dropped §17§]"
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-aisdk/error/edit_marker",
+      "profile": "opencode-aisdk",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "error",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ],
+          "error": "failure"
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "error",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "output": "result",
+          "attachments": [
+            {
+              "type": "image",
+              "url": "data:abc"
+            }
+          ],
+          "error": "[dropped §17§]"
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "callID": "call",
+        "tool": "edit"
+      }
+    },
+    {
+      "name": "opencode-v2/error/skeleton",
+      "profile": "opencode-v2",
+      "part": {
+        "type": "tool",
+        "state": {
+          "status": "error",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "result"
+            },
+            {
+              "type": "file",
+              "url": "data:abc"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool",
+        "state": {
+          "status": "error",
+          "input": {
+            "filePath": "keep/me",
+            "file_path": "keep/me",
+            "path": "keep/me",
+            "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "content": "ccccccccccccccccccccccccccccccccccccccccc",
+            "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+            "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+            "nested": {
+              "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+            },
+            "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "metadata": {
+            "keep": true
+          },
+          "content": [
+            {
+              "type": "text",
+              "text": "[dropped §17§]"
+            }
+          ]
+        },
+        "is_error": true,
+        "time": {
+          "start": 1,
+          "end": 2
+        },
+        "id": "call",
+        "name": "edit",
+        "executed": true
+      }
+    },
+    {
+      "name": "input_unchanged/165",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": null
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": null
+      }
+    },
+    {
+      "name": "input_unchanged/166",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    },
+    {
+      "name": "input_unchanged/167",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": 7
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": 7
+      }
+    },
+    {
+      "name": "input_unchanged/168",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": []
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": []
+      }
+    },
+    {
+      "name": "input_unchanged/169",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "content": false,
+          "oldString": 7,
+          "newString": null
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "content": false,
+          "oldString": 7,
+          "newString": null
+        }
+      }
+    },
+    {
+      "name": "owned-broca/json/drop_attachments",
+      "profile": "owned-broca",
+      "part": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "json",
+          "value": {
+            "keep": true
+          }
+        }
+      },
+      "container": "tool_result",
+      "mode": "skeleton",
+      "number": 17,
+      "drop_attachments": true,
+      "expected": {
+        "type": "tool_result",
+        "tool_call_id": "call",
+        "is_error": true,
+        "output": {
+          "kind": "text",
+          "text": "[dropped §17§]"
+        }
+      }
+    },
+    {
+      "name": "unknown_profile",
+      "profile": "unknown",
+      "part": {
+        "type": "text",
+        "text": "a"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": 17,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "trim_each_key/oldString",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "oldString": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "oldString": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...[truncated]",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      }
+    },
+    {
+      "name": "trim_each_key/newString",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "newString": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "newString": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...[truncated]",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      }
+    },
+    {
+      "name": "trim_each_key/content",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "content": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "content": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...[truncated]",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      }
+    },
+    {
+      "name": "trim_each_key/old_string",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...[truncated]",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      }
+    },
+    {
+      "name": "trim_each_key/new_string",
+      "profile": "anthropic-messages",
+      "part": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "new_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "tool_use",
+        "id": "call",
+        "name": "edit",
+        "input": {
+          "new_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...[truncated]",
+          "filePath": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+          "oldstring": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+        }
+      }
+    },
+    {
+      "name": "pi/toolCall/edit_marker/numbered/result_container",
+      "profile": "pi",
+      "part": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": 17,
+      "drop_attachments": false,
+      "expected": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      }
+    },
+    {
+      "name": "pi/toolCall/edit_marker/unnumbered/result_container",
+      "profile": "pi",
+      "part": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "ccccccccccccccccccccccccccccccccccccccccc",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd😀more",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "expected": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {
+          "filePath": "keep/me",
+          "file_path": "keep/me",
+          "path": "keep/me",
+          "oldString": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "newString": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "content": "cccccccccccccccccccccccccccccccccccccccc...[truncated]",
+          "old_string": "ddddddddddddddddddddddddddddddddddddddd...[truncated]",
+          "new_string": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee...[truncated]",
+          "nested": {
+            "content": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+          },
+          "other": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+        }
+      }
+    },
+    {
+      "name": "pi/non_result_image/placeholder/refused",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "other",
+      "mode": "placeholder",
+      "number": null,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/non_result_image/skeleton/refused",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "other",
+      "mode": "skeleton",
+      "number": null,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/non_result_image/edit_marker/refused",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "other",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/non_result_image/future_mode/refused",
+      "profile": "pi",
+      "part": {
+        "type": "image",
+        "data": "abc",
+        "mimeType": "image/png"
+      },
+      "container": "other",
+      "mode": "future_mode",
+      "number": null,
+      "drop_attachments": false,
+      "refusal": "truncate_kind"
+    },
+    {
+      "name": "pi/toolCall/result_container/attachments_refused",
+      "profile": "pi",
+      "part": {
+        "type": "toolCall",
+        "id": "call",
+        "name": "edit",
+        "arguments": {}
+      },
+      "container": "tool_result",
+      "mode": "edit_marker",
+      "number": null,
+      "drop_attachments": true,
+      "refusal": "truncate_kind"
+    }
+  ]
+}

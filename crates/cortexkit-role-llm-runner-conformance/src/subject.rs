@@ -1588,6 +1588,23 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
+    /// Publish a view containing one keep range over the session's entire
+    /// retained transcript, with these edits verbatim. The fixture has no cut
+    /// and an empty initial head. Assign the next version, compute its digest,
+    /// persist it in the scripted provider and announce `view_ready`; never
+    /// apply it directly to runner state. Return the published version. The
+    /// runner must fetch and render it at its next step boundary. Unsupported
+    /// adapters make the negotiated part-edit cases inapplicable by name.
+    async fn publish_compaction_part_edits(
+        &self,
+        _session: &str,
+        _edits: Vec<cortexkit_role_compaction_provider::view::PartEdit>,
+    ) -> Result<u64, HarnessError> {
+        Err(HarnessError::new(
+            "publishing compaction part edits is not implemented",
+        ))
+    }
+
     /// Write `messages` finished messages into `session`'s history through
     /// the runner's own store, then a cut, so the session's current lineage
     /// holds only the newest `window` of them, as a session that ran for

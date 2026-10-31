@@ -2,6 +2,16 @@
 
 Wire types and vectors for `llm-runner/v1`: transcript reads, run results, subscriptions, owner sends, and the session baseline.
 
+`tags::truncate_part` renders negotiated compaction part edits for all five
+serializer profiles. Its checksum-pinned `truncate.json` vectors pin the
+rules in compaction-provider's contract §6.1, including the top-level-only,
+UTF-16 edit-marker input rule. The contract and the vectors together are
+the specification.
+Pass `PartContainer` from the stored row, never from a provider's view.
+On Pi, `drop_attachments` affects only the addressed block, never its
+siblings. To remove a result message's images, the provider sends an ordinary
+`drop` edit for each image part.
+
 Add to `Cargo.toml`:
 
 ```toml

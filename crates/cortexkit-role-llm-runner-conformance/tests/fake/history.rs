@@ -266,6 +266,7 @@ pub struct Applied {
     /// `(from, to, replacement)`: a keep range has no replacement.
     pub ranges: Vec<(u64, u64, Option<Vec<String>>)>,
     pub covers_through: u64,
+    pub edits: Vec<cortexkit_role_compaction_provider::view::PartEdit>,
 }
 
 /// The `compaction_id` a model page names while a view renders.
@@ -416,6 +417,7 @@ pub(super) fn apply(sess: &mut Sess, kind: &str, record: &Value, defects: &Defec
                 version: number("version"),
                 ranges,
                 covers_through: number("covers_through"),
+                edits: serde_json::from_value(record["edits"].clone()).unwrap_or_default(),
             });
         }
         "view_disposed" => {
@@ -619,6 +621,18 @@ impl Module {
             if sess.compaction.disposed.contains(&view.view_version) {
                 continue;
             }
+            self.world
+                .compaction
+                .lock()
+                .unwrap()
+                .sessions
+                .get_mut(session)
+                .unwrap()
+                .provider_calls
+                .push(cortexkit_role_llm_runner_conformance::ProviderCall::new(
+                    cortexkit_role_compaction_provider::ops::VIEW_GET,
+                    json!({"session_ref":view.session_ref,"view_version":view.view_version}),
+                ));
             let first = if self.world.defects.lineage == LineageDefect::ViewFromZeroAccepted {
                 view.ranges_start().unwrap_or(sess.first_ordinal)
             } else {
@@ -665,7 +679,8 @@ impl Module {
                     self.commit(
                         session,
                         json!({ "kind": "view_applied", "version": version, "ranges": ranges,
-                                "covers_through": view.covers_through.ordinal }),
+                                "covers_through": view.covers_through.ordinal,
+                                "edits":view.edits().collect::<Vec<_>>() }),
                     )?;
                     if let Some(cut) = &view.cut {
                         let digest = sess

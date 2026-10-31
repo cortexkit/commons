@@ -1,5 +1,20 @@
 # cortexkit-role-llm-runner-conformance
 
+The negotiated view cases `part_edits_truncate_renders_with_own_tag` and
+`part_edits_bytes_render_with_own_tag` require compaction, tags, queue,
+transcript reads and run ops. They observe the actual Setup `view_features`
+and report the affected case as not applicable without `truncate` or
+`tag_bytes_edits`, respectively. The additive `publish_compaction_part_edits` adapter hook
+publishes a keep-range view through the scripted provider, not by editing
+runner state; its default unsupported answer marks each case that needs the
+hook as not applicable, rather than passed.
+Both cases use a counted assistant text part. The truncate case compares
+the model's exact edited part with the shared profile renderer's output, and
+the bytes case with the supplied replacement bytes, each plus the part's own
+read-row tag. Both require a provider fetch and check that the edited
+message's raw body did not change. The suite's faulty runners leave
+provider bytes untagged or ignore truncation; each fails only its named case.
+
 ## Opt-in sender withdrawal (0.15.33)
 
 The `retract_own_send_*` cases read the live `role.describe` group, which

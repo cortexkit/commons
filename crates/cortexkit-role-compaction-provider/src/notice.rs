@@ -184,6 +184,8 @@ impl MarkerOutcome {
 /// Reasons a runner gives in `view_refused`. Open: a provider that meets
 /// another reason treats the view as refused all the same.
 pub mod refusal_reasons {
+    /// A truncate mode is unknown or does not apply exactly to the stored part.
+    pub const TRUNCATE_KIND: &str = "truncate_kind";
     /// Applying the view would separate a tool call from its result.
     pub const TOOL_PAIR_SPLIT: &str = "tool_pair_split";
     /// Applying the view would break the current model provider's role order.

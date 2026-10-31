@@ -12,6 +12,10 @@ pub const SHA256SUMS: &str = include_str!("../test-vectors/compaction-provider-v
 /// Every shipped vector file, in SHA256SUMS order.
 pub const FILES: &[(&str, &str)] = &[
     (
+        "pi-part-edits.json",
+        include_str!("../test-vectors/compaction-provider-v1/pi-part-edits.json"),
+    ),
+    (
         "setup-accepts.json",
         include_str!("../test-vectors/compaction-provider-v1/setup-accepts.json"),
     ),

@@ -3,6 +3,89 @@
 
 mod fake;
 
+const PART_EDIT_CASES: &[&str] = &[
+    "part_edits_truncate_renders_with_own_tag",
+    "part_edits_bytes_render_with_own_tag",
+];
+
+fn part_edit_subject(defects: fake::Defects) -> fake::FakeSubject {
+    let mut subject = declaring(Capability::Tags, defects);
+    subject.capabilities.insert(Capability::Compaction);
+    subject
+}
+
+#[tokio::test]
+async fn part_edits_opted_in_runner_passes_both_cases() {
+    let report = run(&part_edit_subject(Defects {
+        part_edits_opt_in: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in PART_EDIT_CASES {
+        assert_passed(&report, name);
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn part_edits_untagged_provider_bytes_fail_by_name() {
+    let report = run(&part_edit_subject(Defects {
+        part_edits_opt_in: true,
+        part_edits_untagged_bytes: true,
+        ..Defects::default()
+    }))
+    .await;
+    let name = "part_edits_bytes_render_with_own_tag";
+    assert!(failed(&report, name).contains("model part must equal edited output with its own tag"));
+    assert_passed(&report, "part_edits_truncate_renders_with_own_tag");
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn part_edits_ignored_truncate_fails_by_name() {
+    let report = run(&part_edit_subject(Defects {
+        part_edits_opt_in: true,
+        part_edits_ignore_truncate: true,
+        ..Defects::default()
+    }))
+    .await;
+    let name = "part_edits_truncate_renders_with_own_tag";
+    assert!(failed(&report, name).contains("model part must equal edited output with its own tag"));
+    assert_passed(&report, "part_edits_bytes_render_with_own_tag");
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn part_edits_without_tokens_are_inapplicable_by_name() {
+    let report = run(&part_edit_subject(Defects::default())).await;
+    for name in PART_EDIT_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("Setup view_features")),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn part_edits_without_publisher_hook_are_inapplicable_by_name() {
+    let report = run(&part_edit_subject(Defects {
+        part_edits_opt_in: true,
+        part_edits_missing_hook: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in PART_EDIT_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("publish_compaction_part_edits")),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
 fn head_error_subject(defects: fake::Defects) -> fake::FakeSubject {
     let mut subject = declaring(Capability::RunStatus, defects);
     subject.advertise_status = true;
@@ -706,6 +789,20 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         return;
     }
     // Undeclared opt-in groups add named non-obligations, not passing coverage.
+    if PART_EDIT_CASES.contains(&case) {
+        let token = if case == "part_edits_truncate_renders_with_own_tag" {
+            "truncate"
+        } else {
+            "tag_bytes_edits"
+        };
+        if report.outcome(case)
+            == Some(&CaseOutcome::Inapplicable {
+                reason: format!("runner sends no {token} in Setup view_features"),
+            })
+        {
+            return;
+        }
+    }
     if (case.starts_with("run_cancel_by_interrupt_")
         && report.outcome(case)
             == Some(&CaseOutcome::Inapplicable {

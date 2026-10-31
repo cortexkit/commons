@@ -173,6 +173,10 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub part_edits_opt_in: bool,
+    pub part_edits_ignore_truncate: bool,
+    pub part_edits_untagged_bytes: bool,
+    pub part_edits_missing_hook: bool,
     pub declare_retract_own_send: bool,
     pub retract_sender_refused: bool,
     pub retract_any_non_owner: bool,
@@ -6008,6 +6012,31 @@ impl LlmRunnerSubject for FakeSubject {
         view: cortexkit_role_llm_runner_conformance::ScriptedView,
     ) -> Result<u64, HarnessError> {
         Ok(self.publish_view(session, view))
+    }
+
+    async fn publish_compaction_part_edits(
+        &self,
+        session: &str,
+        edits: Vec<cortexkit_role_compaction_provider::view::PartEdit>,
+    ) -> Result<u64, HarnessError> {
+        if self.defects.part_edits_missing_hook {
+            return Err(HarnessError::new("part-edit publishing is not implemented"));
+        }
+        self.publish_part_edits(session, edits)
+    }
+
+    async fn compaction_provider_calls(
+        &self,
+        session: &str,
+    ) -> Result<Vec<cortexkit_role_llm_runner_conformance::ProviderCall>, HarnessError> {
+        if !session.starts_with("cf-part-edit") {
+            return Err(HarnessError::new(
+                "compaction provider calls are not implemented",
+            ));
+        }
+        Ok(self.world().compaction.lock().unwrap().sessions[session]
+            .provider_calls
+            .clone())
     }
 
     async fn seed_session_history(

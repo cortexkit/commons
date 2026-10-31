@@ -15,6 +15,8 @@ use serde::{de::IgnoredAny, Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+pub use cortexkit_role_llm_runner::tags::{PartContainer, TruncateMode};
+
 use crate::lineage::MessageRef;
 use crate::{
     digest::{finish, frame, is_sha256_hex},
@@ -33,8 +35,8 @@ pub const MAX_PART_KEY_BYTES: usize = 256;
 
 /// One edit of one part of a message inside a keep range: the message stays,
 /// and only this part changes. `part` is `llm-runner/v1`'s opaque part key,
-/// the key its `tags` rows and `session.resolve` use. Exactly one of `bytes`
-/// and `drop` is given.
+/// the key its `tags` rows and `session.resolve` use. Exactly one of `bytes`,
+/// `drop` and `truncate` is given.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct PartEdit {
@@ -46,12 +48,18 @@ pub struct PartEdit {
     /// byte.
     pub part: String,
     /// The replacement part: UTF-8 JSON in the runner's message schema,
-    /// final bytes sent exactly as given.
+    /// final bytes unless Setup opted in to `tag_bytes_edits`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bytes: Option<String>,
     /// True removes the part outright. Omitted when false.
     #[serde(default, skip_serializing_if = "is_false")]
     pub drop: bool,
+    /// Runner-rendered truncation, only with Setup's `truncate` feature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncate: Option<TruncateMode>,
+    /// Remove result attachments; valid only with a result's truncate edit.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub drop_attachments: bool,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -72,6 +80,8 @@ impl PartEdit {
             part: part.into(),
             bytes: Some(bytes.into()),
             drop: false,
+            truncate: None,
+            drop_attachments: false,
         }
     }
 
@@ -83,7 +93,40 @@ impl PartEdit {
             part: part.into(),
             bytes: None,
             drop: true,
+            truncate: None,
+            drop_attachments: false,
         }
+    }
+
+    pub fn truncate(
+        ordinal: u64,
+        mid: impl Into<String>,
+        part: impl Into<String>,
+        mode: TruncateMode,
+    ) -> Self {
+        Self {
+            ordinal,
+            mid: mid.into(),
+            part: part.into(),
+            bytes: None,
+            drop: false,
+            truncate: Some(mode),
+            drop_attachments: false,
+        }
+    }
+
+    pub fn with_drop_attachments(mut self) -> Self {
+        self.drop_attachments = true;
+        self
+    }
+
+    /// Check attachment removal against context from the runner's stored row.
+    /// A malformed attachment request is rejected before rendering the mode.
+    pub fn check_container(&self, container: PartContainer) -> Result<(), ViewProblem> {
+        if self.drop_attachments && container != PartContainer::ToolResult {
+            return Err(ViewProblem::EditAction);
+        }
+        Ok(())
     }
 }
 
@@ -246,7 +289,10 @@ pub enum ViewProblem {
     DuplicateEdit,
     /// A part edit's key is empty or longer than [`MAX_PART_KEY_BYTES`].
     EditPart,
-    /// A part edit gives both `bytes` and `drop`, or neither.
+    /// A part edit does not give exactly one action, asks to drop
+    /// attachments without truncation, or (from
+    /// [`PartEdit::check_container`]) asks to drop attachments outside a
+    /// result container.
     EditAction,
     /// A part edit's `bytes` are not JSON.
     EditNotJson,
@@ -347,7 +393,8 @@ impl CompactionView {
     /// and `to` in decimal and, for `replace`, its `bytes`, or, for `keep`, the
     /// number of its edits in decimal followed, for each edit in order, by its
     /// `ordinal` in decimal, its `mid`, its `part`, and either `bytes` and the
-    /// bytes or `drop`; then, only when a cut is present, `cut`, its `cut_id`
+    /// bytes, `drop`, or `truncate` and its mode; then, only when true,
+    /// `drop_attachments` and `true`; then, only when a cut is present, `cut`, its `cut_id`
     /// and its `through_ordinal` in decimal; then, only when an `apply` mark
     /// is present, `apply` and the mark; then, only when `cache_ttl` is
     /// present, `cache_ttl`, its `model`, its `ms` in decimal or `null`, and
@@ -382,7 +429,18 @@ impl CompactionView {
                                 frame(&mut hasher, b"bytes");
                                 frame(&mut hasher, bytes.as_bytes());
                             }
-                            None => frame(&mut hasher, b"drop"),
+                            None => {
+                                if let Some(mode) = &edit.truncate {
+                                    frame(&mut hasher, b"truncate");
+                                    frame(&mut hasher, mode.as_str().as_bytes());
+                                } else {
+                                    frame(&mut hasher, b"drop");
+                                }
+                            }
+                        }
+                        if edit.drop_attachments {
+                            frame(&mut hasher, b"drop_attachments");
+                            frame(&mut hasher, b"true");
                         }
                     }
                 }
@@ -567,6 +625,8 @@ impl CompactionView {
     /// in exactly as given. A reference for tests and vectors, over a model
     /// of the runner's schema in which a message's parts are the elements of
     /// its `content` array, keyed in order by [`TranscriptMessage::parts`].
+    /// This byte-only reference does not render truncate edits: those require
+    /// the profile and container passed to `tags::truncate_part` by the runner.
     /// Call it on a view that passed every other check.
     pub fn assemble(&self, transcript: &[TranscriptMessage]) -> Result<Vec<Value>, ViewProblem> {
         let mut out = Vec::new();
@@ -617,13 +677,16 @@ fn check_edits(from: u64, to: u64, edits: &[PartEdit]) -> Result<(), ViewProblem
         if edit.part.is_empty() || edit.part.len() > MAX_PART_KEY_BYTES {
             return Err(ViewProblem::EditPart);
         }
-        match (&edit.bytes, edit.drop) {
-            (Some(bytes), false) => {
+        if edit.drop_attachments && edit.truncate.is_none() {
+            return Err(ViewProblem::EditAction);
+        }
+        match (&edit.bytes, edit.drop, &edit.truncate) {
+            (Some(bytes), false, None) => {
                 if serde_json::from_str::<IgnoredAny>(bytes).is_err() {
                     return Err(ViewProblem::EditNotJson);
                 }
             }
-            (None, true) => {}
+            (None, true, None) | (None, false, Some(_)) => {}
             _ => return Err(ViewProblem::EditAction),
         }
     }
@@ -755,6 +818,9 @@ impl TranscriptMessage {
                 None => parts.push(part.clone()),
                 Some(edit) if edit.drop => {}
                 Some(edit) => {
+                    if edit.truncate.is_some() {
+                        return Err(ViewProblem::EditAction);
+                    }
                     let bytes = edit.bytes.as_deref().unwrap_or_default();
                     parts.push(serde_json::from_str(bytes).map_err(|_| ViewProblem::EditNotJson)?);
                 }
@@ -787,8 +853,9 @@ pub enum ViewDisposition {
     /// report `view_discarded:<version>` with `revert_below` on the next
     /// notice.
     Discard,
-    /// It edits a part key the message does not have, or its ranges do not
-    /// start at the lineage's first ordinal: refuse it, report
+    /// It edits a part key the message does not have, its ranges do not
+    /// start at the lineage's first ordinal, or a truncate edit names an
+    /// unknown mode: refuse it, report
     /// `view_refused:<version>:<reason>` with this reason (one of
     /// [`crate::notice::refusal_reasons`]) on the next notice, and keep the
     /// current view.
@@ -818,7 +885,11 @@ impl ViewDisposition {
 /// start at `first_ordinal`, the current lineage's first ordinal, or it is
 /// refused [`crate::notice::refusal_reasons::RANGES_START`]; every edited
 /// part key exists, in its message's part order
-/// ([`CompactionView::check_parts`]). The first that fails decides.
+/// ([`CompactionView::check_parts`]); every truncate mode is known, or it is
+/// refused [`crate::notice::refusal_reasons::TRUNCATE_KIND`]. The first that
+/// fails decides. Container and per-profile applicability of truncate edits
+/// are the runner's checks afterwards ([`PartEdit::check_container`],
+/// `tags::truncate_part`), because they need its stored rows.
 /// `message_at(ordinal)` is the message the runner holds at that ordinal of
 /// `lineage_id`.
 pub fn dispose_fetched(
@@ -855,7 +926,16 @@ pub fn dispose_fetched(
         return ViewDisposition::Refuse(crate::notice::refusal_reasons::RANGES_START);
     }
     match view.check_parts(|ordinal| message_at(ordinal).map(|m| m.parts)) {
-        Ok(()) => ViewDisposition::Apply,
+        Ok(()) => {
+            if view
+                .edits()
+                .any(|edit| matches!(edit.truncate, Some(TruncateMode::Unknown(_))))
+            {
+                ViewDisposition::Refuse(crate::notice::refusal_reasons::TRUNCATE_KIND)
+            } else {
+                ViewDisposition::Apply
+            }
+        }
         Err(None) => ViewDisposition::Refuse(crate::notice::refusal_reasons::UNKNOWN_PART),
         Err(Some(problem)) => ViewDisposition::Rejected(problem),
     }

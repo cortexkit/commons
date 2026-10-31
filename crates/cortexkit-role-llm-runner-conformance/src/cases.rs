@@ -283,6 +283,7 @@ where
             name if name.starts_with("cache_ttl_") => crate::cache_ttl::run(self, name).await,
             name if name.starts_with("ride_wait_") => crate::ride_wait::run(self, name).await,
             name if name.starts_with("view_due_") => crate::view_due::run(self, name).await,
+            name if name.starts_with("part_edits_") => crate::part_edits::run(self, name).await,
             "per_step_cost_scales_with_new_messages" => crate::cost::run(self).await,
             name if name.starts_with("compaction_")
                 || name.starts_with("model_view_")

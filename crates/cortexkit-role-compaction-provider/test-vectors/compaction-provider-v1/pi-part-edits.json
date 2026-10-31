@@ -1,0 +1,38 @@
+{
+  "name": "pi_text_placeholder_and_separate_image_drop",
+  "original": {
+    "type": "message",
+    "id": "result-row",
+    "parentId": "call-row",
+    "message": {
+      "role": "toolResult",
+      "toolCallId": "call",
+      "isError": true,
+      "is_error": true,
+      "content": [
+        {"type": "text", "text": "large result"},
+        {"type": "image", "data": "abc", "mimeType": "image/png"},
+        {"type": "image", "data": "kept", "mimeType": "image/png"}
+      ]
+    }
+  },
+  "edits": [
+    {"ordinal": 0, "mid": "result-row", "part": "text", "truncate": "placeholder", "drop_attachments": true},
+    {"ordinal": 0, "mid": "result-row", "part": "image-1", "drop": true}
+  ],
+  "expected": {
+    "type": "message",
+    "id": "result-row",
+    "parentId": "call-row",
+    "message": {
+      "role": "toolResult",
+      "toolCallId": "call",
+      "isError": true,
+      "is_error": true,
+      "content": [
+        {"type": "text", "text": "[dropped]"},
+        {"type": "image", "data": "kept", "mimeType": "image/png"}
+      ]
+    }
+  }
+}

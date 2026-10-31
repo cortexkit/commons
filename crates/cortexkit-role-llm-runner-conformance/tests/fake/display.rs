@@ -22,7 +22,9 @@ use cortexkit_role_llm_runner::{
 
 /// Whether `session` keeps its bodies in the `anthropic-messages` profile.
 pub(super) fn profiled(session: &str) -> bool {
-    session.starts_with("cf-display") || session.starts_with("cf-descriptor-provider")
+    session.starts_with("cf-display")
+        || session.starts_with("cf-descriptor-provider")
+        || session.starts_with("cf-part-edit")
 }
 
 /// The `anthropic-messages` body of an assistant step from the fake's parts.

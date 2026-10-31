@@ -14,6 +14,10 @@ pub const DIR: &str = "llm-runner-v1";
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
     (
+        "truncate.json",
+        include_str!("../test-vectors/llm-runner-v1/truncate.json"),
+    ),
+    (
         "pi-1.3.0-1.4.0.jsonl",
         include_str!("../test-vectors/llm-runner-v1/pi-1.3.0-1.4.0.jsonl"),
     ),

@@ -7,6 +7,7 @@ draft: these vectors change with the contract until it is reviewed.
 
 | File | What it pins | Checked by |
 |---|---|---|
+| `pi-part-edits.json` | Pi text placeholder beside a separate image drop, preserving an unaddressed sibling image and result error fields | `pi_text_placeholder_and_separate_image_drop_preserve_siblings_and_error_fields` |
 | `setup-accepts.json` | ready Setup opt-in to archived reasoning pruning, with empty omission and open names | `setup_accepts_pruned_reasoning_is_optional_and_open` |
 | `setup-view-due.json` | Setup requests and answers with and without a due-view opt-in and announcement | `setup_view_due_round_trip_and_absence_preserve_wire_bytes` |
 | `reasoning-pruned.json` | the optional prune state: advance notices with and without the `reasoning_pruned` header (one also reporting `view_refused:<version>:pruned_reasoning_restored`), with digests computed independently of the crate; notices refused `malformed:reasoning_pruned` (generation 0, too few or too many numbers, a leading zero, a sign, an empty value); Setup requests with and without `reasoning_pruned` | `reasoning_pruned_notices_and_setup_requests` |

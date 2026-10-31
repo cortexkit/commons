@@ -136,6 +136,7 @@ pub(super) struct Provider {
     pub views: Vec<cortexkit_role_compaction_provider::view::CompactionView>,
     /// Every advance notice received, as its bus headers.
     pub notices: Vec<BTreeMap<String, String>>,
+    pub provider_calls: Vec<cortexkit_role_llm_runner_conformance::ProviderCall>,
 }
 struct ModelCall {
     turn: usize,
@@ -253,6 +254,56 @@ pub(super) fn canonical(sess: &Sess) -> Vec<ModelEntry> {
     entries
 }
 
+fn render_part_edits(sess: &Sess, entries: &mut [ModelEntry], defects: &Defects) {
+    use cortexkit_role_llm_runner::tags::{
+        parse_tag, render_counted_text, truncate_part, PartContainer,
+    };
+    for entry in entries {
+        let EntrySource::Message { ordinal, mid } = &entry.source else {
+            continue;
+        };
+        let message = sess.messages.iter().find(|m| m.mid == *mid).unwrap();
+        let rows = tags::rows(sess, message, defects, &tags::current(sess));
+        let keys = media::parts(&message.body);
+        let Some(parts) = entry.message["content"].as_array_mut() else {
+            continue;
+        };
+        for (index, part) in parts.iter_mut().enumerate() {
+            let edit = sess.compaction.applied.as_ref().and_then(|applied| {
+                applied
+                    .edits
+                    .iter()
+                    .find(|edit| edit.ordinal == *ordinal && edit.part == keys[index].0)
+            });
+            let number = rows[index].tag.as_deref().and_then(parse_tag);
+            if let Some(edit) = edit {
+                if let Some(mode) = &edit.truncate {
+                    if !defects.part_edits_ignore_truncate {
+                        *part = truncate_part(
+                            "anthropic-messages",
+                            part,
+                            PartContainer::Other,
+                            mode.clone(),
+                            number,
+                            edit.drop_attachments,
+                        )
+                        .unwrap();
+                    }
+                } else if let Some(bytes) = &edit.bytes {
+                    *part = serde_json::from_str(bytes).unwrap();
+                }
+            }
+            let untagged =
+                defects.part_edits_untagged_bytes && edit.is_some_and(|edit| edit.bytes.is_some());
+            if !untagged {
+                if let (Some(number), Some(text)) = (number, part["text"].as_str()) {
+                    part["text"] = json!(render_counted_text(number, text));
+                }
+            }
+        }
+    }
+}
+
 impl Module {
     pub(super) fn seal_compaction_setup_crash(
         &self,
@@ -308,6 +359,29 @@ impl Module {
             .setup
             .clone();
         let id = format!("{}-request-{}", sess.lineage, sess.compaction.request_count);
+        let mut request = cortexkit_role_compaction_provider::setup::SetupRequest::new(
+            session,
+            FAKE_HARNESS,
+            &id,
+            Map::new(),
+            FAKE_MODEL,
+            1,
+        );
+        if self.world.defects.part_edits_opt_in {
+            request = request.with_view_features(vec!["truncate".into(), "tag_bytes_edits".into()]);
+        }
+        self.world
+            .compaction
+            .lock()
+            .unwrap()
+            .sessions
+            .get_mut(session)
+            .unwrap()
+            .provider_calls
+            .push(cortexkit_role_llm_runner_conformance::ProviderCall::new(
+                cortexkit_role_compaction_provider::ops::COMPACTION_SETUP,
+                serde_json::to_value(request).unwrap(),
+            ));
         self.commit(
             session,
             json!({"kind":"compaction_request","request_id":id}),
@@ -603,12 +677,16 @@ impl Module {
         };
         sess.notice_events.extend(events);
         self.publish_notice(session, &sess)?;
+        let mut entries = canonical(&sess);
+        if session.starts_with("cf-part-edit") {
+            render_part_edits(&sess, &mut entries, &self.world.defects);
+        }
         let mut providers = self.world.compaction.lock().unwrap();
         let p = providers.sessions.get_mut(session).unwrap();
         p.models.push(ModelCall {
             turn: step,
             run: run_id.into(),
-            entries: canonical(&sess),
+            entries,
             released: false,
         });
         Ok(false)
@@ -698,6 +776,52 @@ impl Module {
 }
 
 impl FakeSubject {
+    pub(super) fn publish_part_edits(
+        &self,
+        session: &str,
+        edits: Vec<cortexkit_role_compaction_provider::view::PartEdit>,
+    ) -> Result<u64, HarnessError> {
+        use cortexkit_role_compaction_provider::{
+            lineage::MessageRef,
+            view::{CompactionView, ViewRange},
+        };
+        let modules = self.compaction_modules(session);
+        let module = modules
+            .first()
+            .ok_or_else(|| HarnessError::new("session module missing"))?;
+        let sess = module.sessions.lock().unwrap()[session].clone();
+        let last = sess
+            .messages
+            .last()
+            .ok_or_else(|| HarnessError::new("session is empty"))?;
+        let world = self.world();
+        let mut providers = world.compaction.lock().unwrap();
+        let provider = providers.sessions.get_mut(session).unwrap();
+        let version = provider
+            .views
+            .last()
+            .map_or(1, |view| view.view_version + 1);
+        provider.views.push(CompactionView::new(
+            cortexkit_role_llm_runner::session_ref(&cortexkit_role_llm_runner::SessionIdentity {
+                runner: FAKE_RUNNER,
+                harness: FAKE_HARNESS,
+                session,
+            }),
+            version,
+            &sess.lineage,
+            MessageRef {
+                ordinal: last.ordinal,
+                mid: last.mid.clone(),
+            },
+            vec![ViewRange::keep_with_edits(
+                sess.first_ordinal,
+                last.ordinal + 1,
+                edits,
+            )],
+        ));
+        Ok(version)
+    }
+
     pub(super) fn has_compaction_script(&self, session: &str) -> bool {
         self.world()
             .compaction
@@ -721,6 +845,7 @@ impl FakeSubject {
                     models: Vec::new(),
                     views: Vec::new(),
                     notices: Vec::new(),
+                    provider_calls: Vec::new(),
                 },
             );
         }

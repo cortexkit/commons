@@ -23,6 +23,11 @@ use serde_json::{Map, Value};
 /// Setup permission required before a runner prunes an enrolled session.
 pub const ACCEPTS_PRUNED_REASONING: &str = "pruned_reasoning";
 
+/// Setup view feature permitting runner-rendered truncate edits.
+pub const VIEW_FEATURE_TRUNCATE: &str = "truncate";
+/// Setup view feature permitting ordinary tags on counted `bytes` edits.
+pub const VIEW_FEATURE_TAG_BYTES_EDITS: &str = "tag_bytes_edits";
+
 pub use cortexkit_role_llm_runner::archive_prunes_reasoning::ReasoningPruned;
 pub use cortexkit_role_llm_runner::tags::SetupCheckpoint;
 
@@ -90,6 +95,11 @@ pub struct SetupRequest {
     /// when empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub view_apply: Vec<String>,
+    /// Opt-in view features the runner supports (`truncate`,
+    /// `tag_bytes_edits`). Providers ignore tokens they do not know; decoding
+    /// keeps them as sent. Omitted when empty.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub view_features: Vec<String>,
     /// The longest this runner can hold a step for a rewrite ride's answer
     /// (cause `ttl_expired`, `model_change`, `account_change` or
     /// `surface_change`), in milliseconds, from 1 to
@@ -139,6 +149,7 @@ impl SetupRequest {
             newest: None,
             now,
             view_apply: Vec::new(),
+            view_features: Vec::new(),
             ride_wait_max_ms: None,
             view_due_max_ms: None,
             reasoning_pruned: None,
@@ -183,6 +194,15 @@ impl SetupRequest {
     pub fn with_view_apply(mut self, view_apply: Vec<String>) -> Self {
         self.view_apply = view_apply;
         self
+    }
+
+    pub fn with_view_features(mut self, features: Vec<String>) -> Self {
+        self.view_features = features;
+        self
+    }
+
+    pub fn view_features(&self) -> &[String] {
+        &self.view_features
     }
 
     /// Declare the longest this runner can hold a step for a rewrite

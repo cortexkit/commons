@@ -1,5 +1,14 @@
 # cortexkit-role-compaction-provider
 
+Setup's optional `view_features` negotiates `truncate` part edits and
+`tag_bytes_edits` runner tagging. Without the tokens, replaced bytes stay
+final as before. The runner renders truncate references with the shared
+`tags::truncate_part` profile rules in `cortexkit-role-llm-runner`.
+On Pi, `drop_attachments` affects only the addressed block, never siblings;
+to remove a result message's images, send an ordinary `drop` edit for each
+image part. The `pi-part-edits.json` vector pairs an image drop with a text
+placeholder and preserves the result message's error fields.
+
 Wire types and vectors for `compaction-provider/v1`: Setup, advance notices, views and `view.get`, `compaction.ride`, and the ceiling policy.
 
 Add to `Cargo.toml`:

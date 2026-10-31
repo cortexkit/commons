@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.32
+
+- Add `tags::truncate_part`, non-exhaustive `TruncateMode`, `PartContainer`
+  and `TruncateRefusal` for profile-exact runner-rendered compaction edits.
+  Refuse unknown or inapplicable modes with `truncate_kind`; derive container
+  context from stored rows, including Pi result blocks.
+- Pin 184 reference vectors across all five profiles, attachment and error
+  preservation, numbered/unnumbered placeholders and UTF-16 input boundaries.
+
 ## 0.7.31
 
 - Pi (§9.6): a runner's compaction-marker checkpoint is the member

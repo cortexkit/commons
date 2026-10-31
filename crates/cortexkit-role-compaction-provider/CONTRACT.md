@@ -218,7 +218,7 @@ the session and freezes that plan for use.
   answered last time (kill point `SetupRecorded`).
 - [pinned] The request (`SetupRequest`) is `{session, harness, request_id,
   preset?, params, composition, model, variant?, context_window?,
-  output_limit?, newest?, lineage_id?, descends_from?, now, view_apply?,
+  output_limit?, newest?, lineage_id?, descends_from?, now, view_apply?, view_features?,
   ride_wait_max_ms?, view_due_max_ms?, reasoning_pruned?}`.
   `model` is a string; `variant`, `context_window` and `output_limit` are
   sibling fields, not a nested model object. `params` defaults to `{}`; an
@@ -231,6 +231,13 @@ the session and freezes that plan for use.
   empty, and an absent list honors none. A provider puts on a view only a
   mark listed here (§7) and ignores names it does not know. Setup decodes
   leniently (§14), so a provider that predates the member ignores it.
+- [pinned] Optional `view_features: [string]` is omitted when empty. Known
+  tokens are `truncate` (`setup::VIEW_FEATURE_TRUNCATE`) and `tag_bytes_edits`
+  (`setup::VIEW_FEATURE_TAG_BYTES_EDITS`); unknown tokens are ignored.
+  `SetupRequest::with_view_features` sets the list and `view_features` reads
+  it. The provider sends `truncate` edits only when the runner listed
+  `truncate`, and relies on runner tagging of `bytes` edits only when the
+  runner listed `tag_bytes_edits`. Absence preserves the rules below verbatim.
 - [pinned] Optional `ride_wait_max_ms` (`u64`, 1 to 300,000,
   `ride::MAX_RIDE_WAIT_MS`; added in 0.5.1,
   `SetupRequest::with_ride_wait_max_ms`) is the longest this runner can
@@ -785,15 +792,18 @@ provider.
   (§7):
   - `{kind: "keep", from, to, edits?}` sends the transcript's messages in the
     range as written, except for the parts `edits` changes. Never empty.
-  - `edits: [{ordinal, mid, part, bytes?, drop?}]` (`view::PartEdit`) edits
+  - `edits: [{ordinal, mid, part, bytes?, drop?, truncate?, drop_attachments?}]` (`view::PartEdit`) edits
     single parts of messages that otherwise stay: a dropped tool output, a
     stripped image, compressed text. So a view never re-sends a whole message
     to change one part. `part` is `llm-runner/v1`'s opaque part key, the same
     key as its `tags: [{part, tag}]` rows and `session.resolve`; it is 1 to
     256 bytes, compared byte for byte. Each edit gives exactly one of `bytes`,
     a string holding the replacement part as UTF-8 JSON in the runner's
-    message schema, or `drop: true`, which removes the part outright (`drop`
-    is omitted when false). Edits are sorted by `ordinal` and, within one
+    message schema, `drop: true`, which removes the part outright, or
+    `truncate: "placeholder" | "skeleton" | "edit_marker"`, rendered by the
+    runner (§6.1). `drop` is omitted when false. Optional
+    `drop_attachments: true` is valid only with a truncate edit on a result
+    part; it is omitted when false. Edits are sorted by `ordinal` and, within one
     message, by the part's position in that message; there is at most one
     edit per part; every `ordinal` lies inside its keep range; and every
     `mid` is the id of the message the runner holds at that ordinal, or the
@@ -813,6 +823,12 @@ provider.
   pinned tag render format (its exact prefix and separator, and the part
   kinds that carry a tag, pinned in `cortexkit-role-llm-runner` 0.3.0), so a
   provider produces the same bytes the runner would.
+- [pinned] **Opt-in tagged bytes.** When Setup listed `tag_bytes_edits`, a
+  counted part edited with `bytes` is still the model's own part. The runner
+  renders its own tag exactly as on a part sent as written. The runner adds
+  no tags inside a replace range's bytes; they remain final. A history head
+  never counts.
+  Without that token, the preceding bullet applies word for word.
 - [pinned] Optional `cut: {cut_id, through_ordinal}` (`view::ViewCut`) names
   the point through which the provider's replacements stand for the whole
   transcript. It lies on a range boundary within the coverage, with only
@@ -836,9 +852,12 @@ provider.
   `from` and `to` in decimal and, for `replace`, its `bytes`, or, for
   `keep`, the number of its edits in decimal followed, for each edit in
   order, by its `ordinal` in decimal, its `mid`, its `part`, and either
-  `bytes` and the edit's bytes or `drop`; then, only when a cut is present,
+  `bytes` and the edit's bytes, `drop`, or `truncate` and its mode; then for
+  that edit, only when `drop_attachments` is true, `drop_attachments` and
+  `true`; then, only when a cut is present,
   `cut`, its `cut_id` and its `through_ordinal` in decimal; then, only when
   `apply` is present, `apply` and the mark. `digest` itself is not an input.
+  Absent new edit fields contribute no frames, preserving existing digests.
   A view without `apply` has the digest it had before the member existed.
 - [pinned] A view is well formed (`CompactionView::check`) when, checked in
   this order: `session_ref` is a session reference (`session_ref`);
@@ -851,7 +870,8 @@ provider.
   are a JSON array (`replacement_not_array`); every keep range's edits lie
   inside it (`edit_outside_range`), are sorted by ordinal (`edit_order`), name
   each part once (`duplicate_edit`), have a valid part key (`edit_part`),
-  give exactly one of `bytes` and `drop` (`edit_action`), and give JSON bytes
+  give exactly one of `bytes`, `drop` and `truncate`, with attachments only
+  on truncate edits (`edit_action`), and give JSON bytes
   (`edit_not_json`); the cut is valid (`cut`); the
   compact JSON encoding is at most 3,145,728 bytes (`MAX_VIEW_BYTES`,
   `too_large`); and `digest` matches the content (`digest_mismatch`).
@@ -877,6 +897,74 @@ provider.
 - [pinned] `ck-bus`'s module-event consumer table (`cortexkit-bus-naming`)
   must admit the provider as a reader of the runner's events and the runner
   as a reader of the provider's. This role does not change that table.
+
+### 6.1 Runner-rendered truncation
+
+- [pinned] The shared renderer is
+  `tags::truncate_part(profile: &str, part: &Value, container: PartContainer,
+  mode: TruncateMode, number: Option<u64>, drop_attachments: bool)
+  -> Result<Value, TruncateRefusal>` in `cortexkit-role-llm-runner`.
+  `TruncateMode`, `PartContainer` and `TruncateRefusal` are non-exhaustive.
+  The runner derives `PartContainer::ToolResult` or `Other` from its stored
+  row, never the view. Pi needs this context because its result blocks carry
+  no role. Other profiles' self-identifying result parts must agree with the
+  container, or rendering refuses. For OpenCode a `tool` part is a result
+  container, although stored inside an assistant row.
+- [pinned] `number` is the part's own number, or `None` when its row has none
+  or the session plan's `render_tags` is false. The placeholder is
+  `tags::dropped_placeholder(N)` (`[dropped §N§]`) for `Some(N)`, otherwise
+  `[dropped]`. That is the part's content, not its final text: the runner
+  then renders the ordinary tag on a counted truncated part, as on a part sent
+  as written. For example, a counted text part numbered 7 becomes
+  `[dropped §7§]` and is then sent with its usual tag prefix. The provider sends references, not
+  pre-rendered placeholders or tags.
+- [pinned] On `opencode-aisdk`, `placeholder` on `text` changes only `text`;
+  on `file` it replaces the whole part with `{type:"text", text:placeholder}`.
+  On `tool`, `skeleton` preserves `state.input` and changes `state.output` to
+  the placeholder. With `state.status: "error"`, it preserves the status and
+  changes `state.error` instead. `placeholder` equals `skeleton` on tools;
+  `edit_marker` additionally applies the input rule below to `state.input`.
+  `drop_attachments` sets `state.attachments` to `[]`. All other fields stay.
+- [pinned] On `opencode-v2`, text and file rules are the same. On `tool`,
+  `placeholder` and `skeleton` preserve `state.input` and set `state.content`
+  to `[{type:"text", text:placeholder}]`. `edit_marker` also applies the
+  input rule to `state.input`. Replacing `state.content` already removes any
+  attachment blocks in it, so `drop_attachments` changes nothing more; no
+  `output` or `attachments` field is invented. All other fields, status, metadata and time stay.
+- [pinned] On `pi`, a `text` or `image` block in a `ToolResult` container becomes
+  `{type:"text", text:placeholder}` under `placeholder` or `skeleton`.
+  Attachment removal affects only the addressed block, never its siblings.
+  To remove a result message's image blocks, the provider sends a separate
+  ordinary `drop: true` edit for each image part. Outside a result container, `placeholder`
+  on `text` changes only `text`, while `skeleton` and attachment removal
+  refuse. `toolCall` supports only `edit_marker`, in either container: apply
+  the input rule to `arguments`, changing nothing else. Results have their
+  own separate edits.
+- [pinned] On `anthropic-messages`, `placeholder` and `skeleton` on
+  `tool_result` set `content` to the placeholder string, preserving
+  `tool_use_id`, `is_error` and other fields. Replacing `content` already
+  removes any image blocks in it, so `drop_attachments` changes nothing more.
+  `edit_marker` on `tool_use` applies only the input rule to `input`.
+  `placeholder` on `text` changes only `text`.
+- [pinned] On `owned-broca`, `placeholder` and `skeleton` on `tool_result`
+  set `output` to `{kind:"text", text:placeholder}`, preserving
+  `tool_call_id`, `is_error` and other fields. Replacing `output` already
+  removes any `kind:"media"` entries, whatever the output kind, so
+  `drop_attachments` changes nothing more. `edit_marker` on `tool_call` applies only the input rule to
+  `input`. `placeholder` on `text` or top-level `media` replaces the whole
+  part with `{type:"text", text:placeholder}`.
+- [pinned] The edit-marker input rule copies the input and visits only its
+  top-level keys, without recursion. Exact, case-sensitive keys `oldString`,
+  `newString`, `content`, `old_string` and `new_string` change only string
+  values longer than 40 UTF-16 units that do not end in `...[truncated]`.
+  Keep the first 40 units, or 39 if unit 40 (index 39) is a high surrogate
+  (0xD800–0xDBFF), then append `...[truncated]`. Other keys and values,
+  including `filePath`, `file_path`, `path`, nested objects and non-string
+  values, stay unchanged. Non-object inputs stay unchanged.
+- [pinned] Every other profile/kind/mode combination, unknown mode, or
+  inconsistent container refuses with `TruncateRefusal::reason()` equal to
+  `truncate_kind`; never guess or approximate. The runner reports
+  `view_refused:<version>:truncate_kind` and keeps its current view.
 
 ## 7. Applying a view: the runner's side
 
@@ -915,8 +1003,16 @@ provider.
      `refused:unknown_part` and the runner reports
      `view_refused:<version>:unknown_part`;
   8. each message's edits follow its part order, or it is
-     `rejected:edit_order`.
-  `view::dispose_fetched` takes the lineage's `first_ordinal` for step 6.
+     `rejected:edit_order`;
+  9. every truncate mode is known, or the view is `refused:truncate_kind` and
+     the runner reports `view_refused:<version>:truncate_kind`.
+  `view::dispose_fetched` takes the lineage's `first_ordinal` for step 6 and
+  performs steps 1 to 9. Two further checks are the runner's, before it
+  persists or applies a view with truncate edits, because only the runner
+  holds the stored rows: attachment removal must target a result container
+  (`PartEdit::check_container`), or the view is `rejected:edit_action`; and
+  every truncate edit must render under `tags::truncate_part` (§6.1), or the
+  view is `refused:truncate_kind`.
   Only then does it `apply`. A rejected view is not persisted, not applied
   and not reported; the runner keeps its current view and may fetch again.
 - [pinned] **A view applies only at a step boundary.** The runner writes it
@@ -929,10 +1025,13 @@ provider.
 - [pinned] Under a view, a request's history is, for each range in order,
   the transcript's messages inside a keep range, with their part edits
   applied (a replaced part becomes its bytes, a dropped part is left out,
-  every other part is sent as written), or a replace range's messages,
-  followed by every message after the coverage (`CompactionView::assemble`
-  is the reference, over a model in which a message's parts are the elements
-  of its `content` array). Messages a runner carries
+  every other part is sent as written, a truncated part is
+  `tags::truncate_part`'s output, and with `tag_bytes_edits` a counted edited
+  part also carries its tag), or a replace range's messages, followed by every
+  message after the coverage. `CompactionView::assemble` is the reference for
+  bytes and drop edits only, over a model in which a message's parts are the
+  elements of its `content` array; it refuses a truncate edit, which the
+  runner renders into a bytes edit first. Messages a runner carries
   outside the transcript (reminders, appends) are the runner's to place.
 - [pinned] Model provider quirks are **the runner's** duty. The view is the
   provider's preference, and the provider carries no model-provider quirks

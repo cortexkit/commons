@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.37
+
+- Pin compaction-provider `=0.7.11` and llm-runner `=0.7.32`.
+- Add named opt-in truncate and tagged-bytes cases with an additive,
+  default-unsupported part-edit publisher hook. Missing tokens or hooks are
+  reported as not applicable on each affected named case, never as passes.
+- Check deliberately faulty runners that ignore truncation or send provider
+  bytes without the part's own tag fail the corresponding case by name.
+
 ## 0.15.36
 
 - Pin compaction-provider `=0.7.10`. Add three opt-in Setup due-view cases:

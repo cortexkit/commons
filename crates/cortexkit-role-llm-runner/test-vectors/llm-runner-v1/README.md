@@ -1,5 +1,20 @@
 # `llm-runner/v1` test vectors
 
+`truncate.json` contains 184 cases consumed by
+`tags::truncate::tests::truncate_part_matches_every_reference_vector`. They
+pin the rules in compaction-provider's contract §6.1. Every legal profile/part/mode cell has numbered and unnumbered
+outputs: OpenCode text/file/tool; Pi text and image result blocks, ordinary
+text and toolCall; Anthropic text/tool_result/tool_use; owned-broca
+text/media/tool_result/tool_call. Refusals cover other modes, reasoning and
+unknown kinds, unknown profiles/modes, non-result attachment requests and
+container mismatches. Pi text appears in both containers. Additional cases
+pin result error fields, OpenCode state.error, attachment removal on every
+profile and owned-broca JSON output, 39/40/41 UTF-16 units, a surrogate pair
+crossing unit 40, existing truncation suffixes, non-string/non-object input,
+nested trimmed-key names and unchanged file paths. Media inside a replaced
+result is already absent; dropping attachments still clears the separately
+stored `opencode-aisdk` attachments.
+
 `refresh-relaunch-required.json` is the opt-in `session.refresh` body with
 `required: true`. The session-change unit test round-trips it through
 `RelaunchRefreshRequest` and checks that the unchanged strict

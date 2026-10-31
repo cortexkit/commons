@@ -27,6 +27,9 @@ use crate::capabilities;
 pub mod checkpoint;
 pub mod clean;
 pub mod numbering;
+pub mod truncate;
+
+pub use truncate::{truncate_part, PartContainer, TruncateMode, TruncateRefusal};
 
 pub use checkpoint::{
     message_checkpoint_anchors, next_message_count, opencode1_message_counts,
@@ -189,8 +192,11 @@ pub fn tool_result_kind(blocks: &[ToolResultBlock<'_>]) -> PartKind {
     }
 }
 
-/// The whole rendered text of a counted part a compaction provider dropped:
-/// `[dropped §N§]`, no prefix before it. The part keeps its number.
+/// The placeholder for a counted part a compaction provider dropped:
+/// `[dropped §N§]`. When a provider writes it into its own bytes, it is the
+/// whole rendered text, with no prefix before it. In a runner-rendered
+/// truncate edit it is the part's content, and the runner then adds the
+/// part's ordinary tag. The part keeps its number.
 pub fn dropped_placeholder(number: u64) -> String {
     format!("[dropped {SIGIL}{number}{SIGIL}]")
 }

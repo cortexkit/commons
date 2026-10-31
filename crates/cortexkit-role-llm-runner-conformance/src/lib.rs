@@ -105,6 +105,7 @@ mod live;
 mod media;
 pub mod message_checkpoint;
 mod output_refs;
+mod part_edits;
 pub mod progress;
 mod report;
 mod retention;

@@ -123,7 +123,7 @@ pub(crate) fn params<S: LlmRunnerSubject>(
 
 /// Send `prompt` (with `extra` beside the role's members) and answer the
 /// send's reply, without waiting for the run.
-async fn send<S>(
+pub(crate) async fn send<S>(
     case: &Case<'_, S>,
     session: &mut Session<S::Route>,
     fields: Option<&Map<String, Value>>,
