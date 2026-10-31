@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.38
+
+- Pin llm-runner `=0.7.33`, a wording-only release.
+
 ## 0.15.37
 
 - Pin compaction-provider `=0.7.11` and llm-runner `=0.7.32`.

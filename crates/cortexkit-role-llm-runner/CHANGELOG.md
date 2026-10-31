@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.33
+
+- Correct two contract sentences and the `try_number_parts` docs, which said a
+  dropped part is rendered as its `[dropped §N§]` placeholder. Under an
+  applied view, a `drop: true` edit is left out of the request on every
+  profile and for every part kind, as compaction-provider §7 already pinned;
+  a counted part keeps its number and still counts. A runner-rendered
+  placeholder comes from an applicable truncate edit, such as
+  `truncate: "placeholder"`. Text only; no code or wire change.
+
 ## 0.7.32
 
 - Add `tags::truncate_part`, non-exhaustive `TruncateMode`, `PartContainer`

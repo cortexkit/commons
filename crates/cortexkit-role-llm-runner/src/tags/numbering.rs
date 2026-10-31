@@ -100,10 +100,10 @@ impl RenderedPart {
 /// being `checkpoint + 1`; `None` for a part that does not count. Two parts
 /// at the same `rendered_at` keep the order they are given in.
 ///
-/// A part a compaction provider dropped behind its placeholder keeps its
-/// number: it is still rendered, as `[dropped §N§]`, so it is still counted.
-/// The only gaps are behind the cut, where the checkpoint may count parts no
-/// longer rendered, or parts an earlier tagger numbered.
+/// A counted part a compaction provider dropped keeps its number and is
+/// still counted, even though a `drop: true` edit leaves it out of the
+/// request. The only gaps are behind the cut, where the checkpoint may count
+/// parts no longer rendered, or parts an earlier tagger numbered.
 ///
 /// Refused with [`NumberingOverflow`] when the last number would pass
 /// `u64::MAX`: a runner refuses such a checkpoint rather than give two parts

@@ -2908,8 +2908,8 @@ part's key and its content digest, never a number.
   storage order with marker pairs skipped): the runner feeds
   `tags::try_number_parts` those parts, not only the ones it renders now. A
   compaction message and its summary never count, wherever they sit and
-  with or without the key; a dropped part keeps its placeholder number and
-  still counts. So the numbers equal the ones computed with every key
+  with or without the key; a counted part dropped with `drop: true`
+  keeps its number and still counts, though it is left out of the request. So the numbers equal the ones computed with every key
   present, the numbers the model saw, and the lineage does not change,
   apart from the Setup cut gone rule above. `tag-numbering.json` pins three
   shapes: the newest key lost with an older keyed marker; every key lost,
@@ -2950,10 +2950,13 @@ part's key and its content digest, never a number.
   member of `details`. `message-checkpoint.json` pins the entry before and
   after the apply, and entries that are no anchor.
 - [pinned] Gaps exist only behind the tail: a checkpoint may count parts no
-  longer rendered, or numbers an earlier tagger handed out. A part a
-  compaction provider dropped keeps its number, rendered as its
-  placeholder `[dropped §N§]` (`tags::dropped_placeholder`), so it is
-  still counted.
+  longer rendered, or numbers an earlier tagger handed out. Under an
+  applied view, a part edited with `drop: true` is left out of the request
+  entirely, whatever its profile or kind, as compaction-provider §7 pins: no
+  part and no placeholder is sent. If the part counted, it keeps its number
+  and still counts. A provider that wants the model to see a runner-rendered
+  placeholder sends an applicable truncate edit instead, such as
+  `truncate: "placeholder"`, rendered through `tags::truncate_part`.
 - [pinned] With compaction Setup's `view_features: ["truncate"]`, the
   provider may send a part edit containing `truncate` instead of bytes.
   Render it with `tags::truncate_part(profile: &str, part: &Value,
