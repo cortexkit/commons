@@ -119,11 +119,18 @@ incrementally updated with each step and never reduced by a rewind or cut.
 The `since` boundary makes uncounted imported history explicit. Unknown token
 fields remain absent, not zero. See contract §4.3 for scope and cost rules.
 `session.head.sender` is the attested caller's own delivery grant under the
-effective next-send plan, including accepted refreshes. Since 0.6.2, the
+latest durably accepted plan, including a refresh whose model input remains
+pending. Senders and optional `app_readers` reader lists govern admission at
+acceptance, never at a later run; `session_change::admission_plan` and
+`delivery_order::effective_senders` select them. Other plan members retain
+the next-run rule, apart from the offered-set gate that refuses calls to removed
+tools at once (§10.2). An absent `readers` list keeps that runner's current read
+admission; a present list restricts the six session reads named in §9.19
+without granting writes. Since 0.6.2, the
 `head_sender` describe group makes absence mean no grant for that caller;
 without the group, absence means unknown, even if some callers receive
-`sender`. Declaring runners report `sender` to every plan-named caller and
-the owner, who gets `owner: true`, every accepted mode and `interrupt: true`.
+`sender`. Declaring runners report `sender` on every head request they admit
+from a plan-named caller or the owner, who gets `owner: true`, every accepted mode and `interrupt: true`.
 Readers can use `HeadMeta::sender_grant` to distinguish `Granted`, `NoGrant`
 and `Unknown`. Model, usage and incarnation absence still means unknown.
 `compaction_item.preset` is optional; a preset-less plan item stays preset-less

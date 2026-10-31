@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.41
+
+- Refreshed plan senders govern admission as soon as refresh acceptance is
+  durable, even during a run or while the rest of the plan waits for a rebuild.
+  Sender removals and narrower grants affect later sends, never sends already
+  admitted. The same sender list answers `session.head.sender`.
+- Add a helper for selecting the sender list from the effective plan and the
+  latest accepted pending plan. Apart from sender and reader admission, plan
+  changes still follow the next-run rule; senders alone do not touch a
+  rung-controlled surface.
+- Add opt-in `app_readers` for plan-named read admission, with the same
+  acceptance timing as senders. An absent `readers` member keeps that
+  runner's current read admission; a present list restricts the six session
+  reads named in §9.19, without granting sends or other writes.
+- Display tool calls can carry stored dispatch and answer times and an open
+  unanswered-outcome string. All three members are omitted when absent;
+  existing display rows keep their bytes.
+
 ## 0.7.40
 
 - Fix: the plan checks walked `items`, which plans don't carry, so neither

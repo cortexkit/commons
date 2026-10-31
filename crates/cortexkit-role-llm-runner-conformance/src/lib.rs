@@ -77,6 +77,7 @@
 
 #![forbid(unsafe_code)]
 
+mod admission;
 mod adopt;
 mod archive_pruning;
 mod attachments;

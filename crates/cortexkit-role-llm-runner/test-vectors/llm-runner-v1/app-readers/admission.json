@@ -1,0 +1,34 @@
+{
+  "shape": [
+    {"name": "absent_keeps_current", "plan": {}, "declared": [], "valid": true},
+    {"name": "empty_restricts", "plan": {"readers": []}, "declared": ["app_readers"], "valid": true},
+    {"name": "exact_principal_strings", "plan": {"readers": ["reader-a", "reader-b"]}, "declared": ["app_readers"], "valid": true},
+    {"name": "empty_still_needs_group", "plan": {"readers": []}, "declared": [], "valid": false},
+    {"name": "duplicate", "plan": {"readers": ["reader-a", "reader-a"]}, "declared": ["app_readers"], "valid": false},
+    {"name": "object_is_not_a_principal_string", "plan": {"readers": [{"module": "reader-a"}]}, "declared": ["app_readers"], "valid": false},
+    {"name": "non_string", "plan": {"readers": [7]}, "declared": ["app_readers"], "valid": false},
+    {"name": "non_array", "plan": {"readers": "reader-a"}, "declared": ["app_readers"], "valid": false},
+    {"name": "null_is_not_absence", "plan": {"readers": null}, "declared": ["app_readers"], "valid": false}
+  ],
+  "reads": [
+    {"caller": "reader-a", "op": "session.head", "admitted": true},
+    {"caller": "reader-a", "op": "session.read", "admitted": true},
+    {"caller": "reader-a", "op": "session.history", "admitted": true},
+    {"caller": "reader-a", "op": "run.status", "admitted": true},
+    {"caller": "reader-a", "op": "role.describe", "admitted": true},
+    {"caller": "reader-a", "op": "session.subscribe", "admitted": true},
+    {"caller": "reader-a", "op": "session.send", "admitted": false},
+    {"caller": "reader-a", "op": "run.cancel", "admitted": false},
+    {"caller": "reader-a", "op": "session.retract", "admitted": false},
+    {"caller": "reader-a", "op": "send.status", "admitted": false},
+    {"caller": "Reader-a", "op": "session.read", "admitted": false},
+    {"caller": "stranger", "op": "session.read", "admitted": false},
+    {"caller": "owner", "op": "session.read", "admitted": true},
+    {"caller": "active-provider", "op": "session.read", "admitted": true},
+    {"caller": "sender-b", "op": "session.read", "admitted": false},
+    {"caller": "sender-b", "op": "send.status", "own_send": true, "admitted": true},
+    {"caller": "sender-b", "op": "send.status", "own_send": false, "admitted": false},
+    {"caller": "local-tool", "op": "session.head", "local_operator": true, "admitted": true},
+    {"caller": "local-tool", "op": "session.head", "local_operator": false, "admitted": false}
+  ]
+}

@@ -203,6 +203,7 @@ particular implementation.
 | `session_usage` | `session.head` with durable, incremental session spend in `usage` | §4.3 |
 | `head_sender` | `session.head` with the attested caller's effective delivery grant in `sender`; absence means no grant | §4.3 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
+| `app_readers` | Plan-named read admission; adds no operation of its own | §9.19 |
 | `send_status` | `send.status` | §9.8 |
 | `user_commands` | `session.user_command`, `session.user_command_status` | §9.10 |
 | `turn_directives` | `session.send` with `directives`; its answer on `run.result` and `run.status` where served | §9.9 |
@@ -357,6 +358,9 @@ particular implementation.
 ## 4. `transcript_reads`: `session.read` and `session.head`
 
 ### 4.1 The request
+
+Read admission follows §9.19 when the plan carries `readers`; without that
+member it keeps that runner's current read admission.
 
 `{from_ordinal?, after_mid?, lineage_id?, limit?, max_bytes?,
 include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
@@ -731,7 +735,7 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   (`read::HeadInput`, added in 0.5.1) describes what a send that names no
   model can carry. `attachments` is `yes`, `no` or `unknown`, decoded open
   (an unknown value reads as `unknown`). `modalities` come from the model
-  catalog (Fusiform's `capability.input_modalities`); `mime_types` come only
+  catalog (its per-model `capability.input_modalities`); `mime_types` come only
   from the runner's own provider adapter, and absent they mean the
   modalities are accepted but the exact types are unknown. A fact the runner
   lacks is `unknown`, never `no`; `no` is a known fact, such as a runner that
@@ -764,10 +768,13 @@ include_originals?, view?, media?, include_rich_ui?}` (`ReadRequest`). Three mod
   `HeadMeta::sender_grant` (`read::SenderGrant`: `Granted`, `NoGrant`,
   `Unknown`) to make this distinction. It is independent of lineage.
 - [pinned] `sender` uses the plan the runner would check on that caller's
-  next send. After an accepted `session.refresh` takes effect, this is the
-  effective plan, not the original frozen bytes: `sender` never disagrees
+  next send. From durable `session.refresh` acceptance, this is the latest
+  accepted plan's sender list, even while its model input remains pending
+  (§10.2), not the original frozen bytes: `sender` never disagrees
   with the next send's grant check. A runner declaring `head_sender` must
-  report `sender` to the owner and every caller named by the plan. The owner
+  report `sender` on every `session.head` request it admits from the owner
+  or a caller named by the plan; whether it admits that request is the read
+  rule (§9.19 when the plan carries `readers`). The owner
   receives `owner: true`, every mode the runner would accept from the owner
   on its next send, and `interrupt: true`. A session with no plan reports
   `sender` only to its owner.
@@ -1310,7 +1317,7 @@ display-ready row for an app's reader on a runner declaring
   block's index for `anthropic-messages`, the part's `id` for
   `opencode-aisdk`): `text {text}`, `reasoning {text}`, `tool_call
   {tool_call_id, name, arguments, arguments_truncated?, call_key?,
-  schema_pin?}` with `arguments`
+  schema_pin?, started_at?, finished_at?, unanswered?}` with `arguments`
   the call's arguments as compact JSON text (`call_key` and `schema_pin`
   only on a runner declaring `call_identity`, §9.16), `tool_result {tool_call_id,
   is_error?, content, truncated?, files?}`, `file {media? | url, mime?,
@@ -1326,7 +1333,8 @@ display-ready row for an app's reader on a runner declaring
   it; an `anthropic-messages` body names none),
   `client_message_id` (§9.11) and `sender` (below), and on a runner
   declaring `call_identity` each tool call's `call_key` and `schema_pin`
-  (§9.16). The conformance kit
+  (§9.16), and each tool call's stored times and unanswered outcome (§4.7.1).
+  The conformance kit
   checks that a served row equals the function applied to the same entry's
   raw form, with only those members taken from the served row. This applies
   to the profiles for which `display::projects(profile)` is true:
@@ -1370,6 +1378,24 @@ display-ready row for an app's reader on a runner declaring
 - [pinned] Nothing new rides on stored message bodies or on the default
   `session.read` entry: everything this section adds is on the display row
   or the request.
+
+### 4.7.1 Tool times and unanswered outcomes
+
+- [pinned] A display row's `tool_call` part (`display::ToolCallPart`) may
+  carry `started_at`, the call's dispatch time, and `finished_at`, the time
+  its answer was recorded. Both are integer milliseconds since the Unix
+  epoch. A call with no stored times carries neither: a runner never invents
+  a time from another clock. A parallel batch reports each call's own answer
+  time, not the batch's.
+- [pinned] A call ended without an answer when its provider never replied
+  to it: the run was interrupted or cancelled while it was outstanding, it
+  was denied, or it was never dispatched, even if the runner then stored a
+  synthetic result for the model. Such a call may carry `unanswered`, a
+  string naming why. Known values are `interrupted`, `cancelled`, `denied`
+  and `not_executed`; readers keep an unknown value as-is.
+- [pinned] Each of these members is optional, omitted when absent and never
+  `null`. Without them the display row's bytes are unchanged. These members
+  belong on the display row, never on the stored message body.
 
 ### 4.8 Counting messages per host
 
@@ -2827,7 +2853,7 @@ nothing. `SendRequest::structured_output()` checks the value itself, then
   and the reason is never discovered from a provider error.
 - [pinned] `reason` is present only on `best_effort`. For runners it is a
   closed set (`structured_output::reasons`): `catalog_unknown` (the model
-  catalog does not say whether the route supports schemas; Fusiform's per-row
+  catalog does not say whether the route supports schemas; the catalog's per-row
   `capability.structured_output`, where absent means unknown, is that
   source), `route_unsupported` (the catalog says it does not),
   `schema_outside_subset`, `mode_not_enforceable` (the route enforces
@@ -3682,7 +3708,9 @@ say who may send and which texts are system text.
 - [pinned] The plan's optional `senders: [{module, idle_start?, interrupt?,
   templates?}]` (`delivery_order::PlanSender`) names the modules other than
   the owner whose sends the session admits, and the templates each may use.
-  Each entry, its grants included, is frozen at admission with the plan.
+  Each entry, its grants included, is frozen at admission with the plan,
+  then replaced at durable `session.refresh` acceptance, not at the next run
+  (§10.2's sender-admission exception).
   It is malformed (a module twice, a template id twice within a sender, a
   placeholder without a slot or a slot without a placeholder, an integer
   slot with `min` over `max`, an enum with no value, an unknown member or
@@ -3691,6 +3719,8 @@ say who may send and which texts are system text.
   at admission `invalid_params {field: "plan.senders"}`, writing nothing
   (`delivery_order::check_plan`). The owner's own templates, when it has
   any, are an entry naming the owner.
+- [pinned] A sender grant grants no transcript reads. Plan-named readers
+  are a separate opt-in admission policy (§9.19 `app_readers`).
 - [pinned] On a runner that declares `delivery_order`, a send from anyone
   but the owner is admitted only when the plan names the sender, matched on
   the route's attested principal, never on a request field
@@ -4655,6 +4685,50 @@ froze for a run to every assistant reply the run writes.
 - [pinned] `test-vectors/llm-runner-v1/tool-upfront/` pins valid and absent
   members, declaration and shape refusals, and the exact stale-name detail.
 
+### 9.19 `app_readers`: plan-named readers
+
+- [pinned] `app_readers` is an opt-in describe group. A plan composer sends
+  the plan member `readers: [<principal>, ...]` only to a runner declaring
+  it. Each principal is a string, with the same exact matching as
+  `delivery_order::PlanSender.module` (§9.7). A malformed entry or duplicate
+  is refused at admission as `invalid_params {field: "plan.readers"}`,
+  writing nothing. A runner without the group refuses any plan carrying
+  `readers`, even an empty list, with the same error and no writes.
+- [pinned] A plan with no `readers` member keeps that runner's current read
+  admission. It does not require a runner to open or close anything it does
+  not already admit.
+- [pinned] When the plan carries `readers`, even an empty list, the read-only
+  operations `session.head`, `session.read`, `session.history`, `run.status`,
+  `role.describe` and `session.subscribe` admit only the listed principals
+  and the implicit readers below. Matching uses the route's attested opener
+  principal, never a request field. Every other principal is refused before
+  any work as `scope_owner_mismatch`.
+- [pinned] The implicit readers are the session's owner and the compaction
+  provider the session is currently using, named by the effective plan's
+  `compaction_item.provider`. That implicit provider grant switches only
+  when the rest of the plan, including `compaction_item`, applies at the next
+  run; the old provider keeps read access until that switch, so a running
+  compaction is not cut off mid-run. Plan-named senders may also
+  read `send.status` for their own sends only. Local operator tools on a
+  direct connection remain admitted for as long as the development admission
+  stands, on runners that admit them; a runner that never admits them need
+  not start. Development admission means that runner's existing permission
+  for local operator tools on direct connections; `app_readers` neither
+  creates that permission nor extends its lifetime. The plan need not list
+  these implicit readers, and listing one changes nothing.
+- [pinned] A listed reader gets nothing beyond the reads above. A read grant
+  never authorizes `session.send` (governed by the sender grants, §9.7),
+  `run.cancel` (owner-only unless `run_cancel_by_interrupt` admits a sender
+  holding the interrupt grant), `session.retract` (owner-only unless
+  `retract_own_send` admits a send's recorded sender), or another sender's
+  `send.status`. Other reads, such as `run.result` and `run.tool_calls`, keep
+  their own admission rules; `readers` restricts only the six operations
+  above and `send.status`.
+- [pinned] `readers` participates in the plan's identity. Like `senders`, it
+  is admission policy, not model input: both follow the single at-acceptance
+  rule in §10.2, not the next-run rule. `app_readers::check_plan` validates
+  the group gate and shape; `app_readers::admit` checks read admission.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -4779,7 +4853,9 @@ froze for a run to every assistant reply the run writes.
 - [pinned] The plan's optional `render_tags` member decides whether part
   tags are rendered to the model (§9.6); absent means off. Its optional
   `senders` member names the session's other senders and their templates
-  (§9.7); absent means the owner alone.
+  (§9.7); absent means the owner alone. Its optional `readers` member
+  restricts read admission on a runner declaring `app_readers` (§9.19);
+  absent keeps that runner's current read admission.
 
 ### 10.2 `session_change`: mid-session changes
 
@@ -4801,17 +4877,48 @@ every request, answer and refusal.
 
 **The next-run rule.**
 
-- [pinned] A change never applies inside a run that is already running.
+- [pinned] Except for sender and reader admission below, a change never
+  applies inside a run that is already running.
   The earliest it applies is the start of the next run, and the
   `immediately` rung means "from the next run". No step ever sees text or
   tools its run did not start with.
-- [pinned] A change applies at the start of the first run at or after its
-  rung's point: `immediately` at the next run; `on_prefix_rebuild`,
+- [pinned] Except for sender and reader admission, a change applies at the
+  start of the first run at or after its rung's point: `immediately` at the
+  next run; `on_prefix_rebuild`,
   `on_system_rebuild` and `on_history_rebuild` at the first run that starts
   with the prefix, the system text or the history rebuilt (a compaction
   fold, a model switch, a `session.flush_prefix`). Applying it moves
   `applied_generation` to its generation and sets `effective`, and clears
   `pending` (§10).
+
+**Sender and reader admission at acceptance.**
+
+- [pinned] Once a runner accepts `session.refresh` and makes that acceptance
+  durable, the refreshed plan's `senders` and `readers` govern admission
+  straight away, whatever the policy rung and even while a run is in progress. This
+  covers `delivery_order::admit`, `delivery_order::admit_delivery`, the
+  `interrupt` grant, `idle_start` and templates (§9.7), and read admission
+  (§9.19). Every other part of the plan keeps the next-run rule above: this
+  exception changes who may send or read, not the text or tools a run
+  started with. The offered-set gate that refuses calls to removed tools at
+  once (relaunch, below) is a separate rule and unchanged.
+- [pinned] Removing a sender or reader, or narrowing its grants, refuses its
+  later sends, reads or narrowed deliveries from acceptance on, subject to
+  §9.19's implicit readers and absent-member rule. Sends admitted before that
+  acceptance stay admitted; their delivery is not revisited.
+- [pinned] The latest accepted refresh generation supplies the governing
+  `senders` and `readers`. Replacing an earlier pending refresh replaces
+  both lists too; an identical repeat changes nothing. `delivery_order::effective_senders`
+  selects the sender list from the effective plan and latest accepted pending
+  plan; `session_change::admission_plan` selects the common admission policy.
+- [pinned] `session.head.sender` (`read::HeadSender`) answers the caller's
+  grant from that same list, including while the rest of the plan is pending.
+- [pinned] Neither `senders` nor `readers` is a `session_change` surface: a
+  change only to these lists touches neither `tools` nor `system_text`
+  (`session_change::surfaces`) and
+  never refuses `rung_unsupported`. A runner without `delivery_order` has no
+  senders, so the sender exception changes nothing for it. The reader
+  exception likewise changes nothing for a runner without `app_readers`.
 
 **`session.refresh {plan, policy, generation}`** (`RefreshRequest`, strict).
 
@@ -4822,15 +4929,17 @@ every request, answer and refusal.
 - [pinned] The runner fetches the new plan's items under one deadline,
   exactly as admission does (§10.1), and holds them as the pending change,
   replacing any change pending before. It applies the change at the rung's
-  point, under the next-run rule.
+  point under the next-run rule, except that senders and readers govern
+  admission from durable acceptance as above.
 - [pinned] The answer is `{accepted_generation, pending: {generation,
   policy}, run_in_progress, applies_from_next_run}` (`RefreshReply`):
-  - `applies_from_next_run` is true when the next run will use the new
-    plan: the `immediately` rung, or a rung whose point the session already
-    meets (a `session.flush_prefix` is waiting, say). It is false when the
-    change waits for a later rebuild; the current plan then stays live until
-    `session.baseline` shows `applied_generation` at or above the
-    generation;
+  - `applies_from_next_run` is true when the next run will use the rest of
+    the new plan: the `immediately` rung, or a rung whose point the session
+    already meets (a `session.flush_prefix` is waiting, say). It is false
+    when the change waits for a later rebuild; the rest of the current plan
+    stays live until `session.baseline` shows `applied_generation` at or
+    above the generation. Senders and readers are never deferred: they
+    govern admission from durable acceptance regardless of this flag;
   - `run_in_progress` says whether that next run is queued behind one
     running now.
 - [pinned] An identical repeat (the same generation, plan identity and
@@ -4873,6 +4982,8 @@ every request, answer and refusal.
   private host with the new plan, preserving history bytes, lineage and
   message ordinals. Several pending changes cost one restart. After success,
   `applied_generation` moves and `effective` names the new plan as usual.
+  Sender and reader admission do not wait for the relaunch or its success:
+  they follow the latest durably accepted refresh as above.
 - [pinned] Only declaring runners accept optional `required` on
   `session.refresh`, absent meaning false. Owners never send that field to
   a runner without `refresh_relaunch`: `RefreshRequest` stays strict and
@@ -4930,8 +5041,8 @@ every request, answer and refusal.
 
 **`session.flush_prefix {send_id}`** (`FlushPrefixRequest`, strict).
 
-- [pinned] Applies any pending change, whatever its policy, and drops the
-  frozen prefix, at the start of the next run, never mid-run. The answer is
+- [pinned] Applies the rest of any pending change, whatever its policy, and
+  drops the frozen prefix, at the start of the next run, never mid-run. The answer is
   `{pending_generation?}` (`FlushPrefixReply`): the pending change the flush
   will apply, absent when none is pending. Idempotent on `send_id`: a repeat
   gets the same answer.
@@ -5673,6 +5784,9 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 | `session_usage_unknown_fields_absent` | same groups; reasoning usage no scripted step reported stays absent, never zero |
 | `head_model_reflects_recorded_switch` | `queue`, `transcript_reads`; when the runner reports a model and the adapter can record a switch, the head follows that switch, not the frozen plan |
 | `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; a plan names A with neither flag and B with both; A gets supported modes minus `idle_start`, B gets all supported modes and interrupt, an unnamed caller gets no grant, and the owner gets all supported modes, interrupt and `owner: true`; an undeclared `head_sender` group or defaulted identity hooks are inapplicable, with no supported-mode-based fallback |
+| `refresh_added_sender_admitted_at_acceptance` | `session_change`, `delivery_order`, `queue`, `transcript_reads` and named-principal routes; an idle refresh admits the newly named sender before any next run; also checked mid-run when the adapter holds tool calls; prefers a deferred rung |
+| `refresh_removed_sender_refused_at_acceptance` | Same groups and routes; a removed sender is refused `scope_owner_mismatch` before another run, with no observable durable-state change |
+| `app_readers_listed_reader_admitted`, `app_readers_unlisted_reader_refused`, `app_readers_reader_cannot_send` | `app_readers`, `queue`, `transcript_reads` and named-principal routes; a listed reader can read head and transcript, an unlisted principal is refused both reads, and a read-only principal cannot send; not applicable by name without the groups or routes |
 | `call_identity_key_matches_attribution` | `call_identity`, `queue`, `transcript_reads`, either `dispatch_attribution` or `run_tool_calls`, and `history_display` with `host_history` or `live_events` with `streaming`; every display tool call and live tool event of two dispatched sibling calls carries the `call_key` §5 exposes for that call when `dispatch_attribution` is declared, otherwise the one `run.tool_calls` (§6.3) lists for the run that scenario's send started, matched by `tool_call_id`; not applicable without `call_identity` or when neither `dispatch_attribution` nor `run_tool_calls` is declared |
 | `call_identity_pin_frozen_at_dispatch` | as above; each entry of a dispatched call carries the `schema_pin` the tool provider received with it, and still does after the catalog changes the tool's definition and another run; the catalog half is reported unchecked when the adapter cannot change the definition |
 | `call_identity_denied_call_has_no_pin` | as above; a call denied before dispatch carries no `schema_pin`, and `call_key` exactly as §5 exposes it when `dispatch_attribution` is declared, otherwise as §6.3 exposes it for that run's call with the same `tool_call_id`; inapplicable without the adapter's denial fixture |

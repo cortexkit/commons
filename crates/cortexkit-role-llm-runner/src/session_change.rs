@@ -5,12 +5,20 @@
 //! a generation the owner chooses and a policy naming the rung
 //! ([`crate::rungs`]) at which it applies. `session.refresh_policy` changes
 //! the pending change's rung, and `session.flush_prefix` applies any pending
-//! change, and drops the frozen prefix, at the start of the next run.
+//! change's model input, and drops the frozen prefix, at the start of the
+//! next run.
 //!
-//! A change never applies inside a run that is already running: the
-//! earliest it applies is the start of the next run, and the `immediately`
+//! Except for sender and reader admission, a change never applies inside a
+//! run that is already running: the earliest it applies is the start of the
+//! next run, and the `immediately`
 //! rung means "from the next run". No step ever sees text or tools its run
 //! did not start with.
+//!
+//! The latest durably accepted refresh's `senders` and `readers` govern
+//! admission immediately, regardless of rung or a run in progress. Replacing
+//! a pending refresh replaces both lists; an identical repeat changes nothing.
+//! Already admitted sends stay admitted. Use [`admission_plan`] to select
+//! admission policy independently of the model-facing effective plan.
 //!
 //! After a lost reply, the owner reads `session.baseline`: its
 //! `accepted_generation`, `applied_generation`, `pending` and `effective`
@@ -23,6 +31,8 @@ use crate::{baseline::PendingChange, errors::PlanDriftDetail, rungs};
 
 /// The surfaces a change policy applies to, as a baseline's `rungs` names
 /// them and a `rung_unsupported` refusal reports them.
+/// Only model-facing tools and system text are surfaces. Changes solely to
+/// sender or reader admission touch neither and cannot refuse a policy rung.
 pub mod surfaces {
     /// The model-facing tool set.
     pub const TOOLS: &str = "tools";
@@ -129,10 +139,13 @@ pub struct RefreshReply {
     pub pending: PendingChange,
     /// Whether a run is running now, so the next run is queued behind it.
     pub run_in_progress: bool,
-    /// Whether the next run uses the new plan: the `immediately` rung, or a
-    /// rung whose point the session already meets. When false, the change
-    /// waits for a later rebuild, and the current plan stays live until
-    /// `session.baseline` shows `applied_generation` at or above it.
+    /// Whether the next run uses the rest of the new plan: the `immediately`
+    /// rung, or a rung whose point the session already meets. When false, the
+    /// change waits for a later rebuild, and the rest of the current plan
+    /// stays live until `session.baseline` shows `applied_generation` at or
+    /// above it.
+    /// Senders and readers are never deferred: both govern admission from
+    /// durable acceptance, regardless of this flag or a run in progress.
     pub applies_from_next_run: bool,
 }
 
@@ -413,6 +426,22 @@ pub fn check_send_drift(
             sent,
         ))
     }
+}
+
+/// The plan whose sender and reader admission policy governs now.
+///
+/// `effective` is the applied plan. `pending` must be the latest durably
+/// accepted refresh plan, not a fetched candidate awaiting acceptance. It
+/// wins regardless of rung, rebuild status or a run in progress. When that
+/// refresh applies, move its plan to `effective` and clear `pending`; when
+/// replaced, pass the replacement. Identical repeats do not change either.
+/// Do not use this helper to select model text, tools or other plan members:
+/// those still follow the next-run rule.
+pub fn admission_plan<'a>(
+    effective: &'a Map<String, Value>,
+    pending: Option<&'a Map<String, Value>>,
+) -> &'a Map<String, Value> {
+    pending.unwrap_or(effective)
 }
 
 #[cfg(test)]

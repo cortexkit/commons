@@ -558,6 +558,9 @@ is unchanged and prints nothing.
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
 | `describe_states_max_bytes` | `transcript_reads` |
 | `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; inapplicable without the describe group or `head_sender_identities` |
+| `refresh_added_sender_admitted_at_acceptance` | `session_change`, `delivery_order`, `queue`, `transcript_reads`, `head_sender_identities` and `send_fields_with_plan`; added sender's queue send is admitted before another run, also during a held run when `HoldToolCalls` is available; prefers a deferred rung |
+| `refresh_removed_sender_refused_at_acceptance` | Same groups and identity routes; removed sender is refused `scope_owner_mismatch` at acceptance with no observable durable-state change; each refresh case is not applicable by name without a required group or routes |
+| `app_readers_listed_reader_admitted`, `app_readers_unlisted_reader_refused`, `app_readers_reader_cannot_send` | `app_readers`, `queue`, `transcript_reads`, `head_sender_identities` and `send_fields_with_plan`, whose base plan must not grant the first identity a send; listed reader can read head and transcript, unlisted reader is refused, and a reader without a send grant cannot send; not applicable by name without a required group or routes |
 | `head_last_run_error_only_on_error` | `queue`, `transcript_reads` for fresh and completed heads; failed/recovered heads additionally require `run_ops`, `run_status` and the model-failure fixture; an error summary may accompany only an error state |
 | `head_last_run_error_matches_run_status` | `queue`, `transcript_reads`, `run_ops`, `run_status` and model-failure fixture; class, exact fractional retry seconds and reset equal the same run's `RunError`; inapplicable without the fixture |
 | `head_last_run_error_requires_last_run_state` | `queue`, `transcript_reads` for fresh and completed heads; failed/recovered heads additionally require `run_ops`, `run_status` and the model-failure fixture; an error summary cannot appear without `last_run_state`; an unobserved optional field remains inapplicable |
@@ -645,7 +648,9 @@ guarantees cannot be observed on the wire. `NARROWINGS` in `src/report.rs` lists
 every report prints them. In short:
 
 - The fetch plan's shape is not pinned (§10), so the runner adapter builds a
-  session's first-send fields and cases do not inspect the plan.
+  session's first-send fields. Cases change only the plan members their
+  contract section defines, such as `senders` and `readers`, and never
+  validate the rest.
 - Cases write sessions with `session.send` (absent `delivery`, meaning
   `queue`), and wait for runs through `session.head`, so cases that need a
   written session require `queue`, and cases that wait require
@@ -711,7 +716,8 @@ suite against its real process and unpaused clock.
   only through the `ttl_expired` token of advance notices, with entries on
   Setup's answer. A ride's `ttl_expired` cause, and the newest-entry rule
   across several entries, are checked only at unit level, against
-  `cache_ttl::lifetime` and its decision vectors.
+  `cortexkit_role_compaction_provider::cache_ttl::lifetime` and its decision
+  vectors.
 - `session.head`'s `input` has no live case; it is checked against the
   role crate's vectors.
 
@@ -1049,7 +1055,8 @@ The `output_refs_*` positive cases discover the runner's live `output_refs`
 declaration. They are **N/A**, not missing-capability skips, when it is absent.
 The exception is `output_refs_unsupported_plan`: it binds exactly runners that
 **do not** declare the group, and is N/A for advertisers. A non-advertising
-0.5.5 runner satisfies that refusal with one call to `output_refs::check_plan`
+0.5.5 runner satisfies that refusal with one call to
+`cortexkit_role_llm_runner::output_refs::check_plan`
 (or the request's `check_output_refs`) before any durable write, on every
 plan-carrying operation: `session.send`, `session.refresh` and `session.adopt`.
 Both explicit true and explicit false must be refused with
@@ -1080,8 +1087,9 @@ whose `role.describe` declares `call_identity`,
 and `call_identity_denied_call_has_no_pin` read every display history
 `tool_call` part (with `history_display` and `host_history`) and every replayed
 `tool_started` and `tool_finished` event (with `live_events` and `streaming`).
-They compare `call_key` with the call's `session.read` attribution (so they also
-need `queue`, `transcript_reads` and `dispatch_attribution`) and `schema_pin`
+They compare `call_key` with the call's attribution, from `session.read` with
+`dispatch_attribution` or else from `run.tool_calls` (so they also need `queue`
+and `transcript_reads`, plus either of those two groups) and `schema_pin`
 with the pin the adapter's tool provider received on the call
 (`dispatched_schema_pin`, required with the group). `change_tool_definition`
 installs `call_identity::CHANGED_DEFINITION` in the provider's catalog after

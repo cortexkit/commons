@@ -601,3 +601,14 @@ All content is invented. `errors.json` gains the `served_bytes_changed` row.
 `tool-upfront/` pins per-item `upfront` shape, its `tool_upfront` declaration
 gate and post-exclusion stale-name refusals. `tests/upfront.rs` checks every
 sample against the helpers and pins the pre-existing plan-vector bytes.
+
+## Read admission and tool-call metadata
+
+`app-readers/admission.json` pins principal strings, duplicate and shape
+refusals, the opt-in gate, implicit readers and read-only grants. Its directory
+README describes the cases. `app_readers::tests` consumes them.
+
+`display-tool-times.json` pins per-call dispatch and answer times for parallel
+calls and known and unknown unanswered outcomes. Display tests also compare
+every existing profile vector's serialized row bytes, with no new members
+when times and outcomes are absent.

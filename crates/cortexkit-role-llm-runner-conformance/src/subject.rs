@@ -826,7 +826,8 @@ pub trait LlmRunnerSubject: Harness {
         Ok(false)
     }
 
-    /// Two distinct, attested non-owner identities for the caller-grant case.
+    /// Two distinct, attested non-owner identities for caller-grant and
+    /// sender/reader admission cases, including refreshes before the next run.
     /// The kit names A without flags and B with both flags in a real plan.
     /// None keeps existing adapters inapplicable until they supply routes.
     fn head_sender_identities(&self) -> Option<[PlanSenderIdentity; 2]> {

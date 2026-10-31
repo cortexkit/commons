@@ -155,6 +155,11 @@ where
             "never_written_session_empty_head" => passed(self.never_written_head().await),
             "head_has_no_bodies" => passed(self.head_has_no_bodies().await),
             "head_sender_is_callers_effective_grant" => crate::head_sender::run(self).await,
+            "refresh_added_sender_admitted_at_acceptance"
+            | "refresh_removed_sender_refused_at_acceptance"
+            | "app_readers_listed_reader_admitted"
+            | "app_readers_unlisted_reader_refused"
+            | "app_readers_reader_cannot_send" => crate::admission::run(self, name).await,
             "head_incarnation_survives_cut_and_changes_on_recreation" => {
                 crate::incarnation::run(self).await
             }

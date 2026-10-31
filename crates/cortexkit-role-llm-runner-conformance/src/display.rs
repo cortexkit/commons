@@ -210,7 +210,9 @@ where
             // Under call_identity the runner adds a tool call's key and, for a
             // dispatched provider tool, its pin. The stored body carries
             // neither, so they're copied here and the call_identity cases
-            // check their values.
+            // check their values. Stored tool times and unanswered outcomes
+            // are runner metadata too; this projection check cannot infer them
+            // from the raw body.
             for (call, served) in expected
                 .tool_calls_mut()
                 .zip(shown.row.parts.iter().filter_map(|part| match part {
@@ -220,6 +222,9 @@ where
             {
                 call.call_key = served.call_key.clone();
                 call.schema_pin = served.schema_pin.clone();
+                call.started_at = served.started_at;
+                call.finished_at = served.finished_at;
+                call.unanswered = served.unanswered.clone();
             }
             if shown.row != expected {
                 return Err(format!(

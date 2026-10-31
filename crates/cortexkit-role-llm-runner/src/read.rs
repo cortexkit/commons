@@ -977,7 +977,8 @@ pub struct HeadMeta {
     /// Durable session spend, present only with the `session_usage` group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<crate::usage::SessionUsage>,
-    /// The attested caller's grant under the plan checked on its next send.
+    /// The attested caller's grant under the latest durably accepted plan,
+    /// including a pending refresh whose model input waits for a later run.
     /// With the `head_sender` group, absent means no grant for this caller;
     /// without the group, absent means unknown. Use [`Self::sender_grant`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1006,7 +1007,8 @@ pub struct HeadMeta {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeadSender {
-    /// Delivery-mode names exactly as the effective plan uses them.
+    /// Delivery-mode names exactly as the admission plan uses them
+    /// ([`crate::delivery_order::effective_senders`]), never deferred by a rung.
     pub modes: Vec<String>,
     pub interrupt: bool,
     /// Encoded only for the owner, as `owner: true`.

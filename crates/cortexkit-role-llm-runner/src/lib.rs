@@ -22,6 +22,7 @@
 #![forbid(unsafe_code)]
 
 pub mod adopt;
+pub mod app_readers;
 pub mod archive_prunes_reasoning;
 pub mod attachments;
 pub mod baseline;
@@ -137,8 +138,9 @@ pub mod ops {
     pub const SESSION_REFRESH: &str = "session.refresh";
     /// A new policy for the pending change. In `session_change`.
     pub const SESSION_REFRESH_POLICY: &str = "session.refresh_policy";
-    /// Drop the frozen prefix and apply any pending change on the next step,
-    /// whatever its policy. In `session_change`.
+    /// Drop the frozen prefix and apply the rest of any pending change at the
+    /// next run, whatever its policy. Admission lists already govern at
+    /// acceptance. In `session_change`.
     pub const SESSION_FLUSH_PREFIX: &str = "session.flush_prefix";
     /// Make the caller the owner of a session the host started with a plan
     /// already applied, without a prompt: no run starts and nothing is
@@ -352,6 +354,8 @@ pub mod capabilities {
     /// modes, plan-named senders and plan templates for system-authority
     /// text.
     pub const DELIVERY_ORDER: &str = "delivery_order";
+    /// Optional plan-named read admission. Adds no read operation of its own.
+    pub const APP_READERS: &str = "app_readers";
     /// `send.status`: what a re-send of a `send_id` would answer, read
     /// without re-sending the send's body.
     pub const SEND_STATUS: &str = "send_status";
@@ -441,6 +445,7 @@ pub mod capabilities {
         (SESSION_USAGE, &[ops::SESSION_HEAD]),
         (HEAD_SENDER, &[ops::SESSION_HEAD]),
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),
+        (APP_READERS, &[]),
         (SEND_STATUS, &[ops::SEND_STATUS]),
         (COMPACTION, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (TAG_CHECKPOINT, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
@@ -573,10 +578,16 @@ mod tests {
         ];
         for (group, group_ops) in capabilities::GROUPS {
             // Step events are plain bus publishes, not management-route ops,
-            // and call identity extends either of two ops, neither required.
+            // call identity extends either of two ops, neither required, and
+            // app readers restrict existing reads without adding any ops.
             assert_eq!(
                 group_ops.is_empty(),
-                [capabilities::STEP_EVENTS, capabilities::CALL_IDENTITY].contains(group),
+                [
+                    capabilities::STEP_EVENTS,
+                    capabilities::CALL_IDENTITY,
+                    capabilities::APP_READERS
+                ]
+                .contains(group),
                 "{group}"
             );
             for op in *group_ops {

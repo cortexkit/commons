@@ -543,6 +543,22 @@ pub fn check_plan<S: AsRef<str>>(
     Ok(())
 }
 
+/// The senders governing admission and `session.head.sender` now.
+///
+/// `pending` is the latest durably accepted refresh plan, if any, as in
+/// [`crate::session_change::admission_plan`]. Its complete sender list replaces
+/// the effective one at acceptance, even mid-run and under a deferred rung.
+/// An absent list removes all named senders. Use the result for [`admit`],
+/// [`admit_delivery`], interrupt and idle-start grants, template validation
+/// and the caller's [`crate::read::HeadSender`]. Never revisit sends already
+/// admitted under the earlier list.
+pub fn effective_senders(
+    effective: &Map<String, Value>,
+    pending: Option<&Map<String, Value>>,
+) -> Result<Vec<PlanSender>, &'static str> {
+    plan_senders(crate::session_change::admission_plan(effective, pending))
+}
+
 /// A send's admission on a runner that declares `delivery_order`. `caller`
 /// is the route's attested principal, `owner` the session's recorded owner
 /// (`None` before the first send), `senders` the plan's, and `modes` the

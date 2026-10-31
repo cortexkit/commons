@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.16.3
+
+- Pin llm-runner 0.7.41. Check that adding or removing a sender takes effect
+  as soon as the runner acknowledges the refresh, before another run starts, including an
+  addition during a held run when the adapter supports holding one.
+- Report both cases by name when their required groups are absent. Add a
+  faulty runner that waits until the next run to change senders, and tests
+  showing each case rejects that behavior by name.
+- Check listed and unlisted `app_readers` admission to head and transcript,
+  and that a read grant cannot send. Each case has its own faulty runner.
+- Allow stored tool times and unanswered outcomes beside the raw-body
+  projection. No existing adapter hook independently observes those stored
+  values, so their semantics are pinned by contract vectors, not a kit case.
+
 ## 0.16.2
 
 - Pins llm-runner `=0.7.40`. The `tool_upfront` and `output_refs` cases put

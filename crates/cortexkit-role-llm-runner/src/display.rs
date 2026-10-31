@@ -290,6 +290,18 @@ pub struct ToolCallPart {
     /// on any runner without the group. Opaque to readers: never parsed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_pin: Option<String>,
+    /// Dispatch time in integer milliseconds since the Unix epoch, when stored.
+    /// Never inferred from another clock or another call in a parallel batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<u64>,
+    /// Time this call's answer was recorded, in Unix epoch milliseconds.
+    /// A parallel batch uses each call's own answer time, not the batch's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<u64>,
+    /// Why the call ended without an answer: `interrupted`, `cancelled`,
+    /// `denied` or `not_executed`. Unknown values are retained unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unanswered: Option<String>,
 }
 
 /// A tool result. `content` is its text: a string result as stored, or the
@@ -338,6 +350,24 @@ pub struct OtherPart {
 }
 
 impl ToolCallPart {
+    /// Record this call's stored dispatch time, in Unix epoch milliseconds.
+    pub fn with_started_at(mut self, started_at: u64) -> Self {
+        self.started_at = Some(started_at);
+        self
+    }
+
+    /// Record this call's stored answer time, in Unix epoch milliseconds.
+    pub fn with_finished_at(mut self, finished_at: u64) -> Self {
+        self.finished_at = Some(finished_at);
+        self
+    }
+
+    /// Record an unanswered outcome, preserving even an unknown value.
+    pub fn with_unanswered(mut self, unanswered: impl Into<String>) -> Self {
+        self.unanswered = Some(unanswered.into());
+        self
+    }
+
     pub fn with_output_refs(mut self, descriptor: crate::output_refs::Descriptor) -> Self {
         self.output_refs = Some(descriptor);
         self
@@ -515,6 +545,9 @@ fn arguments_part(
         arguments_truncated,
         call_key: None,
         schema_pin: None,
+        started_at: None,
+        finished_at: None,
+        unanswered: None,
     })
 }
 
@@ -1534,6 +1567,71 @@ mod tests {
             );
         }
         assert_eq!(seen, (true, true, true), "every shape has a vector");
+    }
+
+    #[test]
+    fn tool_times_and_unanswered_outcomes_round_trip_without_inventing_times() {
+        let file: Value = serde_json::from_str(include_str!(
+            "../test-vectors/llm-runner-v1/display-tool-times.json"
+        ))
+        .unwrap();
+        for case in file["rows"].as_array().unwrap() {
+            let row: DisplayRow = vectors::round_trip(case["name"].as_str().unwrap(), &case["row"]);
+            for part in &row.parts {
+                let DisplayPart::ToolCall(call) = part else {
+                    panic!("fixture must hold tool calls");
+                };
+                let mut built = ToolCallPart::new(
+                    &call.part,
+                    &call.tool_call_id,
+                    &call.name,
+                    &serde_json::json!({}),
+                    None,
+                );
+                assert_eq!(built.started_at, None);
+                assert_eq!(built.finished_at, None);
+                assert_eq!(built.unanswered, None);
+                if let Some(time) = call.started_at {
+                    built = built.with_started_at(time);
+                }
+                if let Some(time) = call.finished_at {
+                    built = built.with_finished_at(time);
+                }
+                if let Some(reason) = &call.unanswered {
+                    built = built.with_unanswered(reason);
+                }
+                assert_eq!(&built, call);
+            }
+        }
+    }
+
+    #[test]
+    fn existing_display_vectors_keep_their_bytes_without_tool_times() {
+        for file in [
+            "display-anthropic-messages.json",
+            "display-opencode-aisdk.json",
+            "display-opencode-v2.json",
+            "display-pi.json",
+        ] {
+            let file = vectors::load(file);
+            for case in vectors::cases(&file, "rows") {
+                let row: DisplayRow = serde_json::from_value(case["row"].clone()).unwrap();
+                for part in &row.parts {
+                    if let DisplayPart::ToolCall(call) = part {
+                        assert_eq!(
+                            (call.started_at, call.finished_at, &call.unanswered),
+                            (None, None, &None)
+                        );
+                    }
+                }
+                assert_eq!(
+                    serde_json::to_vec(&serde_json::to_value(row).unwrap()).unwrap(),
+                    serde_json::to_vec(&case["row"]).unwrap(),
+                    "{}",
+                    case["name"]
+                );
+            }
+        }
     }
 
     #[test]

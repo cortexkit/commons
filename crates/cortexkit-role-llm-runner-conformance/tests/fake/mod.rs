@@ -175,6 +175,11 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub refreshed_senders_wait_for_next_run: bool,
+    pub declare_app_readers: bool,
+    pub app_readers_reject_listed: bool,
+    pub app_readers_admit_unlisted: bool,
+    pub app_readers_reader_can_send: bool,
     pub service_tier: ServiceTierDefect,
     pub part_edits_opt_in: bool,
     pub part_edits_ignore_truncate: bool,
@@ -1035,6 +1040,7 @@ struct Sess {
     left: Vec<Msg>,
     /// The non-owner senders the session's admitted plan names.
     senders: Vec<order::PlanSender>,
+    readers: Option<Vec<String>>,
     /// Accepted `delivery_order` sends, keyed by sender and `send_id`, and
     /// those keys in arrival order.
     ordered: BTreeMap<String, Queued>,
@@ -1558,6 +1564,10 @@ impl Module {
                     plan_digest: record["plan_digest"].as_str().map(str::to_owned),
                     tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                     senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
+                    readers: record
+                        .get("readers")
+                        .filter(|value| !value.is_null())
+                        .map(|value| serde_json::from_value(value.clone()).unwrap()),
                     render_tags: record["render_tags"] == json!(true),
                     output_refs_enabled: record["output_refs_enabled"] == json!(true),
                     rich_ui_plan: record["rich_ui_plan"] == json!(true),
@@ -2824,6 +2834,27 @@ impl Module {
         }
         if matches!(
             method,
+            ops::SESSION_HEAD
+                | ops::SESSION_READ
+                | ops::SESSION_HISTORY
+                | ops::RUN_STATUS
+                | ops::ROLE_DESCRIBE
+                | ops::SESSION_SUBSCRIBE
+        ) {
+            if let Some(sess) = self.sessions.lock().unwrap().get(session) {
+                if let Some(readers) = &sess.readers {
+                    let listed = readers.contains(&stamp.principal);
+                    let admitted = stamp.principal == sess.owner
+                        || (listed && !self.world.defects.app_readers_reject_listed)
+                        || (!listed && self.world.defects.app_readers_admit_unlisted);
+                    if !admitted {
+                        return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
+                    }
+                }
+            }
+        }
+        if matches!(
+            method,
             ops::SESSION_SEND | ops::SESSION_REFRESH | ops::SESSION_ADOPT
         ) {
             if let Some(plan) = params.get("plan") {
@@ -3622,7 +3653,13 @@ impl Module {
             request.retention = old.as_ref().and_then(|s| s.retention);
         }
         if let Some(sess) = &existing {
-            if sess.owner != stamp.principal {
+            if sess.owner != stamp.principal
+                && !(self.world.defects.app_readers_reader_can_send
+                    && sess
+                        .readers
+                        .as_ref()
+                        .is_some_and(|readers| readers.contains(&stamp.principal)))
+            {
                 if !self.world.serves(groups::DELIVERY_ORDER) {
                     return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
                 }
@@ -3757,6 +3794,7 @@ impl Module {
             for check in [
                 cortexkit_role_llm_runner::tags::check_plan(plan, &self.world.groups),
                 order::check_plan(plan, &self.world.groups),
+                cortexkit_role_llm_runner::app_readers::check_plan(plan, &self.world.groups),
             ] {
                 if let Err(field) = check {
                     return Ok(invalid(field));
@@ -3783,6 +3821,7 @@ impl Module {
                         "tools": tools,
                         "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("tool_items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
                         "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
+                        "readers": request.plan.as_ref().and_then(|plan| plan.get("readers")),
                         "render_tags": request.plan.as_ref().and_then(|plan| plan.get(cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS)),
                         "rich_ui_plan": rich_ui_plan, "rich_ui": rich_ui,
                         "plan_digest": request.plan.as_ref().map(plan_digest) }),
@@ -5532,6 +5571,11 @@ impl FakeSubject {
                         .filter_map(|c| c.group())
                         .map(str::to_owned)
                         .chain(self.held_calls_group.then(|| groups::HELD_CALLS.to_owned()))
+                        .chain(
+                            self.defects
+                                .declare_app_readers
+                                .then(|| groups::APP_READERS.to_owned()),
+                        )
                         .chain(
                             self.defects
                                 .declare_retract_own_send

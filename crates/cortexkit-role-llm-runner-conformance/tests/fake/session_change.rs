@@ -132,6 +132,14 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                 senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
             });
+            if record["defer_senders"] != true {
+                sess.senders =
+                    serde_json::from_value(record["senders"].clone()).unwrap_or_default();
+            }
+            sess.readers = record
+                .get("readers")
+                .filter(|value| !value.is_null())
+                .map(|value| serde_json::from_value(value.clone()).unwrap());
         }
         "refresh_policy" => {
             change.policies.insert(
@@ -311,6 +319,8 @@ impl Module {
             json!({ "kind": "refresh", "generation": request.generation,
                     "policy": request.policy, "digest": digest, "tools": names,
                     "senders": request.plan.get("senders").cloned().unwrap_or_else(|| json!([])),
+                    "defer_senders": defects.refreshed_senders_wait_for_next_run,
+                    "readers": request.plan.get("readers"),
                     "answer": answer }),
         )?;
         if running && request.policy == rungs::IMMEDIATELY && defects.refresh_applies_mid_run {

@@ -1,0 +1,29 @@
+{
+  "rows": [
+    {
+      "name": "parallel_calls_keep_their_own_answer_times",
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {"type": "tool_call", "part": "0", "tool_call_id": "first", "name": "lookup", "arguments": "{}", "started_at": 1700000000000, "finished_at": 1700000000010},
+          {"type": "tool_call", "part": "1", "tool_call_id": "second", "name": "lookup", "arguments": "{}", "started_at": 1700000000000, "finished_at": 1700000000090}
+        ]
+      }
+    },
+    {
+      "name": "unanswered_outcomes_are_open_strings",
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {"type": "tool_call", "part": "0", "tool_call_id": "a", "name": "lookup", "arguments": "{}", "started_at": 1700000000000, "unanswered": "interrupted"},
+          {"type": "tool_call", "part": "1", "tool_call_id": "b", "name": "lookup", "arguments": "{}", "unanswered": "cancelled"},
+          {"type": "tool_call", "part": "2", "tool_call_id": "c", "name": "lookup", "arguments": "{}", "unanswered": "denied"},
+          {"type": "tool_call", "part": "3", "tool_call_id": "d", "name": "lookup", "arguments": "{}", "unanswered": "not_executed"},
+          {"type": "tool_call", "part": "4", "tool_call_id": "e", "name": "lookup", "arguments": "{}", "unanswered": "future_outcome"}
+        ]
+      }
+    }
+  ]
+}

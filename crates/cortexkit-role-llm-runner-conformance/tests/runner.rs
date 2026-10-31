@@ -544,6 +544,12 @@ const INTERRUPT_CASES: &[&str] = &[
 const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if (ADMISSION_REFRESH_CASES.contains(&case) || APP_READER_CASES.contains(&case))
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason.starts_with("runner does not declare ") || reason == "adapter supplies no named-principal routes")
+    {
+        return;
+    }
     let submit_variant_reason = match case {
         "structured_output_streamed_siblings" => Some("submit_streamed_siblings is not declared; the strict rule is checked by structured_output_sibling_never_dispatched"),
         "structured_output_sibling_never_dispatched" => Some("submit_streamed_siblings is declared; the streamed rule is checked by structured_output_streamed_siblings"),
@@ -3137,6 +3143,192 @@ async fn head_sender_defect(defects: Defects, expected: Option<&str>) {
 #[tokio::test]
 async fn head_sender_correct_runner_passes() {
     head_sender_defect(Defects::default(), None).await;
+}
+
+const ADMISSION_REFRESH_CASES: &[&str] = &[
+    "refresh_added_sender_admitted_at_acceptance",
+    "refresh_removed_sender_refused_at_acceptance",
+];
+const APP_READER_CASES: &[&str] = &[
+    "app_readers_listed_reader_admitted",
+    "app_readers_unlisted_reader_refused",
+    "app_readers_reader_cannot_send",
+];
+
+fn admission_subject(defects: Defects) -> FakeSubject {
+    let mut subject = declaring(Capability::DeliveryOrder, defects);
+    subject.capabilities.insert(Capability::SessionChange);
+    subject.head_sender_fixtures = true;
+    subject
+}
+
+#[tokio::test]
+async fn refresh_sender_acceptance_correct_runner_passes_idle_and_held_run() {
+    let report = run(&admission_subject(Defects::default())).await;
+    for name in ADMISSION_REFRESH_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn refresh_sender_acceptance_next_run_only_runner_fails_both_cases_by_name() {
+    let report = run(&admission_subject(Defects {
+        refreshed_senders_wait_for_next_run: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, ADMISSION_REFRESH_CASES[0]).contains("scope_owner_mismatch"));
+    assert!(failed(&report, ADMISSION_REFRESH_CASES[1]).contains("not refused"));
+    assert_none_failed_but(&report, ADMISSION_REFRESH_CASES);
+}
+
+#[tokio::test]
+async fn refresh_sender_acceptance_each_missing_group_is_inapplicable_by_name() {
+    for missing in [
+        Capability::SessionChange,
+        Capability::DeliveryOrder,
+        Capability::Queue,
+        Capability::TranscriptReads,
+    ] {
+        let mut subject = admission_subject(Defects::default());
+        subject.capabilities.remove(&missing);
+        let report = run(&subject).await;
+        for name in ADMISSION_REFRESH_CASES {
+            assert!(
+                matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason })
+                if reason.contains(missing.group().unwrap())),
+                "{}",
+                report.render()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn app_readers_correct_runner_passes_all_cases() {
+    let report = run(&admission_subject(Defects {
+        declare_app_readers: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in APP_READER_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+async fn app_reader_fault(defects: Defects, expected: &str) {
+    let report = run(&admission_subject(Defects {
+        declare_app_readers: true,
+        ..defects
+    }))
+    .await;
+    assert!(!failed(&report, expected).is_empty());
+    for name in APP_READER_CASES.iter().filter(|name| **name != expected) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[expected]);
+}
+
+#[tokio::test]
+async fn app_readers_rejecting_listed_reader_fails_by_name() {
+    app_reader_fault(
+        Defects {
+            app_readers_reject_listed: true,
+            ..Defects::default()
+        },
+        APP_READER_CASES[0],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn app_readers_admitting_unlisted_reader_fails_by_name() {
+    app_reader_fault(
+        Defects {
+            app_readers_admit_unlisted: true,
+            ..Defects::default()
+        },
+        APP_READER_CASES[1],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn app_readers_allowing_reader_send_fails_by_name() {
+    app_reader_fault(
+        Defects {
+            app_readers_reader_can_send: true,
+            ..Defects::default()
+        },
+        APP_READER_CASES[2],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn app_readers_undeclared_group_is_inapplicable_by_name() {
+    let report = run(&admission_subject(Defects::default())).await;
+    for name in APP_READER_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "runner does not declare app_readers"),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn refresh_sender_acceptance_immediately_only_runner_passes() {
+    let report = run(&admission_subject(Defects {
+        states_only_immediately: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in ADMISSION_REFRESH_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn admission_named_route_fixture_absent_is_inapplicable_by_name() {
+    let mut subject = admission_subject(Defects {
+        declare_app_readers: true,
+        ..Defects::default()
+    });
+    subject.head_sender_fixtures = false;
+    let report = run(&subject).await;
+    for name in ADMISSION_REFRESH_CASES.iter().chain(APP_READER_CASES) {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "adapter supplies no named-principal routes"),
+            "{}",
+            report.render()
+        );
+    }
 }
 
 #[tokio::test]
