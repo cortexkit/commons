@@ -1,0 +1,1 @@
+{"expect":{"error":{"code":"invalid_params","field":"memory_mib"}},"request":{"command":"printf hello","cwd":"/example/repo","env":{},"memory_mib":263168,"repository_root":"/example/repo","siblings":[],"workspace_key":"example-task"}}

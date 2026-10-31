@@ -160,6 +160,11 @@ pub struct RunRequest {
     /// runner advertising [`PROGRESS_CAPABILITY`]. Omitted when false.
     #[serde(default, skip_serializing_if = "is_false")]
     pub progress: bool,
+    /// Stated job memory in MiB, in whole GiB from 1,024 to [`MEMORY_MAX_MIB`].
+    /// Send only to a runner advertising [`MEMORY_CAPABILITY`]. When absent,
+    /// the runner applies its default of 2 GiB per vCPU.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_mib: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -186,6 +191,15 @@ struct RunRequestInput {
     resume_from_seq: Option<u64>,
     #[serde(default)]
     progress: bool,
+    #[serde(default, deserialize_with = "deserialize_memory_mib")]
+    memory_mib: Option<u64>,
+}
+
+fn deserialize_memory_mib<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    Option::<u64>::deserialize(deserializer)
+        .map_err(|error| serde::de::Error::custom(format!("memory_mib: {error}")))
 }
 
 impl<'de> Deserialize<'de> for RunRequest {
@@ -203,6 +217,13 @@ impl<'de> Deserialize<'de> for RunRequest {
             return Err(serde::de::Error::custom(
                 "resume_from_seq requires submission_key",
             ));
+        }
+        if let Some(memory_mib) = input.memory_mib {
+            if !(1024..=MEMORY_MAX_MIB).contains(&memory_mib) || memory_mib % 1024 != 0 {
+                return Err(serde::de::Error::custom(
+                    "memory_mib must be a whole GiB (multiple of 1024 MiB) from 1024 to 262144 MiB",
+                ));
+            }
         }
         Ok(Self {
             workspace_key: input.workspace_key,
@@ -222,6 +243,7 @@ impl<'de> Deserialize<'de> for RunRequest {
             submission_key: input.submission_key,
             resume_from_seq: input.resume_from_seq,
             progress: input.progress,
+            memory_mib: input.memory_mib,
         })
     }
 }
@@ -257,6 +279,7 @@ impl RunRequest {
             submission_key: None,
             resume_from_seq: None,
             progress: false,
+            memory_mib: None,
         }
     }
 
@@ -298,6 +321,18 @@ impl RunRequest {
     /// Whether display-only pre-acceptance progress is requested.
     pub fn progress(&self) -> bool {
         self.progress
+    }
+
+    /// State job memory only after checking [`MEMORY_CAPABILITY`]. Decoding
+    /// validates whole GiB from 1,024 MiB through [`MEMORY_MAX_MIB`].
+    pub fn with_memory_mib(mut self, memory_mib: u64) -> Self {
+        self.memory_mib = Some(memory_mib);
+        self
+    }
+
+    /// Stated memory in MiB, or `None` for the runner's 2 GiB per vCPU default.
+    pub fn memory_mib(&self) -> Option<u64> {
+        self.memory_mib
     }
 
     /// Set the scheduling weight hint.
@@ -882,6 +917,11 @@ pub const SUBMISSION_KEY_CAPABILITY: &str = "exec-remote-submission-key/v1";
 /// Capability a runner advertises when it can send opt-in progress before
 /// acceptance. A caller sends `RunRequest.progress: true` only after checking it.
 pub const PROGRESS_CAPABILITY: &str = "exec-remote-progress/v1";
+/// Capability a runner advertises for stated job memory. A caller sends
+/// `RunRequest.memory_mib` only after checking this advertisement.
+pub const MEMORY_CAPABILITY: &str = "exec-remote-memory/v1";
+/// Hard ceiling for stated job memory in MiB (256 GiB), not a default.
+pub const MEMORY_MAX_MIB: u64 = 262_144;
 /// Maximum requested returned-file bytes on a v2-only runner, and the default
 /// when `return_max_bytes` is absent from any `return_chunked` request, even v3.
 pub const RETURN_CHUNKED_MAX_BYTES_CAP: u64 = 10_485_760;
@@ -943,6 +983,85 @@ pub fn check_return_cap(request: &RunRequest, runner_max: u64) -> Result<u64, Re
         Err(ReturnCapRefusal::new(max_bytes))
     } else {
         Ok(requested)
+    }
+}
+
+/// JSON `detail` for an `invalid_params` error refusing stated job memory.
+/// This submit-call error has no job ID; no job has been accepted or started.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct MemoryCapRefusal {
+    field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_mib: Option<u64>,
+}
+
+impl MemoryCapRefusal {
+    /// Name the memory field and the runner's largest accepted value in MiB.
+    pub fn new(max_mib: u64) -> Self {
+        Self {
+            field: "memory_mib".into(),
+            max_mib: Some(max_mib),
+        }
+    }
+
+    /// The request field named by the error, normally `memory_mib`.
+    pub fn field(&self) -> &str {
+        &self.field
+    }
+
+    /// The runner's accepted maximum in MiB, or `None` if it was not reported.
+    pub fn max_mib(&self) -> Option<u64> {
+        self.max_mib
+    }
+}
+
+/// Check stated memory against the runner's limit before accepting a job.
+/// The contract ceiling applies even if `runner_max` is higher. Never clamp a
+/// request: put a refusal in the submit call's `invalid_params` error `detail`.
+/// Request syntax is checked on decode, as for `submission_key`.
+///
+/// `None` stays absent: the runner, not this crate, computes and applies its
+/// default of 2 GiB per vCPU. Capability negotiation also belongs to the caller
+/// and runner.
+pub fn check_memory_cap(
+    request: &RunRequest,
+    runner_max: u64,
+) -> Result<Option<u64>, MemoryCapRefusal> {
+    let max_mib = runner_max.min(MEMORY_MAX_MIB);
+    if request.memory_mib.is_some_and(|memory| memory > max_mib) {
+        Err(MemoryCapRefusal::new(max_mib))
+    } else {
+        Ok(request.memory_mib)
+    }
+}
+
+/// The job hit its own memory cap, including a burst account's burst cap.
+pub const OOM_KILL_CAUSE_JOB_LIMIT: &str = "job_limit";
+/// The host ran short and stopped the job furthest over its stated memory.
+pub const OOM_KILL_CAUSE_HOST_PRESSURE: &str = "host_pressure";
+/// The host or VM kernel killed the job outside the runner's memory cap.
+pub const OOM_KILL_CAUSE_HOST_OOM: &str = "host_oom";
+
+/// Memory-kill metadata, reported only when a job was killed for memory.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OomKill {
+    /// Open cause string. Unknown causes are retained verbatim on decode.
+    pub cause: String,
+}
+
+impl OomKill {
+    /// Record a memory-kill cause, including causes not yet named by this crate.
+    pub fn new(cause: impl Into<String>) -> Self {
+        Self {
+            cause: cause.into(),
+        }
+    }
+
+    /// Read the cause without discarding an unrecognised value.
+    pub fn cause(&self) -> &str {
+        &self.cause
     }
 }
 
@@ -1042,6 +1161,18 @@ pub struct TerminalRecord {
     /// Hosted placement and billing. Build-server jobs do not report this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hosted: Option<HostedUsage>,
+    /// Memory the job ran with in MiB: the stated value or the runner's default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_stated_mib: Option<u64>,
+    /// Peak working memory in MiB, excluding file cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_peak_working_mib: Option<u64>,
+    /// Seconds above stated memory, possible only on burst accounts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_over_s: Option<u64>,
+    /// Present only when the job was killed for memory; independent of hosting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oom_kill: Option<OomKill>,
 }
 
 impl TerminalRecord {
@@ -1073,6 +1204,10 @@ impl TerminalRecord {
             untracked_files: None,
             ignored_writes: None,
             hosted: None,
+            memory_stated_mib: None,
+            memory_peak_working_mib: None,
+            memory_over_s: None,
+            oom_kill: None,
         }
     }
 
@@ -1170,6 +1305,50 @@ impl TerminalRecord {
     /// Read hosted placement and billing, when reported.
     pub fn hosted(&self) -> Option<&HostedUsage> {
         self.hosted.as_ref()
+    }
+
+    /// Report the memory the job ran with, whether stated or defaulted.
+    pub fn with_memory_stated_mib(mut self, memory_stated_mib: u64) -> Self {
+        self.memory_stated_mib = Some(memory_stated_mib);
+        self
+    }
+
+    /// Read the job's stated or defaulted memory in MiB, if reported.
+    pub fn memory_stated_mib(&self) -> Option<u64> {
+        self.memory_stated_mib
+    }
+
+    /// Report peak working memory in MiB, excluding file cache.
+    pub fn with_memory_peak_working_mib(mut self, memory_peak_working_mib: u64) -> Self {
+        self.memory_peak_working_mib = Some(memory_peak_working_mib);
+        self
+    }
+
+    /// Read peak working memory in MiB, if reported.
+    pub fn memory_peak_working_mib(&self) -> Option<u64> {
+        self.memory_peak_working_mib
+    }
+
+    /// Report seconds spent above stated memory on a burst account.
+    pub fn with_memory_over_s(mut self, memory_over_s: u64) -> Self {
+        self.memory_over_s = Some(memory_over_s);
+        self
+    }
+
+    /// Read seconds above stated memory, if reported.
+    pub fn memory_over_s(&self) -> Option<u64> {
+        self.memory_over_s
+    }
+
+    /// Report a memory kill, without changing the command's exit outcome.
+    pub fn with_oom_kill(mut self, oom_kill: OomKill) -> Self {
+        self.oom_kill = Some(oom_kill);
+        self
+    }
+
+    /// Read memory-kill metadata, if reported.
+    pub fn oom_kill(&self) -> Option<&OomKill> {
+        self.oom_kill.as_ref()
     }
 }
 

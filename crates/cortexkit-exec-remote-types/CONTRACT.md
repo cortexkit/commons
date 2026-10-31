@@ -43,10 +43,12 @@ submission digests or add an execution-policy implementation.
 
 `progress` is excluded because it changes only display, not what runs. A caller
 may opt in or out on resubmission without changing the request digest.
+`memory_mib` is not cleared: changing memory, including after a memory kill,
+changes the job and requires a new submission key.
 
 The digest covers every caller-supplied field that affects what runs. The
 current set is `command`, `cwd`, `workspace_key`, `repository_root`, `siblings`,
-`platform`, `weight_hint`, `network`, `timeout`, `queue_wait_limit_s`, `env`, and
+`platform`, `weight_hint`, `memory_mib`, `network`, `timeout`, `queue_wait_limit_s`, `env`, and
 the return options `return_paths`, `return_max_bytes`, and `return_chunked`.
 The key identifies the record being compared and is unchanged on resubmit.
 An executor may leave out environment entries it never forwards to the command.
@@ -156,6 +158,52 @@ extends or resets a timer from progress, and never retries or cancels because of
 it. A progress record is never terminal, even for an unknown phase. Timing,
 ordering, capability and privacy requirements are runner/caller obligations;
 these types enforce only the record's shape and detail syntax.
+
+## Stated job memory
+
+`RunRequest.memory_mib` is optional stated memory in MiB, omitted when absent.
+Decoding rejects values that are not whole GiB (`memory_mib % 1024 == 0`), below
+1,024 MiB, or above `MEMORY_MAX_MIB` (262,144 MiB, 256 GiB), with an error naming
+`memory_mib`. The runner reports malformed requests as `invalid_params`.
+
+**Capability gate:** a caller never sends `memory_mib` to a runner without
+`MEMORY_CAPABILITY` (`exec-remote-memory/v1`). Older runners ignore unknown
+fields. When memory is absent, the runner applies its default of 2 GiB per vCPU;
+this crate neither computes nor inserts that default. Jobs exceeding their
+memory cap may be stopped; burst accounts may temporarily exceed stated memory.
+
+A runner may serve less than the ceiling. `check_memory_cap(request, runner_max)`
+checks explicit memory against the smaller of its limit and the ceiling, returning
+the unchanged `Option<u64>` or `MemoryCapRefusal`. Syntax is checked on decode;
+the helper leaves absent memory for the runner to default. Above-limit requests
+are refused, never clamped, on the submit call before any job exists, with
+`invalid_params` and JSON `detail` `{"field":"memory_mib","max_mib":16384}`.
+`max_mib` is the runner's accepted maximum in MiB, capped at the contract ceiling.
+The typed detail mirrors `ReturnCapRefusal`: it ignores unknown members and
+accepts absent `max_mib` as an unstated limit. The error has no job ID and says
+nothing about a previously submitted job's outcome. Unlike `progress` and
+`resume_from_seq`, `memory_mib` stays in the submission-key digest.
+
+`TerminalRecord` reports optional memory metadata for any execution location:
+
+- `memory_stated_mib`: memory the job ran with, either the stated value or the
+  runner's default, in MiB.
+- `memory_peak_working_mib`: peak working memory in MiB, excluding file cache.
+- `memory_over_s`: seconds above stated memory, possible only on burst accounts.
+- `oom_kill: {"cause":"job_limit"}`: present only when the job was killed for
+  memory. It supplements, rather than replaces, the actual exit `outcome`.
+
+All four fields default to absent and are omitted when absent; absence means
+not reported, not zero usage or proof that no memory kill occurred. Older
+readers ignore them. `OomKill.cause` is an open string retained verbatim,
+including unknown values. The named causes and their constants are:
+
+- `job_limit` (`OOM_KILL_CAUSE_JOB_LIMIT`): the job's own cap, its stated memory
+  or a burst account's burst cap.
+- `host_pressure` (`OOM_KILL_CAUSE_HOST_PRESSURE`): the machine ran short and
+  stopped the job furthest over its stated memory.
+- `host_oom` (`OOM_KILL_CAUSE_HOST_OOM`): the host or VM kernel killed the job
+  outside the runner's cap.
 
 ## Hosted placement and billing
 

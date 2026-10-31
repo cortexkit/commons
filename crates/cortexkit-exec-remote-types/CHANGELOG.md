@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.17
+
+- Add optional stated job memory with `with_memory_mib` and `MEMORY_CAPABILITY`
+  (`exec-remote-memory/v1`). Decoding accepts whole GiB from 1 GiB to the
+  256 GiB ceiling. Callers never send memory to a runner without the capability;
+  absent memory leaves the runner's default of 2 GiB per vCPU unchanged.
+- Add `check_memory_cap` and `MemoryCapRefusal` so runners refuse memory above
+  their own limit before a job exists, with numeric `max_mib`, never clamping.
+  Stated memory stays in the submission-key digest: changing it is a different
+  job, unlike changing display-only progress or the replay cursor.
+- Add optional terminal memory measurements and `OomKill` with an open cause
+  string. Report stated or defaulted memory, peak working memory excluding file
+  cache, seconds above stated memory on burst accounts, and memory kills caused
+  by the job limit, host pressure, or host/VM kernel. Unknown causes are kept.
+- Add checked request, refusal, terminal-memory, older-shape and memory-kill
+  samples with checksums. Existing requests and results keep their wire bytes
+  when the new fields are absent.
+
 ## 0.2.16
 
 - Add `RETURN_LARGE_CAPABILITY` (`exec-remote-return/v3`) for explicit chunked

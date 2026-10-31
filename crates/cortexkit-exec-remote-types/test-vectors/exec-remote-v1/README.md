@@ -261,6 +261,36 @@ Refusals, each by its error code:
 - `refuse-chunk-count-mismatch`: `chunk_count_mismatch`, because the manifest
   declares 3 chunks but only 2 arrived (with the correct bytes and digest).
 
+## Stated job memory
+
+`memory/` holds eleven crate-local cases with invented paths and job IDs. Each
+RFC 8785 `.jcs` has no trailing newline and a `.sha256` companion;
+`memory/SHA256SUMS` pins both. Typed tests check the complete inventory, hashes,
+canonical bytes, admission decisions, and terminal round-trips.
+
+- `request-memory`: a request stating 8,192 MiB (8 GiB). The sample holds only
+  the request; a caller sends one only after checking that the runner
+  advertises `exec-remote-memory/v1` (CONTRACT.md). Tests also pin its exact
+  ordinary JSON bytes.
+- `refuse-not-whole-gib`, `refuse-below-minimum`, `refuse-over-ceiling`: request
+  decode refusals for 1,025, 0, and 263,168 MiB. Each envelope carries the raw
+  `request` and an expected `invalid_params` error naming `memory_mib`.
+- `refuse-runner-limit`: the return-cap sample layout (`capabilities`,
+  `runner_max`, `request`, `expect`) with 32,768 MiB requested against a
+  16,384 MiB runner limit. The submit-call `invalid_params` detail is exactly
+  `{"field":"memory_mib","max_mib":16384}`, with no job ID.
+- `terminal-memory`: stated memory 8,192 MiB, peak working memory 9,000 MiB
+  excluding file cache, and three seconds above stated memory on a burst account.
+- `oom-job-limit`, `oom-host-pressure`, `oom-host-oom`, `oom-unknown-cause`:
+  terminal records with `oom_kill.cause` set to each named cause or
+  `future_memory_cause`. The unknown string is retained unchanged.
+- `terminal-older-shape`: a terminal record without any memory fields, which
+  decodes with all four absent and re-encodes without adding them.
+
+Absence of request memory leaves the 2 GiB per vCPU default to the runner.
+The submission-key tests separately show that memory changes the request digest,
+while display-only progress and the replay cursor do not.
+
 ## Large returned files
 
 `return-large/` holds 14 crate-local cases for `exec-remote-return/v3`, using

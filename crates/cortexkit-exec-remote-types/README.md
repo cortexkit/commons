@@ -65,6 +65,27 @@ for the cap, capability requirement, and outcome rules.
 `truncated_before_seq`. Base64 is standard and padded. A chunk may split a UTF-8
 character, so decoding never converts its payload to a string.
 
+### Stated job memory
+
+`RunRequest::with_memory_mib` / `memory_mib()` set/read optional stated job
+memory in MiB. Send it only after checking `MEMORY_CAPABILITY`
+(`exec-remote-memory/v1`). Decode requires whole GiB from 1,024 MiB through
+`MEMORY_MAX_MIB` (262,144 MiB); absence leaves the runner's 2 GiB per vCPU
+default to the runner. `check_memory_cap` checks explicit memory against a
+runner's limit and the ceiling without clamping, returning the stated option
+or a submit-call `MemoryCapRefusal` detail with `field: "memory_mib"` and
+numeric `max_mib`. Memory stays in the submission-key digest, so changing it
+requires a new key.
+
+`TerminalRecord` has optional `memory_stated_mib`, `memory_peak_working_mib`
+(excluding file cache), `memory_over_s` (burst accounts only), and `oom_kill`.
+Each has a `with_*` setter and accessor; absent values are omitted. `OomKill`
+keeps its open `cause` string, with constants `OOM_KILL_CAUSE_JOB_LIMIT`,
+`OOM_KILL_CAUSE_HOST_PRESSURE`, and `OOM_KILL_CAUSE_HOST_OOM`. Unknown causes
+are retained. These fields apply to any execution location, independently of
+hosted billing, and leave `Outcome` and `Killed` unchanged. See
+[`CONTRACT.md`](CONTRACT.md) for the limit-refusal and memory-kill rules.
+
 ### Idempotent submission
 
 A caller may set `RunRequest::with_submission_key` only after the executor
@@ -397,6 +418,13 @@ request, and three malformed records (121-byte detail, newline detail, non-`u64`
 phase time). Each has a `.sha256` companion and is pinned by the folder's
 `SHA256SUMS`. Valid requests and records round-trip byte for byte; malformed
 known progress records must fail decoding rather than becoming `Unknown`.
+
+`test-vectors/exec-remote-v1/memory/` adds eleven stated-memory cases: an exact
+request, three syntax refusals, a numeric runner-limit refusal, terminal memory
+measurements, each named memory-kill cause, an unknown cause, and an older terminal
+shape. Each `.jcs` has a `.sha256` companion and both are pinned by `SHA256SUMS`.
+Tests preserve unknown causes and old wire bytes and keep memory in the
+submission-key digest.
 
 `test-vectors/exec-remote-v1/return-large/` adds cap admission cases for v2-only
 and v3 runners, an older error without a stated limit, unchanged defaults, and

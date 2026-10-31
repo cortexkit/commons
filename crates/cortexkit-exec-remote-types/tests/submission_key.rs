@@ -258,6 +258,29 @@ fn submission_request_digest_ignores_progress() {
 }
 
 #[test]
+fn submission_request_digest_includes_memory_mib() {
+    let original = request()
+        .with_submission_key("example:task-0001")
+        .with_memory_mib(8192);
+    let larger = original.clone().with_memory_mib(16384);
+    let original_digest = Sha256::digest(canonical_submission_request(
+        serde_json::to_value(&original).unwrap(),
+    ));
+    assert_ne!(
+        original_digest,
+        Sha256::digest(canonical_submission_request(
+            serde_json::to_value(larger).unwrap()
+        ))
+    );
+    let mut absent = serde_json::to_value(original).unwrap();
+    absent.as_object_mut().unwrap().remove("memory_mib");
+    assert_ne!(
+        original_digest,
+        Sha256::digest(canonical_submission_request(absent))
+    );
+}
+
+#[test]
 fn keyed_refusals_have_distinct_job_ids() {
     let attached_case = vector("attached");
     let StreamRecord::Accepted(attached) = &attached_case.stream[0] else {
