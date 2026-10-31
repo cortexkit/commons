@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Requires subc-protocol 0.34 for development checks only; no API or wire change.
+
 ## 0.2.0
 
 Breaking, with `cortexkit-model-batch` 0.3.0: an item image may be a

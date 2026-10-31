@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.0
+
+- Requires subc-protocol 0.34; breaking because `ObservedFrame::Error` contains
+  its `ErrorBody` and call-mode interfaces expose its `CallMode`.
+- Pins tool-provider 0.14.0, re-exported as `wire`. No conformance-check changes.
+
 ## 0.13.1
 
 - Stop rejecting legacy replies merely because they decode as `ToolResult`;

@@ -7,7 +7,8 @@ kills do not establish real-process crash conformance. The in-process fake
 in this crate tests the runner, not any production provider.
 
 The suite's case inventory and role contract are in the wire crate's
-[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Versions 0.13.1 and 0.13.0
+[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.14.0 pairs with
+subc-protocol 0.34 and cortexkit-role-tool-provider 0.14.0. Versions 0.13.1 and 0.13.0
 pair with cortexkit-role-tool-provider 0.13.0. Version 0.12.1
 pairs with cortexkit-role-tool-provider 0.12.1. Version 0.12.0
 pairs with subc-protocol 0.33 and cortexkit-role-tool-provider 0.12.0. Version 0.11.0

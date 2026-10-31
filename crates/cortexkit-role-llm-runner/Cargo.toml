@@ -9,7 +9,7 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-llm-runner"
-version = "0.7.37"
+version = "0.7.38"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -31,7 +31,7 @@ cortexkit-rich-ui-syntax = { version = "0.3.0", path = "../cortexkit-rich-ui-syn
 
 [dev-dependencies]
 cortexkit-rich-ui-syntax = { version = "0.3.0", path = "../cortexkit-rich-ui-syntax", features = ["test-vectors"] }
-cortexkit-role-tool-provider = { version = "0.13.2", path = "../cortexkit-role-tool-provider", features = ["test-vectors"] }
+cortexkit-role-tool-provider = { version = "0.14.0", path = "../cortexkit-role-tool-provider", features = ["test-vectors"] }
 
 [[test]]
 name = "vectors_feature"

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0
+
+- Requires subc-protocol 0.34; breaking because `CallMode` and `ToolCallRequest`
+  are re-exported and public helpers use protocol types. No role wire change.
+
 ## 0.13.3
 
 - Add non-terminal `held` late entries so a provider can say that a call moved

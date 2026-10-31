@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- Requires subc-protocol 0.34; breaking because `Reply::Error` contains its
+  `ErrorBody`. Pins extractor 0.2.1. No conformance-check changes.
+
 ## 0.3.0
 
 - Depends on `cortexkit-role-extractor` 0.2.0, re-exported as `wire`, whose

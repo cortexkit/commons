@@ -6,7 +6,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-step-transform-provider = "0.4.1"
+cortexkit-role-step-transform-provider = "0.4.2"
 ```
 
 The [contract](CONTRACT.md) is normative. See the [role/conformance guide](../../docs/role-contracts.md) for the available suites and vector locations.

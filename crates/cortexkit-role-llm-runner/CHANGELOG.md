@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.38
+
+- Updates the development-only tool-provider dependency to 0.14 for its
+  subc-protocol 0.34 migration; no API or wire change.
+
 ## 0.7.37
 
 - Add CONTRACT §4.2.1 and `served_bytes`: a runner that reads from a host

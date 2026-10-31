@@ -657,7 +657,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -669,7 +669,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier-conformance"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-classifier",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -706,7 +706,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor-conformance"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-extractor",
@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.7.37"
+version = "0.7.38"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
@@ -738,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.15.42"
+version = "0.16.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -759,7 +759,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "cortexkit-role-llm-runner",
  "cortexkit-role-tool-provider",
@@ -771,7 +771,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing-conformance"
-version = "0.7.4"
+version = "0.8.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-routing",
@@ -783,7 +783,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-step-transform-provider"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "cortexkit-role-llm-runner",
  "serde",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.13.3"
+version = "0.14.0"
 dependencies = [
  "serde",
  "serde_jcs",
@@ -804,7 +804,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.13.1"
+version = "0.14.0"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",
@@ -2620,9 +2620,9 @@ dependencies = [
 
 [[package]]
 name = "subc-protocol"
-version = "0.33.0"
+version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "587cff68a0d5b98eb85a7231ce00e3a117e3e50314ad6823d42b802afa5461a3"
+checksum = "3583246114ab2ab1000d9297bd990ac42a35a1f47121353e7ff9df713cfc3631"
 dependencies = [
  "serde",
  "serde_json",

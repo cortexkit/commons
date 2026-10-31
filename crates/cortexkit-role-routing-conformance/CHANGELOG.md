@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.0
+
+- Requires subc-protocol 0.34; breaking because `Reply::Error` contains its
+  `ErrorBody`. Pins routing 0.5.6. No conformance-check changes.
+
 ## 0.7.4
 
 - Check tier-eligible account admission, fallback order and recorded chosen

@@ -8,7 +8,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.7.2"
+cortexkit-role-routing-conformance = "0.8.0"
 ```
 
 ```rust,ignore

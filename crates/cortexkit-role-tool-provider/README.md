@@ -6,14 +6,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = "0.13.3"
+cortexkit-role-tool-provider = "0.14.0"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = { version = "0.13.3", features = ["test-vectors"] }
+cortexkit-role-tool-provider = { version = "0.14.0", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_tool_provider::vectors::FILES` and a

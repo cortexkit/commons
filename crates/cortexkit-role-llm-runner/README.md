@@ -16,7 +16,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-llm-runner = "0.7.4"
+cortexkit-role-llm-runner = "0.7.38"
 ```
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.

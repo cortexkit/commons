@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.6
+
+- Requires subc-protocol 0.34 and tool-provider 0.14 for development checks
+  only; no API or wire change.
+
 ## 0.5.5
 
 - Add the service-tier capability group, plan-eligible selection with ordered

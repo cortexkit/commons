@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- Requires subc-protocol 0.34 for development checks only; no API or wire change.
+
 ## 0.4.1
 
 - Refresh the copied plan-composer admission cases: presets are now session

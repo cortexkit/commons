@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.0
+
+- Requires subc-protocol 0.34; breaking because `Reply::Error` contains its
+  `ErrorBody`. Pins classifier 0.5.1. No conformance-check changes.
+
 ## 0.6.0
 
 - Depends on `cortexkit-role-classifier` 0.5.0, re-exported as `wire`, whose

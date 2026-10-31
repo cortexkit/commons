@@ -6,14 +6,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-classifier = "0.5.0"
+cortexkit-role-classifier = "0.5.1"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-classifier = { version = "0.5.0", features = ["test-vectors"] }
+cortexkit-role-classifier = { version = "0.5.1", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_classifier::vectors::FILES` and a constant

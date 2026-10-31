@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.16.0
+
+- Requires subc-protocol 0.34; breaking because `Reply::Error` and
+  `SubscribeOutcome::Refused` contain its `ErrorBody`.
+- Pins llm-runner 0.7.38 and updates the development-only tool-provider
+  dependency to 0.14. No conformance-check changes.
+
 ## 0.15.42
 
 - Pin `cortexkit-role-llm-runner` 0.7.37. No conformance-case changes. The

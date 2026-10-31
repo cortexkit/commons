@@ -8,7 +8,7 @@
 # flags.
 [package]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.13.1"
+version = "0.14.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -19,10 +19,10 @@ publish = true
 [dependencies]
 async-trait = "0.1"
 cortexkit-role-harness = { version = "0.1.0", path = "../cortexkit-role-harness" }
-cortexkit-role-tool-provider = { version = "0.13.0", path = "../cortexkit-role-tool-provider", features = ["test-vectors"] }
+cortexkit-role-tool-provider = { version = "=0.14.0", path = "../cortexkit-role-tool-provider", features = ["test-vectors"] }
 futures-util = { version = "0.3", default-features = false }
 serde_json = "1"
-subc-protocol = "0.33"
+subc-protocol = "0.34"
 tokio = { version = "1", features = ["time"] }
 
 [dev-dependencies]
