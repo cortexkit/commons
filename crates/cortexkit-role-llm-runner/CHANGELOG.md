@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.39
+
+- Add the opt-in `tool_upfront` group and per-plan-item `upfront` list for
+  hosts that defer tool definitions. Add admission-validation helpers:
+  `upfront::check_plan` for the declaration and list shape, and
+  `upfront::resolve`, which reports listed names the item doesn't offer as
+  `plan_stale` differences. Neither changes the offered set.
+- Pin the rendering, provider-isolation and plan-identity rules in CONTRACT
+  §9.18 as runner requirements, and add tool-upfront vectors.
+
 ## 0.7.38
 
 - Updates the development-only tool-provider dependency to 0.14 for its

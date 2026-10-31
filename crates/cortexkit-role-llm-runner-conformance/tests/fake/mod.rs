@@ -622,6 +622,8 @@ pub struct Defects {
     pub rich_ui_head_leftover: bool,
     /// Two different stamps in one plan are admitted, the first one kept.
     pub rich_ui_conflict_accepted: bool,
+    pub upfront_filters_tools: bool,
+    pub upfront_accepts_stale: bool,
 }
 
 /// Recovery of a recorded assistant step whose tool calls were never sent.
@@ -3493,7 +3495,7 @@ impl Module {
                 Ok(jcs) => jcs,
                 Err(reply) => return Ok(reply),
             };
-        let tools: Vec<String> = match &existing {
+        let mut tools: Vec<String> = match &existing {
             Some(sess) => sess.tools.clone(),
             None => request
                 .plan
@@ -3501,6 +3503,35 @@ impl Module {
                 .and_then(|plan| serde_json::from_value(plan.get("tools")?.clone()).ok())
                 .unwrap_or_default(),
         };
+        if let Some(plan) = &request.plan {
+            if let Err(field) = cortexkit_role_llm_runner::upfront::check_plan(
+                &json!(plan),
+                self.world.serves(groups::TOOL_UPFRONT),
+            ) {
+                return Ok(invalid(&field));
+            }
+            for item in plan
+                .get("items")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(list) = item.get("upfront") {
+                    let list: Vec<String> = serde_json::from_value(list.clone()).unwrap();
+                    if let Err(stale) = cortexkit_role_llm_runner::upfront::resolve(
+                        item["provider"].as_str().unwrap(),
+                        &list,
+                        tools.iter().map(String::as_str),
+                    ) {
+                        if !self.world.defects.upfront_accepts_stale {
+                            return Ok(refuse(stale.code(), Some(stale.detail())));
+                        }
+                    } else if self.world.defects.upfront_filters_tools {
+                        tools.retain(|name| list.contains(name));
+                    }
+                }
+            }
+        }
         let frozen = match &structured_output {
             None => Value::Null,
             Some(structured_output) => {
@@ -5248,6 +5279,8 @@ pub struct FakeSubject {
     pub call_identity_group: bool,
     /// Declare `rich_ui_stamp`: runs carry their plan's rich UI stamp.
     pub rich_ui_stamp_group: bool,
+    pub upfront_group: bool,
+    pub upfront_plan_fixture: bool,
     /// Declare the submit-step variant that permits earlier streamed calls.
     pub submit_streamed_siblings_group: bool,
     /// Fix structured output, present or absent, on the first admitted send.
@@ -5403,6 +5436,8 @@ impl FakeSubject {
             output_refs_group: false,
             call_identity_group: false,
             rich_ui_stamp_group: false,
+            upfront_group: false,
+            upfront_plan_fixture: true,
             submit_streamed_siblings_group: false,
             structured_output_per_session_group: false,
             rich_ui_plan_fixture: true,
@@ -5528,6 +5563,7 @@ impl FakeSubject {
                             self.rich_ui_stamp_group
                                 .then(|| groups::RICH_UI_STAMP.to_owned()),
                         )
+                        .chain(self.upfront_group.then(|| groups::TOOL_UPFRONT.to_owned()))
                         .chain(
                             self.submit_streamed_siblings_group
                                 .then(|| groups::SUBMIT_STREAMED_SIBLINGS.to_owned()),
@@ -6324,6 +6360,40 @@ impl LlmRunnerSubject for FakeSubject {
             }
         }
         fields
+    }
+
+    async fn upfront_durable_state(
+        &self,
+        handle: &FakeHandle,
+        _session: &str,
+    ) -> Result<Vec<u8>, HarnessError> {
+        match std::fs::read(&handle.0.log) {
+            Ok(bytes) => Ok(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+            Err(error) => Err(HarnessError::new(error.to_string())),
+        }
+    }
+
+    fn upfront_plan_fields(
+        &self,
+        session: &str,
+        upfront: Option<&[String]>,
+    ) -> Option<Map<String, Value>> {
+        if self.without_plans || !self.upfront_plan_fixture {
+            return None;
+        }
+        let mut fields = self.send_fields(session, true);
+        let plan = fields.get_mut("plan")?;
+        plan["tools"] = json!([
+            SCRIPTED_TOOL,
+            cortexkit_role_llm_runner_conformance::upfront::OTHER_TOOL
+        ]);
+        plan["items"] =
+            json!([{"provider": self.tool_provider_module(), "preset": "default", "params": {}}]);
+        if let Some(upfront) = upfront {
+            plan["items"][0]["upfront"] = json!(upfront);
+        }
+        Some(fields)
     }
 
     fn send_fields_with_tools(

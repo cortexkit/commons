@@ -154,6 +154,7 @@ particular implementation.
 | Group | Ops (`capabilities::GROUPS`) | Section |
 |---|---|---|
 | `output_refs` | `session.output_refs`, `session.output_ref_read` (requires `tags`) | §9.13 |
+| `tool_upfront` | `session.send` with per-plan-item `upfront`; no added op | §9.18 |
 | `transcript_reads` | `session.read`, `session.head` | §4 |
 | `host_history` | `session.history` | §4.6 |
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
@@ -4608,6 +4609,47 @@ froze for a run to every assistant reply the run writes.
   conflict refusal.
 
 
+### 9.18 `tool_upfront`: initially loaded tool definitions
+
+- [pinned] `tool_upfront` is an opt-in `role.describe` group. A plan composer
+  carries `upfront` on an item only for a runner that declares the group.
+  A runner without it refuses a plan carrying the member on any item at
+  admission as `invalid_params {field: "plan.items[<i>].upfront"}`, where
+  `<i>` is the zero-based item index, and writes nothing.
+- [pinned] The member is `upfront: [<tool name>, ...]`, beside the item's
+  `provider`, `preset`, `params` and `optional`. It must be a non-empty array
+  of distinct, non-empty strings naming the provider's bare tool names, not
+  host-qualified aliases. This role defines no further tool-name grammar.
+  Any malformed list refuses that send with `invalid_params` naming the
+  same indexed field, before any write, even on an optional item.
+  `upfront::check_plan` checks the declaration and shape; the runner calls it
+  before fetching and builds the refusal from the field it returns.
+- [pinned] After fetching the item and applying that item's own exclusions,
+  every listed name must be a tool that item actually offers. A name not in
+  that set is staleness: refuse `plan_stale` whose `detail.differences`
+  holds one `{kind: "upfront", provider, name}` per missing name, in list
+  order (`upfront::UpfrontStale`). No admission refusal writes anything.
+  For an optional item that did not arrive, its list is not checked or
+  rendered, and its names are never compared against another item's tools.
+  The plan as sent, list included, is unchanged and still counts toward the
+  plan's identity. `upfront::resolve` compares an arrived item's list with
+  the offered names the runner passes it, after that item's exclusions.
+- [pinned] `upfront` is a rendering hint only, never provider input. The
+  runner does not forward it to the provider; `params` remain the
+  provider's, unchanged. On a host that defers tool definitions behind a
+  search, whatever renders the session's tool list gives the model each named
+  tool's full definition from the first turn on, on every turn, instead of
+  holding it behind the search.
+  The hint never adds a tool to the offered set and never removes one. A host
+  without deferral renders exactly as without the member. When the member is
+  absent, the host's own default applies.
+- [pinned] `upfront` is part of the plan and covered by the plan's identity.
+  Changing the list is a plan change, even if the offered set is unchanged,
+  with the same surface-change consequences as a tool-set change (§10),
+  including plan drift and the mid-session change rules where applicable.
+- [pinned] `test-vectors/llm-runner-v1/tool-upfront/` pins valid and absent
+  members, declaration and shape refusals, and the exact stale-name detail.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -4680,7 +4722,9 @@ froze for a run to every assistant reply the run writes.
 - [pinned] A runner declaring `plans` fetches the plan's items itself, with
   the composition, under one deadline, and admits the session only when every
   required item arrived, the staleness check passed and no tool names
-  collide. The plan and composition are passed to providers verbatim.
+  collide. The plan and composition are passed to providers verbatim except
+  for runner-only rendering hints such as per-item `upfront` (§9.18), which
+  are never forwarded; provider params remain unchanged.
 - [pinned] Admission refuses as: `fetch_unavailable {provider}`, retryable;
   `plan_stale`, naming the differences; `tool_name_collision {name, providers}`,
   naming the colliding model-facing name and every provider that offered it;
@@ -4690,6 +4734,11 @@ froze for a run to every assistant reply the run writes.
   `session.adopt` refuses a plan other than the one applied at host start
   with the same `plan_drift {frozen, sent}` (§9.5).
 - [pinned] Any refusal during admission writes nothing.
+- [pinned] Any item's `upfront` requires `tool_upfront` and a well-formed
+  list, or admission refuses `invalid_params` naming
+  `plan.items[<i>].upfront`. After that item's fetch and exclusions, missing
+  listed tools refuse `plan_stale` with `{kind: "upfront", provider, name}`
+  differences (§9.18). An optional item that did not arrive drops its list.
 - [pinned] A runner declaring `rich_ui_stamp` refuses a plan whose fetched
   system-text answers declare two different rich UI stamps as `plan_stale`,
   with one `{kind: "rich_ui", provider, rich_ui}` difference per stamped
@@ -5518,6 +5567,8 @@ Crash recovery may be runner-driven (the runner resumes the cut run) or sender-d
 
 | Case | Requires |
 |---|---|
+| `tool_upfront_preserves_offered_tools` | `tool_upfront`, `queue`, `transcript_reads`; a plan with a hint is admitted and offers exactly the same two tools to the scripted model as the plan without it; not applicable by name without the group or `upfront_plan_fields` |
+| `tool_upfront_stale_refused` | same requirements and a direct storage snapshot through `upfront_durable_state`; an unoffered name refuses `plan_stale` whose `detail.differences` contains its `upfront` entry, with the snapshot, head and transcript unchanged and no model dispatch |
 | `run_cancel_step_boundary_finishes_tool_batch` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model/tool calls; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; owner-only, idempotent repeat, recorded tool results and no further model step |
 | `run_cancel_unlisted_at_refused` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model call; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; `invalid_params` naming `at`, no state or transcript change |
 | `run_cancel_step_boundary_escalates_to_now` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model call; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; terminal reached without releasing the model |

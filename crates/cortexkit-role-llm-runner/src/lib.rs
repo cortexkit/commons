@@ -53,6 +53,7 @@ pub mod structured_output;
 pub mod subscribe;
 pub mod tags;
 pub mod tool_calls;
+pub mod upfront;
 pub mod usage;
 pub mod user_commands;
 #[cfg(any(test, feature = "test-vectors"))]
@@ -176,6 +177,9 @@ pub mod capabilities {
     /// Immutable output references captured against the writing request.
     /// Requires tags and applies only where the frozen plan renders tags.
     pub const OUTPUT_REFS: &str = "output_refs";
+
+    /// Per-item hints that keep selected offered tool definitions loaded.
+    pub const TOOL_UPFRONT: &str = "tool_upfront";
 
     /// Session-scoped uploads, upload references on sends and media by digest.
     pub const ATTACHMENTS: &str = "attachments";
@@ -363,6 +367,7 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (TOOL_UPFRONT, &[ops::SESSION_SEND]),
         (SERVICE_TIER, &[ops::SESSION_SEND]),
         (
             SESSION_RETENTION,

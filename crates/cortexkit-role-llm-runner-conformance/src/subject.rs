@@ -1177,6 +1177,37 @@ pub trait LlmRunnerSubject: Harness {
         None
     }
 
+    /// Build first-send fields for a plan with one tool item served by
+    /// [`Self::tool_provider_module`] and offering both
+    /// [`crate::SCRIPTED_TOOL`] and [`crate::upfront::OTHER_TOOL`]. Apply
+    /// `upfront` to that item, or omit the member for `None`; everything else,
+    /// including provider params and exclusions, stays the same. The item must
+    /// not offer [`crate::upfront::MISSING_TOOL`]. Return `None` when the adapter
+    /// cannot create these plan sessions. With `tool_upfront`, the cases also
+    /// require [`Self::model_requests`] to observe the model's actual tools.
+    fn upfront_plan_fields(
+        &self,
+        _session: &str,
+        _upfront: Option<&[String]>,
+    ) -> Option<Map<String, Value>> {
+        None
+    }
+
+    /// Snapshot durable runner state directly from storage, before and after
+    /// upfront admission. The bytes must change for any admission write,
+    /// including a baseline, send-id reservation or transcript entry; do not
+    /// derive them from the request or reply. Required with `tool_upfront`
+    /// when [`Self::upfront_plan_fields`] supplies a plan-session fixture.
+    async fn upfront_durable_state(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+    ) -> Result<Vec<u8>, HarnessError> {
+        Err(HarnessError::new(
+            "upfront durable state observation is not implemented",
+        ))
+    }
+
     /// Like [`Self::send_fields`], but with `members` added to the first
     /// send's plan beside whatever the adapter puts there (`render_tags` for
     /// the tags cases, `senders` for the delivery-order cases). Return

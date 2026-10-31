@@ -1,0 +1,6 @@
+{
+  "declared": true,
+  "plan": {"items": [{"provider": "example.tools", "preset": "default", "params": {"excluded": ["write"]}, "upfront": ["read", "write"]}]},
+  "offered": ["read", "search"],
+  "refusal": {"code": "plan_stale", "detail": {"differences": [{"kind": "upfront", "provider": "example.tools", "name": "write"}]}}
+}

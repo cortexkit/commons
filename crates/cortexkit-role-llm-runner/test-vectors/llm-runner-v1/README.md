@@ -595,3 +595,9 @@ with `served_bytes::check_served` and the stored `served_digest`:
 - an unknown profile, refused.
 
 All content is invented. `errors.json` gains the `served_bytes_changed` row.
+
+## Initially loaded tools
+
+`tool-upfront/` pins per-item `upfront` shape, its `tool_upfront` declaration
+gate and post-exclusion stale-name refusals. `tests/upfront.rs` checks every
+sample against the helpers and pins the pre-existing plan-vector bytes.

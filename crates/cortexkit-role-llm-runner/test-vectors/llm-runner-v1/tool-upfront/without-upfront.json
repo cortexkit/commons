@@ -1,0 +1,4 @@
+{
+  "declared": false,
+  "plan": {"items": [{"provider": "example.tools", "preset": "default", "params": {}}]}
+}

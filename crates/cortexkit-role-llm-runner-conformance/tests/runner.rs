@@ -821,6 +821,12 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    if case.starts_with("tool_upfront_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "runner does not declare tool_upfront")
+    {
+        return;
+    }
     if SERVICE_TIER_CASES.contains(&case)
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason == "role.describe does not declare service_tier"
@@ -8183,4 +8189,78 @@ async fn message_checkpoint_setup_read_deadlock_fails_by_name_without_hanging() 
         reason.contains("session.read during Setup did not answer"),
         "{reason}"
     );
+}
+
+const UPFRONT_PRESERVES: &str = "tool_upfront_preserves_offered_tools";
+const UPFRONT_STALE: &str = "tool_upfront_stale_refused";
+
+fn upfront_subject(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.upfront_group = true;
+    subject
+}
+
+#[tokio::test]
+async fn tool_upfront_faithful_runner_passes_both_cases() {
+    let report = run(&upfront_subject(Defects::default())).await;
+    for name in [UPFRONT_PRESERVES, UPFRONT_STALE] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn tool_upfront_undeclared_group_is_inapplicable_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in [UPFRONT_PRESERVES, UPFRONT_STALE] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare tool_upfront"),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+    }
+}
+
+#[tokio::test]
+async fn tool_upfront_without_plan_sessions_is_inapplicable_by_name() {
+    for without_plans in [true, false] {
+        let mut subject = upfront_subject(Defects::default());
+        subject.without_plans = without_plans;
+        subject.upfront_plan_fixture = false;
+        let report = run(&subject).await;
+        for name in [UPFRONT_PRESERVES, UPFRONT_STALE] {
+            assert!(
+                matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("upfront_plan_fields")),
+                "{name}: {:?}",
+                report.outcome(name)
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn tool_upfront_filtering_offered_tools_fails_by_name() {
+    let report = run(&upfront_subject(Defects {
+        upfront_filters_tools: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, UPFRONT_PRESERVES).contains("upfront changed offered tools"));
+    assert_none_failed_but(&report, &[UPFRONT_PRESERVES]);
+}
+
+#[tokio::test]
+async fn tool_upfront_accepting_stale_names_fails_by_name() {
+    let report = run(&upfront_subject(Defects {
+        upfront_accepts_stale: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, UPFRONT_STALE).contains("stale upfront admission"));
+    assert_none_failed_but(&report, &[UPFRONT_STALE]);
 }

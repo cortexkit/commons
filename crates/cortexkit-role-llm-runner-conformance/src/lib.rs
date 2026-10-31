@@ -125,6 +125,7 @@ mod subject;
 mod system_text_default;
 mod tags;
 mod tool_calls;
+pub mod upfront;
 mod user_commands;
 mod view_due;
 

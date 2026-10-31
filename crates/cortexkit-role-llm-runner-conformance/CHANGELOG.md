@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.1
+
+- Pin llm-runner 0.7.39 and check declared `tool_upfront` plan sessions:
+  upfront hints leave the tools offered to the model unchanged, and a stale
+  upfront name is refused with no observable durable-state change and no model
+  dispatch. Report both cases by name when not applicable.
+- Add faulty runners that demonstrate each case rejects its violation.
+
 ## 0.16.0
 
 - Requires subc-protocol 0.34; breaking because `Reply::Error` and

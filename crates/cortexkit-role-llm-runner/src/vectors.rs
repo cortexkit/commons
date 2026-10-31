@@ -14,6 +14,42 @@ pub const DIR: &str = "llm-runner-v1";
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
     (
+        "tool-upfront/valid.json",
+        include_str!("../test-vectors/llm-runner-v1/tool-upfront/valid.json"),
+    ),
+    (
+        "tool-upfront/undeclared.json",
+        include_str!("../test-vectors/llm-runner-v1/tool-upfront/undeclared.json"),
+    ),
+    (
+        "tool-upfront/empty.json",
+        include_str!("../test-vectors/llm-runner-v1/tool-upfront/empty.json"),
+    ),
+    (
+        "tool-upfront/duplicate.json",
+        include_str!("../test-vectors/llm-runner-v1/tool-upfront/duplicate.json"),
+    ),
+    (
+        "tool-upfront/non-string.json",
+        include_str!("../test-vectors/llm-runner-v1/tool-upfront/non-string.json"),
+    ),
+    (
+        "tool-upfront/non-array.json",
+        include_str!("../test-vectors/llm-runner-v1/tool-upfront/non-array.json"),
+    ),
+    (
+        "tool-upfront/stale.json",
+        include_str!("../test-vectors/llm-runner-v1/tool-upfront/stale.json"),
+    ),
+    (
+        "tool-upfront/without-upfront.json",
+        include_str!("../test-vectors/llm-runner-v1/tool-upfront/without-upfront.json"),
+    ),
+    (
+        "tool-upfront/README.md",
+        include_str!("../test-vectors/llm-runner-v1/tool-upfront/README.md"),
+    ),
+    (
         "truncate.json",
         include_str!("../test-vectors/llm-runner-v1/truncate.json"),
     ),
@@ -728,7 +764,7 @@ mod tests {
                 let name = format!("{prefix}{}", entry.file_name().to_str().unwrap());
                 if entry.file_type().unwrap().is_dir() {
                     collect(&entry.path(), &format!("{name}/"), names);
-                } else if name != "SHA256SUMS" {
+                } else if entry.file_name() != "SHA256SUMS" {
                     names.push(name);
                 }
             }

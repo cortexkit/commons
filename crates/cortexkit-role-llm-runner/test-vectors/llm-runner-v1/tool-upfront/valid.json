@@ -1,0 +1,6 @@
+{
+  "declared": true,
+  "plan": {"items": [{"provider": "example.tools", "preset": "default", "params": {"excluded": ["remove"]}, "upfront": ["read", "search"]}]},
+  "offered": ["read", "search", "write"],
+  "resolved": ["read", "search"]
+}
