@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.46
+
+- Add the `live_ids` group, requiring `live_events`, and per-subscriber
+  `LiveSubscribeRequest::with_live_ids` opt-in. Hosts that name messages only
+  when storing them can stream provisional display ids, then link them to
+  the stored `mid` on `message_started`; control events remain durable.
+- Add optional `live_id` fields to display deltas and `MessageEvent`, plus
+  `live::validate_live_id` with typed errors and strict event validation.
+  Absent fields preserve existing serialized bytes and lenient decoding.
+
 ## 0.7.45
 
 - `finish::normalize` accepts a `pi-ai` source for hosts that expose only Pi's normalized `stopReason`: `stop` → `stop`, `length` → `length`, `toolUse` → `tool_calls`, `error` → `error`, and `aborted`, `pending` and `deferred` → `other` (an abort is a user or host cancel, not a provider error). CONTRACT §6.6 adds the table with its sources; `finish-reason.json` adds the samples.

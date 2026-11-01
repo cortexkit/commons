@@ -34,6 +34,40 @@ pub const SEQ_FIELD: &str = "seq";
 /// The frame member carrying the typed event.
 pub const EVENT_FIELD: &str = "event";
 
+/// Why a provisional display id is not a valid `live_id`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LiveIdError {
+    /// Ids must contain between 1 and 128 bytes.
+    Length,
+    /// Every byte must be printable ASCII, excluding space (0x21–0x7E).
+    Character,
+}
+
+impl std::fmt::Display for LiveIdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Length => "live_id must contain 1–128 bytes",
+            Self::Character => "live_id must contain only ASCII bytes 0x21–0x7E",
+        })
+    }
+}
+
+impl std::error::Error for LiveIdError {}
+
+/// Validate the wire form of an opaque, runner-minted provisional display id.
+/// Session-wide uniqueness and separation from stored ids are the runner's
+/// responsibility; a single id cannot establish those properties.
+pub fn validate_live_id(live_id: &str) -> Result<(), LiveIdError> {
+    if live_id.is_empty() || live_id.len() > 128 {
+        return Err(LiveIdError::Length);
+    }
+    if !live_id.bytes().all(|byte| (0x21..=0x7e).contains(&byte)) {
+        return Err(LiveIdError::Character);
+    }
+    Ok(())
+}
+
 /// The event types, as `type` spells them.
 pub mod event_types {
     pub const SESSION_REFRESH_FAILED: &str = "session_refresh_failed";
@@ -77,12 +111,15 @@ pub mod run_reasons {
 
 /// The `session.subscribe` request a runner declaring `live_events` reads:
 /// [`SubscribeRequest`]'s `from`, plus the optional `limits` that bound
-/// `tool_started.arguments` as they bound a display row. Strict, like
-/// [`SubscribeRequest`]: a runner without the group refuses `limits` as an
-/// unknown field, so a caller sends it only to a runner declaring the group.
+/// `tool_started.arguments` as they bound a display row, and, under the
+/// separate `live_ids` group, the provisional-id opt-in (false by default).
+/// Strict, like [`SubscribeRequest`]: a runner without the matching group
+/// refuses `limits` or `live_ids` as an unknown field, so a caller sends each
+/// only to a runner declaring that group.
 ///
-/// Non-exhaustive: build one with [`LiveSubscribeRequest::new`] and
-/// [`LiveSubscribeRequest::with_limits`], or decode one.
+/// Non-exhaustive: build one with [`LiveSubscribeRequest::new`],
+/// [`LiveSubscribeRequest::with_limits`] and
+/// [`LiveSubscribeRequest::with_live_ids`], or decode one.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -93,6 +130,10 @@ pub struct LiveSubscribeRequest {
     /// Absent means whole arguments.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<Limits>,
+    /// Opt in to provisional display ids. Send `true` only to a runner
+    /// declaring `live_ids`: older runners refuse the unknown request field.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub live_ids: bool,
 }
 
 impl LiveSubscribeRequest {
@@ -100,6 +141,7 @@ impl LiveSubscribeRequest {
         Self {
             from: Some(from),
             limits: None,
+            live_ids: false,
         }
     }
 
@@ -108,13 +150,18 @@ impl LiveSubscribeRequest {
         self
     }
 
+    pub fn with_live_ids(mut self, live_ids: bool) -> Self {
+        self.live_ids = live_ids;
+        self
+    }
+
     /// The attach point the request selects.
     pub fn attach_point(&self) -> SubscribeFrom {
         self.from.clone().unwrap_or(SubscribeFrom::Live)
     }
 
-    /// The same request without `limits`, as a runner without the group
-    /// reads it.
+    /// The base [`SubscribeRequest`]: only `from`, without either extension
+    /// field.
     pub fn base(&self) -> SubscribeRequest {
         SubscribeRequest {
             from: self.from.clone(),
@@ -123,16 +170,28 @@ impl LiveSubscribeRequest {
 }
 
 /// `message_started` and `message_finished`: the message's `mid`, the one
-/// its stored entry carries.
+/// its stored entry carries. Only `message_started` may also name the
+/// provisional `live_id` whose display words the reader rekeys to `mid`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct MessageEvent {
     pub mid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_id: Option<String>,
 }
 
 impl MessageEvent {
     pub fn new(mid: impl Into<String>) -> Self {
-        Self { mid: mid.into() }
+        Self {
+            mid: mid.into(),
+            live_id: None,
+        }
+    }
+
+    /// Link a `message_started` to its pre-storage display words.
+    pub fn with_live_id(mut self, live_id: impl Into<String>) -> Self {
+        self.live_id = Some(live_id.into());
+        self
     }
 }
 
@@ -331,10 +390,10 @@ impl RunEnded {
 
 /// `text_delta` and `reasoning_delta`: a coalesced chunk of a text or
 /// reasoning part of the step in flight. `message_id` is the model
-/// provider's id and may be empty. `mid` is the message's final `mid`,
-/// known from its first event; `part` is the key the stored row gives the
-/// part. A runner without `live_events` sends neither, so both decode as
-/// optional.
+/// provider's id and may be empty. A `live_events` runner sends exactly one
+/// of the stored `mid` or (with `live_ids` opt-in) a provisional `live_id`.
+/// `part` is the key the stored row gives the part. A runner without
+/// `live_events` can omit these keys, so they decode as optional.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct TextDelta {
@@ -346,6 +405,8 @@ pub struct TextDelta {
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part: Option<String>,
 }
@@ -362,6 +423,7 @@ impl TextDelta {
             delta: delta.into(),
             tool_call_id: None,
             mid: Some(mid.into()),
+            live_id: None,
             part: Some(part.into()),
         }
     }
@@ -375,6 +437,8 @@ pub struct ToolInputDelta {
     pub delta: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mid: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part: Option<String>,
 }
@@ -390,6 +454,7 @@ impl ToolInputDelta {
             tool_call_id: tool_call_id.into(),
             delta: delta.into(),
             mid: Some(mid.into()),
+            live_id: None,
             part: Some(part.into()),
         }
     }
@@ -429,7 +494,9 @@ pub enum LiveEvent {
     ReasoningDelta(TextDelta),
     ToolInputDelta(ToolInputDelta),
     DisplayGap(DisplayGap),
-    /// Drop all live state for the step in flight; its deltas stream again.
+    /// Drop all live state for the step in flight. If the step continues or
+    /// is rebuilt, its current deltas stream again; after an unstored message
+    /// is abandoned, none follow.
     DisplayReset,
 }
 
@@ -437,6 +504,31 @@ impl LiveEvent {
     /// Decode `value` strictly: an unknown `type`, or members that do not
     /// decode for a known one, is an error naming the problem.
     pub fn decode_strict(value: &Value) -> Result<Self, String> {
+        let event = Self::decode_unvalidated(value)?;
+        let (mid, live_id) = match &event {
+            Self::MessageStarted(message) => (None, message.live_id.as_deref()),
+            Self::MessageFinished(message) if message.live_id.is_some() => {
+                return Err("message_finished must not carry live_id".into());
+            }
+            Self::TextDelta(delta) | Self::ReasoningDelta(delta) => {
+                (delta.mid.as_deref(), delta.live_id.as_deref())
+            }
+            Self::ToolInputDelta(delta) => (delta.mid.as_deref(), delta.live_id.as_deref()),
+            _ => (None, None),
+        };
+        if let Some(live_id) = live_id {
+            validate_live_id(live_id).map_err(|e| format!("{}: {e}", event.type_name()))?;
+            if mid.is_some() {
+                return Err(format!(
+                    "{}: mid and live_id are mutually exclusive",
+                    event.type_name()
+                ));
+            }
+        }
+        Ok(event)
+    }
+
+    fn decode_unvalidated(value: &Value) -> Result<Self, String> {
         use event_types as t;
         let kind = value
             .get("type")
@@ -507,7 +599,7 @@ impl SessionRefreshFailed {
 impl<'de> Deserialize<'de> for LiveEvent {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
-        Ok(Self::decode_strict(&value).unwrap_or(Self::DisplayReset))
+        Ok(Self::decode_unvalidated(&value).unwrap_or(Self::DisplayReset))
     }
 }
 
@@ -552,6 +644,72 @@ impl SubscribeEvent {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn live_ids_absent_preserve_wire_bytes() {
+        assert_eq!(
+            serde_json::to_string(&LiveEvent::TextDelta(TextDelta::new("", "hi", "m1", "p1")))
+                .unwrap(),
+            r#"{"type":"text_delta","message_id":"","delta":"hi","mid":"m1","part":"p1"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&LiveEvent::MessageStarted(MessageEvent::new("m1"))).unwrap(),
+            r#"{"type":"message_started","mid":"m1"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(
+                &LiveSubscribeRequest::new(SubscribeFrom::Start).with_live_ids(false)
+            )
+            .unwrap(),
+            r#"{"from":"start"}"#
+        );
+        let request: LiveSubscribeRequest = serde_json::from_str("{}").unwrap();
+        assert!(!request.live_ids);
+        assert_eq!(
+            serde_json::to_string(&request.with_live_ids(true)).unwrap(),
+            r#"{"live_ids":true}"#
+        );
+    }
+
+    #[test]
+    fn live_ids_validate_form_and_strict_events_only() {
+        assert_eq!(validate_live_id(""), Err(LiveIdError::Length));
+        assert_eq!(validate_live_id(&"x".repeat(129)), Err(LiveIdError::Length));
+        for id in [" ", "a\nb", "\x7f", "é"] {
+            assert_eq!(validate_live_id(id), Err(LiveIdError::Character));
+        }
+        for id in ["!".to_owned(), "~".repeat(128)] {
+            assert_eq!(validate_live_id(&id), Ok(()));
+        }
+        for kind in [
+            "text_delta",
+            "reasoning_delta",
+            "tool_input_delta",
+            "message_started",
+        ] {
+            let mut wire = serde_json::json!({"type":kind, "live_id":"live-1", "delta":"hi", "tool_call_id":"c1", "part":"p1"});
+            if kind == "message_started" {
+                wire["mid"] = "m1".into();
+            }
+            let decoded = LiveEvent::decode_strict(&wire).unwrap();
+            assert_eq!(serde_json::to_value(decoded).unwrap()["live_id"], "live-1");
+            wire["live_id"] = "bad id".into();
+            assert!(LiveEvent::decode_strict(&wire)
+                .unwrap_err()
+                .contains("live_id"));
+            // Lenient readers still decode known shapes without validating ids.
+            let lenient: LiveEvent = serde_json::from_value(wire).unwrap();
+            assert_ne!(lenient, LiveEvent::DisplayReset);
+        }
+        assert!(LiveEvent::decode_strict(&serde_json::json!({
+            "type":"text_delta", "delta":"hi", "mid":"m1", "live_id":"live-1"
+        }))
+        .is_err());
+        assert!(LiveEvent::decode_strict(&serde_json::json!({
+            "type":"message_finished", "mid":"m1", "live_id":"live-1"
+        }))
+        .is_err());
+    }
 
     #[test]
     fn event_vectors_decode_strictly_and_round_trip() {
@@ -731,7 +889,7 @@ mod tests {
             let read: LiveEvent = serde_json::from_value(case["event"].clone()).unwrap();
             assert_eq!(read, LiveEvent::DisplayReset, "{name}");
         }
-        // Broca's deployed delta, without `mid` and `part`, still decodes.
+        // A legacy delta, without `mid` and `part`, still decodes.
         let deployed: LiveEvent = serde_json::from_value(serde_json::json!({
             "type": "text_delta", "message_id": "", "delta": "hi"
         }))

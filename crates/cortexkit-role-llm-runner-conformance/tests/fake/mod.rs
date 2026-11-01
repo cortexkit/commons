@@ -69,6 +69,7 @@ mod compaction;
 mod display;
 mod held_calls;
 mod history;
+mod live_ids;
 mod media;
 pub mod message_checkpoint;
 mod output_refs;
@@ -176,6 +177,13 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub live_ids_without_opt_in: bool,
+    pub live_ids_started_before_storage: bool,
+    pub live_ids_rekey_mismatch: bool,
+    pub live_ids_after_storage: bool,
+    pub live_ids_no_reset: bool,
+    pub live_ids_no_fixture: bool,
+    pub live_ids_store_at_end: bool,
     pub finish_first_step: bool,
     pub finish_length_as_stop: bool,
     pub finish_without_model_step: bool,
@@ -5922,6 +5930,17 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn live_ids_observation(
+        &self,
+        _handle: &FakeHandle,
+        request: cortexkit_role_llm_runner::live::LiveSubscribeRequest,
+        store: bool,
+    ) -> Result<Option<cortexkit_role_llm_runner_conformance::LiveIdsObservation>, HarnessError>
+    {
+        Ok((!self.defects.live_ids_no_fixture)
+            .then(|| live_ids::observe(request, store, &self.defects)))
+    }
+
     async fn configure_service_tier(
         &self,
         session: &str,

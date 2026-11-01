@@ -159,6 +159,7 @@ particular implementation.
 | `host_history` | `session.history` | §4.6 |
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
+| `live_ids` | `session.subscribe` with opt-in provisional display ids (requires `live_events`; added in 0.7.46) | §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
@@ -266,6 +267,14 @@ particular implementation.
   relies on that reading only from a runner declaring the group. A runner
   that cannot name the send that started a send-started run does not
   declare it.
+- [pinned] `live_ids` is a group of its own (added in 0.7.46), declared
+  only beside `live_events`. `check_describe` refuses it without that group
+  by name (`live_ids_without_live_events`) and checks it for
+  `session.subscribe`. It adds no discovery metadata. A subscriber MUST NOT
+  send `live_ids: true` unless the runner declares `live_ids`: a runner built
+  on this crate's 0.7.45 or older request shape rejects the unknown field and
+  refuses the whole subscribe. Subscribers gate on the declaration, never on
+  a runner's implementation version.
 - [pinned] `call_identity` is a group of its own (added in 0.7.2, §9.16),
   declared only beside `history_display` or `live_events`, whose tool-call
   entries it extends: `check_describe` refuses it by name when neither is declared
@@ -2225,7 +2234,7 @@ new members.
   a display row's. It is otherwise `session.subscribe`'s request.
 - [pinned] **Control events** are durable: each maps onto a record the
   runner already writes, so a replay from a cursor serves them again.
-  - `message_started {mid}` and `message_finished {mid}` for every stored
+  - `message_started {mid, live_id?}` and `message_finished {mid}` for every stored
     message, started first. `message_finished` rides the control frame that
     carries the stored message's unit, so a consumer gets the re-read signal
     and the unit together.
@@ -2279,18 +2288,61 @@ new members.
     either member and shows
     the call without that time; it never reconstructs one
     (`live::ToolStarted::started_at`, `live::ToolFinished::finished_at`).
-- [pinned] **Display events** are best-effort and never replayed, in
-  Broca's deployed shape `{kind: "display", event: {type, ...}}`:
+- [pinned] **Display events** are best-effort and never part of a durable
+  cursor replay; attaching emits a fresh snapshot of the current live state
+  instead (**Attach replay** below). They use the envelope
+  `{kind: "display", event: {type, ...}}`:
   `text_delta {message_id, delta, tool_call_id?}`, `reasoning_delta
   {message_id, delta}`, `tool_input_delta {tool_call_id, delta}`,
   `display_gap {dropped}` and `display_reset`. `message_id` is the model
   provider's id and may be empty. On a `live_events` runner the deltas also
-  carry `mid` (the message's final `mid`, known from its first event and
-  unchanged across a `display_reset`) and `part` (the key the stored row
-  gives the part). Deltas are coalesced chunks, never one per token.
+  carry `part` (the key the stored row gives the part) and exactly one of
+  `mid` (the stored message's final id) or, with the `live_ids` opt-in below,
+  `live_id`. Without that opt-in, `mid` is known from the first delta and
+  unchanged across a `display_reset`; unstored words wait until it is known.
+  Deltas are coalesced chunks, never one per token.
+- [pinned] **Provisional display ids (`live_ids`, added in 0.7.46).** A host
+  that names a message only when storing it can stream words before storage:
+  1. Opt-in is per subscriber. `LiveSubscribeRequest.live_ids` is a boolean,
+     default false and omitted when false so existing request bytes are
+     unchanged. A runner sends `live_id` only if it declares `live_ids` and
+     the subscriber set `live_ids: true`. A subscriber that did not ask gets
+     deltas held until `mid` is known, never a delta without `mid`.
+  2. Only display deltas (`text_delta`, `reasoning_delta`,
+     `tool_input_delta`) for an unstored message carry `live_id` in place of
+     `mid`, with `part` as usual. Exactly one of `mid` and `live_id` is
+     present on a delta from a `live_events` runner.
+  3. A `live_id` is runner-minted and opaque: 1–128 bytes of ASCII 0x21–0x7E,
+     unique within the session's current lineage, never reused, unchanged across
+     a `display_reset` of the same message, and carried the same way by attach
+     replay. It never equals any `mid` the session has or will have. Prefer a
+     fixed `live-` prefix; a runner whose host ids could start that way chooses
+     another form. `live::validate_live_id` returns a typed form error, and
+     `LiveEvent::decode_strict` validates the form. Lenient decoding keeps its
+     existing behavior.
+  4. The control lane stays durable. No message or tool control event is sent
+     for an unstored message. When the host stores it, the runner sends
+     `message_started {mid, live_id}` and then `message_finished {mid}` as
+     usual; each maps to an already-written record and replays from a cursor.
+     A reader rekeys words held under that `live_id` to `mid`. If it holds no
+     words under that `live_id` (a replay, or it attached after storage), the
+     rekey does nothing and the reader handles `message_started` as usual.
+     `tool_started` and `tool_finished` keep `mid`: the message is stored
+     before its tools run.
+  5. After `message_started {mid, live_id}`, every later display delta for
+     that message carries `mid`, never `live_id`, including the snapshot
+     deltas sent on attach or after a `display_reset`.
+  6. If a message ends without being stored (for example an abort the host
+     does not persist), `display_reset` ends its live words, and nothing of
+     that message streams again. No new event type is needed and no message
+     or tool control event is emitted for it.
+  7. A host that names messages at creation never sends `live_id`; its streams
+     are unchanged.
 - [pinned] `display_reset` means: drop all live state for the step in
   flight (a provider retry, or a write-time hook rewriting a finished
-  message); the step's deltas stream again. A reader decodes an event whose
+  message). If the step continues or is rebuilt, its current deltas stream
+  again; after an unstored message is abandoned (rule 6 above), none
+  follow. A reader decodes an event whose
   `type` it does not know, on either lane, as `display_reset`
   (`LiveEvent`'s lenient decoding; `LiveEvent::decode_strict` is the strict
   one).
@@ -2305,8 +2357,11 @@ new members.
   the consumer drops its live rows and attaches again.
 - [pinned] **Attach replay.** A newly attached stream first gets the step in
   flight as it stands, after any durable replay its attach point asks for:
-  `display_reset`, then one coalesced delta per part so far (with `mid` and
-  `part`), then the live deltas, all in the stream's `seq` order. With no
+  `display_reset`, then one coalesced delta per part so far (with `part` and
+  `mid`, or `live_id` before storage for an opted-in subscriber), then the
+  live deltas, all in the stream's `seq` order. A subscriber that did not opt
+  in, attaching while the message is unstored, gets those snapshot and live
+  deltas only once `mid` is known, never under a `live_id`. With no
   step in flight there is nothing to replay. It is the only recovery for
   live state.
 

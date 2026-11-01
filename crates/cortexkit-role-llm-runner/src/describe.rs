@@ -59,6 +59,8 @@ pub mod problem_names {
     /// The answer declares `run_cause` without `live_events`, whose
     /// `run_started` event carries the run's cause.
     pub const RUN_CAUSE_WITHOUT_LIVE_EVENTS: &str = "run_cause_without_live_events";
+    /// The answer declares provisional display ids without live events.
+    pub const LIVE_IDS_WITHOUT_LIVE_EVENTS: &str = "live_ids_without_live_events";
     pub const STEP_EVENTS_MISSING: &str = "step_events_missing";
     pub const STEP_EVENTS_UNDECLARED: &str = "step_events_undeclared";
     pub const INVALID_STEP_EVENTS: &str = "invalid_step_events";
@@ -672,6 +674,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             problem_names::RUN_CAUSE_WITHOUT_LIVE_EVENTS.into(),
         ));
     }
+    if describe.declares(capabilities::LIVE_IDS) && !describe.declares(capabilities::LIVE_EVENTS) {
+        problems.push(DescribeProblem::Undecodable(
+            problem_names::LIVE_IDS_WITHOUT_LIVE_EVENTS.into(),
+        ));
+    }
     if describe.declares(capabilities::CALL_IDENTITY)
         && !describe.declares(capabilities::HISTORY_DISPLAY)
         && !describe.declares(capabilities::LIVE_EVENTS)
@@ -744,6 +751,42 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Ok(describe)
     } else {
         Err(problems)
+    }
+}
+
+#[cfg(test)]
+mod live_ids_tests {
+    use super::*;
+
+    #[test]
+    fn live_ids_requires_live_events_by_name() {
+        let describe = RoleDescribe::new(
+            vec![Major::new(
+                crate::PROVIDES,
+                crate::REQUIRED_OPS
+                    .iter()
+                    .copied()
+                    .chain([crate::ops::SESSION_SUBSCRIBE])
+                    .map(String::from)
+                    .collect(),
+                "alpha",
+            )],
+            "0.7.46",
+        )
+        .with_capabilities(vec![capabilities::LIVE_IDS.into()])
+        .with_session_capabilities_from("baseline");
+        let problems = check_describe(&serde_json::to_value(&describe).unwrap()).unwrap_err();
+        assert_eq!(
+            problems,
+            vec![DescribeProblem::Undecodable(
+                problem_names::LIVE_IDS_WITHOUT_LIVE_EVENTS.into()
+            )]
+        );
+        let describe = describe.with_capabilities(vec![
+            capabilities::LIVE_IDS.into(),
+            capabilities::LIVE_EVENTS.into(),
+        ]);
+        assert!(check_describe(&serde_json::to_value(describe).unwrap()).is_ok());
     }
 }
 

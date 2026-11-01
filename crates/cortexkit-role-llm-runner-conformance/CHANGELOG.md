@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.9
+
+- Pin `cortexkit-role-llm-runner` to `=0.7.46` and add three `live_ids` cases:
+  rekey on storage, no provisional ids without subscriber opt-in, and reset
+  when an unstored message aborts. Undeclared groups are inapplicable by name.
+- Add the defaulted `live_ids_observation` native delayed-storage fixture
+  hook. Cases are inapplicable by name when the adapter cannot provide it.
+  Faulty fake runners defend opt-in, storage timing, rekey identity,
+  post-storage delta ids, and abort reset checks.
+
 ## 0.16.8
 
 - Requires `cortexkit-role-llm-runner` 0.7.45, and accepts `pi-ai` from `model_finish_reason_source`.

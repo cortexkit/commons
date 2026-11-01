@@ -104,6 +104,7 @@ mod interrupt_reason;
 mod last_run_error;
 mod lineage;
 mod live;
+mod live_ids;
 mod media;
 pub mod message_checkpoint;
 mod output_refs;
@@ -146,10 +147,11 @@ pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, C
 pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
 pub use runner::{run_suite, run_suite_with, SetupError};
 pub use subject::{
-    ArchivePruningPart, AttributionFixture, Capability, LlmRunnerSubject, ModelRequestObservation,
-    PlanSenderIdentity, RefreshPlan, RefreshVariant, Script, ScriptedLateEntry, ScriptedPart,
-    ScriptedToolCall, ScriptedTurn, ScriptedUsage, SystemTextDefaultObservation,
-    ToolResultObservation, UserCommandFixture, UserCommandObservation,
+    ArchivePruningPart, AttributionFixture, Capability, LiveIdsObservation, LlmRunnerSubject,
+    ModelRequestObservation, PlanSenderIdentity, RefreshPlan, RefreshVariant, Script,
+    ScriptedLateEntry, ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage,
+    SystemTextDefaultObservation, ToolResultObservation, UserCommandFixture,
+    UserCommandObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

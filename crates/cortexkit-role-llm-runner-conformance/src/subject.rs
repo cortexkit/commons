@@ -9,6 +9,30 @@ use cortexkit_role_harness::{Harness, HarnessError, RouteStamp};
 use cortexkit_role_llm_runner::capabilities as groups;
 use serde_json::{Map, Value};
 
+/// A native delayed-storage fixture's captured wire frames. Construct with
+/// [`Self::new`]; the phases are separated by actual storage (or an abort).
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct LiveIdsObservation {
+    pub before_storage: Vec<Value>,
+    pub after_storage: Vec<Value>,
+    pub stored_mid: Option<String>,
+}
+
+impl LiveIdsObservation {
+    pub fn new(
+        before_storage: Vec<Value>,
+        after_storage: Vec<Value>,
+        stored_mid: Option<String>,
+    ) -> Self {
+        Self {
+            before_storage,
+            after_storage,
+            stored_mid,
+        }
+    }
+}
+
 /// A capability a conformance case requires of the runner or its harness.
 /// A case whose requirement the runner adapter does not declare is reported as
 /// skipped with the missing names, never as passed.
@@ -117,6 +141,8 @@ pub enum Capability {
     /// on every frame and the attach replay of the step in flight on
     /// `session.subscribe`.
     LiveEvents,
+    /// Opt-in provisional display ids until the host stores a message.
+    LiveIds,
     /// The `client_message_id` group: `client_message_id` on
     /// `session.send`, shown on the user message's display row.
     ClientMessageId,
@@ -199,6 +225,7 @@ impl Capability {
         Self::UserCommands,
         Self::HistoryDisplay,
         Self::LiveEvents,
+        Self::LiveIds,
         Self::ClientMessageId,
         Self::RunCause,
         Self::StepEvents,
@@ -266,6 +293,7 @@ impl Capability {
             Self::SendStatus => groups::SEND_STATUS,
             Self::HistoryDisplay => groups::HISTORY_DISPLAY,
             Self::LiveEvents => groups::LIVE_EVENTS,
+            Self::LiveIds => groups::LIVE_IDS,
             Self::ClientMessageId => groups::CLIENT_MESSAGE_ID,
             Self::RunCause => groups::RUN_CAUSE,
             Self::StepEvents => groups::STEP_EVENTS,
@@ -641,6 +669,30 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Drive one fresh session whose host names an assistant message only
+    /// when storing it. Attach with `request` before streaming any words,
+    /// capture the message's frames while storage is held, then store it
+    /// (`store = true`) or abort without persisting it (`false`). Capture any
+    /// later display deltas too; a host that stores only at message end may
+    /// have none.
+    ///
+    /// Return only that message's frames and its `display_reset` signals, not
+    /// other messages' or runs' events. Return a loss-free observation: if the
+    /// stream reports a `display_gap`, drive the scenario again rather than
+    /// returning a capture with a gap. Keep each phase in wire order on the
+    /// same subscription. `stored_mid` must come from native storage,
+    /// not from the stream. Observe the real runner; do not synthesize frames.
+    /// `None` means this host/adapter cannot drive delayed message storage,
+    /// making each `live_ids` case inapplicable by name.
+    async fn live_ids_observation(
+        &self,
+        _handle: &Self::Handle,
+        _request: cortexkit_role_llm_runner::live::LiveSubscribeRequest,
+        _store: bool,
+    ) -> Result<Option<LiveIdsObservation>, HarnessError> {
+        Ok(None)
+    }
+
     /// The scripted provider or host's finish-reason source, using a spelling
     /// accepted by `finish::normalize`. Opt in only when the fixture emits
     /// `ScriptedTurn::finish_reason` through the real model/host path, and a

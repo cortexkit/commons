@@ -300,6 +300,7 @@ where
             name if name.starts_with("display_") || name.starts_with("client_message_id_") => {
                 crate::display::run(self, name).await
             }
+            name if name.starts_with("live_ids_") => crate::live_ids::run(self, name).await,
             name if name.starts_with("live_") || name.starts_with("run_cause_") => {
                 crate::live::run(self, name).await
             }

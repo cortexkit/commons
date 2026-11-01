@@ -204,9 +204,13 @@ pub mod capabilities {
     pub const READ_DISPLAY_FACTS: &str = "read_display_facts";
     /// The pinned live events on `session.subscribe` (`live::LiveEvent`):
     /// durable message, tool and run lifecycle events, display deltas with
-    /// `mid` and `part`, `seq` on every frame, and the attach replay of the
-    /// step in flight.
+    /// `part` and `mid` (or a provisional `live_id` under the separate
+    /// [`LIVE_IDS`] opt-in), `seq` on every frame, and the attach replay of
+    /// the step in flight.
     pub const LIVE_EVENTS: &str = "live_events";
+    /// Opt-in provisional display ids for hosts that name a message only
+    /// when storing it. Requires [`LIVE_EVENTS`]; see [`crate::live::LiveSubscribeRequest`].
+    pub const LIVE_IDS: &str = "live_ids";
     /// `client_message_id` on `session.send`, kept beside the user message
     /// and shown on its display row. A caller never sends the member to a
     /// runner without the group, whose strict decoding may refuse it.
@@ -411,6 +415,7 @@ pub mod capabilities {
         (HISTORY_DISPLAY, &[ops::SESSION_HISTORY]),
         (READ_DISPLAY_FACTS, &[ops::SESSION_READ]),
         (LIVE_EVENTS, &[ops::SESSION_SUBSCRIBE]),
+        (LIVE_IDS, &[ops::SESSION_SUBSCRIBE]),
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
         (STEP_EVENTS, &[]),

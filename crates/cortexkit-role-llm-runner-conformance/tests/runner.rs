@@ -838,6 +838,7 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     // metadata/clock hooks. Inapplicable cases are not counted as passing coverage.
     if (case.starts_with("sender_succession_")
         || case.starts_with("read_display_facts_")
+        || case.starts_with("live_ids_")
         || case == "delivery_deadline_retry_keeps_original_expiry")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { .. }))
     {
@@ -1286,6 +1287,7 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
         }
         if spec.name.starts_with("sender_succession_")
             || spec.name.starts_with("read_display_facts_")
+            || spec.name.starts_with("live_ids_")
             || spec.name == "delivery_deadline_retry_keeps_original_expiry"
         {
             assert_eq!(
@@ -6415,6 +6417,148 @@ const DISPLAY_AND_LIVE_CASES: &[&str] = &[
     "live_seq_rises_across_lanes",
     "live_untimed_history_call_leaves_times_out",
 ];
+
+const LIVE_IDS_CASES: &[&str] = &[
+    "live_ids_rekey_on_store",
+    "live_ids_not_sent_without_opt_in",
+    "live_ids_never_stored_resets",
+];
+
+async fn live_ids_report(defects: Defects) -> SuiteReport {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities = [Capability::LiveEvents, Capability::LiveIds].into();
+    subject.kill_points.clear();
+    run(&subject).await
+}
+
+#[tokio::test]
+async fn live_ids_correct_runner_passes_all_three_cases() {
+    let report = live_ids_report(Defects::default()).await;
+    for name in LIVE_IDS_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn live_ids_storage_only_at_message_end_passes_all_three_cases() {
+    let report = live_ids_report(Defects {
+        live_ids_store_at_end: true,
+        ..Defects::default()
+    })
+    .await;
+    for name in LIVE_IDS_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn live_ids_without_opt_in_fails_by_name() {
+    let report = live_ids_report(Defects {
+        live_ids_without_opt_in: true,
+        ..Defects::default()
+    })
+    .await;
+    assert!(
+        failed(&report, "live_ids_not_sent_without_opt_in").contains("without subscriber opt-in")
+    );
+    for name in ["live_ids_rekey_on_store", "live_ids_never_stored_resets"] {
+        assert_eq!(report.outcome(name), Some(&CaseOutcome::Passed));
+    }
+}
+
+#[tokio::test]
+async fn live_ids_control_before_storage_fails_by_name() {
+    let report = live_ids_report(Defects {
+        live_ids_started_before_storage: true,
+        ..Defects::default()
+    })
+    .await;
+    for name in LIVE_IDS_CASES {
+        assert!(failed(&report, name).contains("control event was sent before native storage"));
+    }
+}
+
+#[tokio::test]
+async fn live_ids_different_rekey_id_fails_by_name() {
+    let report = live_ids_report(Defects {
+        live_ids_rekey_mismatch: true,
+        ..Defects::default()
+    })
+    .await;
+    assert!(failed(&report, "live_ids_rekey_on_store").contains("same live_id"));
+    for name in [
+        "live_ids_not_sent_without_opt_in",
+        "live_ids_never_stored_resets",
+    ] {
+        assert_eq!(report.outcome(name), Some(&CaseOutcome::Passed));
+    }
+}
+
+#[tokio::test]
+async fn live_ids_delta_after_storage_fails_by_name() {
+    let report = live_ids_report(Defects {
+        live_ids_after_storage: true,
+        ..Defects::default()
+    })
+    .await;
+    assert!(failed(&report, "live_ids_rekey_on_store").contains("never live_id"));
+}
+
+#[tokio::test]
+async fn live_ids_missing_abort_reset_fails_by_name() {
+    let report = live_ids_report(Defects {
+        live_ids_no_reset: true,
+        ..Defects::default()
+    })
+    .await;
+    assert!(
+        failed(&report, "live_ids_never_stored_resets").contains("did not end with display_reset")
+    );
+}
+
+#[tokio::test]
+async fn live_ids_missing_adapter_hook_is_inapplicable_by_name() {
+    let report = live_ids_report(Defects {
+        live_ids_no_fixture: true,
+        ..Defects::default()
+    })
+    .await;
+    for name in LIVE_IDS_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("live_ids_observation")),
+            "{name}: {}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn live_ids_missing_groups_are_inapplicable_by_name() {
+    for missing in [Capability::LiveIds, Capability::LiveEvents] {
+        let mut subject = FakeSubject::new(Defects::default());
+        subject.capabilities = [Capability::LiveEvents, Capability::LiveIds].into();
+        subject.capabilities.remove(&missing);
+        subject.kill_points.clear();
+        let report = run(&subject).await;
+        for name in LIVE_IDS_CASES {
+            assert!(
+                matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains(&missing.name())),
+                "{name}: {}",
+                report.render()
+            );
+        }
+    }
+}
 
 /// The live `cache_ttl` cases.
 const CACHE_TTL_CASES: &[&str] = &[
