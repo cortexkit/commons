@@ -169,6 +169,22 @@
     ]
   },
   {
+    "source": "pi-ai",
+    "cases": [
+      {"raw":"stop", "finish":"stop"},
+      {"raw":"length", "finish":"length"},
+      {"raw":"toolUse", "finish":"tool_calls"},
+      {"raw":"error", "finish":"error"},
+      {"raw":"aborted", "finish":"other"},
+      {"raw":"pending", "finish":"other"},
+      {"raw":"deferred", "finish":"other"},
+      {"raw":"future_reason", "finish":"other"},
+      {"raw":"stop", "emitted_tool_calls":true, "finish":"tool_calls"},
+      {"raw":"aborted", "emitted_tool_calls":true, "finish":"other"},
+      {"raw":null, "finish":null}
+    ]
+  },
+  {
     "source": "anthropic.mesages",
     "cases": [
       {"raw":"end_turn", "error":"unknown_source"},

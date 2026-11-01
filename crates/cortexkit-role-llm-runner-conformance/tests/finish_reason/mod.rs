@@ -1,9 +1,10 @@
 use super::*;
 
-const FINISH_CASES: [&str; 3] = [
+const FINISH_CASES: [&str; 4] = [
     "finish_reason_last_model_step",
     "finish_reason_output_cap",
     "finish_reason_no_model_step",
+    "finish_reason_provider_limit",
 ];
 
 fn subject(defects: Defects) -> FakeSubject {
@@ -40,14 +41,20 @@ async fn finish_reason_without_status_still_passes() {
 }
 
 async fn rejected(defects: Defects, expected: &str) {
+    rejected_all(defects, &[expected]).await;
+}
+
+async fn rejected_all(defects: Defects, expected: &[&str]) {
     let report = run(&subject(defects)).await;
-    assert!(failed(&report, expected).contains("finish"));
+    for name in expected {
+        assert!(failed(&report, name).contains("finish"));
+    }
     for name in FINISH_CASES {
-        if name != expected {
+        if !expected.contains(&name) {
             assert_passed(&report, name);
         }
     }
-    assert_none_failed_but(&report, &[expected]);
+    assert_none_failed_but(&report, expected);
 }
 
 #[tokio::test]
@@ -63,13 +70,25 @@ async fn finish_reason_first_step_fails_last_model_step_by_name() {
 }
 
 #[tokio::test]
-async fn finish_reason_stop_at_cap_fails_output_cap_by_name() {
-    rejected(
+async fn finish_reason_stop_at_any_limit_fails_both_length_cases_by_name() {
+    rejected_all(
         Defects {
             finish_length_as_stop: true,
             ..Defects::default()
         },
-        FINISH_CASES[1],
+        &[FINISH_CASES[1], FINISH_CASES[3]],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn finish_reason_length_only_from_caller_cap_fails_provider_limit_by_name() {
+    rejected(
+        Defects {
+            finish_length_only_with_cap: true,
+            ..Defects::default()
+        },
+        FINISH_CASES[3],
     )
     .await;
 }
@@ -116,7 +135,7 @@ async fn finish_reason_default_hook_leaves_emitting_cases_not_applicable() {
     let mut subject = subject(Defects::default());
     subject.finish_reason_fixture = false;
     let report = run(&subject).await;
-    for name in &FINISH_CASES[..2] {
+    for name in [FINISH_CASES[0], FINISH_CASES[1], FINISH_CASES[3]] {
         assert!(
             matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot script raw model finish reasons")
         );

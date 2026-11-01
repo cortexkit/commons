@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.16.8
+
+- Requires `cortexkit-role-llm-runner` 0.7.45, and accepts `pi-ai` from `model_finish_reason_source`.
+- `finish_reason_last_model_step` scripts the source's own tool-call reason on its tool-call turn (`tool_use`, `tool_calls`, `tool-calls`, `toolUse`), not a plain stop. A real host whose loop only continues after a tool-call reason can now reach the second step. Responses and Gemini have no distinct reason for a successful tool-call step, so their turn keeps the ordinary completion. The expected `finish` of the last step is still `stop`.
+- New case `finish_reason_provider_limit`: a scripted response carrying the source's length reason, with no `generation.max_output_tokens` in the send, must report `length`. It requires `finish_reason`, `queue`, `run_ops` and the raw-reason hook, but not `max_output_tokens` or `run_usage`, so a runner that cannot promise a caller cap is still graded on truncation. `finish_reason_output_cap` is unchanged.
+
 ## 0.16.7
 
 - Pin llm-runner `=0.7.44` and add three `finish_reason` cases: the last

@@ -2065,8 +2065,9 @@ run's token usage whichever runner served it.
   `finish::normalize(source: &str, raw: Option<&str>, emitted_tool_calls: bool)
   -> Result<Option<Finish>, UnknownSource>` rather than keeping their own
   mapping tables. `source` is one of the routing wire-format spellings below,
-  or `ai-sdk` when a host exposes only the Vercel AI SDK's normalized reason
-  (for example, a host storing it as `finish` on an assistant message).
+  `ai-sdk` when a host exposes only the Vercel AI SDK's normalized reason
+  (for example, a host storing it as `finish` on an assistant message), or
+  `pi-ai` when a host exposes only Pi's normalized `stopReason`.
   An unknown source is an error even with no raw reason, so a typo fails
   loudly. No raw reason returns `Ok(None)`. An unknown raw string on a known
   source returns `other`. If `emitted_tool_calls` is true and the raw reason
@@ -2162,6 +2163,25 @@ reported. Both `unknown` (absent `finish`) and `interrupted` (`other`) mean
 | `error` | `error` |
 | `other`, `interrupted` | `other` |
 | legacy `unknown` | absent (`Ok(None)`) |
+
+**`pi-ai`** — checked against the `StopReason` type in Pi's model layer
+([`packages/ai/src/types.ts`](https://github.com/earendil-works/pi/blob/main/packages/ai/src/types.ts))
+and Oh My Pi's wire types
+([`packages/wire/src/index.ts`](https://github.com/can1357/oh-my-pi/blob/main/packages/wire/src/index.ts)),
+accessed 2026-11-01. Raw input is the stored assistant message's
+`stopReason`, which Pi's provider layer has already normalized from the
+provider's own reason. `aborted` is a cancel by the user or host, not a
+provider error, so it maps to `other`. Current Pi also defines `pending` and
+`deferred`, which do not describe a finished step; they map to `other` and,
+as with Responses' `in_progress`, do not make an active run carry `finish`.
+
+| Raw | Normalized |
+|---|---|
+| `stop` | `stop` |
+| `length` | `length` |
+| `toolUse` | `tool_calls` |
+| `error` | `error` |
+| `aborted`, `pending`, `deferred` | `other` |
 
 The executable samples in `test-vectors/llm-runner-v1/finish-reason.json`
 pin each documented raw value for each source, unknown raw reasons, missing

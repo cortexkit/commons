@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.45
+
+- `finish::normalize` accepts a `pi-ai` source for hosts that expose only Pi's normalized `stopReason`: `stop` → `stop`, `length` → `length`, `toolUse` → `tool_calls`, `error` → `error`, and `aborted`, `pending` and `deferred` → `other` (an abort is a user or host cancel, not a provider error). CONTRACT §6.6 adds the table with its sources; `finish-reason.json` adds the samples.
+
 ## 0.7.44
 
 - Add the opt-in `finish_reason` group and an open `Finish` type on run

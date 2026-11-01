@@ -80,8 +80,9 @@ impl std::error::Error for UnknownSource {}
 
 /// Normalize one model step's reported reason, without inferring missing data.
 ///
-/// `source` is a routing wire-format spelling, or `ai-sdk` when only a host's
-/// AI SDK reason is available. `raw` is absent if no reason was reported.
+/// `source` is a routing wire-format spelling, `ai-sdk` when only a host's
+/// AI SDK reason is available, or `pi-ai` when only Pi's stored
+/// `stopReason` is. `raw` is absent if no reason was reported.
 /// For Responses, pass the response `status`, except that an `incomplete`
 /// response with `incomplete_details.reason` is passed as
 /// `incomplete:<reason>`, and as bare `incomplete` when that detail is
@@ -107,6 +108,7 @@ pub fn normalize(
             | "google.code_assist"
             | "aws.bedrock_converse"
             | "ai-sdk"
+            | "pi-ai"
     ) {
         return Err(UnknownSource {
             source: source.to_owned(),
@@ -179,6 +181,11 @@ pub fn normalize(
         ("ai-sdk", "error") => Finish::Error,
         ("ai-sdk", "other" | "interrupted") => Finish::Other,
         ("ai-sdk", "unknown") => return Ok(None),
+        ("pi-ai", "stop") => Finish::Stop,
+        ("pi-ai", "length") => Finish::Length,
+        ("pi-ai", "toolUse") => Finish::ToolCalls,
+        ("pi-ai", "error") => Finish::Error,
+        ("pi-ai", "aborted" | "pending" | "deferred") => Finish::Other,
         _ => Finish::Other,
     };
     Ok(Some(if emitted_tool_calls && finish == Finish::Stop {
@@ -213,7 +220,7 @@ mod tests {
             "../test-vectors/llm-runner-v1/finish-reason.json"
         ))
         .unwrap();
-        assert_eq!(sources.len(), 9);
+        assert_eq!(sources.len(), 10);
         for source in sources {
             for sample in source.cases {
                 let result = normalize(

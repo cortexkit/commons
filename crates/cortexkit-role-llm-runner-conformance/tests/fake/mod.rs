@@ -180,6 +180,9 @@ pub struct Defects {
     pub finish_length_as_stop: bool,
     pub finish_without_model_step: bool,
     pub finish_status_omitted: bool,
+    /// Reports `length` only for a run that sent a caller cap, treating the
+    /// provider's own output limit as a natural stop.
+    pub finish_length_only_with_cap: bool,
     pub succession: Option<&'static str>,
     pub read_display_facts: Option<&'static str>,
     pub refreshed_senders_wait_for_next_run: bool,
@@ -4799,6 +4802,12 @@ impl Module {
                 result.finish = Some(Finish::Stop);
             }
             if self.world.defects.finish_without_model_step && run.usage.steps == 0 {
+                result.finish = Some(Finish::Stop);
+            }
+            if self.world.defects.finish_length_only_with_cap
+                && run.max_output_tokens.is_none()
+                && result.finish == Some(Finish::Length)
+            {
                 result.finish = Some(Finish::Stop);
             }
         }
