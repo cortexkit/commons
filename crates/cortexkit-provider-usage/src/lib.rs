@@ -121,8 +121,8 @@ pub struct RateWindow {
 /// Named by PERIOD, not by each upstream's own term, so a consumer branches on
 /// one vocabulary across providers. A producer maps the upstream's name onto it:
 /// Anthropic's `five_hour` and Ollama's "Session usage" are both
-/// [`FIVE_HOUR`]; Anthropic's `seven_day` and Ollama's "Weekly usage" are both
-/// [`WEEKLY`].
+/// [`FIVE_HOUR`](window_kind::FIVE_HOUR); Anthropic's `seven_day` and Ollama's
+/// "Weekly usage" are both [`WEEKLY`](window_kind::WEEKLY).
 ///
 /// The list is open. A consumer must handle a value it does not know, and a
 /// new period is a new constant here, never a reuse of an existing one.
@@ -193,9 +193,10 @@ pub struct BreakdownRow {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Regeneration {
-    /// Which mechanic the upstream describes: `cliff`, `drip`, or `unstated`.
+    /// Which mechanic the upstream describes: `cliff`, `drip`, `step` or
+    /// `unstated`.
     ///
-    /// **PACING DEPENDS ON THIS AND THE THREE ANSWERS DIFFER SHARPLY.** A rate
+    /// **PACING DEPENDS ON THIS AND THE ANSWERS DIFFER SHARPLY.** A rate
     /// alone cannot separate them: "1,000,000 units per 720h" describes both a
     /// lump arriving on one instant and a steady accrual every hour, and the two
     /// give opposite answers about headroom on day 14.
@@ -206,6 +207,12 @@ pub struct Regeneration {
     /// - `drip` — the quota accrues continuously at `rate`, so headroom grows
     ///   between reads and an exhausted pool becomes usable again without any
     ///   reset event.
+    /// - `step` — quota comes back in discrete partial steps at stated instants,
+    ///   and accrual between them is zero. Unlike `cliff`, a step is not a
+    ///   window reset: its instant goes in `next_step`, and `resets_at` is set
+    ///   only when the upstream separately reports a reset. `next_step` may be
+    ///   absent, meaning the next step is not stated, not that none is coming;
+    ///   and one stated step says nothing about the interval to later ones.
     /// - `unstated` — the upstream states that quota replenishes but nothing
     ///   establishes which mechanic. **No pacing claim exists: display the rate,
     ///   never derive headroom from it.** Same contract as `PoolFunding::Unknown`
@@ -220,14 +227,42 @@ pub struct Regeneration {
     /// picks one, and the picker has less evidence than the producer.
     ///
     /// Treat an unrecognised value as `unstated`: render it, pace on nothing.
+    /// A consumer from before `step` existed does exactly that with `step`; it
+    /// never reads a step as a `cliff` or `drip`, or its instant as a reset.
     pub mechanic: String,
     /// The stated replenishment rate, when the upstream gives one.
     ///
-    /// Absent means the mechanic is described without a quantity — a real and
-    /// common shape ("credits refresh monthly" with no amount). Absence here says
-    /// nothing about `mechanic`, which stays authoritative.
+    /// Absent means no amount per period is stated — a real and common shape
+    /// ("credits refresh monthly" with no amount). Absence here says nothing
+    /// about `mechanic`, which stays authoritative, and a `step` mechanic may
+    /// still state one step's size in `next_step`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub rate: Option<RegenerationRate>,
+    /// The next regeneration step, when the upstream states one. A producer sets
+    /// it only with `mechanic: "step"`; a consumer that does not recognise the
+    /// mechanic derives no headroom from it. Absent means no step is stated.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub next_step: Option<RegenerationStep>,
+}
+
+/// One stated regeneration step: when it lands and, if stated, how much of the
+/// window it returns. This crate stores what the upstream stated and checks
+/// neither field.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RegenerationStep {
+    /// When the step lands. Producers send RFC 3339; this crate keeps the string
+    /// as received and does not check its format or that it is in the future.
+    /// A consumer that cannot parse it, or finds it already past, forecasts
+    /// nothing from this step.
+    pub at: String,
+    /// How much the step returns, in percentage points of the window's total
+    /// (the 0-100 scale of `used_percent`), not of what remains. Producers send
+    /// a finite value above 0 and at most 100; this crate does not check it.
+    /// Absent when the upstream states the time without the size; a consumer
+    /// must then not assume any amount.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub percent: Option<f64>,
 }
 
 /// How much quota returns, and over what period.
@@ -1109,6 +1144,7 @@ mod tests {
                     amount: 1_000_000.0,
                     per_minutes: 43_200,
                 }),
+                next_step: None,
             }),
             window_kind: None,
             breakdown: None,
@@ -1120,6 +1156,42 @@ mod tests {
             json.contains("\"perMinutes\":43200"),
             "camelCase on the wire: {json}"
         );
+    }
+
+    /// A stated step round-trips under camelCase keys, and a step with no
+    /// stated size omits `percent` rather than sending zero.
+    #[test]
+    fn a_stated_step_round_trips() {
+        let mut window: RateWindow =
+            serde_json::from_str(r#"{"usedPercent":37.5}"#).expect("decodes");
+        window.regeneration = Some(Regeneration {
+            mechanic: "step".to_string(),
+            rate: None,
+            next_step: Some(RegenerationStep {
+                at: "2026-11-01T18:00:00Z".to_string(),
+                percent: Some(2.0),
+            }),
+        });
+        let json = serde_json::to_string(&window).expect("serializes");
+        assert!(
+            json.contains(r#""nextStep":{"at":"2026-11-01T18:00:00Z","percent":2.0}"#),
+            "camelCase on the wire: {json}"
+        );
+        let back: RateWindow = serde_json::from_str(&json).expect("round-trips");
+        assert_eq!(back, window);
+
+        let unsized_step = RegenerationStep {
+            at: "2026-11-01T18:00:00Z".to_string(),
+            percent: None,
+        };
+        let json = serde_json::to_string(&unsized_step).expect("serializes");
+        assert!(
+            !json.contains("percent"),
+            "an unstated size must be absent, not zero: {json}"
+        );
+        let old = r#"{"usedPercent":10.0,"regeneration":{"mechanic":"drip"}}"#;
+        let window: RateWindow = serde_json::from_str(old).expect("older shape decodes");
+        assert_eq!(window.regeneration.expect("present").next_step, None);
     }
 
     /// A mechanic with no rate is a valid statement.
