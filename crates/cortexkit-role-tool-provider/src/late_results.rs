@@ -43,6 +43,11 @@ pub mod reasons {
     /// The provider restarted with the call Prepared or Authorized and never
     /// dispatched it.
     pub const RESTART_BEFORE_DISPATCH: &str = "restart_before_dispatch";
+    /// The scope the call was held under ended before the call reached
+    /// DispatchStarted, so the provider settled it as not started and will
+    /// never dispatch it. CONTRACT.md §6 defines what counts as the scope
+    /// ending.
+    pub const SCOPE_ENDED: &str = "scope_ended";
 }
 
 /// A position in one custodian's view of the log. The incarnation changes
@@ -452,6 +457,26 @@ pub fn check_since(
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn scope_ended_not_started_entry_round_trips() {
+        let wire = json!({
+            "kind": "not_started",
+            "owner": "reserved:example-owner",
+            "ref": "scope-7",
+            "scope_epoch": 3,
+            "custodian": "reserved:example-runner",
+            "call_key": "01J9ZQ:44",
+            "event_id": "task-20:not_started",
+            "settled_at": 1790000003000_u64,
+            "reduced": false,
+            "reason": "scope_ended"
+        });
+        let entry: LateEntry = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(entry.kind(), EntryKind::NotStarted);
+        assert_eq!(entry.reason.as_deref(), Some(reasons::SCOPE_ENDED));
+        assert_eq!(serde_json::to_value(&entry).unwrap(), wire);
+    }
 
     #[test]
     fn late_result_vectors_decode_as_recorded() {

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.4
+
+- Track `cortexkit-role-tool-provider` 0.14.4, which defines how a held call
+  settles when its scope ends. No suite changes.
+
 ## 0.14.3
 
 - Pin tool-provider `=0.14.3` and re-export its keepalive helpers and vectors.

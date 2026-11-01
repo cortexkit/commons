@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.14.4
+
+- Define what happens to a held call when its scope ends (CONTRACT §6). It
+  covers every call held past its first reply under a scope, whatever its
+  held reason. Only `route.closed {reason: "scope_ended"}` for that scope, or
+  `scope.describe` answering `status: "ended"` at the call's `scope_epoch`,
+  counts as the end; any other route close is not by itself evidence and
+  doesn't trigger the rule. A call before DispatchStarted is settled as not
+  started and never dispatched, even if approved later: the provider records
+  a `late_results` `not_started` entry with `reason: "scope_ended"`, and a
+  permitted `tool.withdraw` answers `refused`, `scope_ended`. A call at or
+  after DispatchStarted is never reclassified as not started; the provider
+  reports what it observes, `unknown` when it can't tell.
+- Add `late_results::reasons::SCOPE_ENDED`. `not_started` reasons stay open;
+  a consumer treats an unknown reason as a call that never ran.
+- Clarify existing text: `refused` means the original call will never run,
+  not that the withdrawal was refused; `unknown_call` says nothing about
+  whether a call was sent; a call recovered as not started after a restart
+  is never dispatched, even if approved later.
+- No wire shape or type changes. A provider that ran a held call after its
+  scope ended must stop doing so.
+
 ## 0.14.3
 
 - Add opt-in `call-keepalive/v1`: providers send a PUSH at least every 30 seconds

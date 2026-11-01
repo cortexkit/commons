@@ -869,7 +869,12 @@ This includes a call whose first reply carries `held` (§4.1,
   - `{answer: "already_started", outcome: "<code>" | "unknown"}`;
   - `{answer: "completed", result: <recorded reply>, result_retained: true}`,
     or `{answer: "completed", outcome: "<code>", result_retained: false}`;
-  - `{answer: "refused", reason: "denied" | "expired" | "scope_ended" | <open>}`;
+  - `{answer: "refused", reason: "denied" | "expired" | "scope_ended" | <open>}`:
+    the original call was refused before dispatch and will never run, for
+    every reason including an unknown one. It does not mean the withdrawal
+    itself was refused; a refused withdrawal is a route error (above). Here
+    `expired` means the call's approval window passed, unlike the late entry
+    kind `expired` (§7), which means an unacked result aged out;
   - `{answer: "unknown_call"}`: no record has that `(carrier, call_key)`. A
     provider answers this for a key it never held, and never refuses such a
     key (the caller checks aside). It never means "not sent".
@@ -883,7 +888,7 @@ This includes a call whose first reply carries `held` (§4.1,
   | `completed` | the call ran | no |
   | `already_started` with an outcome | that outcome | no |
   | `already_started`, `unknown` | `outcome_unknown` | no |
-  | `unknown_call` | nothing was held | no |
+  | `unknown_call` | no record exists now for that `(carrier, call_key)`; nothing about whether it was sent or ran | no |
   | any other `answer`, or a body that is not an answer | final, unclassified; recorded verbatim | no |
   | `withdraw_not_permitted` and the three errors above | terminal refusal | no |
   | a transient route refusal: `scope_not_synced`, or any code subc itself retries (`module_reloading`, `module_warming`, `target_unavailable`, `module_timeout`; `errors::is_transient`) | nothing yet | yes |
@@ -896,13 +901,51 @@ durable states, each synced before the step it permits: Prepared,
 Authorized, DispatchStarted, Settled.
 
 - A call that is Prepared, or Authorized without DispatchStarted, when the
-  provider restarts is never run automatically. The provider reports it to the
-  call's custodian as a `late_results` entry of kind `not_started` with
-  `reason: "restart_before_dispatch"`, and `tool.withdraw` for it answers
-  `withdrawn` or `refused`.
+  provider restarts is settled as not started and is never dispatched, even
+  if it is approved later; running the action needs a new call. The provider
+  reports it to the call's custodian as a `late_results` entry of kind
+  `not_started` with `reason: "restart_before_dispatch"`, and `tool.withdraw`
+  for it answers `withdrawn` or `refused`.
 - A call that had started when the provider restarted reports what the
   provider observes of it; when it cannot tell whether the call settled, it
   says `unknown`, never a guessed success. It is never re-sent.
+- **A held call whose scope ends.** This applies to every call a provider
+  holds past its first reply under a scope (§4.1, §5), whatever its held
+  reason, including `running`. Its dispatch boundary is DispatchStarted, the
+  durable point after which sending may have begun; a provider that holds
+  calls without an approval step records that point the same way.
+  - **What counts as the scope ending.** Only one of these, for the call's
+    scope `(owner, ref, scope_epoch)`:
+    - `route.closed {reason: "scope_ended"}` on a route stamped with that
+      scope;
+    - a `scope.describe {owner, ref}` answer with `status: "ended"` and
+      `scope_epoch` equal to the call's (subconscious `docs/scopes.md`, §5).
+    A route that closes for any other reason (a restart, a rebind, a dropped
+    connection), or a `scope.describe` answer of `not_live`, is not by itself
+    evidence that the scope ended and does not trigger this rule. Restart
+    recovery (above) still applies.
+  - **Before DispatchStarted:** once the provider observes the end, it
+    settles the call as not started and never dispatches it, even if the
+    person approves afterwards. Running the action needs a new call. The
+    provider records a `late_results` entry of kind `not_started` with
+    `reason: "scope_ended"` (§7). A `tool.withdraw` request for it that
+    passes the caller checks above answers `refused` with reason
+    `scope_ended`; route errors for callers are unchanged.
+  - **At or after DispatchStarted:** scope end never reclassifies the call
+    as not started, because sending may have begun. Whether the provider
+    stops the work, for example by killing it, is the provider's policy, and
+    stopping does not undo effects already made. It reports what it observes
+    as a terminal `result` entry, with outcome `unknown` when it cannot tell
+    how the call ended, never a guessed success.
+  - **Delivery.** Entries reach the call's custodian through `late_results`
+    (§7), under that section's pull, retention and per-custodian rules. This
+    rule adds no other delivery path, and gives no timing guarantee for work
+    the provider lets finish.
+  - A call held on an unscoped route has no scope to end and is unaffected.
+  - This settles the call, not anything a person was asked about. A card
+    filed for the call is not withdrawn by this rule. If answering it grants
+    standing permission that outlives the scope, the provider may leave it
+    open; an answer still never runs the settled call.
 
 ## 7. Late results
 
@@ -928,7 +971,9 @@ update, is the call's answer, correlated by `(carrier, call_key)`.
   - `kind` includes `result`, `not_started`, `expired` and non-terminal `held`, decoded open. An entry of
     an unknown kind is recorded and acked like any other, never retried.
   - `not_started` carries `{call_key, event_id, settled_at, reason}`; `reason`
-    is an open string whose first value is `restart_before_dispatch`.
+    is an open string. Its defined values are `restart_before_dispatch` and
+    `scope_ended` (§6); a consumer treats any other value the same way, as a
+    call that never ran.
   - `reduced: true` means the provider kept only the outcome, in `outcome`,
     rather than the full result.
   - `call_key` is qualified by the carrier; `invocation_id` is present only
