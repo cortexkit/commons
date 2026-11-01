@@ -203,7 +203,8 @@ pub struct Regeneration {
     ///
     /// - `cliff` — the whole amount lands at `resets_at`, and **accrual before
     ///   that instant is exactly zero**. A consumer treating this as gradual
-    ///   believes it has partial headroom when it has none.
+    ///   expects headroom to grow before that instant, when none is added until
+    ///   it lands.
     /// - `drip` — the quota accrues continuously at `rate`, so headroom grows
     ///   between reads and an exhausted pool becomes usable again without any
     ///   reset event.
@@ -1093,8 +1094,9 @@ mod tests {
 
     /// A window with no stated mechanic serializes exactly as before.
     ///
-    /// The additive guarantee: every existing producer omits the field, and a
-    /// consumer on the previous version must see byte-identical output.
+    /// The additive guarantee: every existing producer omits the field, so a
+    /// consumer on the previous version sees byte-identical output. Pinned as
+    /// the exact bytes of the pre-regeneration shape.
     #[test]
     fn a_window_without_regeneration_is_unchanged_on_the_wire() {
         let window = RateWindow {
@@ -1109,9 +1111,9 @@ mod tests {
             breakdown: None,
         };
         let json = serde_json::to_string(&window).expect("serializes");
-        assert!(
-            !json.contains("regeneration"),
-            "an absent mechanic must not appear on the wire: {json}"
+        assert_eq!(
+            json, r#"{"usedPercent":42.0,"resetsAt":"2026-08-17T00:00:00Z","windowMinutes":300}"#,
+            "an absent mechanic must leave the wire exactly as before"
         );
     }
 
