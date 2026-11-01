@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.16.11
+
+- Pin `cortexkit-role-llm-runner` to `=0.7.48` for its served-bytes
+  `run.tool_calls` rebuild rule and helper corrections. The page refusal is
+  documented with an example in the contract; no new kit case is added.
+- Pin `cortexkit-role-compaction-provider` to `=0.7.14`, which removes an
+  obsolete claim of a `compaction_unavailable` difference between contracts.
+
 ## 0.16.10
 
 - Pin `cortexkit-role-llm-runner` to `=0.7.47` and add

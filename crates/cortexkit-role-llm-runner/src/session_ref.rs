@@ -64,14 +64,18 @@ pub fn session_ref(identity: &SessionIdentity<'_>) -> String {
     hash_ref(&jcs)
 }
 
-/// The old folder-based reference, only for migrating stored references.
+/// The legacy key derived from `project_root`, kept only to migrate stored
+/// records to the runner-based [`session_ref`].
 ///
-/// Modules re-key live sessions once; ended rows retain their v1 references.
-/// Pass the old `(harness, project_root, session)` fields exactly as stored,
-/// without normalisation. This helper will be removed in a later release.
+/// Pass the `(harness, project_root, session)` values exactly as they were
+/// stored, without normalisation. Never rebuild `project_root` from a
+/// route's current folder: a runner may key a session without a folder on a
+/// name of its own, so a key computed that way can differ from the runner's.
+/// This computes the old key; it doesn't convert an existing reference. New
+/// references come from [`session_ref`] or from the runner.
 #[deprecated(
     since = "0.7.0",
-    note = "only for migrating stored refs; use session_ref"
+    note = "only for computing legacy project_root keys while migrating stored records; new references come from session_ref or the runner"
 )]
 pub fn session_ref_v1(harness: &str, project_root: &str, session: &str) -> String {
     let jcs = format!(

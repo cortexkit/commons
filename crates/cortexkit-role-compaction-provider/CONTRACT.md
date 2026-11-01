@@ -1705,10 +1705,6 @@ date against this contract and should be changed to match it:
   `plan.compaction_item.provider`, inside `compaction_item: {provider,
   preset, params}` (§3). The runner crate's `plan_compaction_provider`
   helper already reads it there.
-- **When `compaction_unavailable` is written.** It is written when Setup
-  fails or times out (§4), or when an outstanding Setup `view_due` or
-  `view_pending` does not apply (§7), including a local fetch timeout. No
-  model call is made in either case.
 - **What a refusal records.** A `refuse` carries a role `code` and,
   optionally, the provider's own finer `provider_code` (§10). The runner
   contract should name one member for the role code and a separate one for

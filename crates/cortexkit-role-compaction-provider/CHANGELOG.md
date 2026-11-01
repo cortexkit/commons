@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.14
+
+- Remove the obsolete `compaction_unavailable` item from the list of
+  differences with `llm-runner/v1`: the runner contract already covers Setup
+  failures and unapplied outstanding Setup views. No behavior changes.
+
 ## 0.7.13
 
 - Add Setup `view_pending: {version}`, negotiated by `view_pending` in the

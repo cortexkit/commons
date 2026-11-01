@@ -57,8 +57,8 @@ pub enum Mode {
     /// sent. The stored tool result never changes: the runner records that
     /// the send was delivered with that result. User authority.
     ToolResult,
-    /// A turn-scoped system message (Anthropic's `clear_at:
-    /// next_user_message`), for a plan template's rendering only.
+    /// A turn-scoped system entry for a plan template's rendering only.
+    /// Stored bytes stay fixed; a later route may render it at user authority.
     TurnSystem,
     /// A user message into the run in progress, at its next step boundary.
     Steer,
@@ -545,14 +545,14 @@ pub fn plan_senders(plan: &Map<String, Value>) -> Result<Vec<PlanSender>, &'stat
 }
 
 /// Admission's check of a plan's `senders` against `declared`: a malformed
-/// member, or a non-empty one on a runner without `delivery_order`, is
+/// member, or any present member on a runner without `delivery_order`, is
 /// refused `invalid_params` naming [`PLAN_SENDERS_FIELD`], writing nothing.
 pub fn check_plan<S: AsRef<str>>(
     plan: &Map<String, Value>,
     declared: &[S],
 ) -> Result<(), &'static str> {
-    let senders = plan_senders(plan)?;
-    if !senders.is_empty()
+    plan_senders(plan)?;
+    if plan.contains_key(PLAN_SENDERS)
         && !declared
             .iter()
             .any(|name| name.as_ref() == capabilities::DELIVERY_ORDER)
@@ -581,10 +581,13 @@ pub fn effective_senders(
 /// A send's admission on a runner that declares `delivery_order`. `caller`
 /// is the route's attested principal, `owner` the session's recorded owner
 /// (`None` before the first send), `senders` the plan's, and `modes` the
-/// send's list (or its legacy equivalent). The owner is admitted with any
-/// list. Any other caller is admitted only when the plan names it, and may
-/// list `idle_start` only when its entry grants it. `Err` is the refusal:
-/// `scope_owner_mismatch` with no field for an unnamed caller, or
+/// send's list (or its legacy equivalent). With `owner` `None` this check
+/// passes without a plan grant: on a new session the runner records the
+/// first attested sender as owner when it admits that send; this helper
+/// doesn't record anything. With a recorded owner, the owner passes with any
+/// list; any other caller passes only when the plan names it, and may list
+/// `idle_start` only when its entry grants it. `Err`
+/// is the refusal: `scope_owner_mismatch` with no field for an unnamed caller, or
 /// `invalid_params` naming [`FIELD`] for an `idle_start` the grant excludes.
 pub fn admit(
     caller: &str,
@@ -1087,6 +1090,26 @@ mod tests {
                 (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
             }
         }
+    }
+
+    #[test]
+    fn check_plan_refuses_present_senders_without_delivery_order() {
+        for senders in [serde_json::json!([]), Value::Null] {
+            let plan = serde_json::json!({"senders": senders});
+            let plan = plan.as_object().unwrap();
+            assert_eq!(check_plan(plan, &["plans"]), Err(PLAN_SENDERS_FIELD));
+            assert_eq!(check_plan(plan, &["plans", "delivery_order"]), Ok(()));
+        }
+        assert_eq!(check_plan(&Map::new(), &["plans"]), Ok(()));
+    }
+
+    #[test]
+    fn first_send_is_admitted_before_an_owner_is_recorded() {
+        assert_eq!(admit("sender", None, &[], &[Mode::IdleStart]), Ok(()));
+        assert_eq!(
+            admit("sender", Some("owner"), &[], &[Mode::IdleStart]),
+            Err((errors::SCOPE_OWNER_MISMATCH, None))
+        );
     }
 
     #[test]

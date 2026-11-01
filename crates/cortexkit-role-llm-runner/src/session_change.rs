@@ -22,7 +22,8 @@
 //!
 //! After a lost reply, the owner reads `session.baseline`: its
 //! `accepted_generation`, `applied_generation`, `pending` and `effective`
-//! ([`crate::baseline::Baseline`]) carry everything these replies do.
+//! ([`crate::baseline::Baseline`]) recover the durable change state, not the
+//! reply-time `run_in_progress` or `applies_from_next_run` flags.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -46,7 +47,8 @@ pub mod surfaces {
 #[serde(deny_unknown_fields)]
 pub struct RefreshRequest {
     /// The full fetch plan, as [`crate::send::SendRequest::plan`] carries
-    /// it, passed to providers verbatim.
+    /// it, passed to providers verbatim except for runner-only hints such as
+    /// per-item `upfront`, which is never sent to providers.
     pub plan: Map<String, Value>,
     /// One rung name from [`rungs::ALL`].
     pub policy: String,
@@ -536,8 +538,8 @@ mod tests {
         for shape in [(false, true), (true, true), (false, false), (true, false)] {
             assert!(shapes.contains(&shape), "no refresh answer {shape:?}");
         }
-        // After a lost reply, `session.baseline` carries everything a
-        // refresh answer said.
+        // After a lost reply, `session.baseline` recovers durable change state,
+        // not the refresh answer's reply-time flags.
         for case in vectors::cases(&file, "baselines_after_refresh") {
             let name = case["name"].as_str().unwrap();
             let reply: BaselineReply = vectors::round_trip(name, &case["answer"]);

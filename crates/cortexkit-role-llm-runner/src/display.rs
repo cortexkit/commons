@@ -97,7 +97,8 @@ pub struct DisplayRow {
     /// The message's text parts, joined as `run.result` joins them
     /// ([`crate::run::join_text_parts`]). Reasoning is not part of it.
     pub text: String,
-    /// Every part, in the stored message's order.
+    /// Every projected part, in the stored message's order. Bookkeeping
+    /// parts are dropped.
     #[serde(default)]
     pub parts: Vec<DisplayPart>,
     /// The recorded model that wrote the message. A message written through
@@ -1133,7 +1134,8 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
         } as u32)
     }
     let trimmed = text.trim_end_matches('=');
-    if text.len() - trimmed.len() > 2 || trimmed.len() % 4 == 1 {
+    let padding = text.len() - trimmed.len();
+    if trimmed.len() % 4 == 1 || (padding != 0 && (!text.len().is_multiple_of(4) || padding > 2)) {
         return None;
     }
     let mut out = Vec::with_capacity(trimmed.len() * 3 / 4);
@@ -1141,6 +1143,10 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
         let mut acc = 0u32;
         for &byte in chunk {
             acc = (acc << 6) | sextet(byte)?;
+        }
+        // Unused low bits in the final partial quantum must be zero.
+        if (chunk.len() == 2 && acc & 0x0f != 0) || (chunk.len() == 3 && acc & 0x03 != 0) {
+            return None;
         }
         acc <<= 6 * (4 - chunk.len() as u32);
         let bytes = acc.to_be_bytes();
@@ -1284,6 +1290,38 @@ impl DisplayPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base64_decode_accepts_canonical_padded_and_unpadded_input() {
+        for (text, expected) in [
+            ("", ""),
+            ("TQ==", "M"),
+            ("TQ", "M"),
+            ("TWE=", "Ma"),
+            ("TWE", "Ma"),
+            ("TWFu", "Man"),
+            ("TWFuTQ==", "ManM"),
+        ] {
+            assert_eq!(base64_decode(text).as_deref(), Some(expected.as_bytes()));
+        }
+    }
+
+    #[test]
+    fn base64_decode_rejects_bad_padding() {
+        for text in [
+            "=", "==", "===", "====", "TQ=", "TQ===", "TWE==", "TWFu=", "T=Q=", "TQ==TQ==", "A",
+            "TQ==\n", "TQ-_",
+        ] {
+            assert_eq!(base64_decode(text), None, "accepted {text:?}");
+        }
+    }
+
+    #[test]
+    fn base64_decode_rejects_nonzero_trailing_bits() {
+        for text in ["TR==", "TR", "TWF=", "TWF"] {
+            assert_eq!(base64_decode(text), None, "accepted {text:?}");
+        }
+    }
 
     #[test]
     fn projects_is_true_for_the_four_profiles_and_project_refuses_others() {

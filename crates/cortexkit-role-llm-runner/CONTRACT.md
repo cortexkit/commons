@@ -1896,7 +1896,7 @@ run.
 ### 6.3 `run_tool_calls`: `run.tool_calls`
 
 A runner that declares `run_tool_calls` serves `run.tool_calls`: every tool
-call a run made, as a list, so a consumer (core's citations, say) learns
+call a run made, as a list, so a consumer learns
 what a run called without decoding any message body.
 
 - [pinned] The request is `{run_id, after?, limit?}`
@@ -1915,7 +1915,7 @@ what a run called without decoding any message body.
     dispatched to, absent for a call never dispatched (§5);
   - `name` is the model-facing tool name;
   - `args` is the arguments object exactly as dispatched, or, for a call
-    never dispatched, exactly as the model asked for it. It is never
+    never dispatched, exactly as the model asked for it. It is required, never
     truncated or rewritten;
   - `outcome` is an open string (`tool_calls::outcomes`): `succeeded` (it
     executed and its result is not an error), `failed` (it executed and its
@@ -1958,6 +1958,22 @@ what a run called without decoding any message body.
   is listed, its place, `tool_call_id`, `call_key` (once present), `name`,
   `args` and `ordinal` never change; its `outcome`, `result_bytes` and
   `dispatched_to` move forward as the call does.
+- [pinned] **Rebuilt arguments.** A runner rebuilding message bodies under
+  §4.2.1 may also rebuild a call's `args` from its requesting message instead
+  of keeping a copy. It rebuilds and checks that whole message with
+  `served_bytes::served_body` and `served_bytes::check_served` against its
+  stored served digest before serving the arguments. If any call on a page
+  comes from a message whose rebuild no longer matches, or whose host row is
+  gone (after a revert, for example), the runner refuses the whole page
+  `served_bytes_changed`, detail `{mid}` naming the first such message in
+  page order. It never serves a partial page or a call with `args` absent or
+  different. The refusal is not retryable: that run's calls belong to a
+  lineage the host no longer holds, as for a read of that message. Calls
+  whose requesting message is not served under §4.2.1 keep the requirements
+  above without this rebuild option.
+  For example, if a page lists calls from messages A and B in that order,
+  A's rebuild matches and B's host row is gone, the reply is only the
+  refusal with `{mid: "B"}`, not a page containing A's calls.
 - [pinned] Paging is `session.read`'s (§4.2), by count and by bytes. A page
   holds at most `limit` calls (absent means the runner's default, and a
   value above its maximum is capped to it; `limit: 0` is refused
@@ -3897,8 +3913,9 @@ say who may send and which texts are system text.
   `delivered_as: {mode, call_key?}` (`delivery_order::EntryDelivery`) in its
   envelope (§4.2): the mode it went out in, and for `tool_result` the
   `call_key` of the tool result it went out with. Readers and a resumed run
-  render exactly what was sent from that entry. Once delivered, it is resent
-  byte-identical on every later request.
+  render from that entry. Once delivered, the stored entry's bytes, role and
+  `delivered_as` never change. Provider rendering may change on a later
+  route as the `turn_system` authority fall-through below specifies.
 - [pinned] `tool_result` never changes the stored tool result. The runner
   records that send S was delivered with result R, and renders R followed
   by S's text from that record, so a resume renders the same bytes.
@@ -3935,27 +3952,24 @@ say who may send and which texts are system text.
   (`send::states::TEMPLATE_PART_GONE`), never delivered, which a re-send of
   its `send_id` (or `send.status`) answers with `slot`, as an expired send
   answers `expired`. The sender recomposes on its next pass. Once a
-  template send is delivered, its rendered text is stored and resent byte
-  for byte.
+  template send is delivered, its rendered text is stored byte for byte;
+  later provider rendering follows the authority rules below.
 - [pinned] `tool_result`, `steer` and `idle_start` deliver at user
   authority. `turn_system` is possible only for a rendered template, and
   only where the provider route and position support it under the rules
   below and the runner owns the request. Where it is not, the runner falls
   through to the next mode in the list, carrying the same rendered text at
   user authority. A send without a template never goes out as `turn_system`.
-- [pinned] On OpenAI Responses routes, including subscription routes that
-  speak the Responses protocol, `turn_system` renders as a `developer`-role
+- [pinned] On OpenAI Responses routes where the provider supports it,
+  including subscription routes that speak the Responses protocol,
+  `turn_system` renders as a `developer`-role
   input item at its position in the conversation. It never uses the
   top-level `instructions` field: those instructions apply only to the
   current request and are not carried forward with `previous_response_id`.
-  OpenAI lists `developer` as an accepted input role; its documentation gives
-  no rule about where that item may appear in the conversation.
 - [pinned] On Anthropic Messages, `turn_system` renders as a `role:
-  "system"` message inside `messages` only on models the provider lists as
-  accepting mid-conversation system messages. The runner's model catalog
-  takes that support from the provider's published model list, never from
-  version arithmetic: for example, at the time of writing, Opus 4.8 and
-  specific named Claude 5 models are listed, not every major-5 model.
+  "system"` message inside `messages` only where the provider supports
+  mid-conversation system messages. The runner confirms that support for
+  the route and model, never inferring it from version arithmetic.
 - [pinned] An Anthropic mid-conversation system message goes immediately
   after a user turn (a user turn carrying tool results counts), or after an
   assistant turn ending in a server-tool result. It never goes between a
@@ -3965,8 +3979,8 @@ say who may send and which texts are system text.
   model's own reply. The first-possible-mode rule above still applies:
   the next listed mode wins, or the send stays queued. A queued send can
   wait for the next user turn or tool result and be placed right after it.
-- [pinned] On every other route, including Gemini, Anthropic models not
-  on the published support list, and any route whose support the runner
+- [pinned] On every other route, including Gemini, Anthropic models without
+  confirmed support, and any route whose support the runner
   cannot confirm, `turn_system` is never possible. The runner falls
   through in list order, carrying the same rendered text at user
   authority, or keeps the send queued when no mode is possible. A runner
@@ -4016,8 +4030,10 @@ say who may send and which texts are system text.
   any, are an entry naming the owner.
 - [pinned] A sender grant grants no transcript reads. Plan-named readers
   are a separate opt-in admission policy (§9.19 `app_readers`).
-- [pinned] On a runner that declares `delivery_order`, a send from anyone
-  but the owner is admitted only when the plan names the sender, matched on
+- [pinned] The first send, before an owner is recorded, is admitted without
+  a sender grant and sets the owner. After that, on a runner that declares
+  `delivery_order`, a send from anyone but the owner is admitted only when
+  the plan names the sender, matched on
   the route's attested principal, never on a request field
   (`delivery_order::admit`); any other caller is refused
   `scope_owner_mismatch`, writing nothing. This replaces §9's permission to
@@ -5134,7 +5150,9 @@ froze for a run to every assistant reply the run writes.
   `session.baseline` with the plan's `composition_digest` and items. An
   identical later repeat is a no-op for the plan: it does not fetch or freeze
   again, but the send's prompt and `send_id` still follow §9. A different
-  later plan is refused `plan_drift {frozen?, sent}`.
+  later plan is refused `plan_drift {frozen?, sent}`, except that while a
+  change is pending an owner send may name either the effective plan or the
+  latest accepted one (§10.2, `session_change::check_send_drift`).
 - [pinned] A runner declaring `plans` fetches the plan's items itself, with
   the composition, under one deadline, and admits the session only when every
   required item arrived, the staleness check passed and no tool names
@@ -5144,9 +5162,12 @@ froze for a run to every assistant reply the run writes.
 - [pinned] Admission refuses as: `fetch_unavailable {provider}`, retryable;
   `plan_stale`, naming the differences; `tool_name_collision {name, providers}`,
   naming the colliding model-facing name and every provider that offered it;
-  `scope_unsupported` when the send is under a scope and the daemon lacks scopes. A later send whose plan differs from the frozen one is
-  refused `plan_drift {frozen?, sent}`, naming the two plan identities.
-  `frozen` is absent when the session's first episode was plan-less.
+  `scope_unsupported` when the send is under a scope and the daemon lacks scopes.
+  A later send outside the effective/latest-accepted exception above is
+  refused `plan_drift {frozen?, sent}`, naming the latest accepted plan (or
+  the effective plan when no change was accepted) and the sent plan.
+  `frozen` is absent only when neither exists: a plan-less first episode
+  with no change accepted since.
   `session.adopt` refuses a plan other than the one applied at host start
   with the same `plan_drift {frozen, sent}` (§9.5).
 - [pinned] Any refusal during admission writes nothing.
@@ -5186,7 +5207,7 @@ froze for a run to every assistant reply the run writes.
   text with its join version in its start record. A session keeps its role
   versions for life.
 - [pinned] The plan travels as `plan` on the session's first send, carried
-  verbatim (`SendRequest::plan`); its shape is the fetch-plan section's.
+  verbatim (`SendRequest::plan`).
 - [pinned] The plan's optional `render_tags` member decides whether part
   tags are rendered to the model (§9.6); absent means off. Its optional
   `senders` member names the session's other senders and their templates
@@ -5392,7 +5413,8 @@ every request, answer and refusal.
   (`session_change::check_send_drift`).
 - [pinned] After a lost reply, the owner reads `session.baseline`: its
   `accepted_generation`, `applied_generation`, `pending` and `effective`
-  (§10) carry everything a `session_change` answer says.
+  (§10) recover the durable change state, not the reply-time
+  `run_in_progress` or `applies_from_next_run` flags.
 
 ## 11. Calls the runner makes
 
@@ -5572,7 +5594,7 @@ treats it as a terminal refusal of that one request.
 |---|---|---|---|
 | `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
 | `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
-| `served_bytes_changed` | a read would serve a message whose body, rebuilt from the host's store, differs from the digest it was first served with (§4.2.1) | `{mid}` (`errors::ServedBytesChangedDetail`); no content or digest | no: the runner serves that message again only under a new lineage; re-read from the tail |
+| `served_bytes_changed` | a read would serve a message whose body, rebuilt from the host's store, differs from the digest it was first served with (§4.2.1); or a `run.tool_calls` page rebuilds `args` from a requesting message under the same whole-message digest check (`served_bytes::served_body` and `check_served`), and that rebuild differs or its host row is gone (§6.3). The whole page is refused, never a partial page or a call with absent or different `args` | `{mid}` (`errors::ServedBytesChangedDetail`), the first such message in page order; no content or digest | no. For a read: the changed message is served again only under a new lineage, so re-read from the tail. For `run.tool_calls`: don't retry that page; the requesting message can't be reproduced, and reading the current transcript doesn't recover the original run's arguments |
 | `unknown_mid` | `after_mid` names no message in the lineage; a `session.history` `from_mid` or `before_mid` names no message of the session's history (§4.6) | — | no |
 | `before_lineage_start` | a range read, an after-message read or a `session.resolve` names a position below the current lineage's `first_ordinal` (§4.5) | `{first_ordinal}` (`errors::BeforeLineageStartDetail`) | no: read from `first_ordinal`, or read older history with `session.history` |
 | `unknown_ordinal` | a `session.history` `from_ordinal` or `before_ordinal` names an ordinal the runner never assigned, or one a revert removed (§4.6) | — | no |
@@ -5615,7 +5637,7 @@ treats it as a terminal refusal of that one request.
 | `unknown_invocation` | status key is not held by the session | — | no |
 | `no_person` | the session plan has `interactive: false` | — | no |
 | `user_commands_unsupported` | runner does not declare `user_commands` | — | no |
-| `plan_drift` | a later send's plan differs from the frozen one (while a change is pending, from both the effective and the latest accepted plan, which `frozen` then names, §10.2); a `session.adopt` plan differs from the one applied at host start (§9.5) | `frozen?`, `sent` (plan identities; no `frozen` after a plan-less first episode, or on `session.adopt` when no plan was applied) | no |
+| `plan_drift` | a later send's plan differs from the frozen one (while a change is pending, from both the effective and the latest accepted plan, which `frozen` then names, §10.2); a `session.adopt` plan differs from the one applied at host start (§9.5) | `frozen?`, `sent` (plan identities; `frozen` is the latest accepted plan, else the effective one, and is absent only when neither exists, or on `session.adopt` when no plan was applied) | no |
 | `pre_user_unavailable` | a steer or queue under an unavailable `refuse` PreUser | `provider` | no |
 | `transient` | a condition that may clear by itself | — | **yes** |
 | `scope_not_synced` | the scope's owner has not re-synced after a daemon restart | — | **yes**, with backoff within the hold bound |

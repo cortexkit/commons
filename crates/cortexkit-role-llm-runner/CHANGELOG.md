@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.48
+
+- Permit `run.tool_calls` arguments to be rebuilt from requesting messages
+  served under §4.2.1, with the same whole-message digest check. A changed
+  or missing host row refuses the entire page as non-retryable
+  `served_bytes_changed`, naming the first affected message in page order;
+  arguments are never omitted or changed. Add a contract example; no new
+  paging helper or conformance case is introduced.
+- Clarify `session_ref_v1` docs: legacy v1 translation only; new code uses `session_ref` or the runner's reference.
+- Refuse any present `plan.senders`, including an empty array or null, on a
+  runner without `delivery_order`; document the first send's owner-setting
+  exemption from sender grants. Add regression tests.
+- Validate optional base64 padding and zero trailing bits in display media
+  decoding, with separate regressions for malformed padding and trailing bits.
+- Align stored delivery bytes with later authority fall-through, make
+  provider-support wording conditional, and remove the obsolete
+  `clear_at: next_user_message` analogy. Clarify owner-send drift during a
+  pending change, baseline recovery versus reply-time flags, runner-only
+  `upfront` hints, and projected display parts; remove a dangling plan-shape
+  reference.
+
 ## 0.7.47
 
 - Add the `message_senders` guarantee, requiring `history_display` and
