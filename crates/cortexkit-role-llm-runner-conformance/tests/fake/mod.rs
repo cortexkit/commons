@@ -72,6 +72,7 @@ mod history;
 mod live_ids;
 mod media;
 pub mod message_checkpoint;
+mod message_senders;
 mod output_refs;
 mod rich_ui;
 mod service_tier;
@@ -177,6 +178,14 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub declare_message_senders: bool,
+    pub message_senders_omit: bool,
+    pub message_senders_owner: bool,
+    pub message_senders_late: bool,
+    pub message_senders_no_observer: bool,
+    pub message_senders_model: bool,
+    pub message_senders_no_client_id: bool,
+    pub message_senders_join_only: bool,
     pub live_ids_without_opt_in: bool,
     pub live_ids_started_before_storage: bool,
     pub live_ids_rekey_mismatch: bool,
@@ -1221,7 +1230,8 @@ pub struct Module {
     alive: AtomicBool,
     kill_hook: Mutex<Option<String>>,
     hook_fired: AtomicBool,
-    sessions: Mutex<BTreeMap<String, Sess>>,
+    sessions: Arc<Mutex<BTreeMap<String, Sess>>>,
+    sender_observer: Mutex<Option<message_senders::Observer>>,
     /// Serialize user-command reservation with forwarding so concurrent retries
     /// cannot both pass the durable lookup before the invocation key is recorded.
     user_command_gate: Mutex<()>,
@@ -1344,7 +1354,8 @@ impl Module {
             alive: AtomicBool::new(true),
             kill_hook: Mutex::new(None),
             hook_fired: AtomicBool::new(false),
-            sessions: Mutex::new(BTreeMap::new()),
+            sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            sender_observer: Mutex::new(None),
             user_command_gate: Mutex::new(()),
             replayed: AtomicBool::new(false),
         });
@@ -1561,6 +1572,7 @@ impl Module {
             return Err(Killed);
         }
         self.apply(&record);
+        message_senders::capture(self, session);
         Ok(())
     }
 
@@ -1775,10 +1787,14 @@ impl Module {
                 let mut body = json!({ "role": role, "text": queued.text });
                 attachments::add_parts(&mut body, record);
                 let sender = queued.sender.clone();
+                let client_id = queued.request["client_message_id"]
+                    .as_str()
+                    .map(str::to_owned);
                 let ordinal = sess.push(body, &text("run_id"), Vec::new());
                 let message = sess.at_mut(ordinal);
                 message.delivered_as = Some(record["delivered_as"].clone());
                 message.sender = Some(sender);
+                message.client_message_id = client_id;
                 let row = message.mid.clone();
                 if let Some(queued) = sess.ordered.get_mut(&id) {
                     queued.delivery = Some(QueuedDelivery {
@@ -2835,6 +2851,7 @@ impl Module {
                         "attachment_parts": attachments::queued_parts(self, session, &sess.ordered[&id].request),
                         "delivery": groups::QUEUE, "run_id": run_id, "admitted": false,
                         "cause": cause, "sender": sender,
+                        "client_message_id": sess.ordered[&id].request["client_message_id"],
                         "delivered_as": { "mode": order::modes::IDLE_START } }),
             )?;
             self.drive(session, &run_id)?;
@@ -5465,6 +5482,15 @@ impl RunnerRoute for FakeRoute {
         }
         Ok(self.module.subscribe(&self.session, params))
     }
+
+    async fn observe_message_started(
+        &self,
+        operation: std::pin::Pin<
+            &mut (dyn std::future::Future<Output = Result<Reply, RouteFailure>> + Send),
+        >,
+    ) -> Result<Option<(Reply, Vec<(Value, Reply)>)>, RouteFailure> {
+        message_senders::observe(self, operation).await
+    }
 }
 
 pub struct FakeSubject {
@@ -5735,6 +5761,11 @@ impl FakeSubject {
                         .filter_map(|c| c.group())
                         .map(str::to_owned)
                         .chain(self.held_calls_group.then(|| groups::HELD_CALLS.to_owned()))
+                        .chain(
+                            self.defects
+                                .declare_message_senders
+                                .then(|| groups::MESSAGE_SENDERS.to_owned()),
+                        )
                         .chain(
                             self.defects
                                 .declare_app_readers

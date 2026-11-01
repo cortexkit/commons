@@ -158,6 +158,7 @@ where
             "never_written_session_empty_head" => passed(self.never_written_head().await),
             "head_has_no_bodies" => passed(self.head_has_no_bodies().await),
             "head_sender_is_callers_effective_grant" => crate::head_sender::run(self).await,
+            "message_senders_rows_name_their_sender" => crate::message_senders::run(self).await,
             "sender_succession_same_payload_receipt"
             | "sender_succession_changed_payload_refused"
             | "sender_succession_third_sender_fresh"

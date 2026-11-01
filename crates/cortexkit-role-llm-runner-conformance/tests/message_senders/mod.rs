@@ -1,0 +1,200 @@
+use super::*;
+
+const NAME: &str = "message_senders_rows_name_their_sender";
+
+fn subject(mut defects: Defects) -> FakeSubject {
+    defects.declare_message_senders = true;
+    let mut subject = declaring(Capability::DeliveryOrder, defects);
+    subject.capabilities.extend([
+        Capability::HostHistory,
+        Capability::HistoryDisplay,
+        Capability::LiveEvents,
+        Capability::ClientMessageId,
+    ]);
+    subject.head_sender_fixtures = true;
+    subject
+}
+
+#[tokio::test]
+async fn message_senders_correct_runner_passes_start_and_join() {
+    let report = run(&subject(Defects::default())).await;
+    assert_eq!(
+        report.outcome(NAME),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn message_senders_omitted_sender_fails_by_name() {
+    let report = run(&subject(Defects {
+        message_senders_omit: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        failed(&report, NAME).contains("sender is None"),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[NAME]);
+}
+
+#[tokio::test]
+async fn message_senders_owner_instead_of_sender_b_fails_by_name() {
+    let report = run(&subject(Defects {
+        message_senders_owner: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, NAME);
+    assert!(
+        reason.contains("sender is Some") && reason.contains("fake.sender-b"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &[NAME]);
+}
+
+#[tokio::test]
+async fn message_senders_late_binding_passes_buffered_checks_but_fails_live_timing_by_name() {
+    let report = run(&subject(Defects {
+        message_senders_late: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        failed(&report, NAME).contains("message_senders_timing_at_message_started: sender is None"),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[NAME]);
+}
+
+#[tokio::test]
+async fn message_senders_join_binding_is_checked_after_the_start_passes() {
+    for late in [false, true] {
+        let report = run(&subject(Defects {
+            message_senders_join_only: true,
+            message_senders_omit: !late,
+            message_senders_late: late,
+            ..Defects::default()
+        }))
+        .await;
+        let reason = failed(&report, NAME);
+        assert!(reason.contains("sender is None"), "{reason}");
+        assert_eq!(
+            reason.contains("message_senders_timing_at_message_started"),
+            late,
+            "{reason}"
+        );
+        assert_none_failed_but(&report, &[NAME]);
+    }
+}
+
+#[tokio::test]
+async fn message_senders_model_reply_with_sender_fails_by_name() {
+    let report = run(&subject(Defects {
+        message_senders_model: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        failed(&report, NAME).contains("model reply"),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[NAME]);
+}
+
+#[tokio::test]
+async fn message_senders_missing_client_message_id_fails_by_name() {
+    let report = run(&subject(Defects {
+        message_senders_no_client_id: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        failed(&report, NAME).contains("client_message_id is None"),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[NAME]);
+}
+
+#[tokio::test]
+async fn message_senders_without_live_observer_still_checks_buffered_rows() {
+    let report = run(&subject(Defects {
+        message_senders_no_observer: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        matches!(report.outcome(NAME), Some(CaseOutcome::PassedWithInapplicableRule { reason }) if reason.contains("message_senders_timing_at_message_started")),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+    let report = run(&subject(Defects {
+        message_senders_no_observer: true,
+        message_senders_omit: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        failed(&report, NAME).contains("sender is None"),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[NAME]);
+}
+
+#[tokio::test]
+async fn message_senders_without_a_steerable_hold_checks_start_only() {
+    let mut subject = subject(Defects::default());
+    subject.capabilities.remove(&Capability::Steer);
+    let report = run(&subject).await;
+    assert!(
+        matches!(report.outcome(NAME), Some(CaseOutcome::PassedWithInapplicableRule { reason }) if reason.contains("message_senders_join") && !reason.contains("message_senders_timing")),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn message_senders_undeclared_group_and_missing_identities_are_inapplicable_by_name() {
+    for no_group in [true, false] {
+        let mut subject = subject(Defects::default());
+        if no_group {
+            subject.defects.declare_message_senders = false;
+        } else {
+            subject.head_sender_fixtures = false;
+        }
+        let report = run(&subject).await;
+        let missing = if no_group {
+            "message_senders"
+        } else {
+            "head_sender_identities"
+        };
+        assert!(
+            matches!(report.outcome(NAME), Some(CaseOutcome::Inapplicable { reason }) if reason.contains(missing)),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn message_senders_missing_dependencies_are_inapplicable_by_name() {
+    for dependency in [Capability::HistoryDisplay, Capability::LiveEvents] {
+        let mut subject = subject(Defects::default());
+        subject.capabilities.remove(&dependency);
+        let report = run(&subject).await;
+        assert!(
+            matches!(report.outcome(NAME), Some(CaseOutcome::Inapplicable { reason }) if reason.contains(&dependency.name())),
+            "{}",
+            report.render()
+        );
+    }
+}

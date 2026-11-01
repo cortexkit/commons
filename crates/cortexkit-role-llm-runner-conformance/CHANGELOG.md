@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.16.10
+
+- Pin `cortexkit-role-llm-runner` to `=0.7.47` and add
+  `message_senders_rows_name_their_sender`: a plan-named sender's start and
+  join messages expose its module id and client message id as soon as
+  `message_started` arrives, while model replies carry no sender.
+- Reuse the named-sender adapter fixtures. Missing adapter prerequisites,
+  an undeclared group, or unavailable named-principal fixtures make the
+  case inapplicable; invalid discovery, such as `message_senders` declared
+  without its dependencies, still fails.
+  Faulty fake runners cover omitted, wrong and late sender bindings.
+- Add defaulted `RunnerRoute::observe_message_started` for immediate row
+  reads at live event receipt. Without the hook only the timing rule is
+  inapplicable; buffered checks still run. Without a steerable held run,
+  the case covers start messages and marks the join rule inapplicable.
+
 ## 0.16.9
 
 - Pin `cortexkit-role-llm-runner` to `=0.7.46` and add three `live_ids` cases:

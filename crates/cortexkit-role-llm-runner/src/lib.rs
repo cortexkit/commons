@@ -211,6 +211,10 @@ pub mod capabilities {
     /// Opt-in provisional display ids for hosts that name a message only
     /// when storing it. Requires [`LIVE_EVENTS`]; see [`crate::live::LiveSubscribeRequest`].
     pub const LIVE_IDS: &str = "live_ids";
+    /// Module-principal sends have their attested sender and any supplied
+    /// client message id on the display row before `message_started`.
+    /// Requires both [`HISTORY_DISPLAY`] and [`LIVE_EVENTS`].
+    pub const MESSAGE_SENDERS: &str = "message_senders";
     /// `client_message_id` on `session.send`, kept beside the user message
     /// and shown on its display row. A caller never sends the member to a
     /// runner without the group, whose strict decoding may refuse it.
@@ -416,6 +420,10 @@ pub mod capabilities {
         (READ_DISPLAY_FACTS, &[ops::SESSION_READ]),
         (LIVE_EVENTS, &[ops::SESSION_SUBSCRIBE]),
         (LIVE_IDS, &[ops::SESSION_SUBSCRIBE]),
+        (
+            MESSAGE_SENDERS,
+            &[ops::SESSION_HISTORY, ops::SESSION_SUBSCRIBE],
+        ),
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
         (STEP_EVENTS, &[]),

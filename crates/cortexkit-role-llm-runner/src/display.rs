@@ -115,6 +115,9 @@ pub struct DisplayRow {
     /// route principal the send arrived on), where the runner recorded it,
     /// kept beside the stored body and never inside it. Absent for a prompt
     /// a person typed into the host directly.
+    /// With [`crate::capabilities::MESSAGE_SENDERS`], module-principal sends
+    /// stored while the group is declared have this binding by `message_started`.
+    /// An absent sender never proves who wrote the message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<String>,
     /// For an assistant message a run wrote, on a runner declaring

@@ -3,6 +3,7 @@
 
 mod fake;
 mod finish_reason;
+mod message_senders;
 
 const PART_EDIT_CASES: &[&str] = &[
     "part_edits_truncate_renders_with_own_tag",
@@ -837,8 +838,9 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     // Legacy fixtures do not opt into these groups or supply their optional
     // metadata/clock hooks. Inapplicable cases are not counted as passing coverage.
     if (case.starts_with("sender_succession_")
-        || case.starts_with("read_display_facts_")
         || case.starts_with("live_ids_")
+        || case.starts_with("message_senders_")
+        || case.starts_with("read_display_facts_")
         || case == "delivery_deadline_retry_keeps_original_expiry")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { .. }))
     {
@@ -1286,8 +1288,9 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             continue;
         }
         if spec.name.starts_with("sender_succession_")
-            || spec.name.starts_with("read_display_facts_")
             || spec.name.starts_with("live_ids_")
+            || spec.name.starts_with("message_senders_")
+            || spec.name.starts_with("read_display_facts_")
             || spec.name == "delivery_deadline_retry_keeps_original_expiry"
         {
             assert_eq!(

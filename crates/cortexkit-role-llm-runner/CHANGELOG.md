@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.47
+
+- Add the `message_senders` guarantee, requiring `history_display` and
+  `live_events`: module-principal sends have their attested `sender` and any
+  supplied `client_message_id` on the display row before `message_started`.
+  This covers start, join and queued sends stored after restart without
+  changing event fields, stored bodies or default reads.
+- Clarify that absent senders prove nothing and readers decide what a
+  present sender means, including whether an app sender relays a person's reply.
+
 ## 0.7.46
 
 - Add the `live_ids` group, requiring `live_events`, and per-subscriber

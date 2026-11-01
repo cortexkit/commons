@@ -228,6 +228,8 @@ pub const CASES: &[CaseSpec] = &[
         "a reported log identity holds across a real cut but changes when the same key's log is created again"),
     case("head_sender_is_callers_effective_grant", &[Queue, TranscriptReads],
          "when role.describe declares head_sender, A gets supported modes minus idle_start, B gets every supported mode and interrupt, the unnamed caller gets no grant, and the owner gets owner=true"),
+    case("message_senders_rows_name_their_sender", &[Capability::HistoryDisplay, Capability::HostHistory, Capability::LiveEvents, Capability::DeliveryOrder, Capability::ClientMessageId, Queue, TranscriptReads],
+         "with message_senders and named-principal routes, sender B's start and join messages name B and their client ids by message_started; model replies have no sender; live timing and joins are individually inapplicable without adapter support"),
     case("refresh_added_sender_admitted_at_acceptance", &[],
          "with session_change, delivery_order, queue and transcript_reads, a sender added by a durable refresh is admitted before the next run, also mid-run when held calls are available"),
     case("refresh_removed_sender_refused_at_acceptance", &[],

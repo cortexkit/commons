@@ -160,6 +160,7 @@ particular implementation.
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `live_ids` | `session.subscribe` with opt-in provisional display ids (requires `live_events`; added in 0.7.46) | §7.1 |
+| `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
@@ -275,6 +276,12 @@ particular implementation.
   on this crate's 0.7.45 or older request shape rejects the unknown field and
   refuses the whole subscribe. Subscribers gate on the declaration, never on
   a runner's implementation version.
+- [pinned] `message_senders` (added in 0.7.47) requires both
+  `history_display` and `live_events`. `check_describe` reports each missing
+  dependency by name (`message_senders_without_history_display`,
+  `message_senders_without_live_events`) and checks for `session.history`
+  and `session.subscribe`. The group strengthens the existing display-row
+  sender binding (§4.7); it adds no fields or discovery metadata.
 - [pinned] `call_identity` is a group of its own (added in 0.7.2, §9.16),
   declared only beside `history_display` or `live_events`, whose tool-call
   entries it extends: `check_describe` refuses it by name when neither is declared
@@ -1405,6 +1412,28 @@ display-ready row for an app's reader on a runner declaring
   body or the default `session.read` entry: a reader such as a compaction
   provider decodes stored bodies strictly, and a member it does not know
   would fail that decode.
+- [pinned] **Sender binding by message start (`message_senders`).** On a
+  runner declaring `message_senders`, every user message stored from a
+  `session.send` whose attested route principal is a module (the owner or
+  any other admitted sender, such as a plan-named one under §9.7), while
+  the runner declares the group, has
+  `sender` on its display row: exactly that principal's attested module id.
+  It also has `client_message_id` when the send carried one. Both are
+  readable by `mid` from the moment the runner sends the message's
+  `message_started` (§7.1). A runner that learns the binding later MUST
+  delay `message_started` until the row has it. This covers a send that
+  starts a run, one that joins a run in progress (each stored as its own
+  message with its own `message_started`), and a queued send stored after
+  a runner restart.
+- [pinned] The sender guarantee is positive only. An absent `sender`
+  claims nothing: the message may not come from a send (a model turn, a
+  runner-written notice, or a person typing in an adopted host's own UI,
+  §9.5), may come from a non-module caller such as `direct`, or may have
+  been stored before the runner declared `message_senders`. Readers act
+  only on a present `sender`. The reader, not the runner, decides what a
+  given sender means; for example, the plan composer may treat messages
+  from the plan's app sender as the person's own replies. No new fields
+  ride on events, stored bodies or default `session.read` entries.
 - [pinned] **Cuts.** `limits` bounds, in UTF-8 bytes, a tool call's
   `arguments` (`arguments_bytes`), a tool result's `content`
   (`result_bytes`) and an error result's `content` (`error_result_bytes`).
@@ -2238,6 +2267,10 @@ new members.
     message, started first. `message_finished` rides the control frame that
     carries the stored message's unit, so a consumer gets the re-read signal
     and the unit together.
+    For a user message covered by §4.7's `message_senders` guarantee, the
+    display row is readable by `mid`, with its `sender` and any supplied
+    `client_message_id`, as soon as `message_started` arrives. Other
+    messages gain no sender from this.
   - `tool_started {mid, tool_call_id, name, arguments,
     arguments_truncated?, started_at?, call_key?, schema_pin?}`: `mid` is the message holding the
     call, `tool_call_id` the model's id as the stored row carries it, and

@@ -393,6 +393,7 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
     if !missing.is_empty() {
         if spec.name.starts_with("sender_succession_")
             || spec.name.starts_with("live_ids_")
+            || spec.name.starts_with("message_senders_")
             || spec.name.starts_with("read_display_facts_")
             || spec.name == "delivery_deadline_retry_keeps_original_expiry"
         {

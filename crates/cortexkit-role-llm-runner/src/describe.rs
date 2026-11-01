@@ -61,6 +61,9 @@ pub mod problem_names {
     pub const RUN_CAUSE_WITHOUT_LIVE_EVENTS: &str = "run_cause_without_live_events";
     /// The answer declares provisional display ids without live events.
     pub const LIVE_IDS_WITHOUT_LIVE_EVENTS: &str = "live_ids_without_live_events";
+    pub const MESSAGE_SENDERS_WITHOUT_HISTORY_DISPLAY: &str =
+        "message_senders_without_history_display";
+    pub const MESSAGE_SENDERS_WITHOUT_LIVE_EVENTS: &str = "message_senders_without_live_events";
     pub const STEP_EVENTS_MISSING: &str = "step_events_missing";
     pub const STEP_EVENTS_UNDECLARED: &str = "step_events_undeclared";
     pub const INVALID_STEP_EVENTS: &str = "invalid_step_events";
@@ -687,6 +690,22 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             problem_names::CALL_IDENTITY_WITHOUT_DISPLAY.into(),
         ));
     }
+    if describe.declares(capabilities::MESSAGE_SENDERS) {
+        for (dependency, problem) in [
+            (
+                capabilities::HISTORY_DISPLAY,
+                problem_names::MESSAGE_SENDERS_WITHOUT_HISTORY_DISPLAY,
+            ),
+            (
+                capabilities::LIVE_EVENTS,
+                problem_names::MESSAGE_SENDERS_WITHOUT_LIVE_EVENTS,
+            ),
+        ] {
+            if !describe.declares(dependency) {
+                problems.push(DescribeProblem::Undecodable(problem.into()));
+            }
+        }
+    }
     if let Some(modes) = &describe.delivery_order_modes {
         use crate::delivery_order::modes as names;
         if !describe.declares(capabilities::DELIVERY_ORDER) {
@@ -751,6 +770,69 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Ok(describe)
     } else {
         Err(problems)
+    }
+}
+
+#[cfg(test)]
+mod message_senders_tests {
+    use super::*;
+
+    #[test]
+    fn message_senders_requires_each_dependency_by_name() {
+        for (dependencies, missing) in [
+            (
+                vec![],
+                vec![
+                    problem_names::MESSAGE_SENDERS_WITHOUT_HISTORY_DISPLAY,
+                    problem_names::MESSAGE_SENDERS_WITHOUT_LIVE_EVENTS,
+                ],
+            ),
+            (
+                vec![capabilities::HISTORY_DISPLAY],
+                vec![problem_names::MESSAGE_SENDERS_WITHOUT_LIVE_EVENTS],
+            ),
+            (
+                vec![capabilities::LIVE_EVENTS],
+                vec![problem_names::MESSAGE_SENDERS_WITHOUT_HISTORY_DISPLAY],
+            ),
+            (
+                vec![capabilities::HISTORY_DISPLAY, capabilities::LIVE_EVENTS],
+                vec![],
+            ),
+        ] {
+            let describe = RoleDescribe::new(
+                vec![Major::new(
+                    crate::PROVIDES,
+                    crate::REQUIRED_OPS
+                        .iter()
+                        .copied()
+                        .chain([crate::ops::SESSION_HISTORY, crate::ops::SESSION_SUBSCRIBE])
+                        .map(String::from)
+                        .collect(),
+                    "alpha",
+                )],
+                "0.7.47",
+            )
+            .with_capabilities(
+                std::iter::once(capabilities::MESSAGE_SENDERS)
+                    .chain(dependencies)
+                    .map(String::from)
+                    .collect(),
+            )
+            .with_session_capabilities_from("baseline");
+            let result = check_describe(&serde_json::to_value(describe).unwrap());
+            if missing.is_empty() {
+                assert!(result.is_ok(), "{result:?}");
+            } else {
+                assert_eq!(
+                    result.unwrap_err(),
+                    missing
+                        .into_iter()
+                        .map(|name| DescribeProblem::Undecodable(name.into()))
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
     }
 }
 

@@ -400,6 +400,37 @@ unnamed caller and the owner. Existing adapters return `None` and remain
 inapplicable; adapters with the group and hook run regardless of their
 supported-mode set. Declaring runners must report `sender` for both named
 callers and the owner (with `owner: true`).
+
+`message_senders_rows_name_their_sender` reuses `head_sender_identities`
+and `send_fields_with_plan`: an owner installs a plan naming B, then B
+starts a run with `[idle_start]`; if discovery narrows out that list mode,
+the case is inapplicable. When `[steer]` is a declared list mode and
+`hold_next_model_step` can hold the run open, B sends a second message with
+`[steer]`, joining that run. Without a steerable hold the case checks the
+start only and reports `message_senders_join` as an inapplicable rule.
+Each send carries a distinct `client_message_id`. Buffered checks read the
+display row by each `message_started`'s `mid`, require B's attested module
+id and that client id, and require model replies to have no `sender`.
+
+The defaulted `RunnerRoute::observe_message_started` hook checks the
+receipt-time guarantee rather than inferring it from a replay. It receives
+an unpolled operation future: the start operation only sends; the join
+operation also releases the held model answer and obtains the settled
+receipt. Drive the future as given and never release a hold on your own.
+Subscribe live before polling that future; at each
+`message_started`, immediately read `session.history` with `from_mid: mid`,
+`limit: 1`, `form: "display"`. Capture the original stream frame and that
+read's reply before awaiting another frame or the quiet window. Keep
+observing until the operation finishes and the stream goes quiet, then
+return its reply and the captured `(frame, history_reply)` pairs. Never
+fill these pairs from later row reads: if the binding was absent at
+receipt, that absence must stay in the captured reply even when the runner
+binds the sender a few milliseconds later. The default returns
+`Ok(None)` without polling the future, preserving existing adapters. The
+case then runs the operation normally and still checks buffered rows;
+only `message_senders_timing_at_message_started` is inapplicable. No event,
+stored-body or default-read fields change.
+
 `cut_incarnation_log` and `recreate_incarnation_log` optionally exercise a
 reported log identity through a real cut and creation of a new log at the
 same key. Defaults are inapplicable; both lifetime faults have named tests.
@@ -662,6 +693,7 @@ is unchanged and prints nothing.
 | `describe_states_max_bytes` | `transcript_reads` |
 | `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; inapplicable without the describe group or `head_sender_identities` |
 | `refresh_added_sender_admitted_at_acceptance` | `session_change`, `delivery_order`, `queue`, `transcript_reads`, `head_sender_identities` and `send_fields_with_plan`; added sender's queue send is admitted before another run, also during a held run when `HoldToolCalls` is available; prefers a deferred rung |
+| `message_senders_rows_name_their_sender` | `message_senders`, `history_display`, `host_history`, `live_events`, `delivery_order`, `client_message_id`, `queue`, `transcript_reads`, `head_sender_identities` and `send_fields_with_plan`, with `idle_start` offered; B's start and (with a steerable hold) join rows name B and their client ids at `message_started`, settled model replies have no `sender`. Without live observation only the timing rule is inapplicable; without an offered `steer` mode and a working held step only the join rule is; both may be inapplicable together while the buffered start checks still run. Identities supplied without the plan fixture fail the case |
 | `refresh_removed_sender_refused_at_acceptance` | Same groups and identity routes; removed sender is refused `scope_owner_mismatch` at acceptance with no observable durable-state change; each refresh case is not applicable by name without a required group or routes |
 | `app_readers_listed_reader_admitted`, `app_readers_unlisted_reader_refused`, `app_readers_reader_cannot_send` | `app_readers`, `queue`, `transcript_reads`, `head_sender_identities` and `send_fields_with_plan`, whose base plan must not grant the first identity a send; listed reader can read head and transcript, unlisted reader is refused, and a reader without a send grant cannot send; not applicable by name without a required group or routes |
 | `head_last_run_error_only_on_error` | `queue`, `transcript_reads` for fresh and completed heads; failed/recovered heads additionally require `run_ops`, `run_status` and the model-failure fixture; an error summary may accompany only an error state |

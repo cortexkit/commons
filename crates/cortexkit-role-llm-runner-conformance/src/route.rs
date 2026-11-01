@@ -69,4 +69,31 @@ pub trait RunnerRoute: Send + Sync {
     /// reads finite replays, including while a held tool call waits without
     /// producing further events, and resumes from durable cursors as needed.
     async fn subscribe(&self, params: Value) -> Result<SubscribeOutcome, RouteFailure>;
+
+    /// Observe display rows at live `message_started` receipt while driving
+    /// `operation`. The start operation only sends; the join operation also
+    /// releases the held model answer and obtains the settled receipt. Drive
+    /// it as given and never release a hold independently.
+    ///
+    /// Open a live subscription before polling the operation. For every
+    /// `message_started` frame, immediately read `session.history` with
+    /// `from_mid: mid`, `limit: 1`, `form: "display"`, before awaiting more
+    /// frames or a quiet window. Return the operation's reply and pairs of
+    /// the original frame and that read's reply. Keep observing until the
+    /// operation completes and the stream goes quiet. Never replace a
+    /// receipt-time reply with a later read: if the binding was absent at
+    /// receipt, that absence must stay in the captured reply even when the
+    /// runner binds the sender later.
+    ///
+    /// `None` means unsupported and MUST leave `operation` unpolled, so the
+    /// caller can still drive it and check the buffered rows. Existing
+    /// adapters then leave only the receipt-time rule inapplicable.
+    async fn observe_message_started(
+        &self,
+        _operation: std::pin::Pin<
+            &mut (dyn std::future::Future<Output = Result<Reply, RouteFailure>> + Send),
+        >,
+    ) -> Result<Option<(Reply, Vec<(Value, Reply)>)>, RouteFailure> {
+        Ok(None)
+    }
 }

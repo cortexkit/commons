@@ -443,6 +443,27 @@ impl Module {
                 row = row.with_sender(sender);
             }
         }
+        let affected = !defects.message_senders_join_only
+            || sess.messages.iter().any(|message| {
+                message.mid == entry.mid
+                    && message
+                        .delivered_as
+                        .as_ref()
+                        .is_some_and(|mode| mode["mode"] == "steer")
+            });
+        if defects.declare_message_senders && session.contains("message-senders") && affected {
+            if row.role == "user" && defects.message_senders_omit {
+                row.sender = None;
+            } else if row.role == "user" && defects.message_senders_owner {
+                row.sender = Some(sess.owner.clone());
+            }
+            if row.role == "assistant" && defects.message_senders_model {
+                row.sender = Some(sess.owner.clone());
+            }
+            if defects.message_senders_no_client_id {
+                row.client_message_id = None;
+            }
+        }
         if let Some(times) = self.world.read_tool_times.lock().unwrap().get(session) {
             for call in row.tool_calls_mut() {
                 if let Some(time) = times
