@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.5
+
+- Track `cortexkit-role-tool-provider` 0.14.5, which widens when a display
+  server fetches views again. No suite changes.
+
 ## 0.14.4
 
 - Track `cortexkit-role-tool-provider` 0.14.4, which defines how a held call

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2
+
+- Contract text only (§6): the display server fetches a writer's views again
+  when its `module_version` or, where the catalog carries it, declared build
+  changes, and may also fetch again under its own cache-age or
+  template-validation policy, as tool-provider 0.14.5 §2.1 describes.
+
 ## 0.1.1
 
 - Contract text only (§3): a value of an `id` field may be passed to the

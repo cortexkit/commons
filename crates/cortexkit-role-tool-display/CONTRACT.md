@@ -211,8 +211,10 @@ a pin never changes meaning, so a call recorded before the provider changed its
 catalog still joins.
 
 The display server fetches `tool.views {pins: [...]}` on the **writer's own route**,
-for unseen pins, again when the writer's `module_version` changes
-(tool-provider §2.1), and **never on the write path**. The optional operation
+for unseen pins and again when the writer's `module_version` or, where its
+catalog entry carries one, declared build changes, and **never on the write
+path**. It may also fetch again under its own cache-age or template-validation
+policy (tool-provider §2.1). The optional operation
 and `tool-views/v1` capability are defined by the
 [`tool-provider/v1` contract](../cortexkit-role-tool-provider/CONTRACT.md#21-optional-display-views).
 The reply is `{views: {<pin>: <ViewManifest> | "unknown"}}`. A manifest has a

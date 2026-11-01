@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.5
+
+- Contract text only (§2.1): a display server keeps each view with the
+  writer's `module_version` and, where the daemon's `catalog.list` entry
+  carries it, the writer's declared build (`provenance.git_sha`), and fetches
+  again when either changes. It may also fetch a kept view again under its
+  own policy, after an age it chooses or when the view fails its own template
+  validation. Previously, deploying a revised template without changing
+  `module_version` did not refetch an already-kept view.
+
 ## 0.14.4
 
 - Define what happens to a held call when its scope ends (CONTRACT §6). It

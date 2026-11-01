@@ -85,9 +85,8 @@ operations the app server may call on a route it carries. `template` may
 change, but only together with a higher `template_revision`, and one revision
 always carries one template. A template fix can therefore reach rows recorded
 earlier under that pin without minting a new pin, once the display server
-fetches the revised view. It fetches again only when the writer's
-`module_version` changes (below), so a provider ships a template revision in a
-new module version.
+fetches and accepts the revised view. The refetch rules are below; this
+contract sets no deadline for a revision to reach existing rows.
 
 A provider that has ever served a view for a pin MUST keep serving a view for
 it, with the same `record_schema` and `reads`, for as long as it declares
@@ -102,9 +101,17 @@ view the provider has shipped, with a test that fails if an entry's record
 schema or reads change or the entry is removed.
 
 The display server (tool-display §6) keeps each view with the writer's
-`module_version`, as the daemon's `catalog.list` reports it for that module.
-When that version changes, it fetches the view again, and the same trigger
-re-checks an `"unknown"` answer. `ViewManifest::compare_with_kept` classifies
+`module_version` from its `catalog.list` entry and, when the entry also carries
+the writer's declared build (`provenance.git_sha`), with that build too. Older
+daemons omit the build, and then only the version is compared. The display
+server fetches the view again when either changes. It may also fetch a kept
+view again under its own policy: after an age it chooses, or when the view
+fails the server's own template validation. That validation is separate from
+the pin's catalog check, whose first result the server keeps. If a writer keeps
+one `module_version` across builds and its catalog entry carries no build, only
+that optional policy refreshes a kept view. A cached `"unknown"` answer is
+checked again when the version or build changes, and may be retried after an
+age the server chooses. `ViewManifest::compare_with_kept` classifies
 the fetched view. A changed `record_schema` or `reads` is a conflict whatever
 its revision. Otherwise a higher revision is accepted, and the display server
 keeps the fetched view, its revision included; a lower revision is stale; and
