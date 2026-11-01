@@ -3,21 +3,28 @@
 ## Delivery gate
 
 - Before delivering, run `scripts/gate.sh fast` (seconds: formatting,
-  lockfile, versions, vector checksums), then the full test suite and clippy of
-  every crate you changed: `cargo test -p <crate> --all-features` and
-  `cargo clippy -p <crate> --all-targets --all-features -- -D warnings`, plus
-  the same clippy with `--target x86_64-pc-windows-gnu`. Filtered tests alone
-  are never a gate. When changing a conformance kit or its contract crate,
-  run both crates' full suites.
-- Do not run `scripts/gate.sh lint` or `scripts/gate.sh test` (the whole
-  workspace) unless your brief asks. The head runs them once when it lands a
-  batch, because workspace builds unify features across crates and catch what
-  package runs can't. If your brief names a narrower check, the brief wins.
-- Run tests on the build server with `runon: "linux,8c"` (or more CPUs for a
-  large crate). In the agent's bash tool, `runon` selects a Linux build host.
-- Report each stage's verdict, test counts, and every failing test name. If a
-  failure is unrelated to your change, show it fails the same way on the base
-  commit.
+  lockfile, versions, vector checksums), the tests for the code and behaviour
+  you changed, filtered by name or module
+  (`cargo test -p <crate> --all-features <filter>`), and clippy for every crate
+  you changed: `cargo clippy -p <crate> --all-targets --all-features -- -D warnings`,
+  plus the same clippy with `--target x86_64-pc-windows-gnu`. A bug fix adds a
+  test and shows once that it fails without the fix. When changing a
+  conformance kit or its contract crate, run the kit cases for what you
+  changed, filtered the same way.
+- Never run a whole crate's test suite or a full gate (`scripts/gate.sh lint`
+  or `test`). The head runs the full suites once, over several merged
+  deliveries, because workspace builds unify features across crates and catch
+  what package runs can't. A filtered run that takes more than about 15
+  minutes means the filter is too broad: narrow it. If your brief names a
+  narrower check, the brief wins.
+- If a test outside your change fails, rerun that one test by name on the
+  base commit, never the suite.
+- Run tests on the build server with `runon: "linux"`. In the agent's bash
+  tool, `runon` selects a Linux build host. Don't wait on remote jobs in long
+  `bash_watch` loops: run a filtered job in the foreground with a timeout that
+  fits it. Keep the normal build directory; a separate `CARGO_TARGET_DIR` per
+  run means a cold build every time.
+- Report each check's verdict, test counts, and every failing test name.
 - Build and test remotely. Only macOS-only work runs on this Mac, at
   `nice -n 10`.
 
