@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.14.3
+
+- Add opt-in `call-keepalive/v1`: providers send a PUSH at least every 30 seconds
+  while a call's work advances, stuck work goes silent, and runners stop
+  waiting after 90 seconds of silence.
+  Keepalive bodies are not progress and never enter history, logs, or model input.
+  Providers send them only as the call's own work advances, never from an
+  independent timer, and still send the request's terminal frame within the
+  tool's declared reply bound.
+- Add keepalive constants, body helpers, and `reply_deadline_ms_with_keepalive`.
+  With both sides opted in, calls without a declared reply use the one-day ceiling;
+  declared reply limits and the existing deadline helper are unchanged.
+- Require runners to send CANCEL whenever they give up on a request that has no
+  terminal frame yet. Declaring providers must stop the call's work; runners
+  ignore late frames after recording `outcome_unknown` and never retry the call.
+  A call held past its first reply is still withdrawn with `tool.withdraw`.
+- Ship keepalive recognition and deadline vectors. Existing public types and wire
+  shapes are unchanged.
+
 ## 0.14.2
 
 - A view can carry `template_revision` (u64, default 0, omitted when 0). For

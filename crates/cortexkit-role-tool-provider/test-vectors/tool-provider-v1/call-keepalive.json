@@ -1,0 +1,96 @@
+{
+  "capability": "call-keepalive/v1",
+  "interval_ms": 30000,
+  "silence_ms": 90000,
+  "reply_max_ms": 86400000,
+  "body": "{\"kind\":\"keepalive\"}",
+  "recognition": [
+    {"name": "keepalive", "body": "{\"kind\":\"keepalive\"}", "expected": true},
+    {"name": "extra_members", "body": "{\"kind\":\"keepalive\",\"extra\":1}", "expected": true},
+    {"name": "whitespace", "body": " { \"kind\" : \"keepalive\" }\n", "expected": true},
+    {"name": "no_kind", "body": "{}", "expected": false},
+    {"name": "progress", "body": "{\"kind\":\"progress\",\"message\":\"working\"}", "expected": false},
+    {"name": "wrong_case", "body": "{\"kind\":\"Keepalive\"}", "expected": false},
+    {"name": "null_kind", "body": "{\"kind\":null}", "expected": false},
+    {"name": "numeric_kind", "body": "{\"kind\":1}", "expected": false},
+    {"name": "array", "body": "[{\"kind\":\"keepalive\"}]", "expected": false},
+    {"name": "string", "body": "\"keepalive\"", "expected": false},
+    {"name": "null", "body": "null", "expected": false},
+    {"name": "non_json", "body": "still running", "expected": false},
+    {"name": "trailing_json", "body": "{\"kind\":\"keepalive\"} {}", "expected": false}
+  ],
+  "deadlines": [
+    {
+      "name": "no_reply",
+      "reply": null,
+      "arguments": {},
+      "runner_fallback_ms": 120000,
+      "without_keepalive_ms": 120000,
+      "with_keepalive_ms": 86400000
+    },
+    {
+      "name": "no_reply_fallback_above_ceiling",
+      "reply": null,
+      "arguments": {},
+      "runner_fallback_ms": 100000000,
+      "without_keepalive_ms": 100000000,
+      "with_keepalive_ms": 86400000
+    },
+    {
+      "name": "declared_max",
+      "reply": {"max_ms": 600000},
+      "arguments": {},
+      "runner_fallback_ms": 120000,
+      "without_keepalive_ms": 600000,
+      "with_keepalive_ms": 600000
+    },
+    {
+      "name": "declared_max_fallback_floor",
+      "reply": {"max_ms": 5000},
+      "arguments": {},
+      "runner_fallback_ms": 120000,
+      "without_keepalive_ms": 120000,
+      "with_keepalive_ms": 120000
+    },
+    {
+      "name": "hold_argument",
+      "reply": {"max_ms": 600000, "hold_argument": {"name": "wait_ms", "default_ms": 180000, "grace_ms": 10000}},
+      "arguments": {"wait_ms": 300000},
+      "runner_fallback_ms": 120000,
+      "without_keepalive_ms": 310000,
+      "with_keepalive_ms": 310000
+    },
+    {
+      "name": "hold_capped_at_max",
+      "reply": {"max_ms": 600000, "hold_argument": {"name": "wait_ms", "default_ms": 180000, "grace_ms": 10000}},
+      "arguments": {"wait_ms": 900000},
+      "runner_fallback_ms": 120000,
+      "without_keepalive_ms": 600000,
+      "with_keepalive_ms": 600000
+    },
+    {
+      "name": "hold_absent_uses_default",
+      "reply": {"max_ms": 600000, "hold_argument": {"name": "wait_ms", "default_ms": 180000, "grace_ms": 10000}},
+      "arguments": {},
+      "runner_fallback_ms": 120000,
+      "without_keepalive_ms": 190000,
+      "with_keepalive_ms": 190000
+    },
+    {
+      "name": "hold_string_uses_default",
+      "reply": {"max_ms": 600000, "hold_argument": {"name": "wait_ms", "default_ms": 180000, "grace_ms": 10000}},
+      "arguments": {"wait_ms": "300000"},
+      "runner_fallback_ms": 120000,
+      "without_keepalive_ms": 190000,
+      "with_keepalive_ms": 190000
+    },
+    {
+      "name": "hold_fallback_floor",
+      "reply": {"max_ms": 600000, "hold_argument": {"name": "wait_ms", "default_ms": 180000, "grace_ms": 10000}},
+      "arguments": {"wait_ms": 1},
+      "runner_fallback_ms": 120000,
+      "without_keepalive_ms": 120000,
+      "with_keepalive_ms": 120000
+    }
+  ]
+}

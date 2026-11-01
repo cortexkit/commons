@@ -739,6 +739,10 @@ pub fn serves_call_mode(tool: &CatalogTool, mode: &CallMode) -> bool {
     }
 }
 
+/// The contract ceiling for `reply.max_ms`, also used for keepalive-enabled
+/// calls whose tool declares no reply metadata.
+pub const REPLY_MAX_MS: u64 = 86_400_000;
+
 /// The longest reply time a provider declares for one tool, in milliseconds.
 /// This is catalog metadata, never part of the argument schema or schema pin.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -924,7 +928,7 @@ pub fn check_reply(tool: &CatalogTool) -> Result<(), ReplyProblem> {
         member,
         reason,
     };
-    if !(1..=86_400_000).contains(&reply.max_ms) {
+    if !(1..=REPLY_MAX_MS).contains(&reply.max_ms) {
         return Err(problem("reply.max_ms", "must be between 1 and 86,400,000"));
     }
     if let Some(hold) = &reply.hold_argument {
@@ -985,6 +989,27 @@ pub fn reply_deadline_ms(reply: Option<&Reply>, arguments: &Value, runner_fallba
         }
     };
     deadline.max(runner_fallback_ms)
+}
+
+/// Compute a call's deadline when both provider and consumer may opt in to
+/// [`crate::CALL_KEEPALIVE_CAPABILITY`].
+///
+/// Set `keepalive` only when the provider's manifest and the consumer's route
+/// bind both declare the capability. Without reply metadata, such a pair uses
+/// [`REPLY_MAX_MS`] instead of the runner's fallback. Declared reply metadata
+/// uses [`reply_deadline_ms`] unchanged, including its fallback floor. The
+/// independent [`crate::KEEPALIVE_SILENCE_MS`] timer can end the call sooner.
+pub fn reply_deadline_ms_with_keepalive(
+    reply: Option<&Reply>,
+    arguments: &Value,
+    runner_fallback_ms: u64,
+    keepalive: bool,
+) -> u64 {
+    if keepalive && reply.is_none() {
+        REPLY_MAX_MS
+    } else {
+        reply_deadline_ms(reply, arguments, runner_fallback_ms)
+    }
 }
 
 /// Schema keywords whose value is one subschema.

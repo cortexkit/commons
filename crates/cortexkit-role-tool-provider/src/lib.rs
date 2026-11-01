@@ -68,6 +68,39 @@ pub const HELD_REPLY_V1: &str = "held-reply/v1";
 /// send them; `held-reply/v1` and `tool-result/v1` are also required.
 pub const HELD_UPDATE_CAPABILITY: &str = "held-update/v1";
 
+/// The provider manifest and consumer route-bind capability for call keepalives.
+///
+/// Providers promise keepalives and stopping work on CANCEL for an outstanding
+/// request. They send keepalives only on binds whose consumer also declares this
+/// capability.
+pub const CALL_KEEPALIVE_CAPABILITY: &str = "call-keepalive/v1";
+
+/// Maximum time between PUSH frames while a keepalive-enabled call's work is
+/// advancing. Work that stops advancing goes silent.
+pub const KEEPALIVE_INTERVAL_MS: u64 = 30_000;
+
+/// Silence after which a runner gives up on a keepalive-enabled call.
+pub const KEEPALIVE_SILENCE_MS: u64 = 90_000;
+
+/// The exact keepalive PUSH body. Send it on the running call's correlation,
+/// only as that call's own work advances, never from an independent timer.
+pub fn keepalive_body() -> &'static [u8] {
+    br#"{"kind":"keepalive"}"#
+}
+
+/// Whether a PUSH body is a JSON object whose `kind` is `"keepalive"`.
+///
+/// Extra object members are allowed and ignored. Non-objects, malformed JSON,
+/// and other `kind` values are not keepalives. Consumers drop keepalives before
+/// showing progress or recording history, logs, or model input.
+pub fn is_keepalive(body: &[u8]) -> bool {
+    matches!(
+        serde_json::from_slice::<serde_json::Value>(body),
+        Ok(serde_json::Value::Object(object))
+            if object.get("kind").and_then(serde_json::Value::as_str) == Some("keepalive")
+    )
+}
+
 /// Whether a route's bind says that its consumer decodes `tool-result/v1` results.
 ///
 /// Providers use this bind-scoped declaration, together with the tool's

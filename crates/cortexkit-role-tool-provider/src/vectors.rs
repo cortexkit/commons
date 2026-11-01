@@ -9,6 +9,9 @@ pub const DIR: &str = "tool-provider-v1";
 
 /// The `call-key.json` vector cases.
 pub const CALL_KEY_JSON: &str = include_str!("../test-vectors/tool-provider-v1/call-key.json");
+/// The `call-keepalive.json` body, recognition and deadline cases.
+pub const CALL_KEEPALIVE_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/call-keepalive.json");
 /// The `call-modes.json` vector cases.
 pub const CALL_MODES_JSON: &str = include_str!("../test-vectors/tool-provider-v1/call-modes.json");
 /// The `catalog-answers.json` vector cases.
@@ -85,6 +88,7 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/tool-provider-v1/reference-slots.json"),
     ),
     ("call-key.json", CALL_KEY_JSON),
+    ("call-keepalive.json", CALL_KEEPALIVE_JSON),
     ("call-modes.json", CALL_MODES_JSON),
     ("catalog-answers.json", CATALOG_ANSWERS_JSON),
     ("catalog-capabilities.json", CATALOG_CAPABILITIES_JSON),

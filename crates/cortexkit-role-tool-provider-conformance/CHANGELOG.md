@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.3
+
+- Pin tool-provider `=0.14.3` and re-export its keepalive helpers and vectors.
+  No new live cases: the route adapter returns buffered frames without timing
+  or evidence that work stopped after CANCEL, and the runner's fake is
+  in-process rather than a provider on a real route.
+
 ## 0.14.2
 
 - Pin tool-provider `=0.14.2`. No new cases.

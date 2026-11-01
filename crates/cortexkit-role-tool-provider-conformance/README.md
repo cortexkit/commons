@@ -7,7 +7,8 @@ kills do not establish real-process crash conformance. The in-process fake
 in this crate tests the runner, not any production provider.
 
 The suite's case inventory and role contract are in the wire crate's
-[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.14.1 pairs with
+[`CONTRACT.md`](../cortexkit-role-tool-provider/CONTRACT.md). Version 0.14.3 pairs with
+subc-protocol 0.34 and cortexkit-role-tool-provider 0.14.3. Version 0.14.1 pairs with
 subc-protocol 0.34 and cortexkit-role-tool-provider 0.14.1. Version 0.14.0 pairs with
 subc-protocol 0.34 and cortexkit-role-tool-provider 0.14.0. Versions 0.13.1 and 0.13.0
 pair with cortexkit-role-tool-provider 0.13.0. Version 0.12.1
@@ -19,6 +20,16 @@ pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.10.4; version
 0.9.2 pairs with cortexkit-role-tool-provider 0.9.2; versions 0.8.x pair with
 subc-protocol 0.32; versions 0.7.x pair with protocol 0.31, and versions 0.6.x
 pair with protocol 0.30.
+
+## Call keepalives
+
+The wire crate defines opt-in `call-keepalive/v1`, its body and deadline helpers,
+and shared vectors. This suite does not yet check keepalive timing or stopping
+work on CANCEL: `ToolRoute` returns a buffered `Exchange` without frame timestamps
+or an observation of work after cancellation. The suite's in-process fake does
+not exercise a real route. A terminal `cancelled` reply alone would not prove
+that the provider stopped working, so the existing terminal-frame cancellation
+case does not establish the keepalive capability's promise.
 
 ## Opt-in `tool-result/v1` results
 

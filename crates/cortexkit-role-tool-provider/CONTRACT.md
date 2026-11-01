@@ -402,22 +402,28 @@ idempotency and join requirements are in
       Missing required members or non-integer metadata also make an answer
       invalid.
     - A runner computes the deadline for one call from its coerced arguments
-      (`reply_deadline_ms`):
-      1. No `reply`: use the runner's own fallback.
+      (`reply_deadline_ms`, or `reply_deadline_ms_with_keepalive` for §4.4):
+      1. No `reply`: use the runner's own fallback, unless both the provider
+         and the route's consumer declare `call-keepalive/v1` (§4.4). For a
+         declaring pair, use the `reply.max_ms` ceiling of 86,400,000 ms
+         (`REPLY_MAX_MS`) instead of the fallback.
       2. `reply` without `hold_argument`: use `max_ms`.
       3. With `hold_argument`: use the named argument as the hold only if it is
          a JSON integer or an integral number at least 1. Absence, zero,
          strings, fractional numbers, negative numbers, null and other values
          use `default_ms`. Add `grace_ms` with saturating arithmetic, then take
          `min(hold + grace_ms, max_ms)`.
-      4. Never use a deadline below the runner's own fallback, even if `max_ms`
-         is smaller. The fallback floor applies after the maximum is applied.
+      4. For declared `reply` metadata, never use a deadline below the runner's
+         own fallback, even if `max_ms` is smaller. The fallback floor applies
+         after the maximum is applied, unchanged by keepalive support.
     - The deadline bounds how long a runner waits; it never changes the call's
       arguments or a provider's own limits. A provider exceeding its declared
       `max_ms` violates the contract; a runner records `outcome_unknown` and
       never re-sends that call. When the reply deadline expires without
       a terminal frame, a runner records `outcome_unknown` and never re-sends
-      the call.
+      the call. It also sends CANCEL (§4.4), whether or not either side
+      declares keepalive support. For a declaring pair, the silence window
+      in §4.4 ends the call independently: whichever expires first wins.
     - A runner saves `reply` together with the tool when it admits the tool
       into a run's plan. A resumed run uses that saved value, never a value
       fetched again from the provider.
@@ -753,6 +759,74 @@ Adoption. Providers declare first. A caller relying on the list, and so
 sending no preset to a provider that lists none, needs every provider that
 serves presets to declare its list. Until then, a caller may keep its
 existing behaviour for a provider whose preset-less answer lists no presets.
+
+## 4.4. Call keepalives and cancellation
+
+- **Opt-in on both sides.** A provider lists `call-keepalive/v1`
+  (`CALL_KEEPALIVE_CAPABILITY`) in its manifest's `capabilities.provides`.
+  Consumers discover the promise through the daemon catalog. The capability
+  promises both keepalives and stopping a call's work on CANCEL. A consumer
+  declares the same capability among its route-bind consumer capabilities,
+  just as it declares `held-reply/v1`. A provider sends keepalives only on a bind
+  that declared it:
+  older consumers may hand every PUSH to their progress callback.
+- **Sending.** For a declaring pair, while a call's REQUEST has been accepted,
+  no terminal frame has been sent and the call's work is advancing, the
+  provider sends a PUSH on that call's correlation at least every 30,000 ms
+  (`KEEPALIVE_INTERVAL_MS`). Work that stops advancing goes silent instead (see
+  the next rule).
+  Any PUSH on the call counts, including real progress. The defined keepalive
+  body is exactly `{"kind":"keepalive"}` (`keepalive_body()`). A consumer resets
+  its silence timer on any PUSH for the call. It never shows a keepalive as
+  progress, records it in history or logs, or passes it to the model.
+  `is_keepalive` recognizes only a JSON object whose `kind` is `"keepalive"`;
+  extra members are allowed and ignored when recognizing a keepalive, but
+  senders use the exact defined body.
+- **Keepalives reflect advancing work.** A provider sends a keepalive only from
+  the call's own work as it advances, for example at the points where that work
+  already checks for cancellation. It must never send keepalives from a timer
+  that runs independently of the work. A call whose work is stuck must go
+  silent, so the 90-second silence window can detect it.
+- **End of keepalives.** Keepalives stop with the call's terminal frame. They
+  do not apply to calls held past their reply (§5, §7), which retain their own
+  late-result rules. A held first reply is already a terminal frame for the
+  original REQUEST, so its later work is withdrawn with `tool.withdraw`
+  (§5), never with CANCEL.
+- **Silence.** For a declaring pair, no PUSH and no terminal frame for
+  90,000 ms (`KEEPALIVE_SILENCE_MS`, three missed intervals) means the call is
+  hung. The runner gives up, records `outcome_unknown` and never re-sends,
+  exactly as for an expired reply deadline. Any PUSH resets this timer, not
+  the reply deadline.
+- **Deadline interaction.** Under §3 rule 1, a declaring pair uses the
+  86,400,000 ms ceiling for a tool without `reply`, rather than the runner's
+  fallback, because keepalives prove the call is alive. A declared `reply`
+  still limits the call under the existing rules, including the fallback
+  floor. `reply.max_ms` bounds the time until the REQUEST's terminal frame, and
+  keepalives never extend it. A long-running tool sends that frame within the
+  bound: a final answer, partial if need be, or, where the call qualifies, a
+  held reply (§4.1) whose work continues under the late-result rules (§7).
+  Keepalives cover legitimately long work, not unbounded work. The silence
+  window and deadline
+  are independent; whichever expires first ends the wait. If either side does
+  not declare the capability, all deadline rules remain as before and there is
+  no keepalive silence timer.
+- **CANCEL on give-up, for every outstanding call.** When a runner stops
+  waiting for a REQUEST that has no terminal frame yet, because of a deadline,
+  silence, or cancellation of the run, it sends a subc CANCEL frame on that
+  call's correlation. This applies whether or not either side declares
+  `call-keepalive/v1`. A declaring provider must stop the call's work when
+  CANCEL arrives; other providers should stop it too. A call held past its
+  first reply has no outstanding REQUEST: a runner withdraws it with
+  `tool.withdraw` (§5).
+- **Late frames.** A provider may still send a terminal frame after CANCEL:
+  its own reply can cross the CANCEL, or it may answer with a `cancelled`
+  error, as the Rust and TypeScript subc clients do for a handler they cancel. A runner ignores every frame for a call it has already recorded
+  as `outcome_unknown`. A late frame never becomes a second result, and the
+  call is never re-sent. At-most-once execution is unchanged.
+
+`test-vectors/tool-provider-v1/call-keepalive.json` pins the keepalive body,
+recognition and deadline interactions. `reply_deadline_ms` remains unchanged;
+`reply_deadline_ms_with_keepalive` adds the opt-in rule.
 
 ## 5. `tool.withdraw`
 
