@@ -583,6 +583,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortexkit-presence"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "cortexkit-project-identity"
 version = "0.1.4"
 dependencies = [
