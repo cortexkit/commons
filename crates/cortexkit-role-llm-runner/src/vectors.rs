@@ -98,6 +98,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/rich-ui-stamp.json"),
     ),
     (
+        "finish-reason.json",
+        include_str!("../test-vectors/llm-runner-v1/finish-reason.json"),
+    ),
+    (
         "head-last-run-error.json",
         include_str!("../test-vectors/llm-runner-v1/head-last-run-error.json"),
     ),

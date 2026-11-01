@@ -131,6 +131,9 @@ const HISTORY_CUT: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("finish_reason_last_model_step", &[Capability::FinishReason, Queue, RunOps], "result and ended status report the normalized reason of the last model step, not an earlier tool step"),
+    case("finish_reason_output_cap", &[Capability::FinishReason, Capability::MaxOutputTokens, Capability::RunUsage, Queue, RunOps], "a response actually cut at the received max_output_tokens reports length, never stop"),
+    case("finish_reason_no_model_step", &[Capability::FinishReason, Capability::InputTokenCap, Queue, RunOps], "a run stopped before its first model request omits finish, without inheriting a previous run's reason"),
     case("sender_succession_same_payload_receipt", SUCCESSION, "a successor's matching keyed retry gets the predecessor's existing receipt, without another transcript write"),
     case("sender_succession_changed_payload_refused", SUCCESSION, "a successor's conflicting keyed retry is send_id_reuse, with no transcript write"),
     case("sender_succession_third_sender_fresh", SUCCESSION, "the owner's same send id stays independent of the predecessor and successor"),

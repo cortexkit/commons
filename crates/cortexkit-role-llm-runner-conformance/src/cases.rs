@@ -89,6 +89,9 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("finish_reason_") => {
+                crate::finish_reason::run(self, name).await
+            }
             name if name.starts_with("tool_upfront_") => crate::upfront::run(self, name).await,
             name if name.starts_with("service_tier_") => crate::service_tier::run(self, name).await,
             name if name.starts_with("retract_own_send_") => {

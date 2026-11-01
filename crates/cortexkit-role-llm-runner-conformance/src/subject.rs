@@ -94,6 +94,8 @@ pub enum Capability {
     RunToolCalls,
     /// Per-run token usage (`usage`) on `run.result` and `run.status`.
     RunUsage,
+    /// Normalized last-model-step finish on results and ended status.
+    FinishReason,
     /// Durable session spend on `session.head`.
     SessionUsage,
     /// `session.send` with `delivery_order`, plan-named senders and plan
@@ -188,6 +190,7 @@ impl Capability {
         Self::Tags,
         Self::RunToolCalls,
         Self::RunUsage,
+        Self::FinishReason,
         Self::SessionUsage,
         Self::DeliveryOrder,
         Self::SenderSuccession,
@@ -255,6 +258,7 @@ impl Capability {
             Self::Tags => groups::TAGS,
             Self::RunToolCalls => groups::RUN_TOOL_CALLS,
             Self::RunUsage => groups::RUN_USAGE,
+            Self::FinishReason => groups::FINISH_REASON,
             Self::SessionUsage => groups::SESSION_USAGE,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
             Self::SenderSuccession => groups::SENDER_SUCCESSION,
@@ -297,6 +301,11 @@ pub struct Script {
 #[non_exhaustive]
 pub struct ScriptedTurn {
     pub parts: Vec<ScriptedPart>,
+    /// Raw reason the scripted model or host reports, in the source named by
+    /// `model_finish_reason_source`. `None` means no reason, not a natural stop.
+    /// For output-cap fixtures, a response actually truncated by the received
+    /// cap reports that source's length reason instead of this value.
+    pub finish_reason: Option<String>,
     /// Report exactly these counts, or omit input usage entirely for `None`.
     /// Adapters must not fill in missing usage with an estimate or zero.
     /// For output-cap cases, the scripted provider honours the maximum it
@@ -525,9 +534,15 @@ impl ScriptedTurn {
     pub fn new(parts: Vec<ScriptedPart>) -> Self {
         Self {
             parts,
+            finish_reason: None,
             usage: None,
             model_failure: None,
         }
+    }
+
+    pub fn with_finish_reason(mut self, reason: impl Into<String>) -> Self {
+        self.finish_reason = Some(reason.into());
+        self
     }
 
     pub fn with_model_failure(mut self, error: cortexkit_role_llm_runner::run::RunError) -> Self {
@@ -626,6 +641,16 @@ pub enum AttributionFixture {
 /// Compaction terms are defined in the crate's Contract vocabulary section.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// The scripted provider or host's finish-reason source, using a spelling
+    /// accepted by `finish::normalize`. Opt in only when the fixture emits
+    /// `ScriptedTurn::finish_reason` through the real model/host path, and a
+    /// response truncated at its received output cap reports a length reason.
+    /// The default leaves reason-emitting cases not applicable; adapters must
+    /// never synthesize management replies to supply a finish.
+    fn model_finish_reason_source(&self) -> Option<&'static str> {
+        None
+    }
+
     /// Arrange a current route supporting fast but not ultrafast, with served
     /// unknown, and a scripted model that does not state a served tier. For
     /// the ride case, attach a compaction provider answering nothing and count

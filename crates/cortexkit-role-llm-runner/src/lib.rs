@@ -33,6 +33,7 @@ pub mod describe;
 pub mod directives;
 pub mod display;
 pub mod errors;
+pub mod finish;
 pub mod history;
 pub mod live;
 pub mod output_refs;
@@ -349,6 +350,8 @@ pub mod capabilities {
     /// Per-run token usage (`usage`) on `run.result`, and on `run.status`
     /// where the runner serves it. Adds no op of its own.
     pub const RUN_USAGE: &str = "run_usage";
+    /// Normalized finish of the last model step on run results and ended status.
+    pub const FINISH_REASON: &str = "finish_reason";
     /// Durable, incrementally maintained session spend on `session.head`.
     pub const SESSION_USAGE: &str = "session_usage";
     /// The caller's effective grant on `session.head`; absence means no grant.
@@ -448,6 +451,7 @@ pub mod capabilities {
         (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
         (RUN_USAGE, &[ops::RUN_RESULT]),
+        (FINISH_REASON, &[ops::RUN_RESULT]),
         (SESSION_USAGE, &[ops::SESSION_HEAD]),
         (HEAD_SENDER, &[ops::SESSION_HEAD]),
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),

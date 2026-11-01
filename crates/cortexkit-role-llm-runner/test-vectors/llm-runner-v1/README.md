@@ -149,6 +149,7 @@ its SHA-256. These vectors change together with the versioned contract.
 
 | File | What it pins | Checked by |
 |---|---|---|
+| `finish-reason.json` | Every documented provider/host finish reason for each routing source, unknown raw reasons and sources, missing reasons, and the tool-call override | `finish::tests::every_finish_reason_sample_matches` |
 | `sender-succession.json` | snapshots, not one executable sequence: a one-hop predecessor plan, a changed-deadline retry, original expiry, status, reuse and indexed refusals. The predecessor's send was accepted under an earlier plan. | `display_facts_and_succession` round-trips its plan and send requests; the kit's cases exercise the receipt, status and refusal behaviour separately |
 | `read-display-facts.json` | opt-in envelope client ids/tool times, unchanged bodies and defaults, open outcomes and undeclared refusal | `display_facts_and_succession` round-trips its requests and pages; the kit checks the refusal separately |
 | `session-ref.json` | JCS and session references from named `SessionIdentity { runner, harness, session }` fields: ASCII, Unicode, quote/backslash/control escaping, empty strings, byte preservation, two runners hosting the same harness/session, and bare `runner-a` versus the distinct `reserved:runner-a` display-form input | `session_ref::tests::matches_the_pinned_vectors`, `session_ref::tests::bare_runner_id_and_principal_display_form_match_distinct_vectors` |

@@ -14,7 +14,7 @@ use crate::{
     subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn, ScriptedUsage},
 };
 
-async fn send<S>(
+pub(crate) async fn send<S>(
     case: &Case<'_, S>,
     session: &mut Session<S::Route>,
     params: Value,
@@ -44,7 +44,7 @@ where
     match name {
         "max_steps_seals_pending_calls" => max_steps(case).await,
         "max_steps_final_step_completes" => final_step(case).await,
-        "max_output_tokens_caps_response" => output_cap(case).await,
+        "max_output_tokens_caps_response" => output_cap(case, false).await,
         "no_tools_offered_to_model" => no_tools(case).await,
         "no_tools_later_plan_send_refused" => later_tools(case).await,
         other => Err(format!("unknown run parameter case {other}")),
@@ -204,25 +204,32 @@ where
     Ok(Ending::Passed)
 }
 
-async fn output_cap<S>(case: &Case<'_, S>) -> Result<Ending, String>
+pub(crate) async fn output_cap<S>(case: &Case<'_, S>, check_finish: bool) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
     for requested in [3, u64::MAX] {
+        let mut turn = ScriptedTurn::new(vec![ScriptedPart::Text(
+            "one two three four five six seven".into(),
+        )])
+        .with_usage(ScriptedUsage::new(1, 0, 0, 7));
+        if check_finish {
+            let source = case
+                .subject
+                .model_finish_reason_source()
+                .ok_or("adapter cannot script raw model finish reasons")?;
+            turn = turn.with_finish_reason(crate::finish_reason::raw_stop(source)?);
+        }
         let mut session = case
-            .open(
-                "output-cap",
-                Script {
-                    turns: vec![ScriptedTurn::new(vec![ScriptedPart::Text(
-                        "one two three four five six seven".into(),
-                    )])
-                    .with_usage(ScriptedUsage::new(1, 0, 0, 7))],
-                },
-            )
+            .open("output-cap", Script { turns: vec![turn] })
             .await?;
         crate::tags::require_declared(&session.route, groups::MAX_OUTPUT_TOKENS, ops::SESSION_SEND)
             .await?;
+        if check_finish {
+            crate::tags::require_declared(&session.route, groups::FINISH_REASON, ops::RUN_RESULT)
+                .await?;
+        }
         let mut params = case.params(
             &session,
             "bounded response",
@@ -252,6 +259,20 @@ where
             || output > requested
         {
             return Err(format!("response exceeds cap {requested} or no positive cap reached model: output_tokens={output}, requests={requests:?}, result={result:?}"));
+        }
+        if check_finish {
+            let cap = requests[0].max_output_tokens.unwrap();
+            if output != cap.min(7) {
+                return Err(format!(
+                    "scripted response did not exercise the received cap {cap}: output={output}"
+                ));
+            }
+            let expected = if cap < 7 {
+                cortexkit_role_llm_runner::finish::Finish::Length
+            } else {
+                cortexkit_role_llm_runner::finish::Finish::Stop
+            };
+            crate::finish_reason::check(case, &session.route, &end.run_id, Some(expected)).await?;
         }
     }
     Ok(Ending::Passed)

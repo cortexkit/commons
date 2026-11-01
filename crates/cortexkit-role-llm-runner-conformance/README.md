@@ -1,6 +1,35 @@
 # cortexkit-role-llm-runner-conformance
 
-Version 0.16.4 pins llm-runner 0.7.42 and adds these cases:
+Version 0.16.7 pins llm-runner 0.7.44. The new normalized-finish cases are
+listed below; the sender and display cases following them were added in 0.16.4.
+
+## Normalized finish reasons
+
+| Case | Groups and adapter hooks |
+|---|---|
+| `finish_reason_last_model_step` | `finish_reason`, `queue`, `run_ops`; `model_finish_reason_source` returns a recognized mapping source, and the scripted provider emits `ScriptedTurn::finish_reason` through its real response path. A tool-call step followed by a plain-stop step proves the answer comes from the last step. |
+| `finish_reason_output_cap` | The same groups and hook, plus `max_output_tokens` and `run_usage`. Reuses the output-cap case's seven-token scripted response, received-cap observations and output usage. The truncated response reports the source's length reason; an untruncated response reports stop. |
+| `finish_reason_no_model_step` | `finish_reason`, `queue`, `run_ops`, `input_token_cap`. A measured warm-up exhausts the input budget, then the next run must end without another model invocation and with no `finish` member. When the raw-reason hook is available, the warm-up also scripts a stop reason, so the case checks that reason is not inherited; without the hook it checks only that a run with no model invocation omits `finish`. |
+
+All three cases compare `run.result` and, when `run_status` is declared,
+ended `run.status`. Each grades **not applicable** without `finish_reason`.
+The kit previously had no raw-reason fixture. The additive
+`model_finish_reason_source` hook defaults to `None`, making the first two
+cases not applicable until the adapter can emit raw reasons; the no-model-step
+case still runs without it. The provider must honor an actually received
+output cap and report that source's length reason when it truncates, not
+merely clamp reported usage. A host exposing only the AI SDK's reason uses
+`ai-sdk`. The adapter must never fabricate management replies.
+Faulty-runner self-tests retain the first step's reason, label truncation as
+stop, invent a reason without a model step, or omit the ended status reason;
+each is rejected by its corresponding case name.
+
+These three cases do not exhaust every provider mapping or exercise restart
+durability; the contract crate's samples pin the full normalization table.
+
+## Sender succession and display facts
+
+Version 0.16.4 added these cases:
 
 | Cases | Groups and adapter hooks |
 |---|---|

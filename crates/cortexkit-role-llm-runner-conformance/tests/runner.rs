@@ -2,6 +2,7 @@
 //! Conformance of a real runner is run by that runner, never here.
 
 mod fake;
+mod finish_reason;
 
 const PART_EDIT_CASES: &[&str] = &[
     "part_edits_truncate_renders_with_own_tag",
@@ -842,6 +843,12 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    if case.starts_with("finish_reason_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "finish_reason is not declared")
+    {
+        return;
+    }
     if SERVICE_TIER_CASES.contains(&case)
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason == "role.describe does not declare service_tier"
@@ -1248,6 +1255,15 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
     let report = run(&subject).await;
     for spec in CASES {
         if spec.requires.is_empty() {
+            continue;
+        }
+        if spec.name.starts_with("finish_reason_") {
+            assert_eq!(
+                report.outcome(spec.name),
+                Some(&CaseOutcome::Inapplicable {
+                    reason: "finish_reason is not declared".into(),
+                })
+            );
             continue;
         }
         if spec.name.starts_with("archive_pruning_") {

@@ -176,6 +176,10 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub finish_first_step: bool,
+    pub finish_length_as_stop: bool,
+    pub finish_without_model_step: bool,
+    pub finish_status_omitted: bool,
     pub succession: Option<&'static str>,
     pub read_display_facts: Option<&'static str>,
     pub refreshed_senders_wait_for_next_run: bool,
@@ -938,6 +942,7 @@ struct RunRec {
     directives: Vec<cortexkit_role_llm_runner::directives::DirectiveName>,
     max_steps: Option<u64>,
     max_output_tokens: Option<u64>,
+    finish: Option<cortexkit_role_llm_runner::finish::Finish>,
     no_tools: bool,
     run_id: String,
     state: String,
@@ -1897,6 +1902,7 @@ impl Module {
                             .unwrap_or_default(),
                         max_steps: record["max_steps"].as_u64(),
                         max_output_tokens: record["max_output_tokens"].as_u64(),
+                        finish: None,
                         no_tools: record["no_tools"] == true,
                         run_id,
                         state: "active".into(),
@@ -1955,6 +1961,16 @@ impl Module {
                     }
                 }
                 if let Some(run) = sess.run_mut(&run_id) {
+                    if !self.world.defects.finish_first_step || run.usage.steps == 0 {
+                        run.finish = cortexkit_role_llm_runner::finish::normalize(
+                            "ai-sdk",
+                            record["finish_reason"].as_str(),
+                            record["calls"]
+                                .as_array()
+                                .is_some_and(|calls| !calls.is_empty()),
+                        )
+                        .unwrap();
+                    }
                     run.usage.record_step(FAKE_PROVIDER, FAKE_MODEL, None, step);
                 }
                 if let Some(usage) = &mut sess.session_usage {
@@ -2485,6 +2501,19 @@ impl Module {
                     .iter()
                     .all(|part| matches!(part, ScriptedPart::Text(_) | ScriptedPart::Reasoning(_)))
                 {
+                    let tokens: usize = turn
+                        .parts
+                        .iter()
+                        .filter_map(|part| match part {
+                            ScriptedPart::Text(text) | ScriptedPart::Reasoning(text) => {
+                                Some(text.split_whitespace().count())
+                            }
+                            _ => None,
+                        })
+                        .sum();
+                    if tokens as u64 > cap {
+                        turn.finish_reason = Some("length".into());
+                    }
                     let mut remaining = cap as usize;
                     for part in &mut turn.parts {
                         if let ScriptedPart::Text(text) | ScriptedPart::Reasoning(text) = part {
@@ -2545,7 +2574,8 @@ impl Module {
             self.commit(
                 session,
                 json!({ "kind": "step", "run_id": run_id, "parts": parts, "calls": calls,
-                        "input_spent": input_spent, "usage": usage }),
+                        "input_spent": input_spent, "usage": usage,
+                        "finish_reason": turn.finish_reason }),
             )?;
             // The limit cuts the run off only when this step asked for a
             // tool call that would lead to another step. A step with no call
@@ -4761,6 +4791,17 @@ impl Module {
             }
             result = result.with_usage(usage);
         }
+        if self.world.serves(groups::FINISH_REASON) && RunState::parse(&result.state).is_terminal()
+        {
+            use cortexkit_role_llm_runner::finish::Finish;
+            result.finish = run.finish.clone();
+            if self.world.defects.finish_length_as_stop && result.finish == Some(Finish::Length) {
+                result.finish = Some(Finish::Stop);
+            }
+            if self.world.defects.finish_without_model_step && run.usage.steps == 0 {
+                result.finish = Some(Finish::Stop);
+            }
+        }
         respond(result)
     }
 
@@ -4770,6 +4811,9 @@ impl Module {
         let run_id = params["run_id"].as_str().unwrap_or_default().to_owned();
         let mut reply = self.run_result(session, params);
         if let Reply::Response(body) = &mut reply {
+            if self.world.defects.finish_status_omitted && body["usage"]["steps"] == 2 {
+                body.as_object_mut().unwrap().remove("finish");
+            }
             let held = self.held_status(session, &run_id);
             if !held.is_empty() {
                 body["held_calls"] = json!(held);
@@ -5407,6 +5451,7 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub finish_reason_fixture: bool,
     pub model_failure_fixture: bool,
     pub step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents,
     pub incarnation_fixtures: bool,
@@ -5572,6 +5617,7 @@ impl FakeSubject {
             head_sender_group: true,
             incarnation_fixtures: false,
             model_failure_fixture: true,
+            finish_reason_fixture: true,
             output_refs_group: false,
             call_identity_group: false,
             rich_ui_stamp_group: false,
@@ -5882,6 +5928,10 @@ impl LlmRunnerSubject for FakeSubject {
             .insert(session.into(), service_tier::State::default());
         Ok(true)
     }
+    fn model_finish_reason_source(&self) -> Option<&'static str> {
+        self.finish_reason_fixture.then_some("ai-sdk")
+    }
+
     fn supports_model_failure_fixture(&self) -> bool {
         self.model_failure_fixture
     }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.44
+
+- Add the opt-in `finish_reason` group and an open `Finish` type on run
+  results and ended status. Missing reasons stay absent; unknown normalized
+  values round-trip without a decoding error.
+- Add shared provider and host finish normalization, with documented source
+  spellings, a tool-call override, and checked public API tables and samples.
+  Output limits, including a full context window, normalize to `length`.
+  Absent and `other` never prove a reply complete.
+
 ## 0.7.43
 
 - `session.read` display facts: on a runner declaring both

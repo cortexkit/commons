@@ -1,0 +1,178 @@
+[
+  {
+    "source": "anthropic.messages",
+    "cases": [
+      {"raw":"end_turn", "finish":"stop"},
+      {"raw":"stop_sequence", "finish":"stop"},
+      {"raw":"max_tokens", "finish":"length"},
+      {"raw":"model_context_window_exceeded", "finish":"length"},
+      {"raw":"tool_use", "finish":"tool_calls"},
+      {"raw":"refusal", "finish":"content_filter"},
+      {"raw":"pause_turn", "finish":"other"},
+      {"raw":"future_reason", "finish":"other"},
+      {"raw":"end_turn", "emitted_tool_calls":true, "finish":"tool_calls"},
+      {"raw":"max_tokens", "emitted_tool_calls":true, "finish":"length"},
+      {"raw":null, "emitted_tool_calls":true, "finish":null}
+    ]
+  },
+  {
+    "source": "openai.chat_completions",
+    "cases": [
+      {"raw":"stop", "finish":"stop"},
+      {"raw":"length", "finish":"length"},
+      {"raw":"content_filter", "finish":"content_filter"},
+      {"raw":"tool_calls", "finish":"tool_calls"},
+      {"raw":"function_call", "finish":"tool_calls"},
+      {"raw":"future_reason", "finish":"other"},
+      {"raw":"stop", "emitted_tool_calls":true, "finish":"tool_calls"},
+      {"raw":"content_filter", "emitted_tool_calls":true, "finish":"content_filter"},
+      {"raw":null, "finish":null}
+    ]
+  },
+  {
+    "source": "openai.responses",
+    "cases": [
+      {"raw":"completed", "finish":"stop"},
+      {"raw":"incomplete:max_output_tokens", "finish":"length"},
+      {"raw":"incomplete:content_filter", "finish":"content_filter"},
+      {"raw":"incomplete:max_messages", "finish":"other"},
+      {"raw":"incomplete:steered", "finish":"other"},
+      {"raw":"incomplete:future_reason", "finish":"other"},
+      {"raw":"incomplete", "finish":"other"},
+      {"raw":"failed", "finish":"error"},
+      {"raw":"cancelled", "finish":"other"},
+      {"raw":"in_progress", "finish":"other"},
+      {"raw":"queued", "finish":"other"},
+      {"raw":"future_reason", "finish":"other"},
+      {"raw":"completed", "emitted_tool_calls":true, "finish":"tool_calls"},
+      {"raw":"failed", "emitted_tool_calls":true, "finish":"error"},
+      {"raw":null, "finish":null}
+    ]
+  },
+  {
+    "source": "openai.chatgpt_responses",
+    "cases": [
+      {"raw":"completed", "finish":"stop"},
+      {"raw":"incomplete:max_output_tokens", "finish":"length"},
+      {"raw":"incomplete:content_filter", "finish":"content_filter"},
+      {"raw":"incomplete:max_messages", "finish":"other"},
+      {"raw":"incomplete:steered", "finish":"other"},
+      {"raw":"incomplete:future_reason", "finish":"other"},
+      {"raw":"incomplete", "finish":"other"},
+      {"raw":"failed", "finish":"error"},
+      {"raw":"cancelled", "finish":"other"},
+      {"raw":"in_progress", "finish":"other"},
+      {"raw":"queued", "finish":"other"},
+      {"raw":"future_reason", "finish":"other"},
+      {"raw":"completed", "emitted_tool_calls":true, "finish":"tool_calls"},
+      {"raw":"incomplete:content_filter", "emitted_tool_calls":true, "finish":"content_filter"},
+      {"raw":null, "finish":null}
+    ]
+  },
+  {
+    "source": "google.generate_content",
+    "cases": [
+      {"raw":"STOP", "finish":"stop"},
+      {"raw":"MAX_TOKENS", "finish":"length"},
+      {"raw":"SAFETY", "finish":"content_filter"},
+      {"raw":"RECITATION", "finish":"content_filter"},
+      {"raw":"BLOCKLIST", "finish":"content_filter"},
+      {"raw":"PROHIBITED_CONTENT", "finish":"content_filter"},
+      {"raw":"SPII", "finish":"content_filter"},
+      {"raw":"IMAGE_SAFETY", "finish":"content_filter"},
+      {"raw":"IMAGE_PROHIBITED_CONTENT", "finish":"content_filter"},
+      {"raw":"IMAGE_RECITATION", "finish":"content_filter"},
+      {"raw":"MALFORMED_FUNCTION_CALL", "finish":"error"},
+      {"raw":"UNEXPECTED_TOOL_CALL", "finish":"error"},
+      {"raw":"TOO_MANY_TOOL_CALLS", "finish":"error"},
+      {"raw":"MISSING_THOUGHT_SIGNATURE", "finish":"error"},
+      {"raw":"MALFORMED_RESPONSE", "finish":"error"},
+      {"raw":"FINISH_REASON_UNSPECIFIED", "finish":"other"},
+      {"raw":"LANGUAGE", "finish":"other"},
+      {"raw":"OTHER", "finish":"other"},
+      {"raw":"IMAGE_OTHER", "finish":"other"},
+      {"raw":"NO_IMAGE", "finish":"other"},
+      {"raw":"ESCALATION", "finish":"other"},
+      {"raw":"PUP_LIMITED_DISABLED", "finish":"other"},
+      {"raw":"CONTINUATION", "finish":"other"},
+      {"raw":"future_reason", "finish":"other"},
+      {"raw":"STOP", "emitted_tool_calls":true, "finish":"tool_calls"},
+      {"raw":"MAX_TOKENS", "emitted_tool_calls":true, "finish":"length"},
+      {"raw":null, "finish":null}
+    ]
+  },
+  {
+    "source": "google.code_assist",
+    "cases": [
+      {"raw":"STOP", "finish":"stop"},
+      {"raw":"MAX_TOKENS", "finish":"length"},
+      {"raw":"SAFETY", "finish":"content_filter"},
+      {"raw":"RECITATION", "finish":"content_filter"},
+      {"raw":"BLOCKLIST", "finish":"content_filter"},
+      {"raw":"PROHIBITED_CONTENT", "finish":"content_filter"},
+      {"raw":"SPII", "finish":"content_filter"},
+      {"raw":"IMAGE_SAFETY", "finish":"content_filter"},
+      {"raw":"IMAGE_PROHIBITED_CONTENT", "finish":"content_filter"},
+      {"raw":"IMAGE_RECITATION", "finish":"content_filter"},
+      {"raw":"MALFORMED_FUNCTION_CALL", "finish":"error"},
+      {"raw":"UNEXPECTED_TOOL_CALL", "finish":"error"},
+      {"raw":"TOO_MANY_TOOL_CALLS", "finish":"error"},
+      {"raw":"MISSING_THOUGHT_SIGNATURE", "finish":"error"},
+      {"raw":"MALFORMED_RESPONSE", "finish":"error"},
+      {"raw":"FINISH_REASON_UNSPECIFIED", "finish":"other"},
+      {"raw":"LANGUAGE", "finish":"other"},
+      {"raw":"OTHER", "finish":"other"},
+      {"raw":"IMAGE_OTHER", "finish":"other"},
+      {"raw":"NO_IMAGE", "finish":"other"},
+      {"raw":"ESCALATION", "finish":"other"},
+      {"raw":"PUP_LIMITED_DISABLED", "finish":"other"},
+      {"raw":"CONTINUATION", "finish":"other"},
+      {"raw":"future_reason", "finish":"other"},
+      {"raw":"STOP", "emitted_tool_calls":true, "finish":"tool_calls"},
+      {"raw":"SAFETY", "emitted_tool_calls":true, "finish":"content_filter"},
+      {"raw":null, "finish":null}
+    ]
+  },
+  {
+    "source": "aws.bedrock_converse",
+    "cases": [
+      {"raw":"end_turn", "finish":"stop"},
+      {"raw":"stop_sequence", "finish":"stop"},
+      {"raw":"max_tokens", "finish":"length"},
+      {"raw":"model_context_window_exceeded", "finish":"length"},
+      {"raw":"tool_use", "finish":"tool_calls"},
+      {"raw":"guardrail_intervened", "finish":"content_filter"},
+      {"raw":"content_filtered", "finish":"content_filter"},
+      {"raw":"malformed_model_output", "finish":"error"},
+      {"raw":"malformed_tool_use", "finish":"error"},
+      {"raw":"future_reason", "finish":"other"},
+      {"raw":"end_turn", "emitted_tool_calls":true, "finish":"tool_calls"},
+      {"raw":"future_reason", "emitted_tool_calls":true, "finish":"other"},
+      {"raw":null, "finish":null}
+    ]
+  },
+  {
+    "source": "ai-sdk",
+    "cases": [
+      {"raw":"stop", "finish":"stop"},
+      {"raw":"length", "finish":"length"},
+      {"raw":"content-filter", "finish":"content_filter"},
+      {"raw":"tool-calls", "finish":"tool_calls"},
+      {"raw":"error", "finish":"error"},
+      {"raw":"other", "finish":"other"},
+      {"raw":"interrupted", "finish":"other"},
+      {"raw":"unknown", "finish":null},
+      {"raw":"future_reason", "finish":"other"},
+      {"raw":"stop", "emitted_tool_calls":true, "finish":"tool_calls"},
+      {"raw":"unknown", "emitted_tool_calls":true, "finish":null},
+      {"raw":null, "finish":null}
+    ]
+  },
+  {
+    "source": "anthropic.mesages",
+    "cases": [
+      {"raw":"end_turn", "error":"unknown_source"},
+      {"raw":null, "error":"unknown_source"}
+    ]
+  }
+]

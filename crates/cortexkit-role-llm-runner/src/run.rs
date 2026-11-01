@@ -6,6 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::finish::Finish;
 pub use crate::structured_output::{SkippedSibling, StructuredOutputResult};
 pub use crate::usage::{ModelUsage, RunUsage, StepUsage};
 
@@ -166,6 +167,10 @@ pub struct RunResult {
     /// The run's state, one of [`states`]; any other value decodes as a
     /// plain string.
     pub state: String,
+    /// Normalized finish of the last model step, on a declaring runner.
+    /// Absent means no reason was reported or no model step ran, never stop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish: Option<Finish>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<BudgetExhaustedDetail>,
     /// Why the run ended, where the runner names a reason.
@@ -203,6 +208,7 @@ impl RunResult {
         Self {
             run_id: run_id.into(),
             state: state.into(),
+            finish: None,
             detail: None,
             reason: None,
             error: None,
@@ -212,6 +218,11 @@ impl RunResult {
             usage: None,
             directives: None,
         }
+    }
+
+    pub fn with_finish(mut self, finish: Finish) -> Self {
+        self.finish = Some(finish);
+        self
     }
 
     pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
@@ -524,6 +535,10 @@ impl HeldCall {
 #[non_exhaustive]
 pub struct RunStatus {
     pub state: String,
+    /// Normalized finish of the last model step, on a declaring runner.
+    /// Absent means no reason was reported or no model step ran, never stop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finish: Option<Finish>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<BudgetExhaustedDetail>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -567,6 +582,7 @@ impl RunStatus {
     pub fn new(state: impl Into<String>) -> Self {
         Self {
             state: state.into(),
+            finish: None,
             detail: None,
             reason: None,
             error: None,
@@ -608,6 +624,11 @@ impl RunStatus {
     pub fn is_held_wait(&self) -> bool {
         !self.held_calls.is_empty()
     }
+    pub fn with_finish(mut self, finish: Finish) -> Self {
+        self.finish = Some(finish);
+        self
+    }
+
     pub fn with_context_ceiling(mut self, detail: crate::errors::ContextCeilingDetail) -> Self {
         self.context_ceiling = Some(detail);
         self

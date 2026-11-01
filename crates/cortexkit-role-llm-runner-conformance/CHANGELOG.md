@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.16.7
+
+- Pin llm-runner `=0.7.44` and add three `finish_reason` cases: the last
+  model step's normalized finish, output-cap truncation as `length`, and no
+  finish when no model step ran. Ended status is checked where served.
+- Add optional raw-reason scripting with an unsupported-default adapter
+  hook. Reuse the output-cap fixture, reporting a real truncation reason.
+  Undeclared runners grade not applicable, and faulty runners are rejected
+  by each case's name.
+
 ## 0.16.6
 
 - Pin llm-runner `=0.7.43`. No new cases. The contract's sample and

@@ -356,6 +356,11 @@ mod submit_variant_verdict_tests {
 /// The outcome of a case that cannot run against this subject: skipped
 /// with what it lacks, or inapplicable. `None` when the case can run.
 fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome> {
+    if spec.name.starts_with("finish_reason_") && !declared.contains(&Capability::FinishReason) {
+        return Some(CaseOutcome::Inapplicable {
+            reason: "finish_reason is not declared".into(),
+        });
+    }
     if spec.name.starts_with("archive_pruning_")
         && !declared.contains(&Capability::ArchivePrunesReasoning)
     {

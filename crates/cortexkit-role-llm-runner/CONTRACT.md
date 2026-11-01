@@ -202,6 +202,7 @@ particular implementation.
 | `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
 | `run_usage` | `run.result` with `usage`, and `run.status` with it where the runner serves that op | §6.4 |
+| `finish_reason` | `run.result` with `finish`, and ended `run.status` with it where served | §6.6 |
 | `session_usage` | `session.head` with durable, incremental session spend in `usage` | §4.3 |
 | `head_sender` | `session.head` with the attested caller's effective delivery grant in `sender`; absence means no grant | §4.3 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
@@ -1500,10 +1501,11 @@ display-ready row for an app's reader on a runner declaring
   message, with its final values, its text parts joined in order and its
   reasoning parts excluded.
   [pinned] The answer is `{run_id, state, reason?, error?, detail?, final_message?:
-  {ordinal, mid, text}, structured_output?, context_ceiling?, usage?, directives?}` (`RunResult`;
+  {ordinal, mid, text}, structured_output?, context_ceiling?, usage?, directives?, finish?}` (`RunResult`;
   `structured_output` is §9.4's result, on an ended run admitted with it;
   `context_ceiling` is below; `usage` is the run's token usage, §6.4;
-  `directives` is §9.9's parsed trailing tag), and a run that has not ended answers
+  `directives` is §9.9's parsed trailing tag; `finish` is §6.6's normalized
+  finish of the last model step), and a run that has not ended answers
   its current state with no final message. [pinned] The separator is the
   empty string (`run::TEXT_SEPARATOR`, `run::join_text_parts`): text parts
   are concatenated exactly as emitted, with nothing inserted, so a JSON
@@ -1693,10 +1695,11 @@ state, polled without reading the transcript.
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
-  structured_output?, context_ceiling?, deadline_ms?, held_calls?, usage?, directives?}`,
+  structured_output?, context_ceiling?, deadline_ms?, held_calls?, usage?, directives?, finish?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason` and
-  `retries_used` stay runner members, not pinned.
+  `retries_used` stay runner members, not pinned. The normalized `finish`
+  beside an optional raw `final_step_finish_reason` is pinned by §6.6.
   - `state` is a run state as in `run.result` (`run::states`), decoded open
     (`RunState::parse`): a consumer does not treat an unknown state as
     terminal.
@@ -1718,6 +1721,8 @@ state, polled without reading the transcript.
   - `context_ceiling`: on `context_ceiling`, exactly the detail `run.result`
     carries (§6).
   - `directives`: exactly what `run.result` carries for the run (§9.9).
+  - `finish`: once the run has ended, exactly what `run.result` carries
+    for the run, on a runner declaring `finish_reason` (§6.6).
   - `usage`: the run's token usage so far, on a runner that declares
     `run_usage` (§6.4).
 - [pinned] **Held calls** (added in 0.5.4). A runner declares the describe
@@ -2023,6 +2028,145 @@ run's token usage whichever runner served it.
   sealed before the runner adopted this group), never a reason guessed
   from the current process's lifetime. `check_describe` checks the group
   for `run.result`; it adds no discovery metadata.
+
+### 6.6 `finish_reason`: normalized last-model-step finish
+
+- [pinned] A runner declares the describe group `finish_reason`
+  (`capabilities::FINISH_REASON`) when it reports the normalized finish of
+  the run's **last model step**. The group requires `run.result`, adds no
+  operation, and does not require `run_status`. On a declaring runner,
+  `run.result` and `run.status` once the run has ended carry `finish` when
+  that last step reported a reason. Ended status and result agree. This is
+  independent of the run's terminal `state`: `completed` alone does not
+  prove that generation finished without truncation.
+- [pinned] `finish` is an open string enum (`finish::Finish`, also exported
+  from `run`): `stop | length | content_filter | tool_calls | error | other`.
+  A later normalized value decodes as `Finish::Unknown`, retaining its
+  spelling and re-encoding unchanged, never failing decoding. `stop` means
+  a natural stop or a requested stop sequence; `tool_calls` means the step
+  ended with tool calls; `content_filter` means generation was filtered or
+  refused; `error` means the provider or host reported a generation error.
+- [pinned] `length` means generation stopped at an output limit: the run's
+  `max_output_tokens`, the model's own output maximum, or a full context
+  window (including Anthropic `model_context_window_exceeded`). `other`
+  means the provider or host reported a reason outside the classified set.
+  A consumer MUST treat absent and `other` alike, as **not proven complete**;
+  an unknown normalized value is likewise not proof of completeness. A
+  consumer publishing model output must not pass an output-cap truncation
+  off as a complete reply.
+- [pinned] `finish` is absent, never guessed, if no model step ran or the
+  last model step's provider or host reported no reason. Do not infer it
+  from token counts, the run state, an earlier step, or an earlier run. A
+  runner that does not declare `finish_reason` never sends `finish`. The
+  runner MAY continue sending its existing raw string as a runner-specific
+  member beside `finish`, such as `final_step_finish_reason`; nothing about
+  existing raw members or display output changes.
+- [pinned] Runners call the shared public
+  `finish::normalize(source: &str, raw: Option<&str>, emitted_tool_calls: bool)
+  -> Result<Option<Finish>, UnknownSource>` rather than keeping their own
+  mapping tables. `source` is one of the routing wire-format spellings below,
+  or `ai-sdk` when a host exposes only the Vercel AI SDK's normalized reason
+  (for example, a host storing it as `finish` on an assistant message).
+  An unknown source is an error even with no raw reason, so a typo fails
+  loudly. No raw reason returns `Ok(None)`. An unknown raw string on a known
+  source returns `other`. If `emitted_tool_calls` is true and the raw reason
+  maps to `stop`, return `tool_calls` instead. The flag never overrides
+  length, filtering, errors, other, or absence.
+
+**`anthropic.messages`** — checked against [Anthropic's stop reason
+documentation](https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons),
+accessed 2026-11-01. Raw input is `stop_reason`.
+
+| Raw | Normalized |
+|---|---|
+| `end_turn`, `stop_sequence` | `stop` |
+| `max_tokens`, `model_context_window_exceeded` | `length` |
+| `tool_use` | `tool_calls` |
+| `refusal` | `content_filter` |
+| `pause_turn` | `other` |
+
+**`openai.chat_completions`** — checked against [OpenAI's Chat Completions
+response reference](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create),
+accessed 2026-11-01. Raw input is the last step's choice `finish_reason`.
+
+| Raw | Normalized |
+|---|---|
+| `stop` | `stop` |
+| `length` | `length` |
+| `content_filter` | `content_filter` |
+| `tool_calls`, legacy `function_call` | `tool_calls` |
+
+**`openai.responses` and `openai.chatgpt_responses`** — checked against
+[OpenAI's Responses reference](https://developers.openai.com/api/reference/resources/responses/methods/create),
+accessed 2026-11-01. Responses has no finish-reason member: the runner passes
+the response `status`, except that `incomplete` with
+`incomplete_details.reason` becomes `incomplete:<reason>`. Without that
+detail, pass bare `incomplete`, which maps to `other`. These are raw-input
+spellings for this helper, not new provider fields. A tool-call output with
+`status: completed` is distinguished by `emitted_tool_calls`.
+
+| Raw | Normalized |
+|---|---|
+| `completed` | `stop` (or `tool_calls` through the flag) |
+| `incomplete:max_output_tokens` | `length` |
+| `incomplete:content_filter` | `content_filter` |
+| `failed` | `error` |
+| `incomplete:max_messages`, `incomplete:steered`, any other `incomplete:<reason>`, bare `incomplete` | `other` |
+| `cancelled`, `in_progress`, `queued` | `other` |
+
+`in_progress` and `queued` are not ended responses; their inclusion in the
+mapping does not make an active run's status carry `finish`.
+
+**`google.generate_content` and `google.code_assist`** — checked against
+[Google's current `FinishReason` enum](https://ai.google.dev/api/generate-content#FinishReason),
+accessed 2026-11-01. Raw input is the candidate's `finishReason`. Both
+sources use the same enum, including the additional documented image,
+tool-call, response-format and continuation values.
+
+| Raw | Normalized |
+|---|---|
+| `STOP` | `stop` |
+| `MAX_TOKENS` | `length` |
+| `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT`, `SPII`, `IMAGE_SAFETY`, `IMAGE_PROHIBITED_CONTENT`, `IMAGE_RECITATION` | `content_filter` |
+| `MALFORMED_FUNCTION_CALL`, `UNEXPECTED_TOOL_CALL`, `TOO_MANY_TOOL_CALLS`, `MISSING_THOUGHT_SIGNATURE`, `MALFORMED_RESPONSE` | `error` |
+| `FINISH_REASON_UNSPECIFIED`, `LANGUAGE`, `OTHER`, `IMAGE_OTHER`, `NO_IMAGE`, `ESCALATION`, `PUP_LIMITED_DISABLED`, `CONTINUATION` | `other` |
+
+**`aws.bedrock_converse`** — checked against [Amazon Bedrock's Converse
+`stopReason` reference](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html),
+accessed 2026-11-01. Raw input is `stopReason`; the current documented enum
+also includes the two malformed-output reasons below.
+
+| Raw | Normalized |
+|---|---|
+| `end_turn`, `stop_sequence` | `stop` |
+| `max_tokens`, `model_context_window_exceeded` | `length` |
+| `tool_use` | `tool_calls` |
+| `guardrail_intervened`, `content_filtered` | `content_filter` |
+| `malformed_model_output`, `malformed_tool_use` | `error` |
+
+**`ai-sdk`** — checked against [Vercel AI SDK's `generateText` return
+reference](https://ai-sdk.dev/docs/reference/ai-sdk-core/generate-text#returns),
+accessed 2026-11-01. Raw input is the SDK's normalized `finishReason`, not
+its optional `rawFinishReason`. The current documentation lists
+`interrupted` and no longer lists `unknown`; `unknown` remains supported
+because hosts on older AI SDK versions still store it when no reason was
+reported. Both `unknown` (absent `finish`) and `interrupted` (`other`) mean
+**not proven complete** to a consumer.
+
+| Raw | Normalized |
+|---|---|
+| `stop` | `stop` |
+| `length` | `length` |
+| `content-filter` | `content_filter` |
+| `tool-calls` | `tool_calls` |
+| `error` | `error` |
+| `other`, `interrupted` | `other` |
+| legacy `unknown` | absent (`Ok(None)`) |
+
+The executable samples in `test-vectors/llm-runner-v1/finish-reason.json`
+pin each documented raw value for each source, unknown raw reasons, missing
+reasons, the tool-call override, and an unknown source. None of the tables
+permits inferring an unreported reason.
 
 ## 7. `streaming`: `session.subscribe`
 
