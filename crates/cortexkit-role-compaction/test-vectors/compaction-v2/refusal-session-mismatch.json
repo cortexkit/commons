@@ -1,0 +1,7 @@
+{
+  "code": "session_mismatch",
+  "detail": {
+    "session": "session-other"
+  },
+  "message": "the hook names another session than its route"
+}

@@ -1,0 +1,14 @@
+[package]
+name = "cortexkit-role-compaction"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Wire contract for compaction-provider/v2 and compaction-runner/v1"
+readme = "README.md"
+
+[dependencies]
+cortexkit-role-llm-runner = { version = "0.7.48", path = "../cortexkit-role-llm-runner" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_path_to_error = "0.1"

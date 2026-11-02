@@ -1,0 +1,7 @@
+{
+  "code": "invalid_params",
+  "detail": {
+    "field": "context_window"
+  },
+  "message": "expected an unsigned integer"
+}

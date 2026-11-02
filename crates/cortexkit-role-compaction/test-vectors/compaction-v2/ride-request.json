@@ -1,0 +1,28 @@
+{
+  "method": "compaction.ride",
+  "params": {
+    "applied_view": {
+      "checksum": "73191a83b00c75f1f59e88e44b5b0d1e0465392dcd131354e0aed3e98660f577",
+      "version": 1
+    },
+    "causes": [
+      "over_limit"
+    ],
+    "conditions": {
+      "context_window": 32768,
+      "last_prompt_tokens": 1024,
+      "model": {
+        "model": "example-model",
+        "provider": "example-provider",
+        "variant": "standard"
+      },
+      "output_reserve": 4096,
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "none"
+      }
+    },
+    "deadline_ms": 1500,
+    "request_tokens": 30000
+  }
+}

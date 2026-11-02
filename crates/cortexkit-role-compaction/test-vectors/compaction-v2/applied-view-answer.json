@@ -1,0 +1,25 @@
+{
+  "view": {
+    "checksum": "73191a83b00c75f1f59e88e44b5b0d1e0465392dcd131354e0aed3e98660f577",
+    "edits": [
+      {
+        "at": "start",
+        "message": {
+          "id": "insert-a",
+          "role": "user",
+          "texts": [
+            "An invented summary."
+          ]
+        },
+        "op": "insert",
+        "since": 1
+      },
+      {
+        "op": "cut",
+        "since": 1,
+        "through": "message-a"
+      }
+    ],
+    "version": 1
+  }
+}

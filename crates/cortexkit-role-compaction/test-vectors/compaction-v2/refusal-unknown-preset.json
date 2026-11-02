@@ -1,0 +1,7 @@
+{
+  "code": "unknown_preset",
+  "detail": {
+    "preset": "example-missing"
+  },
+  "message": "unknown preset `example-missing`"
+}

@@ -1,0 +1,93 @@
+{
+  "entries": [
+    {
+      "digest": "e4565946a06648fa4ba6a87d56934d4506449a4e850ef6a5f588e3375f1e5ea7",
+      "mid": "message-a",
+      "notice": {
+        "sender": "example-notifier",
+        "template": "example"
+      },
+      "ordinal": 1,
+      "parts": [
+        {
+          "digest": "635c5b437d5d204fd794bbf6d6569f53f3df37c2802d3df80e8df1a2c8a0e7d3",
+          "id": "part-a",
+          "kind": "text",
+          "tag": 1,
+          "text": "An invented message."
+        }
+      ],
+      "role": "user",
+      "written_at": 1700000000000
+    },
+    {
+      "digest": "1725aad389e945ae6af74e1eb18c666c7f99def8ca284d8e807a59f814743626",
+      "mid": "message-b",
+      "ordinal": 2,
+      "parts": [
+        {
+          "attachments": [
+            {
+              "id": "attachment-a",
+              "kind": "file",
+              "mime": "image/png",
+              "size": 64,
+              "transport": "inline"
+            }
+          ],
+          "call_id": "call-a",
+          "delivered": [
+            {
+              "sender": "example-notifier",
+              "template": "reminder",
+              "text": "An invented reminder.",
+              "text_bytes": 21
+            }
+          ],
+          "digest": "c0bad040097818ddd3b17c39c133241f0bbe7730ca31a3329beecf12758f77c8",
+          "id": "part-b",
+          "input": {
+            "query": "invented"
+          },
+          "kind": "tool",
+          "name": "example-tool",
+          "output": "An invented result.",
+          "output_bytes": 19,
+          "status": "completed"
+        },
+        {
+          "digest": "640e4cb43f7256c71be0b7eec6e01d47a8055bb6ccd32d412b69f7fddbfd2747",
+          "id": "part-c",
+          "kind": "reasoning",
+          "seal": "signed",
+          "text": "An invented thought.",
+          "text_bytes": 20
+        },
+        {
+          "digest": "155342e6fa896c82c4277a99ca28cfe098aec08f91879f8b006a0e4a8905a5e9",
+          "id": "part-d",
+          "kind": "opaque",
+          "provider_kind": "example-provider.item",
+          "size": 32
+        }
+      ],
+      "role": "assistant",
+      "usage": {
+        "output_tokens": 64,
+        "prompt_tokens": 1024
+      },
+      "written_at": 1700000000100
+    }
+  ],
+  "head": {
+    "applied_view": {
+      "checksum": "73191a83b00c75f1f59e88e44b5b0d1e0465392dcd131354e0aed3e98660f577",
+      "version": 1
+    },
+    "newest": {
+      "digest": "1725aad389e945ae6af74e1eb18c666c7f99def8ca284d8e807a59f814743626",
+      "mid": "message-b",
+      "ordinal": 2
+    }
+  }
+}

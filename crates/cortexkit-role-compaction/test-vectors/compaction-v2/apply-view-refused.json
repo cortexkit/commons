@@ -1,0 +1,6 @@
+{
+  "answer": "refused",
+  "refusal": {
+    "code": "bad_checksum"
+  }
+}

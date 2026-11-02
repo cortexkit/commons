@@ -1,0 +1,7 @@
+{
+  "code": "unknown_method",
+  "detail": {
+    "method": "session.example"
+  },
+  "message": "this route does not serve `session.example`"
+}

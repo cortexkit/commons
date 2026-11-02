@@ -1,0 +1,373 @@
+//! Views: what the provider wants the model to see, as edits over the
+//! runner's transcript.
+//!
+//! A view is cumulative: each new version carries every edit of the previous
+//! one, unchanged or changed in place (a changed edit takes the new version
+//! as its `since`), plus new ones. An edit leaves only when a revert removes
+//! the message it names. Everything a view does not name is rendered
+//! unchanged. While the transcript only grows and the view stays the same,
+//! each request extends the previous one byte for byte; a revert, branch
+//! switch or host edit can break that before a newer view arrives. Whether
+//! the model provider's cache still holds the prefix depends on the cache's
+//! lifetime and on the rest of the request staying the same.
+//!
+//! The provider computes every byte it puts in a view (placeholders such as
+//! `[dropped §12§]`, cut-down edit arguments, the history head). The runner
+//! adds nothing to them, not even a tag prefix; every other tagged text is
+//! rendered with its prefix.
+//!
+//! No edit changes a tag number: the runner counts from the transcript, not
+//! from what it renders. The only way a view could mislead the model's count
+//! is a number written into its own bytes, so a runner refuses an inserted
+//! message that carries a tag prefix, and a replaced field that carries one
+//! the part neither owns nor already contained.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use crate::read::Role;
+
+/// A published view.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct View {
+    /// At least 1, and greater than every view the provider built for the
+    /// session before, whether or not the runner accepted it.
+    pub version: u64,
+    /// Checksum of `version` and `edits` ([`View::seal`]).
+    pub checksum: String,
+    pub edits: Vec<Edit>,
+}
+
+impl View {
+    /// Build a view, computing its checksum. Nothing else is checked: not
+    /// the version, the edits, or what they name.
+    pub fn seal(version: u64, edits: Vec<Edit>) -> Self {
+        let checksum = view_checksum(version, &edits);
+        Self {
+            version,
+            checksum,
+            edits,
+        }
+    }
+
+    /// Whether the checksum matches `version` and `edits`. The view is not
+    /// checked against a transcript or the provider rules.
+    pub fn verify(&self) -> bool {
+        self.checksum == view_checksum(self.version, &self.edits)
+    }
+
+    pub fn applied(&self) -> AppliedView {
+        AppliedView {
+            version: self.version,
+            checksum: self.checksum.clone(),
+        }
+    }
+}
+
+fn view_checksum(version: u64, edits: &[Edit]) -> String {
+    #[derive(Serialize)]
+    struct Sealed<'a> {
+        version: u64,
+        edits: &'a [Edit],
+    }
+    crate::digest::checksum(&Sealed { version, edits })
+}
+
+/// Names a view by version and checksum. A version alone is not enough: a
+/// provider restored from an older backup could publish different content
+/// under a version number the runner already applied.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AppliedView {
+    pub version: u64,
+    pub checksum: String,
+}
+
+/// One edit, with the view version that first held it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Edit {
+    /// The version of the first view that held this edit unchanged. A view
+    /// repeats an earlier edit with its original `since`; a new or changed
+    /// edit gets the view's own version. The rule check uses it to tell
+    /// which edits came after a signed reasoning part was generated, and
+    /// a runner verifies it against its previous view.
+    pub since: u64,
+    #[serde(flatten)]
+    pub op: EditOp,
+}
+
+impl Edit {
+    pub fn new(since: u64, op: EditOp) -> Self {
+        Self { since, op }
+    }
+}
+
+open_tagged! {
+/// What an edit does.
+#[derive(Clone, Debug, PartialEq)]
+pub enum EditOp, "op" {
+    /// Leave out one part, or the whole message when `part` is absent.
+    Drop => "drop" {
+        mid: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        part: Option<String>,
+    },
+    /// Render one field of a part with new bytes.
+    Replace => "replace" {
+        mid: String,
+        part: String,
+        /// `text` (a text part, or a file part, which then renders as text
+        /// in the file's place), `output` (a tool result's text),
+        /// `input.<key>` (one top-level string argument of a tool call), or
+        /// `attachments` (a tool result's attachments), or `delivered` (its
+        /// delivered text items).
+        field: String,
+        /// A string, for `attachments` the array of attachment ids to keep,
+        /// or for `delivered` the array of item indexes to keep.
+        value: Value,
+        /// The part's checksum when the provider computed this edit.
+        expect: String,
+    },
+    /// Render a message the transcript does not hold, such as the history
+    /// summary at the start.
+    Insert => "insert" {
+        at: InsertAt,
+        message: InsertedMessage,
+    },
+    /// Leave out every message up to and including `through`: the messages a
+    /// summary at the start replaces. One per view. Once a view with a cut
+    /// applies, the runner writes its host's own compaction marker there
+    /// (M1), so the host stops loading those messages, and reports it in its
+    /// next notice.
+    Cut => "cut" { through: String },
+}
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Value", into = "Value")]
+#[non_exhaustive]
+pub enum InsertAt {
+    /// Before the first rendered message.
+    Start,
+    /// Immediately before this message, whether or not the message itself
+    /// is dropped.
+    Before(String),
+    /// An unrecognised anchor name or object, kept without interpretation.
+    /// A runner refuses the view `unsupported_edit` (CONTRACT.md W1.5).
+    Unknown(Value),
+}
+
+impl TryFrom<Value> for InsertAt {
+    type Error = String;
+
+    fn try_from(value: Value) -> Result<Self, Self::Error> {
+        match value {
+            Value::String(name) if name == "start" => Ok(Self::Start),
+            Value::String(name) => Ok(Self::Unknown(Value::String(name))),
+            // W1.4: unknown fields beside `before` are ignored.
+            Value::Object(fields) => match fields.get("before") {
+                Some(Value::String(mid)) => Ok(Self::Before(mid.clone())),
+                Some(_) => Err("expected a message id for `before`".to_owned()),
+                None => Ok(Self::Unknown(Value::Object(fields))),
+            },
+            _ => Err("expected an anchor name or an anchor object".to_owned()),
+        }
+    }
+}
+
+impl From<InsertAt> for Value {
+    fn from(value: InsertAt) -> Self {
+        match value {
+            InsertAt::Start => Value::String("start".to_owned()),
+            InsertAt::Before(mid) => serde_json::json!({"before": mid}),
+            InsertAt::Unknown(value) => value,
+        }
+    }
+}
+
+/// A message a view adds. Its parts are text only and carry no tag numbers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct InsertedMessage {
+    /// Chosen by the provider, unique within the view, and kept the same
+    /// across views while the message is unchanged.
+    pub id: String,
+    pub role: Role,
+    pub texts: Vec<String>,
+}
+
+open_tagged! {
+/// Why a runner refuses a view. The runner keeps applying its previous view.
+/// A refusal of a handed-over view is that call's answer; a refusal of a
+/// ride's view, or of an accepted view at a step boundary, goes in the next
+/// notice.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ViewRefusal, "code" {
+    BadChecksum => "bad_checksum",
+    /// The view's version is not newer than the runner's latest view.
+    StaleVersion => "stale_version" {
+        version: u64,
+        latest: u64,
+    },
+    /// An edit's `since` is not consistent with the previous view.
+    BadSince => "bad_since",
+    UnknownMessage => "unknown_message" {
+        mid: String,
+    },
+    UnknownPart => "unknown_part" {
+        mid: String,
+        part: String,
+    },
+    /// The part changed since the provider computed the edit.
+    StalePart => "stale_part" {
+        mid: String,
+        part: String,
+    },
+    /// The field does not exist on that part, or the value has the wrong shape.
+    BadField => "bad_field" {
+        mid: String,
+        part: String,
+        field: String,
+    },
+    /// Two edits target the same part in ways that cannot both hold, such as
+    /// a drop and a replace, or two replaces of one field.
+    Conflict => "conflict" {
+        mid: String,
+        part: String,
+    },
+    /// A tool call still running cannot be dropped or edited.
+    RunningTool => "running_tool" {
+        mid: String,
+        part: String,
+    },
+    UnknownAnchor => "unknown_anchor" {
+        mid: String,
+    },
+    DuplicateInsert => "duplicate_insert" {
+        id: String,
+    },
+    /// More than one cut.
+    DuplicateCut => "duplicate_cut",
+    /// An inserted message's text contains a tag prefix.
+    TaggedInsert => "tagged_insert" {
+        id: String,
+    },
+    /// A replace value contains a tag prefix for a number other than the
+    /// part's own that the field's original text does not already contain.
+    ForeignTag => "foreign_tag" {
+        mid: String,
+        part: String,
+        field: String,
+        tag: u64,
+    },
+    /// The view breaks a provider rule the runner declared.
+    Rule => "rule"(payload: crate::rules::RuleBreak),
+    /// The edit at this index of `edits` has an `op`, an insert `at` or an
+    /// inserted message `role` the runner does not know, so it cannot apply
+    /// the view (W1.5).
+    UnsupportedEdit => "unsupported_edit" {
+        index: u64,
+    },
+}
+}
+
+/// The largest view, as serialized JSON, a provider may hand over (W6.7).
+/// It leaves room under a module call's 4 MiB frame for the request around it.
+/// A provider refuses by name to send a larger view: one would be a bug in
+/// the provider, not something to page.
+pub const MAX_VIEW_BYTES: usize = 3 << 20;
+
+/// `session.apply_view`, served by the runner: the provider hands over a new
+/// view. The runner checks it with the view library (its shape, its `since`
+/// values and the provider rules), stores it, and applies it from the next step
+/// boundary, never in the middle of a step.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ApplyViewRequest {
+    pub view: View,
+}
+
+open_tagged! {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ApplyViewAnswer, "answer" {
+    /// Stored; it applies from the next step boundary.
+    Accepted => "accepted",
+    /// Not stored; the runner keeps its current view.
+    Refused => "refused" { refusal: ViewRefusal },
+}
+}
+
+/// `session.applied_view`, served by the runner: the view it applies now, for
+/// a provider whose own copy is missing or older (for example after its store
+/// was restored from a backup).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AppliedViewRequest {}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct AppliedViewAnswer {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<View>,
+}
+
+impl AppliedView {
+    /// Build the value with its required fields.
+    pub fn new(version: u64, checksum: impl Into<String>) -> Self {
+        Self {
+            version,
+            checksum: checksum.into(),
+        }
+    }
+}
+
+impl InsertedMessage {
+    /// Build the value with its required fields.
+    pub fn new(id: impl Into<String>, role: Role, texts: Vec<String>) -> Self {
+        Self {
+            id: id.into(),
+            role,
+            texts,
+        }
+    }
+}
+
+impl ApplyViewRequest {
+    /// Build the value with its required fields.
+    pub fn new(view: View) -> Self {
+        Self { view }
+    }
+}
+
+impl AppliedViewRequest {
+    /// Build the value with its required fields.
+    pub fn new() -> Self {
+        Self {}
+    }
+}
+
+impl Default for AppliedViewRequest {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AppliedViewAnswer {
+    /// Build the value with its required fields.
+    pub fn new() -> Self {
+        Self { view: None }
+    }
+
+    pub fn with_view(mut self, view: View) -> Self {
+        self.view = Some(view);
+        self
+    }
+}
+
+impl Default for AppliedViewAnswer {
+    fn default() -> Self {
+        Self::new()
+    }
+}

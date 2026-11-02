@@ -1,0 +1,11 @@
+{
+  "method": "session.entries",
+  "params": {
+    "detail": "compact",
+    "max_bytes": 65536,
+    "select": {
+      "by": "after",
+      "limit": 10
+    }
+  }
+}
