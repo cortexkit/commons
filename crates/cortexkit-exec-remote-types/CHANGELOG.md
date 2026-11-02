@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.18
+
+- Add optional `TerminalRecord.source_read_only` with `with_source_read_only`
+  and an accessor: the runner's report on whether the files Git tracks in the
+  job's source tree were read-only while the command ran. `true` means on,
+  `false` means not on for this job, absent means not reported. A supporting
+  runner sends it for every job that ran. Omitted when absent; older readers
+  ignore it. The report gives context for a failed write, not proof of its
+  cause.
+
 ## 0.2.17
 
 - Add optional stated job memory with `with_memory_mib` and `MEMORY_CAPABILITY`

@@ -1173,6 +1173,17 @@ pub struct TerminalRecord {
     /// Present only when the job was killed for memory; independent of hosting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub oom_kill: Option<OomKill>,
+    /// The runner's report on source-write protection for this job: whether
+    /// it made the files Git tracks in the job's source tree read-only while
+    /// the command ran. Untracked and ignored files are not covered. `Some(true)`:
+    /// protection was on for this job. `Some(false)`: it was not on, for
+    /// example because the runner has none on that platform. `None`: not
+    /// reported. A runner that supports the report sends it for every job that
+    /// ran; refused-before-start records and expired history omit it. The
+    /// runner, not this type, applies the protection, and the report gives
+    /// context for a failed write without proving its cause.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_read_only: Option<bool>,
 }
 
 impl TerminalRecord {
@@ -1208,6 +1219,7 @@ impl TerminalRecord {
             memory_peak_working_mib: None,
             memory_over_s: None,
             oom_kill: None,
+            source_read_only: None,
         }
     }
 
@@ -1349,6 +1361,19 @@ impl TerminalRecord {
     /// Read memory-kill metadata, if reported.
     pub fn oom_kill(&self) -> Option<&OomKill> {
         self.oom_kill.as_ref()
+    }
+
+    /// Report whether source-write protection was on for this job; see
+    /// [`TerminalRecord::source_read_only`] for the files covered.
+    pub fn with_source_read_only(mut self, source_read_only: bool) -> Self {
+        self.source_read_only = Some(source_read_only);
+        self
+    }
+
+    /// Read the runner's source-write-protection report, if present; see the
+    /// field of the same name for the files covered.
+    pub fn source_read_only(&self) -> Option<bool> {
+        self.source_read_only
     }
 }
 

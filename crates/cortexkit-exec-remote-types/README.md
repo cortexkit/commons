@@ -266,6 +266,12 @@ fields, even with equal before/after Git values, an empty untracked list with
 not these types, enforces caps and exclusions. Consumers must not assume that
 remote commits, staged changes, or generated files are present locally.
 
+`TerminalRecord.source_read_only` (`with_source_read_only` and an accessor) is
+the runner's source-write-protection report: `true` if the files Git tracks in
+the job's source tree were read-only while it ran, `false` if not, absent if not
+reported. A supporting runner sends it for every job that ran. See the
+contract's source-write-protection section.
+
 Hosted execution may additionally report `TerminalRecord.hosted` with its
 placement and billed virtual-CPU milliseconds. Billing is absent while pending;
 build-server jobs omit this field.

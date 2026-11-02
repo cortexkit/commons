@@ -205,6 +205,24 @@ including unknown values. The named causes and their constants are:
 - `host_oom` (`OOM_KILL_CAUSE_HOST_OOM`): the host or VM kernel killed the job
   outside the runner's cap.
 
+## Source-write-protection report
+
+`TerminalRecord.source_read_only` is the runner's optional report on whether it
+made the files Git tracks in the job's source tree read-only while the command
+ran. Untracked and ignored files are not covered.
+
+- `true`: protection was on for this job.
+- `false`: protection was not on for this job, for example because the runner
+  has none on that platform.
+- absent: not reported. Absence never means `false`.
+
+A runner that supports the report sends it for every job that ran, `false`
+included. Refused-before-start records and expired history omit it. The field
+is omitted when absent and needs no capability; older readers ignore it. The
+runner, not this crate, applies and verifies the protection. The report gives a
+caller context for a failed write, such as "Operation not permitted", without
+proving that write's cause. Remote changes are never copied back either way.
+
 ## Hosted placement and billing
 
 A hosted runner may add `TerminalRecord.hosted` with its placement identifier, such
