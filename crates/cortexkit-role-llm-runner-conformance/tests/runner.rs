@@ -3342,7 +3342,9 @@ async fn app_readers_correct_runner_passes_all_cases() {
     assert_none_failed_but(&report, &[]);
 }
 
-async fn app_reader_fault(defects: Defects, expected: &str) {
+/// `also_fails` names cases outside the app-reader group that the same
+/// defect must fail too.
+async fn app_reader_fault(defects: Defects, expected: &str, also_fails: &[&str]) {
     let report = run(&admission_subject(Defects {
         declare_app_readers: true,
         ..defects
@@ -3357,17 +3359,22 @@ async fn app_reader_fault(defects: Defects, expected: &str) {
             report.render()
         );
     }
-    assert_none_failed_but(&report, &[expected]);
+    let mut allowed = vec![expected];
+    allowed.extend_from_slice(also_fails);
+    assert_none_failed_but(&report, &allowed);
 }
 
 #[tokio::test]
 async fn app_readers_rejecting_listed_reader_fails_by_name() {
+    // The head_sender case lists its two plan senders as readers on a runner
+    // declaring app_readers, so refusing a listed reader fails it as well.
     app_reader_fault(
         Defects {
             app_readers_reject_listed: true,
             ..Defects::default()
         },
         APP_READER_CASES[0],
+        &["head_sender_is_callers_effective_grant"],
     )
     .await;
 }
@@ -3380,6 +3387,7 @@ async fn app_readers_admitting_unlisted_reader_fails_by_name() {
             ..Defects::default()
         },
         APP_READER_CASES[1],
+        &[],
     )
     .await;
 }
@@ -3392,6 +3400,7 @@ async fn app_readers_allowing_reader_send_fails_by_name() {
             ..Defects::default()
         },
         APP_READER_CASES[2],
+        &[],
     )
     .await;
 }
