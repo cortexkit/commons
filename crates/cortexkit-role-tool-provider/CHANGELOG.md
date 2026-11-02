@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Contract text only (§4.4): for a call whose work runs in a child process,
+  "advancing work" means the provider's supervision of the call, not
+  progress inside the child. The supervision loop sends keepalives while it
+  keeps checking the child and handling cancellation, whether or not the
+  child prints or uses CPU; no separate timer may send them. Keepalives do
+  not extend the deadline for the REQUEST's terminal frame, and CANCEL must
+  stop the work in the child, not only its supervision. If supervision
+  stops and nothing else arrives for the call, the silence window ends the
+  wait.
+
 ## 0.14.6
 
 - Add optional `ViewManifest::tool` and non-exhaustive `ViewTool`, carrying

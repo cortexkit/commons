@@ -814,6 +814,24 @@ existing behaviour for a provider whose preset-less answer lists no presets.
   already checks for cancellation. It must never send keepalives from a timer
   that runs independently of the work. A call whose work is stuck must go
   silent, so the 90-second silence window can detect it.
+- **Work done by a child process.** For a call whose work runs in a child
+  process, the advancing-work condition in the two rules above applies to the
+  provider's supervision of that call, not to progress inside the child. The
+  supervision loop checks whether the child has exited and handles
+  cancellation; while it keeps doing those checks, it sends keepalives at the
+  required interval, whether or not the child prints output or uses CPU. A
+  timer may wake that loop, but no separate timer may send keepalives without
+  it. A child's lack of output or CPU use does not by itself show it is
+  stuck, and these keepalives say only that supervision continues, not that
+  the child is making progress. Keepalives never extend the reply deadline,
+  which bounds the runner's wait for the REQUEST's terminal frame; a
+  qualifying held reply may let the child's work continue under the
+  late-result rules. On CANCEL a declaring provider must stop the work running
+  in the child: stopping supervision, the wait or the keepalives alone does
+  not satisfy that. If supervision stops and no other PUSH or terminal frame
+  arrives for the call, the runner gives up after the silence window; a
+  stopped supervision loop, a lost task or a frozen provider can cause that
+  silence, and the runner doesn't determine which.
 - **End of keepalives.** Keepalives stop with the call's terminal frame. They
   do not apply to calls held past their reply (§5, §7), which retain their own
   late-result rules. A held first reply is already a terminal frame for the
