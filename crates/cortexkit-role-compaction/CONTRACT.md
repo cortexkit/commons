@@ -4,7 +4,7 @@ Protocol: `compaction-provider/v2` and `compaction-runner/v1`.
 
 This contract is what a runner and a compaction provider implement. Part A states the behaviour each side owes the other. Part B is the wire reference: every op, every field, every refusal code. Both parts are normative. Where they disagree, that is a defect in this document.
 
-The JSON examples in `test-vectors/compaction-v2` round-trip through this crate’s wire types in `wire_vectors_round_trip`. The unit tests cover part round-trips, compact forms, canonical checksums, and parameter error paths; they do not implement runner behaviour.
+The request, answer and refusal examples in `test-vectors/compaction-v2` round-trip through this crate’s wire types in `wire_vectors_round_trip`; validation examples assert the expected decoding refusal, and checksum examples assert equality after normalization (W1.6). The unit tests cover part round-trips, compact forms, canonical checksums, and parameter error paths; they do not implement runner behaviour.
 
 **Who owns what.** This crate publishes the wire types in Part B. A separate view library, the `cortexkit-compaction-view` crate, provides applying a view, the provider-rule check, the render plan (W6.3), the reply cleaning (W4.6), the model-to-rules defaults (W3.3), their WebAssembly build for runners written in JavaScript, and JSON test vectors. The library is published on crates.io with a versioned API and depends on this contract crate.
 
@@ -20,10 +20,9 @@ The JSON examples in `test-vectors/compaction-v2` round-trip through this crate�
 | R3 | The provider also uses llm-runner's `session.send` and `run.result`, as published in `llm-runner/v1`. This contract does not change llm-runner. |
 | R4 | All of these are calls over routes. A bus is not used. |
 | R5 | A session's preset is a name only. The provider decides what each preset enables; the runner never sends feature flags. |
-| R6 | A session's provider also serves its tools (`tool-provider/v1`: `tool.catalog`, `tool.call`) and the `pre_user` hook (`step-transform-provider/v1`: `transform.declare`, `transform.hook`), as published. This contract does not redefine them. |
-| R7 | Every call is about the session its route is bound to. Each side opens one route per session and per role to the other (W2). No request body names a runner, a session or a project. |
+| R6 | A session's provider also serves its tools (`tool-provider/v1`: `tool.catalog`, `tool.call`) and the `pre_user` hook (`step-transform-provider/v2`, defined by the `cortexkit-role-step-transform-provider` crate from 0.5.0: `transform.declare`, `transform.hook`). This contract does not redefine them. |
+| R7 | Every compaction call and every `transform.hook` is about the session its route is bound to. Each side opens one route per session and per role to the other (W2); step-transform discovery and declaration may also use a route without a session (W2.1). No request body names a runner, a session or a project. |
 | R8 | Identity comes only from the daemon: the caller is the module the daemon attests for the route, the session is the route's bind identity, and the project is the daemon's scope stamp on the route. Refusals: W2.4. |
-| R9 | Transitional, until the publication of `step-transform-provider/v2` with per-session routes alongside this contract: under the published v1, a hook call names its session in the body, and its route may serve all of a runner's sessions. The provider then reaches only sessions of the runner the daemon attests for the route; on a route bound to one session, a hook naming another is refused (`session_mismatch`). R9 and `session_mismatch` retire with v2. |
 
 
 ## A2. The neutral part model
@@ -46,7 +45,7 @@ The JSON examples in `test-vectors/compaction-v2` round-trip through this crate�
 | T4 | Numbers are contiguous on the active path. After a revert or a branch switch, counting continues from what remains, so a removed number is given to the next new part. |
 | T5 | The provider never computes a number. It keys its state by part identity, and refuses a context-management tool call (`ctx_*`) whose own message is no longer in the transcript, so a reused number never reaches another part. |
 | T6 | The runner renders the prefix (W4.7) in front of every numbered part's text. Neutral text never carries it. Bytes from a `replace` edit are final and get no prefix. |
-| T7 | A model reply's text is cleaned of tag notation (W4.6) when the runner maps it to neutral text and when it renders it. Whether the runner also cleans what it stores is its own choice. If the model's leading prefix named exactly the number the runner assigns and the reply holds no other tag notation, the reply renders byte for byte as the model wrote it. |
+| T7 | A model reply's text is cleaned of tag notation (W4.6) when the runner maps it to neutral text and when it renders it. Whether the runner also cleans what it stores is its own choice. If the model's leading prefix named exactly the number the runner assigns and the reply holds no other tag notation, and cleaning changes nothing else, the reply renders byte for byte as the model wrote it. |
 | T8 | The numbering rules of this contract apply to a session from a marker on. A session that ran under other rules switches only at a new marker whose checkpoint is the highest number its model has seen, which the move (A13) writes. The marker records only the checkpoint; ordinals need nothing from it (MV4). |
 
 ## A4. Setup
@@ -96,7 +95,7 @@ The JSON examples in `test-vectors/compaction-v2` round-trip through this crate�
 | Id | Rule |
 |---|---|
 | PR1 | The runner declares the session's rules (W3.3) on Setup and in every notice and ride. Only it knows the route and the account. Defaults by model family come from the view library, so runners keep no table of their own. |
-| PR2 | Under `signed_parts: bound`, a kept signed part is valid only while everything rendered before it renders as it did when the part was generated. Signed parts may be left out only as the oldest contiguous run. The provider writes the companion drops this requires into the view; the runner refuses a view that breaks it. |
+| PR2 | Under `signed_parts: bound`, a kept signed part is valid only while everything rendered before it, apart from signed parts left out as allowed here, renders as it did when the part was generated. Among the session's signed parts, those left out may form only an oldest run, a newest run, or both; any other edit before a kept signed part invalidates it. The provider writes the companion drops this requires into the view; the runner refuses a view that breaks it. |
 | PR3 | A tool call is never separated from its result. |
 | PR4 | `history_edit_cost: full_resend` changes nothing in the runner. It tells the provider that any edit to history already sent costs a full resend. A runner that cannot tell whether requests are chained (for example where an auth plugin chains) declares `suffix`. |
 | PR5 | A sealed part (signed or encrypted) can be dropped but never replaced; neither can a provider-executed tool part (the host replays it by reference). |
@@ -116,7 +115,7 @@ The JSON examples in `test-vectors/compaction-v2` round-trip through this crate�
 
 | Id | Rule |
 |---|---|
-| U1 | Before storing a message a person wrote, the runner runs the `pre_user` hook of `step-transform-provider/v1` and stores the message with the provider's prepend and append operations. |
+| U1 | Before storing a message a person wrote, the runner runs the `pre_user` hook of `step-transform-provider/v2` and stores the message with the provider's prepend and append operations. |
 | U2 | The provider declares the hook for presets that use it with a budget of 1,500 ms and `on_unavailable: pass`: on a timeout or an error the message is stored unchanged. |
 
 ## A11. Messages and runs the provider asks for
@@ -160,7 +159,7 @@ The JSON examples in `test-vectors/compaction-v2` round-trip through this crate�
 
 **W1.1 Requests.** Every op is one request on a route. The body is the JSON object `{"method": "<op name>", "params": <request object>}`. A successful answer's body is the op's answer object.
 
-**W1.2 Values.** All integers are JSON numbers with unsigned 64-bit range. Times are milliseconds since the Unix epoch, UTC. Sizes are bytes. Token counts are in the model provider's own tokens. Strings are UTF-8. An optional field that is absent is left out of the object, never sent as `null`.
+**W1.2 Values.** The contract's own integer fields (ordinals, counts, sizes, versions, `seq`, and the like) are JSON numbers in the range 0..2^53−1 (0..9007199254740991), so JavaScript `JSON.parse` can round-trip them exactly. Decoding refuses a larger number as `invalid_params` naming the field. This ceiling does not apply inside opaque JSON payloads, such as tool `input` and replace `value`, or to the payload kept for an unknown tagged value (W1.5); those keep their numbers unchanged (W4.4, W7). Unknown fields on known objects are ignored (W1.4), not kept. Times are milliseconds since the Unix epoch, UTC. Sizes are bytes. Token counts are in the model provider's own tokens. Strings are UTF-8. An optional field that is absent is left out of the object, never sent as `null`.
 
 **W1.3 Refusals.** An op that cannot be answered fails with the transport's error frame `{code, message, detail?}`. `code` is a stable snake_case name; `message` is text for people that no program parses; machine-readable fields go in `detail`. A refusal changes nothing on the side that refused.
 
@@ -174,7 +173,6 @@ Codes and what the caller does next:
 | `unknown_method` | `method` | The route's role does not serve this method. | A bug in the caller: log it, do not retry. |
 | `unknown_preset` | `preset` | Setup names a preset the provider does not know. | The runner logs it and gets no new views. A session that already applies a view keeps applying it and calls Setup again at its next S1 trigger; a session with no view runs without compaction. |
 | `unknown_session` | | A ride for a session the provider holds no Setup for. | The runner treats it as `nothing`, then calls Setup before its next notice. |
-| `session_mismatch` | `session` | A hook names a session other than the one its route is bound to (R9). | A bug in the caller: log it, do not retry. |
 
 `setup_required` is an answer of `compaction.notice`, not a refusal (W5.2). A view the runner refuses is an answer of `session.apply_view`, not a refusal (W5.5).
 
@@ -202,15 +200,17 @@ Codes and what the caller does next:
 | Edit `op`, insert `at` or inserted message `role` | runner | The view is refused `unsupported_edit` (W6.5). |
 | `session.entries` `select` | runner | Refused `invalid_params` naming `select`. |
 
+**W1.6 Empty arrays.** An array marked "may be left out when empty" may be omitted and reads as empty. Today these fields are tool `attachments` and `delivered`, and notice `events` and `entries`. Checksums are computed over the form that leaves these empty arrays out, even when the received object explicitly includes them, so a known object is normalized before its JCS serialization (this crate's typed serializers do it). Hashing raw JSON as received does not normalize it. Empty arrays inside opaque payloads (tool `input`, replace `value`) are never removed.
+
 ## W2. Routes and identity
 
-**W2.1 Routes the runner opens to the provider,** one per session and per role, each bound to the session's identity (`harness`, `session`) under the session's scope:
+**W2.1 Routes the runner opens to the provider,** one per session and per role, each bound to the session's identity (`harness`, `session`) under the session's scope. The one exception is step-transform discovery and declaration, in its row below:
 
 | Role (`role_versions`) | Ops on it |
 |---|---|
 | `compaction-provider` `v2` | `compaction.setup`, `compaction.notice`, `compaction.ride` |
 | `tool-provider` `v1` | `tool.catalog`, `tool.call` (published) |
-| `step-transform-provider` `v2` | `transform.declare`, `transform.hook`, per session, once v2 is published; until then `v1` under R9 |
+| `step-transform-provider` `v2` | `role.describe` and `transform.declare` are answered on any route of this role, including module-level routes and scoped routes opened before a session exists, so a plan composer can declare before hook routes exist. `transform.hook` requires a route bound to a session; otherwise that call is refused `route_unbound` (W2.4). |
 
 **W2.2 Routes the provider opens to the runner,** one per session and per role, bound the same way:
 
@@ -221,13 +221,13 @@ Codes and what the caller does next:
 
 **W2.3 Identity.** A session is keyed by three values, none from a request body: `runner`, the module id the daemon attests for the route (for example `example-runner`); `harness`, the host the session lives in (for example `opencode`, `pi`); and `session`, the host’s own session id. `harness` and `session` stay the same when a session moves from a standalone host to a runner. The project is the daemon’s scope stamp on the route: `workdir` and, when present, `project_id`.
 
-**W2.4 Route refusals,** given when the route is opened (bind), not per op:
+**W2.4 Route refusals,** given when the route is opened (bind), not per op, except for `step-transform-provider/v2`: `role.describe` and `transform.declare` are answered on any route of that role, including module-level routes and scoped routes opened before a session exists. An unbound route is allowed to open for that role; a `transform.hook` on it is refused per call with `route_unbound`. Compaction routes still require a bound session at bind.
 
 | Code | Meaning |
 |---|---|
 | `unattested_runner` | The daemon attests no module for the caller. |
 | `unknown_route_role` | The route declares none of the roles its receiver serves, or more than one. |
-| `route_unbound` | The route has no bound session. Only R9's hook routes may be unbound. |
+| `route_unbound` | The route has no bound session. Refused at bind except for `step-transform-provider/v2`, where it refuses a `transform.hook` call, not `role.describe` or `transform.declare`. |
 
 ## W3. Shared values
 
@@ -335,9 +335,9 @@ Allowed kinds by role: `user` (and notices): `text`, `file`. `assistant`: `text`
 | `output` | string, optional | The result's text: the output when completed, the error text on `error`, the reason on `denied`. Absent while running, and in compact form. |
 | `output_format` | `text`, `json` | `json`: `output` is the JCS text (W7) of a JSON result. Absent means `text`. |
 | `output_bytes` | integer, optional | The size of `output` in bytes, in both forms. Absent while running. |
-| `attachments` | array of `Attachment` | Files and opaque items the result carries besides its text. |
+| `attachments` | array of `Attachment` | Files and opaque items the result carries besides its text; may be left out when empty. |
 | `approval` | object, optional | A provider-executed call's approval answer: `approved` (boolean) and `reason` (string, optional). |
-| `delivered` | array of `Delivered` | Text sent with delivery `tool_result` (A11) and rendered after this result, in delivery order. Each: `sender` (module id), `template` (string, optional), `text` (string; absent in compact form), `text_bytes` (integer). |
+| `delivered` | array of `Delivered` | Text sent with delivery `tool_result` (A11) and rendered after this result, in delivery order; may be left out when empty. Each: `sender` (module id), `template` (string, optional), `text` (string; absent in compact form), `text_bytes` (integer). |
 
 An `Attachment` is `id` (stable within its tool part) plus the fields of a `file` or an `opaque` item (W4.5), told apart by `kind`.
 
@@ -421,11 +421,11 @@ Request:
 | Field | Type | Meaning |
 |---|---|---|
 | `seq` | integer | 1 for the session's first notice after each Setup, then one more for each notice. The runner keeps the counter in memory and restarts it whenever it calls Setup. |
-| `newest` | `Cursor` | The newest entry after the change. |
+| `newest` | `Cursor`, optional | The newest entry after the change; absent only when the transcript is empty, including after a revert to an empty transcript. |
 | `applied_view` | `AppliedView`, optional | The view the runner applies now: not an accepted view still waiting for the next step boundary. Absent when it applies none. |
 | `conditions` | `Conditions` | W3.5. |
-| `events` | array of `Event` | Below. Empty when nothing but entries changed. |
-| `entries` | array of `Entry` | In compact form, oldest first: every entry stored since the previous notice, plus every changed entry again. Empty when they would exceed 1,048,576 bytes of JSON; the provider then reads them. |
+| `events` | array of `Event` | Below. Empty when nothing but entries changed; may be left out when empty. |
+| `entries` | array of `Entry` | In compact form, oldest first: every entry stored since the previous notice, plus every changed entry again. Empty when they would exceed 1,048,576 bytes of JSON; the provider then reads them. May be left out when empty. |
 
 Events, each an object with an `event` field:
 
@@ -471,7 +471,7 @@ Request:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `select` | object, with `by` | `{"by": "after", "after_ordinal"?: integer, "limit"?: integer}`: entries with an ordinal greater than `after_ordinal` (from the first when absent), oldest first, at most `limit`. `{"by": "mids", "mids": [string]}`: those messages in transcript order; ids not on the active path are left out. `{"by": "tags", "tags": [integer]}`: the messages holding parts with these numbers, in transcript order. |
+| `select` | object, with `by` | `{"by": "after", "after_ordinal"?: integer, "limit"?: integer}`: entries with an ordinal greater than `after_ordinal` (from the first when absent), oldest first, at most `limit`, which must be at least 1 when present. `{"by": "mids", "mids": [string]}`: those messages in transcript order; ids not on the active path are left out. `{"by": "tags", "tags": [integer]}`: the messages holding parts with these numbers, in transcript order. |
 | `detail` | `compact`, `full` | W4.8. |
 | `max_bytes` | integer, optional | Stop adding entries once the page's entries reach this many bytes of JSON. A page holds at least one entry when any matches. |
 
@@ -525,7 +525,7 @@ Used as llm-runner publishes them; this contract adds nothing. What a provider s
 
 **W6.3 The render plan.** The view library turns a view and the transcript into a render plan, and every runner renders from it (V9): for each entry, keep or leave out; for each kept part, keep, leave out, or replace a field with given bytes; the inserted messages and where each goes; and each kept part's number, with whether its prefix is rendered. Rules: inserts at the start come first, in edit order; each entry follows in transcript order, preceded by the inserts anchored before it; a dropped or cut entry is left out; dropped parts are left out; an entry left with no parts is not rendered; numbered text gets its prefix (W4.7), except text a `replace` wrote, which is final. The runner applies the plan to its host messages, so everything the plan keeps goes out byte-identical. The plan is available from the Rust library, from its WebAssembly build, and as JSON test vectors.
 
-**W6.4 Numbers and views.** No edit changes a number. The runner counts from the transcript (A3), not from what it renders: inserted messages are not entries and are never counted, a dropped part keeps its number unused (a gap, unless a `replace` writes a placeholder showing it instead), a replaced part keeps its number, and a cut only hides the oldest numbers. What the model sees may therefore have gaps and start above 1. That is safe because the model takes its next number from the newest one it sees, and the newest numbered part (the person's prompt or a tool result) is always written after the view in force and rendered with its prefix.
+**W6.4 Numbers and views.** No edit changes a number. The runner counts from the transcript (A3), not from what it renders: inserted messages are not entries and are never counted, a dropped part keeps its number unused (a gap, unless a `replace` writes a placeholder showing it instead), a replaced part keeps its number, and a cut only hides the oldest numbers. What the model sees may therefore have gaps and start above 1. If a view leaves out the newest number (for example by dropping the newest result to fit the usable window) and the model then writes a lower number, the runner replaces it with the assigned number (T7).
 
 What could mislead the model is a number in bytes the provider writes, such as a summary quoting an old prefix. So the runner checks every view's bytes for tag prefixes (a section sign, one or more ASCII digits, a section sign, anywhere in the text):
 
@@ -559,7 +559,7 @@ What could mislead the model is a number in bytes the provider writes, such as a
 
 ## W7. Checksums
 
-Every checksum is the lowercase hex SHA-256 of the value's RFC 8785 (JCS) serialization, computed with llm-runner's shared `content_digest` function, never a separate implementation. A runner written in JavaScript computes it through the view library's WebAssembly build, which runs that same function. Absent optional fields are left out, so they never enter a checksum. Floats occur (a tool's `input` is any JSON), and JCS fixes their form.
+Every checksum is the lowercase hex SHA-256 of the value's RFC 8785 (JCS) serialization, computed with llm-runner's shared `content_digest` function, never a separate implementation. A runner written in JavaScript computes it through the view library's WebAssembly build, which runs that same function. Absent optional fields and the empty arrays named in W1.6 are left out, so they never enter a checksum. Floats occur (a tool's `input` is any JSON), and JCS fixes their form.
 
 | Checksum | Over |
 |---|---|
@@ -569,7 +569,6 @@ Every checksum is the lowercase hex SHA-256 of the value's RFC 8785 (JCS) serial
 
 # Open points
 
-2. `step-transform-provider/v2` (per-session routes, lineage fields removed) is to ship alongside this contract; R9 covers v1 until then.
 3. MV4 needs, per host, the standalone reader’s counting as the map’s old side: OpenCode 1 counts raw session messages; OpenCode 2 counts raw message types by `seq`; Pi folds tool-result runs into one ordinal, while extension messages, branch summaries and compactions take none. The move reuses those readers’ rules exactly.
 5. Gemini’s rule for thought signatures (which parts keep them, within which turn, and what an edit before them does) is unmeasured. Until a live check, a Gemini runner declares `signed_parts: none`, and the provider never replaces a signed part (PR5).
 6. The hook carries no clock, so the provider measures the time-marker gap on its own clock against the runner’s write times. On one machine they are the same clock.

@@ -26,8 +26,11 @@ pub const ENTRIES_BUDGET_BYTES: usize = 1 << 20;
 pub struct NoticeRequest {
     /// 1 for the first notice after each Setup, then one more for each
     /// notice, so the provider can tell a repeated or reordered notice apart.
+    #[serde(deserialize_with = "crate::integer::required")]
     pub seq: u64,
-    pub newest: Cursor,
+    /// The newest entry, absent only when the transcript is empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newest: Option<Cursor>,
     /// The view the runner applies now, absent when it applies none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_view: Option<AppliedView>,
@@ -49,12 +52,15 @@ pub struct NoticeRequest {
 #[non_exhaustive]
 pub struct Conditions {
     pub model: ModelRef,
+    #[serde(deserialize_with = "crate::integer::required")]
     pub context_window: u64,
+    #[serde(deserialize_with = "crate::integer::required")]
     pub output_reserve: u64,
     pub rules: ProviderRules,
     /// The prompt size of the newest request, as the provider reported it.
     /// Absent before the first request, or when the provider reported none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub last_prompt_tokens: Option<u64>,
 }
 
@@ -67,15 +73,25 @@ pub enum Event, "event" {
     /// are gone leave its next view. Until that view arrives, the runner
     /// renders with the edits that still apply
     /// using the view library's transcript filtering.
-    TranscriptChanged => "transcript_changed" { from_ordinal: u64 },
+    TranscriptChanged => "transcript_changed" {
+        #[serde(deserialize_with = "crate::integer::required")]
+        from_ordinal: u64
+    },
     /// The runner wrote the host's own compaction marker for this view, so the
     /// host stops loading the messages the view leaves out at the start.
-    MarkerWritten => "marker_written" { version: u64 },
+    MarkerWritten => "marker_written" {
+        #[serde(deserialize_with = "crate::integer::required")]
+        version: u64
+    },
     /// A view the runner refused when it came to apply it: a ride's answer,
     /// or an accepted view that no longer fits the transcript at the next step
     /// boundary. Otherwise a view handed over with `session.apply_view` is
     /// refused in that call's answer.
-    ViewRefused => "view_refused" { version: u64, refusal: ViewRefusal },
+    ViewRefused => "view_refused" {
+        #[serde(deserialize_with = "crate::integer::required")]
+        version: u64,
+        refusal: ViewRefusal
+    },
 }
 }
 
@@ -92,15 +108,20 @@ pub enum NoticeAnswer, "answer" {
 
 impl NoticeRequest {
     /// Build the value with its required fields.
-    pub fn new(seq: u64, newest: Cursor, conditions: Conditions) -> Self {
+    pub fn new(seq: u64, conditions: Conditions) -> Self {
         Self {
             seq,
-            newest,
+            newest: None,
             conditions,
             applied_view: None,
             events: Vec::new(),
             entries: Vec::new(),
         }
+    }
+
+    pub fn with_newest(mut self, newest: Cursor) -> Self {
+        self.newest = Some(newest);
+        self
     }
 
     pub fn with_applied_view(mut self, applied_view: AppliedView) -> Self {

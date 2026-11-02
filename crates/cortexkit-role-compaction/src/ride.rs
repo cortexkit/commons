@@ -23,6 +23,7 @@ pub struct RideRequest {
     /// How long the runner waits for the answer, in milliseconds. A cold
     /// start gets a longer deadline, since the provider may first have to
     /// read the transcript.
+    #[serde(deserialize_with = "crate::integer::required")]
     pub deadline_ms: u64,
     pub conditions: Conditions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -30,6 +31,7 @@ pub struct RideRequest {
     /// For [`RideCause::OverLimit`]: the runner's estimate, in tokens, of the
     /// request it is about to send.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub request_tokens: Option<u64>,
 }
 

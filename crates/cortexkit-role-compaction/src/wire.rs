@@ -40,12 +40,59 @@ pub fn decode(body: &[u8]) -> Result<(String, Value), Refusal> {
 }
 
 /// Decode an op's parameters into its request type, naming the field that
-/// failed (a dotted path, empty for the whole object).
+/// failed (a path of dotted fields and bracketed array indexes, such as
+/// `select.tags[0]`; empty for the whole object).
 pub fn params<T: DeserializeOwned>(params: Value) -> Result<T, Refusal> {
     serde_path_to_error::deserialize(params).map_err(|error| {
         let field = error.path().to_string();
-        let field = if field == "." { String::new() } else { field };
-        Refusal::invalid_params(&field, error.into_inner().to_string())
+        let mut field = if field == "." { String::new() } else { field };
+        let mut message = error.into_inner().to_string();
+        if let Some(nested) = message.strip_prefix(FIELD_ERROR) {
+            if let Ok(nested) = serde_json::from_str::<FieldError>(nested) {
+                if !field.is_empty() && !nested.field.is_empty() && !nested.field.starts_with('[') {
+                    field.push('.');
+                }
+                field.push_str(&nested.field);
+                message = nested.message;
+            }
+        }
+        Refusal::invalid_params(&field, message)
+    })
+}
+
+const FIELD_ERROR: &str = "compaction field error: ";
+
+#[derive(Serialize, Deserialize)]
+struct FieldError {
+    field: String,
+    message: String,
+}
+
+// Tagged values are buffered to preserve unknown variants. Carry the field
+// path across that buffer so invalid_params still names the nested field.
+//
+// Buffering starts a fresh path tracker, so the inner relative path and message
+// travel to the enclosing `params` call in a reserved serde-error envelope
+// (`FIELD_ERROR` followed by `{field, message}` JSON). `params` unwraps it and
+// appends the relative path before building the wire refusal. This envelope is
+// internal to decoding and never a format peers parse; only a whole error
+// string that starts with the prefix and decodes as the envelope is treated as
+// one.
+pub(crate) fn tagged_fields<T: DeserializeOwned, E: serde::de::Error>(
+    value: Value,
+) -> Result<T, E> {
+    params(value).map_err(|refusal| {
+        let error = FieldError {
+            field: refusal.detail.unwrap()["field"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+            message: refusal.message,
+        };
+        E::custom(format!(
+            "{FIELD_ERROR}{}",
+            serde_json::to_string(&error).unwrap()
+        ))
     })
 }
 
@@ -104,16 +151,6 @@ impl Refusal {
     pub fn unknown_session() -> Self {
         Self::new(codes::UNKNOWN_SESSION, "no Setup for this session", None)
     }
-
-    /// A hook names a session other than the one its route is bound to.
-    /// Transitional: it retires with `step-transform-provider/v2`.
-    pub fn session_mismatch(session: &str) -> Self {
-        Self::new(
-            codes::SESSION_MISMATCH,
-            "the hook names another session than its route",
-            Some(json!({ "session": session })),
-        )
-    }
 }
 
 /// Refusal codes. Each names why.
@@ -122,14 +159,14 @@ pub mod codes {
     pub const UNKNOWN_METHOD: &str = "unknown_method";
     pub const UNKNOWN_SESSION: &str = "unknown_session";
     pub const UNKNOWN_PRESET: &str = "unknown_preset";
-    pub const SESSION_MISMATCH: &str = "session_mismatch";
     /// Opening a route: the daemon attests no module for the caller.
     pub const UNATTESTED_RUNNER: &str = "unattested_runner";
     /// Opening a route: it declares none of the roles its receiver serves,
     /// or more than one.
     pub const UNKNOWN_ROUTE_ROLE: &str = "unknown_route_role";
-    /// Opening a route: it has no bound session. Only the transitional
-    /// module-level hook routes may be unbound.
+    /// The route has no bound session. Refused at bind, except for
+    /// step-transform-provider/v2, which refuses each unbound transform.hook
+    /// call while answering role.describe and transform.declare on any route.
     pub const ROUTE_UNBOUND: &str = "route_unbound";
 }
 

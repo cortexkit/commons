@@ -1,0 +1,40 @@
+{
+  "checksum": "cc46c72bb86c8ef7529a43d54f53ce4b4006c759d04477298fd491b5e492da79",
+  "with_empty": {
+    "digest": "cc46c72bb86c8ef7529a43d54f53ce4b4006c759d04477298fd491b5e492da79",
+    "mid": "message-tool",
+    "ordinal": 1,
+    "parts": [
+      {
+        "attachments": [],
+        "call_id": "call-tool",
+        "digest": "85cfcae9d5cf4db7e37a41402dcf81c9b06eceeb8dc030952fe38996bd48e034",
+        "id": "part-tool",
+        "input": {},
+        "kind": "tool",
+        "name": "example-tool",
+        "status": "running"
+      }
+    ],
+    "role": "assistant",
+    "written_at": 1700000000000
+  },
+  "without_empty": {
+    "digest": "cc46c72bb86c8ef7529a43d54f53ce4b4006c759d04477298fd491b5e492da79",
+    "mid": "message-tool",
+    "ordinal": 1,
+    "parts": [
+      {
+        "call_id": "call-tool",
+        "digest": "85cfcae9d5cf4db7e37a41402dcf81c9b06eceeb8dc030952fe38996bd48e034",
+        "id": "part-tool",
+        "input": {},
+        "kind": "tool",
+        "name": "example-tool",
+        "status": "running"
+      }
+    ],
+    "role": "assistant",
+    "written_at": 1700000000000
+  }
+}

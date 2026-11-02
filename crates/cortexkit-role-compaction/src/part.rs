@@ -24,6 +24,7 @@ pub struct Part {
     /// position among the numbered parts from the marker's first kept entry
     /// on (T1).
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub tag: Option<u64>,
     /// What the model provider checks when the part is sent back.
     #[serde(default, skip_serializing_if = "Seal::is_none")]
@@ -108,6 +109,7 @@ pub enum PartBody, "kind" {
         text: Option<String>,
         /// The size of the visible text in bytes, in both forms.
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "crate::integer::optional")]
         text_bytes: Option<u64>,
     },
     /// A tool call and its result as one item, at the call's position, even
@@ -179,6 +181,7 @@ pub struct ToolPart {
     /// The size of `output` in bytes, in both forms. Absent while the call is
     /// running.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub output_bytes: Option<u64>,
     /// Files and opaque items the result carries besides its text.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -264,6 +267,7 @@ pub struct Delivered {
     /// Left out in the compact form.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
+    #[serde(deserialize_with = "crate::integer::required")]
     pub text_bytes: u64,
 }
 
@@ -315,14 +319,18 @@ pub struct FileMedia {
     pub transport: Transport,
     /// Size in bytes, when the runner knows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub size: Option<u64>,
     /// Pixels, for images and video, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub width: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub height: Option<u64>,
     /// For audio and video, when known.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub duration_ms: Option<u64>,
     /// The model produced it as part of its reasoning (the AI SDK's
     /// `reasoning-file`).
@@ -380,6 +388,7 @@ pub struct Opaque {
     /// `provider.type`, for example `anthropic.compaction`.
     pub provider_kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub size: Option<u64>,
 }
 

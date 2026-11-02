@@ -23,9 +23,11 @@ pub struct SetupRequest {
     pub preset: String,
     pub model: ModelRef,
     /// The model's context window in tokens.
+    #[serde(deserialize_with = "crate::integer::required")]
     pub context_window: u64,
     /// Tokens the runner keeps free for the reply. The runner never sends a
     /// request larger than `context_window - output_reserve`.
+    #[serde(deserialize_with = "crate::integer::required")]
     pub output_reserve: u64,
     pub rules: ProviderRules,
     /// The ride causes the runner can detect. A cause it cannot detect is
@@ -41,6 +43,7 @@ pub struct SetupRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub newest: Option<Cursor>,
     /// The runner's clock, in milliseconds since the Unix epoch.
+    #[serde(deserialize_with = "crate::integer::required")]
     pub now: u64,
 }
 

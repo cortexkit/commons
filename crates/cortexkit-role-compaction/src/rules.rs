@@ -24,8 +24,8 @@ pub enum SignedParts {
     /// Anthropic thinking on the current families (Opus 5.5, Sonnet 5.5,
     /// Fable 5.1, Haiku 5.5). A signed part stays valid only while the
     /// history before it renders exactly as it did when the part was
-    /// generated, with one allowance: earlier signed parts may be left out
-    /// as an oldest contiguous run. Leaving out a part in the middle, or any
+    /// generated, with one allowance: signed parts may be left out as an
+    /// oldest run, a newest run, or both. Leaving out a part in the middle, or any
     /// other edit before it (a drop, a replace, an inserted message),
     /// invalidates it, so the view must leave it out as well.
     Bound,

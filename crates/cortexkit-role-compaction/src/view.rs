@@ -17,10 +17,12 @@
 //! rendered with its prefix.
 //!
 //! No edit changes a tag number: the runner counts from the transcript, not
-//! from what it renders. The only way a view could mislead the model's count
-//! is a number written into its own bytes, so a runner refuses an inserted
-//! message that carries a tag prefix, and a replaced field that carries one
-//! the part neither owns nor already contained.
+//! from what it renders. Hiding numbered parts can leave gaps, or lead the
+//! model to write an older number; reply cleaning and rendering then restore
+//! the number the runner assigned (W4.6, W6.4). Separately, a view must not
+//! write a number into its own bytes, so a runner refuses an inserted message
+//! that carries a tag prefix, and a replaced field that carries one the part
+//! neither owns nor already contained.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -33,6 +35,7 @@ use crate::read::Role;
 pub struct View {
     /// At least 1, and greater than every view the provider built for the
     /// session before, whether or not the runner accepted it.
+    #[serde(deserialize_with = "crate::integer::required")]
     pub version: u64,
     /// Checksum of `version` and `edits` ([`View::seal`]).
     pub checksum: String,
@@ -80,6 +83,7 @@ fn view_checksum(version: u64, edits: &[Edit]) -> String {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AppliedView {
+    #[serde(deserialize_with = "crate::integer::required")]
     pub version: u64,
     pub checksum: String,
 }
@@ -93,6 +97,7 @@ pub struct Edit {
     /// edit gets the view's own version. The rule check uses it to tell
     /// which edits came after a signed reasoning part was generated, and
     /// a runner verifies it against its previous view.
+    #[serde(deserialize_with = "crate::integer::required")]
     pub since: u64,
     #[serde(flatten)]
     pub op: EditOp,
@@ -208,7 +213,9 @@ pub enum ViewRefusal, "code" {
     BadChecksum => "bad_checksum",
     /// The view's version is not newer than the runner's latest view.
     StaleVersion => "stale_version" {
+        #[serde(deserialize_with = "crate::integer::required")]
         version: u64,
+        #[serde(deserialize_with = "crate::integer::required")]
         latest: u64,
     },
     /// An edit's `since` is not consistent with the previous view.
@@ -260,6 +267,7 @@ pub enum ViewRefusal, "code" {
         mid: String,
         part: String,
         field: String,
+        #[serde(deserialize_with = "crate::integer::required")]
         tag: u64,
     },
     /// The view breaks a provider rule the runner declared.
@@ -268,6 +276,7 @@ pub enum ViewRefusal, "code" {
     /// inserted message `role` the runner does not know, so it cannot apply
     /// the view (W1.5).
     UnsupportedEdit => "unsupported_edit" {
+        #[serde(deserialize_with = "crate::integer::required")]
         index: u64,
     },
 }

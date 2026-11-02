@@ -1,0 +1,19 @@
+{
+  "refusal": {
+    "code": "invalid_params",
+    "detail": {
+      "field": "select.limit"
+    },
+    "message": "limit must be at least 1"
+  },
+  "request": {
+    "method": "session.entries",
+    "params": {
+      "detail": "compact",
+      "select": {
+        "by": "after",
+        "limit": 0
+      }
+    }
+  }
+}

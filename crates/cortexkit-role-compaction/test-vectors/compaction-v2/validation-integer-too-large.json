@@ -1,0 +1,19 @@
+{
+  "refusal": {
+    "code": "invalid_params",
+    "detail": {
+      "field": "select.after_ordinal"
+    },
+    "message": "integer exceeds 9007199254740991"
+  },
+  "request": {
+    "method": "session.entries",
+    "params": {
+      "detail": "compact",
+      "select": {
+        "after_ordinal": 9007199254740992,
+        "by": "after"
+      }
+    }
+  }
+}

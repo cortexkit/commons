@@ -37,6 +37,8 @@
 #[macro_use]
 mod open;
 
+mod integer;
+
 pub mod digest;
 pub mod notice;
 pub mod part;

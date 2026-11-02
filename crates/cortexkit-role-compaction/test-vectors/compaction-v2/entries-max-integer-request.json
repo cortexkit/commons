@@ -1,0 +1,11 @@
+{
+  "method": "session.entries",
+  "params": {
+    "detail": "compact",
+    "select": {
+      "after_ordinal": 9007199254740991,
+      "by": "after",
+      "limit": 1
+    }
+  }
+}

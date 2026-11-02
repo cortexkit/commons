@@ -47,6 +47,7 @@ pub struct Entry {
     /// entry. Every entry counts, including the ones a cut leaves out. After a
     /// revert or a branch switch, a new entry takes the ordinal of the removed
     /// one; the runner's notice says so.
+    #[serde(deserialize_with = "crate::integer::required")]
     pub ordinal: u64,
     /// The host's message id. Stable for the life of the message. Nothing may
     /// derive it from the ordinal or the reverse.
@@ -60,6 +61,7 @@ pub struct Entry {
     /// epoch. It does not change when the entry is updated. For a message the
     /// runner did not store itself (history from before the runner, a moved
     /// session), the host's own write time.
+    #[serde(deserialize_with = "crate::integer::required")]
     pub written_at: u64,
     /// Checksum of the entry's role, notice origin and parts, with the parts
     /// in full form ([`entry_digest`]).
@@ -118,17 +120,22 @@ pub struct NoticeOrigin {
 pub struct StepUsage {
     /// The whole prompt: uncached input plus cache reads plus cache writes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub prompt_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub cache_read_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub cache_write_tokens: Option<u64>,
     /// Reply tokens, reasoning included.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub output_tokens: Option<u64>,
     /// Reasoning tokens within `output_tokens`. The reasoning budget depends
     /// on it: encrypted reasoning has no other measure.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub reasoning_tokens: Option<u64>,
 }
 
@@ -136,6 +143,7 @@ pub struct StepUsage {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Cursor {
+    #[serde(deserialize_with = "crate::integer::required")]
     pub ordinal: u64,
     pub mid: String,
     pub digest: String,
@@ -149,6 +157,7 @@ pub struct ReadRequest {
     /// Stop adding entries once the page reaches this many bytes. The page
     /// always holds at least one entry when one matches.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub max_bytes: Option<u64>,
 }
 
@@ -170,14 +179,20 @@ pub enum Select, "by" {
     /// Entries after an ordinal, oldest first; from the start when absent.
     After => "after" {
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "crate::integer::optional")]
         after_ordinal: Option<u64>,
+        /// At most this many entries; at least 1 when supplied (W5.4).
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[serde(deserialize_with = "crate::integer::positive")]
         limit: Option<u64>,
     },
     /// Exactly these messages, in transcript order. Missing ids are left out.
     Mids => "mids" { mids: Vec<String> },
     /// The messages holding these tag numbers, in transcript order.
-    Tags => "tags" { tags: Vec<u64> },
+    Tags => "tags" {
+        #[serde(deserialize_with = "crate::integer::list")]
+        tags: Vec<u64>
+    },
 }
 }
 
@@ -188,6 +203,7 @@ pub struct ReadPage {
     /// For [`Select::After`]: the ordinal to continue after when more entries
     /// match than fit the page. Absent when the page reaches the end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
     pub next_after: Option<u64>,
     pub head: Head,
 }

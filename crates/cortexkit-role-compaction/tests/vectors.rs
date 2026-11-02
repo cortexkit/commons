@@ -122,10 +122,13 @@ fn samples() -> Vec<(&'static str, Value)> {
     .with_applied_view(view.applied());
     let mut compact_assistant = assistant.clone();
     compact_assistant.parts = assistant.parts.iter().map(Part::compact).collect();
-    let notice = NoticeRequest::new(1, cursor.clone(), conditions.clone())
+    let notice = NoticeRequest::new(1, conditions.clone())
+        .with_newest(cursor.clone())
         .with_entries(vec![entry.clone(), compact_assistant])
         .with_events(vec![Event::MarkerWritten { version: 1 }])
         .with_applied_view(view.applied());
+    let empty_notice = NoticeRequest::new(2, conditions.clone())
+        .with_events(vec![Event::TranscriptChanged { from_ordinal: 1 }]);
     let ride = RideRequest::new(vec![RideCause::OverLimit], 1_500, conditions)
         .with_request_tokens(30_000)
         .with_applied_view(view.applied());
@@ -137,6 +140,10 @@ fn samples() -> Vec<(&'static str, Value)> {
             request(ops::COMPACTION_NOTICE, notice),
         ),
         ("notice-answer.json", value(NoticeAnswer::Received)),
+        (
+            "notice-empty-transcript-request.json",
+            request(ops::COMPACTION_NOTICE, empty_notice),
+        ),
         (
             "notice-setup-required.json",
             value(NoticeAnswer::SetupRequired),
@@ -325,10 +332,6 @@ fn samples() -> Vec<(&'static str, Value)> {
             value(Refusal::unknown_session()),
         ),
         (
-            "refusal-session-mismatch.json",
-            value(Refusal::session_mismatch("session-other")),
-        ),
-        (
             "refusal-unattested-runner.json",
             value(Refusal::new(
                 codes::UNATTESTED_RUNNER,
@@ -353,6 +356,64 @@ fn samples() -> Vec<(&'static str, Value)> {
             )),
         ),
     ]);
+    samples.push((
+        "entries-max-integer-request.json",
+        request(
+            ops::SESSION_ENTRIES,
+            ReadRequest::new(
+                Select::After {
+                    after_ordinal: Some(9_007_199_254_740_991),
+                    limit: Some(1),
+                },
+                Detail::Compact,
+            ),
+        ),
+    ));
+    for (name, select, field, message) in [
+        (
+            "validation-integer-too-large.json",
+            json!({"by": "after", "after_ordinal": 9_007_199_254_740_992_u64}),
+            "select.after_ordinal",
+            "integer exceeds 9007199254740991",
+        ),
+        (
+            "validation-zero-limit.json",
+            json!({"by": "after", "limit": 0}),
+            "select.limit",
+            "limit must be at least 1",
+        ),
+    ] {
+        samples.push((name, json!({
+            "request": {"method": ops::SESSION_ENTRIES, "params": {"select": select, "detail": "compact"}},
+            "refusal": Refusal::invalid_params(field, message),
+        })));
+    }
+    let entry = Entry::new(
+        1,
+        "message-tool",
+        Role::Assistant,
+        1_700_000_000_000,
+        vec![Part::new(
+            "part-tool",
+            PartBody::Tool(ToolPart::new(
+                "call-tool",
+                "example-tool",
+                json!({}),
+                ToolStatus::Running,
+            )),
+        )],
+    );
+    let without_empty = value(&entry);
+    let mut with_empty = without_empty.clone();
+    with_empty["parts"][0]["attachments"] = json!([]);
+    samples.push((
+        "checksum-empty-attachments.json",
+        json!({
+            "with_empty": with_empty,
+            "without_empty": without_empty,
+            "checksum": entry.digest,
+        }),
+    ));
     samples
 }
 
@@ -372,7 +433,29 @@ fn request_round_trip<T: DeserializeOwned + Serialize>(
 }
 
 fn check(name: &str, json: Value) {
-    if name.ends_with("-request.json") {
+    if name.starts_with("validation-") {
+        let (method, params) =
+            wire::decode(&serde_json::to_vec(&json["request"]).unwrap()).unwrap();
+        assert_eq!(method, ops::SESSION_ENTRIES);
+        let refusal = wire::params::<ReadRequest>(params).unwrap_err();
+        assert_eq!(value(refusal), json["refusal"]);
+    } else if name == "checksum-empty-attachments.json" {
+        assert_eq!(json["with_empty"]["parts"][0]["attachments"], json!([]));
+        assert!(json["without_empty"]["parts"][0]
+            .get("attachments")
+            .is_none());
+        for form in ["with_empty", "without_empty"] {
+            let entry: Entry = serde_json::from_value(json[form].clone()).unwrap();
+            assert_eq!(
+                cortexkit_role_compaction::read::entry_digest(
+                    entry.role,
+                    entry.notice.as_ref(),
+                    &entry.parts
+                ),
+                json["checksum"].as_str().unwrap()
+            );
+        }
+    } else if name.ends_with("-request.json") {
         let (method, params) = wire::decode(&serde_json::to_vec(&json).unwrap()).unwrap();
         match method.as_str() {
             ops::COMPACTION_SETUP => request_round_trip::<SetupRequest>(&method, params, json),

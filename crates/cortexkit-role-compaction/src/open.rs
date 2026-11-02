@@ -31,6 +31,23 @@ macro_rules! open_string {
 // A tagged enum must distinguish a later tag from a malformed known variant:
 // only the former may be preserved as Unknown. An untagged catch-all alone
 // would silently accept missing required fields on known requests.
+macro_rules! open_tagged_value {
+    ($name:ident, $variant:ident, $value:ident) => {
+        Ok(Self::$variant)
+    };
+    ($name:ident, $variant:ident, $value:ident, $payload:ident: $inner:ty) => {
+        crate::wire::tagged_fields::<$inner, D::Error>($value).map(Self::$variant)
+    };
+    ($name:ident, $variant:ident, $value:ident, { $($(#[$attr:meta])* $field:ident: $ty:ty),* }) => {{
+        #[derive(serde::Deserialize)]
+        struct Fields {
+            $($(#[$attr])* $field: $ty),*
+        }
+        let fields: Fields = crate::wire::tagged_fields::<_, D::Error>($value)?;
+        Ok(Self::$variant { $($field: fields.$field),* })
+    }};
+}
+
 macro_rules! open_tagged {
     (
         $(#[$attr:meta])*
@@ -67,28 +84,20 @@ macro_rules! open_tagged {
 
         impl<'de> serde::Deserialize<'de> for $name {
             fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                #[derive(serde::Deserialize)]
-                #[serde(tag = $tag)]
-                enum Known {
-                    $(
-                        #[serde(rename = $wire)]
-                        $variant $(($inner))? $({ $($(#[$fattr])* $field: $fty),* })?,
-                    )*
-                }
                 let value = serde_json::Value::deserialize(deserializer)?;
                 let name = value.get($tag).and_then(serde_json::Value::as_str)
                     .ok_or_else(|| serde::de::Error::custom(concat!("expected string tag `", $tag, "`")))?;
-                if matches!(name, $($wire)|*) {
-                    let known: Known = serde_json::from_value(value).map_err(serde::de::Error::custom)?;
-                    Ok(match known {
-                        $(Known::$variant $(($payload))? $({ $($field),* })? =>
-                            Self::$variant $(($payload))? $({ $($field),* })?,)*
-                    })
-                } else {
-                    let name = name.to_owned();
-                    let mut fields = value.as_object().expect("tagged object").clone();
-                    fields.remove($tag);
-                    Ok(Self::Unknown { name, fields })
+                match name {
+                    $($wire => open_tagged_value!($name, $variant, value
+                        $(, $payload: $inner)?
+                        $(, { $($(#[$fattr])* $field: $fty),* })?
+                    ),)*
+                    _ => {
+                        let name = name.to_owned();
+                        let mut fields = value.as_object().expect("tagged object").clone();
+                        fields.remove($tag);
+                        Ok(Self::Unknown { name, fields })
+                    }
                 }
             }
         }
