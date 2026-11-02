@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.14.6
+
+- Add optional `ViewManifest::tool` and non-exhaustive `ViewTool`, carrying
+  the catalog's `name`, `input_schema` and `semantics`. Missing `tool` emits
+  no bytes, preserving existing serialized views.
+- Add `ViewTool::schema_pin`, catalog conversion, `ViewManifest::with_tool`
+  and `check_pin`, reusing structural schema digests and the canonical `tp1`
+  encoder. A definition that doesn't recompute to the pin cannot authorize a
+  display join; the check covers the pin binding, not schema validity.
+- Contract §2.1: providers send the tool definition bound to each served pin
+  (its name, structural input schema and `semantics`; `description` text isn't
+  part of the pin), keep serving the first one, and MUST include it for pins
+  outside their current catalog, so a first fetch of an old view can recover
+  its input schema. Keep serving every previously served pin for as long as
+  the provider declares `tool-views/v1`. `compare_with_kept` doesn't compare
+  `tool`; the display server keeps the first accepted one.
+- Ship matching, mismatching and legacy view-definition vectors, shared with
+  tool-display 0.1.3.
+
 ## 0.14.5
 
 - Contract text only (§2.1): a display server keeps each view with the

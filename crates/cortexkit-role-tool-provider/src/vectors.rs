@@ -78,6 +78,8 @@ pub const VIEWS_JSON: &str = include_str!("../test-vectors/tool-provider-v1/view
 /// revision, and the conflicts `ViewManifest::compare_with_kept` reports.
 pub const VIEW_REVISIONS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/view-revisions.json");
+/// Pinned tool definitions that match, mismatch, or are absent on legacy views.
+pub const VIEW_TOOLS_JSON: &str = include_str!("../test-vectors/tool-provider-v1/view-tools.json");
 /// The vectors' `README.md`.
 pub const README: &str = include_str!("../test-vectors/tool-provider-v1/README.md");
 
@@ -111,6 +113,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("rich-ui-stamp.json", RICH_UI_STAMP_JSON),
     ("views.json", VIEWS_JSON),
     ("view-revisions.json", VIEW_REVISIONS_JSON),
+    ("view-tools.json", VIEW_TOOLS_JSON),
     ("README.md", README),
 ];
 

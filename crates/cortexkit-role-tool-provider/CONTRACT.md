@@ -69,7 +69,7 @@ ASCII bytes (`0x21`–`0x7e`), compared byte for byte. An invalid request is
 `invalid_request {field}`, naming `pins` or `pins[i]`. Empty requests are valid.
 Its bare answer is `{views: {<pin>: <ViewManifest> | "unknown"}}`, with exactly
 the requested keys (repeated pins share one key). A known view is
-`{record_schema: {name, revision, fields}, reads: [{op, ...}], template}`.
+`{record_schema: {name, revision, fields}, reads: [{op, ...}], template, tool?}`.
 `revision` is a u64 integer. `fields` declares provider extension fields only,
 using the kinds in [`tool-display/v1`](../cortexkit-role-tool-display/CONTRACT.md).
 Standard display fields retain their fixed validators. `reads` declares the
@@ -77,6 +77,23 @@ provider operations the app server may call to page through a call's details;
 they aren't offered to the model as tools, and their shapes are the
 provider's own. `template` is opaque JSON that only the app server interprets;
 neither contract defines a template format, and this crate never interprets it. An unsupported pin is the string `"unknown"`, not a guessed view.
+
+`tool` is `{name, input_schema, semantics}` (`views::ViewTool`), with the same
+types and spellings as those members of `CatalogTool`. A provider sends it for
+every pin it serves, and MUST send it for any pin no longer in its current
+`tool.catalog`. A pin fixes the tool's name, the structural digest of its
+input schema and its `semantics`; the structural digest leaves out
+`description` keywords, so a matching pin doesn't fix that text. A provider
+keeps serving the `tool` it first served for a pin. `ViewTool::schema_pin`
+computes the existing `tp1` encoding from `name`, the structural
+`schema_digest(input_schema)` and `semantics` (§4), without trusting a
+separately supplied digest. `ViewManifest::check_pin` returns whether `tool`
+is present and recomputes to the requested pin. It errors when the schema
+can't be canonicalized, the pin can't be encoded, or the pin differs. It
+checks only that binding, not whether `input_schema` is a valid argument
+schema. A failed check is `unknown` for joining, never a fallback to the
+catalog check (tool-display §6). Older providers may omit `tool`; an absent
+member emits no bytes, preserving existing views.
 
 A known view may also carry `template_revision`, a u64 that defaults to 0 and
 is omitted when 0. For a pin, `record_schema` and `reads` never change:
@@ -93,10 +110,9 @@ it, with the same `record_schema` and `reads`, for as long as it declares
 `tool-views/v1`, even after the tool's definition changes. It answers
 `"unknown"` only for a pin it never served. A change to a tool's name, schema
 digest or `semantics` mints a new pin (§4); it never retires the old pin's
-view, so transcripts whose view the display server already fetched and
-checked keep joining. A pin the display server first fetches after the tool
-has left the writer's catalog fails tool-display §6's catalog check and
-doesn't join. One way to meet this obligation is a committed table of every
+view. The pinned `tool` lets the display server first fetch and check an old
+pin even after the tool has left the writer's current catalog (tool-display
+§6). One way to meet this obligation is a committed table of every
 view the provider has shipped, with a test that fails if an entry's record
 schema or reads change or the entry is removed.
 
@@ -107,12 +123,16 @@ daemons omit the build, and then only the version is compared. The display
 server fetches the view again when either changes. It may also fetch a kept
 view again under its own policy: after an age it chooses, or when the view
 fails the server's own template validation. That validation is separate from
-the pin's catalog check, whose first result the server keeps. If a writer keeps
+the pin check, whose accepted result and input schema the server keeps. If a writer keeps
 one `module_version` across builds and its catalog entry carries no build, only
 that optional policy refreshes a kept view. A cached `"unknown"` answer is
 checked again when the version or build changes, and may be retried after an
 age the server chooses. `ViewManifest::compare_with_kept` classifies
-the fetched view. A changed `record_schema` or `reads` is a conflict whatever
+the fetched view by its record schema, reads and template only; it doesn't
+look at `tool`. The display server keeps the first `tool` and input schema
+it accepted for a pin, through template refreshes; a view that gains `tool`
+after being accepted without one is checked by `check_pin` and changes
+nothing else. A changed `record_schema` or `reads` is a conflict whatever
 its revision. Otherwise a higher revision is accepted, and the display server
 keeps the fetched view, its revision included; a lower revision is stale; and
 the same revision with a different template is a conflict. A stale or

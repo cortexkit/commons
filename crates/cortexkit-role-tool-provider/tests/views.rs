@@ -1,7 +1,8 @@
 use cortexkit_role_tool_provider::{
+    catalog::CatalogTool,
     describe::{check_describe, Major, RoleDescribe},
     ops,
-    views::{ViewChange, ViewEntry, ViewManifest, ViewRead, ViewsReply, ViewsRequest},
+    views::{ViewChange, ViewEntry, ViewManifest, ViewRead, ViewTool, ViewsReply, ViewsRequest},
     PROVIDES, TOOL_VIEWS_CAPABILITY,
 };
 use serde_json::{json, Value};
@@ -131,5 +132,117 @@ fn template_revisions_replace_only_the_template() {
             "{}",
             case["name"]
         );
+    }
+}
+
+fn view_tools_fixture() -> Value {
+    serde_json::from_str(cortexkit_role_tool_provider::vectors::VIEW_TOOLS_JSON).unwrap()
+}
+
+#[test]
+fn view_tool_vectors_are_identical_in_both_packages() {
+    assert_eq!(
+        cortexkit_role_tool_provider::vectors::VIEW_TOOLS_JSON,
+        cortexkit_role_tool_display::vectors::VIEW_TOOLS_JSON
+    );
+}
+
+#[test]
+fn view_tool_pins_match_the_published_vectors() {
+    for case in view_tools_fixture()["cases"].as_array().unwrap() {
+        let view: ViewManifest = serde_json::from_value(case["view"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(&view).unwrap(), case["view"]);
+        let pin = case["pin"].as_str().unwrap();
+        match case["check"].as_str().unwrap() {
+            "present" => {
+                assert_eq!(
+                    view.tool.as_ref().unwrap().schema_pin().unwrap(),
+                    case["computed_pin"]
+                );
+                assert!(view.check_pin(pin).unwrap(), "{}", case["name"]);
+            }
+            "mismatch" => {
+                assert_eq!(
+                    view.tool.as_ref().unwrap().schema_pin().unwrap(),
+                    case["computed_pin"]
+                );
+                let error = view.check_pin(pin).unwrap_err();
+                assert_eq!(error.code, "invalid_request");
+                assert_eq!(error.detail.unwrap()["field"], "tool");
+            }
+            "absent" => assert!(!view.check_pin(pin).unwrap(), "{}", case["name"]),
+            other => panic!("unknown pin check {other}"),
+        }
+        // Reply shape validation stays separate from per-view authorization.
+        ViewsReply::new([(pin.into(), ViewEntry::Manifest(view))].into())
+            .validate_for(&ViewsRequest::new(vec![pin.into()]))
+            .unwrap();
+    }
+}
+
+#[test]
+fn view_tool_absence_preserves_exact_serialized_bytes() {
+    let fixture = view_tools_fixture();
+    let case = &fixture["cases"][2];
+    let decoded: ViewManifest = serde_json::from_value(case["view"].clone()).unwrap();
+    assert!(decoded.tool.is_none());
+    let constructed = ViewManifest::new(decoded.record_schema.clone(), vec![], Value::Null);
+    assert_eq!(decoded, constructed);
+    let expected = case["encoded"].as_str().unwrap().as_bytes();
+    assert_eq!(serde_json::to_vec(&decoded).unwrap(), expected);
+    assert_eq!(serde_json::to_vec(&constructed).unwrap(), expected);
+}
+
+#[test]
+fn view_tool_reuses_catalog_fields_and_structural_digest() {
+    let fixture = view_tools_fixture();
+    let case = &fixture["cases"][0];
+    let view: ViewManifest = serde_json::from_value(case["view"].clone()).unwrap();
+    let expected = case["pin"].as_str().unwrap();
+    let catalog_tool = CatalogTool::new(
+        "example:run",
+        "not trusted by ViewTool",
+        1,
+        json!({"type":"object", "description":"Not part of the structural digest"}),
+    );
+    let tool = ViewTool::from(&catalog_tool);
+    assert_eq!(tool.name, catalog_tool.name);
+    assert_eq!(tool.input_schema, catalog_tool.input_schema);
+    assert_eq!(tool.semantics, catalog_tool.semantics);
+    assert_eq!(tool.schema_pin().unwrap(), expected);
+    let updated = view.with_tool(tool);
+    assert!(updated.check_pin(expected).unwrap());
+
+    let tool = updated.tool.as_ref().unwrap();
+    for changed in [
+        ViewTool::new("another", tool.input_schema.clone(), tool.semantics),
+        ViewTool::new(
+            &tool.name,
+            json!({"type":"object", "required":["path"]}),
+            tool.semantics,
+        ),
+        ViewTool::new(&tool.name, tool.input_schema.clone(), tool.semantics + 1),
+    ] {
+        assert!(updated
+            .clone()
+            .with_tool(changed)
+            .check_pin(expected)
+            .is_err());
+    }
+}
+
+#[test]
+fn view_tool_invalid_definitions_cannot_match_a_pin() {
+    let fixture = view_tools_fixture();
+    let case = &fixture["cases"][0];
+    let view: ViewManifest = serde_json::from_value(case["view"].clone()).unwrap();
+    for name in [String::new(), "x".repeat(257)] {
+        let tool = ViewTool::new(name, json!({"type":"object"}), 1);
+        assert!(tool.schema_pin().is_err());
+        assert!(view
+            .clone()
+            .with_tool(tool)
+            .check_pin(case["pin"].as_str().unwrap())
+            .is_err());
     }
 }

@@ -105,7 +105,7 @@ order. A record requires `durationMs` and `outcome`:
 | `durationMs` | non-negative i64 JSON integer: provider processing time, excluding queued time and time held waiting for a person |
 | `outcome` | `success`, `error`, `partial` or `held` |
 | `reason` | optional code matching `^[a-z][a-z0-9_]{0,63}$` |
-| `queuedMs`, `heldMs` | optional non-negative i64 JSON integers |
+| `queuedMs`, `heldMs` | optional non-negative i64 JSON integers; `heldMs` is time held waiting for a person, omitted when there was none |
 | `location` | optional, only `outside_project` |
 
 Known reasons include `timed_out`, `killed`, `cancelled`, `permission_denied`,
@@ -113,11 +113,20 @@ Known reasons include `timed_out`, `killed`, `cancelled`, `permission_denied`,
 If a path would fall outside the project, the provider omits that path field
 and sets `location: "outside_project"`; it never sends an absolute path instead.
 
-A **completion** records call-time facts of when deferred work ended, such as
-a background command's exit or a held call settling later. A held call's
-first record, written after its held reply, carries `outcome: "held"`; its
-later result goes in the completion. It is written once,
-under the completion kind's idempotency key. It requires `outcome`, permits
+A call has **at most one completion**, recording the end of its deferred work.
+A held call's first record, written after its held reply, carries
+`outcome: "held"`. A held reply can mean the call waits for a person or that
+its work is already running (tool-provider §4.1). Approval ends a person
+wait, not the call's deferred work: if approved work runs in the background,
+the completion is written when that work finishes, carrying the person-wait
+time in `heldMs`. If approval is refused before the action starts, nothing
+runs, and the completion records the refusal with `outcome: "error"` and a
+`reason` such as `consent` or `permission_denied`. If the provider stops
+deferred work itself and confirms it stopped, the completion records that,
+with `reason: "killed"`; this contract sets no deadline for doing so. A
+provider that loses track of work without knowing how it ended writes no
+completion. The completion is written once under the completion kind's
+idempotency key. It requires `outcome`, permits
 `reason`, and makes `durationMs` optional: deferred run time can be a declared
 provider field. All other record field rules apply unchanged.
 
@@ -203,12 +212,38 @@ so a forged write pin cannot select a view or prove a match. Otherwise the app
 server drops the write from the join. Another writer's view cannot authorize
 it.
 
-When the display server first fetches a view for a pin, it also checks that the
-pin belongs to a tool in that writer's `tool.catalog`: the pin computed from
-the tool's `name`, `schema_digest` and `semantics` (the tool-provider
-contract's `tp1` pin) must equal it. It keeps that result with the view, since
-a pin never changes meaning, so a call recorded before the provider changed its
-catalog still joins.
+The display server MUST ask `tool.views` for every pin it needs, including a
+pin outside the writer's current `tool.catalog`, **before judging catalog
+membership**. It decides from the answer:
+
+- If the view carries `tool`, the server computes its `schema_digest` from
+  `tool.input_schema` and recomputes the tool-provider contract's `tp1` pin
+  from `tool.name`, that digest and `tool.semantics`. It accepts the view only
+  when that pin equals the requested pin, and takes the input schema from
+  `tool.input_schema`; no current catalog membership is needed.
+- A view without `tool` is accepted only if the requested pin belongs to a
+  tool in the writer's current `tool.catalog`: the `tp1` pin computed from the
+  catalog tool's `name`, `schema_digest` and `semantics` must equal it. The
+  input schema then comes from that catalog entry, as for older providers.
+- Anything else is `unknown` and cannot authorize a join: no view, `"unknown"`,
+  a `tool` that cannot recompute to the requested pin, or no `tool` and no
+  matching current catalog entry. A mismatched `tool` never falls back to the
+  catalog check.
+
+The server keeps the accepted result and input schema with the view, through
+later template refreshes, so a call recorded before the provider changed its
+catalog still joins. A matching pin fixes the tool's name, structural input
+schema and `semantics`; it doesn't fix `description` text or say which
+provider owns the tool. A server that cached a pin as unusable only because
+the pin was missing from the writer's current catalog, without asking
+`tool.views`, MUST ask for that pin again once and judge the answer under
+these rules. A provider's own `"unknown"` answer keeps its normal retry rules.
+
+For one call (`runner`, `call_key`), if stored writes from more than one
+writer each have an accepted view for the runner's stored call pin, the app
+server uses none of those writes for that call. That covers another provider
+listing an identical tool, since the matching pin doesn't say which provider
+owns it.
 
 The display server fetches `tool.views {pins: [...]}` on the **writer's own route**,
 for unseen pins and again when the writer's `module_version` or, where its
@@ -218,7 +253,8 @@ policy (tool-provider §2.1). The optional operation
 and `tool-views/v1` capability are defined by the
 [`tool-provider/v1` contract](../cortexkit-role-tool-provider/CONTRACT.md#21-optional-display-views).
 The reply is `{views: {<pin>: <ViewManifest> | "unknown"}}`. A manifest has a
-record schema, declared reads and a template. The template is opaque JSON
+record schema, declared reads, a template and an optional pinned `tool`
+definition (tool-provider §2.1). The template is opaque JSON
 that only the app server interprets; this contract defines no template format,
 so which templates an app server understands is its own choice. An `unknown`
 view cannot authorize a join.

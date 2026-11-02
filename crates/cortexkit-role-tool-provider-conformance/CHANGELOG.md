@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.6
+
+- Track `cortexkit-role-tool-provider` 0.14.6 and its optional pinned view
+  definitions. No suite changes.
+
 ## 0.14.5
 
 - Track `cortexkit-role-tool-provider` 0.14.5, which widens when a display

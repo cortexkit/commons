@@ -10,7 +10,11 @@ use subc_protocol::ErrorBody;
 
 pub use cortexkit_role_tool_display::{FieldKind, RecordSchema};
 
-use crate::{call::validate_schema_pin, errors};
+use crate::{
+    call::{validate_schema_pin, SchemaPin},
+    catalog::{schema_digest, CatalogTool},
+    errors,
+};
 
 pub const MAX_PINS: usize = 64;
 
@@ -57,6 +61,42 @@ impl ViewRead {
     }
 }
 
+/// The catalog definition needed to recover a pin's input schema after the
+/// tool has left the provider's current catalog.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct ViewTool {
+    pub name: String,
+    pub input_schema: Value,
+    pub semantics: u64,
+}
+
+impl ViewTool {
+    pub fn new(name: impl Into<String>, input_schema: Value, semantics: u64) -> Self {
+        Self {
+            name: name.into(),
+            input_schema,
+            semantics,
+        }
+    }
+
+    /// Compute the canonical `tp1` pin using the catalog's structural schema
+    /// digest, not a digest supplied by the view's writer.
+    pub fn schema_pin(&self) -> Result<String, ErrorBody> {
+        let digest = schema_digest(&self.input_schema)
+            .map_err(|error| errors::invalid_request("tool.input_schema", error.to_string()))?;
+        SchemaPin::new(&self.name, digest, self.semantics)
+            .encode()
+            .map_err(|error| errors::invalid_request("tool", error.to_string()))
+    }
+}
+
+impl From<&CatalogTool> for ViewTool {
+    fn from(tool: &CatalogTool) -> Self {
+        Self::new(&tool.name, tool.input_schema.clone(), tool.semantics)
+    }
+}
+
 /// Provider schema, the detail reads the app server may call, and a template
 /// that only the app server interprets.
 ///
@@ -73,6 +113,12 @@ pub struct ViewManifest {
     /// serializes with the same members as before this field existed.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub template_revision: u64,
+    /// The tool definition behind this pin. Absent on older providers' views;
+    /// omission preserves their serialized bytes. A provider keeps serving the
+    /// first one it served for a pin; a matching pin fixes the name, the
+    /// structural input schema and `semantics`, not `description` text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<ViewTool>,
 }
 
 fn is_zero(value: &u64) -> bool {
@@ -84,7 +130,8 @@ fn is_zero(value: &u64) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ViewChange {
-    /// Identical to the kept view.
+    /// Same record schema, reads, template revision and template as the
+    /// kept view. `tool` isn't compared.
     Same,
     /// Same record schema and reads with a higher template revision: keep
     /// the fetched view in place of the kept one, its revision included.
@@ -105,12 +152,38 @@ impl ViewManifest {
             reads,
             template,
             template_revision: 0,
+            tool: None,
         }
     }
 
     pub fn with_template_revision(mut self, template_revision: u64) -> Self {
         self.template_revision = template_revision;
         self
+    }
+
+    pub fn with_tool(mut self, tool: ViewTool) -> Self {
+        self.tool = Some(tool);
+        self
+    }
+
+    /// Return `true` when `tool` recomputes to `pin`, or `false` when `tool`
+    /// is absent and the display server must use the current catalog check.
+    /// It errors when the schema can't be canonicalized, the pin can't be
+    /// encoded, or the recomputed pin differs: treat the view as `unknown`,
+    /// never fall back to catalog membership (tool-display §6). It checks the
+    /// pin binding only, not that `input_schema` is a valid argument schema,
+    /// and not the writer or the runner's stored call pin.
+    pub fn check_pin(&self, pin: &str) -> Result<bool, ErrorBody> {
+        let Some(tool) = &self.tool else {
+            return Ok(false);
+        };
+        if tool.schema_pin()? != pin {
+            return Err(errors::invalid_request(
+                "tool",
+                "tool does not match the requested pin",
+            ));
+        }
+        Ok(true)
     }
 
     /// Compare this freshly fetched view with the one kept for the same pin.

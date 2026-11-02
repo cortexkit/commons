@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.3
+
+- Contract §6: ask `tool.views` before judging current catalog membership,
+  including for old pins, and retry once pins previously marked "not in
+  catalog". Accept a view's pinned `tool` definition only when it recomputes
+  to the requested pin, using its input schema without a catalog check;
+  views without `tool` retain the catalog check. A definition that doesn't
+  recompute to the pin is `unknown` and cannot authorize a join. A matching
+  pin fixes the name, structural input schema and `semantics`, not
+  `description` text or which provider owns the tool.
+- Contract §6: for one call, if writes from more than one writer each have an
+  accepted view for the runner's stored pin, none of them is used; this
+  covers providers listing identical tools.
+- Contract §3: a call has at most one completion, for the end of its deferred
+  work, not approval of a hold. Approved background work completes when it
+  finishes, with person-wait time in `heldMs` (omitted when there was none);
+  a refusal before the action starts completes as an error; work the
+  provider stops and confirms stopped completes with `reason: "killed"`.
+- Add shared view-definition vectors for matching, mismatching and legacy views.
+
 ## 0.1.2
 
 - Contract text only (§6): the display server fetches a writer's views again

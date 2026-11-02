@@ -61,6 +61,11 @@ requests every listed preset from a live provider.
 unknown pin, plus malformed requests and replies. Record field kinds are owned
 by `tool-display/v1`; that package carries an identical copy of this vector.
 
+`view-tools.json` pins a matching `tool` definition, a definition with mismatched
+semantics, and a legacy view without `tool`, including its exact serialized
+bytes. It uses the digest of `{"type":"object"}` from `schema-digest.json`.
+The provider owns these bytes; tool-display carries an identical copy.
+
 `view-revisions.json` pins how a refetched view compares with the view kept
 for the same pin (`ViewManifest::compare_with_kept`): identical, a higher
 template revision, a lower one, and the three conflicts (same revision with a

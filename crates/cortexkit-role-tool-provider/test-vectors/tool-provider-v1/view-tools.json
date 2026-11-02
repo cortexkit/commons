@@ -1,0 +1,40 @@
+{
+  "_about": "Provider-owned pinned tool definitions, copied byte for byte into tool-display. The digest of {type: object} is pinned in schema-digest.json. A missing tool requires the current catalog check; a mismatched tool is unknown and cannot fall back to that check.",
+  "cases": [
+    {
+      "name": "matching tool, even after leaving the current catalog",
+      "pin": "tp1:example%3Arun:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0:1",
+      "computed_pin": "tp1:example%3Arun:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0:1",
+      "check": "present",
+      "view": {
+        "record_schema": {"name": "example", "revision": 1, "fields": {}},
+        "reads": [],
+        "template": null,
+        "tool": {"name": "example:run", "input_schema": {"type": "object"}, "semantics": 1}
+      }
+    },
+    {
+      "name": "mismatched semantics is unknown, even if the requested pin is in the catalog",
+      "pin": "tp1:example%3Arun:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0:1",
+      "computed_pin": "tp1:example%3Arun:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0:2",
+      "check": "mismatch",
+      "view": {
+        "record_schema": {"name": "example", "revision": 1, "fields": {}},
+        "reads": [],
+        "template": null,
+        "tool": {"name": "example:run", "input_schema": {"type": "object"}, "semantics": 2}
+      }
+    },
+    {
+      "name": "legacy view needs a matching current catalog entry",
+      "pin": "tp1:example%3Arun:a2c799262a3ce3c19ef5cdd983bf3d12b43ab3c426227091b909dcb7054738c0:1",
+      "check": "absent",
+      "encoded": "{\"record_schema\":{\"name\":\"example\",\"revision\":1,\"fields\":{}},\"reads\":[],\"template\":null}",
+      "view": {
+        "record_schema": {"name": "example", "revision": 1, "fields": {}},
+        "reads": [],
+        "template": null
+      }
+    }
+  ]
+}
