@@ -873,6 +873,61 @@ existing behaviour for a provider whose preset-less answer lists no presets.
 recognition and deadline interactions. `reply_deadline_ms` remains unchanged;
 `reply_deadline_ms_with_keepalive` adds the opt-in rule.
 
+## 4.5. Model-visible size limit
+
+Each tool result has a **model-visible size**: an accounting measure of the
+content a model reads, which must be **at most 65,536 bytes**
+(`result::MAX_MODEL_VISIBLE_BYTES`, inclusive). Keeping to it is a provider
+duty. The size is measured on the decoded body the provider sent, before any
+consumer renders it. It ignores wire whitespace and escape spellings, and it
+isn't the size of the final model input.
+
+Measure each body by its negotiated format (§4.1), never by its appearance:
+
+- **A `tool-result/v1` reply** (`result::model_visible_bytes`): the UTF-8
+  length of each text part's `text`, plus the canonical JSON length of each
+  part of an unknown type. Image parts don't count, `alt` included, and
+  neither does `structuredContent`, which consumers never show a model. A held
+  first reply is measured the same way, on its interim `content`; `held.reason`
+  and `held.detail` don't count.
+- **A legacy body**, meaning any reply not decoded as `tool-result/v1`,
+  including an opted-in tool's reply on a route that didn't declare
+  `tool-result/v1` (`result::legacy_model_visible_bytes`): a JSON string counts
+  as the UTF-8 length of its text, any other value as its canonical JSON
+  length.
+- **A late result** (§7): the entry's result payload, measured by the rule for
+  its format. An entry without a payload, such as `not_started` or `expired`,
+  has nothing to measure.
+- **A refusal** (an `ERROR` frame): the UTF-8 length of its `message`. Neither
+  helper takes a refusal body.
+
+Canonical JSON length is the byte length of the value's RFC 8785 (JCS)
+serialization, the canonical form `schema_digest` also uses. Its number and
+string formatting match ECMAScript's `JSON.stringify`, so an implementation
+in any language computes the same count.
+
+**The provider's duty.** A provider keeps every result at or below the limit
+by shaping large output itself: paging it, summarizing it, or saving it to a
+file and returning a pointer the model can follow. Shaped output says so: a
+provider never presents shortened output as complete. `result::validate`
+doesn't check this limit. It checks the reply's shape and §4.1's separate
+serialized-reply bound for `tool-result/v1` bodies (strictly under 3 MiB),
+which limits transport, not what a model reads.
+
+**Consumers.** A consumer never shortens a provider's payload to fit. Whether
+and where a consumer enforces the limit is up to its own contract: the
+component that turns provider content into model input is the one that may.
+Enforcing means replacing the model-facing content with an explicit size error
+that keeps the call's execution state. A completed result's error says the tool
+ran and its output was discarded; a held reply stays pending, and its late
+answer is still collected; a refusal stays a refusal. A consumer never sends a
+call again because of its size.
+
+`test-vectors/tool-provider-v1/model-visible-size.json` pins the measure for
+the listed `tool-result/v1` replies and legacy bodies, including number
+formatting, and the size of a single text part at, one byte past and two bytes
+past the limit. It doesn't cover refusals or late-result selection.
+
 ## 5. `tool.withdraw`
 
 Served by a provider that can hold a call past its reply.

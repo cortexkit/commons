@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.0
+
+- Depend on `cortexkit-role-tool-provider` 0.15.0. The live suite doesn't
+  check its new model-visible size limit yet; no cases changed.
+
 ## 0.14.6
 
 - Track `cortexkit-role-tool-provider` 0.14.6 and its optional pinned view

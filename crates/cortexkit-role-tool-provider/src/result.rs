@@ -8,6 +8,15 @@ use std::collections::HashSet;
 /// 4 MiB connection limit needs headroom for framing and other traffic.
 pub const MAX_RESULT_BYTES: usize = 3 * 1024 * 1024;
 
+/// The inclusive maximum model-visible size of one tool result, in bytes
+/// (64 KiB). The size is an accounting measure of what a model reads, taken on
+/// the decoded body the provider sent: [`model_visible_bytes`] for a
+/// `tool-result/v1` reply, [`legacy_model_visible_bytes`] for any other body,
+/// and the UTF-8 length of `message` for a refusal. It is separate from
+/// [`MAX_RESULT_BYTES`], which bounds the serialized reply for transport.
+/// [`validate`] doesn't check it.
+pub const MAX_MODEL_VISIBLE_BYTES: usize = 65_536;
+
 /// Open per-tool result-format vocabulary. Unknown strings are preserved.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(from = "String", into = "String")]
@@ -317,8 +326,10 @@ fn problem(member: impl Into<String>, reason: &'static str) -> ResultProblem {
     }
 }
 
-/// Validate a decoded or constructed result before sending or on receipt.
-/// Providers exceeding the size bound downsize or refuse by name, never truncate.
+/// Validate a decoded or constructed result before sending or on receipt:
+/// its shape and the serialized-reply bound, [`MAX_RESULT_BYTES`]. Providers
+/// exceeding that bound downsize or refuse by name, never truncate. The
+/// model-visible limit, [`MAX_MODEL_VISIBLE_BYTES`], is checked separately.
 pub fn validate(result: &ToolResult) -> Result<(), ResultProblem> {
     if result.content.is_empty() {
         return Err(problem("content", "must contain at least one part"));
@@ -437,4 +448,42 @@ fn is_standard_base64(data: &str) -> bool {
             .is_some_and(|b| b & 15 == 0),
         _ => true,
     }
+}
+
+/// The model-visible size of a `tool-result/v1` reply, in bytes: the UTF-8
+/// length of every text part plus the canonical (RFC 8785) JSON length of
+/// every part of an unknown type. Image parts don't count, `alt` included, and
+/// neither does `structuredContent`, which consumers never show a model. For a
+/// held first reply this counts its interim `content`, not `held`. Text a
+/// consumer adds when it renders the result never counts.
+pub fn model_visible_bytes(result: &ToolResult) -> usize {
+    result
+        .content
+        .iter()
+        .map(|part| match part {
+            ContentPart::Text { text } => text.len(),
+            ContentPart::Image(_) => 0,
+            ContentPart::Unknown(value) => canonical_json_len(value),
+        })
+        .sum()
+}
+
+/// The model-visible size of a legacy body, in bytes: any reply not decoded as
+/// `tool-result/v1`, including an opted-in tool's reply on a route that didn't
+/// declare `tool-result/v1`. A JSON string counts as the UTF-8 length of its
+/// text, anything else as the length of its canonical (RFC 8785) JSON.
+pub fn legacy_model_visible_bytes(body: &Value) -> usize {
+    match body {
+        Value::String(text) => text.len(),
+        other => canonical_json_len(other),
+    }
+}
+
+/// The byte length of `value`'s RFC 8785 (JCS) serialization, whose number and
+/// string formatting match ECMAScript's `JSON.stringify`, so other languages
+/// count the same.
+fn canonical_json_len(value: &Value) -> usize {
+    serde_jcs::to_vec(value)
+        .expect("a decoded JSON value has a canonical form")
+        .len()
 }

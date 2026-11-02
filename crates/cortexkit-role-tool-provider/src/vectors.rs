@@ -55,6 +55,9 @@ pub const SCHEMA_DIGEST_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/schema-digest.json");
 /// The `schema-pin.json` vector cases.
 pub const SCHEMA_PIN_JSON: &str = include_str!("../test-vectors/tool-provider-v1/schema-pin.json");
+/// The `model-visible-size.json` measure, legacy-body and limit-boundary cases.
+pub const MODEL_VISIBLE_SIZE_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/model-visible-size.json");
 /// The `withdraw-answers.json` vector cases.
 pub const WITHDRAW_ANSWERS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/withdraw-answers.json");
@@ -114,6 +117,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("views.json", VIEWS_JSON),
     ("view-revisions.json", VIEW_REVISIONS_JSON),
     ("view-tools.json", VIEW_TOOLS_JSON),
+    ("model-visible-size.json", MODEL_VISIBLE_SIZE_JSON),
     ("README.md", README),
 ];
 

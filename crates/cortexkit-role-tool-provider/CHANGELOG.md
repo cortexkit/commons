@@ -1,7 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.15.0
 
+- New duty for every provider, hence a minor release (§4.5): a tool result's
+  model-visible size must be at most 65,536 bytes
+  (`result::MAX_MODEL_VISIBLE_BYTES`). The size is an accounting measure taken
+  on the decoded body the provider sent, chosen by its negotiated format:
+  `result::model_visible_bytes` for a `tool-result/v1` reply (text parts in
+  UTF-8, unknown parts by their RFC 8785 JSON length; image parts and
+  `structuredContent` excluded), `result::legacy_model_visible_bytes` for any
+  other body, and the UTF-8 length of `message` for a refusal. Providers shape
+  larger output themselves, by paging, summarizing or saving it to a file with
+  a pointer. `result::validate` doesn't check the limit. A consumer never
+  shortens a payload; one that enforces replaces it with an explicit size
+  error that keeps the call's execution state, and never sends the call again.
+  New vectors: `model-visible-size.json`.
 - Contract text only (§4.4): for a call whose work runs in a child process,
   "advancing work" means the provider's supervision of the call, not
   progress inside the child. The supervision loop sends keepalives while it

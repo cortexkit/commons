@@ -35,6 +35,6 @@ tokio = { version = "1", features = ["time"] }
 [dev-dependencies]
 getrandom = "0.4"
 # Test-only: the fixture pins are checked against the tool-provider crate.
-cortexkit-role-tool-provider = { version = "0.14.0", path = "../cortexkit-role-tool-provider" }
+cortexkit-role-tool-provider = { version = "0.15.0", path = "../cortexkit-role-tool-provider" }
 tempfile = "3"
 tokio = { version = "1", features = ["macros", "rt", "time", "test-util"] }
