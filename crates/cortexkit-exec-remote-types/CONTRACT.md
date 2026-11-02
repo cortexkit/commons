@@ -4,6 +4,24 @@ This crate defines caller-facing values for `exec-remote/v1`. It carries protoco
 shapes; runners remain responsible for enforcing request limits, collecting files,
 and emitting records in the required order.
 
+## Paths and confinement
+
+`workspace_key` identifies the checkout a job runs in, `repository_root` its
+repository, `cwd` the command's working folder, and `siblings[]` further
+repositories copied beside it. Their contents reach the remote command, which
+can disclose them through its output or through files the caller asks to have
+returned. These types don't validate these paths. An executor may check that
+they are well formed, but it never decides whether its caller may use them. A
+working folder recorded in the route's scope stamp is attribution, not
+permission, and is distinct from `cwd`.
+
+So confinement is the caller's duty. A caller submitting for a session must
+refuse a request whose workspace, repository, `cwd` or any sibling its own
+policy doesn't let that session read, and must refuse when it can't decide.
+It checks while preparing the request and again just before handing it to
+the executor, since grants can change in between. Which folders a session may
+read is the caller's policy; this contract doesn't define it.
+
 ## Idempotent submission
 
 `RunRequest.submission_key` is an optional, opaque, caller-chosen key of 16 to

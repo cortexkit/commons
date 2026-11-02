@@ -923,6 +923,14 @@ ran and its output was discarded; a held reply stays pending, and its late
 answer is still collected; a refusal stays a refusal. A consumer never sends a
 call again because of its size.
 
+One consumer case needs its own measure. A consumer that requires every reply
+on its routes to be an MCP `CallToolResult`, and fails any other body as
+malformed, shows a model only that result's `content`. It measures such a reply
+with the `tool-result/v1` rule above, which uses the same member names. This is
+size accounting only: it doesn't make the body a `tool-result/v1` body, and a
+consumer that doesn't require that format measures legacy bodies by the legacy
+rule.
+
 `test-vectors/tool-provider-v1/model-visible-size.json` pins the measure for
 the listed `tool-result/v1` replies and legacy bodies, including number
 formatting, and the size of a single text part at, one byte past and two bytes
