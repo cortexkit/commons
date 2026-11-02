@@ -44,6 +44,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.broca.step.finished.v1",
             "event.thalamus-harness.step.finished.v1",
             "event.thalamus.step.finished.v1",
+            "event.thalamus-pi.step.finished.v1",
         ],
     },
     EventConsumer {
@@ -57,6 +58,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         filter_subjects: &[
             "event.thalamus-harness.compaction.>",
             "event.thalamus.compaction.>",
+            "event.thalamus-pi.compaction.>",
             "event.broca.compaction.>",
         ],
     },
@@ -68,6 +70,11 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
     EventConsumer {
         module_id: "thalamus",
         durable: "m_thalamus",
+        filter_subjects: &["event.magic-context.compaction.>"],
+    },
+    EventConsumer {
+        module_id: "thalamus-pi",
+        durable: "m_thalamus-pi",
         filter_subjects: &["event.magic-context.compaction.>"],
     },
     EventConsumer {

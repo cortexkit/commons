@@ -51,6 +51,7 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
                 format!("ck.{account}.event.broca.step.finished.v1"),
                 format!("ck.{account}.event.thalamus-harness.step.finished.v1"),
                 format!("ck.{account}.event.thalamus.step.finished.v1"),
+                format!("ck.{account}.event.thalamus-pi.step.finished.v1"),
             ]
         );
         let routing = specs
@@ -70,10 +71,16 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
             [
                 format!("ck.{account}.event.thalamus-harness.compaction.>"),
                 format!("ck.{account}.event.thalamus.compaction.>"),
+                format!("ck.{account}.event.thalamus-pi.compaction.>"),
                 format!("ck.{account}.event.broca.compaction.>"),
             ]
         );
-        for durable in ["m_thalamus-harness", "m_thalamus", "m_broca"] {
+        for durable in [
+            "m_thalamus-harness",
+            "m_thalamus",
+            "m_thalamus-pi",
+            "m_broca",
+        ] {
             let reader = specs
                 .iter()
                 .find(|spec| spec.consumer.durable == durable)

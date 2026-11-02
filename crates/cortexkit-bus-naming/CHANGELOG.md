@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.9
+
+- Add `thalamus-pi` (the Pi runner) as a reader of Magic Context's compaction
+  notices through `m_thalamus-pi`, and widen `magic-context`'s filter to also
+  read `event.thalamus-pi.compaction.>`. Its grant keeps the ordinary
+  participant permissions and adds only EVENT-stream pull, acknowledgement
+  and consumer-info permissions for `m_thalamus-pi`, matching the other
+  runner readers.
+- Add the exact filter `event.thalamus-pi.step.finished.v1` to `astrocyte`'s
+  step-history reader (`m_astrocyte`), beside its other runner step-finished
+  filters.
+
 ## 0.2.8
 
 - Additive patch: overlap validation uses the existing

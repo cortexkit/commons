@@ -418,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-bus-naming"
-version = "0.2.8"
+version = "0.2.9"
 
 [[package]]
 name = "cortexkit-bus-nats"

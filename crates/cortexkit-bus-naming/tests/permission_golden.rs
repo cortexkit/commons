@@ -673,6 +673,7 @@ fn event_consumer_grant_is_participant_plus_exactly_three_durable_permissions() 
         "astrocyte",
         "thalamus-harness",
         "thalamus",
+        "thalamus-pi",
     ] {
         let baseline = participant_permissions(&account, "UPFC", "ordinary", &[])
             .unwrap()
