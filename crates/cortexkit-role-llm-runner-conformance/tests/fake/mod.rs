@@ -204,6 +204,12 @@ pub struct Defects {
     pub read_display_facts: Option<&'static str>,
     pub refreshed_senders_wait_for_next_run: bool,
     pub declare_app_readers: bool,
+    /// A conformant closed default read admission. For an existing session
+    /// whose plan has no `readers` list, the request handler's read-admission
+    /// guard refuses non-owners `scope_owner_mismatch`. It doesn't close every
+    /// read API, nor the separate subscription path; a `readers` list takes
+    /// precedence.
+    pub closed_default_reads: bool,
     pub app_readers_reject_listed: bool,
     pub app_readers_admit_unlisted: bool,
     pub app_readers_reader_can_send: bool,
@@ -2912,6 +2918,8 @@ impl Module {
                     if !admitted {
                         return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
                     }
+                } else if self.world.defects.closed_default_reads && stamp.principal != sess.owner {
+                    return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
                 }
             }
         }

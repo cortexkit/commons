@@ -183,6 +183,11 @@ pub async fn head<R: RunnerRoute>(route: &R) -> Result<HeadMeta, String> {
         "session.head",
         call(route, ops::SESSION_HEAD, json!({})).await?,
     )?;
+    checked_head(body)
+}
+
+/// Decode a `session.head` answer and check it for consistency with its lineage.
+pub fn checked_head(body: Value) -> Result<HeadMeta, String> {
     let head: HeadMeta = decode("session.head", body.clone())?;
     if !head.incarnation_valid() {
         return Err(format!(

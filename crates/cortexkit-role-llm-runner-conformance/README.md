@@ -378,7 +378,8 @@ from `role.describe` (no new `Capability` enum variant). Without that group,
 `head_sender_is_callers_effective_grant` is inapplicable with a reason naming
 `head_sender`, even when the adapter supplies its two-identity fixture.
 The reference fake declares the group; a faulty runner that declares it but
-omits every `sender` fails the case by name.
+omits the `sender` grants on the named callers' admitted reads fails the case
+by name.
 
 New in 0.11.1, for llm-runner 0.6.1: declare `Capability::SessionUsage`
 when serving the `session_usage` group, and opt into the scripted fixtures
@@ -395,11 +396,12 @@ case has faulty-runner self-tests that must fail it by name.
 `head_sender_identities` optionally supplies two attested non-owner modules
 A and B. The kit installs a plan naming A without flags and B with both
 `idle_start` and `interrupt`. `head_sender_is_callers_effective_grant` compares
-their grants to supported modes from checked describe, also checking an
-unnamed caller and the owner. Existing adapters return `None` and remain
-inapplicable; adapters with the group and hook run regardless of their
-supported-mode set. Declaring runners must report `sender` for both named
-callers and the owner (with `owner: true`).
+their grants on admitted `session.head` reads to supported modes from checked
+describe. With `app_readers`, the plan lists A and B as readers, and a refusal of either fails the case. Without it, a `scope_owner_mismatch` refusal of A's or B's `session.head` ends the whole case as inapplicable, without checking the later callers. Any other refusal fails the case. Once both grants check, it also checks an unnamed caller
+(a `scope_owner_mismatch` refusal, or no `sender`) and the owner. Existing
+adapters return `None` and remain inapplicable; adapters with the group and
+hook run regardless of their supported-mode set. Declaring runners must report
+the grants on reads they admit, and the owner's with `owner: true`.
 
 `message_senders_rows_name_their_sender` reuses `head_sender_identities`
 and `send_fields_with_plan`: an owner installs a plan naming B, then B
@@ -691,7 +693,7 @@ is unchanged and prints nothing.
 | `view_due_first_model_uses_view`, `view_due_refused_fetch_blocks_model`, `view_due_later_step_retries` | `compaction`, `queue`, `transcript_reads`, `run_ops`; raw provider-call capture and the due-view fixture/fetch hooks. The fixture plan disables `render_tags` and every other model-only decoration; any enabled decorations make the case not applicable by name. No `view_due_max_ms`, or a missing adapter hook, is also not applicable by name. |
 | `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete`, `extra_op_still_admitted` | — |
 | `describe_states_max_bytes` | `transcript_reads` |
-| `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; inapplicable without the describe group or `head_sender_identities` |
+| `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; inapplicable without the describe group or `head_sender_identities`, and, on a runner without `app_readers`, when A's or B's `session.head` is refused `scope_owner_mismatch` |
 | `refresh_added_sender_admitted_at_acceptance` | `session_change`, `delivery_order`, `queue`, `transcript_reads`, `head_sender_identities` and `send_fields_with_plan`; added sender's queue send is admitted before another run, also during a held run when `HoldToolCalls` is available; prefers a deferred rung |
 | `message_senders_rows_name_their_sender` | `message_senders`, `history_display`, `host_history`, `live_events`, `delivery_order`, `client_message_id`, `queue`, `transcript_reads`, `head_sender_identities` and `send_fields_with_plan`, with `idle_start` offered; B's start and (with a steerable hold) join rows name B and their client ids at `message_started`, settled model replies have no `sender`. Without live observation only the timing rule is inapplicable; without an offered `steer` mode and a working held step only the join rule is; both may be inapplicable together while the buffered start checks still run. Identities supplied without the plan fixture fail the case |
 | `refresh_removed_sender_refused_at_acceptance` | Same groups and identity routes; removed sender is refused `scope_owner_mismatch` at acceptance with no observable durable-state change; each refresh case is not applicable by name without a required group or routes |

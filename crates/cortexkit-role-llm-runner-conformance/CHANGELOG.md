@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Fix `head_sender_is_callers_effective_grant` for runners whose default
+  read admission refuses non-owners. §4.3 reports `sender` only on reads the
+  runner admits, and §9.19 keeps a runner's own read admission when the plan
+  carries no `readers`; the case had required every caller's `session.head`
+  to be admitted. With `app_readers`, the plan lists A and B as readers, and a refusal of either fails the case. Without it, a `scope_owner_mismatch` refusal of A's or B's `session.head` ends the whole case as inapplicable, without checking the later callers. Any other refusal fails the case. The unnamed caller may be refused
+  `scope_owner_mismatch` instead of getting no grant; this case checks grant
+  disclosure only, and the `app_readers` cases check §9.19's refusal of an
+  unlisted reader. Each `session.head` probe is now one request.
+
 ## 0.16.11
 
 - Pin `cortexkit-role-llm-runner` to `=0.7.48` for its served-bytes

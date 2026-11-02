@@ -3194,6 +3194,71 @@ async fn head_sender_correct_runner_passes() {
     head_sender_defect(Defects::default(), None).await;
 }
 
+fn head_sender_outcome(report: &SuiteReport) -> &CaseOutcome {
+    report
+        .outcome("head_sender_is_callers_effective_grant")
+        .expect("the case ran")
+}
+
+#[tokio::test]
+async fn head_sender_closed_default_reads_without_app_readers_is_inapplicable() {
+    let mut subject = declaring(
+        Capability::DeliveryOrder,
+        Defects {
+            closed_default_reads: true,
+            ..Defects::default()
+        },
+    );
+    subject.head_sender_fixtures = true;
+    let report = run(&subject).await;
+    assert!(
+        matches!(head_sender_outcome(&report), CaseOutcome::Inapplicable { reason } if reason.contains("without app_readers the case can't request read access")),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn head_sender_closed_default_reads_with_app_readers_passes() {
+    let mut subject = declaring(
+        Capability::DeliveryOrder,
+        Defects {
+            closed_default_reads: true,
+            declare_app_readers: true,
+            ..Defects::default()
+        },
+    );
+    subject.head_sender_fixtures = true;
+    let report = run(&subject).await;
+    assert_eq!(
+        head_sender_outcome(&report),
+        &CaseOutcome::Passed,
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn head_sender_listed_reader_refused_fails_by_name() {
+    let mut subject = declaring(
+        Capability::DeliveryOrder,
+        Defects {
+            closed_default_reads: true,
+            declare_app_readers: true,
+            app_readers_reject_listed: true,
+            ..Defects::default()
+        },
+    );
+    subject.head_sender_fixtures = true;
+    let report = run(&subject).await;
+    assert!(
+        failed(&report, "head_sender_is_callers_effective_grant")
+            .contains("although the plan lists it in readers"),
+        "{}",
+        report.render()
+    );
+}
+
 const ADMISSION_REFRESH_CASES: &[&str] = &[
     "refresh_added_sender_admitted_at_acceptance",
     "refresh_removed_sender_refused_at_acceptance",
