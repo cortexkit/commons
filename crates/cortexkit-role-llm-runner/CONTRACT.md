@@ -5313,9 +5313,10 @@ every request, answer and refusal.
     generation at or below the accepted one that is not an identical
     repeat: the same generation with another plan or policy, or a lower one;
   - `tool_outside_host_set {names}` (`ToolOutsideHostSetDetail`), terminal.
-    A host that fixes its tool set when it starts (OpenCode registers each
-    tool's name, description and input schema then) refuses a plan naming
-    any tool outside that set. A tool is inside the set only if its
+    Some hosts fix their registered tools when they start: OpenCode, for
+    example, registers each tool's name, description and input schema then.
+    On a runner without `refresh_relaunch` whose host does that, a plan
+    naming any tool outside that set is refused. A tool is inside the set only if its
     definition is identical: name, description and input schema
     (`session_change::outside_host_set`). A changed definition under a kept
     name is refused the same way, naming those tools. `names` is sorted.
@@ -5327,21 +5328,50 @@ every request, answer and refusal.
   operation, not all of `live_events`. `check_describe` refuses a declaration
   missing either. A runner declaring neither new group retains its existing
   behavior and conformance verdict.
-- [pinned] A runner whose host fixes its tool set at start accepts refreshes
-  requiring new tools, changed definitions or removal from the fixed set,
-  instead of refusing `tool_outside_host_set`. Fetch, admission refusals,
-  generations and drift remain as above. Removing a tool from the offered
-  subset without changing the host's fixed set needs no restart; neither
-  does changing only system text or which registered tools are offered.
+- [pinned] A declaring runner accepts refreshes that add, change or remove
+  tools in the host's registered set, instead of refusing
+  `tool_outside_host_set`, and applies them by relaunch, below. Fetch,
+  admission refusals, generations and drift remain as above. Removing a tool
+  from the offered subset without changing the host's registered set needs
+  no relaunch; neither does changing only system text or which registered
+  tools are offered.
 - [pinned] A relaunch happens only at a run boundary with no run in progress,
   at the pending change's rung point under the next-run rule: `immediately`
   means the next run; deferred rungs wait for the `session.flush_prefix` or
-  rebuild reaching their point. The runner restarts only that session's
+  rebuild reaching their point. The runner relaunches only that session's
   private host with the new plan, preserving history bytes, lineage and
-  message ordinals. Several pending changes cost one restart. After success,
+  message ordinals. Several pending changes cost one relaunch. After success,
   `applied_generation` moves and `effective` names the new plan as usual.
   Sender and reader admission do not wait for the relaunch or its success:
   they follow the latest durably accepted refresh as above.
+- [pinned] A relaunch installs the pending change's surface on the
+  session's host: the tool definitions the runner manages, the offered
+  subset, and the system text the runner supplies. A runner may do that by
+  restarting the host or, where the host can change those in place, by
+  reinstalling them in place; every rule in this group applies either way.
+  A relaunch succeeds only when the runner has read the installed surface
+  back from the host and it matches what the change requires: each managed
+  tool's name, description and input schema equal the fetched pending
+  manifest's, the offered subset equals the pending plan's, and the
+  supplied system text equals the text joined for that manifest. A host's
+  own tools that the runner doesn't manage are not part of this comparison;
+  they stay subject to the offered-set gate. A read-back that can't be
+  obtained, or a mismatch, is a failed relaunch.
+- [pinned] If the host lets anyone other than the runner change its offered
+  tools or system text, two rules apply:
+  - The runner intercepts every tool call a model step makes, before it
+    runs, and applies the offered-set gate, including the pending plan's
+    removals below, refusing anything outside it `tool_not_selected`. A host
+    where a model-issued call can run without passing that gate can't
+    declare this group.
+  - Before each model request, at the latest point the host lets it, the
+    runner compares the request's tools and system text with the run's
+    frozen surface. On a difference it restores the frozen surface in that
+    request or ends the run `error` with class `host_relaunch_failed`. Some
+    hosts let other code rewrite a request after the runner's last check
+    (another extension's hook, for example); there a request can still
+    carry a different surface, and the offered-set gate stays what decides
+    which calls run.
 - [pinned] Only declaring runners accept optional `required` on
   `session.refresh`, absent meaning false. Owners never send that field to
   a runner without `refresh_relaunch`: `RefreshRequest` stays strict and
@@ -5350,11 +5380,14 @@ every request, answer and refusal.
   same required boolean (absent and false are equivalent); changing it at
   the accepted generation is `generation_stale`.
 - [pinned] On a failed non-required relaunch the runner restores the host
-  on the effective old tool definitions and runs the turn on them. Additions,
+  on the effective old tool definitions and system text, verifies that by
+  read-back as above, and runs the turn on them. If that restoration or its
+  verification fails, no model request starts: the run ends `error` with
+  class `host_relaunch_failed`. Additions,
   changed definitions and system text remain pending. Tools the pending plan
   removes or no longer offers are refused at once by the existing offered-set
   gate, `tool_not_selected`, including during fallback: authority removal
-  never waits for a successful restart. `applied_generation` does not move
+  never waits for a successful relaunch. `applied_generation` does not move
   and `effective` still names the old plan. The runner must never report the
   new generation while quietly using the old tool set.
 - [pinned] A required change whose relaunch fails instead ends the run
@@ -5372,10 +5405,11 @@ every request, answer and refusal.
   without `live_events`. No existing session-change event fits this notice.
   The event is prompt notice; the lenient baseline is the recovery record.
 - [pinned] For runners declaring `compaction`, a changed tool surface changes
-  the provider prefix: after the relaunch succeeds and before the new host's
-  first model request, send `compaction.ride` with cause `surface_change`,
+  the provider prefix: after the relaunch succeeds and before the session's
+  first model request on the newly installed surface, send `compaction.ride`
+  with cause `surface_change`,
   so queued provider work lands in that same rebuild. The same ride-before-
-  request rule applies to system-text-only changes applied without a restart.
+  request rule applies to system-text-only changes applied without a relaunch.
   An unsuccessful relaunch that falls back to unchanged model tools sends
   no ride: its provider surface and cached prefix did not change, and removals
   are enforced at the offered-set gate only. If fallback does change the tool
@@ -5667,7 +5701,7 @@ to the provider codes below, this role names the following runner-side class
 
 | Error class | When |
 |---|---|
-| `host_relaunch_failed` | a required `refresh_relaunch` change could not start the new host; the run ends `error` without using old definitions, and the change remains pending (§10.2) |
+| `host_relaunch_failed` | the run ends `error` with no further model request because a required `refresh_relaunch` change could not be installed and verified on the host, a failed relaunch's fallback could not restore and verify the previous surface, or a request's surface that someone else changed mid-run was not restored; a pending change stays pending (§10.2) |
 
 [pinned] A run that ends `error` because of a provider names the code
 callers branch on as `provider_code` in its run error, and any finer

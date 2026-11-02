@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Contract text only (§10.2): a `refresh_relaunch` relaunch may reinstall
+  the host's tools and system text in place, where the host supports that,
+  instead of restarting it; every relaunch rule applies either way. A
+  relaunch succeeds only when the installed surface, read back from the
+  host, matches the pending change; an unobtainable read-back is a failure.
+  Fallback restores and verifies the old tools and system text, or ends the
+  run `host_relaunch_failed`. Where others can change the host's offered
+  tools, the runner gates every model-issued call (a host whose calls can
+  bypass the gate can't declare the group) and checks each model request
+  against the run's frozen surface at the latest point the host allows,
+  restoring it or ending the run. `tool_outside_host_set` applies only to
+  runners without `refresh_relaunch`.
+
 ## 0.7.48
 
 - Permit `run.tool_calls` arguments to be rebuilt from requesting messages
