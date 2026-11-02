@@ -35,7 +35,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
-          targets: ${{ matrix.os == 'ubuntu-latest' && 'x86_64-pc-windows-gnu' || '' }}
+          targets: ${{ matrix.os == 'ubuntu-latest' && 'x86_64-pc-windows-gnu,wasm32-unknown-unknown' || '' }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -60,6 +60,15 @@ jobs:
         env:
           GATE_CI_OS: ${{ matrix.os }}
         run: scripts/gate.sh lint
+
+      - uses: actions/setup-node@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          node-version: 'lts/*'
+
+      - name: Test compaction view WebAssembly and JavaScript loader
+        if: matrix.os == 'ubuntu-latest'
+        run: bash crates/cortexkit-compaction-view-wasm/build.sh
 
       - name: Test
         run: cargo test --workspace --all-targets --locked

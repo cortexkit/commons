@@ -462,6 +462,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "cortexkit-compaction-view"
+version = "0.1.0"
+dependencies = [
+ "cortexkit-role-compaction",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "cortexkit-compaction-view-wasm"
+version = "0.1.0"
+dependencies = [
+ "cortexkit-compaction-view",
+ "serde_json",
+]
+
+[[package]]
 name = "cortexkit-cow"
 version = "0.1.1"
 dependencies = [

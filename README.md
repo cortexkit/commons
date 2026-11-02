@@ -14,6 +14,8 @@ Shared Rust crates for the [CortexKit](https://github.com/cortexkit) fleet: role
 | [cortexkit-bus-trait](crates/cortexkit-bus-trait/README.md) | NATS-shaped message, register, stream, and work-queue interfaces. | [Published](https://crates.io/crates/cortexkit-bus-trait) |
 | [cortexkit-cache-core](crates/cortexkit-cache-core/README.md) | Prompt-cache stability state machine for freezing and replaying content. | Not published |
 | [cortexkit-chatgpt-policy](crates/cortexkit-chatgpt-policy/README.md) | ChatGPT and Codex subscription account ids, refusal classification, and quota-header policy. | [Published](https://crates.io/crates/cortexkit-chatgpt-policy) |
+| [cortexkit-compaction-view](crates/cortexkit-compaction-view/README.md) | Shared Rust implementation of compaction rendering, provider-rule checks, reply cleaning, and tag numbering. | [Published](https://crates.io/crates/cortexkit-compaction-view) |
+| [cortexkit-compaction-view-wasm](crates/cortexkit-compaction-view-wasm/README.md) | WebAssembly adapter and JavaScript loader for the shared compaction view implementation. | [Published](https://crates.io/crates/cortexkit-compaction-view-wasm) |
 | [cortexkit-cow](crates/cortexkit-cow/README.md) | Copy-on-write workspace isolation and change capture. | [Published](https://crates.io/crates/cortexkit-cow) |
 | [cortexkit-exec-remote-types](crates/cortexkit-exec-remote-types/README.md) | Caller-facing types and vectors for `exec-remote/v1`. | [Published](https://crates.io/crates/cortexkit-exec-remote-types) |
 | [cortexkit-lease](crates/cortexkit-lease/README.md) | Durable single-writer leases and owner-only file/directory helpers. | [Published](https://crates.io/crates/cortexkit-lease) |

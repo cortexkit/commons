@@ -122,7 +122,7 @@ fast() {
     # Auxiliary checksum manifests pin additional vector sets and need checking.
     while IFS= read -r -d '' manifest; do
         case "$manifest" in
-            test-vectors/*|*/test-vectors/*)
+            test-vectors/*|*/test-vectors/*|crates/cortexkit-compaction-view/vectors/*)
                 run_step "SHA256SUMS: $manifest" checksum "$manifest"
                 manifests=$((manifests + 1))
                 ;;

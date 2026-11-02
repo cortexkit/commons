@@ -12,6 +12,9 @@ A role crate defines the wire types and validation shared by an implementation a
 | `extractor/v1` (draft) | [Contract](../crates/cortexkit-role-extractor/CONTRACT.md) | [Vectors](../crates/cortexkit-role-extractor/test-vectors/extractor-v1/) | [Extractor suite](../crates/cortexkit-role-extractor-conformance/README.md) |
 | `routing/v1` | [Contract](../crates/cortexkit-role-routing/CONTRACT.md) | [Vectors](../crates/cortexkit-role-routing/test-vectors/routing-v1/) | [Routing kit](../crates/cortexkit-role-routing-conformance/README.md) |
 | `compaction-provider/v1` | [Contract](../crates/cortexkit-role-compaction-provider/CONTRACT.md) | [Vectors](../crates/cortexkit-role-compaction-provider/test-vectors/compaction-provider-v1/) | No separate runner crate yet |
+| `compaction-provider/v2`, `compaction-runner/v1` | [Contract](../crates/cortexkit-role-compaction/CONTRACT.md) | [Wire vectors](../crates/cortexkit-role-compaction/test-vectors/compaction-v2/) | No separate runner crate yet |
+| [`cortexkit-compaction-view`](../crates/cortexkit-compaction-view/README.md) | [Contract](../crates/cortexkit-role-compaction/CONTRACT.md) | [Rendering vectors](../crates/cortexkit-compaction-view/vectors/cases.json) | Shared implementation, not a conformance suite |
+| [`cortexkit-compaction-view-wasm`](../crates/cortexkit-compaction-view-wasm/README.md) | [Contract](../crates/cortexkit-role-compaction/CONTRACT.md) | Uses the view library's vectors | Shared implementation, not a conformance suite |
 | `step-transform-provider/v1` | [Contract](../crates/cortexkit-role-step-transform-provider/CONTRACT.md) | [Vectors](../crates/cortexkit-role-step-transform-provider/test-vectors/step-transform-provider-v1/) | No separate runner crate yet |
 | `agent-data/v1` | [Contract](../crates/cortexkit-role-agent-data/CONTRACT.md) | [Crate-local vectors](../crates/cortexkit-role-agent-data/test-vectors/agent-data-v1/README.md) | No separate runner crate yet |
 
