@@ -108,7 +108,8 @@ pub fn admit(
             | ops::ROLE_DESCRIBE
             | ops::SESSION_SUBSCRIBE
     );
-    if !read && op != ops::SEND_STATUS {
+    let send_status = matches!(op, ops::SESSION_SEND_STATUS | ops::SEND_STATUS);
+    if !read && !send_status {
         return Ok(false);
     }
     let plan = session_change::admission_plan(effective, pending);
@@ -118,7 +119,7 @@ pub fn admit(
     if caller == owner {
         return Ok(true);
     }
-    if op == ops::SEND_STATUS {
+    if send_status {
         return Ok(facts.own_send
             && crate::delivery_order::plan_senders(plan)?
                 .iter()

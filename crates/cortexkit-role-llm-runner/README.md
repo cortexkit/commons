@@ -1,205 +1,116 @@
 # cortexkit-role-llm-runner
 
-Wire types and vectors for `llm-runner/v1`: transcript reads, run results, subscriptions, owner sends, and the session baseline.
+Wire types, small validation helpers and checksum-pinned vectors for
+`llm-runner/v1`: transcript reads, run results, subscriptions, session sends
+and the frozen session baseline. Version **0.8.0** is a breaking Rust and wire
+release; the role capability name remains `llm-runner/v1`.
 
-`tags::truncate_part` renders negotiated compaction part edits for all five
-serializer profiles. Its checksum-pinned `truncate.json` vectors pin the
-rules in compaction-provider's contract §6.1, including the top-level-only,
-UTF-16 edit-marker input rule. The contract and the vectors together are
-the specification.
-Pass `PartContainer` from the stored row, never from a provider's view.
-On Pi, `drop_attachments` affects only the addressed block, never its
-siblings. To remove a result message's images, the provider sends an ordinary
-`drop` edit for each image part.
+[CONTRACT.md](CONTRACT.md) is the complete normative contract. The separate
+`cortexkit-role-llm-runner-conformance` 0.17.0 crate drives real runners over
+their management routes; this crate has no transport or runtime.
 
-Add to `Cargo.toml`:
+## Compaction and entry counting
 
-```toml
-[dependencies]
-cortexkit-role-llm-runner = "0.7.42"
-```
+Compaction is defined by `cortexkit-role-compaction`:
+`compaction-runner/v1` and `compaction-provider/v2`. This crate no longer
+publishes the compaction-provider/v1 integration, checkpoint/anchor APIs,
+lineages, negotiated truncate edits, tag rows or `session.resolve`.
+`model_view` reads and replacement-entry pages are removed too. A plan still
+names its provider with `compaction_item {provider, preset, params}`. The
+session-role preset is required; omission is refused at admission as
+`invalid_params` naming `plan.compaction_item.preset`. It is passed unchanged
+to Setup, never invented or defaulted.
 
-The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-llm-runner-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
+Ordinals follow compaction W4.1/W4.2 entries, from **1** over the whole active
+path. Marker records are not entries; a finished OpenCode 1 compaction pair
+is a marker, while dead steps and unfinished pairs remain entries.
+`serializer_profile` provides:
 
-Since 0.7.42, these optional groups extend existing wire shapes:
+- `opencode1_session_projection`, ordering hydrated `{info, parts}` rows by
+  creation time and id and recognizing completed compaction pairs;
+- `opencode_v2_session_projection`, using native `seq` order and excluding
+  idle, agent-switched and background-shell controls;
+- `pi_session_projection`, walking the active branch and counting every
+  message role, custom message and branch summary;
+- `native_log_ordinals`, counting all native messages except host markers.
 
-| Group | Extension |
-|---|---|
-| `sender_succession` | `PlanSender::succeeds` names one predecessor for keyed retry and status lookup, not delegated sends or withdrawals. Validate with the additive request checks before other plan checks. |
-| `read_display_facts` | `ReadRequest::include_display_facts` adds `ReadMessage::client_message_id` and ordered `tool_times` (`read::ToolTime`) beside unchanged message bodies. |
+Part numbering, tag notation and cleaning belong only to the compaction
+contract. A `delivery_order` template's `part_tag` slot remains: its `shown`
+callback supplies the part's compaction A3 number. Templates do not count.
 
-Delivery retry comparisons now ignore `expires_at_ms` for every sender and
-runner; the accepted send's original deadline still governs.
+## Reads and cache identity
 
-Since 0.7.29, the opt-in `retract_own_send` group (requiring `retract`)
-allows a daemon-attested sender to withdraw its own pending submission on
-the same session. On a session with a recorded owner, other non-owners and
-submissions without a recorded sender stay owner-only; request fields never
-establish identity. Answers and withdrawal semantics, including durability,
-are unchanged. Without the group the owner-only rule on owner-protected
-sessions is unchanged. On a session with no recorded attested owner, a
-runner may admit any reachable caller; that existing rule is unchanged. See contract §§6.2
-and 9.2.
+`session.read` serves the whole active path, including entries below the
+latest host marker, from the host's own store. `from_ordinal: 0` and `1` both
+start at the first entry. A marker hides entries from the model, never from
+reads. `session.head.first_ordinal` and `cut` describe that model boundary.
+Every history and display entry has a required ordinal; neither operation
+serves markers or control records as entries.
 
-Since 0.7.14, a runner declaring the `rich_ui_stamp` group serves the rich UI
-stamp `{dialect, catalog_digest}` (`rich_ui::RichUiStamp`) that a run's frozen
-plan carries, copied from the system-text answers it fetched: on every
-assistant display row the run writes (`DisplayRow::rich_ui`), on its
-`run_started`, as `session.head`'s `last_run_rich_ui` while that run is the
-last, and on its assistant `session.read` entries when the read sets
-`include_rich_ui`. Absent from such a runner means unstamped: render plain
-Markdown. Readers accept the members before any runner declares the group.
-Two different stamps in one plan are refused `plan_stale`. See contract §9.17.
+Every head and every read/history page carries required `history_version`
+and `incarnation`. Readers bind cached pages to that pair. A rewrite raises
+the version; appends and cuts do not. Incarnation is minted with the runner's
+session record and is new if that record was discarded and the session
+returns. A durable per-id high-water outside discarded/restored data prevents
+reallocating an old version to replacement history, as well as pair reuse.
+An `after_mid` cursor carries `history_version`;
+a mismatch is `history_changed`, never a fallback to tail.
 
-Since 0.7.8, an `owned-broca` tool error may say that its provider module
-is restarting or down, with optional `module`, `code`, `detail`,
-`nothing_sent` and `retry` members after `message`. The set is closed and
-readers refuse any violation, naming the member and the rule
-(`serializer_profile::error_output::ErrorOutput::decode`). Every runner,
-whatever its profile, shows the model the same block
-(`serializer_profile::error_output::render`): the message, then one line
-per present member, `nothing was sent` standing for `nothing_sent: true`.
-See contract §4.4 and §11.4 and `test-vectors/owned-broca-tool-outage/`.
+A host-backed runner may keep each served message's digest and a `stripped`
+flag instead of its body. `served_bytes::served_body` applies the profile's
+fixed strip list; `check_served` detects changed rebuilt bytes. The runner
+refuses `served_bytes_changed` with `{mid}` and raises `history_version`
+before serving rewritten content. `opencode-aisdk` strips user-message
+`info.summary`; the other profiles' lists are empty.
 
-Since 0.7.4, `archive_prunes_reasoning` declares the exact pruning kinds a
-runner may apply at rest. Every affected raw/model read and raw/display history
-page repeats `pruned_reasoning`, carrying the original part's JCS byte length
-and write-time digest. Parts keep their types, positions, required fields,
-keys, tags and digests; only the declared payload changes. An enrolled
-compaction provider must opt in through Setup's `accepts: ["pruned_reasoning"]`.
-See §9.14.1 and the original/served vectors. Readers may replace held copies
-only for listed parts with matching original digests; an unknown kind means
-the changed payload is not trusted. Imported assistant display rows may omit
-an unrecorded model; readers must treat absence as unknown before rollout.
+Descriptors publish their own opaque part keys in `part_digests`, one per
+stored top-level part in order. They do not depend on tag rows. Readers
+never construct part keys from array indexes or native part ids.
 
-Since 0.7.2, a runner declaring the `call_identity` group puts `call_key` and
-`schema_pin` on display tool calls (`display::ToolCallPart`) and on the live
-`tool_started` and `tool_finished` events. Both are opaque. `call_key` is the
-call's key exactly as `session.read` attributes it, so it is absent only while
-that attribution has none. `schema_pin` is the pin of the tool definition the
-call was dispatched against, recorded at dispatch; it is absent for a call
-never dispatched and for a runner-native tool. See contract §9.16.
+## Run settings and results
 
-Since 0.7.1, `session_retention` may declare a default-zero `min_hold_days` and
-`deletion_waits_for_readers: true`. The floor is a minimum, never added to a
-policy's lifetime. Head exposes `released` until deletion, reads remain served,
-and refused sends carry `detail.delete_after_ms`. The separate `watermark`
-module defines a log reader's caller-scoped `log-read-watermark/v1` capability,
-strict empty `watermark.get` request and timestamp-or-null reply. See contract
-§9.14–9.15 for the durability and same-computer clock requirements.
+`SendRequest::route_decision_id` is typed beside `service_tier` and fixed per
+run. An explicit different value on a joining send is refused by name on
+every runner. Runners using routing accounts forward it to `route.account_for`
+as `decision_id` with the run's own provider and model; an unknown or expired
+decision ends the run before a model call under `routing_decision_refused`.
+There is no fallback allocation, and the caller alone reports that decision.
+Other runners ignore only forwarding and reporting.
 
-## Hosted session references
+A runner measures every provider result before rendering using tool-provider
+0.15.0's shared 65,536-byte model-visible measure. `tool_result_limit` reuses
+those helpers. Oversized output becomes a whole error result with reason
+`tool_result_too_large`, measured `bytes` and `limit`, explicitly saying the
+tool ran, its output was discarded, and the call must not be repeated just
+to see it. Output is never truncated or redispatched. Held first replies stay
+pending and refusals remain refusals.
 
-Use the shared function with named inputs; legacy positional calls no longer
-compile, preventing a folder from silently becoming a hash input:
+The optional `send_status` group serves `session.send_status` and the
+`send.status` alias until the next breaking release. User-command request
+bodies omit `session_ref`; their route is already session-bound.
 
-```rust
-use cortexkit_role_llm_runner::{session_ref, SessionIdentity};
+## Archive pruning and immutable output references
 
-let reference = session_ref(&SessionIdentity {
-    runner: "runner-a",
-    harness: "harness-a",
-    session: "session-1",
-});
-assert_eq!(reference, "f93ec93e3559a70a8db019b29e0fa883");
-```
+`archive_prunes_reasoning` still declares the exact native pruning kinds.
+Head/read `reasoning_pruned` and per-page `pruned_reasoning` are retained.
+Each served entry publishes its stored-order keys in `part_digests`, or in
+`part_keys` when digests are absent. Every listed pruned part names a served
+key. Parts keep their type, position, identity and write-time digest.
 
-`runner` is the daemon-attested principal's **bare module id**, exactly as
-recorded in `session_binding.runner`, never `reserved:runner-a` or another
-prefixed/display spelling. Extract the bare id before constructing the
-identity; the helper hashes all fields exactly as supplied and strips nothing.
-Use deprecated `session_ref_v1(harness, project_root, session)` only to migrate
-stored refs: re-key live sessions once; ended rows keep v1 refs.
+A runner whose plan names a compaction provider does not prune reasoning
+until the compaction contract defines provider acceptance. Sessions without
+a provider may prune under CONTRACT §9.14.1. The old Setup acceptance and
+post-prune view machinery are removed.
 
-Since 0.6.5, `system_text_default` promises preset-less system-text admission
-and unchanged forwarding. `RoleDescribe::system_text_default()` reads this
-group. A composer omits a preset only with both this runner fact and the
-provider's manifest `system-text-default/v1` fact from `catalog.list`.
-Admission checks that provider fact before writing or forwarding; its absence
-is terminal `system_text_preset_required {provider}`, never a timed refusal.
-The provider name is exposed as `SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY`
-without a tool-provider runtime dependency. `system-text-default.json` adds
-describe and refusal vectors; existing vector data is unchanged.
+`output_refs` no longer requires the removed `tags` group. It captures the
+writing request's part-number mapping, addresses stored parts by message/part
+identity and retains immutable snapshots. It never re-resolves an old record
+against a later request.
 
-Since 0.6.1, `session.head.model` optionally reports the runner's recorded
-next-send selection, not the frozen plan. Absence means unknown; no group is
-needed. The new `session_usage` group enables `session.head.usage`: the same
-fields as run usage plus a required `since` run ID. Session spend is durable,
-incrementally updated with each step and never reduced by a rewind or cut.
-The `since` boundary makes uncounted imported history explicit. Unknown token
-fields remain absent, not zero. See contract §4.3 for scope and cost rules.
-`session.head.sender` is the attested caller's own delivery grant under the
-latest durably accepted plan, including a refresh whose model input remains
-pending. Senders and optional `app_readers` reader lists govern admission at
-acceptance, never at a later run; `session_change::admission_plan` and
-`delivery_order::effective_senders` select them. Other plan members retain
-the next-run rule, apart from the offered-set gate that refuses calls to removed
-tools at once (§10.2). An absent `readers` list keeps that runner's current read
-admission; a present list restricts the six session reads named in §9.19
-without granting writes. Since 0.6.2, the
-`head_sender` describe group makes absence mean no grant for that caller;
-without the group, absence means unknown, even if some callers receive
-`sender`. Declaring runners report `sender` on every head request they admit
-from a plan-named caller or the owner, who gets `owner: true`, every accepted mode and `interrupt: true`.
-Readers can use `HeadMeta::sender_grant` to distinguish `Granted`, `NoGrant`
-and `Unknown`. Model, usage and incarnation absence still means unknown.
-`compaction_item.preset` is optional; a preset-less plan item stays preset-less
-on provider calls, and named presets must come from the provider's catalog.
-`session.head.incarnation`, when known, identifies the key's log across cuts,
-reverts, restarts, restores and moves. Claims key on `(incarnation, mid)`;
-without it they fall back to lineage-scoped claims. A runner reports it only
-when it can vouch for that full lifetime, never with a per-process value.
+## Vectors and validation
 
-The optional `held_calls` describe group reports held tool-provider calls on
-run status and status events. A non-empty list is a runner-owned wait with no
-deadline, independently of `deadline_ms`; watchdogs do not nudge these runs.
-
-Since 0.6.0, `started_at` on `tool_started` and `finished_at` on
-`tool_finished` are optional. A runner leaves one out only when it recorded
-no time, such as a call replayed from history stored before it kept times,
-and never invents one; a reader shows the call without that time.
-
-## Served bytes rebuilt from a host's store
-
-A runner that reads from a host may keep each served message's digest and a
-`stripped` flag instead of its body, and rebuild every read from the host's
-stored row (CONTRACT §4.2.1). For a message flagged `stripped: true`,
-`served_bytes::served_body` removes each member the profile's strip list
-names where its condition holds. With `stripped: false` it returns the host
-row unchanged. `served_bytes::check_served` returns the body only when its
-digest matches the one first served, and otherwise returns an error. The
-runner maps that error to the `served_bytes_changed` refusal, detail
-`{mid}`, and serves the message again only under a new lineage.
-`opencode-aisdk` leaves out a user message's `info.summary`; the other
-profiles' lists are empty.
-
-## Provider service tiers
-
-The opt-in `service_tier` group publishes a per-wire `service_tiers` map and
-accepts `standard`, `fast` and `ultrafast` on sends. Absence means standard for
-a send that starts a run; a send into a running run inherits its tier. Send
-encoders omit only absence and preserve explicit standard. Unsupported levels
-are refused before model dispatch,
-and an explicit different tier cannot steer or queue into a running run.
-`service_tier` holds the shared types and validators. `ServiceTierUsage` owns
-per-step tier metadata without changing the token-only, Copy `StepUsage`;
-`RunUsage::record_step_with_service_tier` updates `RunServiceTierUsage` state,
-which keeps a constant number of tier strings independent of the number of
-steps and examines only the new step, to aggregate a fixed applied level
-and unanimous reported served values. Persist that state alongside token totals
-so a restart cannot forget disagreement, without re-reading old steps each time.
-Never copy applied into served. Unknown-served wires omit served.
-
-Tier changes are cache-busting and ride before the changed request, like a
-model change. A compaction provider must adopt 0.7.12 before a runner sends a
-non-standard tier, because notice digests cover the new condition. The closed
-`step.finished.v1` event is unchanged; consumers read tier values in usage-steps
-rows. See CONTRACT §9.3.2 for the full rules.
-
-Requests keep the closed `ServiceTier` enum; read the raw member with
-`service_tier::parse_request` so an unknown level receives the named
-`unsupported_tier` refusal before decoding the rest. Tier values on records are
-strings and keep unknown levels on read. Producer checks restrict applied
-records to fast/ultrafast (standard is omitted), while served provider values
-remain open. Pricing at an unfamiliar level is unconfirmed. `WIRE_APIS` exports
-the wire API list; a routing drift test keeps it equal to routing's constants.
+Enable `test-vectors` to compile the shipped vectors into the public `vectors`
+module. `vectors::FILES` is the ordered inventory, and `SHA256SUMS` hashes each
+file's exact bytes. Public extensible wire types have constructors and are
+non-exhaustive. Decode requests strictly where omission would change the
+question; decode reply extensions leniently, as CONTRACT §13 specifies.

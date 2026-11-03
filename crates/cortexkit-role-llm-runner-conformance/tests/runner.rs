@@ -2,91 +2,208 @@
 //! Conformance of a real runner is run by that runner, never here.
 
 mod fake;
-mod finish_reason;
-mod message_senders;
-
-const PART_EDIT_CASES: &[&str] = &[
-    "part_edits_truncate_renders_with_own_tag",
-    "part_edits_bytes_render_with_own_tag",
-];
-
-fn part_edit_subject(defects: fake::Defects) -> fake::FakeSubject {
-    let mut subject = declaring(Capability::Tags, defects);
-    subject.capabilities.insert(Capability::Compaction);
-    subject
-}
 
 #[tokio::test]
-async fn part_edits_opted_in_runner_passes_both_cases() {
-    let report = run(&part_edit_subject(Defects {
-        part_edits_opt_in: true,
-        ..Defects::default()
-    }))
-    .await;
-    for name in PART_EDIT_CASES {
+async fn mode3_read_and_run_contracts_accept_a_faithful_runner() {
+    let mut subject = declaring(Capability::SendStatus, Defects::default());
+    subject.capabilities.insert(Capability::Plans);
+    let report = run(&subject).await;
+    for name in [
+        "history_version_on_read_pages",
+        "stale_read_cursor_history_changed",
+        "read_from_ordinal_zero",
+        "incarnation_on_every_page",
+        "route_decision_id_fixed_per_run",
+        "send_status_both_names",
+        "tool_result_too_large_is_error",
+        "tool_result_too_large_not_repeated",
+        "compaction_item_preset_required",
+        "read_below_host_marker",
+    ] {
         assert_passed(&report, name);
     }
-    assert_none_failed_but(&report, &[]);
+}
+
+macro_rules! mode3_fault {
+    ($test:ident, $field:ident, $case:literal) => {
+        #[tokio::test]
+        async fn $test() {
+            let mut subject = declaring(
+                Capability::SendStatus,
+                Defects {
+                    $field: true,
+                    ..Defects::default()
+                },
+            );
+            subject.capabilities.insert(Capability::Plans);
+            let report = run(&subject).await;
+            assert!(
+                matches!(report.outcome($case), Some(CaseOutcome::Failed { .. })),
+                "{}",
+                report.render()
+            );
+            assert!(
+                report.render().contains(concat!("FAIL ", $case)),
+                "{}",
+                report.render()
+            );
+        }
+    };
 }
 
 #[tokio::test]
-async fn part_edits_untagged_provider_bytes_fail_by_name() {
-    let report = run(&part_edit_subject(Defects {
-        part_edits_opt_in: true,
-        part_edits_untagged_bytes: true,
-        ..Defects::default()
-    }))
-    .await;
-    let name = "part_edits_bytes_render_with_own_tag";
-    assert!(failed(&report, name).contains("model part must equal edited output with its own tag"));
-    assert_passed(&report, "part_edits_truncate_renders_with_own_tag");
-    assert_none_failed_but(&report, &[name]);
+async fn mode3_uses_seeded_route_decision_fixture() {
+    let subject = declaring(Capability::SendStatus, Defects::default());
+    let report = run(&subject).await;
+    assert_passed(&report, "route_decision_id_fixed_per_run");
+    assert_eq!(
+        subject
+            .route_decision_fixture_calls
+            .load(std::sync::atomic::Ordering::SeqCst),
+        1,
+        "the routing case must obtain its decision from the adapter"
+    );
 }
 
 #[tokio::test]
-async fn part_edits_ignored_truncate_fails_by_name() {
-    let report = run(&part_edit_subject(Defects {
-        part_edits_opt_in: true,
-        part_edits_ignore_truncate: true,
-        ..Defects::default()
-    }))
-    .await;
-    let name = "part_edits_truncate_renders_with_own_tag";
-    assert!(failed(&report, name).contains("model part must equal edited output with its own tag"));
-    assert_passed(&report, "part_edits_bytes_render_with_own_tag");
-    assert_none_failed_but(&report, &[name]);
+async fn mode3_fake_decisions_allow_keyed_replay_and_new_interrupt() {
+    use cortexkit_role_llm_runner::{ops, send::SendReply};
+    use cortexkit_role_llm_runner_conformance::{
+        harness::Harness, LlmRunnerSubject, Reply, RunnerRoute, Script, ScriptedPart, ScriptedTurn,
+    };
+    use serde_json::json;
+
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::Interrupt);
+    let root = tempfile::tempdir().unwrap();
+    let handle = subject.spawn(root.path()).await.unwrap();
+    let session = "decision-replay";
+    subject
+        .install_script(
+            session,
+            Script {
+                turns: (0..3)
+                    .map(|_| ScriptedTurn::new(vec![ScriptedPart::Text("answer".into())]))
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+    let route = subject
+        .session_route(&handle, session, &subject.owner_stamp())
+        .await
+        .unwrap();
+    let mut first = serde_json::Value::Object(subject.send_fields(session, true));
+    first["prompt"] = json!("first");
+    first["send_id"] = json!("first-send");
+    first["route_decision_id"] = json!("decision-a");
+    let Reply::Response(first_body) = route
+        .request(ops::SESSION_SEND, first.clone())
+        .await
+        .unwrap()
+    else {
+        panic!("first run was refused");
+    };
+    let first_reply: SendReply = serde_json::from_value(first_body).unwrap();
+
+    subject.hold_next_model_step(session).await.unwrap();
+    let second = route
+        .request(
+            ops::SESSION_SEND,
+            json!({
+                "prompt":"second", "send_id":"second-send", "route_decision_id":"decision-b"
+            }),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(second, Reply::Response(_)), "{second:?}");
+    subject.await_model_step(session).await.unwrap();
+
+    let replay = route.request(ops::SESSION_SEND, first).await.unwrap();
+    let Reply::Response(replay_body) = replay else {
+        panic!("keyed replay was refused: {replay:?}");
+    };
+    let replay_reply: SendReply = serde_json::from_value(replay_body).unwrap();
+    assert_eq!(replay_reply.run_id, first_reply.run_id);
+
+    let interrupt = route.request(ops::SESSION_SEND, json!({
+        "prompt":"interrupt", "send_id":"interrupt-send", "delivery":"interrupt", "route_decision_id":"decision-c"
+    })).await.unwrap();
+    assert!(matches!(interrupt, Reply::Response(_)), "{interrupt:?}");
+    let _ = subject.release_model_step(session).await;
 }
+mode3_fault!(
+    mode3_rejects_missing_read_history_version,
+    missing_history_version,
+    "history_version_on_read_pages"
+);
+mode3_fault!(
+    mode3_rejects_stale_cursor_success,
+    stale_cursor_accepted,
+    "stale_read_cursor_history_changed"
+);
+mode3_fault!(
+    mode3_rejects_skipping_the_first_entry_at_zero,
+    zero_skips_first,
+    "read_from_ordinal_zero"
+);
+mode3_fault!(
+    mode3_rejects_missing_incarnation,
+    missing_incarnation,
+    "incarnation_on_every_page"
+);
+mode3_fault!(
+    mode3_rejects_a_joining_decision_change,
+    decision_change_accepted,
+    "route_decision_id_fixed_per_run"
+);
+mode3_fault!(
+    mode3_rejects_missing_canonical_send_status,
+    canonical_send_status_missing,
+    "send_status_both_names"
+);
+mode3_fault!(
+    mode3_rejects_truncating_provider_output,
+    oversized_result_truncated,
+    "tool_result_too_large_is_error"
+);
+mode3_fault!(
+    mode3_rejects_redispatching_an_oversized_call,
+    oversized_result_repeated,
+    "tool_result_too_large_not_repeated"
+);
+mode3_fault!(
+    mode3_rejects_missing_compaction_preset,
+    compaction_preset_missing_accepted,
+    "compaction_item_preset_required"
+);
+mode3_fault!(
+    mode3_rejects_marker_limited_reads,
+    marker_hides_reads,
+    "read_below_host_marker"
+);
 
 #[tokio::test]
-async fn part_edits_without_tokens_are_inapplicable_by_name() {
-    let report = run(&part_edit_subject(Defects::default())).await;
-    for name in PART_EDIT_CASES {
-        assert!(
-            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("Setup view_features")),
-            "{name}\n{}",
-            report.render()
-        );
-    }
-    assert_none_failed_but(&report, &[]);
+async fn mode3_user_commands_are_bound_only_by_the_route() {
+    assert_passed(
+        &run(&command_subject(None)).await,
+        "user_commands_without_session_ref",
+    );
+    let report = run(&command_subject(Some("session_ref_required"))).await;
+    assert!(
+        matches!(
+            report.outcome("user_commands_without_session_ref"),
+            Some(CaseOutcome::Failed { .. })
+        ),
+        "{}",
+        report.render()
+    );
+    assert!(report
+        .render()
+        .contains("FAIL user_commands_without_session_ref"));
 }
-
-#[tokio::test]
-async fn part_edits_without_publisher_hook_are_inapplicable_by_name() {
-    let report = run(&part_edit_subject(Defects {
-        part_edits_opt_in: true,
-        part_edits_missing_hook: true,
-        ..Defects::default()
-    }))
-    .await;
-    for name in PART_EDIT_CASES {
-        assert!(
-            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("publish_compaction_part_edits")),
-            "{name}\n{}",
-            report.render()
-        );
-    }
-    assert_none_failed_but(&report, &[]);
-}
+mod finish_reason;
+mod message_senders;
 
 fn head_error_subject(defects: fake::Defects) -> fake::FakeSubject {
     let mut subject = declaring(Capability::RunStatus, defects);
@@ -448,10 +565,7 @@ use cortexkit_role_llm_runner_conformance::{
     harness::KillMechanism, progress, run_suite, run_suite_with, Capability, CaseOutcome,
     SetupError, SuiteOptions, SuiteProgress, SuiteReport, SuiteVerdict, CASES,
 };
-use fake::{
-    CacheTtlDefect, CompactionDefect, CompactionRouteMode, Defects, DirectiveDefect, FakeSubject,
-    LineageDefect, RetentionDefect, StepRecovery,
-};
+use fake::{Defects, DirectiveDefect, FakeSubject, LineageDefect, RetentionDefect, StepRecovery};
 use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -462,93 +576,15 @@ async fn run(subject: &FakeSubject) -> SuiteReport {
     run_suite(subject, dir.path()).await.unwrap()
 }
 
-fn failed(report: &SuiteReport, case: &str) -> String {
-    match report.outcome(case) {
-        Some(CaseOutcome::Failed { reason }) => reason.clone(),
-        other => panic!("{case} should fail, got {other:?}\n{}", report.render()),
-    }
-}
-
-/// The case that resolves tags only after a `StepRecorded` seal that moves
-/// the session onto a new lineage. The fake resumes by default, so the case
-/// is inapplicable by name; the tests that seal check it passes and fails.
-const LEFT_LINEAGE_CASE: &str = "tags_resolve_answers_the_current_lineage";
-
-/// Optional groups the fake leaves undeclared unless a test declares them.
-const OPTIONAL_GROUPS: &[Capability] = &[
-    Capability::SessionRetention,
-    Capability::Attachments,
-    Capability::RetentionClock,
-    Capability::UserCommands,
-    Capability::InputTokenCap,
-    Capability::MaxSteps,
-    Capability::MaxOutputTokens,
-    Capability::NoTools,
-    Capability::TurnDirectives,
-    Capability::InterruptReason,
-    Capability::StructuredOutput,
-    Capability::Adopt,
-    Capability::Tags,
-    Capability::RunToolCalls,
-    Capability::RunUsage,
-    Capability::SessionUsage,
-    Capability::DeliveryOrder,
-    Capability::Retract,
-    Capability::SendStatus,
-    Capability::SessionChange,
-    Capability::HostHistory,
-    Capability::HistoryDisplay,
-    Capability::LiveEvents,
-    Capability::ClientMessageId,
-    Capability::RunCause,
-    Capability::StepEvents,
-];
-
-// The in-process fake does not declare session_retention or exercise a real
-// process kill at ReleasePending. A separate subprocess fixture covers those
-// cases. Head-error cases also need run_status, which some fixtures omit.
-// All other cases must pass.
-fn assert_only_session_retention_skipped(report: &SuiteReport) {
-    assert!(
-        matches!(&report.verdict,
-            SuiteVerdict::ConformingForDeclaredCapabilities { declared, skipped }
-            if skipped == &if declared.contains(&Capability::RunStatus) {
-                vec![Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
-            } else {
-                vec![Capability::RunStatus, Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
-            }
-        ),
-        "{}",
-        report.render()
-    );
-}
-
-/// The opt-in cost case: a subject without the seeding hook cannot run it.
-const COST_CASE: &str = "per_step_cost_scales_with_new_messages";
-
-const NEW_RETENTION_CASES: &[&str] = &[
-    "session_retention_floor_describe",
-    "session_retention_floor",
-    "session_retention_release_hold",
-    "session_retention_release_after_idle",
-    "session_retention_zero_floor_drain",
-];
-
-/// The cases that interrupt a running turn: inapplicable on a runner
-/// without `interrupt`.
-const INTERRUPT_CASES: &[&str] = &[
-    "run_cause_interrupt_names_the_new_send",
-    "delivery_order_ungranted_interrupt_refused",
-    "delivery_order_granted_interrupt_interrupts",
-];
-
-/// The case reading the `sender` of a plan sender's display row.
-const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
-
 fn assert_passed(report: &SuiteReport, case: &str) {
     if (ADMISSION_REFRESH_CASES.contains(&case) || APP_READER_CASES.contains(&case))
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason.starts_with("runner does not declare ") || reason == "adapter supplies no named-principal routes")
+    {
+        return;
+    }
+    if case == "read_below_host_marker"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { .. }))
     {
         return;
     }
@@ -591,11 +627,6 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
-    if case == "head_incarnation_survives_cut_and_changes_on_recreation"
-        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot cut the incarnation log")
-    {
-        return;
-    }
     if case == "head_sender_is_callers_effective_grant"
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter supplies no two-identity head.sender fixture")
     {
@@ -621,16 +652,6 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         && (matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason.starts_with("the runner does not declare "))
             || matches!(report.outcome(case), Some(CaseOutcome::Skipped { missing }) if !missing.is_empty()))
-    {
-        return;
-    }
-    if case == "cut_setup_leaves_reads_alone"
-        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("never refuses reads"))
-    {
-        return;
-    }
-    if case == HOST_CUT_CASE
-        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("host cut"))
     {
         return;
     }
@@ -712,14 +733,6 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
-    if case == LEFT_LINEAGE_CASE
-        && matches!(
-            report.outcome(case),
-            Some(CaseOutcome::Inapplicable { reason }) if reason.contains("no lineage")
-        )
-    {
-        return;
-    }
     // The fake leaves interrupt undeclared unless a test declares it, so the
     // cases that interrupt a running turn cannot be asked.
     if INTERRUPT_CASES.contains(&case)
@@ -736,20 +749,6 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         && matches!(
             report.outcome(case),
             Some(CaseOutcome::Inapplicable { reason }) if reason.contains("idle_start")
-        )
-    {
-        return;
-    }
-    // The fake leaves structured_output undeclared unless a test declares
-    // it, so the cleaning case names the structured-output rule unchecked.
-    if [
-        "tags_model_written_tags_cleaned_on_exposure",
-        "tags_host_store_cleaned_at_the_save_seam",
-    ]
-    .contains(&case)
-        && matches!(
-            report.outcome(case),
-            Some(CaseOutcome::PassedWithInapplicableRule { reason }) if reason.contains("structured_output")
         )
     {
         return;
@@ -776,40 +775,6 @@ fn assert_passed(report: &SuiteReport, case: &str) {
             })
     {
         return;
-    }
-    // Legacy subjects intentionally omit the opt-in message group. Its new
-    // cases must be named Inapplicable, not treated as passing coverage.
-    if case.starts_with("message_checkpoint_")
-        && report.outcome(case)
-            == Some(&CaseOutcome::Inapplicable {
-                reason: "runner does not declare message_checkpoint".into(),
-            })
-    {
-        return;
-    }
-    // Legacy adapters without raw provider-call capture name the due/pending-view
-    // coverage gap instead of claiming those optional checks passed.
-    if (case.starts_with("view_due_") || case.starts_with("view_pending_")) && report.outcome(case) == Some(&CaseOutcome::Inapplicable {
-        reason:
-            "adapter lacks Setup request observation: compaction provider calls are not implemented"
-                .into(),
-    }) {
-        return;
-    }
-    // Undeclared opt-in groups add named non-obligations, not passing coverage.
-    if PART_EDIT_CASES.contains(&case) {
-        let token = if case == "part_edits_truncate_renders_with_own_tag" {
-            "truncate"
-        } else {
-            "tag_bytes_edits"
-        };
-        if report.outcome(case)
-            == Some(&CaseOutcome::Inapplicable {
-                reason: format!("runner sends no {token} in Setup view_features"),
-            })
-        {
-            return;
-        }
     }
     if (case.starts_with("run_cancel_by_interrupt_")
         && report.outcome(case)
@@ -867,6 +832,84 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     );
 }
 
+fn failed(report: &SuiteReport, case: &str) -> String {
+    match report.outcome(case) {
+        Some(CaseOutcome::Failed { reason }) => reason.clone(),
+        other => panic!("{case} should fail, got {other:?}\n{}", report.render()),
+    }
+}
+
+/// Optional groups the fake leaves undeclared unless a test declares them.
+const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::Plans,
+    Capability::SessionRetention,
+    Capability::Attachments,
+    Capability::RetentionClock,
+    Capability::UserCommands,
+    Capability::InputTokenCap,
+    Capability::MaxSteps,
+    Capability::MaxOutputTokens,
+    Capability::NoTools,
+    Capability::TurnDirectives,
+    Capability::InterruptReason,
+    Capability::StructuredOutput,
+    Capability::Adopt,
+    Capability::RunToolCalls,
+    Capability::RunUsage,
+    Capability::SessionUsage,
+    Capability::DeliveryOrder,
+    Capability::Retract,
+    Capability::SendStatus,
+    Capability::SessionChange,
+    Capability::HostHistory,
+    Capability::HistoryDisplay,
+    Capability::LiveEvents,
+    Capability::ClientMessageId,
+    Capability::RunCause,
+    Capability::StepEvents,
+];
+
+// The in-process fake does not declare session_retention or exercise a real
+// process kill at ReleasePending. A separate subprocess fixture covers those
+// cases. Head-error cases also need run_status, which some fixtures omit.
+// All other cases must pass.
+fn assert_only_session_retention_skipped(report: &SuiteReport) {
+    assert!(
+        matches!(&report.verdict,
+            SuiteVerdict::ConformingForDeclaredCapabilities { declared, skipped }
+            if skipped == &if declared.contains(&Capability::RunStatus) {
+                vec![Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
+            } else {
+                vec![Capability::RunStatus, Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
+            }
+        ),
+        "{}",
+        report.render()
+    );
+}
+
+/// The opt-in cost case: a subject without the seeding hook cannot run it.
+const COST_CASE: &str = "per_step_cost_scales_with_new_messages";
+
+const NEW_RETENTION_CASES: &[&str] = &[
+    "session_retention_floor_describe",
+    "session_retention_floor",
+    "session_retention_release_hold",
+    "session_retention_release_after_idle",
+    "session_retention_zero_floor_drain",
+];
+
+/// The cases that interrupt a running turn: inapplicable on a runner
+/// without `interrupt`.
+const INTERRUPT_CASES: &[&str] = &[
+    "run_cause_interrupt_names_the_new_send",
+    "delivery_order_ungranted_interrupt_refused",
+    "delivery_order_granted_interrupt_interrupts",
+];
+
+/// The case reading the `sender` of a plan sender's display row.
+const SENDER_CASE: &str = "display_row_names_the_sender_never_in_read";
+
 /// Every case not in `failing` passed.
 fn assert_others_passed(report: &SuiteReport, failing: &[&str]) {
     for spec in CASES {
@@ -906,7 +949,7 @@ async fn a_faithful_runner_passes_every_case_but_its_simulated_kills_fail_the_ru
     for spec in CASES {
         assert_passed(&report, spec.name);
     }
-    assert_eq!(report.kills.len(), 7, "{}", report.render());
+    assert_eq!(report.kills.len(), 6, "{}", report.render());
     assert!(report
         .kills
         .iter()
@@ -921,7 +964,6 @@ async fn a_faithful_runner_passes_every_case_but_its_simulated_kills_fail_the_ru
 }
 
 const TIMED_RETENTION_CASES: &[&str] = &[
-    "retention_shorten_continues_lineage",
     "retention_equal_noop",
     "retention_honoured",
     "retention_run_status_expired",
@@ -932,6 +974,7 @@ const TIMED_RETENTION_CASES: &[&str] = &[
 
 fn faithful_runner_with_all_supported_groups() -> FakeSubject {
     let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::Plans);
     subject.held_calls_group = true;
     subject.capabilities.insert(Capability::RunStatus);
     subject.claim_process_kill = true;
@@ -941,7 +984,6 @@ fn faithful_runner_with_all_supported_groups() -> FakeSubject {
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
     subject.capabilities.insert(Capability::Adopt);
-    subject.capabilities.insert(Capability::Tags);
     subject.capabilities.insert(Capability::RunToolCalls);
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::SessionUsage);
@@ -1351,6 +1393,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::HostHistory,
                     Capability::RunStatus,
                     Capability::Streaming,
+                    Capability::Plans,
                     Capability::SessionChange,
                     Capability::Retention,
                     Capability::SessionRetention,
@@ -1723,6 +1766,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::HostHistory,
                     Capability::RunOps,
                     Capability::RunStatus,
+                    Capability::Plans,
                     Capability::SessionChange,
                     Capability::Retention,
                     Capability::SessionRetention,
@@ -2014,12 +2058,12 @@ retention_violation!(
 retention_violation!(
     retention_violation_shorten_ignored_fails_by_name,
     ShortenIgnored,
-    "retention_shorten_continues_lineage"
+    "retention_shorten_continues_history_version"
 );
 retention_violation!(
     retention_violation_shorten_replaces_fails_by_name,
     ShortenReplaces,
-    "retention_shorten_continues_lineage"
+    "retention_shorten_continues_history_version"
 );
 retention_violation!(
     retention_violation_equal_refused_fails_by_name,
@@ -2110,6 +2154,7 @@ retention_violation!(
 #[tokio::test(start_paused = true)]
 async fn retention_paused_non_terminal_run_passes() {
     let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::Plans);
     subject.held_calls_group = true;
     subject.capabilities.insert(Capability::RunStatus);
     subject.capabilities.insert(Capability::Attachments);
@@ -2118,7 +2163,6 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
     subject.capabilities.insert(Capability::Adopt);
-    subject.capabilities.insert(Capability::Tags);
     subject.capabilities.insert(Capability::RunToolCalls);
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::SessionUsage);
@@ -2151,13 +2195,13 @@ async fn retention_paused_non_terminal_run_passes() {
 #[tokio::test(start_paused = true)]
 async fn retention_status_is_inapplicable_when_not_served() {
     let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::Plans);
     subject.capabilities.insert(Capability::Attachments);
     subject.enable_retention();
     subject.claim_process_kill = true;
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
     subject.capabilities.insert(Capability::Adopt);
-    subject.capabilities.insert(Capability::Tags);
     subject.capabilities.insert(Capability::RunToolCalls);
     subject.capabilities.insert(Capability::RunUsage);
     subject.capabilities.insert(Capability::SessionUsage);
@@ -2205,244 +2249,6 @@ async fn retention_requires_a_real_tombstone_process_kill() {
         .filter(|s| s.name.starts_with("retention_") && s.name != "retention_without_group_refused")
     {
         assert_passed(&report, spec.name);
-    }
-}
-
-const COMPACTION_CASES: &[&str] = &[
-    "compaction_setup_durable_once",
-    "compaction_setup_route_session_matches_setup",
-    "session_ref_uses_runner_identity",
-    "model_view_half_open_ranges_and_travel",
-    "compaction_unavailable_distinct_from_refuse",
-];
-
-async fn compaction_break(defect: CompactionDefect, case: &str) {
-    let subject = FakeSubject::new(Defects {
-        compaction: defect,
-        ..Defects::default()
-    });
-    let report = run(&subject).await;
-    assert!(!failed(&report, case).is_empty());
-    let failures: Vec<_> = report
-        .cases
-        .iter()
-        .filter(|c| matches!(c.outcome, CaseOutcome::Failed { .. }))
-        .map(|c| c.case)
-        .collect();
-    assert_eq!(failures, vec![case], "{}", report.render());
-    assert_others_passed(&report, &[case]);
-}
-
-#[tokio::test]
-async fn compaction_good_fake_passes_all_named_cases() {
-    let report = run(&FakeSubject::new(Defects::default())).await;
-    for name in COMPACTION_CASES {
-        assert_passed(&report, name);
-    }
-}
-
-#[tokio::test]
-async fn session_ref_from_folder_fails_only_named_case() {
-    compaction_break(
-        CompactionDefect::SessionRefFromFolder,
-        "session_ref_uses_runner_identity",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn compaction_setup_route_session_mismatch_fails_only_named_case() {
-    compaction_break(
-        CompactionDefect::BindWrongSession,
-        "compaction_setup_route_session_matches_setup",
-    )
-    .await;
-}
-
-/// A runner that records a `setup_identity_mismatch` refusal under another
-/// code fails the route-session case, by name and with that reason.
-#[tokio::test]
-async fn compaction_identity_mismatch_under_another_code_fails_only_the_route_session_case() {
-    compaction_break(
-        CompactionDefect::IdentityMismatchUnderAnotherCode,
-        "compaction_setup_route_session_matches_setup",
-    )
-    .await;
-    let report = run(&FakeSubject::new(Defects {
-        compaction: CompactionDefect::IdentityMismatchUnderAnotherCode,
-        ..Defects::default()
-    }))
-    .await;
-    let reason = failed(&report, "compaction_setup_route_session_matches_setup");
-    assert!(
-        reason.contains("a Setup refused setup_identity_mismatch"),
-        "{reason}"
-    );
-}
-
-#[tokio::test]
-async fn compaction_shared_project_route_with_runner_harness_passes_identity_case() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.compaction_route_mode = CompactionRouteMode::SharedProject;
-    let report = run(&subject).await;
-    assert_passed(&report, "compaction_setup_route_session_matches_setup");
-}
-
-#[tokio::test]
-async fn compaction_setup_rerun_fails_only_setup_durability() {
-    compaction_break(
-        CompactionDefect::RerunRecordedSetup,
-        "compaction_setup_durable_once",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn compaction_setup_sender_driven_recovery_passes() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.seal_compaction_setup_crash = true;
-    let report = run(&subject).await;
-    for name in COMPACTION_CASES {
-        assert_passed(&report, name);
-    }
-    assert_others_passed(&report, &[]);
-}
-
-async fn compaction_sender_driven_break(defect: CompactionDefect, reason: &str) {
-    let mut subject = FakeSubject::new(Defects {
-        compaction: defect,
-        ..Defects::default()
-    });
-    subject.seal_compaction_setup_crash = true;
-    let report = run(&subject).await;
-    let failure = failed(&report, "compaction_setup_durable_once");
-    assert!(failure.contains(reason), "{failure}");
-    assert_others_passed(&report, &["compaction_setup_durable_once"]);
-}
-
-/// A runner whose crash recovery seals the Setup run in the background reads
-/// `active` for a few `session.head` reads after the restart before it reads
-/// `interrupted`. The case waits for it to settle, sends the continuation and
-/// passes; a single read would have taken the resumed-on-its-own branch and
-/// found no model request.
-#[tokio::test]
-async fn compaction_setup_background_seal_passes() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.seal_compaction_setup_crash = true;
-    subject.setup_crash_active_reads = 3;
-    let report = run(&subject).await;
-    for name in COMPACTION_CASES {
-        assert_passed(&report, name);
-    }
-    assert_others_passed(&report, &[]);
-}
-
-/// A runner whose recovered Setup run stays `active` with no model request
-/// fails the Setup durability case by name, saying the state it stayed in.
-#[tokio::test]
-async fn compaction_setup_recovery_never_settling_fails_only_setup_durability() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.seal_compaction_setup_crash = true;
-    subject.setup_crash_active_reads = usize::MAX;
-    let report = run(&subject).await;
-    let failure = failed(&report, "compaction_setup_durable_once");
-    assert!(
-        failure.contains("did not settle") && failure.contains("last seen active"),
-        "{failure}"
-    );
-    assert_others_passed(&report, &["compaction_setup_durable_once"]);
-}
-
-#[tokio::test]
-async fn compaction_setup_sender_driven_rerun_fails_only_setup_durability() {
-    compaction_sender_driven_break(CompactionDefect::RerunSetupOnResumeSend, "Setup was re-run")
-        .await;
-}
-
-#[tokio::test]
-async fn compaction_setup_sender_driven_changed_view_fails_only_setup_durability() {
-    compaction_sender_driven_break(
-        CompactionDefect::ChangeSetupResumeView,
-        "content at message 1 differs",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn compaction_setup_unexpected_recovery_state_fails_only_setup_durability() {
-    compaction_sender_driven_break(
-        CompactionDefect::CancelSetupCrash,
-        "unexpected run state cancelled",
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn compaction_insertion_after_message_fails_only_model_ranges() {
-    compaction_break(
-        CompactionDefect::InsertionAfterMessage,
-        "model_view_half_open_ranges_and_travel",
-    )
-    .await;
-}
-#[tokio::test]
-async fn compaction_unavailable_as_refusal_fails_only_refusals() {
-    compaction_break(
-        CompactionDefect::UnavailableAsRefusal,
-        "compaction_unavailable_distinct_from_refuse",
-    )
-    .await;
-}
-#[tokio::test]
-async fn compaction_finer_code_replaces_role_code_fails_only_refusals() {
-    compaction_break(
-        CompactionDefect::FinerCodeReplacesRoleCode,
-        "compaction_unavailable_distinct_from_refuse",
-    )
-    .await;
-}
-#[tokio::test]
-async fn compaction_missing_groups_are_not_applicable_by_name() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.capabilities.remove(&Capability::Compaction);
-    subject.capabilities.remove(&Capability::ModelView);
-    let report = run(&subject).await;
-    for name in COMPACTION_CASES {
-        assert!(
-            matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::Compaction)),
-            "{name}: {:?}",
-            report.outcome(name)
-        );
-        assert!(report
-            .render()
-            .lines()
-            .any(|line| line.starts_with(&format!("N/A  {name} "))));
-    }
-}
-
-#[tokio::test]
-async fn compaction_model_view_missing_is_not_applicable_independently() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.capabilities.remove(&Capability::ModelView);
-    let report = run(&subject).await;
-    for name in COMPACTION_CASES {
-        if *name == "compaction_unavailable_distinct_from_refuse"
-            || *name == "compaction_setup_route_session_matches_setup"
-            || *name == "session_ref_uses_runner_identity"
-        {
-            assert_passed(&report, name);
-        } else {
-            assert_eq!(
-                report.outcome(name),
-                Some(&CaseOutcome::Skipped {
-                    missing: vec![Capability::ModelView]
-                })
-            );
-            assert!(report
-                .render()
-                .lines()
-                .any(|line| line.starts_with(&format!("N/A  {name} "))));
-        }
     }
 }
 
@@ -2532,17 +2338,6 @@ async fn run_attribution_tool_result_final_fails_by_name() {
     }))
     .await;
     assert!(failed(&report, "run_attribution_per_message").contains("durable terminal=true"));
-}
-
-/// A runner may accept a send and end the run a moment later, so a read immediately
-/// after the send can still say `active`. The compaction cases that assert how
-/// a run ended must wait for the end rather than read once.
-#[tokio::test]
-async fn compaction_cases_wait_for_a_run_reported_ended_late() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.late_seal_reads = 3;
-    let report = run(&subject).await;
-    assert_passed(&report, "compaction_unavailable_distinct_from_refuse");
 }
 
 const BOUNDARY_CANCEL_CASES: &[&str] = &[
@@ -3155,7 +2950,6 @@ async fn only_these_fail(
     }
 }
 
-const TAG_PREFIXES: &[&str] = &["tags_"];
 const TOOL_CALL_PREFIXES: &[&str] = &["run_tool_calls_"];
 const ORDER_PREFIXES: &[&str] = &["delivery_order_"];
 const USAGE_PREFIXES: &[&str] = &["run_usage_"];
@@ -3552,64 +3346,6 @@ async fn head_sender_respects_supported_mode_narrowing() {
     }
 }
 
-async fn incarnation_defect(defects: Defects, expected: Option<&str>) {
-    let mut subject = FakeSubject::new(defects);
-    subject.incarnation_fixtures = true;
-    let report = run(&subject).await;
-    let name = "head_incarnation_survives_cut_and_changes_on_recreation";
-    if let Some(reason) = expected {
-        assert!(
-            failed(&report, name).contains(reason),
-            "{}",
-            report.render()
-        );
-    } else {
-        assert_eq!(
-            report.outcome(name),
-            Some(&CaseOutcome::Passed),
-            "{}",
-            report.render()
-        );
-    }
-}
-
-#[tokio::test]
-async fn incarnation_correct_runner_passes() {
-    incarnation_defect(Defects::default(), None).await;
-}
-
-#[tokio::test]
-async fn incarnation_changed_at_cut_fails_by_name() {
-    incarnation_defect(
-        Defects {
-            incarnation_changes_on_cut: true,
-            ..Defects::default()
-        },
-        Some("cut changed incarnation"),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn incarnation_reused_after_recreation_fails_by_name() {
-    incarnation_defect(
-        Defects {
-            incarnation_reused_on_recreation: true,
-            ..Defects::default()
-        },
-        Some("re-created log kept or omitted incarnation"),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn incarnation_default_hooks_are_inapplicable() {
-    let report = run(&FakeSubject::new(Defects::default())).await;
-    assert!(
-        matches!(report.outcome("head_incarnation_survives_cut_and_changes_on_recreation"), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter cannot cut the incarnation log")
-    );
-}
-
 async fn session_usage_defect(defects: Defects, expected: Option<&str>) {
     let mut subject = declaring(Capability::SessionUsage, defects);
     subject.capabilities.insert(Capability::RunUsage);
@@ -3862,68 +3598,6 @@ async fn without_send_status_its_cases_skip_by_name_and_the_resend_case_still_ru
     assert_eq!(report.outcome(RESEND_CASE), Some(&CaseOutcome::Passed));
 }
 
-/// The tags case reads the `StepRecorded` scenario: a seal that drops the
-/// step moves the session to a new lineage, whose numbers may repeat the
-/// dropped part's; resolve answers the part the new lineage shows.
-#[tokio::test]
-async fn a_dropped_step_resolves_in_the_new_lineage_and_resolving_old_content_fails_by_name() {
-    for recovery in [StepRecovery::SealDropStep, StepRecovery::SealDropCall] {
-        let mut subject = FakeSubject::new(Defects::default());
-        subject.step_recovery = recovery;
-        let report = run(&subject).await;
-        assert_eq!(
-            report.outcome(LEFT_LINEAGE_CASE),
-            Some(&CaseOutcome::Passed),
-            "{recovery:?}: {}",
-            report.render()
-        );
-        assert_passed(&report, "crash_at_StepRecorded");
-    }
-
-    let mut subject = FakeSubject::new(Defects {
-        resolve_left_lineage_tags: true,
-        ..Defects::default()
-    });
-    subject.step_recovery = StepRecovery::SealDropStep;
-    let report = run(&subject).await;
-    let reason = failed(&report, LEFT_LINEAGE_CASE);
-    assert!(
-        reason.contains("never the one the session left"),
-        "{reason}"
-    );
-    assert_passed(&report, "crash_at_StepRecorded");
-    assert_passed(&report, "tags_resolve_unknown_tag_refused");
-}
-
-/// Without a seal that leaves a lineage, the left-lineage case has nothing
-/// to ask and says so by name; without `tags` it is skipped.
-#[tokio::test]
-async fn without_a_new_lineage_the_left_lineage_case_is_inapplicable() {
-    for recovery in [StepRecovery::Resume, StepRecovery::SealInterrupted] {
-        let mut subject = FakeSubject::new(Defects::default());
-        subject.step_recovery = recovery;
-        let report = run(&subject).await;
-        match report.outcome(LEFT_LINEAGE_CASE) {
-            Some(CaseOutcome::Inapplicable { reason }) => {
-                assert!(reason.contains("no lineage"), "{recovery:?}: {reason}")
-            }
-            other => panic!("{recovery:?}: {other:?}"),
-        }
-    }
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.step_recovery = StepRecovery::SealDropStep;
-    subject.capabilities.remove(&Capability::Compaction);
-    subject.capabilities.remove(&Capability::TagCheckpoint);
-    subject.capabilities.remove(&Capability::Tags);
-    let report = run(&subject).await;
-    assert_eq!(
-        report.outcome(LEFT_LINEAGE_CASE),
-        Some(&CaseOutcome::Skipped {
-            missing: vec![Capability::Tags]
-        })
-    );
-}
-
 #[tokio::test]
 async fn a_faithful_usage_runner_passes_the_usage_cases() {
     only_these_fail(
@@ -3981,425 +3655,6 @@ async fn run_status_carries_the_same_usage_as_run_result() {
     subject.advertise_status = true;
     let report = run(&subject).await;
     assert_passed(&report, "run_usage_counts_reported_steps");
-}
-
-#[tokio::test]
-async fn a_tagging_runner_passes_the_tags_cases() {
-    only_these_fail(Capability::Tags, TAG_PREFIXES, Defects::default(), &[]).await;
-    let report = run(&declaring(Capability::Tags, Defects::default())).await;
-    for name in [
-        "tags_numbered_in_rendered_order",
-        "tags_renumbering_waits_for_the_step_boundary",
-        "tags_count_only_parts_rendered_with_a_number",
-        "tags_setup_checkpoint_anchors_at_its_cut",
-        "tags_fork_of_a_managed_session_refused",
-        "tags_model_written_tags_cleaned_on_exposure",
-    ] {
-        assert!(
-            matches!(
-                report.outcome(name),
-                Some(CaseOutcome::Passed | CaseOutcome::PassedWithInapplicableRule { .. })
-            ),
-            "{name}: {:?}",
-            report.outcome(name)
-        );
-    }
-}
-
-/// The cases that read which parts carry a number, each of which must
-/// accept both layouts.
-const PART_COUNTING_CASES: [&str; 3] = [
-    "tags_on_every_read_entry",
-    "tags_count_only_parts_rendered_with_a_number",
-    "tags_tool_result_blocks_share_one_number",
-];
-
-#[tokio::test]
-async fn tool_result_numbering_rejects_every_text_numbered() {
-    only_these_fail(
-        Capability::Tags,
-        TAG_PREFIXES,
-        Defects {
-            tags_number_every_text: true,
-            ..Defects::default()
-        },
-        &[(
-            "tags_tool_result_blocks_share_one_number",
-            "text_image_text: rendered numbers",
-        )],
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn tool_result_numbering_rejects_empty_block_numbered() {
-    only_these_fail(
-        Capability::Tags,
-        TAG_PREFIXES,
-        Defects {
-            tags_number_empty_block: true,
-            ..Defects::default()
-        },
-        &[(
-            "tags_tool_result_blocks_share_one_number",
-            "empty_text_then_text: number is not on the first non-empty text",
-        )],
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn tool_result_numbering_rejects_pdf_image_label() {
-    only_these_fail(
-        Capability::Tags,
-        TAG_PREFIXES,
-        Defects {
-            tags_pdf_image_label: true,
-            ..Defects::default()
-        },
-        &[(
-            "tags_tool_result_blocks_share_one_number",
-            "pdf: number is not on the first non-empty text or correct label",
-        )],
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn tool_result_numbering_rejects_structured_value_counted() {
-    only_these_fail(
-        Capability::Tags,
-        TAG_PREFIXES,
-        Defects {
-            tags_count_structured_result: true,
-            ..Defects::default()
-        },
-        &[(
-            "tags_tool_result_blocks_share_one_number",
-            "structured_only: whole result number",
-        )],
-    )
-    .await;
-}
-
-/// A tagging fake in an embedded layout, as OpenCode's: a call's result is
-/// stored in the requesting entry's tool part, so that entry carries two
-/// numbers, its text's and its tool part's. `tool_calls` also declares
-/// `run_tool_calls`, so the case locates the result through `result_ordinal`
-/// rather than the result's marker.
-fn embedded_tags_runner(defects: Defects, tool_calls: bool) -> FakeSubject {
-    let mut subject = declaring(
-        Capability::Tags,
-        Defects {
-            run_tool_calls_embedded_results: true,
-            ..defects
-        },
-    );
-    if tool_calls {
-        subject.capabilities.insert(Capability::RunToolCalls);
-    }
-    subject
-}
-
-#[tokio::test]
-async fn an_embedded_layout_runner_passes_the_part_counting_cases() {
-    for tool_calls in [false, true] {
-        let report = run(&embedded_tags_runner(Defects::default(), tool_calls)).await;
-        for name in PART_COUNTING_CASES {
-            assert_eq!(
-                report.outcome(name),
-                Some(&CaseOutcome::Passed),
-                "{name} (run_tool_calls declared: {tool_calls})\n{}",
-                report.render()
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn marker_free_media_results_pass_whole_result_numbering() {
-    use cortexkit_role_llm_runner::tags::ToolResultBlock::{Image, Media, Text};
-    use cortexkit_role_llm_runner_conformance::LlmRunnerSubject;
-
-    for embedded in [false, true] {
-        let mut subject = declaring(
-            Capability::Tags,
-            Defects {
-                run_tool_calls_embedded_results: embedded,
-                ..Defects::default()
-            },
-        );
-        subject.capabilities.insert(Capability::RunToolCalls);
-        for blocks in [vec![Media], vec![Image, Media], vec![Text(""), Media]] {
-            let result = subject
-                .numbering_tool_result("absent-media-marker", &blocks)
-                .unwrap();
-            assert!(!result.to_string().contains("absent-media-marker"));
-        }
-        let report = run(&subject).await;
-        assert_eq!(
-            report.outcome("tags_tool_result_blocks_share_one_number"),
-            Some(&CaseOutcome::Passed),
-            "embedded={embedded}\n{}",
-            report.render()
-        );
-    }
-}
-
-#[tokio::test]
-async fn marker_results_without_call_ids_use_marker_fallback() {
-    use cortexkit_role_llm_runner::tags::ToolResultBlock::{Image, Media, Text};
-    use cortexkit_role_llm_runner_conformance::LlmRunnerSubject;
-
-    let subject = embedded_tags_runner(
-        Defects {
-            tags_marker_only_results: true,
-            ..Defects::default()
-        },
-        true,
-    );
-    for blocks in [vec![Media], vec![Image, Media], vec![Text(""), Media]] {
-        let result = subject
-            .numbering_tool_result("present-media-marker", &blocks)
-            .unwrap();
-        assert!(result.to_string().contains("present-media-marker"));
-    }
-    let report = run(&subject).await;
-    assert_eq!(
-        report.outcome("tags_tool_result_blocks_share_one_number"),
-        Some(&CaseOutcome::Passed),
-        "{}",
-        report.render()
-    );
-}
-
-#[tokio::test]
-async fn a_message_array_runner_declaring_run_tool_calls_passes_the_part_counting_cases() {
-    let mut subject = declaring(Capability::Tags, Defects::default());
-    subject.capabilities.insert(Capability::RunToolCalls);
-    let report = run(&subject).await;
-    for name in PART_COUNTING_CASES {
-        assert_eq!(
-            report.outcome(name),
-            Some(&CaseOutcome::Passed),
-            "{name}\n{}",
-            report.render()
-        );
-    }
-}
-
-#[tokio::test]
-async fn an_embedded_runner_leaving_its_result_part_unnumbered_fails_by_name() {
-    for tool_calls in [false, true] {
-        let defects = Defects {
-            tags_embedded_result_unnumbered: true,
-            ..Defects::default()
-        };
-        let report = run(&embedded_tags_runner(defects, tool_calls)).await;
-        let reason = failed(&report, "tags_count_only_parts_rendered_with_a_number");
-        assert!(
-            reason.contains("holds the tool call's result and carries no number"),
-            "{reason}"
-        );
-        assert_passed(&report, "tags_on_every_read_entry");
-    }
-}
-
-/// A message-array runner stores a call's text result in a tool-result
-/// entry of its own; leaving that entry unnumbered fails the counted-parts
-/// case by name, whether the case finds the entry through `result_ordinal`
-/// (`run_tool_calls` declared) or through the result's marker. The same
-/// runner without the defect passes, naming the image rule it could not
-/// check.
-#[tokio::test]
-async fn a_message_array_runner_leaving_its_result_entry_unnumbered_fails_by_name() {
-    for tool_calls in [false, true] {
-        for defective in [false, true] {
-            let mut subject = declaring(
-                Capability::Tags,
-                Defects {
-                    tags_tool_result_entry_unnumbered: defective,
-                    ..Defects::default()
-                },
-            );
-            subject.no_image_results = true;
-            if tool_calls {
-                subject.capabilities.insert(Capability::RunToolCalls);
-            }
-            let report = run(&subject).await;
-            let name = "tags_count_only_parts_rendered_with_a_number";
-            if defective {
-                let reason = failed(&report, name);
-                assert!(
-                    reason.contains("holds the tool call's result and carries no number"),
-                    "run_tool_calls declared: {tool_calls}: {reason}"
-                );
-            } else {
-                assert!(
-                    matches!(
-                        report.outcome(name),
-                        Some(CaseOutcome::PassedWithInapplicableRule { .. })
-                    ),
-                    "run_tool_calls declared: {tool_calls}: {:?}",
-                    report.outcome(name)
-                );
-            }
-        }
-    }
-}
-
-/// Each defect fails its named rule. Restarting numbering every run also
-/// breaks the lost-key case, whose setup spans runs; other tag cases pass.
-#[tokio::test]
-async fn each_tags_defect_fails_its_case_by_name() {
-    let cases: &[(Defects, &str, &str)] = &[
-        (
-            Defects {
-                tags_restart_each_run: true,
-                ..Defects::default()
-            },
-            "tags_numbers_stable_within_a_lineage",
-            "used twice",
-        ),
-        (
-            Defects {
-                tags_exposed_raw: true,
-                ..Defects::default()
-            },
-            "tags_model_written_tags_cleaned_on_exposure",
-            "cleaned on every exposure",
-        ),
-        (
-            Defects {
-                tags_numbered_in_storage_order: true,
-                ..Defects::default()
-            },
-            "tags_numbered_in_rendered_order",
-            "never in storage order",
-        ),
-        (
-            Defects {
-                tags_renumber_mid_step: true,
-                ..Defects::default()
-            },
-            "tags_renumbering_waits_for_the_step_boundary",
-            "still held",
-        ),
-        (
-            Defects {
-                tags_renumber_without_new_lineage: true,
-                ..Defects::default()
-            },
-            "tags_renumbering_waits_for_the_step_boundary",
-            "starts a new lineage",
-        ),
-        (
-            Defects {
-                tags_count_reasoning: true,
-                ..Defects::default()
-            },
-            "tags_count_only_parts_rendered_with_a_number",
-            "only its text counts",
-        ),
-        (
-            Defects {
-                tags_numbered_without_render_tags: true,
-                ..Defects::default()
-            },
-            "tags_only_on_tag_rendering_sessions",
-            "numbering applies only to sessions whose plan renders tags",
-        ),
-        (
-            Defects {
-                tags_setup_checkpoint_ignored: true,
-                ..Defects::default()
-            },
-            "tags_setup_checkpoint_anchors_at_its_cut",
-            "numbering starts after the checkpoint",
-        ),
-        (
-            Defects {
-                fork_accepted: true,
-                ..Defects::default()
-            },
-            "tags_fork_of_a_managed_session_refused",
-            "not refused",
-        ),
-        (
-            Defects {
-                tags_count_only_rendered_parts: true,
-                ..Defects::default()
-            },
-            "tags_lost_marker_key_keeps_numbers",
-            "fallback counts every part",
-        ),
-        (
-            Defects {
-                host_seam_not_cleaning: true,
-                ..Defects::default()
-            },
-            "tags_host_store_cleaned_at_the_save_seam",
-            "save seam",
-        ),
-    ];
-    for (defects, case, text) in cases {
-        let mut expected = vec![(*case, *text)];
-        if defects.tags_restart_each_run {
-            expected.push(("tags_lost_marker_key_keeps_numbers", "used twice"));
-        }
-        only_these_fail(Capability::Tags, TAG_PREFIXES, *defects, &expected).await;
-    }
-}
-
-/// A runner whose fresh session's first Setup runs at send admission, before
-/// any message is written, names no `newest` on that Setup, so the Setup
-/// checkpoint has no cut to anchor. The checkpoint case is then
-/// inapplicable, and every other case's verdict is unchanged.
-#[tokio::test]
-async fn admission_setup_without_newest_leaves_checkpoint_case_inapplicable() {
-    const CASE: &str = "tags_setup_checkpoint_anchors_at_its_cut";
-    const REASON: &str = "the runner runs a fresh session's first Setup at send admission, before \
-         writing any message, so that Setup names no `newest` and has no cut to anchor; a Setup \
-         checkpoint only reaches moved sessions, which the message_checkpoint cases cover";
-    let mut subject = declaring(Capability::Tags, Defects::default());
-    subject.first_setup_names_newest = false;
-    let report = run(&subject).await;
-    assert_eq!(
-        report.outcome(CASE),
-        Some(&CaseOutcome::Inapplicable {
-            reason: REASON.into()
-        }),
-        "{CASE}\n{}",
-        report.render()
-    );
-    let reference = run(&declaring(Capability::Tags, Defects::default())).await;
-    for spec in CASES {
-        if spec.name == CASE {
-            continue;
-        }
-        assert_eq!(
-            report.outcome(spec.name),
-            reference.outcome(spec.name),
-            "{}",
-            spec.name
-        );
-    }
-    assert_none_failed_but(&report, &[]);
-}
-
-/// With `structured_output` declared, the cleaning case also checks that a
-/// structured-output run's final text stays raw.
-#[tokio::test]
-async fn a_structured_output_runner_keeps_its_final_text_raw() {
-    let mut subject = declaring(Capability::StructuredOutput, Defects::default());
-    subject.capabilities.insert(Capability::Tags);
-    let report = run(&subject).await;
-    assert_eq!(
-        report.outcome("tags_model_written_tags_cleaned_on_exposure"),
-        Some(&CaseOutcome::Passed),
-        "{}",
-        report.render()
-    );
 }
 
 /// A host turn that creates no run fails the adopt host-turn case by name.
@@ -4684,14 +3939,6 @@ async fn without_the_new_groups_their_cases_skip_by_name() {
 }
 
 #[tokio::test]
-async fn a_ceiling_wait_reads_as_waiting_and_ends_either_way() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.advertise_status = true;
-    let report = run(&subject).await;
-    assert_passed(&report, "run_context_ceiling_wait_is_not_a_stall");
-}
-
-#[tokio::test]
 async fn a_read_serving_live_host_metadata_fails_the_stability_case() {
     let report = run(&FakeSubject::new(Defects {
         read_serves_live_host_metadata: true,
@@ -4712,7 +3959,7 @@ async fn a_drop_recovery_keeping_its_lineage_fails_the_step_recorded_crash_case(
         subject.step_recovery = recovery;
         let report = run(&subject).await;
         let reason = failed(&report, "crash_at_StepRecorded");
-        assert!(reason.contains("new lineage"), "{recovery:?}: {reason}");
+        assert!(reason.contains("history_version"), "{recovery:?}: {reason}");
     }
 }
 
@@ -4740,7 +3987,6 @@ const RUN_PARAMETER_CASES: &[&str] = &[
 const SERVICE_TIER_CASES: &[&str] = &[
     "service_tier_unsupported_before_model",
     "service_tier_run_fixed",
-    "service_tier_ride_before_changed_request",
     "service_tier_unknown_never_echoed",
 ];
 
@@ -4808,13 +4054,12 @@ async fn service_tier_faulty_runner_changes_running_tier_fails_by_name() {
 }
 
 #[tokio::test]
-async fn service_tier_faulty_runner_rides_after_request_fails_by_name() {
-    tier_fault(fake::ServiceTierDefect::LateRide, SERVICE_TIER_CASES[2]).await;
-}
-
-#[tokio::test]
 async fn service_tier_faulty_runner_echoes_applied_as_served_fails_by_name() {
-    tier_fault(fake::ServiceTierDefect::EchoServed, SERVICE_TIER_CASES[3]).await;
+    tier_fault(
+        fake::ServiceTierDefect::EchoServed,
+        "service_tier_unknown_never_echoed",
+    )
+    .await;
 }
 
 fn run_parameters(defects: Defects) -> FakeSubject {
@@ -5270,69 +4515,11 @@ async fn user_command_crash_faults_fail_by_name() {
 }
 
 #[tokio::test]
-async fn standalone_refusal_hands_off_only_before_service() {
-    let mut subject = FakeSubject::new(Defects::default());
-    subject.standalone_in_process = true;
-    assert_passed(
-        &run(&subject).await,
-        "compaction_standalone_refusal_lifecycle",
-    );
-    for defect in [
-        CompactionDefect::StandaloneNoHandoff,
-        CompactionDefect::StandaloneLateHandoff,
-    ] {
-        let mut subject = FakeSubject::new(Defects {
-            compaction: defect,
-            ..Defects::default()
-        });
-        subject.standalone_in_process = true;
-        let report = run(&subject).await;
-        let reason = failed(&report, "compaction_standalone_refusal_lifecycle");
-        assert!(reason.contains("standalone"), "{reason}");
-    }
-}
-
-#[tokio::test]
 async fn user_command_cutoff_defect_fails_after_forward_by_name() {
     let report = run(&command_subject(Some("cutoff_failed"))).await;
     let reason = failed(&report, "user_commands_cutoff_after_forward");
     assert!(reason.contains("outcome_unknown"), "{reason}");
     assert_passed(&report, "user_commands_cutoff_before_forward");
-}
-
-#[tokio::test]
-async fn descriptor_defects_fail_their_cases_by_name() {
-    for (defect, case) in [
-        ("base64", "media_descriptors_image_bytes"),
-        ("nested_base64", "media_descriptors_nested_media"),
-        ("head_boundary", "media_descriptors_utf8_head"),
-        ("pairing", "media_descriptors_pairing"),
-        ("hash_descriptor", "media_descriptors_full_content_digests"),
-        ("part_key", "media_descriptors_part_keys"),
-        (
-            "model_view_descriptors",
-            "media_descriptors_model_view_refused",
-        ),
-        ("page_position", "media_descriptors_stable_across_pages"),
-        ("smallest_first", "media_descriptors_frame_budget"),
-    ] {
-        let mut subject = FakeSubject::new(Defects {
-            media: Some(defect),
-            ..Defects::default()
-        });
-        subject.descriptor_fixtures = true;
-        subject.descriptor_case = Some(case);
-        let report = run(&subject).await;
-        let reason = failed(&report, case);
-        if defect == "smallest_first" {
-            assert!(
-                reason.contains("largest-first") && reason.contains("[0, 2, 4]"),
-                "{reason}"
-            );
-        }
-        eprintln!("{defect}: {case} failed: {reason}");
-        assert_passed(&report, "tags_numbers_stable_within_a_lineage");
-    }
 }
 
 /// The pairing case's call carries arguments over the inline limit with
@@ -5367,10 +4554,7 @@ async fn descriptor_provider_rows_reject_an_omitted_untagged_tool_call_tag_row()
     subject.descriptor_case = Some("media_descriptors_provider_rows");
     let report = run(&subject).await;
     let reason = failed(&report, "media_descriptors_provider_rows");
-    assert!(
-        reason.contains("part_digests keys do not match tags rows in order"),
-        "{reason}"
-    );
+    assert!(reason.contains("part_digests row count"), "{reason}");
     let failures = report
         .cases
         .iter()
@@ -5407,22 +4591,6 @@ async fn mixed_size_fallback_frame_budget_case() {
     subject.descriptor_case = Some("media_descriptors_frame_budget");
     let report = run(&subject).await;
     assert_passed(&report, "media_descriptors_frame_budget");
-}
-
-/// These two controls use the production tag primitives through the fake's
-/// live route, not a second implementation of either rule.
-#[tokio::test]
-async fn shared_tag_rules_control_keeps_structured_output_raw() {
-    let mut subject = declaring(Capability::StructuredOutput, Defects::default());
-    subject.capabilities.insert(Capability::Tags);
-    let report = run(&subject).await;
-    assert_passed(&report, "tags_model_written_tags_cleaned_on_exposure");
-}
-
-#[tokio::test]
-async fn shared_tag_rules_control_numbers_in_rendered_order() {
-    let report = run(&declaring(Capability::Tags, Defects::default())).await;
-    assert_passed(&report, "tags_numbered_in_rendered_order");
 }
 
 /// The cases where a step reaches `max_steps` without the limit cutting
@@ -5795,20 +4963,6 @@ async fn refresh_relaunch_old_tools_with_new_generation_fails_by_name() {
     );
 }
 
-#[tokio::test]
-async fn refresh_relaunch_ride_after_request_fails_by_name() {
-    let report = run(&relaunching(Defects {
-        relaunch_omits_ride: true,
-        ..Defects::default()
-    }))
-    .await;
-    assert!(
-        failed(&report, "refresh_relaunch_preserves_runs_and_history")
-            .contains("before the first new-tools")
-    );
-    assert_none_failed_but(&report, &["refresh_relaunch_preserves_runs_and_history"]);
-}
-
 fn changing(defects: Defects) -> FakeSubject {
     declaring(Capability::SessionChange, defects)
 }
@@ -6011,44 +5165,18 @@ async fn a_host_set_checked_by_name_only_fails_the_host_set_case() {
     .await;
 }
 
-/// The cut cases.
-const CUT_CASES: &[&str] = &[
-    "cut_starts_a_new_lineage",
-    "old_lineage_reads_refused_after_a_cut",
-    "read_below_first_ordinal_refused",
-    "ordinals_never_renumber_across_a_cut",
-    "setup_once_per_lineage",
-    "view_ranges_start_at_first_ordinal",
-    "cut_lineage_notice_descends_from",
-    "head_names_the_cut",
-    "notice_carries_first_ordinal",
-    "revert_below_the_cut_restarts_at_the_previous_cut",
-    "revert_below_a_cut_before_adoption_has_no_descent",
-    "checkpoint_on_descending_setup_refused",
-    "cut_setup_leaves_reads_alone",
-    "cut_numbering_continues_from_the_old_lineage",
-];
-
-/// The cut case that needs a host cut before adoption, which the fake
-/// gives only with its host-history hook.
-const HOST_CUT_CASE: &str = "revert_below_a_cut_before_adoption_has_no_descent";
-
 /// The `host_history` cases.
 const HISTORY_CASES: &[&str] = &[
     "history_pages_back_to_the_first_message",
     "history_mid_matches_read",
-    "history_no_tags_below_first_ordinal",
-    "history_ordinal_kept_below_the_cut",
-    "history_cursor_survives_a_cut",
     "history_never_serves_a_reverted_branch",
     "history_cursor_expired_after_a_revert_past_it",
     "history_boundary_order",
-    "history_before_mid_continues_below_the_window",
-    "history_version_unchanged_by_a_cut",
+    "history_before_mid_reaches_host_prefix",
     "history_version_rises_at_a_revert",
     "history_from_ordinal_and_before_ordinal",
     "history_unknown_ordinal_refused",
-    "history_before_lowest_ordinal_reaches_unnumbered_entries",
+    "history_before_ordinal_reaches_host_prefix",
 ];
 
 /// A fake that declares `host_history` and can seed host history; with
@@ -6062,26 +5190,7 @@ fn history_subject(defect: LineageDefect, prefix: u64) -> FakeSubject {
     subject.capabilities.insert(Capability::HostHistory);
     subject.host_prefix_hook = true;
     subject.host_prefix_everywhere = prefix;
-    subject.holds_reads_during_setup = true;
     subject
-}
-
-/// The reference fake, with and without a host-served prefix that has no
-/// ordinals, passes every cut and history case, and every other case too.
-#[tokio::test]
-async fn lineage_and_history_reference_fakes_pass_every_case() {
-    for prefix in [0, 3] {
-        let report = run(&history_subject(LineageDefect::None, prefix)).await;
-        for name in CUT_CASES.iter().chain(HISTORY_CASES) {
-            assert_eq!(
-                report.outcome(name),
-                Some(&CaseOutcome::Passed),
-                "{name} with a host prefix of {prefix}\n{}",
-                report.render()
-            );
-        }
-        assert_others_passed(&report, &[]);
-    }
 }
 
 /// Without the hooks a history case needs, it is inapplicable by name,
@@ -6093,7 +5202,7 @@ async fn history_cases_without_their_hooks_are_inapplicable() {
     let report = run(&subject).await;
     for name in [
         "history_boundary_order",
-        "history_before_mid_continues_below_the_window",
+        "history_before_mid_reaches_host_prefix",
     ] {
         assert!(
             matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("host history")),
@@ -6135,87 +5244,7 @@ async fn lineage_break(subject: FakeSubject, case: &str, family: &[&str]) -> Str
 }
 
 fn family() -> Vec<&'static str> {
-    CUT_CASES.iter().chain(HISTORY_CASES).copied().collect()
-}
-
-#[tokio::test]
-async fn a_cut_that_keeps_the_lineage_fails_the_new_lineage_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::CutKeepsLineage, 0),
-        "cut_starts_a_new_lineage",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("kept lineage"), "{reason}");
-}
-
-#[tokio::test]
-async fn old_lineage_reads_served_after_a_cut_fail_the_old_lineage_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::OldLineageServedAfterCut, 0),
-        "old_lineage_reads_refused_after_a_cut",
-        &family(),
-    )
-    .await;
-    assert!(
-        reason.contains("not refused") || reason.contains("answered"),
-        "{reason}"
-    );
-}
-
-#[tokio::test]
-async fn reads_below_first_ordinal_served_fail_the_read_bound_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::BelowFirstOrdinalServed, 0),
-        "read_below_first_ordinal_refused",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("below first_ordinal"), "{reason}");
-}
-
-#[tokio::test]
-async fn ordinals_renumbered_at_a_cut_fail_the_renumbering_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::CutRenumbersOrdinals, 0),
-        "ordinals_never_renumber_across_a_cut",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("before the cut"), "{reason}");
-}
-
-#[tokio::test]
-async fn setup_once_per_session_fails_the_setup_per_lineage_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::SetupOncePerSession, 0),
-        "setup_once_per_lineage",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("Setup calls"), "{reason}");
-}
-
-#[tokio::test]
-async fn a_view_tiling_from_zero_accepted_fails_the_ranges_start_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::ViewFromZeroAccepted, 0),
-        "view_ranges_start_at_first_ordinal",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("ranges_start"), "{reason}");
-}
-
-#[tokio::test]
-async fn a_cut_notice_without_descent_fails_the_descent_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::CutNoticeWithoutDescent, 0),
-        "cut_lineage_notice_descends_from",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("descend"), "{reason}");
+    HISTORY_CASES.to_vec()
 }
 
 #[tokio::test]
@@ -6248,39 +5277,6 @@ async fn window_entries_served_from_the_host_fail_the_mid_case() {
     )
     .await;
     assert!(reason.contains("served differently"), "{reason}");
-}
-
-#[tokio::test]
-async fn tags_below_first_ordinal_fail_the_no_tags_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::HistoryTagsBelowFirst, 0),
-        "history_no_tags_below_first_ordinal",
-        HISTORY_CASES,
-    )
-    .await;
-    assert!(reason.to_lowercase().contains("tags"), "{reason}");
-}
-
-#[tokio::test]
-async fn ordinals_dropped_below_the_cut_fail_the_ordinal_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::HistoryDropsOrdinalsBelowCut, 0),
-        "history_ordinal_kept_below_the_cut",
-        HISTORY_CASES,
-    )
-    .await;
-    assert!(reason.contains("with ordinal None"), "{reason}");
-}
-
-#[tokio::test]
-async fn a_cursor_refused_after_a_cut_fails_the_cursor_survival_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::HistoryCursorLineageChanged, 0),
-        "history_cursor_survives_a_cut",
-        HISTORY_CASES,
-    )
-    .await;
-    assert!(reason.contains("lineage_changed"), "{reason}");
 }
 
 #[tokio::test]
@@ -6318,11 +5314,11 @@ async fn a_host_prefix_after_the_numbered_entries_fails_the_boundary_case() {
 async fn before_mid_answered_empty_fails_the_below_window_case() {
     let reason = lineage_break(
         history_subject(LineageDefect::HistoryBeforeMidEmpty, 0),
-        "history_before_mid_continues_below_the_window",
+        "history_before_mid_reaches_host_prefix",
         HISTORY_CASES,
     )
     .await;
-    assert!(reason.contains("answered 0 entries"), "{reason}");
+    assert!(reason.contains("omitted the host prefix"), "{reason}");
 }
 
 /// The cost case passes a runner whose step work does not grow with the
@@ -6348,61 +5344,6 @@ async fn per_step_cost_passes_a_flat_runner_and_fails_one_that_walks_history() {
 }
 
 #[tokio::test]
-async fn a_head_naming_the_first_retained_message_fails_the_head_cut_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::HeadCutNamesFirstRetained, 0),
-        "head_names_the_cut",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("folds"), "{reason}");
-}
-
-#[tokio::test]
-async fn notices_without_first_ordinal_fail_the_notice_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::NoticeWithoutFirstOrdinal, 0),
-        "notice_carries_first_ordinal",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("first_ordinal None"), "{reason}");
-}
-
-#[tokio::test]
-async fn a_revert_that_keeps_the_undone_cut_fails_the_revert_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::RevertKeepsTheCut, 0),
-        "revert_below_the_cut_restarts_at_the_previous_cut",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("first_ordinal is"), "{reason}");
-}
-
-#[tokio::test]
-async fn a_descent_invented_for_a_host_cut_fails_the_adoption_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::RevertInventsDescent, 0),
-        HOST_CUT_CASE,
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("descends from Some"), "{reason}");
-}
-
-#[tokio::test]
-async fn a_history_version_raised_at_a_cut_fails_the_cut_version_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::HistoryVersionBumpsAtCut, 0),
-        "history_version_unchanged_by_a_cut",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("moved history_version"), "{reason}");
-}
-
-#[tokio::test]
 async fn a_history_version_kept_at_a_revert_fails_the_revert_version_case() {
     let reason = lineage_break(
         history_subject(LineageDefect::HistoryVersionStaticAtRevert, 0),
@@ -6421,7 +5362,7 @@ async fn an_ordinal_seek_off_by_one_fails_the_seek_case() {
         &family(),
     )
     .await;
-    assert!(reason.contains("from_ordinal 2 served"), "{reason}");
+    assert!(reason.contains("from_ordinal 3 served"), "{reason}");
 }
 
 #[tokio::test]
@@ -6439,44 +5380,11 @@ async fn an_unknown_ordinal_answered_empty_fails_the_unknown_ordinal_case() {
 async fn before_the_lowest_ordinal_answered_empty_fails_the_unnumbered_case() {
     let reason = lineage_break(
         history_subject(LineageDefect::HistoryBeforeLowestOrdinalEmpty, 0),
-        "history_before_lowest_ordinal_reaches_unnumbered_entries",
+        "history_before_ordinal_reaches_host_prefix",
         &family(),
     )
     .await;
-    assert!(reason.contains("before_ordinal 0 served"), "{reason}");
-}
-
-#[tokio::test]
-async fn a_checkpoint_applied_on_a_descending_setup_fails_the_checkpoint_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::CheckpointOnDescentApplied, 0),
-        "checkpoint_on_descending_setup_refused",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("checkpoint_on_descent"), "{reason}");
-}
-
-#[tokio::test]
-async fn reads_held_during_a_cut_setup_fail_the_reads_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::ReadsHeldDuringCutSetup, 0),
-        "cut_setup_leaves_reads_alone",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("transient"), "{reason}");
-}
-
-#[tokio::test]
-async fn numbering_restarted_at_a_cut_fails_the_numbering_case() {
-    let reason = lineage_break(
-        history_subject(LineageDefect::CutRestartsNumbering, 0),
-        "cut_numbering_continues_from_the_old_lineage",
-        &family(),
-    )
-    .await;
-    assert!(reason.contains("renumbers nothing"), "{reason}");
+    assert!(reason.contains("newest counted host prefix"), "{reason}");
 }
 
 /// The display, client-message-id and live-event cases.
@@ -6637,13 +5545,6 @@ async fn live_ids_missing_groups_are_inapplicable_by_name() {
     }
 }
 
-/// The live `cache_ttl` cases.
-const CACHE_TTL_CASES: &[&str] = &[
-    "cache_ttl_entry_for_another_model_ignored",
-    "cache_ttl_configured_null_never_expires",
-    "cache_ttl_missed_model_change_falls_through_to_observed",
-];
-
 /// A fake declaring the display, client-message-id and live-event groups.
 fn displaying(defects: Defects) -> FakeSubject {
     let mut subject = FakeSubject::new(defects);
@@ -6660,7 +5561,7 @@ fn displaying(defects: Defects) -> FakeSubject {
 /// Each of `failing` failed, with a reason holding `says`, and every other
 /// display, live-event and `cache_ttl` case passed.
 fn fails_only(report: &SuiteReport, failing: &[&str], says: &str) {
-    for case in DISPLAY_AND_LIVE_CASES.iter().chain(CACHE_TTL_CASES) {
+    for case in DISPLAY_AND_LIVE_CASES {
         if failing.contains(case) {
             let reason = failed(report, case);
             assert!(reason.contains(says), "{case}: {reason}");
@@ -6946,41 +5847,6 @@ async fn a_seq_per_lane_fails_the_stream_order_case() {
     );
 }
 
-/// A fake declaring the display groups and judging the cache lifetime by
-/// the faulty `rule`.
-fn caching(rule: CacheTtlDefect) -> FakeSubject {
-    let mut subject = displaying(Defects::default());
-    subject.cache_ttl_defect = rule;
-    subject
-}
-
-#[tokio::test]
-async fn an_entry_used_for_another_model_fails_its_cache_ttl_case() {
-    let report = run(&caching(CacheTtlDefect::IgnoreModel)).await;
-    let reason = failed(&report, "cache_ttl_entry_for_another_model_ignored");
-    assert!(reason.contains("the model it names"), "{reason}");
-}
-
-#[tokio::test]
-async fn a_configured_null_read_as_absent_fails_its_cache_ttl_case() {
-    let report = run(&caching(CacheTtlDefect::NullAsAbsent)).await;
-    fails_only(
-        &report,
-        &["cache_ttl_configured_null_never_expires"],
-        "configured null",
-    );
-}
-
-#[tokio::test]
-async fn a_previous_model_lifetime_kept_fails_the_model_change_case() {
-    let report = run(&caching(CacheTtlDefect::KeepPrevious)).await;
-    fails_only(
-        &report,
-        &["cache_ttl_missed_model_change_falls_through_to_observed"],
-        "never keeps a previous model's value",
-    );
-}
-
 /// The `run_cause`, interrupt-grant, named-sender string and display
 /// `sender` cases.
 const SENDER_AND_CAUSE_CASES: &[&str] = &[
@@ -7142,12 +6008,7 @@ async fn without_interrupt_the_interrupt_cases_cannot_be_asked() {
 }
 
 /// The provider-set rewrite-ride wait cases.
-const RIDE_WAIT_CASES: &[&str] = &[
-    "ride_wait_provider_wait_honoured",
-    "ride_wait_slow_answer_reported",
-    "ride_wait_fast_answer_not_reported",
-    "ride_wait_above_cap_fails_setup",
-];
+const RIDE_WAIT_CASES: &[&str] = &[];
 
 /// Each of `failing` failed with a reason holding `says`, and every other
 /// ride-wait case passed.
@@ -7170,62 +6031,6 @@ fn only_ride_cases_fail(report: &SuiteReport, failing: &[&str], says: &str) {
 #[tokio::test]
 async fn a_faithful_runner_passes_the_ride_wait_cases() {
     only_ride_cases_fail(&run(&FakeSubject::new(Defects::default())).await, &[], "");
-}
-
-#[tokio::test]
-async fn a_fixed_ride_deadline_fails_the_provider_wait_case() {
-    let report = run(&FakeSubject::new(Defects {
-        ride_wait_fixed_deadline: true,
-        ..Defects::default()
-    }))
-    .await;
-    only_ride_cases_fail(
-        &report,
-        &["ride_wait_provider_wait_honoured"],
-        "as long as Setup's ride_wait_ms says",
-    );
-}
-
-#[tokio::test]
-async fn an_unreported_slow_ride_fails_the_report_case() {
-    let report = run(&FakeSubject::new(Defects {
-        ride_wait_never_reported: true,
-        ..Defects::default()
-    }))
-    .await;
-    only_ride_cases_fail(
-        &report,
-        &["ride_wait_slow_answer_reported"],
-        "never read compaction_wait",
-    );
-}
-
-#[tokio::test]
-async fn a_ride_reported_at_once_fails_the_fast_answer_case() {
-    let report = run(&FakeSubject::new(Defects {
-        ride_wait_reported_at_once: true,
-        ..Defects::default()
-    }))
-    .await;
-    only_ride_cases_fail(
-        &report,
-        &["ride_wait_fast_answer_not_reported"],
-        "is never reported",
-    );
-}
-
-#[tokio::test]
-async fn a_ride_wait_above_the_cap_accepted_fails_the_cap_case() {
-    let report = run(&FakeSubject::new(Defects {
-        ride_wait_cap_ignored: true,
-        ..Defects::default()
-    }))
-    .await;
-    only_ride_cases_fail(
-        &report,
-        &["ride_wait_above_cap_fails_setup"],
-        "failed Setup naming ride_wait_ms",
-    );
 }
 
 fn attachment_subject(defect: &'static str) -> FakeSubject {
@@ -7426,11 +6231,9 @@ fn output_refs_subject(defect: Option<&'static str>) -> FakeSubject {
         ..Defects::default()
     });
     subject.output_refs_group = true;
-    subject.capabilities.extend([
-        Capability::Tags,
-        Capability::HostHistory,
-        Capability::HistoryDisplay,
-    ]);
+    subject
+        .capabilities
+        .extend([Capability::HostHistory, Capability::HistoryDisplay]);
     subject
 }
 
@@ -8503,149 +7306,6 @@ async fn rich_ui_stamp_two_conflicting_values_accepted_fails_by_name() {
     let reason = failed(&report, RICH_UI_CONFLICT);
     assert!(reason.contains("was admitted"), "{reason}");
     assert_none_failed_but(&report, &[RICH_UI_CONFLICT]);
-}
-
-const MESSAGE_CHECKPOINT_CASES: &[&str] = &[
-    "message_checkpoint_numbering_starts_at_message_count",
-    "message_checkpoint_head_matches_certified_cut",
-    "message_checkpoint_anchors_after_folded_message",
-    "message_checkpoint_native_marker_carries_both_counters",
-    "message_checkpoint_missing_counter_is_not_zero",
-    "message_checkpoint_uncounted_rows_never_served",
-    "message_checkpoint_head_during_setup_uses_marker",
-    "message_checkpoint_read_during_adoption_setup",
-];
-
-#[tokio::test]
-async fn message_checkpoint_conforming_fake_passes_all_cases() {
-    let mut subject = declaring(Capability::MessageCheckpoint, Defects::default());
-    subject.capabilities.insert(Capability::HostHistory);
-    subject.holds_reads_during_setup = true;
-    let report = run(&subject).await;
-    for name in MESSAGE_CHECKPOINT_CASES {
-        assert_passed(&report, name);
-    }
-}
-
-#[tokio::test]
-async fn message_checkpoint_absent_is_inapplicable_and_preserves_verdict() {
-    let report = run(&FakeSubject::new(Defects::default())).await;
-    for name in MESSAGE_CHECKPOINT_CASES {
-        assert!(
-            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("does not declare message_checkpoint")),
-            "{name}: {:?}",
-            report.outcome(name)
-        );
-    }
-    let with = run(&declaring(
-        Capability::MessageCheckpoint,
-        Defects::default(),
-    ))
-    .await;
-    assert_eq!(report.verdict, with.verdict);
-}
-
-#[tokio::test]
-async fn message_checkpoint_default_hooks_are_inapplicable_by_name() {
-    let mut subject = declaring(Capability::MessageCheckpoint, Defects::default());
-    subject.message_checkpoint_hooks = false;
-    let report = run(&subject).await;
-    for name in MESSAGE_CHECKPOINT_CASES {
-        assert!(
-            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("adapter lacks")),
-            "{name}: {:?}",
-            report.outcome(name)
-        );
-    }
-}
-
-#[tokio::test]
-async fn message_checkpoint_each_faulty_fake_fails_its_named_case() {
-    use fake::message_checkpoint::Defect;
-    for (name, defect) in MESSAGE_CHECKPOINT_CASES.iter().zip([
-        Defect::NumberingFromZero,
-        Defect::HeadMismatch,
-        Defect::RemovedCutFromStart,
-        Defect::MarkerMissingCounters,
-        Defect::MissingCounterFromZero,
-        Defect::ServesSummaryRow,
-        Defect::SetupHeadFromStart,
-        Defect::SetupReadBelowFirstOrdinal,
-    ]) {
-        let report = run(&declaring(
-            Capability::MessageCheckpoint,
-            Defects {
-                message_checkpoint: defect,
-                ..Defects::default()
-            },
-        ))
-        .await;
-        let reason = failed(&report, name);
-        assert!(!reason.is_empty(), "{name} must fail by name");
-        if defect == Defect::SetupReadBelowFirstOrdinal {
-            assert!(
-                reason.contains("session.read during Setup served rows below first_ordinal"),
-                "{reason}"
-            );
-        }
-    }
-}
-
-#[tokio::test]
-async fn message_checkpoint_counting_compaction_only_row_fails_by_name() {
-    let report = run(&declaring(
-        Capability::MessageCheckpoint,
-        Defects {
-            message_checkpoint: fake::message_checkpoint::Defect::CountsCompactionOnlyRow,
-            ..Defects::default()
-        },
-    ))
-    .await;
-    let name = "message_checkpoint_uncounted_rows_never_served";
-    let reason = failed(&report, name);
-    assert!(
-        reason.contains("uncounted compaction-only row was served on session.read"),
-        "{reason}"
-    );
-    assert_none_failed_but(&report, &[name]);
-}
-
-#[tokio::test]
-async fn message_checkpoint_setup_head_deadlock_fails_by_name_without_hanging() {
-    let subject = declaring(
-        Capability::MessageCheckpoint,
-        Defects {
-            message_checkpoint: fake::message_checkpoint::Defect::SetupHeadWaitsForSetup,
-            ..Defects::default()
-        },
-    );
-    let report = tokio::time::timeout(Duration::from_secs(20), run(&subject))
-        .await
-        .expect("a session.head/Setup deadlock must not hang the suite");
-    let reason = failed(&report, "message_checkpoint_head_during_setup_uses_marker");
-    assert!(
-        reason.contains("session.head during Setup did not answer"),
-        "{reason}"
-    );
-}
-
-#[tokio::test]
-async fn message_checkpoint_setup_read_deadlock_fails_by_name_without_hanging() {
-    let subject = declaring(
-        Capability::MessageCheckpoint,
-        Defects {
-            message_checkpoint: fake::message_checkpoint::Defect::SetupReadWaitsForSetup,
-            ..Defects::default()
-        },
-    );
-    let report = tokio::time::timeout(Duration::from_secs(20), run(&subject))
-        .await
-        .expect("a session.read/Setup deadlock must not hang the suite");
-    let reason = failed(&report, "message_checkpoint_read_during_adoption_setup");
-    assert!(
-        reason.contains("session.read during Setup did not answer"),
-        "{reason}"
-    );
 }
 
 const UPFRONT_PRESERVES: &str = "tool_upfront_preserves_offered_tools";

@@ -56,7 +56,7 @@ pub struct PiNativeCut {
     pub entry_id: String,
     pub first_kept_entry_id: String,
     /// The first ordinal at or after `first_kept_entry_id`. Earlier ordinals
-    /// are outside the served range; the kept tail is never renumbered.
+    /// are hidden from the model, never from reads; the kept tail is never renumbered.
     pub first_kept_ordinal: u64,
 }
 
@@ -216,7 +216,10 @@ fn ordinal_bearing(entry: &Value) -> bool {
 /// branch switches do not participate. A journal may hold several roots (an
 /// append after Pi's `resetLeaf()` starts a new one); only the leaf's chain is
 /// active. Every `message`, `custom_message` and
-/// `branch_summary` on that path consumes one zero-based ordinal. All other
+/// `branch_summary` on that path consumes one ordinal, from 1. Compaction
+/// W4.2, Pi and Oh My Pi: "active-branch journal entries of type message
+/// (every role, each toolResult its own entry), custom_message, branch_summary".
+/// All other
 /// types, including settings, labels, context edits and compactions, consume none.
 ///
 /// Apply the last active-path `context_edit` for each target before projecting
@@ -235,9 +238,9 @@ fn ordinal_bearing(entry: &Value) -> bool {
 ///
 /// The latest active-path compaction is the native cut. Neither it nor its
 /// summary consumes an ordinal or is served. Entries before `firstKeptEntryId`
-/// fall outside the served range; kept ordinals do not change. This helper
+/// fall hidden from the model, never from reads; kept ordinals do not change. This helper
 /// describes a snapshot: a late edit of already served model-visible content
-/// requires a new lineage from that target's ordinal at a step boundary, never
+/// requires a raised history_version from that target's ordinal at a step boundary, never
 /// in-place changes to served bytes. Serve each entry's `served_body`, not
 /// `projected_content` and not the raw row when an edit targets it. Only `message` with runtime role `user` is the user's
 /// own text; display keeps `custom`, `branchSummary` and `bashExecution`
@@ -349,7 +352,7 @@ pub fn pi_session_projection(journal: &[Value]) -> Result<PiSessionProjection, P
         projected.push(PiOrdinalEntry {
             entry_id: id.to_owned(),
             entry_type: entry["type"].as_str().expect("validated type").to_owned(),
-            ordinal: projected.len() as u64,
+            ordinal: projected.len() as u64 + 1,
             part_count: content_count(&content).map_err(malformed)?,
             projected_content: content,
             served_body,
@@ -378,7 +381,8 @@ pub fn pi_session_projection(journal: &[Value]) -> Result<PiSessionProjection, P
             let first_kept_ordinal = path[..kept_position]
                 .iter()
                 .filter(|e| ordinal_bearing(e))
-                .count() as u64;
+                .count() as u64
+                + 1;
             Ok(PiNativeCut {
                 entry_id: id.to_owned(),
                 first_kept_entry_id: kept.to_owned(),
@@ -776,12 +780,12 @@ mod tests {
                 .iter()
                 .map(|entry| entry.ordinal)
                 .collect::<Vec<_>>(),
-            [0, 1]
+            [1, 2]
         );
         let cut = actual.native_cut.unwrap();
         assert_eq!(cut.entry_id, "d");
         assert_eq!(cut.first_kept_entry_id, "c");
-        assert_eq!(cut.first_kept_ordinal, 1);
+        assert_eq!(cut.first_kept_ordinal, 2);
     }
 
     #[test]
@@ -799,7 +803,7 @@ mod tests {
             .map(|e| e.entry_id.as_str())
             .collect();
         assert_eq!(ids, ["c"]);
-        assert_eq!(projection.entries[0].ordinal, 0);
+        assert_eq!(projection.entries[0].ordinal, 1);
     }
 
     #[test]
@@ -870,7 +874,7 @@ mod tests {
                 .iter()
                 .map(|entry| entry.ordinal)
                 .collect::<Vec<_>>(),
-            [0, 1, 2, 3]
+            [1, 2, 3, 4]
         );
     }
 }

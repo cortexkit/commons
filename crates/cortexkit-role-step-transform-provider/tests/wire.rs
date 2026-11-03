@@ -38,20 +38,16 @@ fn op_envelopes_round_trip() {
     exact(
         &OpRequest::new(
             ops::TRANSFORM_HOOK,
-            HookCall::new(
-                "s",
-                "broca",
-                Subject::PreUser {
-                    blocks: vec!["hi".into()],
-                    mark: None,
-                    delivery: None,
-                },
-            )
-            .with_lineage("l")
+            HookCall::new(Subject::PreUser {
+                blocks: vec!["hi".into()],
+                mark: None,
+                delivery: None,
+                at_ms: None,
+            })
             .with_item(Some("head".into()), Map::new()),
         ),
         json!({"method": "transform.hook", "params": {
-            "session": "s", "harness": "broca", "lineage_id": "l", "preset": "head",
+            "preset": "head",
             "params": {}, "hook": "pre_user", "blocks": ["hi"]
         }}),
     );
@@ -100,7 +96,7 @@ fn runner_groups_round_trip_and_name_the_unmet_ones() {
     )
     .with_runner_groups(vec!["transcript_reads".into()]);
     let wire = json!({
-        "majors": [{"version": "step-transform-provider/v1",
+        "majors": [{"version": "step-transform-provider/v2",
             "ops": ["role.describe", "transform.declare", "transform.hook"],
             "stability": "alpha"}],
         "implementation_version": "1.0.0", "capabilities": [],

@@ -103,7 +103,8 @@ where
         }
         return Ok(Ending::Passed);
     }
-    crate::tags::require_declared(&session.route, groups::SESSION_USAGE, ops::SESSION_HEAD).await?;
+    crate::send_helpers::require_declared(&session.route, groups::SESSION_USAGE, ops::SESSION_HEAD)
+        .await?;
     let mut runs = Vec::new();
     for first in [true, false] {
         let prompt = case.mint.next("spend-prompt");

@@ -38,7 +38,7 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(
+    crate::send_helpers::require_declared(
         &session.route,
         groups::USER_COMMANDS,
         ops::SESSION_USER_COMMAND,
@@ -49,7 +49,7 @@ where
         interactive: name != "user_commands_no_person",
         host_replies_outside_history: name != "user_commands_unsafe_host_menu",
     };
-    let (session_ref, fields) = case
+    let (_session_ref, fields) = case
         .subject
         .prepare_user_commands(&session.name, &fixture)
         .await
@@ -89,7 +89,7 @@ where
         if !frozen.is_empty() {
             return Err("no-person baseline listed commands".into());
         }
-        let reply = call(&session.route, ops::SESSION_USER_COMMAND, json!({"session_ref": session_ref, "command": "ctx-status", "input": "", "invocation_id": case.mint.next("no-person")})).await?;
+        let reply = call(&session.route, ops::SESSION_USER_COMMAND, json!({"command": "ctx-status", "input": "", "invocation_id": case.mint.next("no-person")})).await?;
         return expect_code(
             "no-person invocation",
             &expect_error("no-person invocation", reply)?,
@@ -104,6 +104,7 @@ where
         return Err("baseline omitted frozen commands or declaring providers".into());
     }
     let command = if [
+        "user_commands_without_session_ref",
         "user_commands_progress_order",
         "user_commands_history_isolation",
     ]
@@ -114,7 +115,8 @@ where
         "ctx-status"
     };
     let input = "  untouched input\n20  ";
-    let invocation = json!({"session_ref": session_ref, "command": command, "input": input, "invocation_id": case.mint.next("command")});
+    let invocation =
+        json!({"command": command, "input": input, "invocation_id": case.mint.next("command")});
     let first = expect_ok(
         "user command",
         call(
@@ -166,11 +168,11 @@ where
         for (op, params) in [
             (
                 ops::SESSION_USER_COMMAND,
-                json!({"session_ref": session_ref, "command": "ctx-status", "input": "", "invocation_id": case.mint.next("stranger")}),
+                json!({"command": "ctx-status", "input": "", "invocation_id": case.mint.next("stranger")}),
             ),
             (
                 ops::SESSION_USER_COMMAND_STATUS,
-                json!({"session_ref": session_ref, "call_key": answer.call_key}),
+                json!({"call_key": answer.call_key}),
             ),
         ] {
             expect_code(
@@ -193,7 +195,7 @@ where
                     call(
                         &session.route,
                         ops::SESSION_USER_COMMAND_STATUS,
-                        json!({"session_ref": session_ref, "call_key": answer.call_key}),
+                        json!({"call_key": answer.call_key}),
                     )
                     .await?,
                 )?,
@@ -292,7 +294,7 @@ where
         interactive: true,
         host_replies_outside_history: true,
     };
-    let (session_ref, fields) = case
+    let (_session_ref, fields) = case
         .subject
         .prepare_user_commands(&session.name, &fixture)
         .await
@@ -319,7 +321,8 @@ where
             "the adapter cannot cut off a command: {e}"
         )));
     }
-    let request = json!({"session_ref":session_ref,"command":"ctx-status","input":"cutoff","invocation_id":case.mint.next("cutoff")});
+    let request =
+        json!({"command":"ctx-status","input":"cutoff","invocation_id":case.mint.next("cutoff")});
     let first = expect_ok(
         "cutoff invocation",
         call(&session.route, ops::SESSION_USER_COMMAND, request.clone()).await?,
@@ -347,7 +350,7 @@ where
             call(
                 &session.route,
                 ops::SESSION_USER_COMMAND_STATUS,
-                json!({"session_ref":session_ref,"call_key":answer.call_key}),
+                json!({"call_key":answer.call_key}),
             )
             .await?,
         )?,
@@ -418,7 +421,7 @@ where
     // user-command case: an adapter may compute the session reference from
     // the runner instance the route bound, which does not exist before the
     // spawn.
-    let (session_ref, fields) = subject
+    let (_session_ref, fields) = subject
         .prepare_user_commands(&name, &fixture)
         .await
         .map_err(|error| error.to_string())?;
@@ -435,7 +438,6 @@ where
     wait_run_end(subject, &route, declared, None, &admission).await?;
 
     let request = json!({
-        "session_ref": session_ref,
         "command": "ctx-status",
         "input": "check after restart",
         "invocation_id": invocation_id,
@@ -483,7 +485,7 @@ where
             call(
                 &route,
                 ops::SESSION_USER_COMMAND_STATUS,
-                json!({"session_ref":session_ref,"call_key":answer.call_key}),
+                json!({"call_key":answer.call_key}),
             )
             .await?,
         )?,

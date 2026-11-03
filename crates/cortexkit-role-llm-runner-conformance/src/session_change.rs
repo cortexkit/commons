@@ -814,7 +814,7 @@ where
             }
         }
         let frozen = read_all(&session.route).await?.1;
-        let lineage = head(&session.route).await?.lineage_id;
+        let history_version = head(&session.route).await?.history_version;
         if policy == rungs::ON_PREFIX_REBUILD {
             expect_ok(
                 "flush relaunch",
@@ -838,69 +838,13 @@ where
         }
         applied(&session.route, 1).await?;
         let after = read_all(&session.route).await?.1;
-        if head(&session.route).await?.lineage_id != lineage || !after.starts_with(&frozen) {
-            return Err("relaunch changed history bytes, message ordinals or lineage".into());
+        if head(&session.route).await?.history_version != history_version
+            || !after.starts_with(&frozen)
+        {
+            return Err(
+                "relaunch changed history bytes, message ordinals or history_version".into(),
+            );
         }
     }
-    if case.declared.contains(&Capability::Compaction) {
-        relaunch_ride(case).await
-    } else {
-        Ok(Ending::PassedWithInapplicableRule(
-            "compaction is not declared; surface_change ride ordering is not applicable".into(),
-        ))
-    }
-}
-
-async fn relaunch_ride<S: LlmRunnerSubject>(case: &Case<'_, S>) -> Result<Ending, String>
-where
-    S::Route: RunnerRoute,
-{
-    use crate::compaction::{self, CompactionSetup};
-    let mut session = compaction::install(
-        case,
-        "relaunch-ride",
-        CompactionSetup::Ready(compaction::initial("relaunch-ride")),
-        Script {
-            turns: vec![text("old tools"), text("new tools")],
-        },
-    )
-    .await?;
-    let mut next_plan = None;
-    for generation in 0..=1 {
-        if generation == 1 {
-            let plan = plan_for(case, &session.name, RefreshVariant::OutsideHostSet)
-                .ok_or("no OutsideHostSet addition fixture")?;
-            accepted(&session.route, &plan.plan, rungs::IMMEDIATELY, 1).await?;
-            next_plan = Some(plan);
-        }
-        let reply = compaction::send(case, &mut session, "ride ordering").await?;
-        compaction::release_model(case.subject, &session.name).await?;
-        compaction::result(case, &session, &reply).await?;
-    }
-    let seen = case
-        .subject
-        .model_requests(&session.name)
-        .await
-        .map_err(|e| e.to_string())?;
-    if seen.len() != 2 {
-        return Err("ride probe expected two model requests".into());
-    }
-    let before = seen[0].tools.iter().cloned().collect();
-    let after = seen[1].tools.iter().cloned().collect();
-    if !uses_new_plan(
-        &after,
-        &before,
-        next_plan.as_ref().ok_or("ride probe has no new plan")?,
-    ) {
-        return Err("the ride probe did not reach the model with new tools".into());
-    }
-    match (seen[0].surface_change_rides, seen[1].surface_change_rides) {
-        (Some(before), Some(after)) if after > before => Ok(Ending::Passed),
-        (Some(_), Some(_)) => {
-            Err("no surface_change ride arrived before the first new-tools model request".into())
-        }
-        _ => Ok(Ending::PassedWithInapplicableRule(
-            "the adapter supplies no shared-ingress surface_change ride counter".into(),
-        )),
-    }
+    Ok(Ending::Passed)
 }

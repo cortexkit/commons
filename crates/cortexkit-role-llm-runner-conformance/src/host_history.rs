@@ -11,19 +11,23 @@ use cortexkit_role_llm_runner::{
     errors,
     history::{HistoryEntry, HistoryPage, HistoryRequest},
     ops,
-    read::{fields, ReadMessage, ReadView},
+    read::{fields, ReadMessage},
 };
 use subc_protocol::ErrorBody;
 
 use crate::{
     cases::{Case, Ending, Session},
     drive::{call, decode, expect_code, expect_error, expect_field, expect_ok, head, read_all},
-    lineage::{self, Fixture, CUT_FIRST_ORDINAL},
     subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
     RunnerRoute,
 };
 
 /// Entries per history page in every case.
+enum Fixture<T> {
+    Ready(T),
+    Inapplicable(String),
+}
+
 const PAGE: u64 = 2;
 
 /// How many pages a walk follows before it gives up.
@@ -47,16 +51,14 @@ async fn history_reply<R: RunnerRoute>(
     .await
 }
 
-/// One `session.history` page, checked on its own against the current
-/// lineage's `first_ordinal`.
+/// One `session.history` page, checked against its page-local envelope rules.
 async fn history<R: RunnerRoute>(
     route: &R,
     request: &HistoryRequest,
 ) -> Result<HistoryPage, String> {
     let body = expect_ok("session.history", history_reply(route, request).await?)?;
     let page: HistoryPage = decode("session.history", body)?;
-    let first = head(route).await?.first_ordinal;
-    page.check(first)
+    page.check()
         .map_err(|problem| format!("a session.history page breaks its own rules: {problem:?}"))?;
     Ok(page)
 }
@@ -125,8 +127,8 @@ fn unique(what: &str, entries: &[HistoryEntry]) -> Check {
 }
 
 /// `entries` end with exactly the messages of `window`, in order, and
-/// everything before them is history `session.read` does not serve: host
-/// entries without an ordinal, or entries below the window.
+/// any entries preceding that selection have lower ordinals. Both read
+/// operations can reach those older active-path entries.
 fn ends_with_window(what: &str, entries: &[HistoryEntry], window: &[ReadMessage]) -> Check {
     let window_mids: Vec<&str> = window.iter().map(|m| m.mid.as_str()).collect();
     let served = mids(entries);
@@ -137,7 +139,7 @@ fn ends_with_window(what: &str, entries: &[HistoryEntry], window: &[ReadMessage]
             if served[split..] == window_mids[..]
                 && entries[..split]
                     .iter()
-                    .all(|e| e.ordinal.is_none_or(|ordinal| ordinal < start)) => {}
+                    .all(|e| e.ordinal < start) => {}
         _ => {
             return Err(format!(
                 "{what}, history served {served:?}; it must end with the session's window                  {window_mids:?}, with only older history before it"
@@ -198,20 +200,14 @@ where
     let outcome = match name {
         "history_pages_back_to_the_first_message" => pages_back(case, &label).await?,
         "history_mid_matches_read" => mid_matches_read(case, &label).await?,
-        "history_no_tags_below_first_ordinal" => no_tags_below(case, &label).await?,
-        "history_ordinal_kept_below_the_cut" => ordinal_kept(case, &label).await?,
-        "history_cursor_survives_a_cut" => cursor_survives_cut(case, &label).await?,
         "history_never_serves_a_reverted_branch" => never_reverted(case, &label).await?,
         "history_cursor_expired_after_a_revert_past_it" => cursor_expired(case, &label).await?,
         "history_boundary_order" => boundary_order(case, &label).await?,
-        "history_before_mid_continues_below_the_window" => before_mid(case, &label).await?,
-        "history_version_unchanged_by_a_cut" => version_at_cut(case, &label).await?,
+        "history_before_mid_reaches_host_prefix" => before_mid(case, &label).await?,
         "history_version_rises_at_a_revert" => version_at_revert(case, &label).await?,
         "history_from_ordinal_and_before_ordinal" => ordinal_seeks(case, &label).await?,
         "history_unknown_ordinal_refused" => unknown_ordinal(case, &label).await?,
-        "history_before_lowest_ordinal_reaches_unnumbered_entries" => {
-            before_lowest(case, &label).await?
-        }
+        "history_before_ordinal_reaches_host_prefix" => before_lowest(case, &label).await?,
         other => return Err(format!("unknown history case {other}")),
     };
     Ok(match outcome {
@@ -247,22 +243,11 @@ where
     if walk_older(route).await? != back {
         return Err("a second walk back served other entries or other bytes".into());
     }
-    let error = history_refusal(
-        route,
-        "a model-view history request",
-        &HistoryRequest::newest().with_view(ReadView::Model),
-    )
-    .await?;
-    expect_field(
-        "a model-view history request",
-        &error,
-        errors::INVALID_PARAMS,
-        fields::VIEW,
-    )?;
+
     Ok(Fixture::Ready(()))
 }
 
-/// Every message both ops serve has the same `mid`, ordinal, bytes and tags
+/// Every message both ops serve has the same `mid`, ordinal, bytes and served part identities
 /// in both.
 async fn mid_matches_read<S>(case: &Case<'_, S>, label: &str) -> Result<Fixture<()>, String>
 where
@@ -280,7 +265,7 @@ where
 }
 
 /// Each read entry is served by history with the same `mid`, ordinal, bytes
-/// and tags.
+/// and served part identities.
 fn compare_window(read: &[ReadMessage], entries: &[HistoryEntry]) -> Check {
     for message in read {
         match entries.iter().find(|entry| entry.mid == message.mid) {
@@ -302,127 +287,6 @@ fn compare_window(read: &[ReadMessage], entries: &[HistoryEntry]) -> Check {
         }
     }
     Ok(())
-}
-
-/// After a cut, entries below `first_ordinal` carry no tags, and window
-/// entries carry exactly what `session.read` serves.
-async fn no_tags_below<S>(case: &Case<'_, S>, label: &str) -> Result<Fixture<()>, String>
-where
-    S: LlmRunnerSubject,
-    S::Route: RunnerRoute,
-{
-    let fixture = match lineage::cut_session(case, label, 3).await? {
-        Fixture::Ready(fixture) => fixture,
-        Fixture::Inapplicable(reason) => return Ok(Fixture::Inapplicable(reason)),
-    };
-    if fixture.before.iter().all(|m| m.tags.is_empty()) {
-        return Err(
-            "session.read served no tag rows before the cut, though compaction \
-                    requires the tags group"
-                .into(),
-        );
-    }
-    let route = &fixture.session.route;
-    let entries = walk_older(route).await?;
-    for entry in &entries {
-        let below = entry
-            .ordinal
-            .is_none_or(|ordinal| ordinal < CUT_FIRST_ORDINAL);
-        if below && !entry.tags.is_empty() {
-            return Err(format!(
-                "history entry {} at ordinal {:?}, below first_ordinal {CUT_FIRST_ORDINAL}, \
-                 carries tags {:?}",
-                entry.mid, entry.ordinal, entry.tags
-            ));
-        }
-    }
-    let (_, read) = read_all(route).await?;
-    compare_window(&read, &entries)?;
-    Ok(Fixture::Ready(()))
-}
-
-/// An entry read with an ordinal before a cut carries the same ordinal from
-/// history after it.
-async fn ordinal_kept<S>(case: &Case<'_, S>, label: &str) -> Result<Fixture<()>, String>
-where
-    S: LlmRunnerSubject,
-    S::Route: RunnerRoute,
-{
-    let fixture = match lineage::cut_session(case, label, 3).await? {
-        Fixture::Ready(fixture) => fixture,
-        Fixture::Inapplicable(reason) => return Ok(Fixture::Inapplicable(reason)),
-    };
-    let entries = walk_older(&fixture.session.route).await?;
-    for before in &fixture.before {
-        match entries.iter().find(|entry| entry.mid == before.mid) {
-            Some(entry) if entry.ordinal == Some(before.ordinal) => {}
-            Some(entry) => {
-                return Err(format!(
-                    "message {} was read at ordinal {} before the cut; history serves it with \
-                     ordinal {:?}",
-                    before.mid, before.ordinal, entry.ordinal
-                ))
-            }
-            None => {
-                return Err(format!(
-                    "message {} at ordinal {}, read before the cut, is missing from history",
-                    before.mid, before.ordinal
-                ))
-            }
-        }
-    }
-    Ok(Fixture::Ready(()))
-}
-
-/// A cursor minted before a cut continues after it, with no overlap or gap.
-async fn cursor_survives_cut<S>(case: &Case<'_, S>, label: &str) -> Result<Fixture<()>, String>
-where
-    S: LlmRunnerSubject,
-    S::Route: RunnerRoute,
-{
-    let written = lineage::written(case, label, 3).await?;
-    let newest = history(
-        &written.session.route,
-        &HistoryRequest::newest().with_limit(PAGE),
-    )
-    .await?;
-    let older = newest
-        .older
-        .clone()
-        .ok_or("a four-message session's newest two-entry page has no older cursor")?;
-    let expected: Vec<String> = written.before[..2].iter().map(|m| m.mid.clone()).collect();
-    if mids(&newest.messages)
-        != written.before[2..]
-            .iter()
-            .map(|m| m.mid.as_str())
-            .collect::<Vec<_>>()
-    {
-        return Err(format!(
-            "the newest history page serves {:?}, not the two newest messages",
-            mids(&newest.messages)
-        ));
-    }
-    let fixture = match lineage::apply_cut(case, written, label).await? {
-        Fixture::Ready(fixture) => fixture,
-        Fixture::Inapplicable(reason) => return Ok(Fixture::Inapplicable(reason)),
-    };
-    let reply = history_reply(
-        &fixture.session.route,
-        &HistoryRequest::cursor(older).with_limit(PAGE),
-    )
-    .await?;
-    let page: HistoryPage = decode(
-        "session.history after a cut",
-        expect_ok("a cursor minted before a cut, used after it", reply)?,
-    )?;
-    if mids(&page.messages) != expected.iter().map(String::as_str).collect::<Vec<_>>() {
-        return Err(format!(
-            "a cursor minted before a cut served {:?} after it, not the {expected:?} directly \
-             before the page that minted it",
-            mids(&page.messages)
-        ));
-    }
-    Ok(Fixture::Ready(()))
 }
 
 /// Revert the message `mid` and everything after it, or why the adapter
@@ -459,7 +323,16 @@ where
     };
     let (_, before) = read_all(&session.route).await?;
     let left: Vec<String> = before[4..].iter().map(|m| m.mid.clone()).collect();
-    if let Some(reason) = revert(case, &session, &before[4].mid).await? {
+    if let Some(reason) = revert(
+        case,
+        &session,
+        &before
+            .get(4)
+            .ok_or("the history fixture omitted a scripted entry")?
+            .mid,
+    )
+    .await?
+    {
         return Ok(Fixture::Inapplicable(reason));
     }
     case.run_prompt(&mut session, &format!("{label}-after-revert"))
@@ -513,7 +386,16 @@ where
             oldest_of_middle.mid, before[2].mid
         ));
     }
-    if let Some(reason) = revert(case, &session, &before[2].mid).await? {
+    if let Some(reason) = revert(
+        case,
+        &session,
+        &before
+            .get(2)
+            .ok_or("the history fixture omitted a scripted entry")?
+            .mid,
+    )
+    .await?
+    {
         return Ok(Fixture::Inapplicable(reason));
     }
     for (what, cursor) in [
@@ -527,8 +409,7 @@ where
     Ok(Fixture::Ready(()))
 }
 
-/// With host history before the runner's first numbered message, the
-/// newest unnumbered entry comes directly before the lowest ordinal.
+/// The seeded host prefix is part of the same one-based active-path count.
 async fn boundary_order<S>(case: &Case<'_, S>, label: &str) -> Result<Fixture<()>, String>
 where
     S: LlmRunnerSubject,
@@ -538,35 +419,28 @@ where
         Fixture::Ready(session) => session,
         Fixture::Inapplicable(reason) => return Ok(Fixture::Inapplicable(reason)),
     };
+    let (_, read) = read_all(&session.route).await?;
     let entries = walk_older(&session.route).await?;
-    let unnumbered = entries.iter().filter(|e| e.ordinal.is_none()).count();
-    if unnumbered as u64 != HOST_PREFIX {
-        return Err(format!(
-            "history serves {unnumbered} entries without an ordinal; the host held \
-             {HOST_PREFIX} before the runner's first numbered message"
-        ));
+    if entries.len() < HOST_PREFIX as usize
+        || mids(&entries)
+            != read
+                .iter()
+                .map(|entry| entry.mid.as_str())
+                .collect::<Vec<_>>()
+    {
+        return Err("the seeded host prefix is not in the same order as full-path reads".into());
     }
-    let lowest = entries
-        .iter()
-        .filter_map(|e| e.ordinal)
-        .min()
-        .ok_or("history serves no numbered entry")?;
-    let at = entries
-        .iter()
-        .position(|e| e.ordinal == Some(lowest))
-        .expect("the lowest ordinal is served");
-    if at != unnumbered || entries[..at].iter().any(|e| e.ordinal.is_some()) {
+    let expected: Vec<u64> = (1..=entries.len() as u64).collect();
+    if ordinals(&entries) != expected {
         return Err(format!(
-            "the entry with the lowest ordinal {lowest} is at position {at}, not directly after \
-             the {unnumbered} entries without an ordinal: {:?}",
-            entries.iter().map(|e| e.ordinal).collect::<Vec<_>>()
+            "host history must count its prefix from 1 without gaps: {:?}",
+            ordinals(&entries)
         ));
     }
     Ok(Fixture::Ready(()))
 }
 
-/// `before_mid` of the window's first message continues into the host
-/// history before it, and paging `older` ends at the first entry.
+/// Backward paging from the first post-seed entry reaches the whole counted host prefix.
 async fn before_mid<S>(case: &Case<'_, S>, label: &str) -> Result<Fixture<()>, String>
 where
     S: LlmRunnerSubject,
@@ -577,62 +451,46 @@ where
         Fixture::Inapplicable(reason) => return Ok(Fixture::Inapplicable(reason)),
     };
     let route = &session.route;
-    let (_, window) = read_all(route).await?;
-    let first = window.first().ok_or("the window is empty")?;
-    if first.ordinal != 0 || head(route).await?.first_ordinal != Some(0) {
-        return Err(format!(
-            "an adopted session's window should start at ordinal 0; it starts at {}",
-            first.ordinal
-        ));
-    }
+    let (_, all) = read_all(route).await?;
+    let first_new = all
+        .get(HOST_PREFIX as usize)
+        .ok_or("the fixture omitted a post-seed entry")?;
     let mut page = history(
         route,
-        &HistoryRequest::before_mid(&first.mid).with_limit(PAGE),
+        &HistoryRequest::before_mid(&first_new.mid).with_limit(PAGE),
     )
     .await?;
     let mut entries = page.messages.clone();
     if entries.is_empty() || page.older.is_none() {
-        return Err(format!(
-            "before_mid of the window's first message answered {} entries and older {:?}, \
-             though the host holds {HOST_PREFIX} entries before it",
-            entries.len(),
-            page.older
-        ));
+        return Err("before_mid omitted the host prefix or its older cursor".into());
     }
     for _ in 0..MAX_PAGES {
         let Some(older) = page.older.clone() else {
             break;
         };
         page = history(route, &HistoryRequest::cursor(older).with_limit(PAGE)).await?;
-        let mut older_entries = page.messages.clone();
-        older_entries.extend(entries);
-        entries = older_entries;
+        let mut prefix = page.messages.clone();
+        prefix.extend(entries);
+        entries = prefix;
     }
-    if entries.len() as u64 != HOST_PREFIX || entries.iter().any(|e| e.ordinal.is_some()) {
-        return Err(format!(
-            "below the window, history served {:?}; the host held {HOST_PREFIX} entries \
-             without ordinals",
-            entries
-                .iter()
-                .map(|e| (&e.mid, e.ordinal))
-                .collect::<Vec<_>>()
-        ));
+    let expected = all[..HOST_PREFIX as usize]
+        .iter()
+        .map(|entry| entry.mid.as_str())
+        .collect::<Vec<_>>();
+    if mids(&entries) != expected || ordinals(&entries) != (1..=HOST_PREFIX).collect::<Vec<_>>() {
+        return Err("backward paging did not reach the complete one-based host prefix".into());
     }
-    unique("following older below the window", &entries)?;
+    unique("following older into the host prefix", &entries)?;
     Ok(Fixture::Ready(()))
 }
 
-/// The history version `session.head` states and the newest history page
+/// The history_version `session.head` states and the newest history page
 /// carries; they must agree.
 async fn versions<R: RunnerRoute>(route: &R) -> Result<u64, String> {
-    let on_head = head(route)
-        .await?
-        .history_version
-        .ok_or("session.head carries no history_version")?;
+    let on_head = head(route).await?.history_version;
     let on_page = history(route, &HistoryRequest::newest().with_limit(PAGE))
         .await?
-        .history_version
-        .ok_or("a session.history page carries no history_version")?;
+        .history_version;
     if on_head != on_page {
         return Err(format!(
             "session.head states history_version {on_head}, a history page {on_page}"
@@ -641,29 +499,7 @@ async fn versions<R: RunnerRoute>(route: &R) -> Result<u64, String> {
     Ok(on_head)
 }
 
-/// A cut, and the exchange after it, leave the history version as it was.
-async fn version_at_cut<S>(case: &Case<'_, S>, label: &str) -> Result<Fixture<()>, String>
-where
-    S: LlmRunnerSubject,
-    S::Route: RunnerRoute,
-{
-    let written = lineage::written(case, label, 3).await?;
-    let before = versions(&written.session.route).await?;
-    let fixture = match lineage::apply_cut(case, written, label).await? {
-        Fixture::Ready(fixture) => fixture,
-        Fixture::Inapplicable(reason) => return Ok(Fixture::Inapplicable(reason)),
-    };
-    let after = versions(&fixture.session.route).await?;
-    if after != before {
-        return Err(format!(
-            "a cut moved history_version from {before} to {after}; only a rewrite of the \
-             visible history moves it"
-        ));
-    }
-    Ok(Fixture::Ready(()))
-}
-
-/// A revert raises the history version.
+/// A revert raises the history_version.
 async fn version_at_revert<S>(case: &Case<'_, S>, label: &str) -> Result<Fixture<()>, String>
 where
     S: LlmRunnerSubject,
@@ -675,7 +511,16 @@ where
     };
     let before = versions(&session.route).await?;
     let (_, read) = read_all(&session.route).await?;
-    if let Some(reason) = revert(case, &session, &read[2].mid).await? {
+    if let Some(reason) = revert(
+        case,
+        &session,
+        &read
+            .get(2)
+            .ok_or("the history fixture omitted a scripted entry")?
+            .mid,
+    )
+    .await?
+    {
         return Ok(Fixture::Inapplicable(reason));
     }
     let after = versions(&session.route).await?;
@@ -688,7 +533,7 @@ where
     Ok(Fixture::Ready(()))
 }
 
-fn ordinals(entries: &[HistoryEntry]) -> Vec<Option<u64>> {
+fn ordinals(entries: &[HistoryEntry]) -> Vec<u64> {
     entries.iter().map(|e| e.ordinal).collect()
 }
 
@@ -706,35 +551,35 @@ where
         Fixture::Inapplicable(reason) => return Ok(Fixture::Inapplicable(reason)),
     };
     let route = &session.route;
-    let from = history(route, &HistoryRequest::from_ordinal(2).with_limit(PAGE)).await?;
-    if ordinals(&from.messages) != [Some(2), Some(3)] {
+    let from = history(route, &HistoryRequest::from_ordinal(3).with_limit(PAGE)).await?;
+    if ordinals(&from.messages) != [3, 4] {
         return Err(format!(
-            "from_ordinal 2 served ordinals {:?}, not [2, 3]",
+            "from_ordinal 3 served ordinals {:?}, not [3, 4]",
             ordinals(&from.messages)
         ));
     }
     let newer = from
         .newer
-        .ok_or("from_ordinal 2 of six messages has no newer cursor")?;
+        .ok_or("from_ordinal 3 of six messages has no newer cursor")?;
     let next = history(route, &HistoryRequest::cursor(newer).with_limit(PAGE)).await?;
-    if ordinals(&next.messages) != [Some(4), Some(5)] {
+    if ordinals(&next.messages) != [5, 6] {
         return Err(format!(
-            "the page after from_ordinal 2 served {:?}, not [4, 5]",
+            "the page after from_ordinal 3 served {:?}, not [5, 6]",
             ordinals(&next.messages)
         ));
     }
-    let before = history(route, &HistoryRequest::before_ordinal(4).with_limit(PAGE)).await?;
-    if ordinals(&before.messages) != [Some(2), Some(3)] {
+    let before = history(route, &HistoryRequest::before_ordinal(5).with_limit(PAGE)).await?;
+    if ordinals(&before.messages) != [3, 4] {
         return Err(format!(
-            "before_ordinal 4 served ordinals {:?}, not [2, 3]",
+            "before_ordinal 5 served ordinals {:?}, not [3, 4]",
             ordinals(&before.messages)
         ));
     }
-    let older = before.older.ok_or("before_ordinal 4 has no older cursor")?;
+    let older = before.older.ok_or("before_ordinal 5 has no older cursor")?;
     let prior = history(route, &HistoryRequest::cursor(older).with_limit(PAGE)).await?;
-    if ordinals(&prior.messages) != [Some(0), Some(1)] {
+    if ordinals(&prior.messages) != [1, 2] {
         return Err(format!(
-            "the page before before_ordinal 4 served {:?}, not [0, 1]",
+            "the page before before_ordinal 5 served {:?}, not [1, 2]",
             ordinals(&prior.messages)
         ));
     }
@@ -772,7 +617,17 @@ where
         let error = history_refusal(route, &what, &request).await?;
         expect_code(&what, &error, errors::UNKNOWN_ORDINAL)?;
     }
-    if revert(case, &session, &read[2].mid).await?.is_none() {
+    if revert(
+        case,
+        &session,
+        &read
+            .get(2)
+            .ok_or("the history fixture omitted a scripted entry")?
+            .mid,
+    )
+    .await?
+    .is_none()
+    {
         let what = "an ordinal a revert removed";
         let error = history_refusal(route, what, &HistoryRequest::from_ordinal(3)).await?;
         expect_code(what, &error, errors::UNKNOWN_ORDINAL)?;
@@ -780,8 +635,7 @@ where
     Ok(Fixture::Ready(()))
 }
 
-/// `before_ordinal` at the lowest ordinal returns the newest host-history
-/// entries, which have no ordinal.
+/// An ordinal seek before the first post-seed entry pages through counted host history.
 async fn before_lowest<S>(case: &Case<'_, S>, label: &str) -> Result<Fixture<()>, String>
 where
     S: LlmRunnerSubject,
@@ -792,30 +646,29 @@ where
         Fixture::Inapplicable(reason) => return Ok(Fixture::Inapplicable(reason)),
     };
     let route = &session.route;
-    let page = history(route, &HistoryRequest::before_ordinal(0).with_limit(PAGE)).await?;
-    if page.messages.len() as u64 != PAGE.min(HOST_PREFIX)
-        || page.messages.iter().any(|e| e.ordinal.is_some())
-        || page.older.is_none()
-    {
-        return Err(format!(
-            "before_ordinal 0 served {:?} with older {:?}; the host holds {HOST_PREFIX} \
-             entries without an ordinal before it",
-            ordinals(&page.messages),
-            page.older
-        ));
-    }
-    let all = walk_older(route).await?;
-    let host: Vec<&str> = all
+    let (_, all) = read_all(route).await?;
+    let first_new = all
+        .get(HOST_PREFIX as usize)
+        .ok_or("the fixture omitted a post-seed entry")?;
+    let page = history(
+        route,
+        &HistoryRequest::before_ordinal(first_new.ordinal).with_limit(PAGE),
+    )
+    .await?;
+    let start = (HOST_PREFIX as usize).saturating_sub(PAGE as usize);
+    let expected = all[start..HOST_PREFIX as usize]
         .iter()
-        .filter(|e| e.ordinal.is_none())
-        .map(|e| e.mid.as_str())
-        .collect();
-    let newest_host = host[host.len().saturating_sub(PAGE as usize)..].to_vec();
-    if mids(&page.messages) != newest_host {
-        return Err(format!(
-            "before_ordinal 0 served {:?}, not the newest entries without an ordinal {newest_host:?}",
-            mids(&page.messages)
-        ));
+        .map(|entry| entry.mid.as_str())
+        .collect::<Vec<_>>();
+    if mids(&page.messages) != expected || page.older.is_none() {
+        return Err(
+            "before_ordinal did not serve the newest counted host prefix with an older cursor"
+                .into(),
+        );
+    }
+    let first = history(route, &HistoryRequest::before_ordinal(1).with_limit(PAGE)).await?;
+    if !first.messages.is_empty() || first.older.is_some() {
+        return Err("before the first ordinal must be empty with no older cursor".into());
     }
     Ok(Fixture::Ready(()))
 }

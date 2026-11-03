@@ -13,7 +13,7 @@ use cortexkit_role_compaction::{
     setup::{ModelRef, SetupAnswer, SetupRequest},
     view::{
         AppliedViewAnswer, AppliedViewRequest, ApplyViewAnswer, ApplyViewRequest, Edit, EditOp,
-        InsertAt, InsertedMessage, View, ViewRefusal,
+        InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
     },
     wire::{self, codes, Refusal},
 };
@@ -132,7 +132,35 @@ fn samples() -> Vec<(&'static str, Value)> {
     let ride = RideRequest::new(vec![RideCause::OverLimit], 1_500, conditions)
         .with_request_tokens(30_000)
         .with_applied_view(view.applied());
+    let image_message = InsertedMessage::new(
+        "insert-image",
+        Role::User,
+        vec!["An invented visual summary.".into()],
+    )
+    .with_images(vec![InsertedImage::new(
+        "image/png",
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=",
+    )]);
+    let image_request = |message| {
+        ApplyViewRequest::new(View::seal(
+            1,
+            vec![Edit::new(
+                1,
+                EditOp::Insert {
+                    at: InsertAt::Start,
+                    message,
+                },
+            )],
+        ))
+    };
     let mut samples = vec![
+        (
+            "setup-accepts-images-request.json",
+            request(
+                ops::COMPACTION_SETUP,
+                setup.clone().with_accepts_images(true),
+            ),
+        ),
         ("setup-request.json", request(ops::COMPACTION_SETUP, setup)),
         ("setup-answer.json", value(SetupAnswer::Ready)),
         (
@@ -181,6 +209,13 @@ fn samples() -> Vec<(&'static str, Value)> {
             "apply-view-request.json",
             request(ops::SESSION_APPLY_VIEW, ApplyViewRequest::new(view.clone())),
         ),
+        (
+            "apply-view-image-request.json",
+            request(
+                ops::SESSION_APPLY_VIEW,
+                image_request(image_message.clone()),
+            ),
+        ),
         ("apply-view-answer.json", value(ApplyViewAnswer::Accepted)),
         (
             "apply-view-refused.json",
@@ -198,6 +233,24 @@ fn samples() -> Vec<(&'static str, Value)> {
         ),
         ("applied-view-none.json", value(AppliedViewAnswer::new())),
     ];
+    let mut assistant_image = image_message.clone();
+    assistant_image.role = Role::Assistant;
+    let mut non_png_image = image_message;
+    non_png_image.images[0].media_type = "image/jpeg".into();
+    for (name, message) in [
+        ("image-assistant-refused.json", assistant_image),
+        ("image-non-png-refused.json", non_png_image),
+    ] {
+        samples.push((
+            name,
+            json!({
+                "request": request(ops::SESSION_APPLY_VIEW, image_request(message)),
+                "answer": ApplyViewAnswer::Refused {
+                    refusal: ViewRefusal::UnsupportedEdit { index: 0 },
+                },
+            }),
+        ));
+    }
     let refusals = [
         ("bad-checksum", ViewRefusal::BadChecksum),
         (
@@ -433,7 +486,15 @@ fn request_round_trip<T: DeserializeOwned + Serialize>(
 }
 
 fn check(name: &str, json: Value) {
-    if name.starts_with("validation-") {
+    if name.starts_with("image-") {
+        // These pairs specify the runner's refusal, not a wire decoding error:
+        // edit validation is performed by the view library.
+        let (method, params) =
+            wire::decode(&serde_json::to_vec(&json["request"]).unwrap()).unwrap();
+        assert_eq!(method, ops::SESSION_APPLY_VIEW);
+        request_round_trip::<ApplyViewRequest>(&method, params, json["request"].clone());
+        round_trip::<ApplyViewAnswer>(json["answer"].clone());
+    } else if name.starts_with("validation-") {
         let (method, params) =
             wire::decode(&serde_json::to_vec(&json["request"]).unwrap()).unwrap();
         assert_eq!(method, ops::SESSION_ENTRIES);
@@ -497,11 +558,11 @@ fn wire_vectors_round_trip() {
     for (name, generated) in samples() {
         if std::env::var_os("UPDATE_COMPACTION_VECTORS").is_some() {
             std::fs::create_dir_all(&root).unwrap();
-            std::fs::write(
-                root.join(name),
-                format!("{}\n", serde_json::to_string_pretty(&generated).unwrap()),
-            )
-            .unwrap();
+            let path = root.join(name);
+            let bytes = format!("{}\n", serde_json::to_string_pretty(&generated).unwrap());
+            if std::fs::read(&path).ok().as_deref() != Some(bytes.as_bytes()) {
+                std::fs::write(path, bytes).unwrap();
+            }
         }
         let saved: Value =
             serde_json::from_slice(&std::fs::read(root.join(name)).unwrap()).unwrap();

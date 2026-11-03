@@ -192,7 +192,8 @@ impl From<InsertAt> for Value {
     }
 }
 
-/// A message a view adds. Its parts are text only and carry no tag numbers.
+/// A message a view adds. Texts and images carry no tag numbers; the runner
+/// renders images after the texts, in its host's own form.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct InsertedMessage {
@@ -201,6 +202,22 @@ pub struct InsertedMessage {
     pub id: String,
     pub role: Role,
     pub texts: Vec<String>,
+    /// Only user-role inserts may carry images, and only when the runner
+    /// reports `accepts_images: true`. Empty arrays hash as absent (W1.6).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<InsertedImage>,
+}
+
+/// An image carried by an inserted message, included in the view's JSON size
+/// and checksum. The runner checks its media type and base64 before applying
+/// the view (W6.5); decoding the wire value alone does not validate either.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct InsertedImage {
+    /// Currently only `image/png` is supported.
+    pub media_type: String,
+    /// The bytes in standard padded base64.
+    pub data: String,
 }
 
 open_tagged! {
@@ -273,8 +290,9 @@ pub enum ViewRefusal, "code" {
     /// The view breaks a provider rule the runner declared.
     Rule => "rule"(payload: crate::rules::RuleBreak),
     /// The edit at this index of `edits` has an `op`, an insert `at` or an
-    /// inserted message `role` the runner does not know, so it cannot apply
-    /// the view (W1.5).
+    /// inserted message `role` the runner does not know (W1.5), or images on
+    /// a non-user insert, a non-PNG media type, or invalid standard padded
+    /// base64 (W6.5). Each case names the zero-based edit index.
     UnsupportedEdit => "unsupported_edit" {
         #[serde(deserialize_with = "crate::integer::required")]
         index: u64,
@@ -339,6 +357,22 @@ impl InsertedMessage {
             id: id.into(),
             role,
             texts,
+            images: Vec::new(),
+        }
+    }
+
+    pub fn with_images(mut self, images: Vec<InsertedImage>) -> Self {
+        self.images = images;
+        self
+    }
+}
+
+impl InsertedImage {
+    /// Build the wire value; the runner validates it when checking the view.
+    pub fn new(media_type: impl Into<String>, data: impl Into<String>) -> Self {
+        Self {
+            media_type: media_type.into(),
+            data: data.into(),
         }
     }
 }

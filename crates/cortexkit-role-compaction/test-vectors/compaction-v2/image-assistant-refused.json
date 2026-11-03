@@ -1,0 +1,38 @@
+{
+  "answer": {
+    "answer": "refused",
+    "refusal": {
+      "code": "unsupported_edit",
+      "index": 0
+    }
+  },
+  "request": {
+    "method": "session.apply_view",
+    "params": {
+      "view": {
+        "checksum": "d39c28897e9182638a28e9f77b81af8ed632a35e87ea84dd5d14c78bfc05e76a",
+        "edits": [
+          {
+            "at": "start",
+            "message": {
+              "id": "insert-image",
+              "images": [
+                {
+                  "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=",
+                  "media_type": "image/png"
+                }
+              ],
+              "role": "assistant",
+              "texts": [
+                "An invented visual summary."
+              ]
+            },
+            "op": "insert",
+            "since": 1
+          }
+        ],
+        "version": 1
+      }
+    }
+  }
+}

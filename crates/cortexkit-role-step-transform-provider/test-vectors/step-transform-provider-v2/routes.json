@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "name": "module-level hook refused per call",
+      "binding": null,
+      "scoped": false,
+      "method": "transform.hook",
+      "refusal": {
+        "code": "route_unbound",
+        "message": "Expected a bound session"
+      }
+    },
+    {
+      "name": "scoped pre-session hook refused per call",
+      "binding": null,
+      "scoped": true,
+      "method": "transform.hook",
+      "refusal": {
+        "code": "route_unbound",
+        "message": "Expected a bound session"
+      }
+    },
+    {
+      "name": "unscoped binding cannot authorize hook",
+      "binding": {
+        "harness": "harness-a",
+        "session": "session-a"
+      },
+      "scoped": false,
+      "method": "transform.hook",
+      "refusal": {
+        "code": "route_unbound",
+        "message": "Expected a bound session"
+      }
+    },
+    {
+      "name": "session hook admitted",
+      "binding": {
+        "harness": "harness-a",
+        "session": "session-a"
+      },
+      "scoped": true,
+      "method": "transform.hook"
+    },
+    {
+      "name": "module-level declaration answered",
+      "binding": null,
+      "scoped": false,
+      "method": "transform.declare"
+    },
+    {
+      "name": "pre-session scoped declaration answered",
+      "binding": null,
+      "scoped": true,
+      "method": "transform.declare"
+    },
+    {
+      "name": "module-level discovery answered",
+      "binding": null,
+      "scoped": false,
+      "method": "role.describe"
+    }
+  ]
+}

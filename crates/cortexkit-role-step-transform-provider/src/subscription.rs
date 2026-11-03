@@ -4,10 +4,10 @@
 //! The provider's declaration (`transform.declare`) lists, per hook (and per
 //! phase on `pre_tool`), the tools it can act on, the operations it may
 //! return, what the runner does when it is unavailable, and its time budget.
-//! The declaration is the source: whoever composes the plan copies each
-//! subscription's `on_unavailable` and `budget_ms` from it into the plan,
-//! where they are frozen. A plan item's subscriptions choose within the
-//! declaration's bounds. Admission is the plan check before the runner accepts
+//! The plan composer resolves the declaration's defaults and freezes each
+//! subscription's `on_unavailable` and `budget_ms` equal to or stricter than
+//! those bounds. Admission validates, but does not rewrite, the frozen values.
+//! Admission is the plan check before the runner accepts
 //! a session (CONTRACT.md §4). The runner checks the frozen plan
 //! against the provider's current declaration: an equal or stricter
 //! subscription admits, and a looser one, or one whose hook or preset the
@@ -17,18 +17,26 @@
 //! whose `replace` rewrites history and so must run before other providers'
 //! prepends and appends, and which is the only party allowed to remove or
 //! rewrite what was written (CONTRACT.md §5). Only the reduction owner may
-//! `replace` on `pre_user` and `post_assistant`. Every other step transform is preserving: it may
-//! prepend or append. Hooks run in the frozen plan's exact order; the plan
+//! `replace` on `pre_user` and `post_assistant`; non-owners may only prepend
+//! or append on those hooks. `post_tool` replacement is governed separately
+//! by user grants, and `pre_tool` answers by phase. Hooks run in the frozen plan's exact order; the plan
 //! composer places the reduction owner first ([`reduction_owner_first`]),
 //! so a later preserving prepend is never wiped by its replace.
+//!
+//! Validate a received declaration with [`Declaration::check`] before
+//! deriving effective policies, testing hook coverage or bounding planned
+//! subscriptions. Those helpers do not validate the declaration. Planned
+//! subscriptions are separately validated by [`Subscription::check`] or item
+//! admission.
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::errors::runner_codes;
 
-/// A hook. Strict: an unknown hook does not decode.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+/// A hook. Unknown names are preserved but cannot be subscribed or called.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
 pub enum Hook {
     /// A user message, or a steered or queued prompt, before it is written.
     PreUser,
@@ -38,106 +46,29 @@ pub enum Hook {
     PreTool,
     /// A tool's result, before it is written.
     PostTool,
+    Unknown(String),
 }
+open_string!(Hook { PreUser => "pre_user", PostAssistant => "post_assistant", PreTool => "pre_tool", PostTool => "post_tool" });
 
-/// A hook subject whose output was not served, in the enclosing call's lineage.
-/// Unknown fields are ignored, but the hook discriminant remains strict.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub struct UnservedSubject {
-    pub subject_mid: String,
-    pub hook: Hook,
-    /// The opaque tool part id, not the display-only tool call id.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subject_part: Option<String>,
-}
-
-impl UnservedSubject {
-    pub fn new(subject_mid: impl Into<String>, hook: Hook) -> Self {
-        Self {
-            subject_mid: subject_mid.into(),
-            hook,
-            subject_part: None,
-        }
-    }
-
-    pub fn with_subject_part(mut self, subject_part: impl Into<String>) -> Self {
-        self.subject_part = Some(subject_part.into());
-        self
-    }
-}
-
-/// Maximum UTF-8 byte length of an opaque host subject part id.
+/// Maximum UTF-8 byte length of an opaque subject part id.
 pub const MAX_SUBJECT_PART_BYTES: usize = 256;
 
-/// A malformed part id. Refuse with `invalid_params`, naming [`Self::field`].
+/// A malformed part id, refused with `invalid_params {field: "subject_part"}`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SubjectPartProblem {
     SubjectPart,
-    UnservedSubjectPart { index: usize },
 }
 
 impl SubjectPartProblem {
-    pub fn field(self) -> String {
-        match self {
-            Self::SubjectPart => "subject_part".into(),
-            Self::UnservedSubjectPart { index } => {
-                format!("unserved_subjects[{index}].subject_part")
-            }
-        }
+    pub fn field(self) -> &'static str {
+        "subject_part"
     }
 }
 
 pub(crate) fn check_subject_part(part: Option<&str>) -> Result<(), SubjectPartProblem> {
     if part.is_some_and(|part| part.is_empty() || part.len() > MAX_SUBJECT_PART_BYTES) {
         return Err(SubjectPartProblem::SubjectPart);
-    }
-    Ok(())
-}
-
-/// Validate burn-entry parts before any promotion or burning. This checks only
-/// request-local byte limits, not admission, held history or provider state.
-pub fn validate_unserved_subjects(subjects: &[UnservedSubject]) -> Result<(), SubjectPartProblem> {
-    for (index, subject) in subjects.iter().enumerate() {
-        check_subject_part(subject.subject_part.as_deref())
-            .map_err(|_| SubjectPartProblem::UnservedSubjectPart { index })?;
-    }
-    Ok(())
-}
-
-/// A plan parameter value reserved for an OpenCode host acting as a runner
-/// (`serializer_profile: "opencode-aisdk"` or `observation: "answer"`). A
-/// registered runner such as Broca must not send one, because these values
-/// select the host lane's relaxed admission rules.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum RunnerParamsProblem {
-    SerializerProfile,
-    Observation,
-}
-
-impl RunnerParamsProblem {
-    /// The `detail.field` of the `invalid_params` refusal.
-    pub fn field(self) -> &'static str {
-        match self {
-            Self::SerializerProfile => "params.serializer_profile",
-            Self::Observation => "params.observation",
-        }
-    }
-}
-
-/// Refuse those host-only values when they arrive on Setup or a declaration
-/// from a registered runner. The caller decides it is talking to a runner from
-/// the daemon-verified route (the module that opened it), never from the
-/// `harness` field in the request body. This only refuses a runner; it does not
-/// admit a host.
-pub fn check_runner_params(params: &Map<String, Value>) -> Result<(), RunnerParamsProblem> {
-    if params.get("serializer_profile").and_then(Value::as_str) == Some("opencode-aisdk") {
-        return Err(RunnerParamsProblem::SerializerProfile);
-    }
-    if params.get("observation").and_then(Value::as_str) == Some("answer") {
-        return Err(RunnerParamsProblem::Observation);
     }
     Ok(())
 }
@@ -152,15 +83,16 @@ impl Hook {
 
     /// Whether this hook's answers are operations (`prepend`, `append`,
     /// `replace`). `pre_tool` answers by phase instead.
-    pub fn takes_ops(self) -> bool {
-        self != Hook::PreTool
+    pub fn takes_ops(&self) -> bool {
+        matches!(self, Self::PreUser | Self::PostAssistant | Self::PostTool)
     }
 }
 
 /// A `pre_tool` phase, run in this order where the runner owns hook order.
-/// Strict.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+/// Unknown phases are preserved but never executed.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
 pub enum Phase {
     /// May rewrite the input that executes. Must be a pure function of the
     /// call and the frozen config.
@@ -169,21 +101,27 @@ pub enum Phase {
     Validate,
     /// May ask a human before the call executes.
     Approve,
+    Unknown(String),
 }
+open_string!(Phase { Mutate => "mutate", Validate => "validate", Approve => "approve" });
 
-/// An operation on a hook's subject. Strict.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+/// An operation on a hook's subject. Unknown operations grant no permission.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
 pub enum Op {
     Prepend,
     Append,
     Replace,
+    Unknown(String),
 }
+open_string!(Op { Prepend => "prepend", Append => "append", Replace => "replace" });
 
 /// What the runner does when a hook times out, fails, or answers something
-/// it may not. Strict.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+/// it may not. Unknown policies cannot be admitted into a plan.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
 pub enum OnUnavailable {
     /// Go on without the hook's output, and record that.
     Pass,
@@ -191,25 +129,30 @@ pub enum OnUnavailable {
     /// withhold the result (`post_tool_unavailable`). `pre_user`: refuse the
     /// step (`pre_user_unavailable`).
     Refuse,
+    Unknown(String),
 }
+open_string!(OnUnavailable { Pass => "pass", Refuse => "refuse" });
 
 impl OnUnavailable {
     /// Whether a plan may freeze `self` where the declaration says
-    /// `declared`: `refuse` is stricter than `pass`, so only `pass` under a
-    /// declared `refuse` is looser.
-    pub fn within(self, declared: OnUnavailable) -> bool {
-        self == OnUnavailable::Refuse || declared == OnUnavailable::Pass
+    /// `declared`. For known policies, `refuse` tightens `pass`; this method
+    /// returns false if either policy is unknown.
+    pub fn within(&self, declared: OnUnavailable) -> bool {
+        matches!(
+            (self, declared),
+            (Self::Refuse, Self::Refuse | Self::Pass) | (Self::Pass, Self::Pass)
+        )
     }
 }
 
 /// One subscription in a plan item, as the fetch plan carries it: `{hook,
-/// phase?, tools?, ops, on_unavailable, budget_ms}`. Decoded leniently on
-/// fields, strictly on values.
+/// phase?, tools?, ops, on_unavailable, budget_ms}`. Unknown fields are
+/// ignored; unknown values decode but fail semantic admission.
 ///
-/// `on_unavailable` and `budget_ms` are copied from the provider's
-/// declaration when the plan is composed and frozen with the plan. A plan
-/// may carry a stricter value than the declaration (`refuse` for `pass`, a
-/// smaller budget), never a looser one.
+/// The plan composer resolves the declaration's defaults and freezes
+/// `on_unavailable` and `budget_ms` equal to or stricter than those bounds
+/// (`refuse` for `pass`, a smaller budget), never looser. Admission validates
+/// these frozen values without rewriting them.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct Subscription {
@@ -282,18 +225,21 @@ impl DeclaredSubscription {
     }
 
     /// The `on_unavailable` this subscription means in effect, and the value
-    /// a plan composed from it freezes: `pass` on `post_assistant`,
+    /// bounding a plan composed from it: `pass` on `post_assistant`,
     /// otherwise the declared value, `refuse` when none is declared.
+    /// Validate the containing declaration with [`Declaration::check`] first;
+    /// this helper does not validate the declaration.
     pub fn effective_on_unavailable(&self) -> OnUnavailable {
         if self.hook == Hook::PostAssistant {
             return OnUnavailable::Pass;
         }
-        self.on_unavailable.unwrap_or(OnUnavailable::Refuse)
+        self.on_unavailable.clone().unwrap_or(OnUnavailable::Refuse)
     }
 
     /// The fields on which `planned` is looser than this declared
     /// subscription, in the order `on_unavailable`, `budget_ms`. Empty when
     /// the planned values are equal or stricter.
+    /// The declaration and planned subscription must already be validated.
     pub fn loosened_fields(&self, planned: &Subscription) -> Vec<LoosenedField> {
         let mut fields = Vec::new();
         if !planned
@@ -312,8 +258,9 @@ impl DeclaredSubscription {
 /// A planned subscription field that may equal or tighten the declared
 /// value but never loosen it. A `subscription_loosened` difference names
 /// the field that broke this rule in its `field` member.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
 pub enum LoosenedField {
     /// Tools outside the declared bounds.
     Tools,
@@ -323,7 +270,9 @@ pub enum LoosenedField {
     OnUnavailable,
     /// A budget above the declared one.
     BudgetMs,
+    Unknown(String),
 }
+open_string!(LoosenedField { Tools => "tools", Ops => "ops", OnUnavailable => "on_unavailable", BudgetMs => "budget_ms" });
 
 /// The `transform.declare` request: the plan item's preset and params and
 /// the session's composition, verbatim. Decoded leniently.
@@ -337,43 +286,15 @@ pub struct DeclareRequest {
     /// Absent on a preflight call, made before the composition exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub composition: Option<Map<String, Value>>,
-    /// Claude Code capabilities selected from role.describe. The daemon's
-    /// caller identity, not these fields, authorizes use of those capabilities.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_code: Option<crate::claude_code::ClaudeCodeCapabilities>,
 }
 
 impl DeclareRequest {
-    /// Refuse host-only plan values. Call this only once the route shows the
-    /// caller is a registered runner.
-    pub fn check_runner_params(&self) -> Result<(), RunnerParamsProblem> {
-        check_runner_params(&self.params)
-    }
-
     pub fn new(params: Map<String, Value>) -> Self {
         Self {
             preset: None,
             params,
             composition: None,
-            claude_code: None,
         }
-    }
-
-    pub fn with_claude_code(mut self, bundle: crate::claude_code::ClaudeCodeCapabilities) -> Self {
-        self.claude_code = Some(bundle);
-        self
-    }
-
-    pub fn admit_claude_code(
-        &self,
-        attested_principal: &str,
-        connection_id: &str,
-    ) -> Result<crate::claude_code::ClaudeCodeLane, crate::claude_code::InvalidParams> {
-        crate::claude_code::ClaudeCodeLane::admit(
-            attested_principal,
-            connection_id,
-            self.claude_code.clone(),
-        )
     }
 
     pub fn with_preset(mut self, preset: impl Into<String>) -> Self {
@@ -389,13 +310,26 @@ impl DeclareRequest {
 
 /// The `transform.declare` answer. Subscriptions depend only on the item's
 /// preset, params, composition and provider configuration, not caller identity.
-/// Optional Claude Code capabilities copy the selection from role.describe
-/// unchanged. Transport admission is separate and must authenticate the caller.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct Declaration {
     pub subscriptions: Vec<DeclaredSubscription>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_code: Option<crate::claude_code::ClaudeCodeCapabilities>,
+}
+
+impl Declaration {
+    pub fn new(subscriptions: Vec<DeclaredSubscription>) -> Self {
+        Self { subscriptions }
+    }
+
+    /// The plan composer includes an item only if the runner covers every
+    /// declared hook. Validate with [`Self::check`] first: this helper checks
+    /// hook coverage, not declaration validity.
+    pub fn covered_by_step_hooks(&self, step_hooks: &[Hook]) -> bool {
+        self.subscriptions.iter().all(|subscription| {
+            !matches!(subscription.hook, Hook::Unknown(_))
+                && step_hooks.contains(&subscription.hook)
+        })
+    }
 }
 
 /// Why a subscription, declared or planned, is malformed or out of bounds.
@@ -406,10 +340,13 @@ pub struct Declaration {
 /// itself, or breaks a rule no declaration can change, is `invalid_params`;
 /// a plan that the provider's current declaration no longer covers is
 /// `plan_stale`, since recomposing against the current declaration can fix it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SubscriptionProblem {
     /// `phase` on a hook other than `pre_tool`.
     PhaseOutsidePreTool,
+    /// A hook, phase, operation or policy is not understood.
+    UnknownValue,
     /// `pre_tool` without a `phase`.
     MissingPhase,
     /// `ops` on `pre_tool`, whose answers are by phase.
@@ -438,9 +375,10 @@ pub enum SubscriptionProblem {
 
 impl SubscriptionProblem {
     /// The problem's name as the vectors spell it.
-    pub fn name(self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             Self::PhaseOutsidePreTool => "phase_outside_pre_tool",
+            Self::UnknownValue => "unknown_value",
             Self::MissingPhase => "missing_phase",
             Self::OpsOnPreTool => "ops_on_pre_tool",
             Self::NoOps => "no_ops",
@@ -455,9 +393,9 @@ impl SubscriptionProblem {
     }
 
     /// The loosened field, for [`SubscriptionProblem::SubscriptionLoosened`].
-    pub fn field(self) -> Option<LoosenedField> {
+    pub fn field(&self) -> Option<LoosenedField> {
         match self {
-            Self::SubscriptionLoosened(field) => Some(field),
+            Self::SubscriptionLoosened(field) => Some(field.clone()),
             _ => None,
         }
     }
@@ -467,7 +405,7 @@ impl SubscriptionProblem {
     /// problem: `plan_stale` for a subscription the current declaration no
     /// longer covers (missing, its preset missing, or loosened),
     /// `invalid_params` for everything else.
-    pub fn admission_code(self) -> &'static str {
+    pub fn admission_code(&self) -> &'static str {
         match self {
             Self::SubscriptionMissing | Self::PresetMissing | Self::SubscriptionLoosened(_) => {
                 runner_codes::PLAN_STALE
@@ -508,17 +446,16 @@ impl SubscriptionProblem {
     }
 }
 
+open_tagged! {
 /// One entry of a `plan_stale` refusal's `detail.differences` that this
 /// role defines, internally tagged as the fetch plan spells it:
 /// `{kind: "subscription_loosened", provider, hook, phase, field}`.
-/// The same array may carry the fetch plan's own kinds (a digest or tool difference), which
-/// this type does not decode.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum StaleDifference {
+/// Other difference kinds are preserved without interpretation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StaleDifference, "kind" {
     /// The provider's current declaration for the plan item's preset and
     /// params has no subscription with the planned hook and phase.
-    SubscriptionMissing {
+    SubscriptionMissing => "subscription_missing" {
         provider: String,
         hook: Hook,
         #[serde(deserialize_with = "Option::deserialize")]
@@ -526,17 +463,18 @@ pub enum StaleDifference {
     },
     /// The provider no longer knows the plan item's preset, so it declares
     /// nothing for it.
-    PresetMissing { provider: String, preset: String },
+    PresetMissing => "preset_missing" { provider: String, preset: String },
     /// A planned subscription's frozen `field` is looser than the current
     /// declaration's: wider tools or ops, `pass` for a declared `refuse`,
     /// or a larger budget.
-    SubscriptionLoosened {
+    SubscriptionLoosened => "subscription_loosened" {
         provider: String,
         hook: Hook,
         #[serde(deserialize_with = "Option::deserialize")]
         phase: Option<Phase>,
         field: LoosenedField,
     },
+}
 }
 
 /// The `detail` of an `invalid_params` refusal during the plan check before
@@ -545,6 +483,7 @@ pub enum StaleDifference {
 /// problem}`, where `item` and `subscription` are indices into the plan's
 /// `step_transform_items` and that item's `subscriptions`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct InvalidSubscriptionDetail {
     pub field: String,
     pub item: usize,
@@ -570,7 +509,13 @@ fn check_shape(
     tools: Option<&Vec<String>>,
     ops: &[Op],
 ) -> Result<(), SubscriptionProblem> {
-    match (hook, phase) {
+    if matches!(hook, Hook::Unknown(_))
+        || matches!(phase, Some(Phase::Unknown(_)))
+        || ops.iter().any(|op| matches!(op, Op::Unknown(_)))
+    {
+        return Err(SubscriptionProblem::UnknownValue);
+    }
+    match (&hook, &phase) {
         (Hook::PreTool, None) => return Err(SubscriptionProblem::MissingPhase),
         (Hook::PreTool, Some(_)) => {}
         (_, Some(_)) => return Err(SubscriptionProblem::PhaseOutsidePreTool),
@@ -595,6 +540,9 @@ fn check_policy(
     budget_ms: u64,
 ) -> Vec<SubscriptionProblem> {
     let mut problems = Vec::new();
+    if matches!(on_unavailable, Some(OnUnavailable::Unknown(_))) {
+        problems.push(SubscriptionProblem::UnknownValue);
+    }
     if hook == Hook::PostAssistant && on_unavailable == Some(OnUnavailable::Refuse) {
         problems.push(SubscriptionProblem::RefuseOnPostAssistant);
     }
@@ -629,9 +577,20 @@ impl Subscription {
     /// Check the planned subscription on its own: its shape and its frozen
     /// policy. Every problem found here is `invalid_params`.
     pub fn check(&self) -> Result<(), SubscriptionProblem> {
-        check_shape(self.hook, self.phase, self.tools.as_ref(), &self.ops)?;
-        match check_policy(self.hook, Some(self.on_unavailable), self.budget_ms).first() {
-            Some(problem) => Err(*problem),
+        check_shape(
+            self.hook.clone(),
+            self.phase.clone(),
+            self.tools.as_ref(),
+            &self.ops,
+        )?;
+        match check_policy(
+            self.hook.clone(),
+            Some(self.on_unavailable.clone()),
+            self.budget_ms,
+        )
+        .first()
+        {
+            Some(problem) => Err(problem.clone()),
             None => Ok(()),
         }
     }
@@ -644,16 +603,19 @@ impl Declaration {
         let mut problems = Vec::new();
         for (index, declared) in self.subscriptions.iter().enumerate() {
             let shape = check_shape(
-                declared.hook,
-                declared.phase,
+                declared.hook.clone(),
+                declared.phase.clone(),
                 declared.tools.as_ref(),
                 &declared.ops,
             );
             if let Err(problem) = shape {
                 problems.push((index, problem));
             }
-            for problem in check_policy(declared.hook, declared.on_unavailable, declared.budget_ms)
-            {
+            for problem in check_policy(
+                declared.hook.clone(),
+                declared.on_unavailable.clone(),
+                declared.budget_ms,
+            ) {
                 problems.push((index, problem));
             }
         }
@@ -662,6 +624,8 @@ impl Declaration {
 
     /// Find the declared subscription that bounds `planned`, and return its
     /// index. Checks run in a fixed order and report the first failure.
+    /// Validate this declaration with [`Self::check`] first; `bound` does not
+    /// validate the declaration.
     /// First check the planned subscription itself ([`Subscription::check`]).
     /// If no declaration has the same hook and phase, report
     /// `subscription_missing`. Then filter candidates by tool coverage
@@ -706,7 +670,7 @@ impl Declaration {
         {
             return Ok(*index);
         }
-        let field = first.loosened_fields(planned)[0];
+        let field = first.loosened_fields(planned)[0].clone();
         Err(SubscriptionProblem::SubscriptionLoosened(field))
     }
 }
@@ -760,6 +724,7 @@ pub fn reduction_owner_first(providers: &[&str], reduction_owner: Option<&str>) 
 /// Why the runner refuses a step-transform item during admission, the plan
 /// check before accepting a session (CONTRACT.md §4).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ItemRefusal {
     /// `invalid_params`, with the detail of the first malformed or
     /// forbidden subscription.
@@ -832,6 +797,8 @@ impl ItemAdmissionRefusal {
 /// order is reported.
 /// Otherwise every stale subscription is listed, in order. A missing preset
 /// produces one difference per item, even if the item has no subscriptions.
+/// A supplied declaration must already have passed [`Declaration::check`];
+/// this helper validates planned subscriptions, not the declaration.
 pub fn check_item(
     item: usize,
     provider: &str,
@@ -862,6 +829,8 @@ pub fn check_item(
 /// exactly like [`check_item`]. Successful admission returns the declaration
 /// index bounding each planned subscription, without changing those frozen
 /// subscriptions.
+/// A supplied declaration must already have passed [`Declaration::check`];
+/// this helper validates planned subscriptions, not the declaration.
 ///
 /// Pass `declaration: None` only when the provider refused `transform.declare`
 /// with `invalid_params {field: "preset"}`:
@@ -903,15 +872,15 @@ pub fn check_item_with_optional_preset(
                 SubscriptionProblem::SubscriptionMissing => {
                     differences.push(StaleDifference::SubscriptionMissing {
                         provider: provider.to_owned(),
-                        hook: subscription.hook,
-                        phase: subscription.phase,
+                        hook: subscription.hook.clone(),
+                        phase: subscription.phase.clone(),
                     });
                 }
                 SubscriptionProblem::SubscriptionLoosened(field) => {
                     differences.push(StaleDifference::SubscriptionLoosened {
                         provider: provider.to_owned(),
-                        hook: subscription.hook,
-                        phase: subscription.phase,
+                        hook: subscription.hook.clone(),
+                        phase: subscription.phase.clone(),
                         field,
                     });
                 }
@@ -1018,7 +987,7 @@ mod tests {
             match case["problem"].as_str() {
                 None => assert_eq!(outcome, Ok(()), "{name}"),
                 Some(problem) => assert_eq!(
-                    outcome.map_err(SubscriptionProblem::name),
+                    outcome.map_err(|problem| problem.name()),
                     Err(problem),
                     "{name}"
                 ),

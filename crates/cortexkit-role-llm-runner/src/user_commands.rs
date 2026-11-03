@@ -1,8 +1,7 @@
 //! Owner relay for person-only commands. Replies and progress stay out of model history.
 //!
-//! Runner-owned command and reply types avoid a production dependency on the
-//! tool-provider crate and its release cycle. Test-only checks compare both
-//! crates' encodings with the same provider vectors to detect wire-shape drift.
+//! These command and reply types remain runner-owned. Vector tests compare
+//! their encoding with tool-provider's types to detect wire-shape drift.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -114,11 +113,26 @@ pub struct FrozenUserCommand {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+#[serde(deny_unknown_fields)]
 pub struct UserCommandRequest {
-    pub session_ref: String,
     pub command: String,
     pub input: String,
     pub invocation_id: String,
+}
+
+impl UserCommandRequest {
+    pub fn new(
+        command: impl Into<String>,
+        input: impl Into<String>,
+        invocation_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            command: command.into(),
+            input: input.into(),
+            invocation_id: invocation_id.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -128,9 +142,18 @@ pub struct UserCommandAnswer {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+#[serde(deny_unknown_fields)]
 pub struct UserCommandStatusRequest {
-    pub session_ref: String,
     pub call_key: String,
+}
+
+impl UserCommandStatusRequest {
+    pub fn new(call_key: impl Into<String>) -> Self {
+        Self {
+            call_key: call_key.into(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

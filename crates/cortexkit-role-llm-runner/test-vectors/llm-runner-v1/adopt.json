@@ -104,7 +104,7 @@
       "reply": {
         "owner_bound": true,
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "last_ordinal": 4
+        "last_ordinal": 5
       }
     },
     {
@@ -121,7 +121,7 @@
       "session": {
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "owner": null,
-        "last_ordinal": 4,
+        "last_ordinal": 5,
         "active_run": null
       },
       "earlier": [],
@@ -153,7 +153,7 @@
       "reply": {
         "owner_bound": true,
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "last_ordinal": 4
+        "last_ordinal": 5
       },
       "writes": "adoption",
       "messages_written": 0,
@@ -208,7 +208,7 @@
       "session": {
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "owner": "core",
-        "last_ordinal": 6,
+        "last_ordinal": 7,
         "active_run": null
       },
       "earlier": [
@@ -240,7 +240,7 @@
           "reply": {
             "owner_bound": true,
             "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "last_ordinal": 4
+            "last_ordinal": 5
           }
         }
       ],
@@ -272,7 +272,7 @@
       "reply": {
         "owner_bound": true,
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "last_ordinal": 4
+        "last_ordinal": 5
       },
       "writes": "nothing",
       "messages_written": 0,
@@ -284,7 +284,7 @@
       "session": {
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "owner": "core",
-        "last_ordinal": 4,
+        "last_ordinal": 5,
         "active_run": null
       },
       "earlier": [
@@ -316,7 +316,7 @@
           "reply": {
             "owner_bound": true,
             "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "last_ordinal": 4
+            "last_ordinal": 5
           }
         }
       ],
@@ -372,7 +372,7 @@
       "session": {
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "owner": null,
-        "last_ordinal": 4,
+        "last_ordinal": 5,
         "active_run": null
       },
       "earlier": [],
@@ -474,7 +474,7 @@
       "session": {
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "owner": null,
-        "last_ordinal": 2,
+        "last_ordinal": 3,
         "active_run": "run-7"
       },
       "earlier": [],
@@ -506,7 +506,7 @@
       "reply": {
         "owner_bound": true,
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "last_ordinal": 2
+        "last_ordinal": 3
       },
       "writes": "adoption",
       "messages_written": 0,
@@ -518,7 +518,7 @@
       "session": {
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "owner": "core",
-        "last_ordinal": 4,
+        "last_ordinal": 5,
         "active_run": null
       },
       "earlier": [
@@ -550,7 +550,7 @@
           "reply": {
             "owner_bound": true,
             "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "last_ordinal": 4
+            "last_ordinal": 5
           }
         }
       ],
@@ -592,7 +592,7 @@
       "session": {
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "owner": "core",
-        "last_ordinal": 4,
+        "last_ordinal": 5,
         "active_run": null
       },
       "earlier": [
@@ -624,7 +624,7 @@
           "reply": {
             "owner_bound": true,
             "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "last_ordinal": 4
+            "last_ordinal": 5
           }
         }
       ],
@@ -666,7 +666,7 @@
       "session": {
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "owner": null,
-        "last_ordinal": 4,
+        "last_ordinal": 5,
         "active_run": null
       },
       "earlier": [],
@@ -708,7 +708,7 @@
       "session": {
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "owner": "core",
-        "last_ordinal": 6,
+        "last_ordinal": 7,
         "active_run": null
       },
       "earlier": [
@@ -740,7 +740,7 @@
           "reply": {
             "owner_bound": true,
             "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "last_ordinal": 4
+            "last_ordinal": 5
           }
         }
       ],
@@ -772,7 +772,7 @@
       "reply": {
         "owner_bound": true,
         "applied_plan_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "last_ordinal": 6
+        "last_ordinal": 7
       },
       "writes": "adoption",
       "messages_written": 0,

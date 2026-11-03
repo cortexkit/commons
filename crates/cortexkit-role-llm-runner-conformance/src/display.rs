@@ -71,7 +71,7 @@ async fn display_page<R: RunnerRoute>(
         .await?,
     )?;
     let page: DisplayPage = decode("a display session.history", body)?;
-    page.check(head(route).await?.first_ordinal)
+    page.check()
         .map_err(|problem| format!("a display page breaks a history page's rules: {problem:?}"))?;
     Ok(page)
 }
@@ -121,19 +121,19 @@ fn same_entries(what: &str, raw: &[HistoryEntry], shown: &[DisplayEntry]) -> Che
         ));
     }
     for (raw, shown) in raw.iter().zip(shown) {
-        if (raw.ordinal, raw.written_at, &raw.tags)
-            != (shown.ordinal, shown.written_at, &shown.tags)
+        if (raw.ordinal, raw.written_at, &raw.part_keys)
+            != (shown.ordinal, shown.written_at, &shown.part_keys)
         {
             return Err(format!(
-                "{what}, entry {} carries ordinal {:?}, written_at {} and tags {:?} in display \
+                "{what}, entry {} carries ordinal {:?}, written_at {} and part_keys {:?} in display \
                  form, but {:?}, {} and {:?} raw: the envelope is kept",
                 raw.mid,
                 shown.ordinal,
                 shown.written_at,
-                shown.tags,
+                shown.part_keys,
                 raw.ordinal,
                 raw.written_at,
-                raw.tags
+                raw.part_keys
             ));
         }
     }
@@ -207,6 +207,11 @@ where
             }
             expected.client_message_id = shown.row.client_message_id.clone();
             expected.sender = shown.row.sender.clone();
+            // The rich-UI catalog is selected when the run is admitted, and
+            // output references capture the request that wrote the entry.
+            // Neither identity is in the native body; dedicated cases check them.
+            expected.output_refs = shown.row.output_refs.clone();
+            expected.rich_ui = shown.row.rich_ui.clone();
             // Under call_identity the runner adds a tool call's key and, for a
             // dispatched provider tool, its pin. The stored body carries
             // neither, so they're copied here and the call_identity cases
@@ -225,6 +230,7 @@ where
                 call.started_at = served.started_at;
                 call.finished_at = served.finished_at;
                 call.unanswered = served.unanswered.clone();
+                call.output_refs = served.output_refs.clone();
             }
             if shown.row != expected {
                 return Err(format!(
@@ -716,7 +722,7 @@ where
             call(
                 &named,
                 ops::SESSION_SEND,
-                crate::tags::params(
+                crate::send_helpers::params(
                     case,
                     &session,
                     None,

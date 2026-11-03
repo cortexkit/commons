@@ -1,4 +1,4 @@
-//! The kill points the `step-transform-provider/v1` crash suite will ask a
+//! The kill points the `step-transform-provider/v2` crash suite will ask a
 //! harness for.
 //!
 //! A step-transform provider holds little durable state of its own: the

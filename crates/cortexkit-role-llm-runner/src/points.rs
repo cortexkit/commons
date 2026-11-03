@@ -17,11 +17,6 @@ pub const ADMITTED: &str = "Admitted";
 /// nothing new.
 pub const SEND_RECORDED: &str = "SendRecorded";
 
-/// A compaction answer to be applied is durable. The request that would
-/// carry it has not been sent. Resume applies it without calling the
-/// provider again.
-pub const COMPACTION_APPLIED: &str = "CompactionApplied";
-
 /// An assistant step is durable with its PostAssistant output. No tool call
 /// from it has a dispatch intent yet. The runner either resumes and dispatches
 /// each call exactly once, or seals the run `interrupted` without dispatch.
@@ -38,10 +33,6 @@ pub const DISPATCH_INTENT: &str = "DispatchIntent";
 /// A tool call's result is durable with its PostTool output. Resume replays
 /// it without calling the tool or the hook again.
 pub const TOOL_RESULT_RECORDED: &str = "ToolResultRecorded";
-
-/// A prefix rebuild that applies a pending change is durable. The request
-/// that carries the new prefix has not been sent.
-pub const FOLD_RECORDED: &str = "FoldRecorded";
 
 /// The run's terminal state is durable. Resume never writes a second one.
 pub const TERMINAL: &str = "Terminal";
@@ -63,8 +54,6 @@ pub const USER_COMMAND_FORWARDED: &str = "UserCommandForwarded";
 pub const ALL: &[&str] = &[
     ADMITTED,
     SEND_RECORDED,
-    COMPACTION_APPLIED,
-    FOLD_RECORDED,
     STEP_RECORDED,
     DISPATCH_INTENT,
     TOOL_RESULT_RECORDED,

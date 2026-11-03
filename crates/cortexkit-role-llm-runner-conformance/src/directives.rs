@@ -21,7 +21,8 @@ async fn send<S: LlmRunnerSubject>(
 where
     S::Route: RunnerRoute,
 {
-    crate::tags::require_declared(&session.route, groups::TURN_DIRECTIVES, "directives").await?;
+    crate::send_helpers::require_declared(&session.route, groups::TURN_DIRECTIVES, "directives")
+        .await?;
     let mut params = case.params(
         session,
         "directive probe",
@@ -120,8 +121,12 @@ where
         )
         .await?;
     if name == "turn_directives_unknown_refused" {
-        crate::tags::require_declared(&session.route, groups::TURN_DIRECTIVES, "directives")
-            .await?;
+        crate::send_helpers::require_declared(
+            &session.route,
+            groups::TURN_DIRECTIVES,
+            "directives",
+        )
+        .await?;
         for value in [json!(["unknown"]), json!("wake"), json!(["wake", "wake"])] {
             let mut params = case.params(
                 &session,

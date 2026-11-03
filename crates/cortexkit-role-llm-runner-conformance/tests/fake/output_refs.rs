@@ -20,9 +20,9 @@ pub(super) struct StoredSet {
     pub snapshots: BTreeMap<String, Vec<u8>>,
 }
 
-fn targets(sess: &Sess, defects: &Defects) -> BTreeMap<u64, Target> {
+fn targets(sess: &Sess, _defects: &Defects) -> BTreeMap<u64, Target> {
     let mut out = BTreeMap::new();
-    for ((mid, part), n) in tags::fresh(sess, defects, true) {
+    for ((mid, part), n) in part_numbers(sess) {
         let Some(m) = sess.messages.iter().find(|m| m.mid == mid) else {
             continue;
         };
@@ -54,9 +54,6 @@ fn targets(sess: &Sess, defects: &Defects) -> BTreeMap<u64, Target> {
 }
 
 pub(super) fn capture(sess: &Sess, record: &Value, defects: &Defects) -> Value {
-    if !sess.render_tags {
-        return json!([]);
-    }
     let request = targets(sess, defects);
     let mut sets = Vec::new();
     let mut sequence = 0;
@@ -199,7 +196,6 @@ pub(super) fn apply(sess: &mut Sess, kind: &str, record: &Value, defects: &Defec
     }
     if kind == "refs_held" {
         sess.push(json!({"role":"tool","content":record["placeholder"],"call_key":"held-key","held":true}),"",vec![]);
-        tags::note_write(sess, defects, true);
     }
     if kind == "refs_late" {
         for m in &mut sess.messages {
@@ -222,9 +218,8 @@ pub(super) fn apply(sess: &mut Sess, kind: &str, record: &Value, defects: &Defec
     }
     if kind == "refs_renumber" {
         sess.lineage.push_str("-renumbered");
-        for n in sess.numbering.values_mut() {
-            *n += 1000;
-        }
+        sess.number_offset += 1000;
+        sess.history_version += 1;
         if defect == Some("output_refs_writing_request") {
             for set in &mut sess.output_refs.sets {
                 for r in &mut set.records {

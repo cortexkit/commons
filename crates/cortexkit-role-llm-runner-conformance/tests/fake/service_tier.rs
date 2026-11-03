@@ -1,5 +1,4 @@
 use super::*;
-use cortexkit_role_compaction_provider::ride::{RideCause, RideRequest};
 use cortexkit_role_llm_runner::service_tier::{
     check_send, Served, ServiceTier, ServiceTiers, Support,
 };
@@ -10,7 +9,6 @@ pub enum ServiceTierDefect {
     None,
     CallBeforeUnsupportedRefusal,
     ChangeRunTier,
-    LateRide,
     EchoServed,
     NoFixture,
 }
@@ -19,7 +17,6 @@ pub enum ServiceTierDefect {
 pub(super) struct State {
     applied: ServiceTier,
     previous: Option<ServiceTier>,
-    rides: Vec<RideRequest>,
 }
 
 pub(super) fn support() -> cortexkit_role_llm_runner::service_tier::ServiceTiers {
@@ -85,21 +82,7 @@ impl Module {
         let Some(state) = states.get_mut(session) else {
             return;
         };
-        let changed = state
-            .previous
-            .is_some_and(|previous| previous != state.applied);
-        let ride = || {
-            RideRequest::new("a".repeat(32), RideCause::ServiceTierChange, 1000)
-                .with_service_tier(state.applied)
-        };
-        if changed && self.world.defects.service_tier != ServiceTierDefect::LateRide {
-            state.rides.push(ride());
-        }
         observation.service_tier_applied = Some(state.applied.as_str().into());
-        observation.service_tier_change_rides = Some(state.rides.len() as u64);
-        if changed && self.world.defects.service_tier == ServiceTierDefect::LateRide {
-            state.rides.push(ride());
-        }
         state.previous = Some(state.applied);
     }
 

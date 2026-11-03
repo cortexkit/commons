@@ -30,7 +30,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
-cortexkit-role-llm-runner = { version = "0.7.36", path = "../cortexkit-role-llm-runner" }
+cortexkit-role-llm-runner = { version = "0.8", path = "../cortexkit-role-llm-runner" }
 cortexkit-role-tool-provider = { version = "0.15.0", path = "../cortexkit-role-tool-provider" }
 sha2 = "0.10"
 subc-protocol = "0.34"

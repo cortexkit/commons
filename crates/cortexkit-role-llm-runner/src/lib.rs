@@ -54,8 +54,8 @@ pub mod session_retention;
 pub mod step_events;
 pub mod structured_output;
 pub mod subscribe;
-pub mod tags;
 pub mod tool_calls;
+pub mod tool_result_limit;
 pub mod upfront;
 pub mod usage;
 pub mod user_commands;
@@ -117,9 +117,8 @@ pub mod ops {
     /// The transcript's head metadata, without message bodies. In
     /// `transcript_reads`.
     pub const SESSION_HEAD: &str = "session.head";
-    /// The session's whole surviving history, paged by opaque cursors,
-    /// including what lies before the current lineage. On demand only. In
-    /// `host_history`.
+    /// The session's whole active-path history, including entries below native
+    /// markers, paged by opaque cursors. On demand only. In `host_history`.
     pub const SESSION_HISTORY: &str = "session.history";
     /// A run's terminal state and final message. In `run_ops`.
     pub const RUN_RESULT: &str = "run.result";
@@ -148,14 +147,13 @@ pub mod ops {
     /// already applied, without a prompt: no run starts and nothing is
     /// written to the transcript. In `adopt`.
     pub const SESSION_ADOPT: &str = "session.adopt";
-    /// The exact stored content of the message part a runner tag names, or a
-    /// character range of it. In `tags`.
-    pub const SESSION_RESOLVE: &str = "session.resolve";
     /// Every tool call a run made, in order, without message bodies. In
     /// `run_tool_calls`.
     pub const RUN_TOOL_CALLS: &str = "run.tool_calls";
     /// What a re-send of a `send_id` would answer, from the runner's durable
     /// record of the send, without its body. In `send_status`.
+    pub const SESSION_SEND_STATUS: &str = "session.send_status";
+    /// Compatibility alias, served with `session.send_status` until the next breaking release.
     pub const SEND_STATUS: &str = "send.status";
 }
 
@@ -179,7 +177,6 @@ pub mod capabilities {
     pub const ARCHIVE_PRUNES_REASONING: &str = "archive_prunes_reasoning";
 
     /// Immutable output references captured against the writing request.
-    /// Requires tags and applies only where the frozen plan renders tags.
     pub const OUTPUT_REFS: &str = "output_refs";
 
     /// Per-item hints that keep selected offered tool definitions loaded.
@@ -188,11 +185,11 @@ pub mod capabilities {
     /// Session-scoped uploads, upload references on sends and media by digest.
     pub const ATTACHMENTS: &str = "attachments";
 
-    /// Tail, range and after-message reads, head metadata and `lineage_id`
+    /// Tail, range and after-message reads, head metadata and `history_version`
     /// on every page.
     pub const TRANSCRIPT_READS: &str = "transcript_reads";
     /// `session.history`: the session's surviving history from its first
-    /// message, before the current lineage included, paged by opaque
+    /// message, including entries below native markers, paged by opaque
     /// cursors and served on demand (an app's reader, raw recovery). A
     /// runner that is its own host declares it; a runner on a host may, and
     /// then serves history from the host's own storage.
@@ -266,8 +263,6 @@ pub mod capabilities {
     pub const DISPATCH_ATTRIBUTION: &str = "dispatch_attribution";
     /// `session.subscribe` with the snapshot handoff from a page's `head`.
     pub const STREAMING: &str = "streaming";
-    /// `session.read` with `view: "model"`, the post-compaction view.
-    pub const MODEL_VIEW: &str = "model_view";
     /// `session.send` with `delivery: "steer"` from the session's owner.
     pub const STEER: &str = "steer";
     /// `session.send` with `delivery: "queue"` from the session's owner.
@@ -285,27 +280,6 @@ pub mod capabilities {
     /// Admit preset-less system text only for a provider declaring
     /// `system-text-default/v1`, and forward the item unchanged.
     pub const SYSTEM_TEXT_DEFAULT: &str = "system_text_default";
-    /// Hosting a compaction provider: the runner half of
-    /// compaction-provider 0.3.0 §3 (Setup, advance notices, views applied at
-    /// step boundaries, rides, the ceiling and native markers). Requires
-    /// [`TAGS`], whose ops it lists: an answer declaring it without `tags`
-    /// is malformed. The runner also implements the `context_ceiling`
-    /// refusal and run state and the `context_ceiling_wait` status. A runner
-    /// that hosts no sessions of its own declares none of it.
-    pub const COMPACTION: &str = "compaction";
-    /// Honouring a compaction provider's Setup checkpoint
-    /// (`tags::SetupCheckpoint`, `{tag_checkpoint, cut}`): the runner
-    /// anchors the checkpoint at its cut message when no in-effect marker
-    /// carries a checkpoint for the session, and numbers from the session
-    /// start with it, on a new lineage, once that message is gone. A
-    /// provider refuses Setup for a session it moved from standalone Magic
-    /// Context on a runner without it. Requires [`COMPACTION`]: an answer
-    /// declaring it without `compaction` is malformed. Adds no op of its
-    /// own.
-    pub const TAG_CHECKPOINT: &str = "tag_checkpoint";
-    /// Message-lineage checkpoints alongside tag anchors. Requires
-    /// [`TAG_CHECKPOINT`]; adds no operation of its own.
-    pub const MESSAGE_CHECKPOINT: &str = "message_checkpoint";
     /// Mid-session changes from the session's owner: `session.refresh`,
     /// `session.refresh_policy` and `session.flush_prefix`. A runner without
     /// it gets no mid-session changes; its owner applies them at the next
@@ -348,10 +322,6 @@ pub mod capabilities {
     /// with a plan already applied, before or during the person's own turns,
     /// without sending a prompt.
     pub const ADOPT: &str = "adopt";
-    /// Runner-rendered tags: the `§N§` each counted part shows, computed
-    /// from the transcript, on `session.read` entries and resolved in the
-    /// current lineage by `session.resolve`.
-    pub const TAGS: &str = "tags";
     /// `run.tool_calls`: a run's tool calls as a paged list, read without
     /// decoding message bodies.
     pub const RUN_TOOL_CALLS: &str = "run_tool_calls";
@@ -445,7 +415,6 @@ pub mod capabilities {
         (RETRACT_OWN_SEND, &[ops::SESSION_RETRACT]),
         (DISPATCH_ATTRIBUTION, &[ops::SESSION_READ]),
         (STREAMING, &[ops::SESSION_READ, ops::SESSION_SUBSCRIBE]),
-        (MODEL_VIEW, &[ops::SESSION_READ]),
         (STEER, &[ops::SESSION_SEND]),
         (QUEUE, &[ops::SESSION_SEND]),
         (INTERRUPT, &[ops::SESSION_SEND]),
@@ -461,7 +430,6 @@ pub mod capabilities {
         (SUBMIT_STREAMED_SIBLINGS, &[ops::SESSION_SEND]),
         (STRUCTURED_OUTPUT_PER_SESSION, &[ops::SESSION_SEND]),
         (ADOPT, &[ops::SESSION_ADOPT]),
-        (TAGS, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
         (RUN_USAGE, &[ops::RUN_RESULT]),
         (FINISH_REASON, &[ops::RUN_RESULT]),
@@ -470,13 +438,7 @@ pub mod capabilities {
         (DELIVERY_ORDER, &[ops::SESSION_SEND]),
         (SENDER_SUCCESSION, &[ops::SESSION_SEND]),
         (APP_READERS, &[]),
-        (SEND_STATUS, &[ops::SEND_STATUS]),
-        (COMPACTION, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
-        (TAG_CHECKPOINT, &[ops::SESSION_READ, ops::SESSION_RESOLVE]),
-        (
-            MESSAGE_CHECKPOINT,
-            &[ops::SESSION_READ, ops::SESSION_RESOLVE],
-        ),
+        (SEND_STATUS, &[ops::SESSION_SEND_STATUS, ops::SEND_STATUS]),
         (
             SESSION_CHANGE,
             &[
@@ -567,77 +529,6 @@ pub(crate) mod strict {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn every_group_names_only_role_ops() {
-        let role_ops = [
-            ops::SESSION_RELEASE,
-            ops::SESSION_OUTPUT_REFS,
-            ops::SESSION_OUTPUT_REF_READ,
-            ops::SESSION_UPLOAD_BEGIN,
-            ops::SESSION_UPLOAD_APPEND,
-            ops::SESSION_UPLOAD_STATUS,
-            ops::SESSION_UPLOAD_COMMIT,
-            ops::SESSION_MEDIA_READ,
-            ops::ROLE_DESCRIBE,
-            ops::SESSION_BASELINE,
-            ops::SESSION_USER_COMMAND,
-            ops::SESSION_USER_COMMAND_STATUS,
-            ops::SESSION_READ,
-            ops::SESSION_HEAD,
-            ops::SESSION_HISTORY,
-            ops::RUN_RESULT,
-            ops::RUN_STATUS,
-            ops::RUN_CANCEL,
-            ops::SESSION_RETRACT,
-            ops::SESSION_SUBSCRIBE,
-            ops::SESSION_SEND,
-            ops::SESSION_REFRESH,
-            ops::SESSION_REFRESH_POLICY,
-            ops::SESSION_FLUSH_PREFIX,
-            ops::SESSION_ADOPT,
-            ops::SESSION_RESOLVE,
-            ops::RUN_TOOL_CALLS,
-            ops::SEND_STATUS,
-        ];
-        for (group, group_ops) in capabilities::GROUPS {
-            // Step events are plain bus publishes, not management-route ops,
-            // call identity extends either of two ops, neither required, and
-            // app readers restrict existing reads without adding any ops.
-            assert_eq!(
-                group_ops.is_empty(),
-                [
-                    capabilities::STEP_EVENTS,
-                    capabilities::CALL_IDENTITY,
-                    capabilities::APP_READERS
-                ]
-                .contains(group),
-                "{group}"
-            );
-            for op in *group_ops {
-                assert!(role_ops.contains(op), "{group} names {op}");
-            }
-        }
-        assert_eq!(
-            capabilities::group_ops(capabilities::STEER),
-            Some(&[ops::SESSION_SEND][..])
-        );
-        assert_eq!(
-            capabilities::group_ops(capabilities::ORDERED_HOOK_PHASES),
-            None
-        );
-        assert_eq!(
-            capabilities::group_ops(capabilities::COMPACTION),
-            Some(&[ops::SESSION_READ, ops::SESSION_RESOLVE][..])
-        );
-        // A group's ops are never required of every runner: a runner that
-        // declares no group serves only the required ops.
-        for (group, group_ops) in capabilities::GROUPS {
-            for op in *group_ops {
-                assert!(!REQUIRED_OPS.contains(op), "{group}: {op} is required");
-            }
-        }
-    }
 
     #[test]
     fn session_change_vectors_name_group_ops_and_refusals() {

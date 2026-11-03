@@ -17,10 +17,8 @@
 //! - `read::ReadMessage::rich_ui` on the run's assistant entries, only when
 //!   the `session.read` request opts in with `include_rich_ui: true`.
 //!
-//! [`RichUiStamp`] has exactly the wire form of the tool-provider crate's
-//! type of the same name. This crate does not depend on the tool-provider
-//! crate, so it defines its own copy; a test decodes the same vectors with
-//! both and checks they agree.
+//! [`RichUiStamp`] is a runner-owned wire type. Shared-vector tests check
+//! compatibility with tool-provider's stamp of the same name.
 //!
 //! `dialect` is the rich UI language dialect the catalog declares about
 //! itself (for example `"1.0"`). It is not the `rich-ui/1` reference scan
@@ -459,12 +457,12 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let head: HeadMeta = vectors::round_trip(name, &case["answer"]);
             assert_eq!(head.last_run_rich_ui, stamp_of(case), "{name}");
-            assert!(head.lineage_consistent(), "{name}");
+            assert!(head.snapshot_consistent(), "{name}");
         }
         for case in vectors::cases(&file, "inconsistent_heads") {
             let name = case["name"].as_str().unwrap();
             let head: HeadMeta = vectors::round_trip(name, &case["answer"]);
-            assert!(!head.lineage_consistent(), "{name}");
+            assert!(!head.snapshot_consistent(), "{name}");
         }
         // The builder adds only the member.
         let stamped = &vectors::cases(&file, "heads")[0];

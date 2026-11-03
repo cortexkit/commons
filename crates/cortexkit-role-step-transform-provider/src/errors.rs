@@ -38,15 +38,6 @@ impl ErrorBody {
         self.detail = Some(detail);
         self
     }
-
-    /// Recovery hint on a transient history refusal. The provider supplies
-    /// the first missing ordinal; another refusal code gives it no meaning.
-    pub fn history_gap_from(&self) -> Option<u64> {
-        if self.code != TRANSIENT {
-            return None;
-        }
-        self.detail.as_ref()?.get("history_gap_from")?.as_u64()
-    }
 }
 
 // Generate the enumeration and its inventory together so a new variant cannot
@@ -57,6 +48,7 @@ macro_rules! known_codes {
         /// This classification enum is not the open wire type of `code`.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
         #[serde(rename_all = "snake_case")]
+        #[non_exhaustive]
         pub enum KnownCode { $($variant),+ }
 
         impl KnownCode {
@@ -72,7 +64,9 @@ macro_rules! known_codes {
 known_codes! {
     InvalidParams => INVALID_PARAMS,
     NotSubscribed => NOT_SUBSCRIBED,
-    Transient => TRANSIENT,
+    UnattestedRunner => UNATTESTED_RUNNER,
+    UnknownRouteRole => UNKNOWN_ROUTE_ROLE,
+    RouteUnbound => ROUTE_UNBOUND,
     PlanStale => runner_codes::PLAN_STALE,
     PreUserUnavailable => runner_codes::PRE_USER_UNAVAILABLE,
     PreToolDenied => runner_codes::tool_result_reasons::PRE_TOOL_DENIED,
@@ -82,8 +76,8 @@ known_codes! {
     PostToolUnavailable => runner_codes::tool_result_reasons::POST_TOOL_UNAVAILABLE,
 }
 
-/// A request field is malformed, misconfigured or conflicts with an already
-/// ingested subject (an unknown serializer profile or changed message, say).
+/// A request field is malformed or misconfigured (an unknown serializer
+/// profile, for example).
 /// `detail.field` names it. The malformed-request code of the runner and
 /// provider roles alike; `tool-provider/v1` spells it `invalid_request`.
 pub const INVALID_PARAMS: &str = "invalid_params";
@@ -93,18 +87,25 @@ pub const INVALID_PARAMS: &str = "invalid_params";
 /// `phase`.
 pub const NOT_SUBSCRIBED: &str = "not_subscribed";
 
-/// The provider could not answer now for a reason that may clear by itself.
-/// Retryable, but only within the hook's budget.
-/// For a history gap, `detail.history_gap_from` may name the first missing
-/// ordinal. Other codes ignore that hint.
-pub const TRANSIENT: &str = "transient";
+/// The daemon attests no module for the caller.
+pub const UNATTESTED_RUNNER: &str = "unattested_runner";
+/// The route declares none of the roles its receiver serves, or more than one.
+pub const UNKNOWN_ROUTE_ROLE: &str = "unknown_route_role";
+/// The hook route has no session binding under the session's scope.
+pub const ROUTE_UNBOUND: &str = "route_unbound";
 
 /// Every refusal code a provider of this role answers with.
-pub const CODES: &[&str] = &[INVALID_PARAMS, NOT_SUBSCRIBED, TRANSIENT];
+pub const CODES: &[&str] = &[
+    INVALID_PARAMS,
+    NOT_SUBSCRIBED,
+    UNATTESTED_RUNNER,
+    UNKNOWN_ROUTE_ROLE,
+    ROUTE_UNBOUND,
+];
 
-/// Whether a provider's refusal is retryable with the same request.
-pub fn is_retryable(code: &str) -> bool {
-    code == TRANSIENT
+/// No refusal defined by this role is retryable with the same request.
+pub fn is_retryable(_code: &str) -> bool {
+    false
 }
 
 /// The field an `invalid_params` refusal names, or `None` for any other

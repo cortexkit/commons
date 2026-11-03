@@ -5,13 +5,6 @@ use serde_json::Value;
 
 use crate::serializer_profile::{ANTHROPIC_MESSAGES, OPENCODE_AISDK, OWNED_BROCA, PI};
 
-/// The `view_refused` reason a runner reports for a view that would put
-/// pruned content back (CONTRACT §9.14.1), and the reason it records when a
-/// post-prune Setup answer's `initial` would do the same.
-pub const PRUNED_REASONING_RESTORED: &str = "pruned_reasoning_restored";
-
-/// Pruning kinds are open strings on pages. An unknown kind means the part
-/// stays in place but its changed payload cannot be trusted by that reader.
 pub mod kinds {
     pub const REASONING: &str = "reasoning";
     pub const OPAQUE_REASONING: &str = "opaque_reasoning";
@@ -54,8 +47,7 @@ pub struct PrunedReasoning {
     pub sha256: String,
 }
 
-/// A session's prune state, on `session.head`, `session.read` pages, Setup
-/// requests and advance notices of a runner that declares
+/// A session's prune state, on head and read pages of a runner declaring
 /// `archive_prunes_reasoning`. Absent until the session's first prune, so
 /// "never pruned" needs no stored value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -80,31 +72,9 @@ impl ReasoningPruned {
         }
     }
 
-    /// Whether the value can describe a prune: the generation counts from 1.
+    /// Generations and touched entry ordinals both count from 1.
     pub fn valid(&self) -> bool {
-        self.generation >= 1
-    }
-}
-
-/// One part the runner pruned, as its own stored prune state records it:
-/// where the part is and which kind removed what. The runner checks views
-/// against this record, not against digests, because part digests keep
-/// their write-time values after a prune.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct PrunedPartAt {
-    pub ordinal: u64,
-    pub part: String,
-    pub kind: String,
-}
-
-impl PrunedPartAt {
-    pub fn new(ordinal: u64, part: impl Into<String>, kind: impl Into<String>) -> Self {
-        Self {
-            ordinal,
-            part: part.into(),
-            kind: kind.into(),
-        }
+        self.generation >= 1 && self.through_ordinal >= 1
     }
 }
 
@@ -189,92 +159,6 @@ fn provider_state_signed(state: Option<&Value>) -> bool {
     })
 }
 
-/// The pruned part a replacement would restore, if any (CONTRACT §9.14.1).
-/// This is the `owned-broca` reference: it reads each message's `content`
-/// array with [`carries_pruned_content`]. Use [`restored_part_in`] for a
-/// session of another serializer profile.
-///
-/// `stands_for` is the half-open ordinal range the replacement stands for:
-/// a view `replace` range's `[from, to)`, widened to start at 0 for the
-/// first range of a lineage whose `first_ordinal` is above 0, because that
-/// range is the view's head and carries everything before the lineage. A
-/// post-prune Setup answer's `initial` stands for the same as its range,
-/// widened the same way. `messages` is the replacement's JSON array of
-/// messages, each with a `content` array of parts. Pruned parts are taken in
-/// the order given; the first whose ordinal lies in `stands_for` and whose
-/// kind's removed content appears in any replacement part is returned.
-pub fn restored_part<'a>(
-    pruned: &'a [PrunedPartAt],
-    stands_for: std::ops::Range<u64>,
-    messages: &Value,
-) -> Option<&'a PrunedPartAt> {
-    restored_by(
-        pruned,
-        stands_for,
-        messages,
-        |message| message.get("content"),
-        carries_pruned_content,
-    )
-}
-
-/// The shared body of [`restored_part`] and [`restored_part_in`]: `container`
-/// finds a message's part array, `carries` is the profile's rule.
-fn restored_by<'a>(
-    pruned: &'a [PrunedPartAt],
-    stands_for: std::ops::Range<u64>,
-    messages: &Value,
-    container: impl Fn(&Value) -> Option<&Value>,
-    carries: impl Fn(&str, &Value) -> bool,
-) -> Option<&'a PrunedPartAt> {
-    let parts: Vec<&Value> = messages
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|message| container(message).and_then(Value::as_array))
-        .flatten()
-        .collect();
-    pruned.iter().find(|entry| {
-        stands_for.contains(&entry.ordinal) && parts.iter().any(|part| carries(&entry.kind, part))
-    })
-}
-
-/// The pruned part a keep-range part edit would restore, if any (CONTRACT
-/// §9.14.1), by the `owned-broca` rule ([`carries_pruned_content`]); use
-/// [`restored_by_edit_in`] for a session of another serializer profile. `ordinal` and `part` are the edit's; `bytes` is the part the
-/// edit sends, decoded from its `bytes`. A `drop` edit sends nothing and
-/// restores nothing.
-///
-/// The check is per message, as for a replacement: an edit at an ordinal
-/// holding a part pruned with some kind restores it when its bytes carry
-/// that kind's removed content, whichever part of the message it edits, so
-/// moving the content into a sibling part does not get it past. The pruned
-/// entry for the edited part itself is returned first; otherwise the first
-/// matching entry at that ordinal, in the order given.
-pub fn restored_by_edit<'a>(
-    pruned: &'a [PrunedPartAt],
-    ordinal: u64,
-    part: &str,
-    bytes: &Value,
-) -> Option<&'a PrunedPartAt> {
-    edit_restores(pruned, ordinal, part, bytes, carries_pruned_content)
-}
-
-/// The shared body of [`restored_by_edit`] and [`restored_by_edit_in`].
-fn edit_restores<'a>(
-    pruned: &'a [PrunedPartAt],
-    ordinal: u64,
-    part: &str,
-    bytes: &Value,
-    carries: impl Fn(&str, &Value) -> bool,
-) -> Option<&'a PrunedPartAt> {
-    let restores = |entry: &&PrunedPartAt| entry.ordinal == ordinal && carries(&entry.kind, bytes);
-    pruned
-        .iter()
-        .filter(restores)
-        .find(|entry| entry.part == part)
-        .or_else(|| pruned.iter().find(restores))
-}
-
 /// A serializer profile the per-profile prune rules do not name. The
 /// `_in` functions answer it instead of "nothing pruned", so a session of an
 /// unknown profile is never checked by the wrong rule.
@@ -313,17 +197,6 @@ pub fn kinds_carried(profile: &str) -> Result<&'static [&'static str], Unsupport
         OWNED_BROCA | OPENCODE_AISDK | PI => Ok(kinds::ALL),
         ANTHROPIC_MESSAGES => Ok(&[kinds::REASONING, kinds::OPAQUE_REASONING]),
         other => Err(UnsupportedProfile::new(other)),
-    }
-}
-
-/// A message's top-level part array under `profile`: the container
-/// `serializer_profile::top_level_part_count` counts. A string or `text_ref`
-/// content has no structured part, so it carries nothing pruned.
-fn part_container<'a>(profile: &str, message: &'a Value) -> Option<&'a Value> {
-    match profile {
-        OPENCODE_AISDK => message.get("parts"),
-        PI => message.pointer("/message/content"),
-        _ => message.get("content"),
     }
 }
 
@@ -522,50 +395,7 @@ pub fn carries_pruned_content_in(
     })
 }
 
-/// [`restored_part`] for a session of serializer profile `profile`: each
-/// replacement message's parts are read from that profile's part container
-/// (`content` for `anthropic-messages` and `owned-broca`, `parts` for
-/// `opencode-aisdk`, `/message/content` for `pi`) and checked with
-/// [`carries_pruned_content_in`]. `owned-broca` answers exactly as
-/// [`restored_part`] does.
-pub fn restored_part_in<'a>(
-    profile: &str,
-    pruned: &'a [PrunedPartAt],
-    stands_for: std::ops::Range<u64>,
-    messages: &Value,
-) -> Result<Option<&'a PrunedPartAt>, UnsupportedProfile> {
-    kinds_carried(profile)?;
-    Ok(restored_by(
-        pruned,
-        stands_for,
-        messages,
-        |message| part_container(profile, message),
-        |kind, part| carries_pruned_content_in(profile, kind, part).unwrap_or(false),
-    ))
-}
-
-/// [`restored_by_edit`] for a session of serializer profile `profile`:
-/// `bytes` is one part in that profile's format, checked with
-/// [`carries_pruned_content_in`]. `owned-broca` answers exactly as
-/// [`restored_by_edit`] does.
-pub fn restored_by_edit_in<'a>(
-    profile: &str,
-    pruned: &'a [PrunedPartAt],
-    ordinal: u64,
-    part: &str,
-    bytes: &Value,
-) -> Result<Option<&'a PrunedPartAt>, UnsupportedProfile> {
-    kinds_carried(profile)?;
-    Ok(edit_restores(
-        pruned,
-        ordinal,
-        part,
-        bytes,
-        |kind, value| carries_pruned_content_in(profile, kind, value).unwrap_or(false),
-    ))
-}
-
-/// Why [`prune_part_in`] or [`prune_edit_in`] gives no pruned form.
+/// Why a native part cannot be pruned under the declared profile rule.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PruneRefused {
@@ -576,7 +406,7 @@ pub enum PruneRefused {
     /// The part carries content the kind removes, in a form the profile's
     /// rule neither empties nor removes: applying the rule would leave that
     /// content in place. A runner refuses to prune a message whose applied
-    /// view holds such an edit (CONTRACT §9.14.1).
+    /// part carries content the declared native rule cannot remove.
     Inexpressible { profile: String, kind: String },
 }
 
@@ -683,8 +513,7 @@ fn openrouter_details_prune(part: &mut serde_json::Map<String, Value>, kind: &st
 
 /// `part` as a prune of `kind` leaves it under serializer profile `profile`
 /// (CONTRACT §9.14.1, per-profile table): the bytes a runner stores in
-/// place of a pruned part, and the bytes it holds and sends in place of a
-/// part edit of its applied view that re-serializes a pruned part. Required
+/// place of a pruned part. Required
 /// members are emptied to `""`, optional members removed; no member is
 /// added and the part keeps its type. A part that carries nothing the kind
 /// removes ([`carries_pruned_content_in`]) comes back unchanged, so a kind a
@@ -785,35 +614,6 @@ pub fn prune_part_in(profile: &str, kind: &str, part: &Value) -> Result<Value, P
     Ok(pruned)
 }
 
-/// A keep-range part edit's bytes as a runner holds and sends them after a
-/// prune (CONTRACT §9.14.1): [`prune_part_in`] applied to `bytes`, the part
-/// the edit sends, once for each kind `pruned` records at the edit's
-/// `ordinal`, in the order given. Like [`restored_by_edit_in`] it is per
-/// message: an edit naming any part of a pruned message is rewritten when
-/// its bytes carry what a prune of that message removed. An edit at an
-/// ordinal with no pruned part comes back unchanged. A `drop` edit sends no
-/// bytes and needs nothing; the runner never drops an edit to get past this
-/// rule, because dropping a drop-placeholder edit would send the original
-/// content again.
-///
-/// An error is one [`prune_part_in`] gives for any of those kinds; on
-/// [`PruneRefused::Inexpressible`] the runner refuses to prune that
-/// message.
-pub fn prune_edit_in(
-    profile: &str,
-    pruned: &[PrunedPartAt],
-    ordinal: u64,
-    bytes: &Value,
-) -> Result<Value, PruneRefused> {
-    kinds_carried(profile)?;
-    pruned
-        .iter()
-        .filter(|entry| entry.ordinal == ordinal)
-        .try_fold(bytes.clone(), |part, entry| {
-            prune_part_in(profile, &entry.kind, &part)
-        })
-}
-
 impl PrunedReasoning {
     pub fn new(
         mid: impl Into<String>,
@@ -838,9 +638,7 @@ mod tests {
     use crate::{
         content_digest::content_digest,
         describe::{check_describe, RoleDescribe},
-        display::DisplayPage,
-        history::HistoryPage,
-        read::{ModelPage, ReadPage},
+        read::ReadPage,
     };
     use serde_json::{json, Value};
 
@@ -906,208 +704,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn archive_pruning_all_page_types_and_unknown_kind_round_trip() {
-        let row = PrunedReasoning::new("example", "m0#0", "future-kind", 11, "a".repeat(64));
-        let pages = [
-            serde_json::to_value(ReadPage::no_lineage()).unwrap(),
-            serde_json::to_value(ModelPage::no_lineage()).unwrap(),
-            serde_json::to_value(HistoryPage::no_lineage()).unwrap(),
-        ];
-        for page in pages {
-            assert!(page.get("pruned_reasoning").is_none());
-        }
-        let history = HistoryPage::new("example", vec![])
-            .with_history_version(1)
-            .with_pruned_reasoning(vec![row.clone()]);
-        let display = DisplayPage::from_history(&history, |_| {
-            Ok::<_, ()>(crate::display::DisplayRow::new("assistant", vec![]))
-        })
-        .unwrap();
-        assert_eq!(display.pruned_reasoning, vec![row.clone()]);
-        let encoded = serde_json::to_value(&display).unwrap();
-        assert_eq!(
-            serde_json::from_value::<DisplayPage>(encoded).unwrap(),
-            display
-        );
-        let model = ModelPage::new("example", vec![]).with_pruned_reasoning(vec![row]);
-        assert_eq!(
-            serde_json::from_value::<ModelPage>(serde_json::to_value(&model).unwrap()).unwrap(),
-            model
-        );
-    }
-
-    #[test]
-    fn reasoning_pruned_head_and_page_vectors_round_trip_and_stay_absent_by_default() {
-        let file = crate::vectors::load("reasoning-pruned.json");
-        for case in crate::vectors::cases(&file, "heads") {
-            let name = case["name"].as_str().unwrap();
-            let head: crate::read::HeadMeta = crate::vectors::round_trip(name, &case["head"]);
-            assert!(head.lineage_consistent(), "{name}");
-            match name {
-                "never_pruned" => assert_eq!(head.reasoning_pruned, None),
-                _ => assert!(head.reasoning_pruned.unwrap().valid(), "{name}"),
-            }
-        }
-        let generations: Vec<_> = crate::vectors::cases(&file, "heads")
-            .iter()
-            .filter_map(|c| c["head"]["reasoning_pruned"]["generation"].as_u64())
-            .collect();
-        assert_eq!(generations, [1, 2], "generation counts from 1");
-        for case in crate::vectors::cases(&file, "pages") {
-            let name = case["name"].as_str().unwrap();
-            let state = match case["view"].as_str().unwrap() {
-                "raw" => {
-                    crate::vectors::round_trip::<ReadPage>(name, &case["page"]).reasoning_pruned
-                }
-                _ => crate::vectors::round_trip::<ModelPage>(name, &case["page"]).reasoning_pruned,
-            };
-            assert_eq!(state, Some(ReasoningPruned::new(2, 7, 1767312000000)));
-        }
-        for case in crate::vectors::cases(&file, "invalid") {
-            let state: ReasoningPruned =
-                serde_json::from_value(case["reasoning_pruned"].clone()).unwrap();
-            assert!(!state.valid(), "{}", case["name"]);
-        }
-        // Existing heads and pages keep their bytes: the member is omitted
-        // when absent, never encoded as null.
-        for encoded in [
-            serde_json::to_value(crate::read::HeadMeta::new("example", 0, 1)).unwrap(),
-            serde_json::to_value(ReadPage::new("example", vec![])).unwrap(),
-            serde_json::to_value(ModelPage::new("example", vec![])).unwrap(),
-        ] {
-            assert!(encoded.get("reasoning_pruned").is_none());
-        }
-        let mut never_written = crate::read::HeadMeta::no_lineage();
-        assert!(never_written.lineage_consistent());
-        never_written = never_written.with_reasoning_pruned(ReasoningPruned::new(1, 0, 1));
-        assert!(
-            !never_written.lineage_consistent(),
-            "a session never written was never pruned"
-        );
-    }
-
-    #[test]
-    fn restored_part_follows_each_recorded_kind() {
-        let file = crate::vectors::load("reasoning-pruned.json");
-        let mut kinds_seen = std::collections::BTreeSet::new();
-        for case in crate::vectors::cases(&file, "refusals") {
-            let name = case["name"].as_str().unwrap();
-            let pruned: Vec<PrunedPartAt> = case["pruned"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|p| {
-                    PrunedPartAt::new(
-                        p["ordinal"].as_u64().unwrap(),
-                        p["part"].as_str().unwrap(),
-                        p["kind"].as_str().unwrap(),
-                    )
-                })
-                .collect();
-            let from = case["stands_for"]["from"].as_u64().unwrap();
-            let to = case["stands_for"]["to"].as_u64().unwrap();
-            if let Some(range) = case.get("range") {
-                // The head range of a cut lineage stands for everything
-                // before the lineage as well as its own ordinals.
-                let first = case["first_ordinal"].as_u64().unwrap();
-                assert_eq!(range["from"].as_u64(), Some(first), "{name}");
-                assert_eq!((from, to), (0, range["to"].as_u64().unwrap()), "{name}");
-            }
-            let messages: Value = serde_json::from_str(case["bytes"].as_str().unwrap()).unwrap();
-            let found = restored_part(&pruned, from..to, &messages)
-                .map(|p| json!({"ordinal": p.ordinal, "part": p.part}));
-            assert_eq!(found.unwrap_or(Value::Null), case["restored"], "{name}");
-            if !case["restored"].is_null() {
-                kinds_seen.insert(pruned[0].kind.clone());
-            }
-        }
-        assert_eq!(
-            kinds_seen.iter().map(String::as_str).collect::<Vec<_>>(),
-            {
-                let mut all = kinds::ALL.to_vec();
-                all.sort();
-                all
-            },
-            "one refusal vector per kind"
-        );
-        // The served (pruned) form of every archive-pruning vector carries
-        // nothing its kind removes, while the original does.
-        let pruning = crate::vectors::load("archive-prunes-reasoning.json");
-        for case in pruning["cases"].as_array().unwrap() {
-            let kind = case["kind"].as_str().unwrap();
-            assert!(carries_pruned_content(kind, &case["original"]), "{kind}");
-            assert!(!carries_pruned_content(kind, &case["served"]), "{kind}");
-        }
-        assert!(!carries_pruned_content(
-            "future-kind",
-            &json!({"type":"reasoning","text":"x"})
-        ));
-    }
-
-    #[test]
-    fn restored_by_edit_follows_each_recorded_kind() {
-        let file = crate::vectors::load("reasoning-pruned.json");
-        let mut kinds_refused = std::collections::BTreeSet::new();
-        let mut kinds_allowed = std::collections::BTreeSet::new();
-        for case in crate::vectors::cases(&file, "edit_refusals") {
-            let name = case["name"].as_str().unwrap();
-            let pruned: Vec<PrunedPartAt> = case["pruned"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|p| {
-                    PrunedPartAt::new(
-                        p["ordinal"].as_u64().unwrap(),
-                        p["part"].as_str().unwrap(),
-                        p["kind"].as_str().unwrap(),
-                    )
-                })
-                .collect();
-            let edit = &case["edit"];
-            // A drop sends no part, so there is nothing to check.
-            let found = edit["bytes"].as_str().and_then(|bytes| {
-                let part: Value = serde_json::from_str(bytes).unwrap();
-                restored_by_edit(
-                    &pruned,
-                    edit["ordinal"].as_u64().unwrap(),
-                    edit["part"].as_str().unwrap(),
-                    &part,
-                )
-                .map(|p| json!({"ordinal": p.ordinal, "part": p.part}))
-            });
-            assert_eq!(found.unwrap_or(Value::Null), case["restored"], "{name}");
-            if case["restored"].is_null() {
-                kinds_allowed.insert(pruned[0].kind.clone());
-            } else {
-                kinds_refused.insert(pruned[0].kind.clone());
-            }
-        }
-        let mut all = kinds::ALL.to_vec();
-        all.sort();
-        for seen in [kinds_refused, kinds_allowed] {
-            assert_eq!(
-                seen.iter().map(String::as_str).collect::<Vec<_>>(),
-                all,
-                "a refused and an allowed edit vector per kind"
-            );
-        }
-    }
-
-    fn pruned_rows(rows: &Value) -> Vec<PrunedPartAt> {
-        rows.as_array()
-            .unwrap()
-            .iter()
-            .map(|p| {
-                PrunedPartAt::new(
-                    p["ordinal"].as_u64().unwrap(),
-                    p["part"].as_str().unwrap(),
-                    p["kind"].as_str().unwrap(),
-                )
-            })
-            .collect()
-    }
-
     /// No member is added: every member of `served` exists in `original`,
     /// checked recursively through nested objects. Array contents are not
     /// inspected; the vectors' parts nest no objects inside arrays that a
@@ -1165,65 +761,6 @@ mod tests {
                     "{name}"
                 );
             }
-            let mut refused = std::collections::BTreeSet::new();
-            let mut allowed = std::collections::BTreeSet::new();
-            for case in entry["refusals"].as_array().unwrap() {
-                let name = format!("{profile}: {}", case["name"].as_str().unwrap());
-                let pruned = pruned_rows(&case["pruned"]);
-                let from = case["stands_for"]["from"].as_u64().unwrap();
-                let to = case["stands_for"]["to"].as_u64().unwrap();
-                let messages: Value =
-                    serde_json::from_str(case["bytes"].as_str().unwrap()).unwrap();
-                for message in messages.as_array().unwrap() {
-                    // Every replacement message is a body the profile's
-                    // own part counter accepts.
-                    crate::serializer_profile::top_level_part_count(profile, message)
-                        .unwrap_or_else(|e| panic!("{name}: {e}"));
-                }
-                let found = restored_part_in(profile, &pruned, from..to, &messages)
-                    .unwrap()
-                    .map(|p| json!({"ordinal": p.ordinal, "part": p.part}));
-                assert_eq!(found.unwrap_or(Value::Null), case["restored"], "{name}");
-                let target = if case["restored"].is_null() {
-                    &mut allowed
-                } else {
-                    &mut refused
-                };
-                target.insert(pruned[0].kind.clone());
-            }
-            let mut edit_refused = std::collections::BTreeSet::new();
-            let mut edit_allowed = std::collections::BTreeSet::new();
-            for case in entry["edit_refusals"].as_array().unwrap() {
-                let name = format!("{profile}: {}", case["name"].as_str().unwrap());
-                let pruned = pruned_rows(&case["pruned"]);
-                let edit = &case["edit"];
-                let part: Value = serde_json::from_str(edit["bytes"].as_str().unwrap()).unwrap();
-                let found = restored_by_edit_in(
-                    profile,
-                    &pruned,
-                    edit["ordinal"].as_u64().unwrap(),
-                    edit["part"].as_str().unwrap(),
-                    &part,
-                )
-                .unwrap()
-                .map(|p| json!({"ordinal": p.ordinal, "part": p.part}));
-                assert_eq!(found.unwrap_or(Value::Null), case["restored"], "{name}");
-                let target = if case["restored"].is_null() {
-                    &mut edit_allowed
-                } else {
-                    &mut edit_refused
-                };
-                target.insert(pruned[0].kind.clone());
-            }
-            let mut expected: Vec<String> = carried.iter().map(|k| k.to_string()).collect();
-            expected.sort();
-            for seen in [refused, allowed, edit_refused, edit_allowed] {
-                assert_eq!(
-                    seen.into_iter().collect::<Vec<_>>(),
-                    expected,
-                    "{profile}: a refused and an allowed case per carried kind"
-                );
-            }
         }
         profiles_seen.sort();
         let mut named = vec![
@@ -1238,76 +775,16 @@ mod tests {
 
     #[test]
     fn anthropic_thinking_signature_is_not_a_signature_prune() {
-        let thinking = json!({"type":"thinking","thinking":"Consider the blue door.",
-            "signature":"invented-signature"});
+        let thinking = json!({"type":"thinking","thinking":"Consider the blue door.","signature":"invented-signature"});
         let profile = crate::serializer_profile::ANTHROPIC_MESSAGES;
-        // The owned-broca rule reads any non-`reasoning` type as a
-        // non-reasoning part, so it would flag this block's signature.
-        assert!(carries_pruned_content(kinds::SIGNATURE, &thinking));
         assert_eq!(
             carries_pruned_content_in(profile, kinds::SIGNATURE, &thinking),
             Ok(false)
         );
-        let pruned = [PrunedPartAt::new(3, "m3#0", kinds::SIGNATURE)];
-        let fold = json!([{"role":"assistant","content":[thinking.clone()]}]);
-        assert_eq!(restored_part_in(profile, &pruned, 0..5, &fold), Ok(None));
         assert_eq!(
-            restored_by_edit_in(profile, &pruned, 3, "m3#0", &thinking),
-            Ok(None)
+            carries_pruned_content_in(profile, kinds::REASONING, &thinking),
+            Ok(true)
         );
-        // Under `reasoning` the same block is reasoning and is caught.
-        let pruned = [PrunedPartAt::new(3, "m3#0", kinds::REASONING)];
-        assert_eq!(
-            restored_part_in(profile, &pruned, 0..5, &fold),
-            Ok(Some(&pruned[0]))
-        );
-    }
-
-    #[test]
-    fn owned_broca_answers_exactly_as_the_original_reference() {
-        let profile = crate::serializer_profile::OWNED_BROCA;
-        let file = crate::vectors::load("reasoning-pruned.json");
-        for case in crate::vectors::cases(&file, "refusals") {
-            let pruned = pruned_rows(&case["pruned"]);
-            let from = case["stands_for"]["from"].as_u64().unwrap();
-            let to = case["stands_for"]["to"].as_u64().unwrap();
-            let messages: Value = serde_json::from_str(case["bytes"].as_str().unwrap()).unwrap();
-            assert_eq!(
-                restored_part_in(profile, &pruned, from..to, &messages),
-                Ok(restored_part(&pruned, from..to, &messages)),
-                "{}",
-                case["name"]
-            );
-        }
-        for case in crate::vectors::cases(&file, "edit_refusals") {
-            let pruned = pruned_rows(&case["pruned"]);
-            let edit = &case["edit"];
-            let Some(bytes) = edit["bytes"].as_str() else {
-                continue;
-            };
-            let part: Value = serde_json::from_str(bytes).unwrap();
-            let (ordinal, key) = (
-                edit["ordinal"].as_u64().unwrap(),
-                edit["part"].as_str().unwrap(),
-            );
-            assert_eq!(
-                restored_by_edit_in(profile, &pruned, ordinal, key, &part),
-                Ok(restored_by_edit(&pruned, ordinal, key, &part)),
-                "{}",
-                case["name"]
-            );
-        }
-        let pruning = crate::vectors::load("archive-prunes-reasoning.json");
-        for case in pruning["cases"].as_array().unwrap() {
-            for kind in kinds::ALL.iter().chain([&"future-kind"]) {
-                for part in [&case["original"], &case["served"]] {
-                    assert_eq!(
-                        carries_pruned_content_in(profile, kind, part),
-                        Ok(carries_pruned_content(kind, part))
-                    );
-                }
-            }
-        }
     }
 
     #[test]
@@ -1357,77 +834,6 @@ mod tests {
     }
 
     #[test]
-    fn prune_edit_in_rewrites_an_applied_edit_instead_of_dropping_it() {
-        let file = crate::vectors::load("reasoning-pruned-profiles.json");
-        for entry in file["profiles"].as_array().unwrap() {
-            let profile = entry["profile"].as_str().unwrap();
-            let carried = kinds_carried(profile).unwrap();
-            let applied = entry["applied_edits"].as_array().unwrap();
-            assert_eq!(
-                applied.is_empty(),
-                !carried.contains(&kinds::SIGNATURE),
-                "{profile}: one applied-edit vector per profile that carries a signature"
-            );
-            for case in applied {
-                let name = format!("{profile}: {}", case["name"].as_str().unwrap());
-                let pruned = pruned_rows(&case["pruned"]);
-                let edit = &case["edit"];
-                let (ordinal, key) = (
-                    edit["ordinal"].as_u64().unwrap(),
-                    edit["part"].as_str().unwrap(),
-                );
-                let before: Value = serde_json::from_str(edit["bytes"].as_str().unwrap()).unwrap();
-                let after: Value = serde_json::from_str(case["after"].as_str().unwrap()).unwrap();
-                assert_eq!(
-                    restored_by_edit_in(profile, &pruned, ordinal, key, &before),
-                    Ok(Some(&pruned[0])),
-                    "{name}: the edit as applied holds the pre-prune bytes"
-                );
-                assert_eq!(
-                    prune_edit_in(profile, &pruned, ordinal, &before),
-                    Ok(after.clone()),
-                    "{name}"
-                );
-                assert_eq!(
-                    restored_by_edit_in(profile, &pruned, ordinal, key, &after),
-                    Ok(None),
-                    "{name}: the rewritten edit sends nothing the prune removed"
-                );
-                assert_eq!(before["type"], after["type"], "{name}: same type");
-                assert!(adds_nothing(&before, &after), "{name}: a member was added");
-                assert_eq!(
-                    prune_edit_in(profile, &pruned, ordinal + 1, &before),
-                    Ok(before.clone()),
-                    "{name}: an edit of an unpruned message stays as it is"
-                );
-            }
-            // Every edit that would restore a pruned part, once rewritten,
-            // restores nothing.
-            for case in entry["edit_refusals"].as_array().unwrap() {
-                let name = format!("{profile}: {}", case["name"].as_str().unwrap());
-                let pruned = pruned_rows(&case["pruned"]);
-                let edit = &case["edit"];
-                let (ordinal, key) = (
-                    edit["ordinal"].as_u64().unwrap(),
-                    edit["part"].as_str().unwrap(),
-                );
-                let bytes: Value = serde_json::from_str(edit["bytes"].as_str().unwrap()).unwrap();
-                let rewritten = prune_edit_in(profile, &pruned, ordinal, &bytes).unwrap();
-                assert_eq!(
-                    restored_by_edit_in(profile, &pruned, ordinal, key, &rewritten),
-                    Ok(None),
-                    "{name}"
-                );
-                assert_eq!(bytes["type"], rewritten["type"], "{name}: same type");
-                assert!(adds_nothing(&bytes, &rewritten), "{name}");
-                if case["restored"].is_null() {
-                    assert_eq!(rewritten, bytes, "{name}: an allowed edit is unchanged");
-                }
-            }
-        }
-    }
-
-    #[test]
     fn prune_part_in_refuses_what_its_rule_cannot_remove() {
         let profile = crate::serializer_profile::OWNED_BROCA;
         // The owned-broca table names no `signature` member on a
@@ -1440,11 +846,6 @@ mod tests {
         };
         assert_eq!(
             prune_part_in(profile, kinds::SIGNATURE, &text),
-            Err(inexpressible.clone())
-        );
-        let pruned = [PrunedPartAt::new(3, "m3#0", kinds::SIGNATURE)];
-        assert_eq!(
-            prune_edit_in(profile, &pruned, 3, &text),
             Err(inexpressible.clone())
         );
         assert_eq!(
@@ -1463,30 +864,19 @@ mod tests {
                 prune_part_in(unsupported, kinds::SIGNATURE, &text),
                 Err(refused.clone())
             );
-            assert_eq!(prune_edit_in(unsupported, &pruned, 3, &text), Err(refused));
         }
     }
 
     #[test]
     fn an_unnamed_profile_is_unsupported_never_nothing_pruned() {
         let file = crate::vectors::load("reasoning-pruned-profiles.json");
-        let pruned = [PrunedPartAt::new(0, "m0#0", kinds::REASONING)];
         let part = json!({"type":"reasoning","text":"Consider the blue door."});
-        let messages = json!([{"role":"assistant","content":[part.clone()]}]);
         for profile in file["unsupported"].as_array().unwrap() {
             let profile = profile.as_str().unwrap();
             let unsupported = UnsupportedProfile::new(profile);
             assert_eq!(kinds_carried(profile), Err(unsupported.clone()));
             assert_eq!(
                 carries_pruned_content_in(profile, kinds::REASONING, &part),
-                Err(unsupported.clone())
-            );
-            assert_eq!(
-                restored_part_in(profile, &pruned, 0..1, &messages),
-                Err(unsupported.clone())
-            );
-            assert_eq!(
-                restored_by_edit_in(profile, &pruned, 0, "m0#0", &part),
                 Err(unsupported.clone())
             );
             assert_eq!(
@@ -1533,5 +923,60 @@ mod tests {
             .unwrap()
             .remove("archive_prunes_reasoning");
         assert!(check_describe(&paired).is_err());
+    }
+
+    #[test]
+    fn pruning_state_and_served_part_keys_round_trip_on_pages() {
+        let vectors = crate::vectors::load("reasoning-pruned.json");
+        for case in vectors["heads"].as_array().unwrap() {
+            crate::vectors::round_trip::<crate::read::HeadMeta>(
+                case["name"].as_str().unwrap(),
+                &case["head"],
+            );
+        }
+        for case in vectors["pages"].as_array().unwrap() {
+            crate::vectors::round_trip::<crate::read::ReadPage>(
+                case["name"].as_str().unwrap(),
+                &case["page"],
+            );
+        }
+        let part = PrunedReasoning::new(
+            "host-id",
+            "opaque-key",
+            kinds::REASONING,
+            42,
+            "a".repeat(64),
+        );
+        let message = crate::read::ReadMessage::new(
+            1,
+            "host-id",
+            json!({"content":[{"type":"reasoning","text":""}]}),
+        )
+        .with_written_at(1000)
+        .with_part_keys(vec!["opaque-key".into()]);
+        let page = crate::read::ReadPage::new(7, "record-identity", vec![message.clone()])
+            .with_pruned_reasoning(vec![part.clone()])
+            .with_reasoning_pruned(ReasoningPruned::new(1, 1, 1000));
+        let value = serde_json::to_value(&page).unwrap();
+        assert_eq!(
+            serde_json::from_value::<crate::read::ReadPage>(value).unwrap(),
+            page
+        );
+        assert_eq!(
+            page.messages[0].served_part_keys(),
+            Some(vec!["opaque-key"])
+        );
+        let history = crate::history::HistoryPage::new(
+            7,
+            "record-identity",
+            vec![crate::history::HistoryEntry::from_read(message).unwrap()],
+        )
+        .with_pruned_reasoning(vec![part]);
+        assert_eq!(history.check(), Ok(()));
+        assert_eq!(
+            history.messages[0].part_keys.as_ref().unwrap(),
+            &["opaque-key"]
+        );
+        assert!(!ReasoningPruned::new(1, 0, 1000).valid());
     }
 }

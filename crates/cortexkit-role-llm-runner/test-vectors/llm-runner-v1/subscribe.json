@@ -14,7 +14,7 @@
     {
       "name": "durable control event",
       "durable": true,
-      "event": {"kind": "control", "cursor": {"wal_seq": 1204, "sub_index": 0}, "unit": {"type": "message", "ordinal": 500}}
+      "event": {"kind": "control", "cursor": {"wal_seq": 1204, "sub_index": 0}, "unit": {"type": "message", "ordinal": 501}}
     },
     {
       "name": "best-effort display event",

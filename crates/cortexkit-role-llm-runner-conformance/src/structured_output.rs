@@ -988,7 +988,7 @@ where
         None,
     )
     .await?;
-    crate::tags::require_declared(
+    crate::send_helpers::require_declared(
         &session.route,
         cortexkit_role_llm_runner::capabilities::MAX_STEPS,
         ops::SESSION_SEND,

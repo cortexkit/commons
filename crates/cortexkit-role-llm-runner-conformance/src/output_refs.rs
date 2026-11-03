@@ -102,7 +102,9 @@ async fn descriptors<R: RunnerRoute>(route: &R) -> Check<Vec<Descriptor>> {
     Ok(out)
 }
 
-fn tag_of(
+fn tag_of<S: LlmRunnerSubject>(
+    subject: &S,
+    session: &str,
     messages: &[cortexkit_role_llm_runner::read::ReadMessage],
     marker: &str,
 ) -> Check<String> {
@@ -110,11 +112,11 @@ fn tag_of(
         .iter()
         .find(|m| m.message.to_string().contains(marker))
         .ok_or("fixture message missing")?;
-    message
-        .tags
+    subject
+        .read_parts(&message.message)
         .iter()
-        .find_map(|t| t.tag.as_ref())
-        .map(|tag| tag.trim_matches('§').to_owned())
+        .find_map(|(key, _)| subject.shown_part_number(session, &message.mid, key))
+        .map(|number| number.to_string())
         .ok_or("fixture message has no rendered tag".into())
 }
 
@@ -136,10 +138,11 @@ fn matching_text<'a>(value: &'a Value, prefix: &str, found: &mut Vec<&'a str>) {
 }
 
 /// Locate the fixture's result by its unique prefix, but keep the entire stored
-/// text, including any truncation note. Tag rows point to the message part
-/// containing the result, which may not be the first part.
+/// text, including any historical truncation note. Locate the native result
+/// part by its unique prefix, then obtain its number from shown_part_number.
 fn stored_tool_text<S: LlmRunnerSubject>(
     subject: &S,
+    session: &str,
     messages: &[cortexkit_role_llm_runner::read::ReadMessage],
     prefix: &str,
 ) -> Check<(String, String)> {
@@ -149,13 +152,10 @@ fn stored_tool_text<S: LlmRunnerSubject>(
             let mut texts = Vec::new();
             matching_text(&part, prefix, &mut texts);
             for text in texts {
-                let tag = message
-                    .tags
-                    .iter()
-                    .find(|row| row.part == key)
-                    .and_then(|row| row.tag.as_ref())
+                let tag = subject
+                    .shown_part_number(session, &message.mid, &key)
                     .ok_or("stored tool-result part has no rendered tag")?;
-                found.push((tag.trim_matches('§').to_owned(), text.to_owned()));
+                found.push((tag.to_string(), text.to_owned()));
             }
         }
     }
@@ -244,9 +244,6 @@ where
             "the runner does not declare output_refs".into(),
         ));
     }
-    if !describe.declares(groups::TAGS) {
-        return Err("output_refs requires tags".into());
-    }
     let fields = case
         .subject
         .output_refs_fields(&session.name)
@@ -263,7 +260,12 @@ where
     } else {
         marker.clone()
     };
-    tool.result = json!(content);
+    let tool_call_id = tool.tool_call_id.clone();
+    tool.result = json!(if oversized || budget {
+        marker.clone()
+    } else {
+        content.clone()
+    });
     case.subject
         .install_script(
             &session.name,
@@ -276,13 +278,39 @@ where
         )
         .await
         .map_err(|e| e.to_string())?;
-    crate::tags::send_and_wait(case, &mut session, Some(&fields), &user_marker, &Map::new())
-        .await?;
+    crate::send_helpers::send_and_wait(
+        case,
+        &mut session,
+        Some(&fields),
+        &user_marker,
+        &Map::new(),
+    )
+    .await?;
+    if oversized || budget {
+        // Snapshot budgets still apply to imported/pre-limit stored outputs.
+        // A new provider result cannot be this large under the 64 KiB rule.
+        if !case
+            .subject
+            .fixture_seed_historical_tool_output(
+                case.handle.inner(),
+                &session.name,
+                &tool_call_id,
+                &content,
+            )
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(Ending::Inapplicable(format!("{name}: the adapter cannot seed a historical/imported stored tool output without dispatch")));
+        }
+    }
     let (_, messages) = read_all(&session.route).await?;
     let (tag, stored) = if oversized || budget {
-        stored_tool_text(case.subject, &messages, &marker)?
+        stored_tool_text(case.subject, &session.name, &messages, &marker)?
     } else {
-        (tag_of(&messages, &marker)?, String::new())
+        (
+            tag_of(case.subject, &session.name, &messages, &marker)?,
+            String::new(),
+        )
     };
     if oversized && stored.len() <= MAX_SNAPSHOT_BYTES {
         return Ok(Ending::Inapplicable(format!(
@@ -296,8 +324,8 @@ where
             stored.len()
         )));
     }
-    let user_tag = tag_of(&messages, &user_marker)?;
-    let model_tag = tag_of(&messages, &model_marker)?;
+    let user_tag = tag_of(case.subject, &session.name, &messages, &user_marker)?;
+    let model_tag = tag_of(case.subject, &session.name, &messages, &model_marker)?;
     let mut held_tag = None;
     if name == "output_refs_held_placeholder" {
         held_tag = Some(
@@ -373,7 +401,8 @@ where
         .await
         .map_err(|e| e.to_string())?;
     let before_send = messages.last().ok_or("no initial message")?.mid.clone();
-    crate::tags::send_and_wait(case, &mut session, None, "write references", &Map::new()).await?;
+    crate::send_helpers::send_and_wait(case, &mut session, None, "write references", &Map::new())
+        .await?;
     let sets = descriptors(&session.route).await?;
     let d = sets
         .iter()

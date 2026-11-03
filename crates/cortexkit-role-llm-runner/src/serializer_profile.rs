@@ -3,10 +3,9 @@
 //!
 //! The role keeps message bodies in the runner's own schema (CONTRACT
 //! §4.2). A profile names one such schema, so a consumer that knows the
-//! profile can read the body. The same value reaches a session's providers
-//! as their plan item's `params.serializer_profile` (pinned in the
-//! step-transform-provider and compaction-provider contracts, which name
-//! `opencode-aisdk`). This module names the supported profiles and pins
+//! profile can read the body. Native transform providers can receive it in
+//! `params.serializer_profile` as their own contract defines. Compaction uses
+//! its separate neutral part model, not these native containers. This module names the supported profiles and pins
 //! their part containers; `display` holds the supported projections to
 //! display rows, and [`error_output`] the `owned-broca` tool error with its
 //! module-outage members and the text every runner renders for it.
@@ -14,6 +13,8 @@
 use serde_json::Value;
 
 pub mod error_output;
+mod opencode_v1;
+pub use opencode_v1::{opencode1_session_projection, OpenCode1OrdinalEntry};
 pub(crate) mod opencode_v2;
 pub use opencode_v2::{
     opencode_v2_projected_content, opencode_v2_session_projection, OpenCodeV2NativeCut,
@@ -58,6 +59,79 @@ pub const OWNED_BROCA: &str = "owned-broca";
 /// The `pi` profile: bodies are wrapped journal entries, not bare messages.
 /// See [`pi_session_projection`] for active paths, ordinals, edits and cuts.
 pub const PI: &str = "pi";
+
+/// Compaction W4.2, a host with a native message log: "every message in its
+/// log, in log order"; "its marker records" are never entries. Supply records
+/// paired with whether the host identifies them as markers. Empty messages
+/// count, as do result-only messages whose neutral parts belong to a call.
+pub fn native_log_ordinals<T>(records: impl IntoIterator<Item = (bool, T)>) -> Vec<(u64, T)> {
+    records
+        .into_iter()
+        .filter_map(|(marker, record)| (!marker).then_some(record))
+        .enumerate()
+        .map(|(index, record)| (index as u64 + 1, record))
+        .collect()
+}
+
+#[cfg(test)]
+mod entry_count_tests {
+    #[test]
+    fn native_w4_2_counts_every_message_but_not_markers() {
+        let entries = super::native_log_ordinals([
+            (false, "host-m0"),
+            (true, "marker"),
+            (false, "empty-step"),
+            (false, "result-only"),
+        ]);
+        assert_eq!(
+            entries,
+            [(1, "host-m0"), (2, "empty-step"), (3, "result-only")]
+        );
+    }
+
+    /// Compaction W4.2, Claude Code (new sessions): "the messages of the
+    /// request's messages array, as Claude Code merges them from its journal";
+    /// summary requests are not entries. This fixture supplies already merged
+    /// requests, not a second implementation of the host's journal merger.
+    #[test]
+    fn claude_code_w4_2_counts_merged_messages_not_summary_requests() {
+        use serde_json::{json, Value};
+
+        let fixture = json!([
+            {"summary": false, "messages": [
+                {"role":"user","content":[{"type":"text","text":"one"},{"type":"text","text":"two"}]},
+                {"role":"assistant","content":[{"type":"tool_use","id":"call-1","name":"lookup","input":{}}]},
+                {"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"done"}]}
+            ]},
+            {"summary": true, "messages": [{"role":"user","content":"summarize"}]}
+        ]);
+        let counted: Vec<Vec<(u64, Value)>> = fixture
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|request| {
+                // The host adapter selects ordinary model requests first;
+                // the shared counter then sees each merged message once.
+                let messages = request["messages"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|_| request["summary"] == false)
+                    .map(|message| (false, message.clone()));
+                super::native_log_ordinals(messages)
+            })
+            .collect();
+        assert_eq!(
+            counted[0],
+            vec![
+                (1, fixture[0]["messages"][0].clone()),
+                (2, fixture[0]["messages"][1].clone()),
+                (3, fixture[0]["messages"][2].clone()),
+            ]
+        );
+        assert!(counted[1].is_empty());
+    }
+}
 
 /// Count top-level parts without deriving their runner-defined keys.
 /// `anthropic-messages` uses `content`, `opencode-aisdk` uses `parts`,

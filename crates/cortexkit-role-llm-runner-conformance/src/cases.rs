@@ -8,7 +8,7 @@ use cortexkit_role_llm_runner::{
     capabilities::{self as groups, source},
     describe::{check_describe, steer_receipt, RoleDescribe, Stability},
     errors, ops,
-    read::{HeadMeta, ReadMessage, ReadPage, ReadRequest, ToolCallAttribution},
+    read::{HeadMeta, ReadMessage, ReadRequest, ToolCallAttribution},
     run::{join_text_parts, states as run_states},
     send::{states, Delivered, DeliveredAs, SendReply, DELIVERY_FIELD},
     subscribe::{kinds, SubscribeEvent, SubscribeFrom, SubscribeRequest},
@@ -89,6 +89,17 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            "tool_result_too_large_is_error" | "tool_result_too_large_not_repeated" => {
+                crate::tool_result_limit::run(self, name).await
+            }
+            "history_version_on_read_pages"
+            | "compaction_item_preset_required"
+            | "stale_read_cursor_history_changed"
+            | "read_from_ordinal_zero"
+            | "incarnation_on_every_page"
+            | "route_decision_id_fixed_per_run"
+            | "send_status_both_names"
+            | "read_below_host_marker" => crate::read_contract::run(self, name).await,
             name if name.starts_with("finish_reason_") => {
                 crate::finish_reason::run(self, name).await
             }
@@ -102,9 +113,6 @@ where
             }
             "refresh_relaunch_preserves_runs_and_history" => {
                 crate::session_change::relaunch(self).await
-            }
-            name if name.starts_with("message_checkpoint_") => {
-                crate::message_checkpoint::run(self, name).await
             }
             name if name.starts_with("head_last_run_error_") => {
                 crate::last_run_error::run(self, name).await
@@ -132,9 +140,6 @@ where
             "user_commands_cutoff_after_forward" | "user_commands_cutoff_before_forward" => {
                 crate::user_commands::cutoff(self, name.ends_with("after_forward")).await
             }
-            "compaction_standalone_refusal_lifecycle" => {
-                crate::compaction::standalone_refusal(self).await
-            }
             name if name.starts_with("user_commands_") => crate::user_commands::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
@@ -151,8 +156,6 @@ where
             "oversize_message_alone_on_its_page" => passed(self.oversize_alone().await),
             "after_mid_reads_strictly_after" => passed(self.after_mid_strictly_after().await),
             "after_mid_unknown_mid_refused" => passed(self.after_mid_unknown_mid().await),
-            "read_other_lineage_refused" => passed(self.read_other_lineage().await),
-            "lineage_id_on_every_page" => passed(self.lineage_on_every_page().await),
             "unknown_read_field_refused" => passed(self.unknown_read_field().await),
             "never_written_session_empty_page" => passed(self.never_written_page().await),
             "never_written_session_empty_head" => passed(self.never_written_head().await),
@@ -177,9 +180,6 @@ where
             | "app_readers_listed_reader_admitted"
             | "app_readers_unlisted_reader_refused"
             | "app_readers_reader_cannot_send" => crate::admission::run(self, name).await,
-            "head_incarnation_survives_cut_and_changes_on_recreation" => {
-                crate::incarnation::run(self).await
-            }
             "run_result_completed_final_text" => passed(self.run_result_final_text().await),
             "run_result_text_parts_joined_unchanged" => passed(self.run_result_joined().await),
             "run_result_completed_no_text_is_empty" => passed(self.run_result_no_text().await),
@@ -207,7 +207,6 @@ where
             "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
             name if name.starts_with("run_cancel_") => crate::cancel::run(self, name).await,
             name if name.starts_with("adopt_") => crate::adopt::run(self, name).await,
-            name if name.starts_with("tags_") => crate::tags::run(self, name).await,
             name if name.starts_with("run_tool_calls_") => crate::tool_calls::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
@@ -253,9 +252,6 @@ where
             "read_stable_across_host_metadata_change" => {
                 passed(self.read_stable_across_host_metadata_change().await)
             }
-            "run_context_ceiling_wait_is_not_a_stall" => {
-                crate::ceiling::run(self).await.map(|()| Ending::Passed)
-            }
             name if name.starts_with("input_token_cap_") => crate::input_token_cap::run(self, name)
                 .await
                 .map(|()| Ending::Passed),
@@ -281,22 +277,6 @@ where
                 crate::structured_output::run(self, name).await
             }
             name if name.starts_with("retention_") => self.retention_case(name).await,
-            "cut_starts_a_new_lineage"
-            | "old_lineage_reads_refused_after_a_cut"
-            | "read_below_first_ordinal_refused"
-            | "ordinals_never_renumber_across_a_cut"
-            | "setup_once_per_lineage"
-            | "view_ranges_start_at_first_ordinal"
-            | "cut_lineage_notice_descends_from"
-            | "head_names_the_cut"
-            | "notice_carries_first_ordinal"
-            | "revert_below_the_cut_restarts_at_the_previous_cut"
-            | "revert_below_a_cut_before_adoption_has_no_descent"
-            | "checkpoint_on_descending_setup_refused"
-            | "cut_setup_leaves_reads_alone"
-            | "cut_numbering_continues_from_the_old_lineage" => {
-                crate::lineage::run(self, name).await
-            }
             name if name.starts_with("history_") => crate::host_history::run(self, name).await,
             name if name.starts_with("display_") || name.starts_with("client_message_id_") => {
                 crate::display::run(self, name).await
@@ -305,26 +285,13 @@ where
             name if name.starts_with("live_") || name.starts_with("run_cause_") => {
                 crate::live::run(self, name).await
             }
-            name if name.starts_with("cache_ttl_") => crate::cache_ttl::run(self, name).await,
-            name if name.starts_with("ride_wait_") => crate::ride_wait::run(self, name).await,
-            name if name.starts_with("view_due_") => crate::view_due::run(self, name).await,
-            name if name.starts_with("view_pending_") => crate::view_pending::run(self, name).await,
-            name if name.starts_with("part_edits_") => crate::part_edits::run(self, name).await,
             "per_step_cost_scales_with_new_messages" => crate::cost::run(self).await,
-            name if name.starts_with("compaction_")
-                || name.starts_with("model_view_")
-                || name == "session_ref_uses_runner_identity" =>
-            {
-                crate::compaction::run(self, name)
-                    .await
-                    .map(|()| Ending::Passed)
-            }
             other => Err(format!("the runner has no case named {other}")),
         }
     }
 
     /// Read the transcript, change the session's metadata in the host, and
-    /// read it again: the same lineage answers the same entries, byte for
+    /// read it again: the same history_version answers the same entries, byte for
     /// byte.
     async fn read_stable_across_host_metadata_change(&self) -> Check {
         let (answer, _) = self.mint.text("stable-answer");
@@ -342,14 +309,14 @@ where
             .await
             .map_err(|e| format!("changing {}'s host metadata: {e}", session.name))?;
         let after = read(&session.route, &ReadRequest::range(0)).await?;
-        if after.lineage_id != before.lineage_id {
+        if after.history_version != before.history_version {
             return Ok(());
         }
         if after.messages != before.messages {
             return Err(format!(
-                "after a host-side metadata change, session.read under lineage {:?} answered \
+                "after a host-side metadata change, session.read under history_version {:?} answered \
                  other entries: before {:?}, after {:?}",
-                before.lineage_id, before.messages, after.messages
+                before.history_version, before.messages, after.messages
             ));
         }
         Ok(())
@@ -883,18 +850,19 @@ where
         Ok(())
     }
 
-    async fn lineage(&self, route: &S::Route) -> Result<String, String> {
-        read(route, &ReadRequest::tail())
-            .await?
-            .lineage_id
-            .ok_or_else(|| "a written session's page carries no lineage_id".to_owned())
+    async fn history_version(&self, route: &S::Route) -> Result<u64, String> {
+        Ok(read(route, &ReadRequest::tail()).await?.history_version)
     }
 
     async fn after_mid_strictly_after(&self) -> Check {
         let (session, _) = self.long_session("after").await?;
         let all = self.all_messages(&session.route, 3).await?;
-        let lineage = self.lineage(&session.route).await?;
-        let page = read(&session.route, &ReadRequest::after(&all[0].mid, &lineage)).await?;
+        let history_version = self.history_version(&session.route).await?;
+        let page = read(
+            &session.route,
+            &ReadRequest::after(&all[0].mid, history_version),
+        )
+        .await?;
         if page.messages.first() != Some(&all[1]) {
             return Err(format!(
                 "a read after mid {} answered ordinals {:?}; the next message is {}",
@@ -907,7 +875,11 @@ where
             return Err("a read after a message answered that message or an earlier one".into());
         }
         let last = &all[all.len() - 1];
-        let past = read(&session.route, &ReadRequest::after(&last.mid, &lineage)).await?;
+        let past = read(
+            &session.route,
+            &ReadRequest::after(&last.mid, history_version),
+        )
+        .await?;
         if !past.messages.is_empty() {
             return Err(format!(
                 "a read after the newest message answered ordinals {:?}",
@@ -919,57 +891,10 @@ where
 
     async fn after_mid_unknown_mid(&self) -> Check {
         let (session, _) = self.long_session("unknown-mid").await?;
-        let lineage = self.lineage(&session.route).await?;
-        let request = ReadRequest::after(self.mint.next("no-such-mid"), &lineage);
+        let history_version = self.history_version(&session.route).await?;
+        let request = ReadRequest::after(self.mint.next("no-such-mid"), history_version);
         let error = read_refusal(&session.route, "a read after an unknown mid", &request).await?;
         expect_code("a read after an unknown mid", &error, errors::UNKNOWN_MID)
-    }
-
-    async fn read_other_lineage(&self) -> Check {
-        let (session, _) = self.long_session("other-lineage").await?;
-        let all = self.all_messages(&session.route, 1).await?;
-        let other = self.mint.next("other-lineage");
-        for (mode, request) in [
-            ("tail", ReadRequest::tail().with_lineage_id(&other)),
-            (
-                "range",
-                ReadRequest::range(all[0].ordinal).with_lineage_id(&other),
-            ),
-            ("after", ReadRequest::after(&all[0].mid, &other)),
-        ] {
-            let what = format!("a {mode} read naming another lineage");
-            let error = read_refusal(&session.route, &what, &request).await?;
-            expect_code(&what, &error, errors::LINEAGE_CHANGED)?;
-        }
-        Ok(())
-    }
-
-    async fn lineage_on_every_page(&self) -> Check {
-        let (session, _) = self.long_session("lineage").await?;
-        let head = head(&session.route).await?;
-        let lineage = head
-            .lineage_id
-            .ok_or("session.head of a written session carries no lineage_id")?;
-        let (mut pages, all) = read_all(&session.route).await?;
-        let first = all.first().ok_or("the written session has no message")?;
-        pages.push(read(&session.route, &ReadRequest::tail().with_limit(1)).await?);
-        pages.push(
-            read(
-                &session.route,
-                &ReadRequest::range(first.ordinal).with_limit(1),
-            )
-            .await?,
-        );
-        pages.push(read(&session.route, &ReadRequest::after(&first.mid, &lineage)).await?);
-        for page in &pages {
-            if page.lineage_id.as_deref() != Some(lineage.as_str()) {
-                return Err(format!(
-                    "a page carries lineage_id {:?}; the session's is {lineage}",
-                    page.lineage_id
-                ));
-            }
-        }
-        Ok(())
     }
 
     async fn unknown_read_field(&self) -> Check {
@@ -1005,9 +930,12 @@ where
     async fn never_written_page(&self) -> Check {
         let session = self.open("unwritten", Script::default()).await?;
         let page = read(&session.route, &ReadRequest::tail()).await?;
-        if page != ReadPage::no_lineage() {
+        if !page.messages.is_empty()
+            || page.next_from_ordinal.is_some()
+            || !page.snapshot_consistent()
+        {
             return Err(format!(
-                "a read of a session never written answered {page:?}, not an empty page without lineage_id"
+                "a read of a session never written answered {page:?}, expected an empty page with required cache identity"
             ));
         }
         Ok(())
@@ -1016,14 +944,13 @@ where
     async fn never_written_head(&self) -> Check {
         let session = self.open("unwritten", Script::default()).await?;
         let mut head = head(&session.route).await?;
-        // Next-send metadata and log identity need no transcript lineage.
+        // Next-send metadata and record identity may exist before any transcript.
         head.input = None;
         head.model = None;
         head.sender = None;
-        head.incarnation = None;
-        if head != HeadMeta::no_lineage() {
+        if head != HeadMeta::empty(head.history_version, head.incarnation.clone()) {
             return Err(format!(
-                "session.head of a session never written answered lineage or spend metadata: {head:?}"
+                "session.head of a session never written answered unexpected transcript/run/spend metadata: {head:?}"
             ));
         }
         Ok(())
@@ -1037,8 +964,8 @@ where
             call(&session.route, ops::SESSION_HEAD, json!({})).await?,
         )?;
         let head = head(&session.route).await?;
-        if head.lineage_id != self.lineage(&session.route).await.ok() {
-            return Err("session.head's lineage_id differs from the page's".into());
+        if head.history_version != self.history_version(&session.route).await? {
+            return Err("session.head's history_version differs from the page's".into());
         }
         if head.last_ordinal != all.last().map(|m| m.ordinal) {
             return Err(format!(

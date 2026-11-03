@@ -1,8 +1,59 @@
 {
   "answers": [
-    {"name": "named module A with neither flag", "answer": {"sender": {"modes": ["tool_result", "turn_system", "steer"], "interrupt": false}}},
-    {"name": "named module B with both flags", "answer": {"sender": {"modes": ["tool_result", "turn_system", "steer", "idle_start"], "interrupt": true}}},
-    {"name": "unnamed module has no grant", "answer": {}},
-    {"name": "owner", "answer": {"sender": {"modes": ["tool_result", "turn_system", "steer", "idle_start"], "interrupt": true, "owner": true}}}
+    {
+      "name": "named module A with neither flag",
+      "answer": {
+        "sender": {
+          "modes": [
+            "tool_result",
+            "turn_system",
+            "steer"
+          ],
+          "interrupt": false
+        },
+        "history_version": 1,
+        "incarnation": "log-1"
+      }
+    },
+    {
+      "name": "named module B with both flags",
+      "answer": {
+        "sender": {
+          "modes": [
+            "tool_result",
+            "turn_system",
+            "steer",
+            "idle_start"
+          ],
+          "interrupt": true
+        },
+        "history_version": 1,
+        "incarnation": "log-1"
+      }
+    },
+    {
+      "name": "unnamed module has no grant",
+      "answer": {
+        "history_version": 1,
+        "incarnation": "log-1"
+      }
+    },
+    {
+      "name": "owner",
+      "answer": {
+        "sender": {
+          "modes": [
+            "tool_result",
+            "turn_system",
+            "steer",
+            "idle_start"
+          ],
+          "interrupt": true,
+          "owner": true
+        },
+        "history_version": 1,
+        "incarnation": "log-1"
+      }
+    }
   ]
 }

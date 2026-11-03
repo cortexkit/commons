@@ -4,7 +4,6 @@ use crate::{
     route::{Reply, RouteFailure, SubscribeOutcome},
 };
 use async_trait::async_trait;
-use cortexkit_role_compaction_provider::notice::{AdvanceNotice, Event};
 use cortexkit_role_harness::{
     CrashDriver, Harness, HarnessError, KillPoint, KillReport, PointDeclaration, RouteStamp,
     Trigger,
@@ -18,6 +17,7 @@ use std::{
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Fault {
+    UnknownPart,
     #[default]
     None,
     RequiredTextRemoved,
@@ -30,7 +30,7 @@ enum Fault {
     UnlistedTwinChange,
     ActiveRun,
     QueuedSend,
-    SetupOptIn,
+    ProviderPlanPruned,
     UndeclaredKind,
     MovedPart,
     SummaryChanged,
@@ -39,19 +39,13 @@ enum Fault {
     ReopenRestoresReasoning,
     ExpiresCursor,
     NoGenerationBump,
-    AcceptsRestoringView,
-    AcceptsRestoringEdit,
-    SkipsSetupAfterPrune,
-    KeepsPrePruneInitial,
-    KeepsPrePruneEdit,
-    DropsAppliedEdit,
 }
 
 #[derive(Default)]
 struct Stored {
     messages: Vec<Value>,
     pruned: Vec<Value>,
-    accepts: Option<Vec<String>>,
+    with_compaction_provider: bool,
     active: bool,
     queued: bool,
     hold_active: bool,
@@ -59,25 +53,11 @@ struct Stored {
     reads: usize,
     /// The session's prune state, as `session.head` reports it.
     reasoning_pruned: Option<ReasoningPruned>,
-    /// Original values of every part a prune emptied: what a view must not
-    /// bring back.
-    removed: Vec<Value>,
-    setup_done: bool,
-    setup_due: bool,
-    installed: Option<crate::CompactionMessage>,
-    rendered: Option<crate::CompactionMessage>,
-    pending: Vec<(u64, crate::ScriptedView)>,
-    published: u64,
-    applied: Option<u64>,
-    /// The part edits of the applied view, which the model view serves in
-    /// place of the stored parts they name.
-    edits: Vec<crate::ScriptedPartEdit>,
-    calls: Vec<crate::ProviderCall>,
-    notices: Vec<BTreeMap<String, String>>,
 }
 
 #[derive(Clone, Default)]
 struct NativeRunner {
+    pruning_only: bool,
     fault: Fault,
     state: Arc<Mutex<BTreeMap<String, Stored>>>,
 }
@@ -120,116 +100,39 @@ fn later_oracle() -> ArchivePruningPart {
     }
 }
 
-fn stored_message(ordinal: usize, parts: Vec<Value>, tags: Value) -> Value {
+fn stored_message(ordinal: usize, parts: Vec<Value>) -> Value {
     let message = json!({"role":"assistant","content":parts});
     let digests: Vec<_> = parts
         .iter()
         .enumerate()
         .map(|(i, p)| json!({"part":i.to_string(),"digest":content_digest(p)}))
         .collect();
-    json!({"ordinal":ordinal,"mid":format!("message-{ordinal}"),"message":message,"digest":content_digest(&message),"part_digests":digests,"tags":tags,"written_at":1000 + ordinal,"role":"assistant"})
+    json!({"ordinal":ordinal,"mid":format!("message-{ordinal}"),"message":message,"digest":content_digest(&message),"part_digests":digests,"written_at":1000 + ordinal,"role":"assistant"})
 }
 
 impl Stored {
-    /// One run of the native runner: the post-prune Setup and the views due
-    /// at its step boundary, then its answer and an advance notice.
-    fn serve_run(&mut self, fault: Fault) {
-        let mut events = Vec::new();
-        if self.accepts.is_some() {
-            let first_setup = !self.setup_done;
-            if first_setup || (self.setup_due && fault != Fault::SkipsSetupAfterPrune) {
-                let mut params = json!({"session":"example"});
-                if let Some(state) = &self.reasoning_pruned {
-                    params["reasoning_pruned"] = serde_json::to_value(state).unwrap();
-                }
-                self.calls
-                    .push(crate::ProviderCall::new("compaction.setup", params));
-                if let Some(answer) = self.installed.clone() {
-                    if first_setup
-                        || (self.applied.is_none() && fault != Fault::KeepsPrePruneInitial)
-                    {
-                        self.rendered = Some(answer);
-                    }
-                }
-                self.setup_done = true;
-                self.setup_due = false;
-            }
-            for (version, view) in std::mem::take(&mut self.pending) {
-                self.calls.push(crate::ProviderCall::new(
-                    "view.get",
-                    json!({"view_version":version}),
-                ));
-                let by_replace = view.ranges.iter().any(|range| {
-                    matches!(range, crate::ScriptedRange::ReplaceVerbatim { messages, .. }
-                        if messages.iter().any(|m| m["content"].as_array().into_iter().flatten()
-                            .any(|part| self.removed.contains(part))))
-                });
-                let by_edit = view.ranges.iter().any(|range| {
-                    matches!(range, crate::ScriptedRange::KeepWithVerbatimEdits { edits, .. }
-                        if edits.iter().any(|edit| self.removed.contains(&edit.part_value)))
-                });
-                let restores = (by_replace && fault != Fault::AcceptsRestoringView)
-                    || (by_edit && fault != Fault::AcceptsRestoringEdit);
-                if restores {
-                    events.push(Event::ViewRefused {
-                        view_version: version,
-                        reason: "pruned_reasoning_restored".into(),
-                    });
-                } else {
-                    self.applied = Some(version);
-                    self.edits = view
-                        .ranges
-                        .iter()
-                        .flat_map(|range| match range {
-                            crate::ScriptedRange::KeepWithVerbatimEdits { edits, .. } => {
-                                edits.clone()
-                            }
-                            _ => Vec::new(),
-                        })
-                        .collect();
-                }
-            }
-        }
-        let ordinal = self.messages.len();
-        self.messages.push(stored_message(
-            ordinal,
-            vec![later_oracle().original],
-            json!([{"part":"0"}]),
-        ));
-        if self.accepts.is_some() {
-            let last = self.messages.last().unwrap();
-            let mut notice = AdvanceNotice::new(
-                "0123456789abcdef0123456789abcdef",
-                self.notices.len() as u64 + 1,
-                "example-lineage",
-                ordinal as u64,
-                last["digest"].as_str().unwrap(),
-                1,
-                "example/model",
-            )
-            .with_events(events);
-            if let Some(version) = self.applied {
-                notice = notice.with_applied_view_version(version);
-            }
-            if let Some(state) = self.reasoning_pruned {
-                notice = notice.with_reasoning_pruned(state);
-            }
-            self.notices.push(notice.to_headers());
-        }
+    fn serve_run(&mut self, _fault: Fault) {
+        let ordinal = self.messages.len() + 1;
+        self.messages
+            .push(stored_message(ordinal, vec![later_oracle().original]));
     }
 }
 
 impl NativeRunner {
-    fn caps() -> BTreeSet<Capability> {
+    fn caps(&self) -> BTreeSet<Capability> {
+        if self.pruning_only {
+            return [
+                Capability::ArchivePrunesReasoning,
+                Capability::TranscriptReads,
+            ]
+            .into();
+        }
         [
             Capability::ArchivePrunesReasoning,
             Capability::TranscriptReads,
             Capability::HostHistory,
             Capability::HistoryDisplay,
-            Capability::ModelView,
             Capability::Queue,
-            Capability::Compaction,
-            Capability::Tags,
         ]
         .into()
     }
@@ -239,11 +142,7 @@ impl NativeRunner {
         let session = state.get_mut(name).unwrap();
         if (session.active && self.fault != Fault::ActiveRun)
             || (session.queued && self.fault != Fault::QueuedSend)
-            || (session
-                .accepts
-                .as_ref()
-                .is_some_and(|a| !a.iter().any(|a| a == "pruned_reasoning"))
-                && self.fault != Fault::SetupOptIn)
+            || (session.with_compaction_provider && self.fault != Fault::ProviderPlanPruned)
         {
             return;
         }
@@ -261,7 +160,6 @@ impl NativeRunner {
             }
             touched.push(entry["ordinal"].as_u64().unwrap());
             for (index, oracle) in oracles.iter().enumerate() {
-                session.removed.push(oracle.original.clone());
                 let key = index.to_string();
                 let mut served = oracle.served.clone();
                 match self.fault {
@@ -279,6 +177,9 @@ impl NativeRunner {
                 }
                 entry["message"]["content"][index] = served;
                 let mut row = json!({"mid":entry["mid"],"part":key,"kind":oracle.kind,"bytes":serde_jcs::to_vec(&oracle.original).unwrap().len(),"sha256":content_digest(&oracle.original)});
+                if self.fault == Fault::UnknownPart {
+                    row["part"] = json!("not-a-served-key");
+                }
                 if self.fault == Fault::WrongSha {
                     row["sha256"] = json!("0".repeat(64));
                 }
@@ -319,29 +220,6 @@ impl NativeRunner {
                 through,
                 1_767_225_600_000 + generation,
             ));
-            session.setup_due = session.accepts.is_some();
-        }
-        // The applied view's edits of a pruned message take the fixture's
-        // signature rule, as the stored part did: a non-reasoning part
-        // loses its `signature`.
-        match self.fault {
-            Fault::KeepsPrePruneEdit => {}
-            Fault::DropsAppliedEdit => session
-                .edits
-                .retain(|edit| !touched.contains(&edit.ordinal)),
-            _ => {
-                for edit in session
-                    .edits
-                    .iter_mut()
-                    .filter(|edit| touched.contains(&edit.ordinal))
-                {
-                    if edit.part_value["type"] != "reasoning" {
-                        if let Some(part) = edit.part_value.as_object_mut() {
-                            part.remove("signature");
-                        }
-                    }
-                }
-            }
         }
     }
 }
@@ -350,7 +228,9 @@ impl NativeRunner {
 impl RunnerRoute for Route {
     async fn request(&self, method: &str, params: Value) -> Result<Reply, RouteFailure> {
         if method == ops::ROLE_DESCRIBE {
-            let caps: Vec<_> = NativeRunner::caps()
+            let caps: Vec<_> = self
+                .runner
+                .caps()
                 .iter()
                 .filter_map(|c| c.group())
                 .collect();
@@ -383,7 +263,7 @@ impl RunnerRoute for Route {
         let value = match method {
             ops::SESSION_HEAD => {
                 let mut head = serde_json::to_value(
-                    cortexkit_role_llm_runner::read::HeadMeta::new("example-lineage", 0, 1000),
+                    cortexkit_role_llm_runner::read::HeadMeta::new(1, "log-1", 1, 1000),
                 )
                 .unwrap();
                 head["history_version"] = json!(1);
@@ -407,7 +287,11 @@ impl RunnerRoute for Route {
             }
             ops::SESSION_READ | ops::SESSION_HISTORY => {
                 let index = if method == ops::SESSION_READ {
-                    params["from_ordinal"].as_u64().unwrap_or(0) as usize
+                    params["from_ordinal"]
+                        .as_u64()
+                        .unwrap_or(1)
+                        .max(1)
+                        .saturating_sub(1) as usize
                 } else {
                     params["cursor"]
                         .as_str()
@@ -415,23 +299,10 @@ impl RunnerRoute for Route {
                         .unwrap_or(session.messages.len().saturating_sub(1))
                 };
                 let mut rows: Vec<_> = session.messages.get(index).cloned().into_iter().collect();
-                if params["view"] == "model" {
-                    for row in &mut rows {
-                        let ordinal = row["ordinal"].as_u64();
-                        for edit in session
-                            .edits
-                            .iter()
-                            .filter(|edit| ordinal == Some(edit.ordinal))
-                        {
-                            let index: usize = edit.part.parse().unwrap();
-                            row["message"]["content"][index] = edit.part_value.clone();
-                        }
-                    }
-                    rows = rows.into_iter().map(|r| json!({"source":{"kind":"message","ordinal":r["ordinal"],"mid":r["mid"]},"message":r["message"]})).collect();
-                } else if params["form"] == "display" {
-                    rows = rows.into_iter().map(|r| json!({"ordinal":r["ordinal"],"mid":r["mid"],"written_at":r["written_at"],"tags":r["tags"],"row":{"role":"assistant","text":"Open the blue door.","parts":[],"model":"example/model"}})).collect();
+                if params["form"] == "display" {
+                    rows = rows.into_iter().map(|r| json!({"ordinal":r["ordinal"],"mid":r["mid"],"written_at":r["written_at"],"part_keys":r["part_digests"].as_array().unwrap().iter().map(|row|row["part"].clone()).collect::<Vec<_>>(),"row":{"role":"assistant","text":"Open the blue door.","parts":[],"model":"example/model"}})).collect();
                 }
-                let mut page = json!({"messages":rows,"lineage_id":"example-lineage"});
+                let mut page = json!({"messages":rows,"history_version":1,"incarnation":"log-1"});
                 if method == ops::SESSION_HISTORY {
                     page["history_version"] = json!(1);
                     if index > 0 {
@@ -442,14 +313,10 @@ impl RunnerRoute for Route {
                     }
                 } else {
                     if index + 1 < session.messages.len() {
-                        page["next_from_ordinal"] = json!(index + 1);
+                        page["next_from_ordinal"] = json!(index + 2);
                     }
                     if let Some(state) = &session.reasoning_pruned {
                         page["reasoning_pruned"] = serde_json::to_value(state).unwrap();
-                    }
-                    if let (true, Some(initial)) = (params["view"] == "model", &session.rendered) {
-                        page["compaction_id"] = json!(initial.compaction_id);
-                        page["version"] = json!(initial.version);
                     }
                 }
                 if !session.pruned.is_empty() {
@@ -467,22 +334,6 @@ impl RunnerRoute for Route {
                     session.reads += 1;
                 }
                 page
-            }
-            ops::SESSION_RESOLVE => {
-                let (entry, tag) = session
-                    .messages
-                    .iter()
-                    .find_map(|entry| {
-                        entry["tags"]
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .find(|t| t["tag"] == params["tag"])
-                            .map(|tag| (entry, tag))
-                    })
-                    .unwrap();
-                let index: usize = tag["part"].as_str().unwrap().parse().unwrap();
-                json!({"tag":params["tag"],"mid":entry["mid"],"ordinal":entry["ordinal"],"part":tag["part"],"content":entry["message"]["content"][index]["text"]})
             }
             _ => json!({}),
         };
@@ -528,7 +379,7 @@ impl LlmRunnerSubject for NativeRunner {
         "example-runner"
     }
     fn capabilities(&self) -> BTreeSet<Capability> {
-        Self::caps()
+        self.caps()
     }
     fn owner_stamp(&self) -> RouteStamp {
         RouteStamp {
@@ -575,67 +426,22 @@ impl LlmRunnerSubject for NativeRunner {
     async fn archive_pruning_fixture(
         &self,
         name: &str,
-        accepts: Option<Vec<String>>,
+        with_compaction_provider: bool,
     ) -> Result<Vec<ArchivePruningPart>, HarnessError> {
         let mut stored = Stored {
-            accepts,
+            with_compaction_provider,
             ..Stored::default()
         };
-        for ordinal in 0..2 {
+        for ordinal in 1..=2 {
             let mut parts: Vec<_> = fixture().into_iter().map(|p| p.original).collect();
             parts.push(json!({"type":"text","text":"An unchanged reminder slot."}));
-            stored.messages.push(stored_message(
-                ordinal,
-                parts,
-                json!([{"part":"0"},{"part":"1"},{"part":"2","tag":format!("§{}§",1 + 2 * ordinal)},{"part":"3"},{"part":"4","tag":format!("§{}§",2 + 2 * ordinal)}]),
-            ));
+            stored.messages.push(stored_message(ordinal, parts));
         }
         self.state.lock().unwrap().insert(name.into(), stored);
         Ok(fixture())
     }
     async fn prune_archived_session(&self, name: &str) -> Result<(), HarnessError> {
         self.prune(name);
-        Ok(())
-    }
-    async fn install_compaction_setup(
-        &self,
-        name: &str,
-        setup: crate::CompactionSetup,
-    ) -> Result<(), HarnessError> {
-        let crate::CompactionSetup::Ready(initial) = setup else {
-            return Err(HarnessError::new("only ready answers are scripted here"));
-        };
-        self.state.lock().unwrap().get_mut(name).unwrap().installed = Some(initial);
-        Ok(())
-    }
-    async fn compaction_observation(
-        &self,
-        name: &str,
-    ) -> Result<crate::CompactionObservation, HarnessError> {
-        Ok(crate::CompactionObservation {
-            notices: self.state.lock().unwrap()[name].notices.clone(),
-            ..Default::default()
-        })
-    }
-    async fn publish_compaction_view(
-        &self,
-        name: &str,
-        view: crate::ScriptedView,
-    ) -> Result<u64, HarnessError> {
-        let mut state = self.state.lock().unwrap();
-        let session = state.get_mut(name).unwrap();
-        session.published += 1;
-        let version = session.published;
-        session.pending.push((version, view));
-        Ok(version)
-    }
-    async fn compaction_provider_calls(
-        &self,
-        name: &str,
-    ) -> Result<Vec<crate::ProviderCall>, HarnessError> {
-        Ok(self.state.lock().unwrap()[name].calls.clone())
-    }
-    async fn release_compaction_model(&self, _: &str) -> Result<(), HarnessError> {
         Ok(())
     }
     async fn hold_next_model_step(&self, name: &str) -> Result<(), HarnessError> {
@@ -673,7 +479,7 @@ async fn exercise(name: &str, fault: Fault) -> Result<Ending, String> {
     let directory = tempfile::tempdir().unwrap();
     let mut driver = CrashDriver::new(&subject);
     let handle = driver.spawn(directory.path()).await.unwrap();
-    let declared = NativeRunner::caps();
+    let declared = subject.caps();
     let mint = Mint::default();
     Case {
         subject: &subject,
@@ -759,10 +565,10 @@ proof!(
     QueuedSend
 );
 proof!(
-    positive_setup_opt_in,
-    rejects_pruning_without_setup_acceptance,
-    "archive_pruning_setup_opt_in",
-    SetupOptIn
+    positive_provider_blocks_pruning,
+    rejects_pruning_provider_plan,
+    "archive_pruning_provider_blocks_pruning",
+    ProviderPlanPruned
 );
 proof!(
     positive_declared_kinds,
@@ -845,6 +651,44 @@ macro_rules! named_proof {
     };
 }
 
+#[tokio::test]
+async fn mode3_pruned_keys_and_provider_gate_are_reported_by_name() {
+    for (name, fault) in [
+        ("archive_pruning_part_keys", Fault::UnknownPart),
+        (
+            "archive_pruning_provider_blocks_pruning",
+            Fault::ProviderPlanPruned,
+        ),
+    ] {
+        for broken in [false, true] {
+            let runner = NativeRunner {
+                pruning_only: true,
+                fault: if broken { fault } else { Fault::None },
+                ..NativeRunner::default()
+            };
+            let directory = tempfile::tempdir().unwrap();
+            let report = crate::run_suite(&runner, directory.path()).await.unwrap();
+            if broken {
+                assert!(
+                    matches!(
+                        report.outcome(name),
+                        Some(crate::CaseOutcome::Failed { .. })
+                    ),
+                    "{}",
+                    report.render()
+                );
+                assert!(report.render().contains(&format!("FAIL {name}")));
+            } else {
+                assert!(
+                    matches!(report.outcome(name), Some(crate::CaseOutcome::Passed)),
+                    "{}",
+                    report.render()
+                );
+            }
+        }
+    }
+}
+
 named_proof!(
     positive_generation,
     rejects_prune_without_generation_bump,
@@ -852,127 +696,3 @@ named_proof!(
     NoGenerationBump,
     "a later prune did not raise the generation by one"
 );
-named_proof!(
-    positive_restored_view_refused,
-    rejects_applying_a_view_that_restores_pruned_content,
-    "archive_pruning_restored_view_refused",
-    AcceptsRestoringView,
-    "a view restoring pruned content was not refused view_refused:1:pruned_reasoning_restored"
-);
-named_proof!(
-    positive_setup_after_prune,
-    rejects_skipping_setup_after_prune,
-    "archive_pruning_setup_after_prune",
-    SkipsSetupAfterPrune,
-    "the runner made no call to the compaction provider after the prune"
-);
-named_proof!(
-    positive_setup_initial_replaced,
-    rejects_keeping_the_pre_prune_initial,
-    "archive_pruning_setup_initial_replaced",
-    KeepsPrePruneInitial,
-    "the runner still renders the pre-prune one"
-);
-
-named_proof!(
-    positive_restored_edit_refused,
-    rejects_applying_a_part_edit_that_restores_pruned_content,
-    "archive_pruning_restored_edit_refused",
-    AcceptsRestoringEdit,
-    "a part edit restoring pruned content was not refused view_refused:1:pruned_reasoning_restored"
-);
-
-named_proof!(
-    positive_applied_edit_pruned,
-    rejects_keeping_an_applied_edits_pre_prune_signature,
-    "archive_pruning_applied_edit_pruned",
-    KeepsPrePruneEdit,
-    "after the prune, the model view still serves the applied part edit with its pre-prune \
-     signature"
-);
-
-#[tokio::test]
-async fn rejects_dropping_an_applied_edit_on_prune() {
-    let Err(failure) = exercise(
-        "archive_pruning_applied_edit_pruned",
-        Fault::DropsAppliedEdit,
-    )
-    .await
-    else {
-        panic!("archive_pruning_applied_edit_pruned must reject DropsAppliedEdit");
-    };
-    assert!(
-        failure.contains("the runner dropped the applied part edit"),
-        "{failure}"
-    );
-}
-
-#[tokio::test]
-async fn applied_edit_case_is_not_applicable_without_the_model_view() {
-    let subject = NativeRunner::default();
-    let directory = tempfile::tempdir().unwrap();
-    let mut driver = CrashDriver::new(&subject);
-    let handle = driver.spawn(directory.path()).await.unwrap();
-    let mut declared = NativeRunner::caps();
-    declared.remove(&Capability::ModelView);
-    let mint = Mint::default();
-    let ending = Case {
-        subject: &subject,
-        handle: &handle,
-        declared: &declared,
-        mint: &mint,
-    }
-    .run("archive_pruning_applied_edit_pruned")
-    .await
-    .unwrap();
-    match ending {
-        Ending::Inapplicable(reason) => assert!(reason.contains("model_view"), "{reason}"),
-        _ => panic!("the case ran without the model view"),
-    }
-}
-
-#[test]
-fn the_expected_edit_follows_the_declared_profile() {
-    // An OpenCode tool part, where call and result share one part: the
-    // provider's edit trims the output and keeps the call's signature.
-    let tool = |output: &str, google: Value| {
-        json!({"id":"prt_tool","type":"tool","callID":"call-example","tool":"open_door",
-            "state":{"status":"completed","input":{"door":"blue"},"output":output},
-            "metadata":{"google":google}})
-    };
-    let oracle = ArchivePruningPart {
-        kind: "signature".into(),
-        original: tool(
-            "The blue door is open.",
-            json!({"thoughtSignature":"invented-signature"}),
-        ),
-        served: tool("The blue door is open.", json!({})),
-    };
-    let edit = provider_edit(&oracle.original);
-    assert_eq!(
-        edit,
-        tool(
-            EDIT_PLACEHOLDER,
-            json!({"thoughtSignature":"invented-signature"})
-        )
-    );
-    let pruned = tool(EDIT_PLACEHOLDER, json!({}));
-    assert_eq!(
-        expected_pruned_edit(
-            Some(cortexkit_role_llm_runner::serializer_profile::OPENCODE_AISDK),
-            &oracle,
-            &edit
-        ),
-        Ok(pruned.clone())
-    );
-    // Without a profile the rules name, the fixture's served form is
-    // edited the same way.
-    assert_eq!(
-        expected_pruned_edit(None, &oracle, &edit),
-        Ok(pruned.clone())
-    );
-    assert_eq!(
-        expected_pruned_edit(Some("future-profile"), &oracle, &edit),
-        Ok(pruned)
-    );
-}

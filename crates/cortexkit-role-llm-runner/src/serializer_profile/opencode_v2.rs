@@ -50,7 +50,7 @@ pub struct OpenCodeV2NativeCut {
 }
 
 /// The latest completed self-referencing compaction. Its row id identifies
-/// the runner's own checkpoint; SQL rows do not reveal that checkpoint's cut.
+/// the runner's marker; SQL rows alone do not reveal the applied view's cut.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct OpenCodeV2RunnerMarker {
@@ -58,7 +58,8 @@ pub struct OpenCodeV2RunnerMarker {
 }
 
 /// All ordinal-bearing rows, including the prefix hidden by a native cut.
-/// A runner marker requires the runner's checkpoint to determine served range.
+/// A runner marker requires the applied view and marker state defined by the
+/// compaction contract to determine the model boundary, not message-count checkpoints.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct OpenCodeV2SessionProjection {
@@ -103,9 +104,10 @@ pub(crate) fn projected_content(body: &Value) -> Result<Value, String> {
                     units.push(text(supplied)?);
                 }
             }
-            let supplied = body.get("text").ok_or("opencode-v2 user has no text")?;
-            if supplied.as_str() != Some("") {
-                units.push(text(supplied)?);
+            if let Some(supplied) = body.get("text") {
+                if supplied.as_str() != Some("") {
+                    units.push(text(supplied)?);
+                }
             }
             units.extend_from_slice(array(body, "files")?);
         }
@@ -122,9 +124,7 @@ pub(crate) fn projected_content(body: &Value) -> Result<Value, String> {
             }
         }
         Some("assistant") => {
-            let content = body["content"].as_array().ok_or(
-                "opencode-v2 assistant content must be an array (hydrate stored parts first)",
-            )?;
+            let content = array(body, "content")?;
             for slot in content {
                 if !matches!(slot["type"].as_str(), Some("text" | "reasoning" | "tool")) {
                     return Err("opencode-v2 assistant slot must be text, reasoning or tool".into());
@@ -160,7 +160,10 @@ pub fn opencode_v2_projected_content(row: &Value) -> Result<Value, OpenCodeV2Ses
 
 /// Assign ordinals in native `seq` order, never id or timestamp order. The
 /// caller supplies one session's SQL envelopes `{id,type,seq,data,...}`, after
-/// hydrating any separate part rows and blobs. Compactions consume no ordinal.
+/// hydrating any separate part rows and blobs. Compaction W4.2, OpenCode 2:
+/// "user, synthetic, assistant, skill, system; location-switched and a
+/// foreground shell ... model-switched (an entry with no parts)". Compaction
+/// rows are markers; idle, agent-switched and background shells never count.
 /// Entries describe storage, not read eligibility: unfinished messages must
 /// still be withheld under the contract's finished-only read rule (§4.2).
 pub fn opencode_v2_session_projection(
@@ -242,6 +245,11 @@ pub fn opencode_v2_session_projection(
         let mut body = Value::Object((*data).clone());
         body["id"] = json!(id);
         body["type"] = json!(kind);
+        if matches!(*kind, "idle" | "agent-switched")
+            || (*kind == "shell" && body["metadata"]["background"] == true)
+        {
+            continue;
+        }
         let content =
             projected_content(&body).map_err(|error| malformed(format!("{id}: {error}")))?;
         entries.push((
@@ -249,7 +257,7 @@ pub fn opencode_v2_session_projection(
             OpenCodeV2OrdinalEntry {
                 entry_id: (*id).to_owned(),
                 entry_type: (*kind).to_owned(),
-                ordinal: entries.len() as u64,
+                ordinal: entries.len() as u64 + 1,
                 part_count: content.as_array().expect("projected native units").len(),
                 projected_content: content,
             },
@@ -261,7 +269,8 @@ pub fn opencode_v2_session_projection(
         first_kept_ordinal: entries
             .iter()
             .position(|(entry_seq, _)| *entry_seq >= seq)
-            .unwrap_or(entries.len()) as u64,
+            .unwrap_or(entries.len()) as u64
+            + 1,
     });
     Ok(OpenCodeV2SessionProjection {
         entries: entries.into_iter().map(|(_, entry)| entry).collect(),
@@ -304,17 +313,12 @@ mod tests {
             })
             .map(|entry| entry.entry_id.clone())
             .collect();
-        if case["outside_served_range"].is_null() {
-            // A runner marker cannot reveal the runner's checkpoint boundary.
+        if case["below_model_cut"].is_null() {
+            // A runner marker row alone cannot reveal the applied view's boundary.
             assert!(actual.runner_marker.is_some());
             assert!(actual.native_cut.is_none());
         } else {
-            assert_eq!(
-                json!(outside),
-                case["outside_served_range"],
-                "{}",
-                case["name"]
-            );
+            assert_eq!(json!(outside), case["below_model_cut"], "{}", case["name"]);
         }
         for entry in &actual.entries {
             let stored = rows.iter().find(|row| row["id"] == entry.entry_id).unwrap();
@@ -352,6 +356,23 @@ mod tests {
         let mut reversed = rows.to_vec();
         reversed.reverse();
         assert_eq!(opencode_v2_session_projection(&reversed).unwrap(), actual);
+    }
+
+    /// Compaction W4.2, OpenCode 2: "A user row with no text and no files,
+    /// and a dead step, are entries with no parts."
+    #[test]
+    fn empty_user_and_dead_step_each_take_an_ordinal() {
+        let rows = vec![
+            json!({"id":"dead-step","seq":8,"type":"assistant","data":{"content":[]}}),
+            json!({"id":"empty-user","seq":3,"type":"user","data":{"text":"","files":[]}}),
+        ];
+        let projection = opencode_v2_session_projection(&rows).unwrap();
+        let actual: Vec<_> = projection
+            .entries
+            .iter()
+            .map(|entry| (entry.ordinal, entry.entry_id.as_str(), entry.part_count))
+            .collect();
+        assert_eq!(actual, vec![(1, "empty-user", 0), (2, "dead-step", 0)]);
     }
 
     #[test]
@@ -407,20 +428,20 @@ mod tests {
                 "msg_s0_current_marker"
             );
             assert!(current.native_cut.is_none());
-            assert_eq!(current.entries.len(), 23);
-            assert_eq!(current.entries[0].ordinal, 0);
+            assert_eq!(current.entries.len(), 15);
+            assert_eq!(current.entries[0].ordinal, 1);
             let whole = project("below.committed");
             assert!(whole.runner_marker.is_none());
             assert!(whole.native_cut.is_none());
-            assert_eq!(whole.entries.len(), 3);
+            assert_eq!(whole.entries.len(), 2);
             if version == "2.2.3" {
                 let before = project("between.before");
                 let after = project("between.committed");
                 assert_ne!(before.runner_marker, after.runner_marker);
                 assert!(after.runner_marker.is_some());
                 assert!(after.native_cut.is_none());
-                assert_eq!(after.entries, before.entries[..14]);
-                assert_eq!(whole.entries, project("below.before").entries[..3]);
+                assert_eq!(after.entries, before.entries[..9]);
+                assert_eq!(whole.entries, project("below.before").entries[..2]);
             }
         }
     }
@@ -470,8 +491,10 @@ mod tests {
                 "missing id",
             ),
             (
-                vec![json!({"id":"partial", "seq":1, "type":"assistant", "data":{}})],
-                "hydrate stored parts first",
+                vec![
+                    json!({"id":"partial", "seq":1, "type":"assistant", "data":{"content":false}}),
+                ],
+                "content",
             ),
         ] {
             let error = opencode_v2_session_projection(&rows)

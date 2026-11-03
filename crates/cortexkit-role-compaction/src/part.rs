@@ -116,8 +116,8 @@ pub enum PartBody, "kind" {
     /// when the host stores the call and the result separately. Dropping a
     /// tool part removes both, so a call is never separated from its result.
     Tool => "tool"(payload: ToolPart),
-    /// Media of any type, images included. The bytes never travel through
-    /// this contract.
+    /// Media of any type, images included. Metadata only: reads never return
+    /// a transcript file's bytes (inserted images are separate, see W6.2).
     File => "file"(payload: FileMedia),
     /// Provider-specific content the runner sends back as it is (the AI SDK's
     /// `custom`). It can only be dropped.

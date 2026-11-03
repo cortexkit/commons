@@ -95,14 +95,14 @@ pub struct UnknownUserCommandDetail {
 /// retryable request refusal; the run ends in the state of the same name.
 pub const BUDGET_EXHAUSTED: &str = "budget_exhausted";
 
-/// A read's `lineage_id` is not the session's current lineage. The caller
-/// re-reads from the tail; it never retries the same cursor.
-pub const LINEAGE_CHANGED: &str = "lineage_changed";
+/// A cursor's history version differs from the session's current version.
+/// Read a fresh page instead of retrying the stale cursor.
+pub const HISTORY_CHANGED: &str = "history_changed";
 
 /// A read would serve a message whose body, rebuilt from the host's store,
 /// no longer matches the digest it was first served with (CONTRACT §4.2.1).
-/// The runner serves no changed bytes under the lineage. It serves that
-/// message again only under a new lineage, so the reader re-reads from the
+/// The runner serves no changed bytes under the active path. It serves that
+/// message again only under a raised history_version, so the reader re-reads from the
 /// tail. `detail` is [`ServedBytesChangedDetail`].
 pub const SERVED_BYTES_CHANGED: &str = "served_bytes_changed";
 
@@ -120,32 +120,10 @@ impl ServedBytesChangedDetail {
     }
 }
 
-/// A read's `after_mid` names no message in the lineage the read named, or
+/// A read's `after_mid` names no message in the active path the read named, or
 /// a `session.history` request's `from_mid` or `before_mid` names no
 /// message of the session's history.
 pub const UNKNOWN_MID: &str = "unknown_mid";
-
-/// A range read, an after-message read or a `session.resolve` names a
-/// position below the current lineage's first ordinal: history before the
-/// session's latest cut, which `session.read` and `session.resolve` never
-/// serve. `detail` is [`BeforeLineageStartDetail`]. Terminal: the reader
-/// reads from `first_ordinal`, or reads the earlier history with
-/// `session.history` on a runner that declares `host_history`.
-pub const BEFORE_LINEAGE_START: &str = "before_lineage_start";
-
-/// The detail of a `before_lineage_start` refusal: the current lineage's
-/// first ordinal, as `session.head` reports it.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub struct BeforeLineageStartDetail {
-    pub first_ordinal: u64,
-}
-
-impl BeforeLineageStartDetail {
-    pub fn new(first_ordinal: u64) -> Self {
-        Self { first_ordinal }
-    }
-}
 
 /// A `session.history` cursor no longer names a place in the session's
 /// history: a revert or a rewrite removed or changed the entry it was
@@ -162,12 +140,12 @@ pub const UNKNOWN_ORDINAL: &str = "unknown_ordinal";
 
 /// The complete encoded `session.read` reply exceeds the transport frame
 /// limit. Terminal: retrying with a smaller `max_bytes` cannot shrink a
-/// single message or atomic model-view group. `detail` is
+/// single message. `detail` is
 /// [`ReplyTooLargeDetail`].
 pub const REPLY_TOO_LARGE: &str = "reply_too_large";
 
 /// Safe identity and size details for a `reply_too_large` refusal. The
-/// subject names a message or a model-view group without carrying its content.
+/// subject names a message, run or tool call without carrying its content.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ReplyTooLargeDetail {
@@ -196,9 +174,6 @@ impl ReplyTooLargeDetail {
 pub enum ReplyTooLargeSubject {
     /// A raw transcript message, identified by its session and ordinal.
     Message { session: String, ordinal: u64 },
-    /// An atomic model-view group, identified by the existing source of its
-    /// anchored entry.
-    ModelGroup { source: crate::read::EntrySource },
     /// A `run.result` or `run.status` answer for this run, made too large by
     /// its structured-output `value`, which is never cut short.
     Run { run_id: String },
@@ -216,38 +191,6 @@ pub enum ReplyTooLargeSubject {
 
 /// `run.result` or `run.tool_calls` names a run the session does not have.
 pub const UNKNOWN_RUN: &str = "unknown_run";
-
-/// A `session.resolve` names a well-formed tag that no part of the session's
-/// current lineage carries: one no part has shown in this lineage, or one
-/// that named a part only under a lineage the session has since left.
-/// Numbers may repeat across lineages, but resolve answers only the current
-/// one, so within it the same request meets the same refusal: terminal. A
-/// malformed tag is `invalid_params` naming `tag` instead.
-pub const UNKNOWN_TAG: &str = "unknown_tag";
-
-/// A `session.send` or `session.adopt` for a session the runner knows was
-/// forked or cloned from a managed session (one whose plan names a
-/// compaction provider). Such a session is never enrolled; the person uses
-/// undo instead. `detail` is [`ForkUnsupportedDetail`]. Terminal, writing
-/// nothing. A runner refuses only forks it can know about: a fork that
-/// carries nothing of the runner's (say, of a session that never compacted)
-/// is an ordinary session.
-pub const FORK_UNSUPPORTED: &str = "fork_unsupported";
-
-/// The detail of a `fork_unsupported` refusal: the session it was forked
-/// from, when the runner knows it.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub struct ForkUnsupportedDetail {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<String>,
-}
-
-impl ForkUnsupportedDetail {
-    pub fn new(parent: Option<String>) -> Self {
-        Self { parent }
-    }
-}
 
 /// A template send names, in a `part_tag` slot, a part the request that
 /// would carry it does not show (a compaction dropped it from the view, or
@@ -297,8 +240,8 @@ pub const CONTEXT_CEILING: &str = "context_ceiling";
 /// [`ContextCeilingDetail`]. Decoded as an open string; a consumer treats a
 /// cause it does not know as a ceiling stop all the same.
 pub mod context_ceiling_causes {
-    /// The runner waited the compaction provider's bound at the ceiling and
-    /// no view came.
+    /// The runner's chosen deadline for the over-limit ride elapsed at the
+    /// ceiling without a view that made the request fit.
     pub const VIEW_TIMEOUT: &str = "view_timeout";
     /// The session has no compaction provider (none at setup), or its
     /// provider is unreachable at the ceiling.
@@ -566,16 +509,13 @@ pub const CODES: &[&str] = &[
     NO_PERSON,
     USER_COMMANDS_UNSUPPORTED,
     INVALID_PARAMS,
-    LINEAGE_CHANGED,
+    HISTORY_CHANGED,
     SERVED_BYTES_CHANGED,
     UNKNOWN_MID,
-    BEFORE_LINEAGE_START,
     CURSOR_EXPIRED,
     UNKNOWN_ORDINAL,
     REPLY_TOO_LARGE,
     UNKNOWN_RUN,
-    UNKNOWN_TAG,
-    FORK_UNSUPPORTED,
     TEMPLATE_PART_GONE,
     UNKNOWN_SEND,
     CONTEXT_CEILING,
@@ -625,6 +565,8 @@ pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a st
 /// Reasons a runner writes on a tool call's error result. Where the reason
 /// sits inside a message body is the runner's message schema.
 pub mod tool_result_reasons {
+    /// The tool ran, but its model-visible output was discarded whole.
+    pub const TOOL_RESULT_TOO_LARGE: &str = "tool_result_too_large";
     /// The session input-token cap stopped the call before dispatch.
     pub const BUDGET_EXHAUSTED: &str = super::BUDGET_EXHAUSTED;
     /// The call shared a step with a `submit_result` call, which ended the
@@ -654,9 +596,10 @@ pub mod tool_result_reasons {
 /// `provider_code` values a runner writes on a run that ends `error`
 /// because of a provider the session depends on.
 pub mod provider_codes {
-    /// Setup only: failed or timed out with no answer, so no initial view
+    /// Routing refused the caller's decision (including an expired decision).
+    /// No model call or independent account allocation is permitted.
+    pub const ROUTING_DECISION_REFUSED: &str = "routing_decision_refused";
     /// was recorded and no model call was made.
-    pub const COMPACTION_UNAVAILABLE: &str = "compaction_unavailable";
     /// A PreUser hook under `on_unavailable: refuse` was unavailable for a
     /// user turn.
     pub const PRE_USER_UNAVAILABLE: &str = "pre_user_unavailable";
@@ -698,7 +641,7 @@ pub mod provider_codes {
 
     /// Every provider code this role names; providers may define others.
     pub const CODES: &[&str] = &[
-        COMPACTION_UNAVAILABLE,
+        ROUTING_DECISION_REFUSED,
         PRE_USER_UNAVAILABLE,
         CONTEXT_OVERFLOW,
         OUTPUT_CEILING,
@@ -802,23 +745,6 @@ mod tests {
     }
 
     #[test]
-    fn lineage_bound_and_cursor_refusals_are_named_and_terminal() {
-        for code in [BEFORE_LINEAGE_START, CURSOR_EXPIRED, UNKNOWN_ORDINAL] {
-            assert!(CODES.contains(&code), "{code}");
-            assert!(!is_retryable(code), "{code}");
-        }
-        let file = vectors::load("errors.json");
-        let case = vectors::cases(&file, "codes")
-            .iter()
-            .find(|case| case["code"] == BEFORE_LINEAGE_START)
-            .unwrap();
-        let detail: BeforeLineageStartDetail =
-            serde_json::from_value(case["detail"].clone()).unwrap();
-        assert_eq!(detail, BeforeLineageStartDetail::new(42));
-        assert_eq!(serde_json::to_value(detail).unwrap(), case["detail"]);
-    }
-
-    #[test]
     fn retryability_matches_the_vectors() {
         let file = vectors::load("errors.json");
         let output_refs = vectors::load("output-refs.json");
@@ -845,21 +771,6 @@ mod tests {
                 "{code}"
             );
         }
-    }
-
-    #[test]
-    fn compaction_unavailable_decodes_and_is_listed_as_a_provider_code() {
-        let file = vectors::load("run-result.json");
-        let case = vectors::cases(&file, "answers")
-            .iter()
-            .find(|case| case["name"] == "Setup unavailable with no answer")
-            .unwrap();
-        let result: crate::run::RunResult =
-            vectors::round_trip("compaction unavailable", &case["answer"]);
-        let error = result.error.unwrap();
-        assert_eq!(error.provider_code, provider_codes::COMPACTION_UNAVAILABLE);
-        assert!(provider_codes::CODES.contains(&"compaction_unavailable"));
-        assert!(!CODES.contains(&"compaction_unavailable"));
     }
 
     #[test]
@@ -1011,41 +922,9 @@ mod tag_code_tests {
     use super::*;
 
     #[test]
-    fn unknown_tag_is_named_and_terminal() {
-        assert!(CODES.contains(&UNKNOWN_TAG));
-        assert!(!is_retryable(UNKNOWN_TAG));
-    }
-
-    #[test]
     fn unknown_send_is_named_and_terminal() {
         assert!(CODES.contains(&UNKNOWN_SEND));
         assert!(!is_retryable(UNKNOWN_SEND));
-    }
-
-    #[test]
-    fn fork_and_gone_part_refusals_are_named_terminal_and_carry_their_detail() {
-        for code in [FORK_UNSUPPORTED, TEMPLATE_PART_GONE] {
-            assert!(CODES.contains(&code), "{code}");
-            assert!(!is_retryable(code), "{code}");
-        }
-        let file = crate::vectors::load("errors.json");
-        let detail = |code: &str| {
-            crate::vectors::cases(&file, "codes")
-                .iter()
-                .find(|case| case["code"] == code)
-                .and_then(|case| case.get("detail").cloned())
-                .unwrap_or_else(|| panic!("{code} has no detail vector"))
-        };
-        let fork: ForkUnsupportedDetail =
-            crate::vectors::round_trip(FORK_UNSUPPORTED, &detail(FORK_UNSUPPORTED));
-        assert_eq!(fork, ForkUnsupportedDetail::new(Some("ses_parent".into())));
-        assert_eq!(
-            serde_json::to_value(ForkUnsupportedDetail::new(None)).unwrap(),
-            serde_json::json!({})
-        );
-        let gone: TemplatePartGoneDetail =
-            crate::vectors::round_trip(TEMPLATE_PART_GONE, &detail(TEMPLATE_PART_GONE));
-        assert_eq!(gone, TemplatePartGoneDetail::new("part"));
     }
 }
 

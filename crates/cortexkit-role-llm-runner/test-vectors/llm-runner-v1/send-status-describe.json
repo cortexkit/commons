@@ -7,7 +7,8 @@
           "role.describe",
           "session.baseline",
           "session.send",
-          "send.status"
+          "send.status",
+          "session.send_status"
         ],
         "stability": "alpha"
       }
@@ -26,7 +27,8 @@
         "ops": [
           "role.describe",
           "session.baseline",
-          "session.send"
+          "session.send",
+          "session.send_status"
         ],
         "stability": "alpha"
       }

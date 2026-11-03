@@ -262,7 +262,10 @@ pub fn describe_message(
         if let Some(parts) = inline["content"].as_array() {
             for (index, part) in parts.iter().enumerate() {
                 if part["type"] == "tool_use" {
-                    read.tags.retain(|tag| tag.part != opaque_key(index));
+                    read.part_digests
+                        .as_mut()
+                        .unwrap()
+                        .retain(|row| row.part != opaque_key(index));
                 }
             }
         }
@@ -330,25 +333,6 @@ fn drop_pairing(value: &mut Value) {
 
 pub fn page(page: ReadPage, mode: Option<MediaMode>, budget: usize, defects: &Defects) -> Reply {
     let mut page = page;
-    for message in &mut page.messages {
-        if message.message["content"].is_array() || message.message["content"].is_string() {
-            let previous = std::mem::take(&mut message.tags);
-            message.tags = parts(&message.message)
-                .into_iter()
-                .enumerate()
-                .map(|(index, (key, _))| {
-                    match previous
-                        .iter()
-                        .find(|tag| tag.part == index.to_string())
-                        .and_then(|tag| tag.tag.as_ref())
-                    {
-                        Some(tag) => cortexkit_role_llm_runner::tags::PartTag::tagged(key, tag),
-                        None => cortexkit_role_llm_runner::tags::PartTag::untagged(key),
-                    }
-                })
-                .collect();
-        }
-    }
     if mode == Some(MediaMode::Descriptors) {
         let messages = page
             .messages

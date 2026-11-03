@@ -1,84 +1,71 @@
-# `step-transform-provider/v1` — role contract
+# `step-transform-provider/v2` — role contract
 
-Stability: **alpha**. This document is the role
-definition; the Rust types in this crate are its wire shapes,
-`test-vectors/step-transform-provider-v1/` inside this crate holds its
-vectors. Conformance requirements are described in §12; this crate does not
-contain a provider conformance runner.
+Stability: **alpha**. This document defines the role. The Rust types in this
+crate are its wire shapes; `test-vectors/step-transform-provider-v2/` holds
+its vectors. Every **[pinned]** item is a binding requirement.
 
-`llm-runner/v1` states what the runner owes at each hook call site;
-this document states the provider's side.
-
-Every item is marked **[pinned]**: a settled, binding requirement, even before
-the crate's first release. A provider must
-do it, and a runner may rely on it.
-
-Codes this role shares with `llm-runner/v1` (the tool-result reasons,
-`pre_user_unavailable`, `invalid_params`) are taken from that crate, which
-this crate depends on, so the two cannot drift apart.
-
-A step-transform provider is any module that makes write-time changes to
-the newest message of a session.
-
-Optional whole-message and lineage fields support runners that cannot serve
-`session.read`. When they are absent, a hook request keeps its existing bytes,
-and the provider reads history and answers exactly as it does today.
+A step-transform provider makes write-time changes to the newest message of
+a session through four hooks. `llm-runner/v1` defines the runner's call-site
+obligations; this document defines the provider's side. Shared runner error
+codes come from that role's crate so their spellings cannot drift.
 
 ## Terms
 
-- **Plan composer**: the component that writes a session's plan and freezes
-  it. It checks each provider's runner groups against the runner, places
-  the providers in order, and fills the plan's user-tier fields.
-- **Runner group**: a capability group a runner advertises in its
-  `llm-runner/v1` `role.describe`, such as `compaction` or
-  `transcript_reads`. A provider lists the groups it needs in its own
-  `role.describe.runner_groups`.
-- **Reduction owner**: the session's compaction provider, the only party
-  that may remove or rewrite history already written. Every other step
-  transform may only add to it.
-- **Signed thinking**: model reasoning blocks that carry a model provider's
-  signature. Any change to them, even one byte, invalidates the signature,
-  so nothing in these roles ever edits them.
+- **Plan composer**: writes and freezes the session plan, checks runner groups
+  and subscribed hooks, orders providers and fills user-tier fields.
+- **Runner group**: a capability group in a runner's `role.describe`, such as
+  `transcript_reads`. Providers list requirements in `runner_groups`.
+- **Reduction owner**: the session's compaction provider, the only party that
+  may remove or rewrite history already written. On `pre_user` and
+  `post_assistant`, non-owners may only prepend or append. `post_tool`
+  replacement is governed separately by user grants; `pre_tool` answers
+  are governed by phase.
+- **Signed thinking**: reasoning blocks carrying a model provider signature;
+  changing even one byte invalidates it, so hooks never edit these blocks.
 
 ## 1. Role identity and addressing
 
-- [pinned] A provider lists `step-transform-provider/v1` in its manifest's
-  `capabilities.provides` (`PROVIDES`). A module may serve several majors.
-- [pinned] Required ops (`REQUIRED_OPS`): `role.describe`, the declaration
-  op `transform.declare` and the hook op `transform.hook`.
-- [pinned] A runner refuses a module whose `role.describe` lacks a required
-  op, by name, before routing anything to it.
-- [pinned] Step-transform routes are module-level and unscoped. The opaque
-  session handle in a hook call is a state key, not an authorization credential.
-- [pinned] Every hook request (`transform.hook`, §7)
-  carries a required string `harness`, next to `session`: the harness
-  named in the session's key (for example `harness-a`). It is caller-chosen,
-  not an authenticated runner identity. This differs from the route's bind harness, the harness a
-  connection declares when it opens the route; a runner always declares
-  `runner`. A request without `harness` does not decode; it is
-  never defaulted.
-- [pinned] A provider keys a runner conversation, and every piece of
-  per-session state it keeps for one, on `(runner, harness, session)`:
-  the bare module id of the daemon-attested runner principal on the route,
-  never its `reserved:<id>` display form or a body field,
-  and the hook's harness and session. This bare-id rule applies to every
-  session, including sessions first established by a hook; this role has no
-  Setup wire op.
-  `project_root` is route metadata only, never part of the state key; folder
-  aliases reach the same state. Two requests that differ in any of the three
-  key fields belong to different conversations. The shared
-  `cortexkit_role_llm_runner::session_ref(&SessionIdentity { runner, harness, session })` function
-  computes the session reference using that runner's module id exactly as
-  recorded in `session_binding.runner`, without normalising any field.
-- [pinned] Every request in this role is `{method, params}` (`OpRequest`):
-  `method` is the op's name and `params` its request. `role.describe`
-  takes empty params (`DescribeRequest`).
+- [pinned] A provider lists `step-transform-provider/v2` (`PROVIDES`) in
+  `capabilities.provides`. `VERSION` is `v2`. Required ops (`REQUIRED_OPS`):
+  `role.describe`, `transform.declare`, `transform.hook`. A consumer refuses a
+  provider missing any required op, by name, before calling it.
+- [pinned] There is one hook route per session and role,
+  opened under the session's scope and bound to `(harness, session)`, with
+  `role_versions` selecting role `step-transform-provider`, version `v2`.
+  Every hook concerns only that route's session. The daemon attests the
+  caller module; the project comes from its scope stamp (`workdir`, and
+  `project_id` when present). No request body carries caller identity.
+- [pinned] `role.describe` and `transform.declare` are answerable on **any
+  route of this role**, including module-level routes and scoped routes
+  opened before the session exists. Session binding is not a bind-time
+  requirement. A hook on any route other than a scoped session-bound route
+  is refused **per call** with `route_unbound`, message `Expected a bound
+  session`. It does not close the route or prevent later preflight calls.
+- [pinned] Caller attestation and the selected role are checked at bind,
+  using these refusal codes and messages:
+  `unattested_runner` (`No caller module attested`) when the daemon attests
+  no caller module; `unknown_route_role` (`Expected exactly one served role`)
+  when the route declares none of the roles its receiver serves, or more
+  than one. These are route opening/binding refusals, not hook-body checks.
+  This role permits non-session routes for preflight and checks session
+  scope and binding per hook call, as specified above.
+- [pinned] Per-session state is keyed on `(runner, harness, session)`: the
+  daemon-attested runner's **bare module id**, never a display prefix, and
+  the route's bound harness and session. Folder spellings and scope metadata
+  are not state-key components; aliases reach the same state. Changing any
+  key component reaches a different conversation. The shared
+  `cortexkit_role_llm_runner::session_ref(&SessionIdentity { runner, harness, session })`
+  helper uses those fields without normalizing them. This role has no Setup
+  op; the first hook can establish provider state.
+- [pinned] Requests use `{method, params}` (`OpRequest`). The method selects
+  the op. `role.describe` takes empty params (`DescribeRequest`). Route
+  metadata is never reconstructed from a request's JSON fields.
 
 ## 2. `role.describe`
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, runner_groups?}` (`RoleDescribe`),
-  decoded leniently; only the `step-transform-provider/v1` major and its
+  decoded leniently; only the `step-transform-provider/v2` major and its
   required ops are checked strictly (`check_describe`). Stability is data:
   `alpha`, `beta` or `stable`, read as `alpha` when absent. This draft is
   `alpha`.
@@ -122,7 +109,7 @@ and the provider reads history and answers exactly as it does today.
 
 ## 4. Subscriptions and the declaration
 
-The admitted host runner lane is the scoped admission exception in §13.1.
+`role.describe` and `transform.declare` are preflight operations, not session hooks.
 
 Admission is the runner's check of a proposed session plan before it accepts
 the session and freezes that plan for use.
@@ -141,6 +128,13 @@ the session and freezes that plan for use.
   budget_ms}]}` (`Declaration`), fetched with the plan's other items at
   admission. `params` defaults to `{}`; `preset` absent selects the default.
   `composition` is an opaque object, absent before composition exists.
+- [pinned] The plan composer can call `transform.declare {preset,
+  params: {}}` on a module-level route before any hook route exists, also
+  for a worker whose session does not exist yet. It reads `hook`,
+  `on_unavailable` (with the default below) and `budget_ms` from every
+  declared subscription, and includes the item only when the runner's
+  `step_hooks` cover **every** subscribed hook. No session context is required
+  to answer this request.
 - [pinned] Shape rules, for declared and planned subscriptions alike:
   `phase` on `pre_tool` and nowhere else; `tools` only on `pre_tool` and
   `post_tool`; at least one op on the hooks that answer with operations;
@@ -154,10 +148,11 @@ the session and freezes that plan for use.
   `on_unavailable` (`pass` or `refuse`) and `budget_ms` (a positive number
   of milliseconds per call). A declaration may omit `on_unavailable`, which
   then means `refuse`, except on `post_assistant`, which always passes: a
-  declaration or plan naming `refuse` there is malformed. Whoever composes
-  the plan copies both values from the declaration into every planned
-  subscription, and they are frozen with the plan. The runner uses the
-  frozen values, capping the budget with its own engine-wide limit.
+  declaration or plan naming `refuse` there is malformed. The plan composer
+  resolves the declaration's defaults and freezes policy and budget values
+  equal to or stricter than those bounds. Admission validates, but does not
+  rewrite, those frozen values. The runner uses them, capping the budget
+  with its own engine-wide limit.
 - [pinned] At admission the runner checks the frozen plan against the
   provider's current declaration for the item's preset and params. A
   planned subscription fits a declared one with the same hook and phase
@@ -223,11 +218,13 @@ the session and freezes that plan for use.
   order: prepends to one block stack outward (each lands before the text an
   earlier prepend added), appends stack in order, and a
   `replace` sees the block's text as it stands at that point.
-- [pinned] Exclusivity. The session has exactly one reduction owner, its
+- [pinned] Exclusivity. The session has at most one reduction owner, its
   compaction provider: the only party that may remove or rewrite what was
   written. On `pre_user` and `post_assistant`, `replace` belongs to the
   reduction owner alone; without one, nobody has it (`check_reduction`).
-  Every other step transform is preserving: it may prepend or append.
+  On those two hooks, non-owners may only prepend or append. `post_tool`
+  replacement is governed separately by user grants; `pre_tool` answers
+  are governed by phase.
 - [pinned] Order. The runner calls a hook's providers in the frozen plan's
   exact order (`hook_order`) and never moves an item, the reduction owner
   included.
@@ -261,8 +258,10 @@ the session and freezes that plan for use.
   applied or recorded (`check_answer`), never detected afterwards. A
   disallowed answer makes the hook unavailable for that call, exactly like
   a timeout or a failure, and the frozen subscription's `on_unavailable`
-  decides (§7). It is never dropped and treated as `pass`, so a broken
-  enforcing hook cannot fail open.
+  decides (§7). Never interpret a disallowed answer as a successful `pass`.
+  Mark the hook unavailable and apply its frozen availability policy;
+  proceeding under an explicitly configured `on_unavailable: pass` remains
+  governed by §7 and the other gates.
 
 ## 6. `pre_tool` phases
 
@@ -307,127 +306,120 @@ the session and freezes that plan for use.
     `pre_tool_expired`;
   - `material_damage` is a boolean: whether the call can cause damage that
     cannot be undone;
-  - `late_execution` is one of `execute` or `notify_only`
-    (`LateExecution`): what an approval arriving after the run moved on
-    does.
-  `on_expiry` and `late_execution` are closed: an unknown value does not
-  decode, so the answer is disallowed and the hook unavailable, and nothing
-  executes on a policy the runner does not understand. The elicitation role
+  - `late_execution` is `execute` or `notify_only` (`LateExecution`): whether
+    an approval arriving after the run moved on executes the call or only
+    notifies the person that it arrived too late.
+  Unknown approval policies supply no execution permission: the answer is
+  disallowed and the hook unavailable. Proceeding under an explicitly
+  configured `on_unavailable: pass` remains governed by §7 and the other
+  gates. The elicitation role
   owns how the question is filed and answered. The runner files it with the
   final canonical arguments, target, schema pin and scope; none of those
   authority fields is supplied by the hook answer.
 
 ## 7. `transform.hook`
 
-Optional host service, burn, part and pass fields are specified in §13.2–§13.3.
-
-- [pinned] The request (`HookCall`) carries `session` (the runner's opaque
-  name for the session), `harness` (the caller's harness from the session's
-  key, required, §1), `lineage_id` (absent only on `pre_user` for the
-  first message of a session nothing has been written to), the plan item's
-  `preset` and `params` verbatim, and the subject, tagged by `hook`
-  (`Subject`), flattened into the request, not nested under `subject`:
-  - `pre_user {blocks, mark?, delivery?}`: `mark` is the sender's mark on a
-    steered or queued prompt, opaque; `delivery` is `queue`, `steer` or
-    `interrupt` for an owner's prompt, decoded open;
-  - `post_assistant {step_id, blocks}`: the message's text blocks only,
-    never reasoning, signatures or tool calls;
+- [pinned] `HookCall` carries the plan item's `preset?` and `params` verbatim
+  and a subject tagged by `hook`, flattened into the request:
+  - `pre_user {blocks, mark?, delivery?, at_ms?}`: `mark` is opaque JSON,
+    including the sender's `{kind, from}` provenance on a steer or late
+    result; `delivery` is an open string, normally `queue`, `steer` or
+    `interrupt`, absent for a person's message. Providers retain both to
+    distinguish human messages, steers, queued prompts and late results.
+    `at_ms` is the new message's time in milliseconds since the Unix epoch
+    (UTC), taken on the runner's machine: the host's own creation time when
+    the host stamps the message, otherwise the runner's clock when it calls
+    the hook. A runner that can give it should, so a provider measuring the
+    gap since the previous message reads both sides from one machine. When
+    it's absent, the provider uses its own clock.
+  - `post_assistant {step_id, blocks}`: only existing text blocks, never
+    reasoning, signatures or tool calls;
   - `pre_tool {step_id, phase, tool, tool_call_id, call_key?, input}`:
-    `input` is the input that would execute, after every earlier mutate;
+    `input` is what would execute after every earlier mutate;
   - `post_tool {step_id, tool, tool_call_id, call_key?, blocks, is_error}`:
-    the tool result's text parts; a result that is a single string is
-    `blocks: [that string]`.
-- [pinned] `blocks` is an array of strings, the text of each of the
-  subject's text blocks in message order (§5), required on every text
-  subject. `params` defaults to `{}`. `mark` is arbitrary JSON; every other
-  subject id field is a string, `input` arbitrary JSON, and `is_error` a
-  boolean. `preset` absent selects the default.
-- [pinned] A hook may also carry `subject_mid` (the runner's message id,
-  string), `subject_ordinal` (its position in the current lineage, `u64`),
-  and `message` (the whole new message as opaque JSON in the runner's own
-  schema). `subject_mid` and `subject_ordinal` come together or not at all;
-  `message` requires both. These pairing rules are validation rules
-  (`HookCall::check_host_fields`), not shape-decoding rules. A provider must
-  validate before interpreting or ingesting the request and refuse a
-  violation with `invalid_params`, naming `message` or the missing identity
-  field in `detail.field`. An explicit JSON `null` is a present `message`
-  and must satisfy the same rule. None of these fields changes which text
-  blocks an operation may address (§5).
-- [pinned] The opaque value `params.serializer_profile` names the schema
-  of `message`; it is part of the existing params, not a separate contract
-  field. The provider must not interpret `message` unless it recognises the
-  profile. If it needs the supplied message and cannot read it, including
-  because the profile is absent or unrecognised, it refuses the hook as
-  misconfigured with `invalid_params {field: "params.serializer_profile"}`.
-  A provider that can read the required history elsewhere may ignore the
-  supplied message.
-- [pinned] Within the conversation's current lineage, the provider ingests
-  a supplied message at most once per `(lineage, subject_mid)`, including
-  across its own crash. A retry or another hook point on the same message
-  still gets a fresh hook answer (§3), but never another ingestion. A mid
-  already seen with a different ordinal or different supplied `message`
-  bytes is refused with `invalid_params {field: "subject_mid"}`, rather than
-  overwriting the earlier input. Providers comparing messages must retain
-  the supplied JSON bytes, not use parsed-value equality to hide a byte
-  difference. Ingesting input does not make unused hook output durable or
-  permit unused output to reach the model (§11).
-- [pinned] A provider may enforce a 3 MiB (3,145,728 byte) request cap on a
-  hook carrying `message` (`DEFAULT_HOOK_CAP_BYTES`,
-  `HookCall::check_message_size`). All fields, including `message`, count:
-  the size is the length of the compact JSON encoding of the `HookCall`
-  request, not the `{method, params}` envelope. If exceeded, the provider
-  refuses `invalid_params {field: "message"}` and never silently truncates.
-  This optional cap imposes no new size policy on hooks without `message`.
-  It is below the 4 MiB per-connection queue budget of subc (the local daemon
-  that routes requests between runners and providers), which
-  closes a connection whose queued bytes exceed it, so a runner should not
-  send a hook larger than this cap even to a provider that does not enforce it.
-- [pinned] The first hook of a lineage may carry
-  `descends_from: {lineage_id, through_ordinal}` (`DescendsFrom`), naming
-  another lineage in the same conversation (§1). It continues that
-  lineage's history up to and including the `u64` `through_ordinal`, with
-  the inherited prefix's message ids and ordinals unchanged; later history
-  from the named lineage is not inherited. The provider must hold that
-  prefix through the named ordinal. If it does not, it refuses the hook
-  with `transient` and may include `detail.history_gap_from`, the first
-  ordinal it lacks, so the runner can resend from there. The provider never
-  guesses ancestry or missing history. An absent `descends_from` declares
-  no inherited history. The hint is meaningful only on this role's
-  retryable history refusal, `transient`, and ignored on other codes.
-- [pinned] `tool_call_id` is the model's id: display only, not unique.
-  `call_key` is the runner's key (`llm-runner/v1` §11.3); it is usually
-  absent on `pre_tool`, because it is minted from the dispatch intent,
-  written after the hook, and present on `post_tool`.
-- [pinned] The answer (`HookAnswer`) is `{answer: "pass"}`, `{answer:
-  "ops", ops}`, `{answer: "mutate", input, note?}`, `{answer: "deny",
-  text}` or `{answer: "ask", ask}`.
-- [pinned] A hook that times out (after the frozen `budget_ms`, capped by
-  the runner), fails, or answers something it may not (§5) is unavailable
-  for that call, and the frozen plan subscription's `on_unavailable` (§4)
-  decides:
-  - `post_assistant`: the message passes through unchanged, and the runner
-    records that;
-  - `pre_tool` under `refuse`: the call is denied `pre_tool_unavailable`;
-    under `pass`, the input executes;
-  - `post_tool` under `refuse`: the result is withheld, written as an error
-    with reason `post_tool_unavailable` naming the provider; the error text
-    says the call executed;
-  - `pre_user` under `refuse`: the run ends `error` with `provider_code`
-    `pre_user_unavailable`; a steered or queued send is refused with it and
-    writes nothing.
+    the result's text parts; a single string is a one-element `blocks`.
+- [pinned] `blocks` is an array of strings in text-block order. Every text
+  subject requires it. `step_id`, `tool`, `tool_call_id`, `call_key` and
+  `preset` are strings; `input` is arbitrary JSON; `is_error` is a boolean.
+  `params` defaults to `{}`; absent `preset` selects the provider's default.
+  Optional `runner_trace` is opaque JSON on **every** hook, never identity
+  or authority. Omission is distinct from an explicitly supplied JSON null.
+- [pinned] Optional `subject_mid` (stable message id, string) and
+  `subject_ordinal` (`u64`) come together or not at all. Optional `message`
+  is the whole new message in the runner's own schema and requires both.
+  Explicit null is a present message. These are validation rules
+  (`check_subject_fields`): violations are `invalid_params`, naming
+  `message` or the missing identity field. None changes the addressable
+  text blocks. `subject_part`, when supplied, is an opaque part id, nonempty
+  and at most 256 UTF-8 bytes, never the model's tool call id; invalid parts
+  name `subject_part`.
+- [pinned] Subject ordinals follow [compaction W4.1/W4.2](../cortexkit-role-compaction/CONTRACT.md): count from **1** at
+  the session's first entry, including entries omitted by a cut, result-only
+  records and dead/empty entries. Markers are not entries. After a revert or
+  branch switch, a replacement takes the removed entry's ordinal. Count the
+  host's records exactly as W4.2 specifies, not text blocks or tool parts.
+  `subject_ordinal: 0` is `invalid_params {field: "subject_ordinal"}`.
+  Message ids and ordinals are independent; an id such as `m0` can name
+  ordinal 1. Derive neither from the other.
+- [pinned] `params.serializer_profile` names the opaque `message` schema.
+  Before interpreting it, the provider must recognize the profile. If it
+  needs that message and cannot read it, including an absent or unknown
+  profile, it refuses `invalid_params {field: "params.serializer_profile"}`.
+  A provider able to read required history elsewhere may ignore `message`.
+  Supplied input never proves that a previous hook answer was used.
+- [pinned] A provider may enforce a 3 MiB (3,145,728 byte) cap on a hook
+  carrying `message` (`DEFAULT_HOOK_CAP_BYTES`, `check_message_size`). All
+  request fields count, including trace and message: measure the compact
+  JSON `HookCall`, not the `{method, params}` envelope. Over-cap requests
+  get `invalid_params {field: "message"}`, never truncation. Hooks without
+  `message` acquire no size policy from this rule. The cap leaves room below
+  the daemon's 4 MiB per-connection queue budget.
+- [pinned] `tool_call_id` is the model's display id, not unique. `call_key`
+  is the runner's dispatch key; usually absent on `pre_tool` because it is
+  minted after the hook from the dispatch intent, and present on `post_tool`.
+- [pinned] Answers (`HookAnswer`) are `{answer: "pass"}`, `{answer: "ops",
+  ops}`, `{answer: "mutate", input, note?}`, `{answer: "deny", text}` or
+  `{answer: "ask", ask}`, constrained by §§5–6.
+- [pinned] Timeout after frozen `budget_ms` (capped by the runner), failure,
+  refusal or disallowed answer makes the hook unavailable for that call.
+  Frozen `on_unavailable` decides:
+  - `post_assistant`: pass unchanged and record that;
+  - `pre_tool` under `refuse`: deny `pre_tool_unavailable`; under `pass`,
+    execute the input;
+  - `post_tool` under `refuse`: withhold the result, write an error with
+    reason `post_tool_unavailable` naming the provider, saying the call
+    executed;
+  - `pre_user` under `refuse`: end the run `error` with provider code
+    `pre_user_unavailable`; refuse a steered/queued send and write nothing.
+  Under `pass`, continue without that hook's output and record that.
 
-## 8. Purity and identity
+## 8. Purity, identity and unknown values
 
-- [pinned] The declaration derives only from the preset, the params, the
-  provider's configuration and the composition, never from scope, agent or
-  session identity.
-- [pinned] No request in this role carries scope, agent or session identity
-  beyond the opaque `session` handle and the caller's `harness` (§1). A
-  provider combines them with the daemon-attested runner principal from the
-  route, never from a body field, only as keys for its own per-session state (a tag
-  counter, say), never to choose a variant.
-- [pinned] A provider tells prompts apart itself, by the mark or by their
-  wrapping. The runner does not classify turns.
+- [pinned] Declarations depend only on preset, params, provider configuration
+  and composition. They never vary with caller, project, scope or session.
+  Route identity is only a state key, never a selector for a declaration.
+- [pinned] Providers distinguish prompts by their mark, delivery or wrapping;
+  the runner does not classify turns for them.
+- [pinned] Unknown fields are ignored. Open wire enums retain unknown strings,
+  or an unknown tag and all its JSON fields. Malformed **known** variants
+  still fail decoding: a missing required field cannot fall through to an
+  unknown variant. Receivers log unknown values they encounter and apply
+  these safe fallbacks; decoding does not imply support for their meaning:
+  - unknown hook, phase, declared/planned op or `on_unavailable`: refuse
+    `invalid_params`; an unknown planned value is `unknown_value` in the
+    subscription problem detail, never a matching permission;
+    an unknown hook in a user grant is `invalid_params` naming
+    `plan.user_grants`;
+  - unknown answer, operation, `on_expiry` or `late_execution`: disallow the
+    entire answer before any mutation or recording; the frozen availability
+    policy decides, never an implicit pass;
+  - unknown `delivery` or `mark` content: preserve as opaque provenance,
+    never infer that it is a person's message or grants authority;
+  - unknown `plan_stale` kind or loosened field: keep it as an opaque stale
+    difference; the plan still requires recomposition;
+  - unknown majors, ops, capability names and stability levels in discovery:
+    ignore unsupported additions, while still requiring v2 and its ops.
+
 
 ## 9. Error codes
 
@@ -443,9 +435,11 @@ required string and `detail` arbitrary JSON, omitted when absent.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | a request field is malformed, misconfigured, over the optional whole-message request cap, or conflicts with an ingested subject | `field` | no |
+| `invalid_params` | a request field is malformed, misconfigured, or over the optional whole-message request cap | `field` | no |
 | `not_subscribed` | a hook call for a hook and phase the provider did not declare for the call's preset and params | `hook`, `phase?` | no |
-| `transient` | a condition that may clear by itself, including required history the provider does not hold | `history_gap_from?` for a history gap | **yes**, within the hook's budget |
+| `unattested_runner` | the daemon attests no module for the caller | none | no |
+| `unknown_route_role` | the route declares none of the roles its receiver serves, or more than one | none | no |
+| `route_unbound` | a hook call is not on a scoped session-bound route; never a bind-time refusal | none | no |
 
 - [pinned] Any refusal of a hook call makes the hook unavailable for that
   call (§7).
@@ -464,33 +458,22 @@ required string and `detail` arbitrary JSON, omitted when absent.
 
 ## 10. Decoding
 
-Host-lane omission and legacy compatibility are specified in §13.5.
+- [pinned] Unknown fields are ignored in discovery, declaration, subscriptions,
+  hook requests and answers. Extensible enum values decode losslessly with
+  the safe semantic fallbacks in §8. Codes remain open strings; an unknown
+  error code is a terminal refusal of that request. Human `message` text is
+  not a machine-readable discriminator; structured information goes in detail.
+- [pinned] Public growable types are non-exhaustive and have constructors.
+  Absent optional fields are omitted. Every known operation requires unsigned
+  32-bit `block`; prepend/append require string `text`, replace string `value`,
+  each with optional string `note`. Text-block indexes are zero-based; they
+  are not entry ordinals.
 
-- [pinned] **Lenient on fields**: `role.describe`, the declaration request
-  and answer, hook requests and answers. A newer runner can add fields
-  without breaking an older provider, and the reverse.
-- [pinned] **Strict on values** this role defines and a party must act on:
-  `hook`, `phase`, `op`, `on_unavailable`, `answer`, and an ask's
-  `on_expiry` and `late_execution`. An unknown value does not decode. On a
-  request the provider refuses it `invalid_params`; on an answer the runner
-  treats the hook as unavailable. Values a runner may grow (`delivery`) are
-  decoded open.
-- [pinned] Public structs that can grow optional fields are non-exhaustive,
-  constructed with `new` and `with_*` setters. Empty optional collections
-  are omitted unless the contract makes them required. Every operation
-  carries a required unsigned 32-bit `block`; `replace` carries string
-  `value`, `prepend` and `append` string `text`, each with optional string
-  `note`.
-- [pinned] `subject_mid`, `subject_ordinal`, `message` and `descends_from`
-  default to absent and are omitted when absent. Their absence preserves
-  existing request bytes and behaviour. `descends_from.lineage_id` is a
-  required string and `descends_from.through_ordinal` a required `u64` when
-  the object is present; unknown fields remain ignored.
 
 ## 11. Crash and durability guarantees
 
-What a provider owes across its own crash, checked (§12) by killing the
-provider and restarting it on the same state root
+What a provider owes across its own crash. A full crash suite must check
+these guarantees by killing the provider and restarting it on the same state root
 (`cortexkit-role-harness`). The runner's side (`StepRecorded`,
 `DispatchIntent`, `ToolResultRecorded`, `SendRecorded`) is `llm-runner/v1`
 §14.
@@ -515,363 +498,38 @@ A provider whose state lives in a store where truncation is not meaningful
 kill, and declares that. A suite run fails unless at least one kill was a
 real process kill.
 
-## 12. Conformance suite (planned)
+## 12. Conformance
 
-A separate `cortexkit-role-step-transform-provider-conformance` crate, run
-by each provider in its own CI against its real module over real routes,
-never a double. It drives the provider with a scripted runner. It will
-check:
+The non-default `conformance` feature exposes focused probes over an
+implementation-specific adapter, not a complete live-provider suite. Adapters
+must use real daemon-attested routes and provider state, not reconstruct
+markers from input identity. A fresh store is required for state probes.
 
 | Case | Checks |
 |---|---|
-| `role_describe_shape`, `role_describe_cacheable`, `extra_op_still_admitted` | §2 |
-| `declaration_well_formed`, `declaration_pure` | §4, §8: two declarations with the same inputs and different `session` routes are byte-identical |
-| `answers_within_declaration` | §5: every operation is one the declaration names |
-| `post_assistant_text_only` | §3 |
-| `mutate_pure` | §6: two runs give identical bytes |
-| `phase_answers_allowed` | §6 |
-| `unknown_hook_refused` | §10 |
-| `not_subscribed_refused` | §9 |
-| `repeat_call_fresh` | §3 |
-| `crash_at_HookStateRecorded` | §11 |
+| `conversation_state_ignores_project_root` | with fixed harness/session, folder aliases reach the same state and another attested runner reaches different state |
+| `hook_on_non_session_route` | both non-session route kinds bind successfully; hooks return error code `route_unbound`; a subsequent discovery RPC succeeds |
+| `declare_on_module_route` | module-level and pre-session scoped routes answer `transform.declare {preset, params: {}}` and `role.describe` |
 
-Runner-side rules no live provider can exercise (bounding a plan, the
-reduction rule, the order, refusing a disallowed answer) are tested against
-the vectors in this crate.
+Each probe has an intentionally faulty implementation that the probe rejects
+with its case name. The hook route probe does not check refusal wording or
+discovery completeness; the declaration probe validates discovery shape and
+required ops. A future full provider suite should additionally check
+pure declarations, phase answers, text-only edits, fresh retries, unused-state
+isolation and a real process kill at `HookStateRecorded`. Runner-side bounds,
+tiers, answer validation and ordering are checked against this crate's vectors.
 
-## 13. Host runner lane
+## Changes from v1
 
-This lane is an explicit exception for OpenCode 1 (`opencode`), OpenCode 2
-(`opencode2`) and the attested Claude Code gateway described in §14, not a
-change to ordinary runner admission or observation.
-
-### 13.1 Admission and observation
-
-- [pinned] compaction-provider 0.3.0 removed `compaction.step`,
-  `compaction.ready`, the request fence and `wait`, and its host runner lane
-  (its former §18). The references to them below describe the
-  compaction-provider/v1 0.2.x lane this section was written against; a
-  compaction-provider 0.3.0 provider offers none of them. This lane is kept
-  as written until it is re-specified on advance notices and views.
-
-- [pinned] Admission is keyed only on the frozen plan item's params and the
-  route's bind `(project_root, session, harness)` under the route's
-  authenticated principal. For direct callers, the bind harness must be
-  `opencode` or `opencode2` and the principal a `direct` caller bound to that
-  conversation. The other admitted pair is daemon-attested
-  `reserved:thalamus` on its own connection with a `claude-code` bind harness
-  and the frozen `claude_code` capability bundle (§14). Neither the
-  body `harness` field nor body params select this exception or confer
-  authority. The §1 triple remains the canonical external conversation identity
-  and the legacy-lane provider key: `(runner, harness, session)`, with the
-  bare module id of the principal attested on the route as its runner component. The bind's
-  `project_root` is admission/routing metadata, not a state key. Claude Code provider state (engine namespace,
-  locks, message ledgers, cursors, views and receipts) is additionally scoped by
-  the frozen provider generation and profile generation. Params never select
-  another canonical conversation or change its project/session/agent ownership.
-- [pinned] For the direct OpenCode callers, the frozen plan opts in with `params.serializer_profile:
-  "opencode-aisdk"`. Answer observation additionally requires
-  `params.observation: "answer"`; both opt-ins and host admission are required
-  for the promote-and-burn protocol below and the compaction departures in
-  §13.4. Missing or unrecognised required opt-ins grant no exception. The
-  same frozen params are passed on declaration, Setup and hooks.
-- [pinned] Only an admitted caller in this section may use an empty runner-group set
-  without `transcript_reads` or a `compaction.ready` service (removed in compaction-provider 0.3.0). This grants no
-  runner-only operation, runner transcript read or other session.
-  A cross-session request refuses `invalid_params`, naming `session` (or
-  `project_root` for a project mismatch). Ordinary runners still undergo full
-  runner admission, including their required groups and ready service; a
-  runner-principal call with body `harness: "opencode"` and host params does
-  not enter this exception.
-- [pinned] The direct-caller exception is no stronger than today's local
-  direct-caller trust for full-request transform. It requires the daemon caller-identity
-  stamp once that stamp lands; body fields are never a substitute for it.
-  It does not globally publish empty runner requirements in `role.describe`.
-- [pinned] From a runner principal, either host-only plan value,
-  `observation: "answer"` or `serializer_profile: "opencode-aisdk"`, on
-  `transform.declare` refuses `invalid_params`, with `detail.field` naming
-  `params.observation` or `params.serializer_profile`, respectively.
-  `compaction.setup` had the same rule (compaction-provider/v1 §18.1, removed in compaction-provider 0.3.0).
-  Authentication/admission is separate from the pure declaration (§4, §8).
-- [pinned] Answer observation makes zero `session.read` calls, including
-  restart and bootstrap. Ingest is not observation; a hook answer alone is
-  never proof that its output was served. Missing acknowledgement never
-  promotes pending output and never falls back to transcript reads.
-
-### 13.2 Durable service and discarded subjects
-
-- [pinned] `transform.hook` may carry `served_through_ordinal: u64`, an
-  optional sibling in the request, not an answer member. It is the highest
-  ordinal durably committed for serving on the call's lineage. Hooks in a
-  pass carry the previous committed watermark; a compaction step carries the
-  watermark after that pass's append transaction. Absence means no
-  ordinal-confirmed promotion, neither zero nor the newest ordinal.
-- [pinned] The host advances the watermark past an ordinal only after a model
-  request carrying that ordinal has completed cleanly at the provider: the
-  response status was 2xx, its final stream event arrived (for Anthropic,
-  `message_stop`), and the connection ended with no transport error.
-  Committing the ordinal before the request is sent, or on receiving response
-  headers, never advances it. A request that fails, is cancelled or is cut off
-  leaves the watermark where it was. A complete response counts as clean
-  whatever its stop reason, a model refusal included, because the model read
-  the request; a provider error status or an in-stream error event is never
-  clean, even after a 2xx status.
-- [pinned] Per lineage the watermark moves only forward, except for a revert
-  clamp to the revert target in the same durable transaction. A lower value
-  without that revert refuses `invalid_params {field:
-  "served_through_ordinal"}`; it never un-promotes output. Promotion never
-  passes the newest ordinal the provider holds for the lineage. Pending
-  answers promote only through the watermark in the current lineage or an
-  ancestor's inherited prefix; ancestor pending answers beyond the descent
-  boundary burn. These rules survive retries and provider crashes.
-- [pinned] `transform.hook` may carry `unserved_subjects:
-  [{subject_mid: string, hook: Hook, subject_part?: string}]`, also optional
-  and not an answer member. The enclosing request supplies the lineage.
-  Entries require typed identity and the existing strict `Hook` discriminant;
-  unknown entry fields are ignored. Host subjects are `pre_user`,
-  `post_assistant` and `post_tool`; a tool subject carries its part id (§13.3).
-  An absent or empty list names no burns; omit the empty list.
-- [pinned] Burning is idempotent, and an entry naming a subject never answered
-  is ignored. Burns precede promotion and cadence. Burned numbers never enter
-  tags or rendering; queued reductions on burned pending tags are discarded.
-  Later status ingestion of the raw message never resurrects discarded hook
-  output. Validation, including held-history conflicts, precedes any
-  promote-and-burn mutation.
-- [pinned] After a timeout or partial failure the host freezes the whole
-  message raw and reports every subject, including answered ones, until a
-  later call answers. It clears the resend list only then. The same two
-  optional fields occurred on `compaction.step`, not Setup
-  (compaction-provider/v1 §18.2; both removed in compaction-provider 0.3.0).
-
-### 13.3 Part identity, pass barrier and size
-
-- [pinned] `transform.hook` may carry `subject_part: string` for a host
-  `post_tool` subject. When present it is opaque, non-empty, at most 256 bytes
-  in UTF-8, and compared byte for byte, without normalisation. An empty or
-  over-limit value refuses `invalid_params {field: "subject_part"}`.
-  The same rule applies inside `unserved_subjects`, with the field named
-  `unserved_subjects[i].subject_part` for a malformed entry.
-- [pinned] Host answer identity is `(lineage, subject_mid, hook,
-  subject_part)`. `pre_user` and `post_assistant` omit the part; omission
-  denotes the no-part slot, not a fabricated tool part id. `post_tool`
-  supplies the actual part id, not the model's display-only `tool_call_id`.
-  Distinct parts with identical call ids and output remain distinct answers;
-  burning one does not burn the other. Every hook on a message still supplies
-  the same opaque pre-op ingest bytes (§7), never an ops-modified clone.
-- [pinned] `transform.hook` may carry `pass_complete: boolean`, true only on
-  the pass's last hook and omitted unless true. Omitted or false schedules no
-  barrier. It is a scheduling hint for off-request historian evaluation,
-  never an acknowledgement and never a substitute for the durable watermark.
-  State sync, including the historian model chain, precedes hooks and ingest;
-  only the barrier schedules evaluation over the complete pass. A missing
-  barrier after unavailable hooks is covered by the next pass's barrier.
-- [pinned] A pass with no hooked append may place `pass_complete: true` on
-  MC's internal `state_sync` request for a zero-append chain change. That use
-  is MC-internal, not an op or field added to either commons role.
-  `pass_complete` is not on `compaction.step` (removed in compaction-provider 0.3.0) or any provider answer;
-  `subject_part` is not top-level on a compaction step or its answer.
-- [pinned] Host encoded hook and status requests are capped at 3 MiB
-  (3,145,728 bytes), counting all fields, including `unserved_subjects` and
-  duplicate content in `blocks`. They are never truncated or sent over cap.
-  The §7 hook cap measures the compact `HookCall`, not its transport envelope;
-  the host's send check additionally budgets the encoded `{method, params}`
-  request. An oversized host status entry exits with
-  `provider_message_too_large`, never an oversized-single-entry paging loop.
-  This does not replace ordinary runners' size policy.
-
-### 13.4 Companion compaction departures
-
-- [pinned] Only an admitted answer-observation host uses immediate status
-  paging (compaction-provider/v1 §18.3, removed in compaction-provider 0.3.0): it re-pages only on `more: true`,
-  immediately with a fresh `request_id` under the same request fence, not on
-  ready or `bound_ms`. The provider releases the conversation lock before
-  answering and spawns no scan. Incomplete history may answer `wait` only
-  when `more: true`; an incomplete final page refuses `history_unreadable`
-  with `detail.history_gap_from` naming the first known missing ordinal.
-  `wait` on a final page is an unavailable call, never a retry loop. Absent
-  `newest` means no written message, not a reason to scan.
-- [pinned] Only that lane departs from compaction-provider/v1 §6's full
-  suffix/final-value rule (§18.4, removed in compaction-provider 0.3.0). `after_ordinal` is the highest contiguous
-  ordinal whose messages have every hook answered (`ingested = true` in
-  host records); later `messages` contains only entries not fully ingested,
-  oldest first, as opaque pre-op JSON. An unavailable/frozen-raw message is
-  sent even if some hooks already ingested it. No wire `ingested` member is
-  added. A missing cursor is the first status, not proof of held history;
-  `messages: []` with `after_ordinal == newest.ordinal` is valid after hooks
-  supplied all entries. Gaps are detected from held history, not list
-  sparsity, and conflicts refuse before promote-and-burn (`subject_mid` for
-  changed input under a held mid, `subject_ordinal` for another mid at a held
-  hook ordinal, `messages` for conflicting step entries).
-
-### 13.5 Compatibility
-
-- [pinned] The new fields default to absent and are omitted when absent, not
-  encoded as `null`. Older decoders ignore them; that is not semantic host
-  admission. Existing strict discriminants stay strict. The runner-owned
-  serializer profile (wire value `owned-broca`) and absent host opt-ins retain declaration, tag/cadence, subject identity,
-  historian scheduling, observation and answer bytes even with valid extra
-  fields; no host promotion, burning or barrier runs there. Pi and OMP keep
-  their existing paths. None of this requires a particular runner to be running.
-- [pinned] The request fence, version high-water, structural checks,
-  Setup-once rule (including on descent), frozen budgets and
-  `on_unavailable` are unchanged. These fields add no operation or answer
-  discriminant. `host-runner-lane.json` in the existing vector directory pins
-  wire examples and stateful expectations separately; older wire decoding
-  alone cannot verify the host protocol.
-
-## Not in v1
-
-- Subjects other than text: images, structured tool results.
-- A deny from `pre_user` or `post_tool`. Only `pre_tool` denies.
-- A provider stopping a run. A caller that wants a session stopped after a
-  deny cancels the run itself.
-- A rule language. A rules engine is a module that answers hooks.
-- Hooks on reasoning, signatures or tool-call blocks.
-
-## 14. Optional native Claude Code capability
-
-### 14.1 Publication and admission
-
-- [pinned] compaction-provider 0.3.0 removed its native Claude Code lane
-  (its former §19), including the shared `claude_code` bundle on Setup,
-  `raw_view`, `compaction.view.read` and its receipts, together with
-  `compaction.step`. The references to them below describe the
-  compaction-provider/v1 0.2.x lane; a compaction-provider 0.3.0 provider
-  offers none of them. This capability is kept as written until it is
-  re-specified.
-
-- [pinned] `role.describe`, `transform.declare` requests and declarations gain
-  optional typed `claude_code: ClaudeCodeCapabilities`. Every existing member
-  keeps its meaning. Absence preserves the existing behavior and bytes for
-  all runners; absence off this lane is never a refusal. Discovery alone is
-  not permission to use the lane. An attested caller that does not select the
-  capability also retains the existing behavior.
-- [pinned] Activation requires BOTH the daemon-attested principal
-  `reserved:thalamus` on its bound connection AND the frozen declaration's
-  `claude_code.capability: "claude-code-step/v1"`. A declaration selecting this
-  bundle from any other principal refuses `invalid_params`, with
-  `detail.field: "claude_code"`, at admission/declare. The bind must resolve the
-  project, session and agent, with `harness=claude-code`; the bundle's harness,
-  principal and profile are compatibility data, never authentication. Body
-  `harness`, params, tags and plan values cannot supply the attestation. Another
-  connection cannot borrow the admitted connection's bundle. There is no
-  authority inherited from another gateway or harness identity.
-- [pinned] Select only a supported advertised bundle before managed traffic;
-  echo it unchanged at declaration, freeze it in the admitted plan and pass it
-  unchanged to compaction Setup. Bundle drift refuses `invalid_params` naming
-  `claude_code`. An absent or unsupported capability required by a proposed
-  managed attachment fails attachment by name (`invalid_params`, or
-  `misconfigured` when missing or inconsistent provider settings prevent the
-  required capability from working, such as an advertised message format with
-  no enabled encoder/decoder). It never enables legacy whole-array transform
-  or raw fallback. `ClaudeCodeLane` is non-wire state:
-  its admission and per-call checks take trusted transport identity. Providers
-  must additionally enforce the bound conversation, profile and observation.
-- [pinned] The bundle contains `capability`, admitted `principal`, `harness`,
-  `profile`, `profile_generation`, `provider_generation`, `observation`,
-  `commons_revision`, `wire_majors`, `package_versions`, `epochs`,
-  `exact_endpoint`, `partial_message_cut`, `caps`, `raw_view_read`, `digest`,
-  `cache_policy_revision`, `canonical_reduce`, `guidance`, `notice_dispatch_ack`,
-  `bootstrap_complete` and optional further `capabilities`. The `epochs` object
-  MUST contain `codec`, `raw_provenance`, `render`, `tagger`, `memory` and
-  `compartment`, even when tagging is inactive. Missing any component refuses
-  `invalid_params` naming `claude_code`; a `render` epoch is not a substitute
-  for component pins. Actual supported values must match provider discovery.
-  The `tagger` epoch names the tagging rules: 1 for tags recorded once and
-  never reused (llm-runner before 0.4.0), and 2
-  (`claude_code::COMPUTED_TAGGER_EPOCH`) for tags computed from the
-  transcript (llm-runner 0.4.0's `runner-tags/v2`, its §9.6). A provider
-  that tags by the computed rules advertises 2 or later.
-  No codec epoch is implied by this contract or by synthetic vectors.
-  Profile/provider generations are separate data fields, not session-id edits.
-  `bootstrap_complete` advertises support for the typed completion receipt in
-  compaction-provider/v1 §19.7 (removed in compaction-provider 0.3.0). The format identifier belongs inside that
-  receipt, not in the discovery bundle. Setup ready or compaction noop alone
-  never proves bootstrap complete. Publication remains fenced until complete
-  native source admission and safe view validation. Durable memory ownership
-  is unchanged.
-- [pinned] Capability identifiers, including the bundle identifier, further
-  capability identifiers and a completion receipt's format tag, use the daemon grammar
-  `<name>/v<N>`: ASCII lowercase letter first, lowercase letters/digits/hyphens,
-  at most 64 name bytes, no adjacent hyphens and no trailing hyphen. `N` is
-  decimal 1 through 4294967295 without leading zeros. Whitespace is invalid.
-  Epochs, revisions and profile generations never enter capability names.
-  Existing capability identifiers and runner-group strings keep their meaning.
-- [pinned] `observation` is `answer`, `exact_endpoint` is
-  `native_top_level_inclusive` and `digest` is `sha256`. Partial cuts are a
-  separately advertised boolean, never inferred from the presence of an
-  endpoint. An initial whole-message-only gateway advertises
-  `partial_message_cut: false`. Reduction and guidance flags describe the
-  canonical, actually served tool/system surfaces frozen in the plan; tags
-  alone never grant reduction authority. Cache-policy revision is a pin, not
-  a second cache expiry scheduler.
-
-### 14.2 Host departures and payload limits
-
-- [pinned] The admitted pair uses the §13 answer-observation protocol: no
-  transcript reads, including restart/bootstrap, and no `compaction.ready`
-  service requirement (removed in compaction-provider 0.3.0). It may use an empty runner-group set locally, without
-  globally changing `role.describe.runner_groups`. Ingress `more=true` fences
-  view execution and immediately requests the next contiguous page with a
-  fresh request ID. This `compaction.step` paging (removed in compaction-provider 0.3.0) admits original messages;
-  `compaction.view.read` separately retrieves frozen replacement bytes.
-  A final-page history gap refuses `history_unreadable`, never an unbounded
-  wait or transcript read.
-  Ordinary runner/group admission and the direct OpenCode exception are
-  unchanged.
-- [pinned] `caps` declares `ingress_envelope_bytes`, `hook_envelope_bytes`,
-  `single_message_bytes` and `view_page_bytes`. Full encoded ingress/hook
-  envelopes, including raw bytes' JSON escaping and sidecar overhead, must
-  be strictly below their declared envelope caps and below 3 MiB of headroom
-  (`MAX_ENVELOPE_BYTES`, the same `DEFAULT_HOOK_CAP_BYTES` constant). Caps must
-  be positive; envelope caps cannot exceed that constant, and the single
-  message cap must be smaller than each envelope cap. `view_page_bytes` caps
-  raw bytes per page and must be smaller than the constant; encoded page
-  envelopes remain strictly below it as well.
-- [pinned] A single message that cannot fit refuses `invalid_params` naming
-  `messages` on a status or `message` on a hook. The host terminal classification
-  is `provider_message_too_large`. Never truncate, raw-forward or use the
-  ordinary compaction paging helper's oversized-first-message behavior on this
-  negotiated lane. Larger ingress requires a separately negotiated chunked
-  immutable payload capability, not view retrieval. None is implied here.
-- [pinned] Native endpoint/raw replacement retrieval, required geometry and
-  notice dispatch acknowledgements follow compaction-provider/v1 §19 (removed in compaction-provider 0.3.0). The
-  `pass_complete` scheduling barrier and ordinal service watermark are not
-  notice acknowledgements and do not prove HTTP dispatch. A pending notice is
-  never armed off the negotiated, attested lane; a plan requesting the notice
-  capability without that attestation refuses `invalid_params` naming
-  `claude_code`, and an off-lane directive refuses naming `channel2_directive`.
-
-### 14.3 Native raw-message sidecars and generation scope
-
-- [pinned] `HookCall` gains optional `raw_message: String`, also carried by each
-  compaction `StatusMessage`. Absence off the admitted Claude Code lane keeps
-  legacy bytes and behavior unchanged. On the admitted lane every native hook
-  requires a nonempty sidecar that parses as JSON; absent, empty or invalid
-  JSON refuses `invalid_params` naming `raw_message`. Validation does not
-  rewrite its bytes. Both the raw sidecar and its JSON escaping count toward
-  the existing single-message and full-envelope caps.
-- [pinned] `raw_message` is the message's JSON bytes exactly as the harness
-  (Claude Code) sent the message to the runner, minus `cache_control` removed
-  only at Anthropic transport positions.
-  Those positions are the top level of `text`, `image`, `document`, `thinking`,
-  `redacted_thinking`, `tool_use` and `tool_result` blocks, and of `text`, `image`
-  and `document` blocks nested in `tool_result.content`. Never remove members
-  inside `tool_use.input`, and never inside opaque data. Preserve every other
-  byte, including member order, whitespace, string escapes, scalar content,
-  signatures and redacted thinking payloads.
-- [pinned] The provider MUST verify that `raw_message`, with `cache_control`
-  removed only at the listed positions, equals `message`, and refuse
-  `invalid_params` naming `raw_message` if not. The common helper checks only
-  presence and JSON syntax; native equivalence, block spans and signed-byte
-  safety are provider codec obligations, not permission for generic recursive
-  cache-marker stripping.
-- [pinned] The canonical external identity is the §1 `(runner, harness, session)`
-  triple, with the daemon-attested principal's bare module id as runner. Resolved agent ownership
-  is an authorization concern, not another component of that triple.
-  Project folders remain route/admission metadata only. Claude Code provider state, including
-  namespace, locks, ingest ledgers, views and receipts, is additionally scoped
-  by provider generation and profile generation. A new native generation never
-  overwrites old state or changes memory ownership; bootstrap resumes within
-  the same generation and lineage. Its typed final-ingress completion receipt,
-  source evidence and conflict/replay rules are compaction-provider/v1 §19.7 (removed in compaction-provider 0.3.0).
+v2 moves session identity from hook bodies to per-session scoped routes and
+changes the capability to `step-transform-provider/v2`. It removes `session`,
+`harness`, `lineage_id` and `descends_from` from bodies. v2 has no lineage or
+ancestry catch-up protocol, so `transient`/`history_gap_from` are removed too. It
+removes answer-observation watermarks (`served_through_ordinal`),
+`unserved_subjects`, promote/burn and `pass_complete`, and removes the native
+capability bundle (`claude_code`), `claude-code-step/v1`, its special admission
+and `raw_message`. These protocols served standalone plugins; session-bound routes and the
+compaction protocol now supply identity and history management instead.
+Subject ids, part ids, opaque messages, prompt provenance and all four hooks
+remain; entry ordinals now follow compaction's 1-based numbering. Unknown enum
+values decode losslessly without relaxing the safe refusal boundary.

@@ -1,5 +1,5 @@
 //! The content identity used by transcript reads, compaction notices and
-//! lineage descent, independent of the read's media representation.
+//! entry checksums, independent of the read's media representation.
 
 use sha2::{Digest, Sha256};
 

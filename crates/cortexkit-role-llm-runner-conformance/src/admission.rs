@@ -18,8 +18,8 @@ use crate::{
         call, decode, expect_code, expect_error, expect_ok, head, read, read_all, wait_run_end,
     },
     route::RunnerRoute,
+    send_helpers::{send, send_and_wait},
     subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
-    tags::{send, send_and_wait},
 };
 
 pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Result<Ending, String>

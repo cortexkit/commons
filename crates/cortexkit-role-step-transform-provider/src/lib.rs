@@ -1,4 +1,4 @@
-//! Wire contract of the `step-transform-provider/v1` role.
+//! Wire contract of the `step-transform-provider/v2` role.
 //!
 //! A step-transform provider makes write-time changes to the newest message
 //! of a session, through four hooks the runner calls ([`subscription::Hook`]):
@@ -20,10 +20,10 @@
 //! `pass`.
 //!
 //! `CONTRACT.md`, next to this crate's `Cargo.toml`, is the role document.
-//! The types here are the wire shapes it describes. Requests a provider decodes are lenient on fields and strict on
-//! the hook and phase values. Answers the runner decodes are strict on the
-//! `answer` and `op` values, because a runner cannot apply an operation it
-//! does not understand.
+//! The types here are the wire shapes it describes. Identity comes from a
+//! session-bound route, not a hook body. Unknown fields are ignored and
+//! unknown enum values are preserved, but never authorize an action the
+//! receiver does not understand.
 
 #![forbid(unsafe_code)]
 
@@ -45,8 +45,9 @@ impl<T> OpRequest<T> {
     }
 }
 
+#[macro_use]
+mod open;
 pub mod answer;
-pub mod claude_code;
 #[cfg(feature = "conformance")]
 pub mod conformance;
 pub mod describe;
@@ -54,16 +55,17 @@ pub mod errors;
 pub mod grant;
 pub mod hook;
 pub mod points;
+pub mod route;
 pub mod subscription;
 
 /// The role name as `role.describe` reports it.
 pub const ROLE: &str = "step-transform-provider";
 
 /// The only major this crate defines.
-pub const VERSION: &str = "v1";
+pub const VERSION: &str = "v2";
 
 /// The string a provider lists in its manifest's `capabilities.provides`.
-pub const PROVIDES: &str = "step-transform-provider/v1";
+pub const PROVIDES: &str = "step-transform-provider/v2";
 
 /// Names of the ops, as the `method` of the request that carries them.
 pub mod ops {
@@ -81,7 +83,7 @@ pub mod ops {
     pub const TRANSFORM_HOOK: &str = "transform.hook";
 }
 
-/// Ops every `step-transform-provider/v1` module must list in
+/// Ops every `step-transform-provider/v2` module must list in
 /// `role.describe`. A consumer refuses a module missing any of them, by
 /// name, before routing anything to it.
 pub const REQUIRED_OPS: &[&str] = &[

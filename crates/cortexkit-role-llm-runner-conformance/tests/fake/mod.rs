@@ -45,8 +45,8 @@ use cortexkit_role_llm_runner_conformance::{
         describe::{Major, Retention, RoleDescribe},
         errors, ops, points,
         read::{
-            HeadMeta, LastRunState, ReadMessage, ReadMode, ReadPage, ReadRequest, ReadView,
-            RunAttribution, ToolCallAttribution,
+            HeadMeta, LastRunState, ReadMessage, ReadMode, ReadPage, ReadRequest, RunAttribution,
+            ToolCallAttribution,
         },
         retract::{RetractReply, RetractRequest},
         run::{FinalMessage, RunResult, RunResultRequest, RunState, RunUsage, StepUsage},
@@ -65,13 +65,11 @@ use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 mod attachments;
-mod compaction;
 mod display;
 mod held_calls;
 mod history;
 mod live_ids;
 mod media;
-pub mod message_checkpoint;
 mod message_senders;
 mod output_refs;
 mod rich_ui;
@@ -79,9 +77,7 @@ mod service_tier;
 mod session_change;
 mod step_events;
 mod system_text_default;
-mod tags;
 mod user_commands;
-pub use compaction::{CacheTtlDefect, CompactionDefect, CompactionRouteMode};
 use display::{anthropic_assistant, live_events, profiled, result_text};
 pub use history::LineageDefect;
 pub use service_tier::ServiceTierDefect;
@@ -92,11 +88,6 @@ pub const TOOL_MODULE: &str = "fake.tools";
 pub const SENDER_MODULE: &str = "fake.sender";
 /// How long the fake holds a run at the context ceiling before its bound.
 const CEILING_WAIT_MS: u64 = 300_000;
-/// The `ride_wait_max_ms` the fake's Setup requests carry: the longest it
-/// holds a step for a rewrite ride.
-pub const RIDE_WAIT_MAX_MS: u64 = 60_000;
-/// The fake's own deadline for a rewrite ride when Setup set none.
-const OWN_RIDE_DEADLINE_MS: u64 = 2_000;
 /// How far one `pause` moves the clock rewrite rides are timed by.
 const RIDE_TICK_MS: u64 = 50;
 pub const RETENTION_MAX: u64 = 4;
@@ -167,7 +158,7 @@ const READ_FIELDS: &[&str] = &[
     "media",
     "from_ordinal",
     "after_mid",
-    "lineage_id",
+    "history_version",
     "limit",
     "max_bytes",
     "include_originals",
@@ -178,6 +169,16 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub compaction_preset_missing_accepted: bool,
+    pub marker_hides_reads: bool,
+    pub missing_history_version: bool,
+    pub stale_cursor_accepted: bool,
+    pub zero_skips_first: bool,
+    pub missing_incarnation: bool,
+    pub decision_change_accepted: bool,
+    pub canonical_send_status_missing: bool,
+    pub oversized_result_truncated: bool,
+    pub oversized_result_repeated: bool,
     pub declare_message_senders: bool,
     pub message_senders_omit: bool,
     pub message_senders_owner: bool,
@@ -214,10 +215,6 @@ pub struct Defects {
     pub app_readers_admit_unlisted: bool,
     pub app_readers_reader_can_send: bool,
     pub service_tier: ServiceTierDefect,
-    pub part_edits_opt_in: bool,
-    pub part_edits_ignore_truncate: bool,
-    pub part_edits_untagged_bytes: bool,
-    pub part_edits_missing_hook: bool,
     pub declare_retract_own_send: bool,
     pub retract_sender_refused: bool,
     pub retract_any_non_owner: bool,
@@ -230,7 +227,6 @@ pub struct Defects {
     pub cancel_sender_other_session: bool,
     pub relaunch_rewrites_history: bool,
     pub relaunch_keeps_old_tools: bool,
-    pub relaunch_omits_ride: bool,
     pub head_error_on_completed: bool,
     pub head_error_on_fresh: bool,
     pub head_error_on_paused: bool,
@@ -274,7 +270,6 @@ pub struct Defects {
     pub attachments_store_data_url: bool,
     pub media: Option<&'static str>,
     pub user_command: Option<&'static str>,
-    pub compaction: CompactionDefect,
     /// The lineage, read-bound, view-start, history and cost breaks.
     pub lineage: LineageDefect,
     /// Continue to a new model step after a boundary cancellation.
@@ -378,58 +373,15 @@ pub struct Defects {
     /// `session.adopt` from a caller other than the recorded owner takes the
     /// session over instead of being refused `scope_owner_mismatch`.
     pub adopt_takes_over_owner: bool,
-    /// Tag numbering starts again at each run, so a later run's parts show
-    /// numbers an earlier run's parts show in the same lineage.
-    pub tags_restart_each_run: bool,
-    /// The model's text is exposed as written even on a session whose plan
-    /// renders tags, instead of cleaned of its own tag notation.
-    pub tags_exposed_raw: bool,
-    /// Parts are numbered in storage order instead of the order they are
-    /// rendered in.
-    pub tags_numbered_in_storage_order: bool,
-    /// A steer that arrives while a step's tool call is still running moves
-    /// the session to a new lineage at once, before the call has run.
-    pub tags_renumber_mid_step: bool,
-    /// A renumbering of exposed parts keeps the lineage.
-    pub tags_renumber_without_new_lineage: bool,
-    /// Reasoning parts are counted and numbered like the model's text.
-    pub tags_count_reasoning: bool,
-    /// With results embedded in the requesting entry's tool part, that tool
-    /// part is left unnumbered as if it held only the call, though it holds
-    /// the call's result.
-    pub tags_embedded_result_unnumbered: bool,
-    pub tags_number_every_text: bool,
-    pub tags_number_empty_block: bool,
-    pub tags_pdf_image_label: bool,
-    pub tags_count_structured_result: bool,
     /// Embedded numbering results omit the stored call id, while their fixtures
     /// retain the marker, exercising part lookup by marker instead of identity.
     pub tags_marker_only_results: bool,
-    /// A tool-result entry of its own (message-array layout) is left
-    /// unnumbered, as if it held only a tool call.
-    pub tags_tool_result_entry_unnumbered: bool,
-    /// A session whose plan renders no tags is numbered all the same.
-    pub tags_numbered_without_render_tags: bool,
-    /// The compaction provider's Setup checkpoint is ignored: numbering
-    /// starts at the session start.
-    pub tags_setup_checkpoint_ignored: bool,
-    pub message_checkpoint: message_checkpoint::Defect,
-    /// A send into, or an adoption of, a fork of a managed session is
-    /// served instead of refused `fork_unsupported`.
-    pub fork_accepted: bool,
     /// A turn the host starts creates no run: nothing answers it on
     /// `run.result`, `run.status` or the stream.
     pub host_turns_without_run: bool,
     /// A template send whose `part_tag` slot names a part the session does
     /// not show is accepted, the slot rendered as written.
     pub order_template_part_gone_accepted: bool,
-    /// After a marker lost its key, numbering from the older marker counts
-    /// only the parts rendered now, skipping those the newer marker
-    /// summarized.
-    pub tags_count_only_rendered_parts: bool,
-    /// The host's save seam leaves a tag-rendering run's reply raw in the
-    /// host's own store.
-    pub host_seam_not_cleaning: bool,
     /// `run.tool_calls` lists a run's calls in reverse dispatch order.
     pub run_tool_calls_reversed: bool,
     /// A `delivery_order` list without `idle_start` starts a run on an idle
@@ -480,10 +432,6 @@ pub struct Defects {
     /// delivered before it `pending` again, as a status kept only in memory
     /// would; a re-send still answers from the durable record.
     pub send_status_pending_after_restart: bool,
-    /// `session.resolve` still answers a tag whose part a recovery dropped
-    /// when it moved the session to a new lineage, with the dropped part's
-    /// old content.
-    pub resolve_left_lineage_tags: bool,
     /// A queued send delivered as a steer is answered `delivered: {as:
     /// step, ref}` without `run_id` even though the runner declares `run_ops`,
     /// on a re-send and on `send.status`.
@@ -602,17 +550,6 @@ pub struct Defects {
     /// The default `session.read` entry of a user message carries the
     /// sender's module as `sender`.
     pub sender_in_read: bool,
-    /// A rewrite ride waits the fake's own fixed deadline, whatever Setup's
-    /// `ride_wait_ms` says.
-    pub ride_wait_fixed_deadline: bool,
-    /// A step waiting on a rewrite ride is never reported `compaction_wait`.
-    pub ride_wait_never_reported: bool,
-    /// A step waiting on a rewrite ride is reported `compaction_wait` as soon
-    /// as the ride is sent, not once its answer has been pending for 1 s.
-    pub ride_wait_reported_at_once: bool,
-    /// A Setup answer whose `ride_wait_ms` is above the fake's own
-    /// `ride_wait_max_ms` is accepted.
-    pub ride_wait_cap_ignored: bool,
     /// Display entries and live tool events leave out every call's
     /// `call_key`.
     pub call_identity_omits_key: bool,
@@ -685,22 +622,14 @@ struct World {
     >,
     system_text_default: Mutex<BTreeMap<String, system_text_default::Provider>>,
     held_replies: Mutex<BTreeMap<String, held_calls::HeldReply>>,
-    standalone_in_process: bool,
     /// Host entries every session holds before the runner numbered
     /// anything, unless the hook seeded another count for it.
-    host_prefix_everywhere: u64,
     /// Each session's history in the host before the runner numbered
     /// anything: the host's own storage, outside the runner's log.
     host_prefixes: Mutex<BTreeMap<String, Vec<history::HostEntry>>>,
-    message_checkpoints: Mutex<BTreeMap<String, message_checkpoint::Seed>>,
     /// Sessions whose host history ends in a cut the host made before the
     /// runner adopted them.
     host_cuts: Mutex<BTreeSet<String>>,
-    /// The runner refuses reads `transient` while a tag-rendering run waits
-    /// for a Setup without descent.
-    holds_reads_during_setup: bool,
-    /// Sessions whose next Setup call the scripted provider holds.
-    setup_holds: Mutex<BTreeMap<String, history::SetupHold>>,
     user_commands: Mutex<user_commands::Commands>,
     retention_defect: RetentionDefect,
     retention_delete_ms: u64,
@@ -714,7 +643,6 @@ struct World {
     /// as a `data:` URL `file` part that carries the digest nowhere.
     data_url_media: bool,
     step_recovery: StepRecovery,
-    compaction_route_mode: compaction::CompactionRouteMode,
     queue_receipt_pending_then_unknown: bool,
     steer_receipt_confirm: bool,
     omit_first_steer_receipt: bool,
@@ -736,7 +664,6 @@ struct World {
     pending_model_holds: Mutex<BTreeSet<String>>,
     held_models: Mutex<BTreeMap<String, String>>,
     staging_holds: Mutex<BTreeSet<String>>,
-    compaction: Mutex<compaction::Providers>,
     invocations: Mutex<BTreeMap<String, usize>>,
     held: Mutex<BTreeSet<String>>,
     released: Mutex<BTreeSet<String>>,
@@ -756,9 +683,6 @@ struct World {
     models: Mutex<BTreeMap<String, String>>,
     /// The prompt-cache lifetime each session's requests carry.
     observed_cache_lifetimes: Mutex<BTreeMap<String, Option<u64>>>,
-    /// Each session's prompt-cache clock.
-    cache_clocks: Mutex<BTreeMap<String, compaction::CacheClock>>,
-    cache_ttl_defect: CacheTtlDefect,
     /// Sessions whose next model answer streams this many parts and holds.
     stream_holds: Mutex<BTreeMap<String, usize>>,
     /// The step in flight of each session whose answer is held mid-stream:
@@ -768,18 +692,6 @@ struct World {
     /// modelling a runner that reports the run as ended only a moment after
     /// the send returns.
     late_seal_reads: AtomicUsize,
-    /// How many `session.head` reads of a Setup crash run sealed
-    /// `interrupted` at restart still answer `active`, modelling a runner
-    /// whose crash recovery seals its log in the background.
-    setup_crash_active_reads: AtomicUsize,
-    /// How each session's next rewrite ride is answered, until a ride takes
-    /// it.
-    ride_scripts: Mutex<BTreeMap<String, cortexkit_role_llm_runner_conformance::ScriptedRide>>,
-    /// The rewrite ride each session's step waits on.
-    rides: Mutex<BTreeMap<String, compaction::PendingRide>>,
-    /// A resolved ride's step, by session: the run and step it held, and the
-    /// notice events computed for it, which the step's notice carries.
-    resolved_rides: Mutex<BTreeMap<String, ResolvedRide>>,
     /// The clock rewrite rides are timed by, in milliseconds: the scripted
     /// provider's delay and the ride's deadline both count on it. Each
     /// `pause` of the subject moves it [`RIDE_TICK_MS`].
@@ -809,10 +721,6 @@ struct World {
 /// arrived, and its method.
 pub type RouteCalls = Arc<Mutex<Vec<(Option<&'static str>, String)>>>;
 
-/// A rewrite ride that resolved: the run and step it held, and the notice
-/// events computed for that step.
-type ResolvedRide = (String, usize, Vec<String>);
-
 impl World {
     fn now(&self) -> u64 {
         1_790_000_000_000
@@ -836,12 +744,6 @@ impl World {
                     .schema_pin
                     .to_owned()
             })
-    }
-
-    /// Whether the fake numbers from a compaction provider's Setup
-    /// checkpoint: it declares `tag_checkpoint` and the defect is off.
-    fn honours_checkpoint(&self) -> bool {
-        self.serves(groups::TAG_CHECKPOINT) && !self.defects.tags_setup_checkpoint_ignored
     }
 
     fn declares_mode(&self, mode: Mode) -> bool {
@@ -893,21 +795,11 @@ struct Msg {
     ordinal: u64,
     mid: String,
     body: Value,
-    /// The writing run's frozen cleaning mode, independent of later plans.
-    writer: cortexkit_role_llm_runner::tags::TextWriter,
     /// The host's own copy, written at its save seam rather than on read.
     host_body: Value,
     run_id: String,
     /// The keys of the calls an assistant message carries, in order.
     calls: Vec<String>,
-    /// For a message a recovery dropped: the numbers its parts showed in
-    /// the lineage it was dropped from.
-    left_numbers: Vec<(String, u64)>,
-    /// For a host compaction marker: the message it cuts at.
-    marker_cut: Option<String>,
-    /// The checkpoint key the runner wrote on that marker, until the host
-    /// drops it.
-    marker_key: Option<u64>,
     /// For an entry written by a delivered `delivery_order` send: the mode
     /// it went out in, as the entry's `delivered_as`.
     delivered_as: Option<Value>,
@@ -965,6 +857,7 @@ struct SendRec {
 
 #[derive(Clone, Debug)]
 struct RunRec {
+    route_decision_id: Option<String>,
     directives: Vec<cortexkit_role_llm_runner::directives::DirectiveName>,
     max_steps: Option<u64>,
     max_output_tokens: Option<u64>,
@@ -1018,10 +911,8 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
-    surface_change_rides: u64,
+    number_offset: u64,
     moved_head: Option<cortexkit_role_llm_runner::read::HeadCut>,
-    planted_marker: Option<cortexkit_role_llm_runner::tags::Marker>,
-    native_message_key: Option<Value>,
     incarnation: Option<String>,
     session_usage: Option<cortexkit_role_llm_runner::usage::SessionUsage>,
     head_model: Option<cortexkit_role_llm_runner::read::HeadModel>,
@@ -1030,7 +921,6 @@ struct Sess {
     attachment_accepts: Option<bool>,
     ever_served: bool,
     standalone_handed_off: bool,
-    compaction: compaction::State,
     retention: Option<u64>,
     input_cap: Option<u64>,
     input_spent: u64,
@@ -1061,14 +951,6 @@ struct Sess {
     events: Vec<String>,
     /// The session's name, which a marker's checkpoint key names.
     name: String,
-    /// Whether the session's frozen plan renders tags.
-    render_tags: bool,
-    /// The numbering in effect for the current lineage, by message id and
-    /// part key (see `tags`).
-    numbering: BTreeMap<tags::Key, u64>,
-    /// The managed session this one was forked from, when the host forked
-    /// it.
-    forked_from: Option<String>,
     /// Messages, as they were written, that a recovery dropped or rewrote
     /// when it moved the session to a new lineage. Never read or resolved,
     /// except when `Defects::resolve_left_lineage_tags` is set.
@@ -1085,10 +967,6 @@ struct Sess {
     /// The run waiting at the context ceiling, and the time its wait ends
     /// (milliseconds since the Unix epoch).
     ceiling_wait: Option<(String, u64)>,
-    /// The run whose step waits on a rewrite ride reported as
-    /// `compaction_wait`, and the ride's deadline (milliseconds since the
-    /// Unix epoch).
-    compaction_wait: Option<(String, u64)>,
     /// What the `session_change` group's records built.
     change: session_change::ChangeState,
     /// The current lineage's first ordinal: the latest cut's first retained
@@ -1102,13 +980,6 @@ struct Sess {
     /// Seeded messages behind the latest cut, kept out of `messages` so a
     /// step never touches them; only `session.history` reads them.
     archive: Arc<Vec<Msg>>,
-    /// Lineages the session has left, newest last.
-    previous_lineages: Vec<String>,
-    /// The descent the next notice declares: the lineage a cut left, the
-    /// cut's through ordinal and the digest of the message there.
-    pending_descent: Option<(String, u64, String)>,
-    /// Event tokens the next notice carries.
-    notice_events: Vec<String>,
     /// The history version: raised at every lineage change but a cut.
     history_version: u64,
     /// The typed live events each record maps onto, by the record's index
@@ -1143,27 +1014,13 @@ impl Sess {
 
     fn push(&mut self, body: Value, run_id: &str, calls: Vec<String>) -> u64 {
         let ordinal = self.base + self.messages.len() as u64;
-        let writer = if self
-            .run(run_id)
-            .is_some_and(|run| run.structured_output.is_some())
-        {
-            cortexkit_role_llm_runner::tags::TextWriter::StructuredOutputFinal
-        } else if self.render_tags {
-            cortexkit_role_llm_runner::tags::TextWriter::TagRenderingRun
-        } else {
-            cortexkit_role_llm_runner::tags::TextWriter::UntaggedRun
-        };
         self.messages.push(Msg {
             ordinal,
             mid: format!("{}.m{ordinal}", self.lineage),
             host_body: body.clone(),
             body,
-            writer,
             run_id: run_id.to_owned(),
             calls,
-            left_numbers: Vec::new(),
-            marker_cut: None,
-            marker_key: None,
             delivered_as: None,
             written_at: 0,
             client_message_id: None,
@@ -1171,6 +1028,38 @@ impl Sess {
         });
         ordinal
     }
+}
+
+fn rendered_texts(sess: &Sess) -> Vec<String> {
+    sess.messages
+        .iter()
+        .filter(|message| message.ordinal >= sess.first_ordinal)
+        .flat_map(|message| {
+            if message.body["role"] == "tool" {
+                return vec![result_text(&message.body["content"])];
+            }
+            media::parts(&message.body)
+                .into_iter()
+                .filter_map(|(_, part)| {
+                    part.as_str()
+                        .or_else(|| part["text"].as_str())
+                        .map(str::to_owned)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+fn part_numbers(sess: &Sess) -> BTreeMap<(String, String), u64> {
+    let mut numbers = BTreeMap::new();
+    let mut next = sess.number_offset + 1;
+    for message in sess.archive.iter().chain(&sess.messages) {
+        for (key, _) in media::parts(&message.body) {
+            numbers.insert((message.mid.clone(), key), next);
+            next += 1;
+        }
+    }
+    numbers
 }
 
 fn point_of(kind: &str) -> &'static str {
@@ -1182,8 +1071,6 @@ fn point_of(kind: &str) -> &'static str {
         "result" => points::TOOL_RESULT_RECORDED,
         "terminal" => points::TERMINAL,
         "tombstone" => points::RETENTION_TOMBSTONED,
-        "compaction_message" => points::COMPACTION_APPLIED,
-        "compaction_fold" => points::FOLD_RECORDED,
         "user_command_forwarded" => points::USER_COMMAND_FORWARDED,
         _ => "",
     }
@@ -1247,6 +1134,16 @@ pub struct Module {
 }
 
 impl Module {
+    fn session_model(&self, session: &str) -> String {
+        self.world
+            .models
+            .lock()
+            .unwrap()
+            .get(session)
+            .cloned()
+            .unwrap_or_else(|| format!("{FAKE_PROVIDER}/{FAKE_MODEL}"))
+    }
+
     fn sweep(&self, session: &str) -> Result<(), Killed> {
         let state = self.sessions.lock().unwrap().get(session).cloned();
         let Some(state) = state else {
@@ -1450,9 +1347,6 @@ impl Module {
             .collect();
         for (session, run_id) in cut {
             self.commit(&session, json!({ "kind": "resume" }))?;
-            if self.seal_compaction_setup_crash(&session, &run_id)? {
-                continue;
-            }
             let open: Vec<String> = self.sessions.lock().unwrap()[&session]
                 .calls
                 .iter()
@@ -1532,6 +1426,35 @@ impl Module {
     /// The step-event fixture syncs to observe publication against a real
     /// durability point. A real runner must sync before it replies.
     fn commit(&self, session: &str, mut record: Value) -> Result<(), Killed> {
+        if record["kind"] == "result" {
+            if let Some(output) = record["content"]
+                .as_str()
+                .filter(|text| text.len() > 65_536)
+            {
+                let bytes = output.len();
+                if self.world.defects.oversized_result_repeated {
+                    let arguments = self
+                        .sessions
+                        .lock()
+                        .unwrap()
+                        .get(session)
+                        .and_then(|sess| {
+                            sess.calls
+                                .get(record["call_key"].as_str().unwrap_or_default())
+                        })
+                        .map(|call| call.arguments.clone());
+                    if let Some(arguments) = arguments {
+                        self.world.invoke(&arguments);
+                    }
+                }
+                record["content"] = if self.world.defects.oversized_result_truncated {
+                    json!(output.chars().take(65_536).collect::<String>())
+                } else {
+                    json!({"is_error":true,"reason":"tool_result_too_large","bytes":bytes,"limit":65536,
+                        "text":"The tool ran; its output was discarded. The call must not be repeated just to see the output."})
+                };
+            }
+        }
         if !self.alive.load(Ordering::SeqCst) {
             return Err(Killed);
         }
@@ -1590,15 +1513,18 @@ impl Module {
         if kind == "start" {
             // A session started again over an expired one keeps raising its
             // history version: it never decreases.
-            let history_version = sessions
-                .get(&session)
-                .map_or(0, |old| old.history_version + 1);
+            let history_version = sessions.get(&session).map_or(0, |old| {
+                old.history_version
+                    + u64::from(self.world.retention_defect != RetentionDefect::ReuseLineage)
+            });
             sessions.insert(
                 session.clone(),
                 Sess {
                     incarnation: record["incarnation"].as_str().map(str::to_owned),
                     owner: text("owner"),
                     lineage: text("lineage"),
+                    base: 1,
+                    first_ordinal: 1,
                     plan_digest: record["plan_digest"].as_str().map(str::to_owned),
                     tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                     senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
@@ -1606,7 +1532,6 @@ impl Module {
                         .get("readers")
                         .filter(|value| !value.is_null())
                         .map(|value| serde_json::from_value(value.clone()).unwrap()),
-                    render_tags: record["render_tags"] == json!(true),
                     output_refs_enabled: record["output_refs_enabled"] == json!(true),
                     rich_ui_plan: record["rich_ui_plan"] == json!(true),
                     rich_ui: record
@@ -1622,7 +1547,6 @@ impl Module {
         if kind == "start" {
             if let Some(sess) = sessions.get_mut(&session) {
                 history::adopt_host_cut(sess, &self.world);
-                message_checkpoint::adopt(sess, &self.world);
             }
         }
         if kind == "fork" {
@@ -1632,7 +1556,6 @@ impl Module {
                 sessions.insert(
                     session.clone(),
                     Sess {
-                        forked_from: Some(text("parent")),
                         incarnation: record["incarnation"].as_str().map(str::to_owned),
                         ..parent
                     },
@@ -1646,7 +1569,6 @@ impl Module {
         let messages_before: BTreeSet<String> =
             sess.messages.iter().map(|m| m.mid.clone()).collect();
         session_change::apply(sess, &kind, record);
-        compaction::apply(&mut sess.compaction, record, self.world.defects.compaction);
         if matches!(kind.as_str(), "send" | "steer" | "step" | "terminal")
             && (self.world.retention_defect != RetentionDefect::ClockNotRestarted
                 || sess.last_activity == 0)
@@ -1662,31 +1584,56 @@ impl Module {
             });
         }
         match kind.as_str() {
+            "fixture_historical_result" => {
+                let key = sess
+                    .calls
+                    .iter()
+                    .find(|(_, call)| record["tool_call_id"] == call.tool_call_id)
+                    .map(|(key, _)| key.clone());
+                let original = record["content"].as_str().expect("historical fixture text");
+                let mut stored = original.to_owned();
+                if let Some((cap, note)) = self.world.defects.output_refs_tool_result_cap {
+                    if original.len() > cap {
+                        if let Some(key) = &key {
+                            sess.output_refs
+                                .original_tool_results
+                                .insert(key.clone(), original.to_owned());
+                        }
+                        let mut end = cap;
+                        while !original.is_char_boundary(end) {
+                            end -= 1;
+                        }
+                        stored = format!("{}{note}", &original[..end]);
+                    }
+                }
+                if let Some(message) = sess.messages.iter_mut().find(|message| {
+                    message.body["tool_call_id"] == record["tool_call_id"]
+                        || key.as_ref().is_some_and(|key| {
+                            message.body["call_key"].as_str() == Some(key.as_str())
+                        })
+                }) {
+                    if let Some(parts) = message.body["parts"].as_array_mut() {
+                        let part = parts
+                            .iter_mut()
+                            .find(|part| {
+                                part["text"].as_str().is_some_and(|text| {
+                                    !text.is_empty() && original.starts_with(text)
+                                })
+                            })
+                            .expect("the historical fixture's source part");
+                        part["text"] = json!(stored);
+                    } else {
+                        message.body["content"] = json!(stored);
+                    }
+                    message.host_body = message.body.clone();
+                    sess.history_version += 1;
+                }
+            }
             "held_status" => {
                 sess.held_status_events.insert(
                     sess.events.len() - 1,
                     record["body"].as_object().unwrap().clone(),
                 );
-            }
-            "uncounted_host_summary" => {
-                if self.world.defects.message_checkpoint
-                    == message_checkpoint::Defect::ServesSummaryRow
-                {
-                    let ordinal = sess.push(json!({"role":"assistant", "summary":true, "finish":"stop", "content":[{"type":"text", "text":"host summary row"}]}), "", Vec::new());
-                    sess.at_mut(ordinal).mid = record["mid"].as_str().unwrap().to_owned();
-                }
-            }
-            "uncounted_host_compaction_only" => {
-                if self.world.defects.message_checkpoint
-                    == message_checkpoint::Defect::CountsCompactionOnlyRow
-                {
-                    let ordinal = sess.push(
-                        json!({"role":"user", "parts":[{"type":"compaction"}]}),
-                        "",
-                        Vec::new(),
-                    );
-                    sess.at_mut(ordinal).mid = record["mid"].as_str().unwrap().to_owned();
-                }
             }
             "head-model-switch" => {
                 sess.head_model = Some(serde_json::from_value(record["model"].clone()).unwrap());
@@ -1710,42 +1657,6 @@ impl Module {
                     .get("rich_ui")
                     .filter(|stamp| !stamp.is_null())
                     .cloned();
-            }
-            "host_compact" => {
-                // The host compacts natively, keeping the last exchange: its
-                // marker cuts at the newest user message, and the runner
-                // writes its checkpoint key on the marker in the same write.
-                let cut = sess
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|m| m.body["role"] == "user" && m.marker_cut.is_none())
-                    .map(|m| m.mid.clone())
-                    .unwrap_or_default();
-                let key = tags::checkpoint_before(sess, &cut);
-                let ordinal = sess.push(
-                    json!({ "role": "user", "compaction": { "tail_start_id": cut } }),
-                    "",
-                    Vec::new(),
-                );
-                let marker = sess.at_mut(ordinal);
-                marker.marker_cut = Some(cut);
-                marker.marker_key = Some(key);
-                sess.push(
-                    json!({ "role": "assistant", "summary": "the history before the cut" }),
-                    "",
-                    Vec::new(),
-                );
-            }
-            "drop_marker_key" => {
-                if let Some(marker) = sess
-                    .messages
-                    .iter_mut()
-                    .rev()
-                    .find(|m| m.marker_cut.is_some())
-                {
-                    marker.marker_key = None;
-                }
             }
             "ordered" => {
                 let id = text("id");
@@ -1814,11 +1725,6 @@ impl Module {
                 sess.ceiling_wait = Some((text("run_id"), record["deadline_ms"].as_u64().unwrap()));
             }
             "ceiling_view" => sess.ceiling_wait = None,
-            "compaction_wait" => {
-                sess.compaction_wait =
-                    Some((text("run_id"), record["deadline_ms"].as_u64().unwrap()));
-            }
-            "ride_resolved" => sess.compaction_wait = None,
             "adopt" => {
                 sess.owner = text("owner");
                 sess.adopts.insert(
@@ -1827,7 +1733,6 @@ impl Module {
                 );
             }
             "standalone_handoff" => sess.standalone_handed_off = true,
-            "require_setup" => sess.compaction = compaction::State::default(),
             "user_command_reservation" => {
                 sess.user_commands.insert(
                     text("invocation"),
@@ -1886,19 +1791,6 @@ impl Module {
                     sess.title = Some(title.into());
                 }
                 let run_id = text("run_id");
-                if kind == "steer"
-                    && self.world.defects.tags_renumber_mid_step
-                    && sess.render_tags
-                    && sess
-                        .calls
-                        .values()
-                        .any(|call| call.run_id == run_id && !call.result)
-                {
-                    // Renumbers at once, while the step's call is running.
-                    sess.lineage = format!("{}-t", sess.lineage);
-                    sess.history_version += 1;
-                    sess.numbering.clear();
-                }
                 let mut body = if profiled(&session) {
                     json!({ "role": "user", "content": [{ "type": "text", "text": text("prompt") }] })
                 } else {
@@ -1931,6 +1823,7 @@ impl Module {
                         cortexkit_role_llm_runner::usage::SessionUsage::new(&run_id)
                     });
                     sess.runs.push(RunRec {
+                        route_decision_id: record["route_decision_id"].as_str().map(str::to_owned),
                         directives: serde_json::from_value(record["directives"].clone())
                             .unwrap_or_default(),
                         max_steps: record["max_steps"].as_u64(),
@@ -2028,14 +1921,12 @@ impl Module {
                 }
                 // The model request this step answers was made at a step
                 // boundary: a renumbering detected since takes effect now.
-                tags::settle(sess, &self.world.defects, self.world.honours_checkpoint());
                 let body = if profiled(&session) {
                     anthropic_assistant(&record["parts"])
                 } else {
                     json!({ "role": "assistant", "parts": record["parts"] })
                 };
                 sess.push(body, &run_id, keys);
-                tags::save_in_host(sess.messages.last_mut().unwrap(), &self.world.defects);
             }
             "drop_step" => {
                 let run_id = text("run_id");
@@ -2046,22 +1937,6 @@ impl Module {
                     sess.history_version += 1;
                 }
                 sess.calls.retain(|_, call| call.run_id != run_id);
-                let shown = tags::current(sess);
-                let dropped: Vec<Msg> = sess
-                    .messages
-                    .iter()
-                    .filter(|m| m.run_id == run_id && !m.calls.is_empty())
-                    .cloned()
-                    .map(|mut m| {
-                        m.left_numbers = shown
-                            .iter()
-                            .filter(|((mid, _), _)| mid == &m.mid)
-                            .map(|((_, part), n)| (part.clone(), *n))
-                            .collect();
-                        m
-                    })
-                    .collect();
-                sess.left.extend(dropped);
                 if record["keep_text"] == json!(true) {
                     for message in sess
                         .messages
@@ -2078,7 +1953,6 @@ impl Module {
                         .retain(|m| m.run_id != run_id || m.calls.is_empty());
                 }
                 // The new lineage numbers afresh.
-                sess.numbering.clear();
             }
             "intent" => {
                 if let Some(call) = sess.calls.get_mut(&text("call_key")) {
@@ -2088,21 +1962,7 @@ impl Module {
             }
             "result" => {
                 let key = text("call_key");
-                let mut content = record["content"].clone();
-                if session.contains("output_refs_") {
-                    if let Some((cap, note)) = self.world.defects.output_refs_tool_result_cap {
-                        if let Some(original) = content.as_str().filter(|s| s.len() > cap) {
-                            sess.output_refs
-                                .original_tool_results
-                                .insert(key.clone(), original.to_owned());
-                            let mut end = cap;
-                            while !original.is_char_boundary(end) {
-                                end -= 1;
-                            }
-                            content = json!(format!("{}{note}", &original[..end]));
-                        }
-                    }
-                }
+                let content = record["content"].clone();
                 let run_id = sess
                     .calls
                     .get(&key)
@@ -2230,8 +2090,6 @@ impl Module {
                     .find(|m| m.run_id == run_id && m.body["role"] == "assistant")
                     .map(|m| m.ordinal);
                 sess.ceiling_wait = None;
-                sess.compaction_wait = None;
-                tags::settle(sess, &self.world.defects, self.world.honours_checkpoint());
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.state = text("state");
                     run.reason = record["reason"].as_str().map(str::to_owned);
@@ -2245,7 +2103,7 @@ impl Module {
                     }
                 }
             }
-            "cut" | "revert" | "seed" | "view_applied" | "view_disposed" | "notice" => {
+            "host_compact" | "revert" | "seed" => {
                 history::apply(sess, &kind, record, &self.world.defects);
                 if let Some(value) = record["incarnation_after_cut"].as_str() {
                     sess.incarnation = Some(value.into());
@@ -2293,7 +2151,6 @@ impl Module {
             message.written_at = at;
         }
         live_events(sess, &kind, record, &messages_before, &self.world.defects);
-        tags::note_write(sess, &self.world.defects, self.world.honours_checkpoint());
         output_refs::apply(sess, &kind, record, &self.world.defects);
     }
 
@@ -2413,9 +2270,6 @@ impl Module {
             }
             history::step_cost(&sess, &self.world.defects);
             // The model consumed a turn even if recovery removed it from history.
-            if !self.prepare_compaction(session, run_id, turn_index)? {
-                return Ok(());
-            }
             let turn = self
                 .world
                 .scripts
@@ -2466,16 +2320,9 @@ impl Module {
                     &sess.tools[..]
                 };
                 let mut observation =
-                    observe_request(tools, frozen.as_ref()).with_rendered(tags::rendered_texts(
-                        &sess,
-                        &self.world.defects,
-                        self.world.honours_checkpoint(),
-                    ));
+                    observe_request(tools, frozen.as_ref()).with_rendered(rendered_texts(&sess));
                 observation.max_output_tokens = output_cap;
                 self.tier_model_ingress(session, &mut observation);
-                if self.world.serves(groups::REFRESH_RELAUNCH) {
-                    observation.surface_change_rides = Some(sess.surface_change_rides);
-                }
                 self.world
                     .model_requests
                     .lock()
@@ -2945,8 +2792,6 @@ impl Module {
         }
         self.sweep(session)
             .map_err(|Killed| RouteFailure::new("the module was killed"))?;
-        self.tick_ride(session)
-            .map_err(|Killed| RouteFailure::new("the module was killed"))?;
         if matches!(
             method,
             ops::SESSION_READ
@@ -2962,18 +2807,6 @@ impl Module {
                     return Ok(reply);
                 }
             }
-        }
-        let checkpoint_read = self.world.serves(groups::MESSAGE_CHECKPOINT)
-            && (method == ops::SESSION_HEAD
-                || (method == ops::SESSION_READ
-                    && message_checkpoint::marker_setup_outstanding(&self.world, session)));
-        if matches!(
-            method,
-            ops::SESSION_READ | ops::SESSION_HEAD | ops::SESSION_RESOLVE
-        ) && !checkpoint_read
-            && history::reads_held(self, session)
-        {
-            return Ok(refuse(errors::TRANSIENT, None));
         }
         let reply = match method {
             ops::SESSION_OUTPUT_REFS | ops::SESSION_OUTPUT_REF_READ
@@ -2992,13 +2825,17 @@ impl Module {
             }
             "session.list" | "session.export" => Ok(self.listing(session)),
             "run.status" if self.world.advertise_status => Ok(self.run_status(session, params)),
-            ops::SESSION_RESOLVE if self.world.serves(groups::TAGS) => {
-                Ok(self.resolve(session, &params))
-            }
             ops::RUN_TOOL_CALLS if self.world.serves(groups::RUN_TOOL_CALLS) => {
                 Ok(self.tool_calls(session, &params))
             }
-            ops::SEND_STATUS if self.world.serves(groups::SEND_STATUS) => {
+            ops::SESSION_SEND_STATUS | ops::SEND_STATUS
+                if self.world.serves(groups::SEND_STATUS) =>
+            {
+                if method == ops::SESSION_SEND_STATUS
+                    && self.world.defects.canonical_send_status_missing
+                {
+                    return Ok(refuse("unknown_method", None));
+                }
                 Ok(self.send_status(stamp, session, &params))
             }
             ops::SESSION_READ | ops::SESSION_HEAD => {
@@ -3193,8 +3030,7 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "start", "owner": "", "lineage": format!("lin-{session}"),
-                    "tools": tools, "plan_digest": plan_digest(plan),
-                    "render_tags": plan.get(cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS) }),
+                    "tools": tools, "plan_digest": plan_digest(plan) }),
         )?;
         let Some(prompt) = prompt else {
             return Ok(());
@@ -3337,7 +3173,7 @@ impl Module {
         // tags) stay out of the held-steer receipt fixtures below, which
         // count and break only the guaranteed-steer case's steers. They are
         // answered without a receipt, which a guaranteed runner may do.
-        if send.delivery == groups::STEER && !sessions[session].render_tags {
+        if send.delivery == groups::STEER {
             let held_turn = send.steered_into_running
                 && run.state == "active"
                 && sessions[session]
@@ -3414,19 +3250,8 @@ impl Module {
 
     /// A fork of a managed session is never enrolled: its sends and its
     /// adoption are refused `fork_unsupported`, naming the parent.
-    fn refuse_fork(&self, session: &str) -> Option<Reply> {
-        let parent = self
-            .sessions
-            .lock()
-            .unwrap()
-            .get(session)
-            .and_then(|sess| sess.forked_from.clone())?;
-        (!self.world.defects.fork_accepted).then(|| {
-            refuse(
-                errors::FORK_UNSUPPORTED,
-                Some(json!(errors::ForkUnsupportedDetail::new(Some(parent)))),
-            )
-        })
+    fn refuse_fork(&self, _session: &str) -> Option<Reply> {
+        None
     }
 
     fn session_structured_output_jcs(
@@ -3461,14 +3286,15 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if !self.world.defects.compaction_preset_missing_accepted {
+            if let Some(plan) = params.get("plan").and_then(Value::as_object) {
+                if let Err(field) = cortexkit_role_llm_runner::compaction::check_plan(plan) {
+                    return Ok(invalid(field));
+                }
+            }
+        }
         if let Some(reply) = self.tier_send(session, &params) {
             return Ok(reply);
-        }
-        if message_checkpoint::refuse_missing_counter(&self.world, session) {
-            return Ok(Reply::Error(ErrorBody::new(
-                "compaction_unavailable",
-                "message_checkpoint_missing_counter",
-            )));
         }
         if let Some(reply) = self.admit_system_text_default(session, &params) {
             return Ok(reply);
@@ -3812,6 +3638,13 @@ impl Module {
                 if delivery != groups::STEER || !self.world.serves(groups::STEER) {
                     return Ok(refuse(errors::TRANSIENT, None));
                 }
+                if !self.world.defects.decision_change_accepted {
+                    if let Err(field) =
+                        request.check_route_decision_id(Some(run.route_decision_id.as_deref()))
+                    {
+                        return Ok(invalid(field));
+                    }
+                }
                 if let Err(field) = request.check_directives(&run.directives) {
                     return Ok(invalid(&field));
                 }
@@ -3843,9 +3676,7 @@ impl Module {
                             "session_structured_output_jcs": session_structured_output_jcs,
                             "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens) }),
                 )?;
-                if self.world.defects.held_steer_ends_run
-                    && !self.sessions.lock().unwrap()[session].render_tags
-                {
+                if self.world.defects.held_steer_ends_run {
                     self.world
                         .held_steer_break_answers
                         .fetch_add(1, Ordering::SeqCst);
@@ -3867,7 +3698,6 @@ impl Module {
         let admitted = existing.is_none();
         if let Some(plan) = request.plan.as_ref().filter(|_| admitted) {
             for check in [
-                cortexkit_role_llm_runner::tags::check_plan(plan, &self.world.groups),
                 order::check_plan(plan, &self.world.groups),
                 cortexkit_role_llm_runner::app_readers::check_plan(plan, &self.world.groups),
             ] {
@@ -3897,7 +3727,6 @@ impl Module {
                         "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("tool_items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
                         "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
                         "readers": request.plan.as_ref().and_then(|plan| plan.get("readers")),
-                        "render_tags": request.plan.as_ref().and_then(|plan| plan.get(cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS)),
                         "rich_ui_plan": rich_ui_plan, "rich_ui": rich_ui,
                         "plan_digest": request.plan.as_ref().map(plan_digest) }),
             )?;
@@ -3967,6 +3796,7 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
+                    "route_decision_id": request.route_decision_id,
                     "attachment_parts": attachment_parts,
                     "stored_as": stored_as,
                     "attachment_accepts": request.runner_params.get("attachment_accepts"),
@@ -4111,7 +3941,7 @@ impl Module {
                     .find(|sender| sender.module == caller)
                     .map(|sender| sender.templates.clone())
                     .unwrap_or_default();
-                let numbers = tags::current(&sess);
+                let numbers = part_numbers(&sess);
                 let shown = |part: &order::PartRef| {
                     numbers.get(&(part.mid.clone(), part.part.clone())).copied()
                 };
@@ -4197,21 +4027,18 @@ impl Module {
         if let Some(field) = unknown_field(params, READ_FIELDS) {
             return invalid(&field);
         }
-        let request: ReadRequest = match serde_json::from_value(params.clone()) {
+        let mut request: ReadRequest = match serde_json::from_value(params.clone()) {
             Ok(request) => request,
             Err(e) if e.to_string().contains("media") => return invalid("media"),
             Err(_) => return invalid("view"),
         };
+        if self.world.defects.zero_skips_first && params["from_ordinal"] == 0 {
+            request.from_ordinal = Some(2);
+        }
         let mode = match request.mode() {
             Ok(mode) => mode,
-            Err("media") if self.world.defects.media == Some("model_view_descriptors") => {
-                ReadMode::Tail
-            }
             Err(field) => return invalid(field),
         };
-        if request.view == Some(ReadView::Model) && !self.world.serves(groups::MODEL_VIEW) {
-            return invalid("view");
-        }
         if self.world.defects.read_display_facts != Some("undeclared_accepted") {
             if let Err(field) = request.check_display_facts(&self.world.groups) {
                 return invalid(field);
@@ -4222,38 +4049,29 @@ impl Module {
         }
         let sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get(session) else {
-            if request.lineage_id.is_some() {
-                return refuse(errors::LINEAGE_CHANGED, None);
+            if request.history_version.is_some() {
+                return refuse(errors::HISTORY_CHANGED, None);
             }
-            return if request.view == Some(ReadView::Model) {
-                respond(cortexkit_role_llm_runner::read::ModelPage::no_lineage())
-            } else {
-                respond(ReadPage::no_lineage())
-            };
+            return respond(ReadPage::empty(1, "log-1"));
         };
-        if request
-            .lineage_id
-            .as_ref()
-            .is_some_and(|lineage| !history::lineage_served(sess, lineage, &self.world.defects))
-        {
-            return refuse(errors::LINEAGE_CHANGED, None);
-        }
-        if let Some(refusal) = history::read_bound(sess, &mode, &self.world.defects) {
-            return refusal;
+        if request.history_version.as_ref().is_some_and(|lineage| {
+            *lineage != sess.history_version && !self.world.defects.stale_cursor_accepted
+        }) {
+            return refuse(errors::HISTORY_CHANGED, None);
         }
         let limit = request.limit.unwrap_or(DEFAULT_LIMIT).min(MAXIMUM_LIMIT) as usize;
-        if request.view == Some(ReadView::Model) {
-            return self.model_read(sess, mode, &request);
-        }
         let cap = request
             .max_bytes
             .unwrap_or(DEFAULT_MAX_BYTES)
             .min(MAXIMUM_MAX_BYTES) as usize;
         let size = |m: &Msg| m.body.to_string().len();
         let all: Vec<_> = sess
-            .messages
+            .archive
             .iter()
-            .filter(|message| history::in_window(sess, message, &self.world.defects))
+            .chain(sess.messages.iter())
+            .filter(|message| {
+                !self.world.defects.marker_hides_reads || message.ordinal >= sess.first_ordinal
+            })
             .filter(|message| {
                 !self.world.defects.run_tool_calls_embedded_results
                     || message.calls.iter().all(|key| sess.calls[key].result)
@@ -4335,13 +4153,25 @@ impl Module {
                 history::served_ordinal(sess, entry, &self.world.defects)
             })
             .collect();
-        let messages = history::served_numbers(self, sess, &all, messages);
-        let mut page = ReadPage::new(&sess.lineage, messages).with_head(cursor(sess.events.len()));
+        let mut page = ReadPage::new(
+            sess.history_version,
+            sess.incarnation.clone().unwrap_or_else(|| "log-1".into()),
+            messages,
+        )
+        .with_head(cursor(sess.events.len()));
         if end < all.len() {
             page = page.with_next_from_ordinal(all[end].ordinal);
         }
-        message_checkpoint::inject_below_first(sess, &self.world, &request, &mut page);
-        media::page(page, request.media, cap, &self.world.defects)
+        let mut reply = media::page(page, request.media, cap, &self.world.defects);
+        if let Reply::Response(body) = &mut reply {
+            if self.world.defects.missing_history_version {
+                body.as_object_mut().unwrap().remove("history_version");
+            }
+            if self.world.defects.missing_incarnation {
+                body.as_object_mut().unwrap().remove("incarnation");
+            }
+        }
+        reply
     }
 
     fn read_message(&self, sess: &Sess, m: &Msg) -> ReadMessage {
@@ -4380,6 +4210,13 @@ impl Module {
             })
             .collect();
         let mut body = m.body.clone();
+        if profiled(&sess.name) {
+            if self.world.defects.display_pi_profile {
+                body = display::pi_body(&m.mid, &body);
+            } else if self.world.defects.display_opencode_v2_profile {
+                body = display::opencode_v2_body(&m.mid, &body);
+            }
+        }
         if self.world.defects.client_id_in_read {
             if let Some(id) = &m.client_message_id {
                 body["client_message_id"] = json!(id);
@@ -4388,17 +4225,6 @@ impl Module {
         if self.world.defects.sender_in_read {
             if let Some(sender) = &m.sender {
                 body["sender"] = json!(sender);
-            }
-        }
-        for part in body
-            .get_mut("parts")
-            .and_then(Value::as_array_mut)
-            .into_iter()
-            .flatten()
-        {
-            if part["type"] == "text" {
-                let text = part["text"].as_str().unwrap_or_default().to_owned();
-                part["text"] = json!(tags::exposed(sess, m, &text, &self.world.defects));
             }
         }
         if self
@@ -4427,10 +4253,6 @@ impl Module {
             .with_written_at(m.written_at);
         if let Some(role) = m.body["role"].as_str() {
             message = message.with_role(role);
-        }
-        if self.world.serves(groups::TAGS) {
-            let numbers = tags::current(sess);
-            message = message.with_tags(tags::rows(sess, m, &self.world.defects, &numbers));
         }
         if let Some(delivered) = &m.delivered_as {
             message = message.with_delivered_as(serde_json::from_value(delivered.clone()).unwrap());
@@ -4477,7 +4299,7 @@ impl Module {
         }
         let sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get(session) else {
-            let mut head = HeadMeta::no_lineage();
+            let mut head = HeadMeta::empty(1, "log-1");
             if stamp.principal == "reserved:owner" && !self.world.defects.head_sender_owner_absent {
                 head = head.with_sender(cortexkit_role_llm_runner::read::HeadSender::for_owner(
                     self.head_supported_modes(),
@@ -4501,11 +4323,16 @@ impl Module {
             return respond(head);
         };
         if sess.expired_at.is_some() && self.world.retention_defect == RetentionDefect::Empty {
-            return respond(HeadMeta::no_lineage());
+            return respond(HeadMeta::empty(1, "log-1"));
         }
-        let mut head = HeadMeta::new(&sess.lineage, sess.first_ordinal, sess.last_activity)
-            .with_head(cursor(sess.events.len()))
-            .with_history_version(sess.history_version);
+        let mut head = HeadMeta::new(
+            sess.history_version,
+            sess.incarnation.clone().unwrap_or_else(|| "log-1".into()),
+            sess.first_ordinal,
+            sess.last_activity,
+        )
+        .with_head(cursor(sess.events.len()))
+        .with_history_version(sess.history_version);
         if let Some(incarnation) = &sess.incarnation {
             head = head.with_incarnation(incarnation);
         }
@@ -4587,33 +4414,13 @@ impl Module {
         if let Some(cut) = &sess.moved_head {
             head = head.with_cut(cut.clone());
         }
-        if self.world.defects.message_checkpoint == message_checkpoint::Defect::SetupHeadFromStart
-            && message_checkpoint::marker_setup_outstanding(&self.world, session)
-        {
-            head.first_ordinal = Some(0);
-            head.cut = None;
-        }
         if let Some(last) = sess.messages.last() {
             head = head.with_last_ordinal(last.ordinal);
         }
-        // Until the background seal is modelled as done, the sealed Setup
-        // crash run still reads as it did before the restart.
-        let sealing_setup_crash = sess.compaction.sealed_setup_crash
-            && sess
-                .runs
-                .last()
-                .is_some_and(|run| run.state == "interrupted")
-            && self
-                .world
-                .setup_crash_active_reads
-                .try_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
-                .is_ok();
         if let Some(run) = sess.runs.last() {
             head = head.with_last_run_state(LastRunState {
                 run_id: run.run_id.clone(),
-                state: if sealing_setup_crash {
-                    "active".into()
-                } else if self.world.held_paused
+                state: if self.world.held_paused
                     && sess.retention.is_some()
                     && run.state == "active"
                 {
@@ -4626,14 +4433,6 @@ impl Module {
                     .as_ref()
                     .filter(|(waiting, _)| *waiting == run.run_id)
                     .map(|_| cortexkit_role_llm_runner::RUN_REASON_CONTEXT_CEILING_WAIT.to_owned())
-                    .or_else(|| {
-                        sess.compaction_wait
-                            .as_ref()
-                            .filter(|(waiting, _)| *waiting == run.run_id)
-                            .map(|_| {
-                                cortexkit_role_llm_runner::RUN_REASON_COMPACTION_WAIT.to_owned()
-                            })
-                    })
                     .or_else(|| run.reason.clone()),
             });
             if let Some(stamp) = self.head_stamp(sess) {
@@ -4746,12 +4545,7 @@ impl Module {
             result = result.with_final_message(FinalMessage {
                 ordinal,
                 mid: message.mid.clone(),
-                text: tags::exposed(
-                    sess,
-                    message,
-                    &run.final_text.clone().unwrap_or_default(),
-                    &self.world.defects,
-                ),
+                text: run.final_text.clone().unwrap_or_default(),
             });
         }
         if let Some(reason) = &run.reason {
@@ -4865,7 +4659,7 @@ impl Module {
                 .lock()
                 .unwrap()
                 .get(session)
-                .map(|sess| (sess.ceiling_wait.clone(), sess.compaction_wait.clone()))
+                .map(|sess| (sess.ceiling_wait.clone(), None))
                 .unwrap_or_default();
             for (wait, reason) in [
                 (
@@ -4881,26 +4675,6 @@ impl Module {
             }
         }
         reply
-    }
-
-    /// The content of part `part` of `message`, as stored.
-    fn part_content(sess: &Sess, message: &Msg, part: &str, defects: &Defects) -> String {
-        match message.body["parts"].as_array() {
-            Some(parts) => {
-                let part = &parts[part.parse::<usize>().unwrap_or_default()];
-                match part["text"].as_str() {
-                    Some(text) if part["type"] == "text" => {
-                        tags::exposed(sess, message, text, defects)
-                    }
-                    Some(text) if part["type"] != "tool_call" => text.to_owned(),
-                    _ => part.to_string(),
-                }
-            }
-            None => match message.body["text"].as_str() {
-                Some(text) => text.to_owned(),
-                None => message.body["content"].to_string(),
-            },
-        }
     }
 
     /// `send.status`: the answer a re-send of the caller's `send_id` would
@@ -4998,117 +4772,6 @@ impl Module {
             json!({ "kind": "order_end", "id": id, "state": "retracted" }),
         )?;
         Ok(respond(RetractReply::Retracted))
-    }
-
-    fn resolve(&self, session: &str, params: &Value) -> Reply {
-        if let Some(field) = unknown_field(params, &["tag", "range", "media"]) {
-            return invalid(&field);
-        }
-        let request: cortexkit_role_llm_runner::tags::ResolveRequest =
-            match serde_json::from_value(params.clone()) {
-                Ok(request) => request,
-                Err(error) if error.to_string().contains("tag") => return invalid("tag"),
-                Err(error) if error.to_string().contains("media") => return invalid("media"),
-                Err(_) => return invalid("range"),
-            };
-        let number = match request.number() {
-            Ok(number) => number,
-            Err(field) => return invalid(field),
-        };
-        let sessions = self.sessions.lock().unwrap();
-        let found = sessions.get(session).and_then(|sess| {
-            // Only the current lineage's parts resolve; with
-            // `Defects::resolve_left_lineage_tags` set, resolve also searches
-            // parts a recovery dropped with the lineage it left.
-            let left = self
-                .world
-                .defects
-                .resolve_left_lineage_tags
-                .then(|| {
-                    sess.left.iter().find_map(|m| {
-                        m.left_numbers
-                            .iter()
-                            .find(|(_, n)| *n == number)
-                            .map(|(part, _)| (m, part.clone()))
-                    })
-                })
-                .flatten();
-            left.or_else(|| tags::find(sess, number))
-                .map(|found| (sess, found))
-        });
-        let Some((sess, (message, part))) = found else {
-            return refuse(errors::UNKNOWN_TAG, None);
-        };
-        // A tag naming a part below the lineage's first ordinal names
-        // history before the latest cut, which resolve never answers.
-        if message.ordinal < sess.first_ordinal
-            && sess.messages.iter().any(|m| m.mid == message.mid)
-        {
-            return refuse(
-                errors::BEFORE_LINEAGE_START,
-                Some(json!({ "first_ordinal": sess.first_ordinal })),
-            );
-        }
-        let content = Self::part_content(sess, message, &part, &self.world.defects);
-        let sliced = match cortexkit_role_llm_runner::tags::slice(&content, request.range.as_ref())
-        {
-            Ok(sliced) => sliced,
-            Err(field) => return invalid(field),
-        };
-        let mut reply = cortexkit_role_llm_runner::tags::ResolveReply::new(
-            &request.tag,
-            message.ordinal,
-            &message.mid,
-            part,
-            sliced,
-        );
-        if let Some(range) = request.range {
-            reply = reply.with_range(range);
-        }
-        if request.media == Some(cortexkit_role_llm_runner::read::MediaMode::Descriptors) {
-            let is_text = message.body.get("text").is_some()
-                || message.body["parts"]
-                    .as_array()
-                    .and_then(|p| reply.part.parse::<usize>().ok().and_then(|i| p.get(i)))
-                    .is_some_and(|p| p["type"] == "text");
-            if !is_text {
-                if let Ok(value) = serde_json::from_str::<Value>(&content) {
-                    reply.content = match cortexkit_role_llm_runner::read::descriptors::describe(
-                        &value,
-                        &media::payloads(&value),
-                        cortexkit_role_llm_runner::read::descriptors::DESCRIPTOR_MESSAGE_MAX - 2048,
-                    ) {
-                        Ok(value) => value,
-                        Err(_) => {
-                            return refuse(
-                                errors::REPLY_TOO_LARGE,
-                                Some(json!({"ordinal":message.ordinal})),
-                            )
-                        }
-                    };
-                }
-            } else if let Some(text) = reply
-                .content
-                .as_str()
-                .filter(|s| s.len() > cortexkit_role_llm_runner::read::descriptors::PART_INLINE_MAX)
-            {
-                reply.content = serde_json::to_value(
-                    cortexkit_role_llm_runner::read::descriptors::Reference::text(
-                        Some(reply.part.clone()),
-                        text,
-                    ),
-                )
-                .unwrap();
-            }
-        } else if serde_json::to_vec(&reply).unwrap().len() + 21
-            > cortexkit_role_llm_runner::TRANSPORT_FRAME_LIMIT
-        {
-            return refuse(
-                errors::REPLY_TOO_LARGE,
-                Some(json!({"ordinal":message.ordinal})),
-            );
-        }
-        respond(reply)
     }
 
     fn tool_calls(&self, session: &str, params: &Value) -> Reply {
@@ -5465,21 +5128,6 @@ impl RunnerRoute for FakeRoute {
             .lock()
             .unwrap()
             .push((case, method.to_owned()));
-        let completed = match method {
-            ops::SESSION_HEAD => message_checkpoint::head_wait(world, &self.session),
-            ops::SESSION_READ => message_checkpoint::read_wait(world, &self.session),
-            _ => None,
-        };
-        if let Some(completed) = completed {
-            // This faulty request waits for the Setup answer, without
-            // blocking the executor that must enforce the case timeout.
-            while !completed.load(Ordering::SeqCst) {
-                if !self.module.alive.load(Ordering::SeqCst) {
-                    return Err(RouteFailure::new("the module is not running"));
-                }
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
-        }
         self.module
             .handle(&self.stamp, &self.session, method, params)
     }
@@ -5502,6 +5150,7 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub route_decision_fixture_calls: AtomicUsize,
     pub finish_reason_fixture: bool,
     pub model_failure_fixture: bool,
     pub step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents,
@@ -5534,7 +5183,6 @@ pub struct FakeSubject {
     /// The tool provider cannot answer an image-only result, so a scripted
     /// call that would carry one carries its default text result instead.
     pub no_image_results: bool,
-    pub standalone_in_process: bool,
     /// The first `late_seal_reads` `run.result` reads of an ended run answer
     /// `active`, as if the runner reported the end late.
     pub late_seal_reads: usize,
@@ -5545,15 +5193,8 @@ pub struct FakeSubject {
     pub cancel_step_boundary: bool,
     pub defects: Defects,
     pub step_recovery: StepRecovery,
-    pub compaction_route_mode: compaction::CompactionRouteMode,
     pub capabilities: BTreeSet<Capability>,
     pub delivery_order_modes: Option<Vec<String>>,
-    pub seal_compaction_setup_crash: bool,
-    /// With `seal_compaction_setup_crash`, the first
-    /// `setup_crash_active_reads` `session.head` reads of the sealed Setup
-    /// crash run answer `active` before `interrupted`; `usize::MAX` never
-    /// lets it settle.
-    pub setup_crash_active_reads: usize,
     pub kill_points: Vec<&'static str>,
     /// Report every kill as a real process kill, which this in-process fake
     /// cannot make. Only for tests of the verdict.
@@ -5580,7 +5221,6 @@ pub struct FakeSubject {
     /// The adapter can give a session host history before its first send
     /// (`seed_host_history`), as a runner over a host that adopted it.
     pub host_prefix_hook: bool,
-    pub message_checkpoint_hooks: bool,
     /// The adapter can seed finished messages behind a cut
     /// (`seed_session_history`), for the cost case.
     pub seed_hook: bool,
@@ -5588,13 +5228,6 @@ pub struct FakeSubject {
     /// numbered message, as on a runner over a host that adopted each
     /// session with history.
     pub host_prefix_everywhere: u64,
-    /// Refuse reads `transient` while a tag-rendering run waits for a Setup
-    /// without descent, as the contract lets a runner.
-    pub holds_reads_during_setup: bool,
-    /// The runner runs a fresh session's first Setup at send admission,
-    /// before writing any message, so that Setup names no `newest`.
-    /// `tags_setup_checkpoint_anchors_at_its_cut` is then inapplicable.
-    pub first_setup_names_newest: bool,
     /// The adapter cannot revert a session: `revert_session` errors.
     pub cannot_revert: bool,
     /// The adapter cannot compact a session in its host: `compact_in_host`
@@ -5603,8 +5236,6 @@ pub struct FakeSubject {
     pub cannot_renumber_output_refs: bool,
     pub cannot_install_output_ref_held: bool,
     pub cannot_complete_output_ref_held: bool,
-    /// How the fake judges the prompt cache's lifetime.
-    pub cache_ttl_defect: CacheTtlDefect,
     /// The case the suite is in, as a test's progress callback sets it: the
     /// case's name from its `CaseStarted` until its `CaseFinished`, `None`
     /// between cases. The fake only reads it, to label `route_calls`.
@@ -5626,17 +5257,13 @@ pub fn served() -> BTreeSet<Capability> {
         Capability::RunCancel,
         Capability::DispatchAttribution,
         Capability::Streaming,
-        Capability::Compaction,
         // `compaction` requires `tags`, whose ops the group lists.
-        Capability::Tags,
-        Capability::ModelView,
         Capability::Steer,
         Capability::Queue,
         Capability::Retract,
         Capability::HoldToolCalls,
         Capability::HoldContextCeiling,
         Capability::HostMetadataChange,
-        Capability::TagCheckpoint,
         Capability::RenderedModelInput,
     ]
     .into()
@@ -5651,14 +5278,13 @@ pub const KILL_POINTS: &[&str] = &[
     points::TOOL_RESULT_RECORDED,
     points::TERMINAL,
     points::RETENTION_TOMBSTONED,
-    points::COMPACTION_APPLIED,
-    points::FOLD_RECORDED,
     points::USER_COMMAND_FORWARDED,
 ];
 
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            route_decision_fixture_calls: AtomicUsize::new(0),
             step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents::new(
                 "per_attempt",
                 "step_ref",
@@ -5682,7 +5308,6 @@ impl FakeSubject {
             data_url_media: false,
             descriptor_fixtures: false,
             no_image_results: false,
-            standalone_in_process: false,
             late_seal_reads: 0,
             retention_defect: RetentionDefect::None,
             retention_delete_ms: RETENTION_DELETE_MS,
@@ -5691,12 +5316,9 @@ impl FakeSubject {
             cancel_step_boundary: true,
             defects,
             step_recovery: StepRecovery::Resume,
-            compaction_route_mode: compaction::CompactionRouteMode::SingleSession,
             capabilities: served(),
             delivery_order_modes: None,
             without_plans: false,
-            seal_compaction_setup_crash: false,
-            setup_crash_active_reads: 0,
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
             queue_receipt_pending_then_unknown: false,
@@ -5706,17 +5328,13 @@ impl FakeSubject {
             pause_for: None,
             turn_system: true,
             host_prefix_hook: false,
-            message_checkpoint_hooks: true,
             seed_hook: false,
             host_prefix_everywhere: 0,
-            holds_reads_during_setup: false,
-            first_setup_names_newest: true,
             cannot_revert: false,
             cannot_compact_in_host: false,
             cannot_renumber_output_refs: false,
             cannot_install_output_ref_held: false,
             cannot_complete_output_ref_held: false,
-            cache_ttl_defect: CacheTtlDefect::None,
             current_case: Arc::new(Mutex::new(None)),
             route_calls: Arc::new(Mutex::new(Vec::new())),
             world: Mutex::new(None),
@@ -5736,13 +5354,8 @@ impl FakeSubject {
                     step_event_policy: self.step_event_policy.clone(),
                     step_publications: Mutex::new(BTreeMap::new()),
                     held_replies: Mutex::new(BTreeMap::new()),
-                    standalone_in_process: self.standalone_in_process,
-                    host_prefix_everywhere: self.host_prefix_everywhere,
                     host_prefixes: Mutex::new(BTreeMap::new()),
-                    message_checkpoints: Mutex::new(BTreeMap::new()),
                     host_cuts: Mutex::new(BTreeSet::new()),
-                    holds_reads_during_setup: self.holds_reads_during_setup,
-                    setup_holds: Mutex::new(BTreeMap::new()),
                     retention_defect: if RETENTION_DEFECTS_ENABLED {
                         self.retention_defect
                     } else {
@@ -5831,10 +5444,6 @@ impl FakeSubject {
                     pending_model_holds: Mutex::new(BTreeSet::new()),
                     held_models: Mutex::new(BTreeMap::new()),
                     staging_holds: Mutex::new(BTreeSet::new()),
-                    compaction: Mutex::new(compaction::Providers::new(
-                        self.seal_compaction_setup_crash,
-                    )),
-                    compaction_route_mode: self.compaction_route_mode,
                     invocations: Mutex::new(BTreeMap::new()),
                     held: Mutex::new(BTreeSet::new()),
                     released: Mutex::new(BTreeSet::new()),
@@ -5845,15 +5454,9 @@ impl FakeSubject {
                     ceiling_holds: Mutex::new(BTreeSet::new()),
                     models: Mutex::new(BTreeMap::new()),
                     observed_cache_lifetimes: Mutex::new(BTreeMap::new()),
-                    cache_clocks: Mutex::new(BTreeMap::new()),
-                    cache_ttl_defect: self.cache_ttl_defect,
                     stream_holds: Mutex::new(BTreeMap::new()),
                     in_flight: Mutex::new(BTreeMap::new()),
                     late_seal_reads: AtomicUsize::new(self.late_seal_reads),
-                    setup_crash_active_reads: AtomicUsize::new(self.setup_crash_active_reads),
-                    ride_scripts: Mutex::new(BTreeMap::new()),
-                    rides: Mutex::new(BTreeMap::new()),
-                    resolved_rides: Mutex::new(BTreeMap::new()),
                     ride_clock: AtomicU64::new(0),
                     current_case: Arc::clone(&self.current_case),
                     route_calls: Arc::clone(&self.route_calls),
@@ -5969,6 +5572,56 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn fixture_seed_historical_tool_output(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        tool_call_id: &str,
+        content: &str,
+    ) -> Result<bool, HarnessError> {
+        handle.0.commit(session, json!({"kind":"fixture_historical_result","tool_call_id":tool_call_id,"content":content}))
+            .map_err(|_| HarnessError::new("killed importing a historical output"))?;
+        Ok(true)
+    }
+    fn shown_part_number(&self, session: &str, mid: &str, part: &str) -> Option<u64> {
+        self.modules
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find_map(|module| {
+                module
+                    .sessions
+                    .lock()
+                    .unwrap()
+                    .get(session)
+                    .and_then(|sess| {
+                        part_numbers(sess)
+                            .get(&(mid.to_owned(), part.to_owned()))
+                            .copied()
+                    })
+            })
+    }
+
+    fn oversized_tool_result(
+        &self,
+        message: &Value,
+        tool_call_id: &str,
+    ) -> Option<cortexkit_role_llm_runner_conformance::ToolResultLimitObservation> {
+        if message["tool_call_id"] != tool_call_id {
+            return None;
+        }
+        let value = &message["content"];
+        Some(
+            cortexkit_role_llm_runner_conformance::ToolResultLimitObservation::new(
+                value["reason"].as_str()?,
+                value["bytes"].as_u64()?,
+                value["limit"].as_u64()?,
+                value["text"].as_str()?,
+                value["is_error"] == true,
+            ),
+        )
+    }
     async fn live_ids_observation(
         &self,
         _handle: &FakeHandle,
@@ -5978,6 +5631,12 @@ impl LlmRunnerSubject for FakeSubject {
     {
         Ok((!self.defects.live_ids_no_fixture)
             .then(|| live_ids::observe(request, store, &self.defects)))
+    }
+
+    async fn route_decision_id_fixture(&self, _session: &str) -> Result<String, HarnessError> {
+        self.route_decision_fixture_calls
+            .fetch_add(1, Ordering::SeqCst);
+        Ok("seeded-decision".into())
     }
 
     async fn configure_service_tier(
@@ -6178,7 +5837,6 @@ impl LlmRunnerSubject for FakeSubject {
     }
     fn output_refs_fields(&self, session: &str) -> Result<Map<String, Value>, HarnessError> {
         let mut fields = self.send_fields(session, true);
-        fields["plan"]["render_tags"] = json!(true);
         fields["plan"]["tool_items"] = json!([{"provider":TOOL_MODULE,"output_refs":true}]);
         Ok(fields)
     }
@@ -6202,7 +5860,7 @@ impl LlmRunnerSubject for FakeSubject {
         let sessions = handle.0.sessions.lock().unwrap();
         let sess = &sessions[session];
         let mid = &sess.messages.last().unwrap().mid;
-        Ok(tags::current(sess)
+        Ok(part_numbers(sess)
             .iter()
             .find(|((m, _), _)| m == mid)
             .unwrap()
@@ -6318,52 +5976,6 @@ impl LlmRunnerSubject for FakeSubject {
             .cutoff = Some(after);
         Ok(())
     }
-    fn standalone_in_process(&self) -> bool {
-        self.standalone_in_process
-    }
-
-    async fn require_setup_again(
-        &self,
-        handle: &FakeHandle,
-        session: &str,
-    ) -> Result<(), HarnessError> {
-        handle
-            .0
-            .commit(session, json!({"kind":"require_setup"}))
-            .map_err(|Killed| HarnessError::new("killed"))
-    }
-    async fn publish_compaction_view(
-        &self,
-        session: &str,
-        view: cortexkit_role_llm_runner_conformance::ScriptedView,
-    ) -> Result<u64, HarnessError> {
-        Ok(self.publish_view(session, view))
-    }
-
-    async fn publish_compaction_part_edits(
-        &self,
-        session: &str,
-        edits: Vec<cortexkit_role_compaction_provider::view::PartEdit>,
-    ) -> Result<u64, HarnessError> {
-        if self.defects.part_edits_missing_hook {
-            return Err(HarnessError::new("part-edit publishing is not implemented"));
-        }
-        self.publish_part_edits(session, edits)
-    }
-
-    async fn compaction_provider_calls(
-        &self,
-        session: &str,
-    ) -> Result<Vec<cortexkit_role_llm_runner_conformance::ProviderCall>, HarnessError> {
-        if !session.starts_with("cf-part-edit") {
-            return Err(HarnessError::new(
-                "compaction provider calls are not implemented",
-            ));
-        }
-        Ok(self.world().compaction.lock().unwrap().sessions[session]
-            .provider_calls
-            .clone())
-    }
 
     async fn seed_session_history(
         &self,
@@ -6408,87 +6020,6 @@ impl LlmRunnerSubject for FakeSubject {
         Ok(())
     }
 
-    async fn message_checkpoint_fixture(
-        &self,
-        _handle: &FakeHandle,
-        session: &str,
-        scenario: cortexkit_role_llm_runner_conformance::message_checkpoint::Scenario,
-    ) -> Result<
-        Option<cortexkit_role_llm_runner_conformance::message_checkpoint::Fixture>,
-        HarnessError,
-    > {
-        Ok(self
-            .message_checkpoint_hooks
-            .then(|| message_checkpoint::fixture(self, session, scenario)))
-    }
-
-    async fn native_message_checkpoint(
-        &self,
-        session: &str,
-    ) -> Result<Option<Value>, HarnessError> {
-        if !self.message_checkpoint_hooks {
-            return Ok(None);
-        }
-        let modules = self.modules.lock().unwrap();
-        let key = modules.iter().rev().find_map(|module| {
-            module
-                .sessions
-                .lock()
-                .unwrap()
-                .get(session)
-                .and_then(|sess| sess.native_message_key.clone())
-        });
-        Ok(Some(key.unwrap_or(Value::Null)))
-    }
-
-    async fn plant_message_checkpoint_marker(
-        &self,
-        _handle: &FakeHandle,
-        session: &str,
-    ) -> Result<
-        Option<cortexkit_role_llm_runner_conformance::message_checkpoint::Fixture>,
-        HarnessError,
-    > {
-        Ok(self
-            .message_checkpoint_hooks
-            .then(|| message_checkpoint::marker_fixture(self, session)))
-    }
-
-    async fn insert_uncounted_host_summary(
-        &self,
-        handle: &FakeHandle,
-        session: &str,
-    ) -> Result<Option<String>, HarnessError> {
-        if !self.message_checkpoint_hooks {
-            return Ok(None);
-        }
-        let mid = format!("{session}.uncounted-summary");
-        handle
-            .0
-            .commit(session, json!({"kind":"uncounted_host_summary", "mid":mid}))
-            .map_err(|Killed| HarnessError::new("killed inserting host summary"))?;
-        Ok(Some(mid))
-    }
-
-    async fn insert_uncounted_host_compaction_only(
-        &self,
-        handle: &FakeHandle,
-        session: &str,
-    ) -> Result<Option<String>, HarnessError> {
-        if !self.message_checkpoint_hooks {
-            return Ok(None);
-        }
-        let mid = format!("{session}.uncounted-compaction-only");
-        handle
-            .0
-            .commit(
-                session,
-                json!({"kind":"uncounted_host_compaction_only", "mid":mid}),
-            )
-            .map_err(|Killed| HarnessError::new("killed inserting compaction-only row"))?;
-        Ok(Some(mid))
-    }
-
     async fn seed_untimed_tool_call(
         &self,
         handle: &FakeHandle,
@@ -6504,43 +6035,6 @@ impl LlmRunnerSubject for FakeSubject {
                        "arguments": call.arguments, "content": call.result}),
             )
             .map_err(|Killed| HarnessError::new("killed seeding a call"))
-    }
-
-    async fn hold_next_compaction_setup(&self, session: &str) -> Result<(), HarnessError> {
-        self.world()
-            .setup_holds
-            .lock()
-            .unwrap()
-            .insert(session.into(), history::SetupHold::Armed);
-        Ok(())
-    }
-
-    async fn await_compaction_setup_held(&self, session: &str) -> Result<(), HarnessError> {
-        match self.world().setup_holds.lock().unwrap().get(session) {
-            Some(history::SetupHold::Held) => Ok(()),
-            other => Err(HarnessError::new(format!(
-                "the runner made no Setup call to hold: {other:?}"
-            ))),
-        }
-    }
-
-    async fn release_compaction_setup(&self, session: &str) -> Result<(), HarnessError> {
-        self.world()
-            .setup_holds
-            .lock()
-            .unwrap()
-            .insert(session.into(), history::SetupHold::Released);
-        let result = self.drive_compaction_modules(session);
-        message_checkpoint::setup_returned(&self.world(), session);
-        result
-    }
-
-    fn holds_reads_during_setup(&self) -> bool {
-        self.holds_reads_during_setup
-    }
-
-    fn first_setup_names_newest(&self) -> bool {
-        self.first_setup_names_newest
     }
 
     async fn revert_session(
@@ -6611,15 +6105,11 @@ impl LlmRunnerSubject for FakeSubject {
         })
     }
 
-    fn send_fields(&self, session: &str, first: bool) -> Map<String, Value> {
+    fn send_fields(&self, _session: &str, first: bool) -> Map<String, Value> {
         let mut fields = Map::new();
         if first && !self.without_plans {
             fields.insert("plan".into(), json!({ "tools": [SCRIPTED_TOOL] }));
             fields.insert("model".into(), json!("fake-model"));
-            if self.has_compaction_script(session) {
-                fields.get_mut("plan").unwrap()["compaction_item"] =
-                    json!({"provider":"fake.compaction"});
-            }
         }
         fields
     }
@@ -6771,64 +6261,8 @@ impl LlmRunnerSubject for FakeSubject {
             .map_err(|Killed| HarnessError::new("the module was killed"))
     }
 
-    async fn drop_marker_key(
-        &self,
-        handle: &FakeHandle,
-        session: &str,
-    ) -> Result<(), HarnessError> {
-        handle
-            .0
-            .commit(session, json!({ "kind": "drop_marker_key" }))
-            .map_err(|Killed| HarnessError::new("the module was killed"))
-    }
-
-    async fn host_stored_text(
-        &self,
-        handle: &FakeHandle,
-        session: &str,
-        marker: &str,
-    ) -> Result<Option<String>, HarnessError> {
-        let sessions = handle.0.sessions.lock().unwrap();
-        Ok(sessions
-            .get(session)
-            .and_then(|sess| tags::host_stored(sess, marker, &self.defects)))
-    }
-
     fn image_tool_result(&self, marker: &str) -> Option<Value> {
-        (!self.no_image_results).then(|| tags::image_result(marker))
-    }
-
-    fn numbering_tool_result(
-        &self,
-        marker: &str,
-        blocks: &[cortexkit_role_llm_runner::tags::ToolResultBlock<'_>],
-    ) -> Option<Value> {
-        use cortexkit_role_llm_runner::tags::ToolResultBlock;
-        let content: Vec<Value> = blocks
-            .iter()
-            .map(|block| match block {
-                ToolResultBlock::Text(text) => json!({"type":"text","text":text}),
-                ToolResultBlock::Image => json!({"type":"image","name":"invented-square.png"}),
-                _ => {
-                    json!({"type":"file","mime_type":"application/pdf","name":"invented-notes.pdf"})
-                }
-            })
-            .collect();
-        Some(if blocks.is_empty() {
-            json!({"fake_numbering":true,"structuredContent":{"marker":marker}})
-        } else if self.capabilities.contains(&Capability::RunToolCalls)
-            && !self.defects.tags_marker_only_results
-            && blocks
-                .iter()
-                .any(|block| matches!(block, ToolResultBlock::Media))
-            && !blocks
-                .iter()
-                .any(|block| matches!(block, ToolResultBlock::Text(text) if !text.is_empty()))
-        {
-            json!({"fake_numbering":true,"content":content})
-        } else {
-            json!({"fake_numbering":true,"marker":marker,"content":content})
-        })
+        (!self.no_image_results).then(|| image_result(marker))
     }
 
     async fn fork_session(
@@ -6985,20 +6419,6 @@ impl LlmRunnerSubject for FakeSubject {
         )
     }
 
-    async fn install_compaction_setup(
-        &self,
-        session: &str,
-        setup: cortexkit_role_llm_runner_conformance::CompactionSetup,
-    ) -> Result<(), HarnessError> {
-        self.install_compaction(session, setup);
-        Ok(())
-    }
-    async fn compaction_observation(
-        &self,
-        session: &str,
-    ) -> Result<cortexkit_role_llm_runner_conformance::CompactionObservation, HarnessError> {
-        Ok(self.observe_compaction(session))
-    }
     fn delivery_clock_now_ms(&self) -> Option<u64> {
         (self.defects.succession != Some("missing_clock")).then(|| self.world().now())
     }
@@ -7035,17 +6455,6 @@ impl LlmRunnerSubject for FakeSubject {
             }
         }
         Ok(())
-    }
-    async fn release_compaction_model(&self, session: &str) -> Result<(), HarnessError> {
-        self.release_model(session)
-    }
-    async fn durable_compaction_setup(
-        &self,
-        handle: &FakeHandle,
-        session: &str,
-    ) -> Result<Option<cortexkit_role_llm_runner_conformance::CompactionMessage>, HarnessError>
-    {
-        self.durable_setup(handle, session)
     }
 
     async fn await_tool_call(&self, arguments: &Value) -> Result<(), HarnessError> {
@@ -7093,21 +6502,6 @@ impl LlmRunnerSubject for FakeSubject {
             .lock()
             .unwrap()
             .insert(session.into());
-        Ok(())
-    }
-
-    async fn advance_prompt_cache_clock(
-        &self,
-        session: &str,
-        milliseconds: u64,
-    ) -> Result<(), HarnessError> {
-        self.world()
-            .cache_clocks
-            .lock()
-            .unwrap()
-            .entry(session.into())
-            .or_default()
-            .now += milliseconds;
         Ok(())
     }
 
@@ -7239,29 +6633,6 @@ impl LlmRunnerSubject for FakeSubject {
         }
     }
 
-    async fn observed_ride_wait_max_ms(&self, session: &str) -> Result<Option<u64>, HarnessError> {
-        if self.setup_received(session) {
-            Ok(Some(RIDE_WAIT_MAX_MS))
-        } else {
-            Err(HarnessError::new(
-                "the session's provider received no Setup",
-            ))
-        }
-    }
-
-    async fn script_next_ride(
-        &self,
-        session: &str,
-        ride: cortexkit_role_llm_runner_conformance::ScriptedRide,
-    ) -> Result<(), HarnessError> {
-        self.world()
-            .ride_scripts
-            .lock()
-            .unwrap()
-            .insert(session.into(), ride);
-        Ok(())
-    }
-
     async fn pause(&self) {
         // Rewrite rides are timed on their own clock, so a case waiting on
         // one moves it without real or Tokio time passing.
@@ -7274,3 +6645,9 @@ impl LlmRunnerSubject for FakeSubject {
         }
     }
 }
+
+fn image_result(marker: &str) -> Value {
+    serde_json::json!({ IMAGE_RESULT: marker })
+}
+
+pub const IMAGE_RESULT: &str = "fake_image";

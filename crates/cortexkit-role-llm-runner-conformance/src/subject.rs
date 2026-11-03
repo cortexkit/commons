@@ -1,6 +1,6 @@
 //! What the runner adapter supplies beyond its harness: the capabilities
 //! it declares, how to reach a session's management route, and a scripted
-//! model, tool and compaction providers.
+//! model and tool endpoints.
 
 use std::collections::BTreeSet;
 
@@ -67,25 +67,16 @@ pub enum Capability {
     DispatchAttribution,
     /// The `streaming` group: `session.subscribe` from a page's `head`.
     Streaming,
-    /// The `model_view` group: live half-open replacement/insertion paging,
-    /// and the canonical view used by the compaction crash checks.
-    ModelView,
     /// The `steer` delivery mode of `session.send`.
     Steer,
     /// The `queue` delivery mode of `session.send`. Cases start every
     /// session it writes with a `queue` send (the mode an absent `delivery`
     /// means), so every case that needs a written session requires it.
     Queue,
+    /// Admission of a session's frozen plan, including explicit compaction preset validation.
+    Plans,
     /// The `interrupt` delivery mode of `session.send`.
     Interrupt,
-    /// The `compaction` group: scripted Setup, advance notices, views and
-    /// rides, refusals, deadlines and durable replay.
-    Compaction,
-    /// The `tag_checkpoint` group: the runner honours a compaction
-    /// provider's Setup checkpoint `{tag_checkpoint, cut}`.
-    TagCheckpoint,
-    /// Separate message and tag anchors in Setup and native markers.
-    MessageCheckpoint,
     /// The `session_change` group: `session.refresh`,
     /// `session.refresh_policy` and `session.flush_prefix`. Its cases need
     /// [`LlmRunnerSubject::refresh_plan`] and
@@ -112,8 +103,6 @@ pub enum Capability {
     /// `session.adopt`: the owner takes over a session the host started
     /// with a plan applied, without sending a prompt.
     Adopt,
-    /// Runner-owned part tags on `session.read` and `session.resolve`.
-    Tags,
     /// `run.tool_calls`: a run's tool calls as a paged list.
     RunToolCalls,
     /// Per-run token usage (`usage`) on `run.result` and `run.status`.
@@ -195,13 +184,10 @@ impl Capability {
         Self::Retract,
         Self::DispatchAttribution,
         Self::Streaming,
-        Self::ModelView,
         Self::Steer,
         Self::Queue,
+        Self::Plans,
         Self::Interrupt,
-        Self::Compaction,
-        Self::TagCheckpoint,
-        Self::MessageCheckpoint,
         Self::SessionChange,
         Self::Retention,
         Self::SessionRetention,
@@ -213,7 +199,6 @@ impl Capability {
         Self::InterruptReason,
         Self::StructuredOutput,
         Self::Adopt,
-        Self::Tags,
         Self::RunToolCalls,
         Self::RunUsage,
         Self::FinishReason,
@@ -264,13 +249,10 @@ impl Capability {
             Self::Retract => groups::RETRACT,
             Self::DispatchAttribution => groups::DISPATCH_ATTRIBUTION,
             Self::Streaming => groups::STREAMING,
-            Self::ModelView => groups::MODEL_VIEW,
             Self::Steer => groups::STEER,
             Self::Queue => groups::QUEUE,
+            Self::Plans => groups::PLANS,
             Self::Interrupt => groups::INTERRUPT,
-            Self::Compaction => groups::COMPACTION,
-            Self::TagCheckpoint => groups::TAG_CHECKPOINT,
-            Self::MessageCheckpoint => groups::MESSAGE_CHECKPOINT,
             Self::SessionChange => groups::SESSION_CHANGE,
             Self::Retention => groups::RETENTION,
             Self::SessionRetention => groups::SESSION_RETENTION,
@@ -282,7 +264,6 @@ impl Capability {
             Self::InterruptReason => groups::INTERRUPT_REASON,
             Self::StructuredOutput => groups::STRUCTURED_OUTPUT,
             Self::Adopt => groups::ADOPT,
-            Self::Tags => groups::TAGS,
             Self::RunToolCalls => groups::RUN_TOOL_CALLS,
             Self::RunUsage => groups::RUN_USAGE,
             Self::FinishReason => groups::FINISH_REASON,
@@ -368,6 +349,36 @@ pub struct ToolResultObservation {
     pub code: String,
 }
 
+/// An oversized result decoded from the runner's stored native error result,
+/// never inferred from the script that supplied the original output.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ToolResultLimitObservation {
+    pub reason: String,
+    pub bytes: u64,
+    pub limit: u64,
+    pub text: String,
+    pub is_error: bool,
+}
+
+impl ToolResultLimitObservation {
+    pub fn new(
+        reason: impl Into<String>,
+        bytes: u64,
+        limit: u64,
+        text: impl Into<String>,
+        is_error: bool,
+    ) -> Self {
+        Self {
+            reason: reason.into(),
+            bytes,
+            limit,
+            text: text.into(),
+            is_error,
+        }
+    }
+}
+
 impl ToolResultObservation {
     pub fn new(executed: bool, code: impl Into<String>) -> Self {
         Self {
@@ -386,15 +397,6 @@ pub struct ModelRequestObservation {
     /// Applied abstract level decoded from the request actually received by
     /// the model, not inferred from the send or runner's usage.
     pub service_tier_applied: Option<String>,
-    /// Number of service_tier_change rides received before this request arrives
-    /// at the scripted model provider. Capture both providers' arrivals with a shared counter, as
-    /// for surface_change_rides; None means arrival order cannot be observed.
-    pub service_tier_change_rides: Option<u64>,
-    /// Number of `surface_change` rides received for this session before
-    /// this request reached the model. Capture arrivals at both scripted providers with a shared
-    /// counter; separate after-the-fact call lists cannot establish ordering.
-    /// None when the adapter cannot observe cross-provider arrival order.
-    pub surface_change_rides: Option<u64>,
     /// The output-token maximum actually sent to the model, if any.
     pub max_output_tokens: Option<u64>,
     /// The names of the tools the request offered, in request order.
@@ -413,10 +415,6 @@ pub struct ModelRequestObservation {
 }
 
 impl ModelRequestObservation {
-    pub fn with_surface_change_rides(mut self, count: u64) -> Self {
-        self.surface_change_rides = Some(count);
-        self
-    }
     pub fn with_max_output_tokens(mut self, limit: u64) -> Self {
         self.max_output_tokens = Some(limit);
         self
@@ -666,7 +664,8 @@ pub enum AttributionFixture {
 ///
 /// Cases open routes with [`LlmRunnerSubject::session_route`], because every
 /// role op rides a session-bound route; they do not call [`Harness::route`].
-/// Compaction terms are defined in the crate's Contract vocabulary section.
+/// Compaction terms are defined by the separate `cortexkit-role-compaction`
+/// contract; this kit does not check that protocol.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
     /// Drive one fresh session whose host names an assistant message only
@@ -703,18 +702,23 @@ pub trait LlmRunnerSubject: Harness {
         None
     }
 
+    /// A valid caller decision for the run-fixed routing-decision case.
+    /// The default literal is suitable for runners that do not use routing
+    /// accounts and ignore forwarding/reporting. A routing-backed adapter
+    /// overrides this hook with a decision it has seeded in routing for this
+    /// session's provider and model, valid when the next send starts its run.
+    async fn route_decision_id_fixture(&self, _session: &str) -> Result<String, HarnessError> {
+        Ok("decision-a".into())
+    }
+
     /// Arrange a current route supporting fast but not ultrafast, with served
-    /// unknown, and a scripted model that does not state a served tier. For
-    /// the ride case, attach a compaction provider answering nothing and count
-    /// rides as they arrive at the scripted compaction provider, before each
-    /// request arrives at the scripted model provider. Record the count in
-    /// [`ModelRequestObservation::service_tier_change_rides`].
-    /// The fixed-run refusal case sends again while the first model response is
-    /// held: implement [`LlmRunnerSubject::hold_next_model_step`],
-    /// [`LlmRunnerSubject::await_model_step`] and [`LlmRunnerSubject::release_model_step`]
-    /// so that the run remains active. Do not synthesize
-    /// refusals, usage, or request observations. Return false when the adapter
-    /// cannot arrange this fixture; each affected case is not applicable by name.
+    /// unknown, and a scripted model that does not state a served tier. The
+    /// refusal scenario changes the tier on another send while the first model
+    /// response is held; the active run's setting must remain fixed. Implement
+    /// hold_next_model_step, await_model_step and release_model_step so
+    /// that the run remains active. Do not synthesize refusals, usage or request
+    /// observations. Return false when this fixture is unsupported; each affected
+    /// case is then not applicable by name.
     async fn configure_service_tier(
         &self,
         _session: &str,
@@ -730,23 +734,14 @@ pub trait LlmRunnerSubject: Harness {
         false
     }
 
-    /// Seed an unpruned, idle native transcript under this session's owner.
-    /// Include each declared pruning kind in at least two messages, plus an
-    /// unpruned part. Enroll with exactly `accepts` when Some; None means no
-    /// compaction provider. Return independently scripted original/served
-    /// parts, never expectations obtained by running the pruning code.
-    ///
-    /// When it enrolls a provider, that provider is the adapter's scripted
-    /// compaction provider for the session: [`Self::install_compaction_setup`]
-    /// changes its next Setup answer, [`Self::publish_compaction_view`]
-    /// publishes from it, and [`Self::compaction_observation`] and
-    /// [`Self::compaction_provider_calls`] report what it received. It
-    /// answers model calls without holding them, so runs on the session end
-    /// without [`Self::release_compaction_model`].
+    /// Seed idle native history with independently scripted original/pruned
+    /// parts. Include every declared kind in two messages and an unpruned part.
+    /// `with_compaction_provider` names a provider in the plan but requires no
+    /// compaction protocol: pruning must then leave all payloads untouched.
     async fn archive_pruning_fixture(
         &self,
         _session: &str,
-        _accepts: Option<Vec<String>>,
+        _with_compaction_provider: bool,
     ) -> Result<Vec<ArchivePruningPart>, HarnessError> {
         Err(HarnessError::new(
             "archive_pruning_fixture is not implemented",
@@ -755,27 +750,13 @@ pub trait LlmRunnerSubject: Harness {
 
     /// Archive and attempt pruning now, using the runner's real maintenance
     /// path. Return after the attempt finishes, including when busy or denied
-    /// by Setup. Do not force past the run, queue or enrollment exclusions.
+    /// by the provider-plan gate. Do not force past the run, queue or enrollment exclusions.
     async fn prune_archived_session(&self, _session: &str) -> Result<(), HarnessError> {
         Err(HarnessError::new(
             "prune_archived_session is not implemented",
         ))
     }
 
-    /// Every call the runner made to `session`'s scripted compaction
-    /// provider, in the order the provider received them, with each call's
-    /// params exactly as received ([`crate::ProviderCall`]). Capture them at
-    /// the provider, outside the runner, and never rebuild them from runner
-    /// state. Required with `archive_prunes_reasoning` and `compaction`: the
-    /// default fails the cases that need it by name.
-    async fn compaction_provider_calls(
-        &self,
-        _session: &str,
-    ) -> Result<Vec<crate::ProviderCall>, HarnessError> {
-        Err(HarnessError::new(
-            "compaction provider calls are not implemented",
-        ))
-    }
     /// Return actual publication subjects and bodies for the fixture session and each
     /// step's position read independently from the runner's native durable log.
     /// Capture publication order against the actual durability point at publish
@@ -992,7 +973,7 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new("late output fixture is not implemented"))
     }
 
-    /// Force a native lineage change that assigns different numbers while
+    /// Force a native history_version change that assigns different numbers while
     /// retaining the reference-bearing message. Never edit saved sets.
     /// Return an error when the runner has no such event; the writing-request
     /// case is then not applicable.
@@ -1222,6 +1203,29 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
+    /// The part's actual model-visible number. The "Tag numbers" chapter (A3)
+    /// of cortexkit-role-compaction's CONTRACT.md owns the calculation. Capture
+    /// the request's mapping from native part identity to the number shown;
+    /// do not recompute it from ordinals or keys. Template and output-reference
+    /// fixtures use this mapping without the removed tags group or resolve op.
+    fn shown_part_number(&self, _session: &str, _mid: &str, _part: &str) -> Option<u64> {
+        None
+    }
+
+    /// Fixture-only import of a historical stored tool output for the named
+    /// call. The output predates the provider-result limit or was imported;
+    /// it is not newly returned by a provider. Do not dispatch any tool or
+    /// bypass size enforcement on a live call. Return false when unsupported.
+    async fn fixture_seed_historical_tool_output(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _tool_call_id: &str,
+        _content: &str,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
     /// The fetch plan a host applies to `session` when it starts, in the
     /// shape `session.adopt` carries it (the contract does not pin a plan's
     /// shape, so the runner adapter builds it). The plan must make
@@ -1294,11 +1298,10 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
-    /// Like [`Self::send_fields`], but with `members` added to the first
-    /// send's plan beside whatever the adapter puts there (`render_tags` for
-    /// the tags cases, `senders` for the delivery-order cases). Return
-    /// `None` when the runner cannot admit such a plan. Required with
-    /// [`Capability::DeliveryOrder`], and by the tags case that renders tags.
+    /// Like [`Self::send_fields`], but add `members` to the first send's plan
+    /// beside the adapter's own members, such as `senders` for delivery-order
+    /// cases. Return `None` when the runner cannot admit such a plan. Required
+    /// with [`Capability::DeliveryOrder`].
     fn send_fields_with_plan(
         &self,
         _session: &str,
@@ -1358,37 +1361,18 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
-    /// A scripted tool result that the adapter's tool provider answers as a
-    /// tool result holding only an image (no text), with `marker` somewhere
-    /// in the result's bytes as `session.read` returns them (an image's
-    /// name, say), so a case can find its entry. `None` when the provider
-    /// cannot answer one; the tags case counting an image-only result then
-    /// checks the rest of its rules and names the one it could not.
+    /// Legacy fixture hook, unused by this release's cases. Return a provider
+    /// result holding only an image, with `marker` in its stored bytes so a
+    /// reader can locate it, or `None` if the provider cannot produce one.
     fn image_tool_result(&self, _marker: &str) -> Option<Value> {
         None
     }
 
-    /// A result in the tool provider's schema, preserving these ordered blocks
-    /// (including empty text). Use invented image/PDF media for `Image`/`Media`.
-    /// With no blocks, return only a structured value, not serialized text.
-    /// Without `run_tool_calls`, keep `marker` in the exposed result's metadata
-    /// or structured value, never as an extra text block, so the case can find
-    /// even an empty result. With `run_tool_calls`, results may be marker-free:
-    /// the case uses the listed call and `tool_result_part` instead.
-    /// `None` names that shape as unchecked by the tool-result numbering case.
-    fn numbering_tool_result(
-        &self,
-        _marker: &str,
-        _blocks: &[cortexkit_role_llm_runner::tags::ToolResultBlock<'_>],
-    ) -> Option<Value> {
-        None
-    }
-
-    /// The stored result part's key, exactly as `read_parts` and tags address
-    /// it, for a finished call and its `result_ordinal` entry. No result payload
-    /// marker is required. The default matches common call-id fields or a
-    /// single-part result entry separate from the requesting message. Override
-    /// for other native schemas; `None` names part identity as unchecked.
+    /// The finished call's stored result-part key, exactly as the runner serves
+    /// it, for the call's result_ordinal entry. No payload marker is required.
+    /// The default matches common call-id fields or a single-part result entry.
+    /// Override for other native schemas or opaque identity mappings; `None`
+    /// names part identity as unchecked.
     fn tool_result_part(
         &self,
         call: &cortexkit_role_llm_runner::tool_calls::RunToolCall,
@@ -1430,9 +1414,12 @@ pub trait LlmRunnerSubject: Harness {
         None
     }
 
-    /// Top-level parts of a read message in message order, keyed exactly as
-    /// tags and replace_part address them. Override for a host's schema;
-    /// these defaults cover content-block and parts-array schemas.
+    /// Legacy body-shape extractor using native ids or decimal array indexes.
+    /// Use this default only when those exactly match the runner's served part
+    /// keys. Otherwise override it using the runner's actual identity mapping;
+    /// body shape alone does not establish an opaque served key. Return parts
+    /// in stored order, keyed as the runner publishes them and replace_read_part
+    /// addresses them.
     fn read_parts(&self, message: &Value) -> Vec<(String, Value)> {
         if let Some(parts) = message
             .get("parts")
@@ -1485,13 +1472,9 @@ pub trait LlmRunnerSubject: Harness {
         }
     }
 
-    /// Make session `fork` a fork or clone of the managed session `parent`
-    /// the way the host makes one (OpenCode's fork copies the parent's
-    /// parts, marker checkpoint included), so that the runner can know it
-    /// was forked. `fork`'s script is installed and its route open, and no
-    /// role request has reached it. Return an error when the adapter cannot
-    /// create a fork the runner can detect: the fork case is then
-    /// inapplicable, since a runner refuses only forks it can know about.
+    /// Legacy fixture hook, unused by this release's cases. Create a host fork
+    /// or clone of `parent` under `fork`, or return an error when unsupported.
+    /// Compaction-protocol fork detection is outside this kit.
     async fn fork_session(
         &self,
         _handle: &Self::Handle,
@@ -1501,10 +1484,8 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new("forks are not implemented"))
     }
 
-    /// Compact `session` the way its host compacts natively (OpenCode's own
-    /// compaction), so that the runner writes its checkpoint key on the
-    /// marker. Return an error when the host cannot: the lost-key tags case
-    /// is then inapplicable.
+    /// Write the host's native marker, without installing a compaction provider.
+    /// Older active-path entries remain readable from the host's own store.
     async fn compact_in_host(
         &self,
         _handle: &Self::Handle,
@@ -1513,25 +1494,9 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new("host compaction is not implemented"))
     }
 
-    /// Drop the checkpoint key from `session`'s newest compaction marker the
-    /// way the host loses it (OpenCode's part-update route drops unknown
-    /// keys), leaving the marker in effect. Return an error when the adapter
-    /// cannot: the lost-key tags case is then inapplicable.
-    async fn drop_marker_key(
-        &self,
-        _handle: &Self::Handle,
-        _session: &str,
-    ) -> Result<(), HarnessError> {
-        Err(HarnessError::new(
-            "dropping a marker key is not implemented",
-        ))
-    }
-
-    /// The text of the model reply holding `marker`, as the host's own store
-    /// keeps it, read outside the runner (an in-process host's save seam has
-    /// run on it); `None` when the store holds no such reply. Return an
-    /// error when the adapter cannot read the host's store: the save-seam
-    /// tags case is then inapplicable.
+    /// Legacy fixture hook, unused by this release's cases. Read the model reply
+    /// containing `marker` directly from the host store, outside the runner, or
+    /// return `None` when no such reply exists. Return an error if unsupported.
     async fn host_stored_text(
         &self,
         _handle: &Self::Handle,
@@ -1541,26 +1506,6 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new(
             "reading the host's store is not implemented",
         ))
-    }
-
-    /// Whether the runner's host runs standalone Magic Context in-process,
-    /// so a runner that has never served a session hands it to standalone on
-    /// `standalone_session_not_migrated` instead of failing the run. The
-    /// refusal case checks that code only when this is `false`.
-    fn standalone_in_process(&self) -> bool {
-        false
-    }
-
-    /// Make the next run call Setup again, as a provider reconnect would,
-    /// without changing the history or whether the runner has already served it.
-    /// Without this hook the case cannot check that a later
-    /// `standalone_session_not_migrated` fails rather than handing off.
-    async fn require_setup_again(
-        &self,
-        _handle: &Self::Handle,
-        _session: &str,
-    ) -> Result<(), HarnessError> {
-        Err(HarnessError::new("repeating Setup is not implemented"))
     }
 
     /// End an invocation at the host's session cutoff, just before or just
@@ -1585,9 +1530,10 @@ pub trait LlmRunnerSubject: Harness {
     /// `script.turns[n]`, where `n` is the number of assistant messages in
     /// the history the request carries. Cases supply enough turns for every
     /// model request they cause.
-    /// Compaction may hide assistant messages from the model view; for a
-    /// session with a compaction script, select turns by emitted assistant
-    /// answers instead, keeping that cursor across held calls and restarts.
+    /// A native marker may hide earlier assistant entries from model input.
+    /// In that case select turns by emitted assistant answers, preserving
+    /// the script cursor across held calls and restarts. No compaction
+    /// provider fixture is installed by this kit.
     async fn install_script(&self, session: &str, script: Script) -> Result<(), HarnessError>;
 
     /// Hold the next actual model answer for this session until explicitly
@@ -1638,179 +1584,11 @@ pub trait LlmRunnerSubject: Harness {
         Ok(AttributionFixture::NotSupported)
     }
 
-    /// Install the scripted compaction provider for `session`, answering the
-    /// runner's Setup call with `setup`. Initial installation must precede
-    /// admission, and the session plan must name that provider. Installing
-    /// again changes the provider's configured answer, not its captured
-    /// calls or the runner's persistent records. Translate replacement text
-    /// to the runner's message schema; preserve ranges, ids and versions
-    /// verbatim. The provider must hold every model answer until
-    /// [`Self::release_compaction_model`]. Required when the runner adapter
-    /// declares `compaction`; cases do not call this method without that
-    /// capability.
-    async fn install_compaction_setup(
-        &self,
-        _session: &str,
-        _setup: crate::CompactionSetup,
-    ) -> Result<(), HarnessError> {
-        Err(HarnessError::new("scripted compaction is not implemented"))
-    }
-
-    /// Prepare a fresh lineage with a nonempty retained transcript prefix,
-    /// before its first model step. Answer its Setup with well-formed `initial`
-    /// and `view_due` naming a durably published view whose rendering contains
-    /// only `replacement` (translated to the runner's schema) for that prefix.
-    /// Compute the view's own digest and serve it at `view.get`, without
-    /// publishing `view_ready`. When `refuse_fetch` is true, refuse that fetch
-    /// instead. Preserve this provider state across later sends and restarts;
-    /// do not clear or replace the runner's due-view record from the adapter.
-    /// Return expectations built from the scripted view, not the runner output.
-    /// Disable `render_tags` and every other model-only decoration in the
-    /// fixture plan: appended user messages must render as raw reads serve
-    /// them. Report any enabled decorations from the actual fixture plan in
-    /// `SetupViewDueFixture::model_only_decorations`; those fixtures are
-    /// inapplicable by name, not failures.
-    /// The session already has a held scripted model and installed provider,
-    /// but has not received a send. Unsupported adapters are inapplicable by name.
-    async fn install_setup_view_due_fixture(
-        &self,
-        _session: &str,
-        _initial: crate::CompactionMessage,
-        _replacement: Vec<String>,
-        _refuse_fetch: bool,
-    ) -> Result<crate::SetupViewDueFixture, HarnessError> {
-        Err(HarnessError::new(
-            "Setup due-view fixture is not implemented",
-        ))
-    }
-
-    /// Prepare the same seeded prefix, independent rendering expectations and
-    /// undecorated plan as `install_setup_view_due_fixture`, but answer Setup
-    /// with `view_pending: {version}` and no digest. Do not publish the view
-    /// or `view_ready` yet. Hold `view.get` for exactly that version for at most
-    /// the observed Setup request's `view_due_max_ms` from fetch arrival,
-    /// accepting notice and fetch in either order. Answer when published,
-    /// otherwise refuse `view_not_published` when that interval expires. The
-    /// runner's client deadline never exceeds its remaining step hold, and
-    /// a local timeout also ends the run with `view_due_unapplied`. Other
-    /// unpublished versions are refused immediately. Capture notices at the
-    /// bus and calls at the provider, not by reconstructing runner state.
-    ///
-    /// For `HoldExpires`, never publish. The suite observes the fetch request
-    /// and terminal error, not the provider's hold or refusal code; its timing
-    /// check is only a lower bound measured from before the send. For
-    /// `BothMembers`, also put a `view_due` naming the prepared version and
-    /// digest in the answer. That view stays unpublished like the rest of
-    /// this fixture: the answer must fail Setup before any fetch. For `Undeclared`,
-    /// configure the actual runner to omit `view_pending` from Setup's
-    /// `view_features` (do not edit an observed request). Other scenarios
-    /// retain the runner's opt-in. Use a short positive `view_due_max_ms`
-    /// that the suite's polls outlast (it polls up to 400 times, each after
-    /// the adapter's `pause`). The returned fixture's digest is
-    /// an independent expectation, not a member of the pending announcement.
-    /// These controls cannot be expressed by the already-published due-view
-    /// hook. The default makes each affected case not applicable by name.
-    async fn install_setup_view_pending_fixture(
-        &self,
-        _session: &str,
-        _initial: crate::CompactionMessage,
-        _replacement: Vec<String>,
-        _scenario: crate::SetupViewPendingScenario,
-    ) -> Result<crate::SetupViewDueFixture, HarnessError> {
-        Err(HarnessError::new(
-            "Setup pending-view fixture is not implemented",
-        ))
-    }
-
-    /// Publish only the prepared pending version and unblock its held fetch.
-    /// Do not send `view_ready`, alter runner state, or repeat Setup. Omitting
-    /// the normally required publication event is a fixture narrowing, so a
-    /// background announcement cannot satisfy the promise instead. The suite
-    /// calls this only after observing a readable first write, its matching
-    /// bus notice, a fetch request, and no model request; it does not test
-    /// crash durability here. Unsupported adapters are not applicable.
-    async fn publish_setup_view_pending(&self, _session: &str) -> Result<(), HarnessError> {
-        Err(HarnessError::new(
-            "Setup pending-view publication is not implemented",
-        ))
-    }
-
-    /// Change only whether the scripted provider refuses `view.get` for the
-    /// prepared due version. Do not send `view_ready`, repeat Setup, or change
-    /// the runner's stored due view. Used to verify a later step retries it.
-    async fn set_setup_view_due_fetch_refused(
-        &self,
-        _session: &str,
-        _refused: bool,
-    ) -> Result<(), HarnessError> {
-        Err(HarnessError::new(
-            "Setup due-view fetch control is not implemented",
-        ))
-    }
-
-    /// Return Setup calls observed at the scripted provider and canonical
-    /// inputs captured at the scripted model. For each Setup call, capture
-    /// `harness` and `session` from the body and the actual `harness`,
-    /// `session` and `project_root` from the route that received it; route
-    /// metadata must not be reconstructed from the body. A shared project
-    /// route may have a generic harness and an empty session. Keep both
-    /// observations outside the runner process and persistent state directory,
-    /// and do not reconstruct them from configured answers or `session.read`
-    /// responses. `CompactionCall` pairs the body and route identities so the
-    /// case can distinguish a single-session bind from a shared route.
-    async fn compaction_observation(
-        &self,
-        _session: &str,
-    ) -> Result<crate::CompactionObservation, HarnessError> {
-        Err(HarnessError::new(
-            "compaction observation is not implemented",
-        ))
-    }
-
-    /// Publish `view` from the scripted compaction provider of `session`, as
-    /// a provider publishes one: durably, then announced with `view_ready`.
-    /// Translate replacement text to the runner's message schema, compute
-    /// the view digest, and keep ranges, ordinals, `mid`s and the cut
-    /// verbatim. Return the view's version: one above every version the
-    /// provider published for the session. The runner fetches, checks and
-    /// applies it at its next step boundary, as it would any view. Return an
-    /// error when the adapter cannot publish views: the cases that need one
-    /// are then inapplicable, by name.
-    async fn publish_compaction_view(
-        &self,
-        _session: &str,
-        _view: crate::ScriptedView,
-    ) -> Result<u64, HarnessError> {
-        Err(HarnessError::new(
-            "publishing compaction views is not implemented",
-        ))
-    }
-
-    /// Publish a view containing one keep range over the session's entire
-    /// retained transcript, with these edits verbatim. The fixture has no cut
-    /// and an empty initial head. Assign the next version, compute its digest,
-    /// persist it in the scripted provider and announce `view_ready`; never
-    /// apply it directly to runner state. Return the published version. The
-    /// runner must fetch and render it at its next step boundary. Unsupported
-    /// adapters make the negotiated part-edit cases inapplicable by name.
-    async fn publish_compaction_part_edits(
-        &self,
-        _session: &str,
-        _edits: Vec<cortexkit_role_compaction_provider::view::PartEdit>,
-    ) -> Result<u64, HarnessError> {
-        Err(HarnessError::new(
-            "publishing compaction part edits is not implemented",
-        ))
-    }
-
-    /// Write `messages` finished messages into `session`'s history through
-    /// the runner's own store, then a cut, so the session's current lineage
-    /// holds only the newest `window` of them, as a session that ran for
-    /// months and compacted along the way would. `session` already has a
-    /// run behind it; the seeded messages follow it. The runner must treat
-    /// them exactly as messages it wrote itself. Return an error when the
-    /// adapter cannot seed: the cost case is then inapplicable, never
-    /// passed.
+    /// Seed `messages` finished messages after the session's existing run,
+    /// through the runner's own store, then a native marker leaving only `window`
+    /// entries in model input. All active-path entries remain readable. The
+    /// runner treats these messages as ones it wrote itself. Return an error
+    /// when unsupported; the cost case is then not applicable, never passed.
     async fn seed_session_history(
         &self,
         _handle: &Self::Handle,
@@ -1823,16 +1601,10 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
-    /// Give `session` `count` messages of history in the host before the
-    /// runner numbers anything, as when the runner adopts a session its host
-    /// already holds: the runner has no ordinals for them, its window starts
-    /// at ordinal 0 after them, and `session.history` serves them from the
-    /// host's own storage. With `cut`, the host's history ends in a cut the
-    /// host made before the runner adopted the session, folding the newest
-    /// of those messages: the runner's first lineage carries that cut, with
-    /// `first_ordinal` 0, and the runner has no lineage at it. Called before
-    /// the session's first send. Return an error when the adapter cannot:
-    /// the cases that need it are then inapplicable, by name.
+    /// Seed `count` native entries before the first runner send. They join the
+    /// same one-based active-path count as later sends. With `cut`, write an
+    /// optional native marker that limits model input, not reads. Return an
+    /// error when unsupported; cases needing the fixture are not applicable by name.
     async fn seed_host_history(
         &self,
         _handle: &Self::Handle,
@@ -1841,86 +1613,6 @@ pub trait LlmRunnerSubject: Harness {
         _cut: bool,
     ) -> Result<(), HarnessError> {
         Err(HarnessError::new("seeding host history is not implemented"))
-    }
-
-    /// Prepare a moved host session before its first send, and a scripted
-    /// compaction provider answering its permanent Setup checkpoint. Seed
-    /// exactly 42 counted messages before the retained boundary and a tag
-    /// checkpoint of 500. Certify the last folded message from host bytes,
-    /// not from runner replies. Return the checkpoint and first-send plan
-    /// fields naming that provider. Hold model answers until
-    /// `release_compaction_model`, as `install_compaction_setup` does.
-    /// `CutRemoved` removes the retained boundary but keeps the folded
-    /// message; the runner must adopt immediately after it. The missing
-    /// counter scenarios instead reload a native marker with that counter
-    /// absent, no Setup checkpoint fallback and no recoverable runner state.
-    /// They must refuse rather than manufacture zero. `None` means the
-    /// adapter cannot prepare the fixture, making the case Inapplicable.
-    async fn message_checkpoint_fixture(
-        &self,
-        _handle: &Self::Handle,
-        _session: &str,
-        _scenario: crate::message_checkpoint::Scenario,
-    ) -> Result<Option<crate::message_checkpoint::Fixture>, HarnessError> {
-        Ok(None)
-    }
-
-    /// Plant a complete in-effect marker at the adoption cut before the
-    /// session's first Setup after runner state loss, with tag checkpoint
-    /// 500, message count 42 and a certified head cut. No earlier stored
-    /// Setup checkpoint may exist: the runner must recover from the marker.
-    /// The provider's permanent checkpoint stays in its held Setup answer
-    /// until the suite releases it; this is not native-cut descent.
-    /// Return the marker's checkpoint facts and a tag-rendering first-send
-    /// plan, so the cases exercise any Setup-time tag-numbering read gate.
-    /// Configure the provider and held model answers as for
-    /// `message_checkpoint_fixture`. The suite holds the first Setup using
-    /// the existing Setup-hold hooks. `None` makes the case Inapplicable.
-    async fn plant_message_checkpoint_marker(
-        &self,
-        _handle: &Self::Handle,
-        _session: &str,
-    ) -> Result<Option<crate::message_checkpoint::Fixture>, HarnessError> {
-        Ok(None)
-    }
-
-    /// Read the newest native marker's actual checkpoint key from the host
-    /// after a cut. Do not reconstruct it from a head or configured answer.
-    /// `None` means observation is unsupported; `Some(null)` means the key
-    /// is absent and fails the case that requires it.
-    async fn native_message_checkpoint(
-        &self,
-        _session: &str,
-    ) -> Result<Option<Value>, HarnessError> {
-        Ok(None)
-    }
-
-    /// Insert a finished host summary row (`summary: true`, `finish:
-    /// "stop") after the newest counted message without changing the
-    /// counted rows. Return its host id so the suite can prove no read
-    /// serves it. Called on both adoption and native-cut lineages, with
-    /// no run active. `None` makes the exclusion case Inapplicable.
-    async fn insert_uncounted_host_summary(
-        &self,
-        _handle: &Self::Handle,
-        _session: &str,
-    ) -> Result<Option<String>, HarnessError> {
-        Ok(None)
-    }
-
-    /// On OpenCode 1, insert a user message whose only part is a
-    /// `compaction` part after the newest counted message, without changing
-    /// the counted rows. Return its host id so the suite checks both its
-    /// absence from reads and that it consumes no ordinal. Called with no
-    /// run active on adoption and native-cut lineages. OpenCode 1 adapters
-    /// implement this hook; `None` leaves the existing summary checks in
-    /// force for other hosts without compaction-only rows.
-    async fn insert_uncounted_host_compaction_only(
-        &self,
-        _handle: &Self::Handle,
-        _session: &str,
-    ) -> Result<Option<String>, HarnessError> {
-        Ok(None)
     }
 
     /// Put into `session`'s stored history, after its newest message, a
@@ -1944,7 +1636,7 @@ pub trait LlmRunnerSubject: Harness {
 
     /// Revert `session` the way its host reverts (an undo), removing the
     /// message `mid` and every later message, while no run is active. The
-    /// runner moves the session to a new lineage. Return an error when the
+    /// runner moves the session to a new history_version. Return an error when the
     /// adapter cannot revert: the cases that need one are then inapplicable,
     /// by name.
     async fn revert_session(
@@ -1954,43 +1646,6 @@ pub trait LlmRunnerSubject: Harness {
         _mid: &str,
     ) -> Result<(), HarnessError> {
         Err(HarnessError::new("reverting a session is not implemented"))
-    }
-
-    /// Hold the next Setup call the runner makes for `session` at the
-    /// scripted provider, unanswered, until
-    /// [`Self::release_compaction_setup`]. Return an error when the adapter
-    /// cannot: the case that needs it is then inapplicable, by name.
-    async fn hold_next_compaction_setup(&self, _session: &str) -> Result<(), HarnessError> {
-        Err(HarnessError::new("holding a Setup call is not implemented"))
-    }
-
-    /// Resolve once the scripted provider holds the Setup call
-    /// [`Self::hold_next_compaction_setup`] asked it to hold.
-    async fn await_compaction_setup_held(&self, _session: &str) -> Result<(), HarnessError> {
-        Err(HarnessError::new("holding a Setup call is not implemented"))
-    }
-
-    /// Answer the held Setup call with the session's installed answer.
-    async fn release_compaction_setup(&self, _session: &str) -> Result<(), HarnessError> {
-        Err(HarnessError::new("holding a Setup call is not implemented"))
-    }
-
-    /// Whether the runner refuses reads `transient` while a tag-rendering
-    /// run waits for a Setup answer without `descends_from`, as the contract
-    /// lets it. Only such a runner could hold reads during a cut's Setup, so
-    /// the case checking it never does is inapplicable to any other.
-    fn holds_reads_during_setup(&self) -> bool {
-        false
-    }
-
-    /// Whether a fresh session's first compaction Setup names `newest`.
-    /// True when the runner writes the session's first message before its
-    /// first Setup, so that Setup names that message as `newest` and the
-    /// checkpoint it carries has a cut to anchor. An adapter whose runner
-    /// runs the first Setup at send admission, before writing any message,
-    /// answers false: that Setup names no `newest` and has no cut to anchor.
-    fn first_setup_names_newest(&self) -> bool {
-        true
     }
 
     /// Current Unix epoch milliseconds of the clock also governing delivery
@@ -2028,31 +1683,6 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
-    /// Release exactly one held model call for `session`. A session with a
-    /// scripted compaction provider holds every model answer, letting cases inspect the canonical
-    /// input and durable records before the answer lets the runner prepare
-    /// another model request.
-    async fn release_compaction_model(&self, _session: &str) -> Result<(), HarnessError> {
-        Err(HarnessError::new(
-            "held compaction model is not implemented",
-        ))
-    }
-
-    /// Read the initial CompactionMessage from the runner's persistent store.
-    /// Do not substitute an in-memory cache, the configured provider answer,
-    /// or a `session.read` model page. Return `None` if no initial answer is
-    /// durably recorded. Cases call this method while the first model call
-    /// is held, to check that Setup was persistent before the model request.
-    async fn durable_compaction_setup(
-        &self,
-        _handle: &Self::Handle,
-        _session: &str,
-    ) -> Result<Option<crate::CompactionMessage>, HarnessError> {
-        Err(HarnessError::new(
-            "durable Setup inspection is not implemented",
-        ))
-    }
-
     /// How many times the scripted tool provider was called with
     /// `arguments`, counted across every kill and restart in the run.
     ///
@@ -2073,6 +1703,16 @@ pub trait LlmRunnerSubject: Harness {
         _message: &Value,
         _tool_call_id: &str,
     ) -> Option<ToolResultObservation> {
+        None
+    }
+
+    /// Locate this call's actual stored result, including the model-visible
+    /// error text and measured size fields, in a native read message.
+    fn oversized_tool_result(
+        &self,
+        _message: &Value,
+        _tool_call_id: &str,
+    ) -> Option<ToolResultLimitObservation> {
         None
     }
 
@@ -2140,26 +1780,11 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
-    /// Move `session`'s prompt-cache clock forward by `milliseconds`: the
-    /// runner's next model request finds that much more time passed since
-    /// its previous request reached the cache. The `cache_ttl` cases are
-    /// inapplicable, by name, when this answers an error.
-    async fn advance_prompt_cache_clock(
-        &self,
-        _session: &str,
-        _milliseconds: u64,
-    ) -> Result<(), HarnessError> {
-        Err(HarnessError::new("a prompt-cache clock is not implemented"))
-    }
-
-    /// Make `session`'s model requests from the next one on go to `model`
-    /// (1 to 256 bytes of printable ASCII, no space), as the runner's own
-    /// model switch would; the `model` header of the runner's compaction
-    /// advance notices then names it. Before the session's first send this
-    /// sets the model the session starts with. A switch after that is a
-    /// model change, and the scripted compaction provider answers its
-    /// `model_change` ride without a `cache_ttl` entry, so the runner holds
-    /// no entry for the new model, as when it missed the ride.
+    /// Change the real model selection so the session's next and subsequent
+    /// requests go to `model` (1 to 256 printable ASCII bytes, without spaces),
+    /// as the runner's own model switch would. Before the first send this sets
+    /// the starting model. Observe the subsequent requests rather than
+    /// synthesizing management replies.
     async fn switch_model(&self, _session: &str, _model: &str) -> Result<(), HarnessError> {
         Err(HarnessError::new("switching models is not implemented"))
     }
@@ -2175,37 +1800,6 @@ pub trait LlmRunnerSubject: Harness {
     ) -> Result<(), HarnessError> {
         Err(HarnessError::new(
             "an observed prompt-cache lifetime is not implemented",
-        ))
-    }
-
-    /// The `ride_wait_max_ms` the runner's latest Setup request for
-    /// `session` carried, as the scripted compaction provider received it
-    /// (compaction-provider §4): `None` when the request carried none,
-    /// which means the runner does not honour provider-set ride waits. The
-    /// `ride_wait_` cases are inapplicable, by name, when this answers
-    /// `None` or an error.
-    async fn observed_ride_wait_max_ms(&self, _session: &str) -> Result<Option<u64>, HarnessError> {
-        Err(HarnessError::new(
-            "observing a Setup request's ride_wait_max_ms is not implemented",
-        ))
-    }
-
-    /// Make the scripted compaction provider of `session` answer the
-    /// session's next rewrite ride as `ride` says: after
-    /// `ride.answer_after_ms` milliseconds from the ride's arrival, with its
-    /// view or `nothing`; an answer later than the runner's deadline for the
-    /// ride is never seen, and the ride times out. Only that one ride
-    /// follows the script; every
-    /// other ride is answered as the scripted provider answers it without
-    /// one. The `ride_wait_` cases are inapplicable, by name, when this
-    /// answers an error.
-    async fn script_next_ride(
-        &self,
-        _session: &str,
-        _ride: crate::ScriptedRide,
-    ) -> Result<(), HarnessError> {
-        Err(HarnessError::new(
-            "scripting a ride's answer is not implemented",
         ))
     }
 

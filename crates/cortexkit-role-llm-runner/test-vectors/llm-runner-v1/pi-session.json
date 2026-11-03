@@ -23,7 +23,7 @@
       {
         "entry_id": "entry-003",
         "entry_type": "message",
-        "ordinal": 0,
+        "ordinal": 1,
         "part_count": 1,
         "projected_content": "",
         "served_body": {
@@ -175,7 +175,7 @@
       {
         "entry_id": "entry-004",
         "entry_type": "message",
-        "ordinal": 1,
+        "ordinal": 2,
         "part_count": 1,
         "projected_content": "STRING_USER",
         "served_body": {
@@ -193,7 +193,7 @@
       {
         "entry_id": "entry-005",
         "entry_type": "message",
-        "ordinal": 2,
+        "ordinal": 3,
         "part_count": 1,
         "projected_content": [
           {
@@ -244,7 +244,7 @@
       {
         "entry_id": "entry-016",
         "entry_type": "message",
-        "ordinal": 3,
+        "ordinal": 4,
         "part_count": 1,
         "projected_content": [
           {
@@ -272,7 +272,7 @@
       {
         "entry_id": "entry-017",
         "entry_type": "message",
-        "ordinal": 4,
+        "ordinal": 5,
         "part_count": 1,
         "projected_content": [
           {
@@ -324,7 +324,7 @@
       {
         "entry_id": "entry-018",
         "entry_type": "message",
-        "ordinal": 5,
+        "ordinal": 6,
         "part_count": 1,
         "projected_content": [
           {
@@ -352,7 +352,7 @@
       {
         "entry_id": "entry-019",
         "entry_type": "message",
-        "ordinal": 6,
+        "ordinal": 7,
         "part_count": 1,
         "projected_content": [
           {
@@ -404,7 +404,7 @@
       {
         "entry_id": "entry-022",
         "entry_type": "message",
-        "ordinal": 7,
+        "ordinal": 8,
         "part_count": 1,
         "projected_content": [
           {
@@ -432,7 +432,7 @@
       {
         "entry_id": "entry-023",
         "entry_type": "message",
-        "ordinal": 8,
+        "ordinal": 9,
         "part_count": 1,
         "projected_content": [
           {
@@ -485,7 +485,7 @@
     "native_cut": {
       "entry_id": "entry-021",
       "first_kept_entry_id": "entry-019",
-      "first_kept_ordinal": 6
+      "first_kept_ordinal": 7
     }
   },
   "abandoned_ids": [
@@ -529,7 +529,7 @@
           {
             "entry_id": "synthetic-0",
             "entry_type": "message",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -584,7 +584,7 @@
           {
             "entry_id": "synthetic-0",
             "entry_type": "message",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -639,7 +639,7 @@
           {
             "entry_id": "synthetic-0",
             "entry_type": "message",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -695,7 +695,7 @@
           {
             "entry_id": "synthetic-0",
             "entry_type": "message",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -758,7 +758,7 @@
           {
             "entry_id": "synthetic-0",
             "entry_type": "message",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 2,
             "projected_content": [
               {
@@ -836,7 +836,7 @@
           {
             "entry_id": "synthetic-0",
             "entry_type": "message",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 0,
             "projected_content": null,
             "served_body": {
@@ -858,7 +858,7 @@
           {
             "entry_id": "synthetic-1",
             "entry_type": "message",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 1,
             "projected_content": "next",
             "served_body": {
@@ -950,7 +950,7 @@
           {
             "entry_id": "synthetic-0",
             "entry_type": "message",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 2,
             "projected_content": [
               {
@@ -984,7 +984,7 @@
           {
             "entry_id": "synthetic-1",
             "entry_type": "message",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 0,
             "projected_content": null,
             "served_body": {
@@ -1022,7 +1022,7 @@
           {
             "entry_id": "synthetic-0",
             "entry_type": "branch_summary",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -1064,7 +1064,7 @@
           {
             "entry_id": "synthetic-0",
             "entry_type": "custom_message",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": "Synthetic rendered notice.",
             "served_body": {
@@ -1167,7 +1167,7 @@
           {
             "entry_id": "u",
             "entry_type": "message",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 0,
             "projected_content": null,
             "served_body": {
@@ -1183,7 +1183,7 @@
           {
             "entry_id": "c",
             "entry_type": "custom_message",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 0,
             "projected_content": null,
             "served_body": {
@@ -1198,7 +1198,7 @@
           {
             "entry_id": "b",
             "entry_type": "branch_summary",
-            "ordinal": 2,
+            "ordinal": 3,
             "part_count": 0,
             "projected_content": null,
             "served_body": {
@@ -1212,7 +1212,7 @@
           {
             "entry_id": "s",
             "entry_type": "message",
-            "ordinal": 3,
+            "ordinal": 4,
             "part_count": 0,
             "projected_content": null,
             "served_body": {

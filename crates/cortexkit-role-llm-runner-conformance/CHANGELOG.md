@@ -11,6 +11,32 @@
   disclosure only, and the `app_readers` cases check §9.19's refusal of an
   unlisted reader. Each `session.head` probe is now one request.
 
+## 0.17.0
+
+- Require ordinal on every history and display entry. Pre-adoption host
+  messages share the one-based count; marker/control rows are not entries.
+
+Breaking release; pin llm-runner =0.8.0.
+
+- Remove the compaction-provider/v1 dependency, scripted provider API and cases,
+  checkpoint/lineage-bound read cases, tags/resolve cases and model-view cases.
+  Compaction-runner conformance is outside this kit.
+- Check one-based entry ordinals and whole-active-path reads, including below
+  native markers, with required history_version/incarnation cache identity.
+- Add named faulty-fake checks for read-page history_version, history_changed
+  on stale cursors, from_ordinal 0, incarnation, run-fixed route_decision_id,
+  route-bound user commands, both send-status names and served pruning keys.
+- Let routing-backed adapters seed a valid decision for the run-fixed case
+  through `route_decision_id_fixture`; other runners use its default literal.
+- Check whole-result tool_result_too_large errors and at-most-once provider
+  dispatch; faulty implementations truncate output or dispatch again.
+- Preserve native no-provider archive pruning. Provider plans must not prune
+  until the compaction contract defines acceptance; remove old Setup/view gates.
+- Keep snapshot budget thresholds by seeding historical/imported stored outputs
+  through a fixture-only hook, never by bypassing the new provider-result limit.
+- Retained template and output-reference fixtures obtain compaction A3 numbers
+  from the adapter's captured request mapping instead of removed tag rows.
+
 ## 0.16.11
 
 - Pin `cortexkit-role-llm-runner` to `=0.7.48` for its served-bytes

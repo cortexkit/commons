@@ -50,10 +50,9 @@ impl Limits {
     }
 }
 
-/// The bounds CortexKit's own phone and desktop clients (the Alfonso apps)
-/// read a session's message list with: 2 KiB of arguments, 16 KiB of a
-/// result and 64 KiB of an error result. A caller that wants a whole
-/// message sends no `limits` at all.
+/// Convenience bounds for message-list clients: 2 KiB arguments, 16 KiB
+/// results and 64 KiB error results. A caller wanting the whole message
+/// sends no `limits`.
 pub const APP_LIMITS: Limits = Limits::new(2_048, 16_384, 65_536);
 
 /// `text` cut to at most `max` bytes, ending on a UTF-8 character boundary,
@@ -1042,7 +1041,7 @@ pub fn opencode_v2(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, 
 /// `branchSummary`, and shell executions remain `bashExecution`. Shell text
 /// shows command, output and status. Images use refs descriptors. Control rows,
 /// including compaction summaries, are refused because they are never served.
-/// Context edits belong to session projection/lineage handling, not raw rows.
+/// Context edits belong to session projection/history_version handling, not raw rows.
 pub fn pi(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, ProjectionError> {
     let role = match str_of(body, "type") {
         "custom_message" => "custom",
@@ -1156,33 +1155,36 @@ fn base64_decode(text: &str) -> Option<Vec<u8>> {
 }
 
 /// One `session.history` entry in display form: the envelope's position
-/// and tags, and the row in place of the stored body.
+/// and served part keys, and the row in place of the stored body.
 ///
 /// Non-exhaustive: build one with [`DisplayEntry::new`] and the `with_*`
 /// setters, or decode one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct DisplayEntry {
-    /// As on a raw history entry: present only where the runner has one.
+    /// The stored-order keys of the parts represented by this entry.
+    /// Required for an archive-pruning runner; no keys are invented by a reader.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ordinal: Option<u64>,
+    pub part_keys: Option<Vec<String>>,
+    /// Required one-based position on the active path, as on raw history.
+    pub ordinal: u64,
     pub mid: String,
     pub written_at: u64,
     pub row: DisplayRow,
-    /// As on a raw history entry: only at or after the lineage's
-    /// `first_ordinal`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<crate::tags::PartTag>,
 }
 
 impl DisplayEntry {
-    pub fn new(mid: impl Into<String>, written_at: u64, row: DisplayRow) -> Self {
+    pub fn with_part_keys(mut self, keys: Vec<String>) -> Self {
+        self.part_keys = Some(keys);
+        self
+    }
+    pub fn new(ordinal: u64, mid: impl Into<String>, written_at: u64, row: DisplayRow) -> Self {
         Self {
-            ordinal: None,
+            part_keys: None,
+            ordinal,
             mid: mid.into(),
             written_at,
             row,
-            tags: Vec::new(),
         }
     }
 
@@ -1190,21 +1192,20 @@ impl DisplayEntry {
     /// its body.
     pub fn from_history(entry: &crate::history::HistoryEntry, row: DisplayRow) -> Self {
         Self {
+            part_keys: entry
+                .part_digests
+                .as_ref()
+                .map(|rows| rows.iter().map(|row| row.part.clone()).collect())
+                .or_else(|| entry.part_keys.clone()),
             ordinal: entry.ordinal,
             mid: entry.mid.clone(),
             written_at: entry.written_at,
             row,
-            tags: entry.tags.clone(),
         }
     }
 
     pub fn with_ordinal(mut self, ordinal: u64) -> Self {
-        self.ordinal = Some(ordinal);
-        self
-    }
-
-    pub fn with_tags(mut self, tags: Vec<crate::tags::PartTag>) -> Self {
-        self.tags = tags;
+        self.ordinal = ordinal;
         self
     }
 }
@@ -1219,14 +1220,12 @@ pub struct DisplayPage {
     pub pruned_reasoning: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
     /// Oldest first.
     pub messages: Vec<DisplayEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lineage_id: Option<String>,
+    pub incarnation: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub older: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub newer: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub history_version: Option<u64>,
+    pub history_version: u64,
 }
 
 impl DisplayPage {
@@ -1248,7 +1247,7 @@ impl DisplayPage {
                 .iter()
                 .map(|entry| row(entry).map(|row| DisplayEntry::from_history(entry, row)))
                 .collect::<Result<_, E>>()?,
-            lineage_id: page.lineage_id.clone(),
+            incarnation: page.incarnation.clone(),
             older: page.older.clone(),
             newer: page.newer.clone(),
             history_version: page.history_version,
@@ -1258,32 +1257,29 @@ impl DisplayPage {
 
     /// The rules a raw page shows on its own ([`crate::history::HistoryPage::check`]),
     /// checked on this page's envelope.
-    pub fn check(
-        &self,
-        first_ordinal: Option<u64>,
-    ) -> Result<(), crate::history::HistoryPageProblem> {
+    pub fn check(&self) -> Result<(), crate::history::HistoryPageProblem> {
         let skeleton = crate::history::HistoryPage {
             messages: self
                 .messages
                 .iter()
                 .map(|entry| {
                     let mut raw = crate::history::HistoryEntry::new(
+                        entry.ordinal,
                         &entry.mid,
                         entry.written_at,
                         Value::Null,
-                    )
-                    .with_tags(entry.tags.clone());
+                    );
                     raw.ordinal = entry.ordinal;
                     raw
                 })
                 .collect(),
-            lineage_id: self.lineage_id.clone(),
+            incarnation: self.incarnation.clone(),
             older: self.older.clone(),
             newer: self.newer.clone(),
             history_version: self.history_version,
             pruned_reasoning: self.pruned_reasoning.clone(),
         };
-        skeleton.check(first_ordinal)
+        skeleton.check()
     }
 }
 
@@ -1484,7 +1480,7 @@ mod tests {
         for case in vectors::cases(&file, "pages") {
             let name = case["name"].as_str().unwrap();
             let page: DisplayPage = vectors::round_trip(name, &case["page"]);
-            assert_eq!(page.check(case["first_ordinal"].as_u64()), Ok(()), "{name}");
+            assert_eq!(page.check(), Ok(()), "{name}");
             // Where a vector names each row's sender, the decoded row says
             // the same; a row it leaves out names none.
             if let Some(senders) = case.get("senders") {
@@ -1506,10 +1502,10 @@ mod tests {
                 case["carries"].as_bool(),
                 "{name}"
             );
-            let head = crate::read::HeadMeta::no_lineage().with_input(input);
+            let head = crate::read::HeadMeta::empty(1, "log-1").with_input(input);
             assert!(
-                head.lineage_consistent(),
-                "{name}: input is outside the lineage rule"
+                head.snapshot_consistent(),
+                "{name}: input is outside the active path rule"
             );
         }
         let declared = [crate::capabilities::CLIENT_MESSAGE_ID];
@@ -1681,16 +1677,16 @@ mod tests {
         let page = DisplayPage {
             pruned_reasoning: Vec::new(),
             messages: vec![
-                DisplayEntry::new("m1", 1, row.clone()).with_ordinal(1),
-                DisplayEntry::new("m0", 1, row).with_ordinal(0),
+                DisplayEntry::new(2, "m1", 1, row.clone()),
+                DisplayEntry::new(1, "m0", 1, row),
             ],
-            lineage_id: Some("lin".into()),
+            incarnation: "log-1".into(),
             older: None,
             newer: None,
-            history_version: Some(1),
+            history_version: 1,
         };
         assert_eq!(
-            page.check(Some(0)),
+            page.check(),
             Err(crate::history::HistoryPageProblem::OrdinalsNotRising(
                 "m0".into()
             ))

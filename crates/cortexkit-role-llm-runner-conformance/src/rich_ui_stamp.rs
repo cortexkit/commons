@@ -189,10 +189,10 @@ struct Shown {
     rich_ui: Option<RichUiStamp>,
 }
 
-/// Every entry of the current lineage, read forward with `include_rich_ui`.
+/// Every active-path entry, read forward from ordinal 1 with `include_rich_ui`.
 async fn opt_in_entries<R: RunnerRoute>(route: &R) -> Result<Vec<ReadMessage>, String> {
     let mut entries = Vec::new();
-    let mut from = head(route).await?.first_ordinal.unwrap_or(0);
+    let mut from = 1;
     for _ in 0..crate::drive::MAX_PAGES {
         let page = read(route, &ReadRequest::range(from).with_include_rich_ui(true)).await?;
         entries.extend(page.messages.iter().cloned());
@@ -516,11 +516,11 @@ where
         }
     }
     let head = head(&session.route).await?;
-    if head.lineage_id.is_some() || head.last_run_state.is_some() {
+    if head.last_ordinal.is_some() || head.last_run_state.is_some() {
         return Err(format!(
-            "after refusing the plan the session has lineage {:?} and last run {:?}: a refusal \
-             at admission writes nothing",
-            head.lineage_id, head.last_run_state
+            "after refusing the plan the session has last_ordinal {:?} and last_run_state {:?}: a refusal \
+              at admission writes nothing",
+            head.last_ordinal, head.last_run_state
         ));
     }
     Ok(Ending::Passed)

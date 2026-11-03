@@ -285,27 +285,6 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
-    if name == "media_descriptors_model_view_refused" {
-        let session = case
-            .open("descriptor-model-view", Script { turns: vec![] })
-            .await?;
-        let error = expect_error(
-            "model-view descriptors",
-            call(
-                &session.route,
-                ops::SESSION_READ,
-                json!({"view":"model","media":"descriptors"}),
-            )
-            .await?,
-        )?;
-        expect_field(
-            "model-view descriptors",
-            &error,
-            errors::INVALID_PARAMS,
-            "media",
-        )?;
-        return Ok(Ending::Passed);
-    }
     let head = name == "media_descriptors_utf8_head";
     let marker = case.mint.next("descriptor");
     let fixture = fixture(name);
@@ -568,7 +547,7 @@ where
                 if default.messages != baseline {
                     return Err("default inline read changed".into());
                 }
-                for op in [ops::SESSION_READ, ops::SESSION_RESOLVE] {
+                for op in [ops::SESSION_READ] {
                     let params = if op == ops::SESSION_READ {
                         json!({"media":"bogus"})
                     } else {

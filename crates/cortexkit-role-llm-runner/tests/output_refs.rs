@@ -158,7 +158,7 @@ fn output_refs_descriptor_paging_and_read_limits() {
 }
 
 #[test]
-fn output_refs_plan_refusal_and_group_dependency() {
+fn output_refs_plan_refusal_and_independent_group() {
     for flag in [json!(true), json!(false), json!(null), json!("yes")] {
         let plan = json!({"tool_items":[{"output_refs":flag}]});
         assert_eq!(check_plan(&plan, false), Err(PLAN_FIELD));
@@ -201,11 +201,18 @@ fn output_refs_plan_refusal_and_group_dependency() {
         )],
         "test",
     )
-    .with_capabilities(vec![capabilities::OUTPUT_REFS.into()]);
-    assert!(check_describe(&serde_json::to_value(describe).unwrap())
+    .with_capabilities(vec![capabilities::OUTPUT_REFS.into()])
+    .with_session_capabilities_from("baseline");
+    let mut value = serde_json::to_value(describe).unwrap();
+    assert!(check_describe(&value).is_ok());
+    value["majors"][0]["ops"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|op| op != ops::SESSION_OUTPUT_REF_READ);
+    assert!(check_describe(&value)
         .unwrap_err()
         .iter()
-        .any(|p| format!("{p:?}").contains("output_refs requires tags")));
+        .any(|p| format!("{p:?}").contains(ops::SESSION_OUTPUT_REF_READ)));
 }
 
 #[test]

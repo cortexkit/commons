@@ -81,7 +81,8 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::MAX_STEPS, ops::SESSION_SEND).await?;
+    crate::send_helpers::require_declared(&session.route, groups::MAX_STEPS, ops::SESSION_SEND)
+        .await?;
     let mut params = case.params(
         &session,
         "keep calling tools",
@@ -156,7 +157,8 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::MAX_STEPS, ops::SESSION_SEND).await?;
+    crate::send_helpers::require_declared(&session.route, groups::MAX_STEPS, ops::SESSION_SEND)
+        .await?;
     let mut params = case.params(
         &session,
         "answer in one step",
@@ -224,11 +226,19 @@ where
         let mut session = case
             .open("output-cap", Script { turns: vec![turn] })
             .await?;
-        crate::tags::require_declared(&session.route, groups::MAX_OUTPUT_TOKENS, ops::SESSION_SEND)
-            .await?;
+        crate::send_helpers::require_declared(
+            &session.route,
+            groups::MAX_OUTPUT_TOKENS,
+            ops::SESSION_SEND,
+        )
+        .await?;
         if check_finish {
-            crate::tags::require_declared(&session.route, groups::FINISH_REASON, ops::RUN_RESULT)
-                .await?;
+            crate::send_helpers::require_declared(
+                &session.route,
+                groups::FINISH_REASON,
+                ops::RUN_RESULT,
+            )
+            .await?;
         }
         let mut params = case.params(
             &session,
@@ -294,7 +304,8 @@ where
                 },
             )
             .await?;
-        crate::tags::require_declared(&session.route, groups::NO_TOOLS, ops::SESSION_SEND).await?;
+        crate::send_helpers::require_declared(&session.route, groups::NO_TOOLS, ops::SESSION_SEND)
+            .await?;
         let mut params = case.params(
             &session,
             "tool-free response",
@@ -335,7 +346,8 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::NO_TOOLS, ops::SESSION_SEND).await?;
+    crate::send_helpers::require_declared(&session.route, groups::NO_TOOLS, ops::SESSION_SEND)
+        .await?;
     let mut params = case.params(&session, "freeze plan", &case.mint.next("plan-tools"), None);
     if !params.get("plan").is_some_and(Value::is_object) {
         let Some(fields) =

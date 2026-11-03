@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.1
+
+- Depend on llm-runner 0.8 (the one-based entry contract).
+- Add inserted-image wire types: PNG images on user-role inserted messages,
+  rendered after their texts without tag numbers. Images count toward the
+  view's size and checksum; empty image arrays are omitted and hash as absent.
+  Specify the runner's required `unsupported_edit` (with the insert's edit
+  index) for images on other roles, non-PNG media types and invalid standard
+  padded base64. Wire decoding validates neither; the view library adds the
+  checks.
+- Add optional `accepts_images` to Setup and conditions: absent means unknown,
+  and a provider inserts images only when the runner reports `true`.
+- Specify that a message id is never given to a different message within a
+  session, even after a revert or branch switch, and that providers key durable
+  part state on both the message id and the part id (P6).
+- Note that `step-transform-provider/v2`'s `pre_user` hook carries an optional
+  `at_ms` taken on the runner's machine, so gaps against write times from that
+  machine have no clock skew; without it the provider uses its own clock (U3).
+- Add image-insert, image-capability Setup and image-refusal vectors (assistant
+  role, non-PNG); existing vector bytes are unchanged. Add tests for image
+  checksums, empty-image normalization and absent/true/false capability.
+- Vector regeneration skips writing a file whose bytes already match.
+
 ## 0.2.0
 
 - **Breaking:** a notice's `newest` is now optional and absent only for an

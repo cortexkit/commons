@@ -552,8 +552,8 @@ mod tests {
             r#"{"send_id":"a","plan":{}}"#
         );
         assert_eq!(
-            serde_json::to_string(&HeadMeta::no_lineage()).unwrap(),
-            "{}"
+            serde_json::to_string(&HeadMeta::empty(1, "log-1")).unwrap(),
+            r#"{"history_version":1,"incarnation":"log-1"}"#
         );
         assert!(errors::is_retryable(errors::SESSION_RELEASED));
         assert_eq!(
@@ -707,7 +707,7 @@ mod floor_tests {
         assert_eq!(serde_json::to_value(head).unwrap(), v["head"]);
         assert_eq!(
             serde_json::to_value(
-                HeadMeta::no_lineage().with_released(Released::new(1000, 604801000))
+                HeadMeta::empty(1, "log-1").with_released(Released::new(1000, 604801000))
             )
             .unwrap(),
             v["head"]

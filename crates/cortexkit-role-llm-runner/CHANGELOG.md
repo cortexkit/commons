@@ -15,6 +15,40 @@
   restoring it or ending the run. `tool_outside_host_set` applies only to
   runners without `refresh_relaunch`.
 
+## 0.8.0
+
+- Require ordinal on every history and display entry. Pre-adoption host
+  messages share the one-based count; marker/control rows are not entries.
+
+Breaking release:
+
+- Replace the compaction-provider/v1 integration with a reference to
+  `cortexkit-role-compaction` (`compaction-runner/v1`, `compaction-provider/v2`).
+  Remove its capability groups, initial-view model-call holds and links between
+  successive cut-bounded read windows, notices, views, rides,
+  checkpoint anchors, copied-checkpoint fork detection and negotiated edits.
+- Remove lineages, model-view reads, `tags`, read tag rows and `session.resolve`.
+  Read the entire active path, including below native markers, from ordinal 1;
+  zero aliases the first entry. Follow compaction W4.1/W4.2 on every host,
+  including dead steps and unfinished OpenCode 1 compaction pairs.
+- Require history_version and incarnation on head/read/history pages. Bind
+  after-mid cursors to history_version and refuse stale cursors history_changed.
+  A durable high-water prevents reuse after session-record loss or restore.
+- Add typed, run-fixed route_decision_id, routing_decision_refused before a
+  model call on an unknown/expired decision, and caller-only reporting.
+- Require compaction_item.preset as the session's role, passed unchanged to
+  Setup. Admission names plan.compaction_item.preset when it is missing.
+- Reuse tool-provider 0.15.0's 64 KiB measure before rendering. Replace whole
+  oversized results with tool_result_too_large carrying bytes/limit; never
+  truncate or redispatch. Preserve held and refusal execution states.
+- Remove session_ref from user-command bodies. The optional send_status group
+  serves session.send_status and the send.status alias until the next break.
+- Keep no-provider archive pruning and its page identities; publish part_keys
+  when part_digests is absent. Provider plans cannot prune until the compaction
+  contract defines acceptance. Remove the v1 pruning gate/view machinery.
+- Descriptors publish their own part keys, and output_refs no longer requires
+  tags. The retained part_tag template callback uses compaction A3 numbers.
+
 ## 0.7.48
 
 - Permit `run.tool_calls` arguments to be rebuilt from requesting messages
@@ -956,10 +990,9 @@ before sending references, since older runners ignore unknown send members.
 
 ## 0.5.2
 
-An additive release. The Alfonso apps now send messages into sessions
-through Thalamus, a sender the session's plan names, while the session's
-owner (core) keeps sending its own messages into the same sessions. These
-additions let the owner tell a person's turns from its own, let an app interrupt,
+An additive release. Applications can send through a plan-named sender
+while the session owner continues sending independently. These additions
+let the owner tell a person's turns from its own, let an app interrupt,
 and say whose authority such a run uses. Every new wire member is optional
 and left out when absent, so existing payloads keep their bytes; stored
 message bodies and the default `session.read` entry gain nothing.
@@ -1063,15 +1096,15 @@ what an older runner does not serve.
   error_result_bytes}` (`display::Limits`) on the display read and on
   `session.subscribe`. A cut ends on a UTF-8 character boundary
   (`display::cut`) and sets `arguments_truncated` or `truncated`. Without
-  `limits` nothing is cut. `display::APP_LIMITS` holds the Alfonso apps'
-  values: 2,048, 16,384 and 65,536 bytes.
+  `limits` nothing is cut. `display::APP_LIMITS` supplies convenience client
+  bounds of 2,048, 16,384 and 65,536 bytes.
 - `serializer_profile::OPENCODE_AISDK` names the `opencode-aisdk` profile
   and pins its body: OpenCode's stored message `{info, parts}` (§4.4).
 - `session.subscribe` carries typed events on a runner declaring the new
   `live_events` group (§7.1, the `live` module): durable
   `message_started`, `message_finished`, `tool_started`, `tool_finished`,
   `run_started`, `run_finished` and `run_paused`, and display deltas in
-  Broca's deployed shape with `mid` and `part` added. Every frame carries
+  the published wire shape, with `mid` and `part` added. Every frame carries
   `seq`, from 1, rising across both lanes; a newly attached stream first
   gets `display_reset` and one coalesced delta per part of the step in
   flight. A reader decodes an unknown event type as `display_reset`.
@@ -1404,15 +1437,15 @@ content digest). CONTRACT.md §9.6 is rewritten around that.
 
 ## 0.3.2
 
-- CONTRACT §14 property 4 now names the two valid shapes of a seal around a written but never-dispatched tool call (a run cut after its step was durable but before the call's dispatch intent). (a) Drop the call, which rewrites a written message and so moves the session to a new lineage whose old reads are refused `lineage_changed` (the existing text). (b) Keep the call and append a never-executed result for it in the same durable commit as the run's `interrupted` terminal state, directly after the message carrying the call: the shape the hard-stop rule (§6) already gives every pending, undispatched call (`max_steps`, `stop_when`, `budget_exhausted`, `context_ceiling`), with no dispatch intent recorded. In shape (b) the call is never dispatched and never reported indeterminate, `run.tool_calls` (§6.3) lists it with `outcome: not_executed`, no later model request carries it without its result, the follow-up writes no second result, and every message already read keeps its bytes, so the lineage stays the same. Broca seals this way.
+- CONTRACT §14 property 4 now names the two valid shapes of a seal around a written but never-dispatched tool call (a run cut after its step was durable but before the call's dispatch intent). (a) Drop the call, which rewrites a written message and so moves the session to a new lineage whose old reads are refused `lineage_changed` (the existing text). (b) Keep the call and append a never-executed result for it in the same durable commit as the run's `interrupted` terminal state, directly after the message carrying the call: the shape the hard-stop rule (§6) already gives every pending, undispatched call (`max_steps`, `stop_when`, `budget_exhausted`, `context_ceiling`), with no dispatch intent recorded. In shape (b) the call is never dispatched and never reported indeterminate, `run.tool_calls` (§6.3) lists it with `outcome: not_executed`, no later model request carries it without its result, the follow-up writes no second result, and every message already read keeps its bytes, so the lineage stays the same.
 - Read stability (§4.2) stays absolute: its paragraph now says that a recovery that only appends, such as shape (b), keeps the lineage because no written byte changes. §15's `crash_at_StepRecorded` row lists both shapes.
 - Text only: no type, constant or vector changes.
 
 ## 0.3.1
 
-- Add per-run token usage, behind the new `run_usage` describe group (`capabilities::RUN_USAGE`, checked by `check_describe` for `run.result`, the op whose answer it extends): `run.result` and `run.status` gain an optional `usage` (`RunResult::usage`, `RunStatus::usage`, `with_usage`), standardizing the shape Broca already sends. A runner declaring the group includes it on every ended run's `run.result`, and on `run.status` once a step has completed (it may send `steps: 0` earlier). An absent `usage`, or an absent total, means not known, never zero.
+- Add per-run token usage, behind the new `run_usage` describe group (`capabilities::RUN_USAGE`, checked by `check_describe` for `run.result`, the op whose answer it extends): `run.result` and `run.status` gain an optional `usage` (`RunResult::usage`, `RunStatus::usage`, `with_usage`), standardizing an existing runner usage shape. A runner declaring the group includes it on every ended run's `run.result`, and on `run.status` once a step has completed (it may send `steps: 0` earlier). An absent `usage`, or an absent total, means not known, never zero.
 - New `usage` module: `RunUsage` `{steps, unreported_steps, input_tokens?, cached_input_tokens?, cache_write_tokens?, output_tokens?, reasoning_tokens?, by_model}` and `ModelUsage` (one `by_model` entry per provider, model and variant, in order of first use), both non-exhaustive with constructors; `StepUsage` and `RunUsage::record_step` accumulate a run's steps as §6.4 counts them (a step reporting any field, even a zero, is reported; a total stays absent until a step reports it), and `RunUsage::consistent` checks that `by_model` sums to the totals. `by_model` decodes as empty when absent, which a zero-step usage may be, and always encodes. `run` re-exports the three types.
-- Vectors: `run_status.usage_plain.json`, `run_status.usage_unreported_step.json`, `run_status.usage_model_switch.json` and `run_status.usage_reasoning.json`, `run.status` bodies from Broca's real run loop. Each `usage` round-trips byte for byte, its `by_model` sums to its totals, and absent totals decode as `None`. The Broca members `final_step_finish_reason` and `retries_used` beside it stay runner members the role does not type.
+- Vectors: `run_status.usage_plain.json`, `run_status.usage_unreported_step.json`, `run_status.usage_model_switch.json` and `run_status.usage_reasoning.json`, representative run-status fixtures. Each `usage` round-trips byte for byte, its `by_model` sums to its totals, and absent totals decode as `None`. The adjacent `final_step_finish_reason` and `retries_used` fields remain runner-specific.
 - The role's vectors move from the repository's top-level `test-vectors/llm-runner-v1/` into this crate's own `test-vectors/llm-runner-v1/` (same file names and bytes, plus the four above), so they ship in the package. The new `test-vectors` feature makes `vectors` a public module: `FILES` (every file as name and contents), `SHA256SUMS`, `README` and `file(name)`, so a runner pinning this crate by version tests against the same bytes without a checkout. A test checks every file on disk is listed with its exact bytes and its SHA-256. Anyone who read the old top-level path (by checkout or `include_str!`) reads `crates/cortexkit-role-llm-runner/test-vectors/llm-runner-v1/` or `vectors::file` instead.
 - CONTRACT gains §6.4 for `run_usage` and its opening paragraph names the new vector location; §3 lists the group, §6 and §6.1 add `usage?` to the answers (§6.1 no longer lists `usage` as a runner member), and §15 lists the conformance case.
 - Patch release: `RunResult` and `RunStatus` are already non-exhaustive, so the new field is additive; every other addition is a new item.

@@ -36,7 +36,7 @@ from the subsequent provider request, while the included output was present.
 `pi-session.json` independently specifies the leaf, full active path, all
 ordinal-bearing entries, projected content and part counts, served bodies, the
 native cut, and abandoned IDs that must not appear. The helper's test compares
-every field. The retained tail has ordinals 6, 7 and 8, not a new zero-based
+every field. The retained tail has ordinals 7, 8 and 9, not a new zero-based
 sequence. Each entry's `served_body` is what a runner serves on `session.read`:
 in the recorded journal, `entry-019`'s `/message/content` carries the recorded
 context edit's replacement, and every other entry is its stored row's JSON
@@ -46,9 +46,11 @@ recorded and synthetic, equals its part count. The synthetic case
 branch summary and a shell run with null edits, pinning each removal shape.
 `display-pi.json` gives display projections of stored bodies for each retained
 entry, as well as recorded entries before navigation and synthetic coverage.
-They test the display function itself; inside the served window a runner
-projects the served body, so `entry-019` displays the edited text there, and
-its original text appears only on host-history pages below the window.
+They test the display function itself, with both recorded bodies and edited
+served bodies as inputs. The served form of `entry-019` displays its edited
+text. In a session, history and read pages must serve the same body for each
+entry, including entries below the model's cut; the original fixture input
+does not define a second readable version of the entry.
 
 Cases marked `synthetic` are not recordings. Shell cases copy the recorded
 `bashExecution` shape and change fields for empty output, cancellation,
@@ -61,7 +63,7 @@ replacement, and a rendered template send stored as `custom_message` with
 `template_id` annotation identifies the source template; it is not a
 `session.send` request (which also needs its delivery and identity fields).
 The recordings do not exercise these synthetic cases or the runner's send
-storage rule, nor can a journal alone prove step-boundary lineage transitions.
+storage rule, nor can a journal alone prove rewrite-version changes at step boundaries.
 
 ## Source checked
 

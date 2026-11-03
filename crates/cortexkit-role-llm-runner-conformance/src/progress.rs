@@ -7,15 +7,12 @@
 
 use std::io::Write;
 
-use crate::{
-    report::{CaseOutcome, CASES},
-    subject::Capability,
-};
+use crate::report::CaseOutcome;
 
 /// One step of a run, passed to the progress callback.
 ///
 /// Every case produces a [`CaseStarted`](Self::CaseStarted) and then a
-/// [`CaseFinished`](Self::CaseFinished), in [`CASES`] order. That includes a
+/// [`CaseFinished`](Self::CaseFinished), in [`crate::CASES`] order. That includes a
 /// case skipped for a missing capability or reported inapplicable before it
 /// runs: it still starts and finishes. A capability skip is decided without
 /// touching the runner, so its elapsed time is near zero; an inapplicability
@@ -25,7 +22,7 @@ use crate::{
 pub enum SuiteProgress {
     /// The suite has reached the case and is about to check whether it can
     /// run, then run it. `index` is its zero-based position in
-    /// [`CASES`]; `total` is the number of cases in the run.
+    /// [`crate::CASES`]; `total` is the number of cases in the run.
     CaseStarted {
         case: &'static str,
         index: usize,
@@ -126,30 +123,14 @@ pub(crate) fn line(event: &SuiteProgress) -> String {
     }
 }
 
-/// The outcome word [`SuiteReport::render`](crate::SuiteReport::render) uses
-/// for `case`. A capability skip of a case requiring `compaction` or
-/// `model_view` is reported there as N/A, not SKIP, so the case's
-/// requirements are looked up in [`CASES`] the same way the report records
-/// them.
-fn word(case: &str, outcome: &CaseOutcome) -> &'static str {
+/// Format the recorded outcome: passed variants as PASS, failures as FAIL,
+/// skipped variants as SKIP, and inapplicable as N/A. No case-specific
+/// capability lookup is performed.
+fn word(_case: &str, outcome: &CaseOutcome) -> &'static str {
     match outcome {
         CaseOutcome::Passed | CaseOutcome::PassedWithInapplicableRule { .. } => "PASS",
         CaseOutcome::Failed { .. } => "FAIL",
-        CaseOutcome::Skipped { .. } => {
-            let not_applicable = CASES.iter().any(|spec| {
-                spec.name == case
-                    && spec
-                        .requires
-                        .iter()
-                        .chain(spec.requires_any)
-                        .any(|c| matches!(c, Capability::Compaction | Capability::ModelView))
-            });
-            if not_applicable {
-                "N/A"
-            } else {
-                "SKIP"
-            }
-        }
+        CaseOutcome::Skipped { .. } => "SKIP",
         CaseOutcome::SkippedWithReason { .. } => "SKIP",
         CaseOutcome::Inapplicable { .. } => "N/A",
     }
@@ -157,6 +138,8 @@ fn word(case: &str, outcome: &CaseOutcome) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use crate::subject::Capability;
+    use crate::CASES;
     use std::sync::{Arc, Mutex};
 
     use super::*;
@@ -214,13 +197,13 @@ mod tests {
             ),
             (
                 finished(
-                    "cut_starts_a_new_lineage",
+                    "missing_optional_group",
                     CaseOutcome::Skipped {
-                        missing: vec![Capability::Compaction],
+                        missing: vec![Capability::Queue],
                     },
                     0,
                 ),
-                "END cut_starts_a_new_lineage N/A 0\n",
+                "END missing_optional_group SKIP 0\n",
             ),
             (
                 finished(

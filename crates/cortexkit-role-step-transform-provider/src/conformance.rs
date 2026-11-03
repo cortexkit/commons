@@ -1,4 +1,4 @@
-//! A focused probe for provider conversation identity, not a full conformance kit.
+//! Focused probes for provider conversation identity and route preflight.
 //!
 //! Enable the non-default `conformance` feature to drive this rule against a
 //! provider through an implementation-specific adapter.
@@ -18,8 +18,8 @@ pub trait StateProbe {
     /// identity fields and folder spelling, then read an opaque, nonempty marker
     /// for the provider's session state. This role has no Setup wire op.
     /// Repeated setup for the same state must return the same marker; distinct
-    /// state must have distinct markers. The harness and session below are
-    /// hook body fields, not the route's possibly generic bind fields.
+    /// state must have distinct markers. Harness and session are route binding
+    /// fields under the session's scope, never hook body fields.
     fn setup_and_state_marker(
         &mut self,
         runner_module_id: &str,
@@ -63,6 +63,91 @@ pub fn conversation_state_ignores_project_root(
     Ok(())
 }
 
+/// Case name for the non-session route's per-call hook refusal.
+pub const HOOK_ROUTE_CASE: &str = "hook_on_non_session_route";
+/// Plan composition can declare before a session or hook route exists.
+pub const DECLARE_ROUTE_CASE: &str = "declare_on_module_route";
+
+/// Adapter over real role routes. Opening a route must not send a hook.
+/// The most recently opened route is used by the following calls.
+pub trait RouteProbe {
+    /// Open an attested, correctly role-selected route without a session.
+    /// `scoped` also probes a scope that exists before the session does.
+    fn open_non_session_route(&mut self, scoped: bool) -> Result<(), crate::errors::ErrorBody>;
+    fn hook(
+        &mut self,
+        call: &crate::hook::HookCall,
+    ) -> Result<crate::answer::HookAnswer, crate::errors::ErrorBody>;
+    fn declare(
+        &mut self,
+        request: &crate::subscription::DeclareRequest,
+    ) -> Result<crate::subscription::Declaration, crate::errors::ErrorBody>;
+    fn describe(&mut self) -> Result<crate::describe::RoleDescribe, crate::errors::ErrorBody>;
+}
+
+/// Both non-session route kinds must bind successfully; hooks must return
+/// error code `route_unbound`, and a subsequent discovery RPC must succeed.
+/// This probe does not check refusal wording or discovery completeness; the
+/// declaration probe validates discovery shape and required ops.
+pub fn hook_on_non_session_route(adapter: &mut impl RouteProbe) -> Result<(), String> {
+    use crate::{
+        errors::ROUTE_UNBOUND,
+        hook::{HookCall, Subject},
+    };
+    let call = HookCall::new(Subject::PreUser {
+        blocks: vec!["hello".into()],
+        mark: None,
+        delivery: None,
+        at_ms: None,
+    });
+    for scoped in [false, true] {
+        adapter
+            .open_non_session_route(scoped)
+            .map_err(|error| format!("{HOOK_ROUTE_CASE}: bind refused: {}", error.code))?;
+        match adapter.hook(&call) {
+            Err(error) if error.code == ROUTE_UNBOUND => {}
+            result => {
+                return Err(format!(
+                    "{HOOK_ROUTE_CASE}: expected per-call route_unbound, got {result:?}"
+                ))
+            }
+        }
+        adapter.describe().map_err(|error| {
+            format!(
+                "{HOOK_ROUTE_CASE}: route unusable after refusal: {}",
+                error.code
+            )
+        })?;
+    }
+    Ok(())
+}
+
+/// `preset` must name a preset the provider supports; no universal preset
+/// name is required by the role.
+pub fn declare_on_module_route(adapter: &mut impl RouteProbe, preset: &str) -> Result<(), String> {
+    use crate::subscription::DeclareRequest;
+    for scoped in [false, true] {
+        adapter
+            .open_non_session_route(scoped)
+            .map_err(|error| format!("{DECLARE_ROUTE_CASE}: bind refused: {}", error.code))?;
+        let request = DeclareRequest::new(serde_json::Map::new()).with_preset(preset);
+        let declaration = adapter
+            .declare(&request)
+            .map_err(|error| format!("{DECLARE_ROUTE_CASE}: declare refused: {}", error.code))?;
+        if !declaration.check().is_empty() {
+            return Err(format!("{DECLARE_ROUTE_CASE}: malformed declaration"));
+        }
+        let described = adapter
+            .describe()
+            .map_err(|error| format!("{DECLARE_ROUTE_CASE}: describe refused: {}", error.code))?;
+        crate::describe::check_describe(
+            &serde_json::to_value(described).expect("describe is JSON"),
+        )
+        .map_err(|problems| format!("{DECLARE_ROUTE_CASE}: unusable describe: {problems:?}"))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +181,118 @@ mod tests {
             let next_marker = format!("state-{}", self.states.len());
             Ok(self.states.entry(key).or_insert(next_marker).clone())
         }
+    }
+
+    #[derive(Default)]
+    struct FakeRoutes {
+        accepts_unbound_hooks: bool,
+        requires_session_for_declare: bool,
+        refuses_unbound_at_bind: bool,
+    }
+
+    impl RouteProbe for FakeRoutes {
+        fn open_non_session_route(&mut self, _: bool) -> Result<(), crate::errors::ErrorBody> {
+            if self.refuses_unbound_at_bind {
+                return Err(crate::errors::ErrorBody::new(
+                    crate::errors::ROUTE_UNBOUND,
+                    "Expected a bound session",
+                ));
+            }
+            Ok(())
+        }
+        fn hook(
+            &mut self,
+            _: &crate::hook::HookCall,
+        ) -> Result<crate::answer::HookAnswer, crate::errors::ErrorBody> {
+            if self.accepts_unbound_hooks {
+                Ok(crate::answer::HookAnswer::Pass)
+            } else {
+                Err(crate::errors::ErrorBody::new(
+                    crate::errors::ROUTE_UNBOUND,
+                    "Expected a bound session",
+                ))
+            }
+        }
+        fn declare(
+            &mut self,
+            request: &crate::subscription::DeclareRequest,
+        ) -> Result<crate::subscription::Declaration, crate::errors::ErrorBody> {
+            use crate::subscription::{Declaration, DeclaredSubscription, Hook, Op};
+            assert_eq!(
+                serde_json::to_value(request).unwrap(),
+                serde_json::json!({"preset":"default", "params":{}})
+            );
+            if self.requires_session_for_declare {
+                return Err(crate::errors::ErrorBody::new(
+                    crate::errors::ROUTE_UNBOUND,
+                    "Expected a bound session",
+                ));
+            }
+            Ok(Declaration::new(vec![DeclaredSubscription::new(
+                Hook::PreUser,
+                vec![Op::Append],
+                250,
+            )]))
+        }
+        fn describe(&mut self) -> Result<crate::describe::RoleDescribe, crate::errors::ErrorBody> {
+            use crate::describe::{Major, RoleDescribe};
+            Ok(RoleDescribe::new(
+                vec![Major::new(
+                    crate::PROVIDES,
+                    crate::REQUIRED_OPS
+                        .iter()
+                        .map(|op| op.to_string())
+                        .collect(),
+                    "alpha",
+                )],
+                "example",
+            ))
+        }
+    }
+
+    #[test]
+    fn faithful_route_provider_passes() {
+        hook_on_non_session_route(&mut FakeRoutes::default()).unwrap();
+        declare_on_module_route(&mut FakeRoutes::default(), "default").unwrap();
+    }
+
+    #[test]
+    fn accepting_unbound_hooks_fails_by_name() {
+        let error = hook_on_non_session_route(&mut FakeRoutes {
+            accepts_unbound_hooks: true,
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert!(error.starts_with(HOOK_ROUTE_CASE), "{error}");
+    }
+
+    #[test]
+    fn rejecting_unbound_bind_fails_by_name() {
+        let error = hook_on_non_session_route(&mut FakeRoutes {
+            refuses_unbound_at_bind: true,
+            ..Default::default()
+        })
+        .unwrap_err();
+        assert_eq!(
+            error,
+            format!("{HOOK_ROUTE_CASE}: bind refused: route_unbound")
+        );
+    }
+
+    #[test]
+    fn requiring_session_for_declare_fails_by_name() {
+        let error = declare_on_module_route(
+            &mut FakeRoutes {
+                requires_session_for_declare: true,
+                ..Default::default()
+            },
+            "default",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            format!("{DECLARE_ROUTE_CASE}: declare refused: route_unbound")
+        );
     }
 
     #[test]

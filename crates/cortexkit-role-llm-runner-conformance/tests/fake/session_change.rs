@@ -172,9 +172,6 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 sess.plan_digest = Some(pending.digest);
             }
             sess.change.flush = false;
-            if record["surface_change_ride"] == true {
-                sess.surface_change_rides += 1;
-            }
             if record["rewrite_history"] == true {
                 if let Some(message) = sess.messages.first_mut() {
                     message.body = json!({"text":"rewritten by host relaunch"});
@@ -464,8 +461,7 @@ impl Module {
             json!({
                 "kind": "change_applied", "applied_by": applied_by,
                 "keep_old_tools": relaunch && self.world.defects.relaunch_keeps_old_tools,
-                "rewrite_history": relaunch && self.world.defects.relaunch_rewrites_history,
-                "surface_change_ride": relaunch && !self.world.defects.relaunch_omits_ride
+                "rewrite_history": relaunch && self.world.defects.relaunch_rewrites_history
             }),
         )
     }

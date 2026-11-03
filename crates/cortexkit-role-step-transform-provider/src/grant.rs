@@ -58,7 +58,16 @@ impl UserGrant {
 pub fn plan_user_grants(plan: &Map<String, Value>) -> Result<Vec<UserGrant>, serde_json::Error> {
     match plan.get(USER_GRANTS_FIELD) {
         None => Ok(Vec::new()),
-        Some(grants) => serde_json::from_value(grants.clone()),
+        Some(grants) => {
+            let grants: Vec<UserGrant> = serde_json::from_value(grants.clone())?;
+            if grants
+                .iter()
+                .any(|grant| matches!(grant.hook, Hook::Unknown(_)))
+            {
+                return Err(serde::de::Error::custom("unknown hook in user grant"));
+            }
+            Ok(grants)
+        }
     }
 }
 

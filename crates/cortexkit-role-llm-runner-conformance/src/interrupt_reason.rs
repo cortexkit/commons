@@ -42,7 +42,8 @@ where
         .session_route(&handle, &session, &subject.owner_stamp())
         .await
         .map_err(|e| e.to_string())?;
-    crate::tags::require_declared(&route, groups::INTERRUPT_REASON, ops::RUN_RESULT).await?;
+    crate::send_helpers::require_declared(&route, groups::INTERRUPT_REASON, ops::RUN_RESULT)
+        .await?;
     let params = send_params(
         subject,
         &session,

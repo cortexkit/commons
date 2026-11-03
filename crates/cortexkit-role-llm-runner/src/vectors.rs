@@ -70,10 +70,6 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/tool-upfront/README.md"),
     ),
     (
-        "truncate.json",
-        include_str!("../test-vectors/llm-runner-v1/truncate.json"),
-    ),
-    (
         "pi-1.3.0-1.4.0.jsonl",
         include_str!("../test-vectors/llm-runner-v1/pi-1.3.0-1.4.0.jsonl"),
     ),
@@ -146,8 +142,8 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/head-incarnation.json"),
     ),
     (
-        "plan-compaction-without-preset.json",
-        include_str!("../test-vectors/llm-runner-v1/plan-compaction-without-preset.json"),
+        "plan-compaction-preset.json",
+        include_str!("../test-vectors/llm-runner-v1/plan-compaction-preset.json"),
     ),
     (
         "head-sender.json",
@@ -442,30 +438,6 @@ pub const FILES: &[(&str, &str)] = &[
     (
         "subscribe.json",
         include_str!("../test-vectors/llm-runner-v1/subscribe.json"),
-    ),
-    (
-        "tag-checkpoint-describe.json",
-        include_str!("../test-vectors/llm-runner-v1/tag-checkpoint-describe.json"),
-    ),
-    (
-        "message-checkpoint.json",
-        include_str!("../test-vectors/llm-runner-v1/message-checkpoint.json"),
-    ),
-    (
-        "tag-cleaning.json",
-        include_str!("../test-vectors/llm-runner-v1/tag-cleaning.json"),
-    ),
-    (
-        "tag-numbering.json",
-        include_str!("../test-vectors/llm-runner-v1/tag-numbering.json"),
-    ),
-    (
-        "tags-describe.json",
-        include_str!("../test-vectors/llm-runner-v1/tags-describe.json"),
-    ),
-    (
-        "tags.json",
-        include_str!("../test-vectors/llm-runner-v1/tags.json"),
     ),
     (
         "display-anthropic-messages.json",

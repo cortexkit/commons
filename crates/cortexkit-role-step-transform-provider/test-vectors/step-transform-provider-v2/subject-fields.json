@@ -1,0 +1,139 @@
+{
+  "requests": [
+    {
+      "name": "reserved identity without a whole message",
+      "request": {
+        "subject_mid": "m0",
+        "subject_ordinal": 1,
+        "params": {},
+        "hook": "post_assistant",
+        "step_id": "step",
+        "blocks": [
+          "done"
+        ]
+      }
+    },
+    {
+      "name": "explicit null is a present opaque message",
+      "request": {
+        "subject_mid": "m0",
+        "subject_ordinal": 1,
+        "message": null,
+        "params": {},
+        "hook": "pre_user",
+        "blocks": []
+      }
+    },
+    {
+      "name": "opaque whole message and part",
+      "request": {
+        "hook": "post_tool",
+        "step_id": "step",
+        "tool": "read",
+        "tool_call_id": "call",
+        "blocks": [
+          "done"
+        ],
+        "is_error": false,
+        "subject_mid": "m0",
+        "subject_ordinal": 1,
+        "subject_part": "part-a",
+        "message": {
+          "opaque_schema": [
+            1,
+            "done"
+          ]
+        },
+        "params": {
+          "serializer_profile": "example"
+        }
+      }
+    }
+  ],
+  "invalid_pairs": [
+    {
+      "name": "message without either identity field",
+      "request": {
+        "params": {},
+        "hook": "pre_user",
+        "blocks": [],
+        "message": {}
+      },
+      "field": "message"
+    },
+    {
+      "name": "null message without either identity field",
+      "request": {
+        "params": {},
+        "hook": "pre_user",
+        "blocks": [],
+        "message": null
+      },
+      "field": "message"
+    },
+    {
+      "name": "message and ordinal without mid",
+      "request": {
+        "params": {},
+        "hook": "pre_user",
+        "blocks": [],
+        "subject_ordinal": 1,
+        "message": {}
+      },
+      "field": "message"
+    },
+    {
+      "name": "message and mid without ordinal",
+      "request": {
+        "params": {},
+        "hook": "pre_user",
+        "blocks": [],
+        "subject_mid": "m",
+        "message": {}
+      },
+      "field": "message"
+    },
+    {
+      "name": "mid without ordinal",
+      "request": {
+        "params": {},
+        "hook": "pre_user",
+        "blocks": [],
+        "subject_mid": "m"
+      },
+      "field": "subject_ordinal"
+    },
+    {
+      "name": "ordinal without mid",
+      "request": {
+        "params": {},
+        "hook": "pre_user",
+        "blocks": [],
+        "subject_ordinal": 1
+      },
+      "field": "subject_mid"
+    },
+    {
+      "name": "entry_ordinals_start_at_one",
+      "request": {
+        "hook": "pre_user",
+        "params": {},
+        "blocks": [],
+        "subject_mid": "m0",
+        "subject_ordinal": 0
+      },
+      "field": "subject_ordinal"
+    }
+  ],
+  "undecodable": [
+    {
+      "name": "negative subject ordinal",
+      "request": {
+        "hook": "pre_user",
+        "blocks": [],
+        "subject_mid": "m",
+        "subject_ordinal": -1
+      }
+    }
+  ]
+}

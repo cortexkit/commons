@@ -40,7 +40,7 @@ async fn transcript<R: RunnerRoute>(route: &R) -> Result<Transcript, String> {
     Ok((head(route).await?, read_all(route).await?.1))
 }
 
-/// Fail unless the transcript reads as `before`: the same lineage, last
+/// Fail unless the transcript reads as `before`: the same history_version, last
 /// ordinal and last run in the same state, and the same messages. The
 /// head's stream position and update time are not compared: an adoption is a
 /// durable record of its own, which a runner may count there.
@@ -48,7 +48,7 @@ async fn unchanged<R: RunnerRoute>(route: &R, before: &Transcript, what: &str) -
     let after = transcript(route).await?;
     let key = |(head, messages): &Transcript| {
         (
-            head.lineage_id.clone(),
+            head.history_version,
             head.last_ordinal,
             head.last_run_state.clone(),
             messages.clone(),

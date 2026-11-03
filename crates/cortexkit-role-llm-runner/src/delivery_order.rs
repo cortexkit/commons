@@ -704,6 +704,11 @@ impl TemplateProblem {
     }
 }
 
+/// Format a positive part-tag number as `§N§`.
+fn format_part_tag(number: u64) -> Option<String> {
+    (number > 0).then(|| format!("§{number}§"))
+}
+
 /// Render `use_` from the templates the plan declares for its sender: the
 /// send's one text, used for whichever mode carries it. `shown` answers the
 /// number the request carrying the send shows for a part, or `None` when
@@ -715,6 +720,9 @@ impl TemplateProblem {
 /// At admission the runner renders against the request it would make now;
 /// at delivery, against the request that carries the send, whose text is
 /// then stored and resent byte for byte.
+/// `shown` supplies the request's part-tag number, defined by the "Tag numbers"
+/// chapter of cortexkit-role-compaction's CONTRACT.md (A3). This function does
+/// not calculate numbering.
 pub fn render(
     templates: &[Template],
     use_: &TemplateUse,
@@ -756,7 +764,7 @@ pub fn render(
             Slot::PartTag => {
                 let part: PartRef = serde_json::from_value(value.clone()).map_err(|_| invalid())?;
                 let n = shown(&part).ok_or_else(|| TemplateProblem::PartGone(name.clone()))?;
-                crate::tags::format_tag(n).ok_or_else(invalid)?
+                format_part_tag(n).ok_or_else(invalid)?
             }
             Slot::Enum { values } => {
                 let chosen = value.as_str().ok_or_else(invalid)?;

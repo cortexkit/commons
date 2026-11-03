@@ -21,18 +21,19 @@ use crate::{
     subscription::{Hook, Op, Phase},
 };
 
-/// One operation on one of the subject's text blocks. Strict on `op`.
+open_tagged! {
+/// One operation on one of the subject's text blocks. Unknown operations
+/// are preserved, but rejected before any operation is applied.
 ///
 /// `block` indexes the subject's `blocks`, which list only its text blocks
 /// in message order. An operation changes that block's text and nothing
 /// else: it never adds, removes or reorders blocks.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(tag = "op", rename_all = "snake_case")]
-pub enum Operation {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Operation, "op" {
     /// Put `text` before the block's text, in the same block. Prepends
     /// stack outward: each one lands before the text an earlier prepend
     /// added, so the last one applied ends up first.
-    Prepend {
+    Prepend => "prepend" {
         block: u32,
         text: String,
         /// A short note for whoever reads the attribution.
@@ -41,19 +42,20 @@ pub enum Operation {
     },
     /// Put `text` after the block's text, in the same block. Appends stack
     /// in order.
-    Append {
+    Append => "append" {
         block: u32,
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
     /// Replace the block's text, as it stands at this point, with `value`.
-    Replace {
+    Replace => "replace" {
         block: u32,
         value: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
+}
 }
 
 impl Operation {
@@ -62,15 +64,18 @@ impl Operation {
             Self::Prepend { .. } => Op::Prepend,
             Self::Append { .. } => Op::Append,
             Self::Replace { .. } => Op::Replace,
+            Self::Unknown { name, .. } => Op::Unknown(name.clone()),
         }
     }
 
-    /// The index of the text block the operation acts on.
-    pub fn block(&self) -> u32 {
+    /// The text-block index for a known operation; `None` for an unknown
+    /// operation.
+    pub fn block(&self) -> Option<u32> {
         match self {
             Self::Prepend { block, .. }
             | Self::Append { block, .. }
-            | Self::Replace { block, .. } => *block,
+            | Self::Replace { block, .. } => Some(*block),
+            Self::Unknown { .. } => None,
         }
     }
 
@@ -80,31 +85,37 @@ impl Operation {
             Self::Prepend { text: before, .. } => text.insert_str(0, before),
             Self::Append { text: after, .. } => text.push_str(after),
             Self::Replace { value, .. } => value.clone_into(text),
+            Self::Unknown { .. } => unreachable!("unknown operations are checked before applying"),
         }
     }
 }
 
-/// What happens when an approval question expires unanswered. Strict: an
-/// unknown value does not decode, so the answer is refused and the hook is
-/// unavailable; nothing runs on a policy the runner does not understand.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+/// What happens when an approval question expires unanswered. An unknown
+/// policy makes the answer unavailable; it never authorizes execution.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
 pub enum OnExpiry {
     /// The tool call is denied because its approval question expired; its
     /// result carries the reason `pre_tool_expired`.
     Deny,
+    Unknown(String),
 }
+open_string!(OnExpiry { Deny => "deny" });
 
 /// What the runner does with an approval that arrives after the run has moved
-/// on. An unknown value does not decode, exactly as for [`OnExpiry`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+/// on. An unknown policy makes the answer unavailable, like [`OnExpiry`].
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
 pub enum LateExecution {
     /// The call executes.
     Execute,
     /// Nothing executes; the human is told the answer came too late.
     NotifyOnly,
+    Unknown(String),
 }
+open_string!(LateExecution { Execute => "execute", NotifyOnly => "notify_only" });
 
 /// What an approve-phase hook asks the human. The elicitation role defines
 /// how the ask is filed and answered; this role carries only what the hook
@@ -154,39 +165,42 @@ impl ApprovalAsk {
     }
 }
 
-/// A hook's answer. Strict on `answer`: an unknown answer does not decode,
-/// and the runner treats the hook as unavailable.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(tag = "answer", rename_all = "snake_case")]
-pub enum HookAnswer {
-    /// No change. Every hook and phase allows it.
-    Pass,
+open_tagged! {
+/// A hook's answer. An unknown answer is preserved, and makes the hook
+/// unavailable rather than permitting an action the runner cannot understand.
+#[derive(Clone, Debug, PartialEq)]
+pub enum HookAnswer, "answer" {
+    /// No change. Allowed for every recognized hook and phase; unknown
+    /// subjects/phases remain invalid.
+    Pass => "pass",
     /// Operations on the subject's text blocks, applied in order.
     /// `pre_user`, `post_assistant` and `post_tool` only.
-    Ops { ops: Vec<Operation> },
+    Ops => "ops" { ops: Vec<Operation> },
     /// The input that executes instead. `pre_tool` `mutate` only. Must be a
     /// pure function of the call and the frozen config.
-    Mutate {
+    Mutate => "mutate" {
         input: Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         note: Option<String>,
     },
     /// Deny the call: `text` becomes its error result, with reason
     /// `pre_tool_denied`. `pre_tool` `validate` only.
-    Deny { text: String },
+    Deny => "deny" { text: String },
     /// Ask a human before the call executes. `pre_tool` `approve` only.
-    Ask { ask: ApprovalAsk },
+    Ask => "ask" { ask: ApprovalAsk },
+}
 }
 
 impl HookAnswer {
     /// The answer's name as it appears in `answer`.
-    pub fn name(&self) -> &'static str {
+    pub fn name(&self) -> &str {
         match self {
             Self::Pass => "pass",
             Self::Ops { .. } => "ops",
             Self::Mutate { .. } => "mutate",
             Self::Deny { .. } => "deny",
             Self::Ask { .. } => "ask",
+            Self::Unknown { name, .. } => name,
         }
     }
 }
@@ -194,6 +208,7 @@ impl HookAnswer {
 /// Why the runner refuses an answer before applying it. Any of these makes
 /// the hook unavailable for the call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AnswerProblem {
     /// The hook or phase does not allow this kind of answer.
     AnswerNotAllowed,
@@ -226,12 +241,25 @@ impl AnswerProblem {
 /// accepts on its result, and each operation's block index against the
 /// subject's `blocks`. `tool_result_ops` of `None` means the tool accepts
 /// every operation, the default `tool-provider/v1` gives.
+///
+/// Run this check before applying or recording an answer, and also run
+/// [`check_post_tool_grant`] where applicable. Reduction ownership must
+/// already have been enforced at subscription admission. The apply helpers
+/// receive neither authorization context: decoding or successfully applying
+/// operations is not authorization.
 pub fn check_answer(
     subject: &Subject,
     subscribed_ops: &[Op],
     tool_result_ops: Option<&[Op]>,
     answer: &HookAnswer,
 ) -> Result<(), AnswerProblem> {
+    if matches!(subject, Subject::Unknown { .. })
+        || matches!(subject.phase(), Some(Phase::Unknown(_)))
+        || matches!(answer, HookAnswer::Unknown { .. })
+        || matches!(answer, HookAnswer::Ask { ask } if matches!(ask.on_expiry, OnExpiry::Unknown(_)) || matches!(ask.late_execution, LateExecution::Unknown(_)))
+    {
+        return Err(AnswerProblem::AnswerNotAllowed);
+    }
     let allowed = match (subject.hook(), subject.phase(), answer) {
         (_, _, HookAnswer::Pass) => true,
         (hook, _, HookAnswer::Ops { .. }) => hook.takes_ops(),
@@ -247,6 +275,9 @@ pub fn check_answer(
         let blocks = subject.blocks().map_or(0, <[String]>::len);
         for operation in ops {
             let op = operation.op();
+            if matches!(op, Op::Unknown(_)) {
+                return Err(AnswerProblem::AnswerNotAllowed);
+            }
             if !subscribed_ops.contains(&op) {
                 return Err(AnswerProblem::OpNotSubscribed);
             }
@@ -255,7 +286,10 @@ pub fn check_answer(
             {
                 return Err(AnswerProblem::OpNotAcceptedByTool);
             }
-            if operation.block() as usize >= blocks {
+            if operation
+                .block()
+                .is_none_or(|block| block as usize >= blocks)
+            {
                 return Err(AnswerProblem::BlockOutOfRange);
             }
         }
@@ -293,12 +327,18 @@ pub fn check_post_tool_grant(
 /// blocks never changes. An index outside `blocks` is refused, and nothing
 /// is applied.
 pub fn apply_ops(blocks: &[String], ops: &[Operation]) -> Result<Vec<String>, AnswerProblem> {
-    if ops.iter().any(|op| op.block() as usize >= blocks.len()) {
+    if ops.iter().any(|op| matches!(op, Operation::Unknown { .. })) {
+        return Err(AnswerProblem::AnswerNotAllowed);
+    }
+    if ops.iter().any(|op| {
+        op.block()
+            .is_none_or(|block| block as usize >= blocks.len())
+    }) {
         return Err(AnswerProblem::BlockOutOfRange);
     }
     let mut blocks = blocks.to_vec();
     for operation in ops {
-        operation.apply_to(&mut blocks[operation.block() as usize]);
+        operation.apply_to(&mut blocks[operation.block().expect("known operation") as usize]);
     }
     Ok(blocks)
 }
@@ -314,11 +354,17 @@ pub fn apply_to_parts<P>(
     ops: &[Operation],
 ) -> Result<(), AnswerProblem> {
     let mut texts: Vec<&mut String> = parts.iter_mut().filter_map(&mut text_of).collect();
-    if ops.iter().any(|op| op.block() as usize >= texts.len()) {
+    if ops.iter().any(|op| matches!(op, Operation::Unknown { .. })) {
+        return Err(AnswerProblem::AnswerNotAllowed);
+    }
+    if ops
+        .iter()
+        .any(|op| op.block().is_none_or(|block| block as usize >= texts.len()))
+    {
         return Err(AnswerProblem::BlockOutOfRange);
     }
     for operation in ops {
-        operation.apply_to(texts[operation.block() as usize]);
+        operation.apply_to(texts[operation.block().expect("known operation") as usize]);
     }
     Ok(())
 }
@@ -344,20 +390,31 @@ mod tests {
         for case in vectors::cases(&file, "undecodable") {
             let name = case["name"].as_str().unwrap();
             vectors::refused::<HookAnswer>(name, &case["answer"]);
-            // An ask whose `on_expiry` or `late_execution` holds a value this
-            // role does not define must not decode, and the error must name
-            // that value (the case's `unknown_value`), so the refusal says
-            // exactly what the runner did not understand.
-            if let Some(value) = case.get("unknown_value") {
-                let error = serde_json::from_value::<HookAnswer>(case["answer"].clone())
-                    .unwrap_err()
-                    .to_string();
-                let value = value.as_str().unwrap();
-                assert!(
-                    error.contains(&format!("unknown variant `{value}`")),
-                    "{name}: {error}"
-                );
-            }
+        }
+        for case in vectors::cases(&file, "unsupported") {
+            let name = case["name"].as_str().unwrap();
+            let answer = vectors::round_trip::<HookAnswer>(name, &case["answer"]);
+            let subject = if matches!(answer, HookAnswer::Ask { .. }) {
+                Subject::PreTool {
+                    step_id: "step".into(),
+                    phase: Phase::Approve,
+                    tool: "tool".into(),
+                    tool_call_id: "call".into(),
+                    call_key: None,
+                    input: Value::Null,
+                }
+            } else {
+                Subject::PreUser {
+                    blocks: vec!["text".into()],
+                    mark: None,
+                    delivery: None,
+                    at_ms: None,
+                }
+            };
+            assert!(
+                check_answer(&subject, &[], None, &answer).is_err(),
+                "{name}"
+            );
         }
         for case in vectors::cases(&file, "checks") {
             let name = case["name"].as_str().unwrap();
@@ -394,15 +451,11 @@ mod tests {
 
     #[test]
     fn multi_block_subjects_and_operations_round_trip() {
-        let call = HookCall::new(
-            "s",
-            "broca",
-            Subject::PostAssistant {
-                step_id: "st".into(),
-                blocks: vec![text("one"), text("two")],
-            },
-        );
-        let wire = serde_json::json!({"session": "s", "harness": "broca", "params": {}, "hook": "post_assistant",
+        let call = HookCall::new(Subject::PostAssistant {
+            step_id: "st".into(),
+            blocks: vec![text("one"), text("two")],
+        });
+        let wire = serde_json::json!({"params": {}, "hook": "post_assistant",
             "step_id": "st", "blocks": ["one", "two"]});
         assert_eq!(vectors::round_trip::<HookCall>("call", &wire), call);
         assert_eq!(call.subject.blocks().unwrap().len(), 2);
@@ -475,6 +528,7 @@ mod tests {
             blocks,
             mark: None,
             delivery: None,
+            at_ms: None,
         };
         let answer = HookAnswer::Ops {
             ops: vec![append(1, "y")],

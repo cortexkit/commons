@@ -1,4 +1,4 @@
-//! Shared `step-transform-provider-v1` vectors, compiled in with `test-vectors`.
+//! Shared `step-transform-provider-v2` vectors, compiled in with `test-vectors`.
 //! These are the same bytes the wire crate tests and its package ships.
 
 #[cfg(test)]
@@ -6,62 +6,50 @@ use serde::{de::DeserializeOwned, Serialize};
 #[cfg(test)]
 use serde_json::Value;
 
-pub const DIR: &str = "step-transform-provider-v1";
-pub const README: &str = include_str!("../test-vectors/step-transform-provider-v1/README.md");
-pub const SHA256SUMS: &str = include_str!("../test-vectors/step-transform-provider-v1/SHA256SUMS");
+pub const DIR: &str = "step-transform-provider-v2";
+pub const README: &str = include_str!("../test-vectors/step-transform-provider-v2/README.md");
+pub const SHA256SUMS: &str = include_str!("../test-vectors/step-transform-provider-v2/SHA256SUMS");
 /// Every shipped vector file, in SHA256SUMS order.
 pub const FILES: &[(&str, &str)] = &[
     (
         "README.md",
-        include_str!("../test-vectors/step-transform-provider-v1/README.md"),
-    ),
-    (
-        "CLAUDE_CODE_SHA256SUMS",
-        include_str!("../test-vectors/step-transform-provider-v1/CLAUDE_CODE_SHA256SUMS"),
-    ),
-    (
-        "claude-code-native-ingress.json",
-        include_str!("../test-vectors/step-transform-provider-v1/claude-code-native-ingress.json"),
-    ),
-    (
-        "claude-code.json",
-        include_str!("../test-vectors/step-transform-provider-v1/claude-code.json"),
+        include_str!("../test-vectors/step-transform-provider-v2/README.md"),
     ),
     (
         "declare.json",
-        include_str!("../test-vectors/step-transform-provider-v1/declare.json"),
+        include_str!("../test-vectors/step-transform-provider-v2/declare.json"),
     ),
     (
         "errors.json",
-        include_str!("../test-vectors/step-transform-provider-v1/errors.json"),
+        include_str!("../test-vectors/step-transform-provider-v2/errors.json"),
     ),
     (
         "grants.json",
-        include_str!("../test-vectors/step-transform-provider-v1/grants.json"),
+        include_str!("../test-vectors/step-transform-provider-v2/grants.json"),
     ),
     (
         "hook-answers.json",
-        include_str!("../test-vectors/step-transform-provider-v1/hook-answers.json"),
+        include_str!("../test-vectors/step-transform-provider-v2/hook-answers.json"),
     ),
     (
         "hook-requests.json",
-        include_str!("../test-vectors/step-transform-provider-v1/hook-requests.json"),
-    ),
-    (
-        "host-runner-lane.json",
-        include_str!("../test-vectors/step-transform-provider-v1/host-runner-lane.json"),
-    ),
-    (
-        "host-runner.json",
-        include_str!("../test-vectors/step-transform-provider-v1/host-runner.json"),
+        include_str!("../test-vectors/step-transform-provider-v2/hook-requests.json"),
     ),
     (
         "role-describe.json",
-        include_str!("../test-vectors/step-transform-provider-v1/role-describe.json"),
+        include_str!("../test-vectors/step-transform-provider-v2/role-describe.json"),
+    ),
+    (
+        "routes.json",
+        include_str!("../test-vectors/step-transform-provider-v2/routes.json"),
+    ),
+    (
+        "subject-fields.json",
+        include_str!("../test-vectors/step-transform-provider-v2/subject-fields.json"),
     ),
     (
         "subscriptions.json",
-        include_str!("../test-vectors/step-transform-provider-v1/subscriptions.json"),
+        include_str!("../test-vectors/step-transform-provider-v2/subscriptions.json"),
     ),
 ];
 

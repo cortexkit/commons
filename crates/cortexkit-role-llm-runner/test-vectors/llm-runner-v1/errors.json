@@ -1,38 +1,82 @@
 {
   "codes": [
-    {"code":"unknown_session","retryable":false},
-    {"code":"unknown_upload","retryable":false},
-    {"code":"upload_not_committed","retryable":false},
-    {"code":"upload_gone","retryable":false},
-    {"code":"upload_chunk_too_large","retryable":false},
-    {"code":"upload_offset_mismatch","retryable":false,"detail":{"received":3}},
-    {"code":"upload_size_mismatch","retryable":false},
-    {"code":"upload_sha256_mismatch","retryable":false},
-    {"code":"media_unsupported","retryable":false},
-    {"code":"unknown_media","retryable":false},
-    {"code": "user_command_collision", "retryable": false},
-    {"code": "unknown_user_command", "retryable": false, "detail": {"command": "ctx-missing"}},
-    {"code": "unknown_invocation", "retryable": false},
-    {"code": "no_person", "retryable": false},
-    {"code": "user_commands_unsupported", "retryable": false},
+    {
+      "code": "unknown_session",
+      "retryable": false
+    },
+    {
+      "code": "unknown_upload",
+      "retryable": false
+    },
+    {
+      "code": "upload_not_committed",
+      "retryable": false
+    },
+    {
+      "code": "upload_gone",
+      "retryable": false
+    },
+    {
+      "code": "upload_chunk_too_large",
+      "retryable": false
+    },
+    {
+      "code": "upload_offset_mismatch",
+      "retryable": false,
+      "detail": {
+        "received": 3
+      }
+    },
+    {
+      "code": "upload_size_mismatch",
+      "retryable": false
+    },
+    {
+      "code": "upload_sha256_mismatch",
+      "retryable": false
+    },
+    {
+      "code": "media_unsupported",
+      "retryable": false
+    },
+    {
+      "code": "unknown_media",
+      "retryable": false
+    },
+    {
+      "code": "user_command_collision",
+      "retryable": false
+    },
+    {
+      "code": "unknown_user_command",
+      "retryable": false,
+      "detail": {
+        "command": "ctx-missing"
+      }
+    },
+    {
+      "code": "unknown_invocation",
+      "retryable": false
+    },
+    {
+      "code": "no_person",
+      "retryable": false
+    },
+    {
+      "code": "user_commands_unsupported",
+      "retryable": false
+    },
     {
       "code": "invalid_params",
       "retryable": false
     },
     {
-      "code": "lineage_changed",
+      "code": "history_changed",
       "retryable": false
     },
     {
       "code": "unknown_mid",
       "retryable": false
-    },
-    {
-      "code": "before_lineage_start",
-      "retryable": false,
-      "detail": {
-        "first_ordinal": 42
-      }
     },
     {
       "code": "cursor_expired",
@@ -51,11 +95,12 @@
       "retryable": false
     },
     {
-      "code": "unknown_tag",
-      "retryable": false
+      "code": "template_part_gone",
+      "retryable": false,
+      "detail": {
+        "slot": "part"
+      }
     },
-    {"code": "fork_unsupported", "retryable": false, "detail": {"parent": "ses_parent"}},
-    {"code": "template_part_gone", "retryable": false, "detail": {"slot": "part"}},
     {
       "code": "unknown_send",
       "retryable": false

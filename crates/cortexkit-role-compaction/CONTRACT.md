@@ -4,7 +4,7 @@ Protocol: `compaction-provider/v2` and `compaction-runner/v1`.
 
 This contract is what a runner and a compaction provider implement. Part A states the behaviour each side owes the other. Part B is the wire reference: every op, every field, every refusal code. Both parts are normative. Where they disagree, that is a defect in this document.
 
-The request, answer and refusal examples in `test-vectors/compaction-v2` round-trip through this crate’s wire types in `wire_vectors_round_trip`; validation examples assert the expected decoding refusal, and checksum examples assert equality after normalization (W1.6). The unit tests cover part round-trips, compact forms, canonical checksums, and parameter error paths; they do not implement runner behaviour.
+The request, answer and refusal examples in `test-vectors/compaction-v2` round-trip through this crate’s wire types in `wire_vectors_round_trip`; validation examples assert the expected decoding refusal, and checksum examples assert equality after normalization (W1.6). Image-refusal examples pair a request with the runner's required answer; the wire tests round-trip both, not perform edit validation. The unit tests cover part round-trips, compact forms, canonical checksums, and parameter error paths; they do not implement runner behaviour.
 
 **Who owns what.** This crate publishes the wire types in Part B. A separate view library, the `cortexkit-compaction-view` crate, provides applying a view, the provider-rule check, the render plan (W6.3), the reply cleaning (W4.6), the model-to-rules defaults (W3.3), their WebAssembly build for runners written in JavaScript, and JSON test vectors. The library is published on crates.io with a versioned API and depends on this contract crate.
 
@@ -34,6 +34,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | P3 | A tool part is one item at the call's position, holding both call and result even when the host stores them apart. Dropping it removes both. |
 | P4 | Compact detail keeps what the provider plans with and leaves out the bulk (W4.8). Checksums are always over the full content. |
 | P5 | A stored entry changes only when a tool call in it gets its result (even when the host stores that result in a later message) or a send is delivered with one of its results (W4.9). Any other change is a transcript change. |
+| P6 | Within a session, a message id is never given to a different message, even after a revert or branch switch; the same message keeps its id if it returns to the active path. A part's id is unique within its message, so within the session's state a provider identifies a part by `(mid, part id)` and keys durable part state on both. |
 
 ## A3. Tag numbers
 
@@ -117,6 +118,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 |---|---|
 | U1 | Before storing a message a person wrote, the runner runs the `pre_user` hook of `step-transform-provider/v2` and stores the message with the provider's prepend and append operations. |
 | U2 | The provider declares the hook for presets that use it with a budget of 1,500 ms and `on_unavailable: pass`: on a timeout or an error the message is stored unchanged. |
+| U3 | The `pre_user` hook carries an optional `at_ms`, the new message's time taken on the runner's machine (`step-transform-provider/v2`). Compared with write times recorded on that same machine, it measures the gap between messages without clock skew between machines. When `at_ms` is absent, the provider uses its own clock. Gaps measured against history written on another machine (moved or imported) are estimates either way. |
 
 ## A11. Messages and runs the provider asks for
 
@@ -200,7 +202,7 @@ Codes and what the caller does next:
 | Edit `op`, insert `at` or inserted message `role` | runner | The view is refused `unsupported_edit` (W6.5). |
 | `session.entries` `select` | runner | Refused `invalid_params` naming `select`. |
 
-**W1.6 Empty arrays.** An array marked "may be left out when empty" may be omitted and reads as empty. Today these fields are tool `attachments` and `delivered`, and notice `events` and `entries`. Checksums are computed over the form that leaves these empty arrays out, even when the received object explicitly includes them, so a known object is normalized before its JCS serialization (this crate's typed serializers do it). Hashing raw JSON as received does not normalize it. Empty arrays inside opaque payloads (tool `input`, replace `value`) are never removed.
+**W1.6 Empty arrays.** An array marked "may be left out when empty" may be omitted and reads as empty. Today these fields are tool `attachments` and `delivered`, notice `events` and `entries`, and inserted message `images`. Checksums are computed over the form that leaves these empty arrays out, even when the received object explicitly includes them, so a known object is normalized before its JSON Canonicalization Scheme (JCS) serialization (this crate's typed serializers do it). Hashing raw JSON as received does not normalize it. Empty arrays inside opaque payloads (tool `input`, replace `value`) are never removed.
 
 ## W2. Routes and identity
 
@@ -258,6 +260,7 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 | Field | Type | Meaning |
 |---|---|---|
 | `model` | `ModelRef` | The session's model. A one-step fallback does not change it (RD6). |
+| `accepts_images` | boolean, optional | Whether the session's model reads images. The runner sends it only when known; absent means unknown. A provider inserts images only when it is `true`. |
 | `context_window` | integer | W3.4. |
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | For the current model and account. |
@@ -284,7 +287,7 @@ An entry is every record on the active path that the model sees or that holds pa
 | Field | Type | Meaning |
 |---|---|---|
 | `ordinal` | integer | The entry's position on the active path, counting from 1 at the session's first entry. Every entry counts, including the ones a cut leaves out. After a revert or a branch switch, a new entry takes the ordinal of the removed one. For a session that ran under the standalone plugin, the move converted every ordinal the provider stored to this counting (MV4). |
-| `mid` | string | The host's message id. Stable for the life of the message. Nothing may derive it from the ordinal or the reverse (a host’s ids might be `m0`, `m1`, … while its ordinals start at 1). |
+| `mid` | string | The host's message id. Stable for the life of the message and never reused within the session, even after a revert or branch switch. A part's id is unique within its message, so `(mid, part id)` is never reused either; providers key durable part state on both ids (P6). Nothing may derive it from the ordinal or the reverse (a host’s ids might be `m0`, `m1`, … while its ordinals start at 1). |
 | `role` | `user`, `assistant`, `system` | `system` is a turn-scoped system entry (llm-runner's `turn_system` delivery); it holds text parts only. |
 | `notice` | `NoticeOrigin`, optional | Set when a module or the runner delivered a user-role entry (a reminder, a wake, a notice) rather than a person typing it. `sender`: the module id. `template`: the plan template it was rendered from, when it was. |
 | `written_at` | integer | When the host first stored the message. It does not change when the entry is updated. For a message the runner did not store itself (history from before the runner, a moved session), the host's own write time. |
@@ -355,7 +358,7 @@ An `Attachment` is `id` (stable within its tool part) plus the fields of a `file
   | `duration_ms` | integer, optional | For audio and video, when known. |
   | `reasoning` | boolean | The model produced it as part of its reasoning (AI SDK `reasoning-file`). Absent means `false`. |
 
-  The bytes never travel through this contract.
+  A transcript `file` part carries metadata only: `session.entries` never returns its bytes. Inserted images are a separate case and carry their bytes as base64 (W6.2).
 - `opaque`: provider-specific content the runner sends back as it is (AI SDK `custom`, Anthropic's server-side fallback). `provider_kind` (string, `provider.type`, for example `anthropic.fallback`) and `size` (integer, optional). It can only be dropped.
 
 **W4.6 Cleaning tag notation from replies.** A model reply's text is cleaned exactly, in this order: the leading prefixes are split off (their first number is the model's own tag, T7); every remaining well-formed `§N§` is removed; then the malformed hybrids `§N">`, `§N">§` and `§N">§M§`; then a dangling `§N` with at most one improvised non-word closer (never followed by a digit or by `.` and a digit, so `§5.1` stays); then any stray `§`; then surrounding whitespace is trimmed. If cleaning leaves the text empty, it becomes empty only on a route that accepts an empty text part; elsewhere the original text stays (standalone: Anthropic accepts empty text, other providers keep the original). Only the model's own replies are cleaned; user, notice and tool text is never changed. Standalone cleans because models, after heavy drops, start writing numbers as delimiters, including broken forms. The view library ships this function with standalone's test cases.
@@ -402,6 +405,7 @@ Request:
 |---|---|---|
 | `preset` | string | The session's preset, for example `head`, `worker`, `reader`. |
 | `model` | `ModelRef` | W3.1. |
+| `accepts_images` | boolean, optional | Whether the session's model reads images. The runner sends it only when known; absent means unknown. A provider inserts images only when it is `true`. |
 | `context_window` | integer | W3.4. |
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | W3.3. |
@@ -520,7 +524,7 @@ Used as llm-runner publishes them; this contract adds nothing. What a provider s
 |---|---|---|
 | `drop` | `mid`, `part` (optional) | Leave out one part, or the whole entry when `part` is absent. Dropping a tool part removes call and result. |
 | `replace` | `mid`, `part`, `field`, `value`, `expect` | Render one field of the part with new bytes. `expect` is the part's `digest` when the edit was computed. Fields: `text` (a text part, or a file part, which the runner then renders as a text block in the file's place; `value` a string); `output` (tool part; a string; the runner maps it to the host's result field, such as the error field of a failed call); `input.<key>` (tool part whose `input` is an object with a string at `key`; a string); `attachments` (tool part; an array of the attachment ids to keep); `delivered` (tool part; an array of the indexes of `delivered` items to keep). |
-| `insert` | `at`, `message` | Render a message the transcript does not hold, such as the history head. `at`: `"start"` (before the first rendered message) or `{"before": mid}` (immediately before that entry, even if it is dropped). `message`: `id` (unique in the view, kept the same while the message is unchanged), `role`, `texts` (array of strings). Inserted messages are never numbered. |
+| `insert` | `at`, `message` | Render a message the transcript does not hold, such as the history head. `at`: `"start"` (before the first rendered message) or `{"before": mid}` (immediately before that entry, even if it is dropped). `message`: `id` (unique in the view, kept the same while the message is unchanged), `role`, `texts` (array of strings), `images` (array of images; may be left out when empty). Each image has `media_type` (string, currently only `image/png`) and `data` (string, standard padded base64 of the bytes). Only a `user`-role inserted message may carry images, and a provider inserts them only when `accepts_images` is `true`. Inserted messages are never numbered. |
 | `cut` | `through` (mid) | Leave out every entry up to and including `through`: the entries the history head replaces. At most one per view. |
 
 **W6.3 The render plan.** The view library turns a view and the transcript into a render plan, and every runner renders from it (V9): for each entry, keep or leave out; for each kept part, keep, leave out, or replace a field with given bytes; the inserted messages and where each goes; and each kept part's number, with whether its prefix is rendered. Rules: inserts at the start come first, in edit order; each entry follows in transcript order, preceded by the inserts anchored before it; a dropped or cut entry is left out; dropped parts are left out; an entry left with no parts is not rendered; numbered text gets its prefix (W4.7), except text a `replace` wrote, which is final. The runner applies the plan to its host messages, so everything the plan keeps goes out byte-identical. The plan is available from the Rust library, from its WebAssembly build, and as JSON test vectors.
@@ -551,11 +555,13 @@ What could mislead the model is a number in bytes the provider writes, such as a
 | `tagged_insert` | `id` | An inserted message's text contains a tag prefix (W6.4). |
 | `foreign_tag` | `mid`, `part`, `field`, `tag` | A replace value contains a tag prefix the part neither owns nor already contained (W6.4). |
 | `rule` | `rule`, and its fields | The view breaks a provider rule: `{"rule": "signed_part_invalid", "mid", "part"}`. |
-| `unsupported_edit` | `index` | The edit at this position of `edits` has an `op`, an insert `at` or an inserted message `role` the runner does not know (W1.5). |
+| `unsupported_edit` | `index` | The edit at this zero-based position of `edits` has an `op`, an insert `at` or an inserted message `role` the runner does not know (W1.5), or carries images the runner cannot apply (below). |
+
+An insert with images is refused as `unsupported_edit` when its role is not `user`, any image's `media_type` is not `image/png`, or any image's `data` is not valid standard padded base64. Each case carries the same detail: `index` names the insert's zero-based position in `edits`; no image-specific detail field is added. The runner checks the standard base64 alphabet, length, padding placement and zero padding bits; inspecting PNG contents is not required by this contract. A conforming runner performs these checks before applying the view. This wire crate preserves the strings without decoding or validating them; image checks and image entries in the render plan are the view library's (W6.3), which adds them in a release after this one.
 
 **W6.6 After a revert.** Until a newer view arrives, the runner renders with the edits whose messages still exist (the view library's `view::edits_for_transcript`): drops, replaces and inserts naming a removed entry are skipped, a cut through a removed entry is skipped, and inserts at the start stay.
 
-**W6.7 Size.** A provider sends no view over 3 MiB (3,145,728 bytes) of JSON (V5).
+**W6.7 Rendering and size.** The runner renders each inserted image as an image part after the message's texts, in array order and in its host's own form. Like inserted texts, images get no tag number. A provider sends no view over 3 MiB (3,145,728 bytes) of JSON (V5); image fields, including their base64 data, count toward that limit.
 
 ## W7. Checksums
 
@@ -565,13 +571,12 @@ Every checksum is the lowercase hex SHA-256 of the value's RFC 8785 (JCS) serial
 |---|---|
 | Part `digest` | The part's object in full form without `id`, `tag` and `digest`. |
 | Entry `digest` | `{"role", "notice", "parts"}`, with each part in full form including its `id`, `tag` and `digest`. |
-| View `checksum` | `{"version", "edits"}`. |
+| View `checksum` | `{"version", "edits"}`, including inserted images and their base64 data. Empty `images` arrays hash as absent (W1.6). |
 
 # Open points
 
 3. MV4 needs, per host, the standalone reader’s counting as the map’s old side: OpenCode 1 counts raw session messages; OpenCode 2 counts raw message types by `seq`; Pi folds tool-result runs into one ordinal, while extension messages, branch summaries and compactions take none. The move reuses those readers’ rules exactly.
 5. Gemini’s rule for thought signatures (which parts keep them, within which turn, and what an edit before them does) is unmeasured. Until a live check, a Gemini runner declares `signed_parts: none`, and the provider never replaces a signed part (PR5).
-6. The hook carries no clock, so the provider measures the time-marker gap on its own clock against the runner’s write times. On one machine they are the same clock.
 7. Whether models have stopped writing tag numbers as delimiters is unmeasured; W4.6 keeps the cleaning either way.
 8. OpenCode 2’s row types: a runner must confirm against `to-llm-message.ts` on 2.0.26 and 2.2.3 which of `agent-switched`, `model-switched`, `idle` and background-shell rows the model sees; each one it renders is an entry.
 9. MV6 needs the importer to return a source-to-target message map when the target runner adopts this contract.

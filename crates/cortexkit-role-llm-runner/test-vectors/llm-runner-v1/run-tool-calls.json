@@ -60,9 +60,9 @@
             "outcome": "succeeded",
             "result_bytes": 412,
             "dispatched_to": "aft",
-            "ordinal": 1,
+            "ordinal": 2,
             "position": 0,
-            "result_ordinal": 2
+            "result_ordinal": 3
           },
           {
             "tool_call_id": "call_2",
@@ -74,9 +74,9 @@
             "outcome": "failed",
             "result_bytes": 96,
             "dispatched_to": "aft",
-            "ordinal": 1,
+            "ordinal": 2,
             "position": 1,
-            "result_ordinal": 2
+            "result_ordinal": 3
           }
         ],
         "next": "2"
@@ -101,9 +101,9 @@
             },
             "outcome": "refused",
             "result_bytes": 58,
-            "ordinal": 3,
+            "ordinal": 4,
             "position": 0,
-            "result_ordinal": 4
+            "result_ordinal": 5
           },
           {
             "tool_call_id": "call_4",
@@ -114,7 +114,7 @@
             },
             "outcome": "indeterminate",
             "dispatched_to": "exec",
-            "ordinal": 5,
+            "ordinal": 6,
             "position": 0
           }
         ],
@@ -139,9 +139,9 @@
             },
             "outcome": "not_executed",
             "result_bytes": 64,
-            "ordinal": 7,
+            "ordinal": 8,
             "position": 0,
-            "result_ordinal": 8
+            "result_ordinal": 9
           }
         ]
       }
@@ -175,9 +175,9 @@
             "outcome": "succeeded",
             "result_bytes": 412,
             "dispatched_to": "aft",
-            "ordinal": 1,
+            "ordinal": 2,
             "position": 0,
-            "result_ordinal": 1
+            "result_ordinal": 2
           },
           {
             "tool_call_id": "call_1",
@@ -189,9 +189,9 @@
             "outcome": "failed",
             "result_bytes": 96,
             "dispatched_to": "aft",
-            "ordinal": 1,
+            "ordinal": 2,
             "position": 1,
-            "result_ordinal": 1
+            "result_ordinal": 2
           }
         ]
       }

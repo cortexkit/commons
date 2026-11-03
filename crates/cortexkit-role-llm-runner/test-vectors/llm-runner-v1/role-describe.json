@@ -7,12 +7,10 @@
         "run_ops",
         "dispatch_attribution",
         "streaming",
-        "model_view",
         "steer",
         "queue",
         "ordered_hook_phases",
         "interrupt",
-        "compaction",
         "session_change",
         "plans"
       ],
@@ -24,7 +22,6 @@
             "ops": [
               "role.describe",
               "session.baseline",
-              "session.resolve",
               "session.read",
               "session.head",
               "run.result",
@@ -42,13 +39,10 @@
           "run_ops",
           "dispatch_attribution",
           "streaming",
-          "model_view",
           "steer",
           "queue",
           "ordered_hook_phases",
           "interrupt",
-          "tags",
-          "compaction",
           "session_change",
           "plans"
         ],
@@ -95,7 +89,6 @@
               "role.describe",
               "session.baseline",
               "session.read",
-              "session.resolve",
               "vendor.extra"
             ]
           }
@@ -107,10 +100,7 @@
     },
     {
       "name": "compaction declared with tags and its ops",
-      "declares": [
-        "tags",
-        "compaction"
-      ],
+      "declares": [],
       "answer": {
         "majors": [
           {
@@ -119,16 +109,12 @@
             "ops": [
               "role.describe",
               "session.baseline",
-              "session.read",
-              "session.resolve"
+              "session.read"
             ]
           }
         ],
         "implementation_version": "1",
-        "capabilities": [
-          "tags",
-          "compaction"
-        ],
+        "capabilities": [],
         "session_capabilities_from": "admission"
       }
     },
@@ -401,8 +387,7 @@
             "stability": "alpha",
             "ops": [
               "role.describe",
-              "session.read",
-              "session.resolve"
+              "session.read"
             ]
           }
         ],
@@ -515,29 +500,6 @@
       }
     },
     {
-      "name": "compaction declared without session.resolve",
-      "problem": "group_incomplete",
-      "answer": {
-        "majors": [
-          {
-            "version": "llm-runner/v1",
-            "stability": "alpha",
-            "ops": [
-              "role.describe",
-              "session.baseline",
-              "session.read"
-            ]
-          }
-        ],
-        "implementation_version": "1",
-        "capabilities": [
-          "tags",
-          "compaction"
-        ],
-        "session_capabilities_from": "admission"
-      }
-    },
-    {
       "name": "session_change declared without session.flush_prefix",
       "problem": "group_incomplete",
       "answer": {
@@ -580,29 +542,6 @@
         "session_capabilities_from": "admission"
       },
       "problem": "group_incomplete"
-    },
-    {
-      "name": "compaction declared without tags",
-      "problem": "compaction_without_tags",
-      "answer": {
-        "majors": [
-          {
-            "version": "llm-runner/v1",
-            "stability": "alpha",
-            "ops": [
-              "role.describe",
-              "session.baseline",
-              "session.read",
-              "session.resolve"
-            ]
-          }
-        ],
-        "implementation_version": "1",
-        "capabilities": [
-          "compaction"
-        ],
-        "session_capabilities_from": "admission"
-      }
     },
     {
       "name": "run_cause declared without live_events",

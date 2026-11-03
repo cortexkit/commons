@@ -275,9 +275,9 @@ fn replace(answer: &mut Value, payload: &Payload) -> Result<(usize, usize), Stri
 impl super::ReadMessage {
     /// Provider-side descriptor validation without deriving opaque part keys.
     /// `profile` is the runner's serializer profile. Count the message's parts,
-    /// validate digests and unique keys, and require exactly the keys served in
-    /// this entry's complete `tags` rows, in the same order. Nonempty messages
-    /// must carry tags rows even for parts with no tag number. Runners also use
+    /// validate digests and unique keys, and require one row per stored part,
+    /// in order. `part_digests` itself publishes the runner's opaque keys;
+    /// readers never derive a key from a native part id or array index. Runners also use
     /// [`Self::check_descriptors`] with their independently known part keys.
     pub fn check_descriptor_rows(&self, profile: &str) -> Result<(), String> {
         self.check_descriptor_digests()?;
@@ -289,21 +289,11 @@ impl super::ReadMessage {
             }
         }
         let count = crate::serializer_profile::top_level_part_count(profile, &self.message)?;
-        if count > 0 && self.tags.is_empty() {
-            return Err("descriptors read missing tags rows".into());
-        }
         if rows.len() != count {
             return Err(format!(
                 "part_digests row count {} does not match top-level part count {count}",
                 rows.len()
             ));
-        }
-        if rows
-            .iter()
-            .map(|row| &row.part)
-            .ne(self.tags.iter().map(|tag| &tag.part))
-        {
-            return Err("part_digests keys do not match tags rows in order".into());
         }
         Ok(())
     }
@@ -344,7 +334,7 @@ impl super::ReadMessage {
 #[cfg(test)]
 mod row_tests {
     use super::*;
-    use crate::{read::ReadMessage, serializer_profile::ANTHROPIC_MESSAGES, tags::PartTag};
+    use crate::{read::ReadMessage, serializer_profile::ANTHROPIC_MESSAGES};
     use serde_json::json;
 
     fn message() -> ReadMessage {
@@ -353,11 +343,7 @@ mod row_tests {
             {"type":"tool_use","id":"call-1","name":"echo","input":{}},
             {"type":"text","text":"after"}
         ]});
-        let mut read = ReadMessage::new(0, "m0", body.clone()).with_tags(vec![
-            PartTag::tagged("token-z", "§1§"),
-            PartTag::untagged("token-q"),
-            PartTag::tagged("token-a", "§2§"),
-        ]);
+        let mut read = ReadMessage::new(1, "m0", body.clone());
         read.digest = Some(content_digest(&body));
         read.part_digests = Some(vec![
             PartDigest::new("token-z", &body["content"][0]),
@@ -368,29 +354,18 @@ mod row_tests {
     }
 
     #[test]
-    fn descriptor_rows_accept_opaque_keys_and_untagged_tool_call() {
+    fn descriptor_rows_accept_opaque_keys_and_tool_call() {
         let read = message();
         assert_eq!(read.check_descriptor_rows(ANTHROPIC_MESSAGES), Ok(()));
     }
 
     #[test]
-    fn descriptor_rows_require_tags_rows() {
-        assert_eq!(
-            message()
-                .with_tags(vec![])
-                .check_descriptor_rows(ANTHROPIC_MESSAGES)
-                .unwrap_err(),
-            "descriptors read missing tags rows"
-        );
-    }
-
-    #[test]
-    fn descriptor_rows_reject_omitted_untagged_tool_call_row() {
+    fn descriptor_rows_reject_omitted_tool_call_row() {
         let mut read = message();
-        read.tags.remove(1);
+        read.part_digests.as_mut().unwrap().remove(1);
         assert_eq!(
             read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
-            "part_digests keys do not match tags rows in order"
+            "part_digests row count 2 does not match top-level part count 3"
         );
     }
 
@@ -409,10 +384,7 @@ mod row_tests {
             {"id":"native-id","type":"tool","state":{"attachments":[{},{}]}},
             {"id":"bookkeeping-id","type":"step-start"}
         ]});
-        let mut read = ReadMessage::new(0, "m0", body.clone()).with_tags(vec![
-            PartTag::untagged("opaque-tool"),
-            PartTag::untagged("opaque-step"),
-        ]);
+        let mut read = ReadMessage::new(1, "m0", body.clone());
         read.digest = Some(content_digest(&body));
         read.part_digests = Some(vec![
             PartDigest::new("opaque-tool", &body["parts"][0]),
@@ -512,61 +484,12 @@ mod row_tests {
     }
 
     #[test]
-    fn descriptor_rows_reject_tag_key_absent_from_rows() {
-        let mut read = message();
-        read.tags[0].part = "absent".into();
-        assert_eq!(
-            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
-            "part_digests keys do not match tags rows in order"
-        );
-    }
-
-    #[test]
-    fn descriptor_rows_reject_reordered_row() {
-        let mut read = message();
-        read.part_digests.as_mut().unwrap().swap(0, 2);
-        assert_eq!(
-            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
-            "part_digests keys do not match tags rows in order"
-        );
-    }
-
-    #[test]
-    fn descriptor_rows_reject_reordered_or_repeated_tag() {
-        let mut read = message();
-        read.tags.swap(0, 1);
-        assert_eq!(
-            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
-            "part_digests keys do not match tags rows in order"
-        );
-        read.tags[1] = read.tags[0].clone();
-        assert_eq!(
-            read.check_descriptor_rows(ANTHROPIC_MESSAGES).unwrap_err(),
-            "part_digests keys do not match tags rows in order"
-        );
-    }
-
-    #[test]
     fn descriptor_rows_refuse_unknown_profile_by_name() {
         assert_eq!(
             message()
                 .check_descriptor_rows("future-profile")
                 .unwrap_err(),
             "unknown serializer profile: future-profile"
-        );
-    }
-
-    #[test]
-    fn runner_check_detects_reorder_when_tags_and_rows_both_reordered() {
-        let mut read = message();
-        let keys = vec!["token-z".into(), "token-q".into(), "token-a".into()];
-        assert_eq!(read.check_descriptors(&keys), Ok(()));
-        read.part_digests.as_mut().unwrap().swap(0, 1);
-        read.tags.swap(0, 1);
-        assert_eq!(read.check_descriptor_rows(ANTHROPIC_MESSAGES), Ok(()));
-        assert_eq!(
-            read.check_descriptors(&keys).unwrap_err(),
-            "part_digests keys do not match message parts in order"
         );
     }
 }
@@ -735,56 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_vector_counts_the_resolved_part() {
-        let file = crate::vectors::load("read-descriptors.json");
-        let part = &file["resolve"]["reply"]["content"];
-        let kind = match part["type"].as_str() {
-            Some("tool_result") => {
-                let content = part["content"].as_array().expect("tool-result content");
-                let blocks: Vec<_> = content
-                    .iter()
-                    .filter_map(|block| match block["type"].as_str() {
-                        Some("text") => block["text"]
-                            .as_str()
-                            .map(crate::tags::ToolResultBlock::Text),
-                        Some("media_ref") if block["kind"] == "image" => {
-                            Some(crate::tags::ToolResultBlock::Image)
-                        }
-                        Some("media_ref") => Some(crate::tags::ToolResultBlock::Media),
-                        _ => None,
-                    })
-                    .collect();
-                crate::tags::tool_result_kind(&blocks)
-            }
-            Some("media_ref") if part["kind"] == "image" => crate::tags::PartKind::UserAttachment,
-            _ => panic!("resolve vector must describe a recognizable transcript part"),
-        };
-        assert!(
-            crate::tags::counts(kind),
-            "resolve vector part kind {kind:?} is not counted by §9.6"
-        );
-    }
-
-    #[test]
     fn reference_decoding_is_strict_and_digest_keys_must_match_the_parts() {
-        let file = crate::vectors::load("read-descriptors.json");
-        let request: crate::tags::ResolveRequest =
-            serde_json::from_value(file["resolve"]["request"].clone()).unwrap();
-        assert_eq!(request.media, Some(MediaMode::Descriptors));
-        let reply: crate::tags::ResolveReply =
-            serde_json::from_value(file["resolve"]["reply"].clone()).unwrap();
-        assert_eq!(reply.content["type"], "tool_result");
-        assert_eq!(reply.content["tool_use_id"], "c1");
-        assert_eq!(reply.content["is_error"], true);
-        assert_eq!(reply.content["content"][0]["type"], "media_ref");
-        assert!(reply.content["content"][0].get("part").is_none());
-        assert_eq!(reply.content, file["cases"][1]["expected"]["content"][0]);
-        let refused: super::super::ReadRequest =
-            serde_json::from_value(file["refused"]["request"].clone()).unwrap();
-        assert_eq!(
-            refused.mode().unwrap_err(),
-            file["refused"]["field"].as_str().unwrap()
-        );
         let valid = serde_json::to_value(Reference::text(Some("p0".into()), "hello")).unwrap();
         for (key, value) in [
             ("sha256", json!("bad")),
@@ -812,12 +686,6 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("media"));
-            assert!(serde_json::from_value::<crate::tags::ResolveRequest>(
-                json!({"tag":"§1§","media":media})
-            )
-            .unwrap_err()
-            .to_string()
-            .contains("media"));
         }
     }
 }

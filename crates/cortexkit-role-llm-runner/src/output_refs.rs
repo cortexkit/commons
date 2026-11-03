@@ -1,7 +1,8 @@
 //! Immutable references to the tool outputs in the request that wrote a reply.
 //!
-//! Runners supply the durably stored request numbering, never the current
-//! lineage, and retain returned snapshots as long as any record names them.
+//! Runners supply the writing request's durably captured part-number mapping,
+//! never a mapping reconstructed from the current transcript, and retain
+//! returned snapshots as long as any record names them.
 
 use std::collections::BTreeMap;
 

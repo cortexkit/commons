@@ -454,7 +454,7 @@ mod tests {
         for case in cases["answers"].as_array().unwrap() {
             let head: crate::read::HeadMeta =
                 serde_json::from_value(case["answer"].clone()).unwrap();
-            assert!(head.lineage_consistent(), "{}", case["name"]);
+            assert!(head.snapshot_consistent(), "{}", case["name"]);
             assert_eq!(
                 serde_json::to_value(&head).unwrap(),
                 case["answer"],
@@ -625,9 +625,8 @@ mod tests {
             (usage.by_model[0].steps, usage.by_model[0].unreported_steps),
             (3, 1)
         );
-        // Broca's run: the first step reported every count, the second
-        // nothing, and the third only `output_tokens: 0`, which still makes
-        // it a reported step.
+        // Three-step fixture: the first reports every count, the second
+        // none, and the third only output_tokens: 0, which is still reported.
         let mut built = RunUsage::new();
         built.record_step("stub", "stub-model", None, reported(400, 16000, 1000, 220));
         built.record_step("stub", "stub-model", None, StepUsage::unreported());

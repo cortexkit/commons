@@ -17,9 +17,8 @@
     {
       "name": "session with a completed last run, after a cut retaining from ordinal 120",
       "answer": {
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-        "last_ordinal": 499,
-        "first_ordinal": 120,
+        "last_ordinal": 500,
+        "first_ordinal": 121,
         "cut": {
           "mid": "msg_0119",
           "digest": "4f6c2a7e0f5a1b3c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c",
@@ -34,15 +33,15 @@
           "run_id": "run-7",
           "state": "completed"
         },
-        "updated_at": 1790000000000
+        "updated_at": 1790000000000,
+        "incarnation": "log-1"
       }
     },
     {
       "name": "last run ended in error",
       "answer": {
-        "lineage_id": "L2",
-        "last_ordinal": 12,
-        "first_ordinal": 0,
+        "last_ordinal": 13,
+        "first_ordinal": 1,
         "history_version": 1,
         "head": {
           "wal_seq": 40,
@@ -53,149 +52,66 @@
           "state": "error",
           "reason": "provider_error"
         },
-        "updated_at": 1790000000500
+        "updated_at": 1790000000500,
+        "incarnation": "log-1"
       }
     },
     {
       "name": "empty session",
       "answer": {
-        "lineage_id": "L3",
-        "first_ordinal": 0,
+        "first_ordinal": 1,
         "history_version": 1,
-        "updated_at": 1790000000000
+        "updated_at": 1790000000000,
+        "incarnation": "log-1"
       }
     },
     {
-      "name": "a cut that retained nothing: the lineage starts one past the last ordinal",
+      "name": "a cut that retained nothing: model input starts one past the last ordinal",
       "answer": {
-        "lineage_id": "L4",
-        "last_ordinal": 12,
-        "first_ordinal": 13,
+        "last_ordinal": 13,
+        "first_ordinal": 14,
         "cut": {
           "mid": "m12",
           "digest": "9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a9a",
           "written_at": 1790000000800
         },
         "history_version": 1,
-        "updated_at": 1790000000900
+        "updated_at": 1790000000900,
+        "incarnation": "log-1"
       }
     },
     {
-      "name": "session never written: every member absent",
-      "answer": {}
+      "name": "session never written: only required cache identity is present",
+      "answer": {
+        "history_version": 1,
+        "incarnation": "log-1"
+      }
     },
     {
-      "name": "a lineage whose cut predates the runner's numbering: a cut with first_ordinal 0",
+      "name": "a pre-adoption host cut shares the whole-path count: model input starts at ordinal 3",
       "answer": {
-        "lineage_id": "L5",
-        "last_ordinal": 4,
-        "first_ordinal": 0,
+        "last_ordinal": 5,
+        "first_ordinal": 3,
         "cut": {
           "mid": "host_msg_77",
           "digest": "1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b",
           "written_at": 1780000000000
         },
         "history_version": 1,
-        "updated_at": 1790000001000
+        "updated_at": 1790000001000,
+        "incarnation": "log-1"
       }
     }
   ],
   "inconsistent": [
     {
-      "name": "no lineage but a last ordinal",
-      "answer": {
-        "last_ordinal": 3
-      }
-    },
-    {
-      "name": "no lineage but a head position",
-      "answer": {
-        "head": {
-          "wal_seq": 1,
-          "sub_index": 0
-        }
-      }
-    },
-    {
-      "name": "no lineage but a last run",
-      "answer": {
-        "last_run_state": {
-          "run_id": "run-1",
-          "state": "active"
-        }
-      }
-    },
-    {
-      "name": "no lineage but an update time",
-      "answer": {
-        "updated_at": 1790000000000
-      }
-    },
-    {
-      "name": "a lineage without its update time",
-      "answer": {
-        "lineage_id": "L1",
-        "last_ordinal": 3,
-        "first_ordinal": 0
-      }
-    },
-    {
-      "name": "no lineage but a first ordinal",
-      "answer": {
-        "first_ordinal": 0
-      }
-    },
-    {
-      "name": "a lineage without its first ordinal",
-      "answer": {
-        "lineage_id": "L1",
-        "last_ordinal": 3,
-        "updated_at": 1790000000000
-      }
-    },
-    {
       "name": "a first ordinal more than one past the last",
       "answer": {
-        "lineage_id": "L1",
-        "last_ordinal": 3,
-        "first_ordinal": 5,
+        "last_ordinal": 4,
+        "first_ordinal": 6,
         "history_version": 1,
-        "updated_at": 1790000000000
-      }
-    },
-    {
-      "name": "a first ordinal above 0 without its cut",
-      "answer": {
-        "lineage_id": "L1",
-        "last_ordinal": 9,
-        "first_ordinal": 4,
-        "history_version": 1,
-        "updated_at": 1790000000000
-      }
-    },
-    {
-      "name": "no lineage but a cut",
-      "answer": {
-        "cut": {
-          "mid": "msg_0119",
-          "digest": "4f6c2a7e0f5a1b3c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3b2c1d0e9f8a7b6c",
-          "written_at": 1789990000000
-        }
-      }
-    },
-    {
-      "name": "a lineage without its history version",
-      "answer": {
-        "lineage_id": "L1",
-        "last_ordinal": 3,
-        "first_ordinal": 0,
-        "updated_at": 1790000000000
-      }
-    },
-    {
-      "name": "no lineage but a history version",
-      "answer": {
-        "history_version": 2
+        "updated_at": 1790000000000,
+        "incarnation": "log-1"
       }
     }
   ]

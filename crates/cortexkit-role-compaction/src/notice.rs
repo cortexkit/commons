@@ -52,6 +52,10 @@ pub struct NoticeRequest {
 #[non_exhaustive]
 pub struct Conditions {
     pub model: ModelRef,
+    /// Whether the session's model reads images. Set only when known; absent
+    /// means unknown. A provider inserts images only when this is `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepts_images: Option<bool>,
     #[serde(deserialize_with = "crate::integer::required")]
     pub context_window: u64,
     #[serde(deserialize_with = "crate::integer::required")]
@@ -150,11 +154,17 @@ impl Conditions {
     ) -> Self {
         Self {
             model,
+            accepts_images: None,
             context_window,
             output_reserve,
             rules,
             last_prompt_tokens: None,
         }
+    }
+
+    pub fn with_accepts_images(mut self, accepts_images: bool) -> Self {
+        self.accepts_images = Some(accepts_images);
+        self
     }
 
     pub fn with_last_prompt_tokens(mut self, last_prompt_tokens: u64) -> Self {

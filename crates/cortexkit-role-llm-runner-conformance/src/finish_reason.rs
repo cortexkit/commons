@@ -117,7 +117,8 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::FINISH_REASON, ops::RUN_RESULT).await?;
+    crate::send_helpers::require_declared(&session.route, groups::FINISH_REASON, ops::RUN_RESULT)
+        .await?;
     let params = case.params(
         &session,
         "use a tool then answer",
@@ -165,7 +166,8 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::FINISH_REASON, ops::RUN_RESULT).await?;
+    crate::send_helpers::require_declared(&session.route, groups::FINISH_REASON, ops::RUN_RESULT)
+        .await?;
     let params = case.params(
         &session,
         "answer at length",
@@ -201,7 +203,8 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::FINISH_REASON, ops::RUN_RESULT).await?;
+    crate::send_helpers::require_declared(&session.route, groups::FINISH_REASON, ops::RUN_RESULT)
+        .await?;
     let mut params = case.params(
         &session,
         "consume the input budget",

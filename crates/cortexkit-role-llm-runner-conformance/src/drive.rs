@@ -177,7 +177,7 @@ pub async fn read_refusal<R: RunnerRoute>(
     )
 }
 
-/// `session.head`, checked for consistency with its lineage.
+/// `session.head`, checked for record identity, ordinal bounds and marker metadata.
 pub async fn head<R: RunnerRoute>(route: &R) -> Result<HeadMeta, String> {
     let body = expect_ok(
         "session.head",
@@ -186,7 +186,7 @@ pub async fn head<R: RunnerRoute>(route: &R) -> Result<HeadMeta, String> {
     checked_head(body)
 }
 
-/// Decode a `session.head` answer and check it for consistency with its lineage.
+/// Decode a `session.head` answer and check record identity, ordinal bounds and marker metadata.
 pub fn checked_head(body: Value) -> Result<HeadMeta, String> {
     let head: HeadMeta = decode("session.head", body.clone())?;
     if !head.incarnation_valid() {
@@ -194,23 +194,22 @@ pub fn checked_head(body: Value) -> Result<HeadMeta, String> {
             "session.head incarnation is not an opaque 1–128-byte string: {body}"
         ));
     }
-    if !head.lineage_consistent() {
+    if !head.snapshot_consistent() {
         return Err(format!(
-            "session.head answered {body}, inconsistent with its lineage"
+            "session.head answered {body}, inconsistent record identity, ordinal bounds or marker metadata"
         ));
     }
     Ok(head)
 }
 
-/// Every message of the current lineage, read forward from its
-/// `first_ordinal` (as `session.head` states it; 0 for a session without a
-/// lineage) by following `next_from_ordinal`, with every page read.
+/// Every entry on the active path, from ordinal 1, including below a model
+/// marker. The head's first_ordinal limits model input, never these reads.
 pub async fn read_all<R: RunnerRoute>(
     route: &R,
 ) -> Result<(Vec<ReadPage>, Vec<ReadMessage>), String> {
     let mut pages = Vec::new();
     let mut messages: Vec<ReadMessage> = Vec::new();
-    let mut from = head(route).await?.first_ordinal.unwrap_or(0);
+    let mut from = 1;
     for _ in 0..MAX_PAGES {
         let page = read(route, &ReadRequest::range(from)).await?;
         messages.extend(page.messages.iter().cloned());

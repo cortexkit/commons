@@ -1,14 +1,40 @@
 {
   "at_limit": {
     "usage": {
-      "since": "run-first", "steps": 1, "unreported_steps": 0, "input_tokens": 9007199254740991,
-      "by_model": [{"provider": "p", "model": "m", "steps": 1, "unreported_steps": 0, "input_tokens": 9007199254740991}]
-    }
+      "since": "run-first",
+      "steps": 1,
+      "unreported_steps": 0,
+      "input_tokens": 9007199254740991,
+      "by_model": [
+        {
+          "provider": "p",
+          "model": "m",
+          "steps": 1,
+          "unreported_steps": 0,
+          "input_tokens": 9007199254740991
+        }
+      ]
+    },
+    "history_version": 1,
+    "incarnation": "log-1"
   },
   "above_limit": {
     "usage": {
-      "since": "run-first", "steps": 1, "unreported_steps": 0, "input_tokens": 9007199254740992,
-      "by_model": [{"provider": "p", "model": "m", "steps": 1, "unreported_steps": 0, "input_tokens": 9007199254740992}]
-    }
+      "since": "run-first",
+      "steps": 1,
+      "unreported_steps": 0,
+      "input_tokens": 9007199254740992,
+      "by_model": [
+        {
+          "provider": "p",
+          "model": "m",
+          "steps": 1,
+          "unreported_steps": 0,
+          "input_tokens": 9007199254740992
+        }
+      ]
+    },
+    "history_version": 1,
+    "incarnation": "log-1"
   }
 }

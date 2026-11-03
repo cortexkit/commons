@@ -4,10 +4,9 @@
       "name": "tail page of a longer session, stopped by count",
       "stopped_early": false,
       "page": {
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
         "messages": [
           {
-            "ordinal": 498,
+            "ordinal": 499,
             "mid": "m498",
             "message": {
               "role": "user",
@@ -20,7 +19,7 @@
             }
           },
           {
-            "ordinal": 499,
+            "ordinal": 500,
             "mid": "m499",
             "message": {
               "role": "assistant",
@@ -36,17 +35,18 @@
         "head": {
           "wal_seq": 1203,
           "sub_index": 0
-        }
+        },
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     },
     {
       "name": "range page stopped by the byte cap",
       "stopped_early": true,
       "page": {
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
         "messages": [
           {
-            "ordinal": 0,
+            "ordinal": 1,
             "mid": "m0",
             "message": {
               "role": "user",
@@ -59,11 +59,13 @@
             }
           }
         ],
-        "next_from_ordinal": 1,
+        "next_from_ordinal": 2,
         "head": {
           "wal_seq": 1203,
           "sub_index": 0
-        }
+        },
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     },
     {
@@ -71,10 +73,9 @@
       "stopped_early": true,
       "max_bytes": 256,
       "page": {
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
         "messages": [
           {
-            "ordinal": 7,
+            "ordinal": 8,
             "mid": "m7",
             "message": {
               "role": "tool",
@@ -83,21 +84,22 @@
             }
           }
         ],
-        "next_from_ordinal": 8,
+        "next_from_ordinal": 9,
         "head": {
           "wal_seq": 1203,
           "sub_index": 0
-        }
+        },
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     },
     {
       "name": "after page with run attribution and dispatch attribution",
       "stopped_early": false,
       "page": {
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
         "messages": [
           {
-            "ordinal": 42,
+            "ordinal": 43,
             "mid": "m42",
             "message": {
               "role": "assistant",
@@ -135,12 +137,12 @@
             ]
           },
           {
-            "ordinal": 43,
+            "ordinal": 44,
             "mid": "m43",
             "message": {
               "role": "tool",
               "tool_call_id": "call_0",
-              "content": "\u00a71\u00a7 fn main() {}"
+              "content": "§1§ fn main() {}"
             },
             "run": {
               "run_id": "run-7",
@@ -159,17 +161,18 @@
         "head": {
           "wal_seq": 990,
           "sub_index": 2
-        }
+        },
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     },
     {
       "name": "a denied call has no dispatch target",
       "stopped_early": false,
       "page": {
-        "lineage_id": "L2",
         "messages": [
           {
-            "ordinal": 5,
+            "ordinal": 6,
             "mid": "m5",
             "message": {
               "role": "assistant",
@@ -193,22 +196,27 @@
               }
             ]
           }
-        ]
+        ],
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     },
     {
       "name": "empty transcript",
       "stopped_early": false,
       "page": {
-        "lineage_id": "L3",
-        "messages": []
+        "messages": [],
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     },
     {
       "name": "a session never written: empty, no lineage, no next ordinal",
       "stopped_early": false,
       "page": {
-        "messages": []
+        "messages": [],
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     }
   ],
@@ -216,10 +224,9 @@
     {
       "name": "runner extras on the page and on a message are ignored",
       "page": {
-        "lineage_id": "L1",
         "messages": [
           {
-            "ordinal": 0,
+            "ordinal": 1,
             "mid": "m0",
             "message": {},
             "badge": "x"
@@ -228,7 +235,9 @@
         "lineage_state": {
           "state": "completed"
         },
-        "tools": []
+        "tools": [],
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     }
   ],
@@ -236,28 +245,32 @@
     {
       "name": "message without mid",
       "page": {
-        "lineage_id": "L1",
         "messages": [
           {
-            "ordinal": 0,
+            "ordinal": 1,
             "message": {}
           }
-        ]
+        ],
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     },
     {
       "name": "head that is not an object",
       "page": {
-        "lineage_id": "L1",
         "messages": [],
-        "head": 7
+        "head": 7,
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     }
   ],
   "inconsistent": [
     {
-      "name": "messages without a lineage",
+      "name": "entry ordinal zero",
       "page": {
+        "history_version": 1,
+        "incarnation": "log-1",
         "messages": [
           {
             "ordinal": 0,
@@ -266,13 +279,6 @@
           }
         ]
       }
-    },
-    {
-      "name": "a next ordinal without a lineage",
-      "page": {
-        "messages": [],
-        "next_from_ordinal": 0
-      }
     }
   ],
   "refusals": [
@@ -280,21 +286,21 @@
       "name": "cursor from a lineage the session no longer has",
       "request": {
         "after_mid": "m41",
-        "lineage_id": "old-lineage"
+        "history_version": 1
       },
       "refusal": {
-        "code": "lineage_changed",
+        "code": "history_changed",
         "message": "the session's lineage is not old-lineage"
       }
     },
     {
       "name": "range read naming an old lineage",
       "request": {
-        "from_ordinal": 40,
-        "lineage_id": "old-lineage"
+        "from_ordinal": 41,
+        "history_version": 1
       },
       "refusal": {
-        "code": "lineage_changed",
+        "code": "history_changed",
         "message": "the session's lineage is not old-lineage"
       }
     },
@@ -302,736 +308,12 @@
       "name": "message id the lineage does not have",
       "request": {
         "after_mid": "m999999",
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
+        "history_version": 1
       },
       "refusal": {
         "code": "unknown_mid",
         "message": "no message m999999 in this lineage"
       }
     }
-  ],
-  "model_pages": [
-    {
-      "name": "count cap after insertion keeps message five on the page",
-      "from_ordinal": 5, "limit": 1, "compacted": true,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "insert"}},
-          {"source": {"kind": "message", "ordinal": 5, "mid": "m5"}, "message": {"text": "message five"}}
-        ],
-        "next_from_ordinal": 6
-      }
-    },
-    {
-      "name": "count cap after insertion keeps replacement on the page",
-      "from_ordinal": 3, "limit": 1, "compacted": true,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 3, "to_ordinal": 3}, "message": {"text": "insert"}},
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 3, "to_ordinal": 7}, "message": {"text": "summary"}}
-        ],
-        "next_from_ordinal": 7
-      }
-    },
-    {
-      "name": "several insertions travel together in order over the byte cap",
-      "from_ordinal": 5, "max_bytes": 1, "compacted": true,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "first"}},
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "second"}},
-          {"source": {"kind": "message", "ordinal": 5, "mid": "m5"}, "message": {"text": "message five"}}
-        ],
-        "next_from_ordinal": 6
-      }
-    },
-    {
-      "name": "Setup head insertion before message zero",
-      "from_ordinal": 0,
-      "compacted": true,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 0, "to_ordinal": 0}, "message": {"role": "user", "text": "head"}},
-          {"source": {"kind": "message", "ordinal": 0, "mid": "m0"}, "message": {"role": "user", "text": "hello"}}
-        ],
-        "next_from_ordinal": 1
-      }
-    },
-    {
-      "name": "tail insertion on the last page",
-      "from_ordinal": 1,
-      "compacted": true,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "message", "ordinal": 1, "mid": "m1"}, "message": {"role": "assistant", "text": "hello"}},
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {"role": "user", "text": "tail"}}
-        ]
-      }
-    },
-    {
-      "name": "insertion before replacement at the same anchor",
-      "from_ordinal": 2,
-      "compacted": true,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {"text": "insert"}},
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 5}, "message": {"text": "summary"}}
-        ],
-        "next_from_ordinal": 5
-      }
-    },
-    {
-      "name": "before any compaction: messages passed through, no compaction state",
-      "from_ordinal": 0,
-      "compacted": false,
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "message",
-              "ordinal": 0,
-              "mid": "m0"
-            },
-            "message": {
-              "role": "user",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "fix the parser"
-                }
-              ]
-            }
-          },
-          {
-            "source": {
-              "kind": "message",
-              "ordinal": 1,
-              "mid": "m1"
-            },
-            "message": {
-              "role": "assistant",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "Reading parse.rs."
-                }
-              ]
-            }
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-        "next_from_ordinal": 2
-      }
-    },
-    {
-      "name": "tail page with both source kinds, naming the compaction state it reflects",
-      "compacted": true,
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "replacement",
-              "compaction_id": "cmp-ses_01J9Z",
-              "version": 4,
-              "from_ordinal": 3,
-              "to_ordinal": 10
-            },
-            "message": {
-              "role": "user",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
-                }
-              ]
-            }
-          },
-          {
-            "source": {
-              "kind": "message",
-              "ordinal": 10,
-              "mid": "m10"
-            },
-            "message": {
-              "role": "assistant",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "All pass."
-                }
-              ]
-            }
-          },
-          {
-            "source": {
-              "kind": "message",
-              "ordinal": 11,
-              "mid": "m11"
-            },
-            "message": {
-              "role": "user",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "thanks"
-                }
-              ]
-            }
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-        "head": {
-          "wal_seq": 1300,
-          "sub_index": 0
-        },
-        "compaction_id": "cmp-ses_01J9Z",
-        "version": 4
-      }
-    },
-    {
-      "name": "a session never written",
-      "compacted": false,
-      "page": {
-        "messages": []
-      }
-    }
-  ],
-  "model_pages_rejected": [
-    {
-      "name": "non-tail page ends between insertion and message five",
-      "problem": "non_tail_insertion",
-      "from_ordinal": 5,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "insert"}}
-        ],
-        "next_from_ordinal": 6
-      }
-    },
-    {
-      "name": "cursor before an unpaired insertion anchor",
-      "problem": "next_inside_entry",
-      "from_ordinal": 5,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 5, "to_ordinal": 5}, "message": {"text": "insert"}},
-          {"source": {"kind": "message", "ordinal": 6, "mid": "m6"}, "message": {}}
-        ],
-        "next_from_ordinal": 5
-      }
-    },
-    {
-      "name": "insertion after message at the same anchor",
-      "problem": "insertion_after_entry",
-      "from_ordinal": 2,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "message", "ordinal": 2, "mid": "m2"}, "message": {}},
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {}}
-        ]
-      }
-    },
-    {
-      "name": "insertion after replacement at the same anchor",
-      "problem": "insertion_after_entry",
-      "from_ordinal": 2,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 5}, "message": {}},
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {}}
-        ]
-      }
-    },
-    {
-      "name": "next cursor repeats an insertion anchor",
-      "problem": "non_tail_insertion",
-      "from_ordinal": 2,
-      "page": {
-        "lineage_id": "lin-1", "compaction_id": "cmp-1", "version": 1,
-        "messages": [
-          {"source": {"kind": "replacement", "compaction_id": "cmp-1", "version": 1, "from_ordinal": 2, "to_ordinal": 2}, "message": {}}
-        ],
-        "next_from_ordinal": 2
-      }
-    },
-    {
-      "name": "a replacement on a page that names no compaction state",
-      "problem": "replacement_without_compaction_state",
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "replacement",
-              "compaction_id": "cmp-ses_01J9Z",
-              "version": 4,
-              "from_ordinal": 3,
-              "to_ordinal": 10
-            },
-            "message": {
-              "role": "user",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
-                }
-              ]
-            }
-          },
-          {
-            "source": {
-              "kind": "message",
-              "ordinal": 10,
-              "mid": "m10"
-            },
-            "message": {
-              "role": "assistant",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "All pass."
-                }
-              ]
-            }
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
-      }
-    },
-    {
-      "name": "a compaction id without its version",
-      "problem": "partial_compaction_state",
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "message",
-              "ordinal": 10,
-              "mid": "m10"
-            },
-            "message": {
-              "role": "assistant",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "All pass."
-                }
-              ]
-            }
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-        "compaction_id": "cmp-ses_01J9Z"
-      }
-    },
-    {
-      "name": "entries not ordered by first covered ordinal",
-      "problem": "out_of_order",
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "message",
-              "ordinal": 10,
-              "mid": "m10"
-            },
-            "message": {
-              "role": "assistant",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "All pass."
-                }
-              ]
-            }
-          },
-          {
-            "source": {
-              "kind": "replacement",
-              "compaction_id": "cmp-ses_01J9Z",
-              "version": 4,
-              "from_ordinal": 3,
-              "to_ordinal": 10
-            },
-            "message": {
-              "role": "user",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
-                }
-              ]
-            }
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-        "compaction_id": "cmp-ses_01J9Z",
-        "version": 4
-      }
-    },
-    {
-      "name": "a replacement whose range is inverted",
-      "problem": "inverted_range",
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "replacement",
-              "compaction_id": "cmp-ses_01J9Z",
-              "version": 4,
-              "from_ordinal": 9,
-              "to_ordinal": 4
-            },
-            "message": {}
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-        "compaction_id": "cmp-ses_01J9Z",
-        "version": 4
-      }
-    },
-    {
-      "name": "a next ordinal inside the replacement's range",
-      "problem": "next_inside_entry",
-      "from_ordinal": 3,
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "replacement",
-              "compaction_id": "cmp-ses_01J9Z",
-              "version": 4,
-              "from_ordinal": 3,
-              "to_ordinal": 10
-            },
-            "message": {
-              "role": "user",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
-                }
-              ]
-            }
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-        "next_from_ordinal": 6,
-        "compaction_id": "cmp-ses_01J9Z",
-        "version": 4
-      }
-    },
-    {
-      "name": "entries without a lineage",
-      "problem": "no_lineage",
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "message",
-              "ordinal": 0,
-              "mid": "m0"
-            },
-            "message": {
-              "role": "user",
-              "content": [
-                {
-                  "type": "text",
-                  "text": "fix the parser"
-                }
-              ]
-            }
-          }
-        ]
-      }
-    }
-  ],
-  "model_pages_undecodable": [
-    {
-      "name": "a source of a kind this role does not define",
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "summary",
-              "ordinal": 3
-            },
-            "message": {}
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
-      }
-    },
-    {
-      "name": "a replacement without its range",
-      "page": {
-        "messages": [
-          {
-            "source": {
-              "kind": "replacement",
-              "compaction_id": "cmp-ses_01J9Z",
-              "version": 4
-            },
-            "message": {}
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-        "compaction_id": "cmp-ses_01J9Z",
-        "version": 4
-      }
-    },
-    {
-      "name": "an entry without a source",
-      "page": {
-        "messages": [
-          {
-            "message": {}
-          }
-        ],
-        "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0"
-      }
-    }
-  ],
-  "replacement_once": {
-    "series": [
-      {
-        "name": "the page holding the replacement's first ordinal returns it whole",
-        "from_ordinal": 0,
-        "page": {
-          "messages": [
-            {
-              "source": {
-                "kind": "message",
-                "ordinal": 0,
-                "mid": "m0"
-              },
-              "message": {
-                "role": "user",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "fix the parser"
-                  }
-                ]
-              }
-            },
-            {
-              "source": {
-                "kind": "message",
-                "ordinal": 1,
-                "mid": "m1"
-              },
-              "message": {
-                "role": "assistant",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "Reading parse.rs."
-                  }
-                ]
-              }
-            },
-            {
-              "source": {
-                "kind": "message",
-                "ordinal": 2,
-                "mid": "m2"
-              },
-              "message": {
-                "role": "user",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "and run the tests"
-                  }
-                ]
-              }
-            },
-            {
-              "source": {
-                "kind": "replacement",
-                "compaction_id": "cmp-ses_01J9Z",
-                "version": 4,
-                "from_ordinal": 3,
-                "to_ordinal": 10
-              },
-              "message": {
-                "role": "user",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
-                  }
-                ]
-              }
-            }
-          ],
-          "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-          "next_from_ordinal": 10,
-          "compaction_id": "cmp-ses_01J9Z",
-          "version": 4
-        }
-      },
-      {
-        "name": "the next page starts past the replaced range",
-        "from_ordinal": 10,
-        "page": {
-          "messages": [
-            {
-              "source": {
-                "kind": "message",
-                "ordinal": 10,
-                "mid": "m10"
-              },
-              "message": {
-                "role": "assistant",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "All pass."
-                  }
-                ]
-              }
-            },
-            {
-              "source": {
-                "kind": "message",
-                "ordinal": 11,
-                "mid": "m11"
-              },
-              "message": {
-                "role": "user",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "thanks"
-                  }
-                ]
-              }
-            }
-          ],
-          "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-          "compaction_id": "cmp-ses_01J9Z",
-          "version": 4
-        }
-      }
-    ],
-    "intersecting": [
-      {
-        "name": "a range read from inside the replaced range does not repeat it",
-        "from_ordinal": 5,
-        "page": {
-          "messages": [
-            {
-              "source": {
-                "kind": "message",
-                "ordinal": 10,
-                "mid": "m10"
-              },
-              "message": {
-                "role": "assistant",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "All pass."
-                  }
-                ]
-              }
-            },
-            {
-              "source": {
-                "kind": "message",
-                "ordinal": 11,
-                "mid": "m11"
-              },
-              "message": {
-                "role": "user",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "thanks"
-                  }
-                ]
-              }
-            }
-          ],
-          "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-          "compaction_id": "cmp-ses_01J9Z",
-          "version": 4
-        }
-      }
-    ],
-    "repeated": [
-      {
-        "name": "a page read from inside the replaced range that repeats the replacement",
-        "from_ordinal": 5,
-        "page": {
-          "messages": [
-            {
-              "source": {
-                "kind": "replacement",
-                "compaction_id": "cmp-ses_01J9Z",
-                "version": 4,
-                "from_ordinal": 3,
-                "to_ordinal": 10
-              },
-              "message": {
-                "role": "user",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "<summary>ordinals 3 to 9: read parse.rs, fixed the off-by-one</summary>"
-                  }
-                ]
-              }
-            },
-            {
-              "source": {
-                "kind": "message",
-                "ordinal": 10,
-                "mid": "m10"
-              },
-              "message": {
-                "role": "assistant",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "All pass."
-                  }
-                ]
-              }
-            },
-            {
-              "source": {
-                "kind": "message",
-                "ordinal": 11,
-                "mid": "m11"
-              },
-              "message": {
-                "role": "user",
-                "content": [
-                  {
-                    "type": "text",
-                    "text": "thanks"
-                  }
-                ]
-              }
-            }
-          ],
-          "lineage_id": "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-          "compaction_id": "cmp-ses_01J9Z",
-          "version": 4
-        }
-      }
-    ]
-  }
+  ]
 }

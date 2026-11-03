@@ -243,7 +243,7 @@ where
     if case.declared.contains(&Capability::DispatchAttribution) {
         return attribution(route).await.map(KeyReference::Attribution);
     }
-    crate::tags::require_declared(
+    crate::send_helpers::require_declared(
         route,
         groups::RUN_TOOL_CALLS,
         cortexkit_role_llm_runner::ops::RUN_TOOL_CALLS,

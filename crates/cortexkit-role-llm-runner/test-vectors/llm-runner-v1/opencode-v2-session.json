@@ -10,7 +10,7 @@
           {
             "entry_id": "msg_18cea76ab001R3hctArc6xCv4c",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -22,7 +22,7 @@
           {
             "entry_id": "msg_18cea780e001xOuZcIgOMVxrVw",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -41,13 +41,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18cea7835001jwwvuHiChNPgKm",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18cea785a001YNh1Cbw6G1SIix",
@@ -119,16 +112,9 @@
             ]
           },
           {
-            "entry_id": "msg_18cea78d1001wNGxK77rH7qQYJ",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18cea7909001DCDi4TwSTGgAfW",
             "entry_type": "system",
-            "ordinal": 7,
+            "ordinal": 6,
             "part_count": 1,
             "projected_content": [
               {
@@ -140,7 +126,7 @@
           {
             "entry_id": "msg_18cea78fe001ACv235x0gFzMM0",
             "entry_type": "user",
-            "ordinal": 8,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -152,7 +138,7 @@
           {
             "entry_id": "msg_18cea7911001BTZ4WoTnMd0RNK",
             "entry_type": "assistant",
-            "ordinal": 9,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -181,7 +167,7 @@
           {
             "entry_id": "msg_18cea7950001gD7DycvIRQwDel",
             "entry_type": "assistant",
-            "ordinal": 10,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -202,16 +188,9 @@
             ]
           },
           {
-            "entry_id": "msg_18cea7967001dvONv0lZpCPmIg",
-            "entry_type": "idle",
-            "ordinal": 11,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18cea7979001f5BG6trjQ7BIGq",
             "entry_type": "synthetic",
-            "ordinal": 12,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -223,7 +202,7 @@
           {
             "entry_id": "msg_18cea7982001oBCBIGEEorfs3d",
             "entry_type": "user",
-            "ordinal": 13,
+            "ordinal": 11,
             "part_count": 2,
             "projected_content": [
               {
@@ -243,7 +222,7 @@
           {
             "entry_id": "msg_18cea79a50014AjofYKnNhavts",
             "entry_type": "assistant",
-            "ordinal": 14,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -262,19 +241,12 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18cea79c4002fFcPa14n89TRld",
-            "entry_type": "idle",
-            "ordinal": 15,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
         "runner_marker": null
       },
-      "outside_served_range": []
+      "below_model_cut": []
     },
     {
       "name": "2.0.26-after_cut",
@@ -285,7 +257,7 @@
           {
             "entry_id": "msg_18cea76ab001R3hctArc6xCv4c",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -297,7 +269,7 @@
           {
             "entry_id": "msg_18cea780e001xOuZcIgOMVxrVw",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -316,13 +288,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18cea7835001jwwvuHiChNPgKm",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18cea785a001YNh1Cbw6G1SIix",
@@ -394,16 +359,9 @@
             ]
           },
           {
-            "entry_id": "msg_18cea78d1001wNGxK77rH7qQYJ",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18cea7909001DCDi4TwSTGgAfW",
             "entry_type": "system",
-            "ordinal": 7,
+            "ordinal": 6,
             "part_count": 1,
             "projected_content": [
               {
@@ -415,7 +373,7 @@
           {
             "entry_id": "msg_18cea78fe001ACv235x0gFzMM0",
             "entry_type": "user",
-            "ordinal": 8,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -427,7 +385,7 @@
           {
             "entry_id": "msg_18cea7911001BTZ4WoTnMd0RNK",
             "entry_type": "assistant",
-            "ordinal": 9,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -456,7 +414,7 @@
           {
             "entry_id": "msg_18cea7950001gD7DycvIRQwDel",
             "entry_type": "assistant",
-            "ordinal": 10,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -477,16 +435,9 @@
             ]
           },
           {
-            "entry_id": "msg_18cea7967001dvONv0lZpCPmIg",
-            "entry_type": "idle",
-            "ordinal": 11,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18cea7979001f5BG6trjQ7BIGq",
             "entry_type": "synthetic",
-            "ordinal": 12,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -498,7 +449,7 @@
           {
             "entry_id": "msg_18cea7982001oBCBIGEEorfs3d",
             "entry_type": "user",
-            "ordinal": 13,
+            "ordinal": 11,
             "part_count": 2,
             "projected_content": [
               {
@@ -518,7 +469,7 @@
           {
             "entry_id": "msg_18cea79a50014AjofYKnNhavts",
             "entry_type": "assistant",
-            "ordinal": 14,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -539,23 +490,9 @@
             ]
           },
           {
-            "entry_id": "msg_18cea79c4002fFcPa14n89TRld",
-            "entry_type": "idle",
-            "ordinal": 15,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18cea7a400011uxcz2sY47lBp6",
-            "entry_type": "idle",
-            "ordinal": 16,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18cea7a51001YOQ6LzUD1tzhKP",
             "entry_type": "user",
-            "ordinal": 17,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -567,7 +504,7 @@
           {
             "entry_id": "msg_18cea7a68001oTxtbpRYf29hEv",
             "entry_type": "assistant",
-            "ordinal": 18,
+            "ordinal": 14,
             "part_count": 2,
             "projected_content": [
               {
@@ -586,13 +523,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18cea7abb001hC9xvJQoyFGfCq",
-            "entry_type": "idle",
-            "ordinal": 19,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": {
@@ -602,10 +532,9 @@
         },
         "runner_marker": null
       },
-      "outside_served_range": [
+      "below_model_cut": [
         "msg_18cea76ab001R3hctArc6xCv4c",
         "msg_18cea780e001xOuZcIgOMVxrVw",
-        "msg_18cea7835001jwwvuHiChNPgKm",
         "msg_18cea785a001YNh1Cbw6G1SIix"
       ]
     },
@@ -618,7 +547,7 @@
           {
             "entry_id": "msg_18cea80db001ORNj2BNXhbh9Ci",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -630,7 +559,7 @@
           {
             "entry_id": "msg_18cea810a001SuabvtxmhCQ1T6",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -651,23 +580,9 @@
             ]
           },
           {
-            "entry_id": "msg_18cea8176001Hfr4sYJZ2JSeN1",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18cea81de001auJwooatQiVgDv",
-            "entry_type": "idle",
-            "ordinal": 3,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18cea81f6001wAlLPI5hH5fIAO",
             "entry_type": "user",
-            "ordinal": 4,
+            "ordinal": 3,
             "part_count": 2,
             "projected_content": [
               {
@@ -687,7 +602,7 @@
           {
             "entry_id": "msg_18cea8224001SqB3wf7qyzHfI0",
             "entry_type": "assistant",
-            "ordinal": 5,
+            "ordinal": 4,
             "part_count": 1,
             "projected_content": [
               {
@@ -721,7 +636,7 @@
           {
             "entry_id": "msg_18cea826d001begOzOGSTAiiZh",
             "entry_type": "assistant",
-            "ordinal": 6,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -742,16 +657,9 @@
             ]
           },
           {
-            "entry_id": "msg_18cea82970018X6symlmeBDK0U",
-            "entry_type": "idle",
-            "ordinal": 7,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18cea82c0001tw8LjWgCvt4YQa",
             "entry_type": "user",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 1,
             "projected_content": [
               {
@@ -763,7 +671,7 @@
           {
             "entry_id": "msg_18cea82d2001Hxj3xs7Hthlo0J",
             "entry_type": "assistant",
-            "ordinal": 9,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -792,7 +700,7 @@
           {
             "entry_id": "msg_18cea82f8001c9hgxfn4LUie3O",
             "entry_type": "assistant",
-            "ordinal": 10,
+            "ordinal": 8,
             "part_count": 2,
             "projected_content": [
               {
@@ -813,16 +721,9 @@
             ]
           },
           {
-            "entry_id": "msg_18cea8316001Dy0l9lpL1MpDvM",
-            "entry_type": "idle",
-            "ordinal": 11,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18cea832000162gSmP7YlG9CB5",
             "entry_type": "synthetic",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 1,
             "projected_content": [
               {
@@ -834,7 +735,7 @@
           {
             "entry_id": "msg_18cea832a0011v1k4Pdjw7aZ7i",
             "entry_type": "user",
-            "ordinal": 13,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -846,7 +747,7 @@
           {
             "entry_id": "msg_18cea833b001k3wW1x6g6BpQxO",
             "entry_type": "assistant",
-            "ordinal": 14,
+            "ordinal": 11,
             "part_count": 2,
             "projected_content": [
               {
@@ -865,23 +766,16 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18cea8378001ABx5W8LCO6yUsn",
-            "entry_type": "idle",
-            "ordinal": 15,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": {
           "entry_id": "msg_18cea818b00146hdOK7u8gnt6u",
           "boundary_entry_id": "msg_18cea80db001ORNj2BNXhbh9Ci",
-          "first_kept_ordinal": 0
+          "first_kept_ordinal": 1
         },
         "runner_marker": null
       },
-      "outside_served_range": []
+      "below_model_cut": []
     },
     {
       "name": "2.2.3-before_cut",
@@ -892,7 +786,7 @@
           {
             "entry_id": "msg_18ceaac39001GMrAsMrjxryJAp",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -904,7 +798,7 @@
           {
             "entry_id": "msg_18ceaae470016inz2Bj6hhaPSF",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -923,13 +817,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18ceaae95001UsJs99Cv3myNZJ",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18ceaaea3001QcD3kcML8Vt3vq",
@@ -1001,16 +888,9 @@
             ]
           },
           {
-            "entry_id": "msg_18ceaaf18001UqoYiAw0kQw3yY",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18ceaaf38001Z10vwtJ5L1Ku81",
             "entry_type": "system",
-            "ordinal": 7,
+            "ordinal": 6,
             "part_count": 1,
             "projected_content": [
               {
@@ -1022,7 +902,7 @@
           {
             "entry_id": "msg_18ceaaf31001by8G6Fmj36116f",
             "entry_type": "user",
-            "ordinal": 8,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -1034,7 +914,7 @@
           {
             "entry_id": "msg_18ceaaf3d0011M7CNyoAO1JMwe",
             "entry_type": "assistant",
-            "ordinal": 9,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -1063,7 +943,7 @@
           {
             "entry_id": "msg_18ceaaf5e0017erRiAc0s8MOY5",
             "entry_type": "assistant",
-            "ordinal": 10,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -1084,16 +964,9 @@
             ]
           },
           {
-            "entry_id": "msg_18ceaaf86001yCYt13qJhJB9vl",
-            "entry_type": "idle",
-            "ordinal": 11,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18ceaaf91001MbLNVgUH7KfuBs",
             "entry_type": "synthetic",
-            "ordinal": 12,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -1105,7 +978,7 @@
           {
             "entry_id": "msg_18ceaaf9b001Rl5B11hUEWnVhE",
             "entry_type": "user",
-            "ordinal": 13,
+            "ordinal": 11,
             "part_count": 2,
             "projected_content": [
               {
@@ -1125,7 +998,7 @@
           {
             "entry_id": "msg_18ceaafcf001Onp525D6hBMIRb",
             "entry_type": "assistant",
-            "ordinal": 14,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -1144,19 +1017,12 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18ceaafee001WNIMqybkypiMj3",
-            "entry_type": "idle",
-            "ordinal": 15,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
         "runner_marker": null
       },
-      "outside_served_range": []
+      "below_model_cut": []
     },
     {
       "name": "2.2.3-after_cut",
@@ -1167,7 +1033,7 @@
           {
             "entry_id": "msg_18ceaac39001GMrAsMrjxryJAp",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -1179,7 +1045,7 @@
           {
             "entry_id": "msg_18ceaae470016inz2Bj6hhaPSF",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -1198,13 +1064,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18ceaae95001UsJs99Cv3myNZJ",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18ceaaea3001QcD3kcML8Vt3vq",
@@ -1276,16 +1135,9 @@
             ]
           },
           {
-            "entry_id": "msg_18ceaaf18001UqoYiAw0kQw3yY",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18ceaaf38001Z10vwtJ5L1Ku81",
             "entry_type": "system",
-            "ordinal": 7,
+            "ordinal": 6,
             "part_count": 1,
             "projected_content": [
               {
@@ -1297,7 +1149,7 @@
           {
             "entry_id": "msg_18ceaaf31001by8G6Fmj36116f",
             "entry_type": "user",
-            "ordinal": 8,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -1309,7 +1161,7 @@
           {
             "entry_id": "msg_18ceaaf3d0011M7CNyoAO1JMwe",
             "entry_type": "assistant",
-            "ordinal": 9,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -1338,7 +1190,7 @@
           {
             "entry_id": "msg_18ceaaf5e0017erRiAc0s8MOY5",
             "entry_type": "assistant",
-            "ordinal": 10,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -1359,16 +1211,9 @@
             ]
           },
           {
-            "entry_id": "msg_18ceaaf86001yCYt13qJhJB9vl",
-            "entry_type": "idle",
-            "ordinal": 11,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18ceaaf91001MbLNVgUH7KfuBs",
             "entry_type": "synthetic",
-            "ordinal": 12,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -1380,7 +1225,7 @@
           {
             "entry_id": "msg_18ceaaf9b001Rl5B11hUEWnVhE",
             "entry_type": "user",
-            "ordinal": 13,
+            "ordinal": 11,
             "part_count": 2,
             "projected_content": [
               {
@@ -1400,7 +1245,7 @@
           {
             "entry_id": "msg_18ceaafcf001Onp525D6hBMIRb",
             "entry_type": "assistant",
-            "ordinal": 14,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -1421,23 +1266,9 @@
             ]
           },
           {
-            "entry_id": "msg_18ceaafee001WNIMqybkypiMj3",
-            "entry_type": "idle",
-            "ordinal": 15,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18ceab03d001KYjXTnHRS74Dsw",
-            "entry_type": "idle",
-            "ordinal": 16,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18ceab04a0015JSA7xnKW4NhwP",
             "entry_type": "user",
-            "ordinal": 17,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -1449,7 +1280,7 @@
           {
             "entry_id": "msg_18ceab05d00145leBrNLbiK9Kr",
             "entry_type": "assistant",
-            "ordinal": 18,
+            "ordinal": 14,
             "part_count": 2,
             "projected_content": [
               {
@@ -1468,13 +1299,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18ceab079001X0bo7r0XpPNosZ",
-            "entry_type": "idle",
-            "ordinal": 19,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": {
@@ -1484,10 +1308,9 @@
         },
         "runner_marker": null
       },
-      "outside_served_range": [
+      "below_model_cut": [
         "msg_18ceaac39001GMrAsMrjxryJAp",
         "msg_18ceaae470016inz2Bj6hhaPSF",
-        "msg_18ceaae95001UsJs99Cv3myNZJ",
         "msg_18ceaaea3001QcD3kcML8Vt3vq"
       ]
     },
@@ -1500,7 +1323,7 @@
           {
             "entry_id": "msg_18ceab5880013y4T75gkPi6zpU",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -1512,7 +1335,7 @@
           {
             "entry_id": "msg_18ceab59700155nTue8nu54OTD",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -1533,23 +1356,9 @@
             ]
           },
           {
-            "entry_id": "msg_18ceab5b3001NksUry3fTN86DL",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18ceab5f0001Rwz8cU30AGEBg8",
-            "entry_type": "idle",
-            "ordinal": 3,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18ceab5fb001jTLhb1WjOeq9Qv",
             "entry_type": "user",
-            "ordinal": 4,
+            "ordinal": 3,
             "part_count": 2,
             "projected_content": [
               {
@@ -1569,7 +1378,7 @@
           {
             "entry_id": "msg_18ceab625001N3XoF1GyUkJCEC",
             "entry_type": "assistant",
-            "ordinal": 5,
+            "ordinal": 4,
             "part_count": 1,
             "projected_content": [
               {
@@ -1603,7 +1412,7 @@
           {
             "entry_id": "msg_18ceab6400018hOjHZO3qK2NRU",
             "entry_type": "assistant",
-            "ordinal": 6,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -1624,16 +1433,9 @@
             ]
           },
           {
-            "entry_id": "msg_18ceab6540014snc7Uui7D53o7",
-            "entry_type": "idle",
-            "ordinal": 7,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18ceab667001rmDeJeEz7YJKfv",
             "entry_type": "user",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 1,
             "projected_content": [
               {
@@ -1645,7 +1447,7 @@
           {
             "entry_id": "msg_18ceab673001I6PSWsxP5PGYpt",
             "entry_type": "assistant",
-            "ordinal": 9,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -1674,7 +1476,7 @@
           {
             "entry_id": "msg_18ceab690001HghoPee76qVw7Y",
             "entry_type": "assistant",
-            "ordinal": 10,
+            "ordinal": 8,
             "part_count": 2,
             "projected_content": [
               {
@@ -1695,16 +1497,9 @@
             ]
           },
           {
-            "entry_id": "msg_18ceab6a4001wW5S1RkmVA4W13",
-            "entry_type": "idle",
-            "ordinal": 11,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18ceab6b9001GiTsZ3L1jOiTDe",
             "entry_type": "synthetic",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 1,
             "projected_content": [
               {
@@ -1716,7 +1511,7 @@
           {
             "entry_id": "msg_18ceab6ca001I1yottnT867lTB",
             "entry_type": "user",
-            "ordinal": 13,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -1728,7 +1523,7 @@
           {
             "entry_id": "msg_18ceab6e6001hEmXlja90Jbvw8",
             "entry_type": "assistant",
-            "ordinal": 14,
+            "ordinal": 11,
             "part_count": 2,
             "projected_content": [
               {
@@ -1747,23 +1542,16 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18ceab702001860XE44VKWTb7m",
-            "entry_type": "idle",
-            "ordinal": 15,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": {
           "entry_id": "msg_18ceab5df0018M5Ha5idcUTE3H",
           "boundary_entry_id": "msg_18ceab5880013y4T75gkPi6zpU",
-          "first_kept_ordinal": 0
+          "first_kept_ordinal": 1
         },
         "runner_marker": null
       },
-      "outside_served_range": []
+      "below_model_cut": []
     },
     {
       "name": "2.0.26-reinjection-previous_marker",
@@ -1774,7 +1562,7 @@
           {
             "entry_id": "msg_18d0cb7680015oWH3hAJN0KEfJ",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -1786,7 +1574,7 @@
           {
             "entry_id": "msg_18d0cb8550014q3UugeHuWAudY",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -1805,13 +1593,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cb87b001pJroePt5iRfpe2",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0cb89d0013wsIz0CGR4P1kM",
@@ -1847,20 +1628,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cb8e4001MSWggTIqRAlrwV",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cb9330011Pn8cpSmk6Rtr8",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
@@ -1868,7 +1635,7 @@
           "entry_id": "msg_s0_previous_marker"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.0.26-reinjection-before_cut",
@@ -1879,7 +1646,7 @@
           {
             "entry_id": "msg_18d0cb7680015oWH3hAJN0KEfJ",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -1891,7 +1658,7 @@
           {
             "entry_id": "msg_18d0cb8550014q3UugeHuWAudY",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -1910,13 +1677,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cb87b001pJroePt5iRfpe2",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0cb89d0013wsIz0CGR4P1kM",
@@ -1954,23 +1714,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cb8e4001MSWggTIqRAlrwV",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cb9330011Pn8cpSmk6Rtr8",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cb9570012WfKMSYU66kvWC",
             "entry_type": "user",
-            "ordinal": 7,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -1990,7 +1736,7 @@
           {
             "entry_id": "msg_18d0cb976001DpKXLq1IM4OoRd",
             "entry_type": "assistant",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 2,
             "projected_content": [
               {
@@ -2011,16 +1757,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cb990001nbzit4GLANwiRH",
-            "entry_type": "idle",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cb9bb001kOu0JphgmW8kR2",
             "entry_type": "user",
-            "ordinal": 10,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -2032,7 +1771,7 @@
           {
             "entry_id": "msg_18d0cb9c6001JhMsThrnoznbbL",
             "entry_type": "assistant",
-            "ordinal": 11,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -2066,7 +1805,7 @@
           {
             "entry_id": "msg_18d0cb9f100118ICqw7DsW79oi",
             "entry_type": "assistant",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -2087,16 +1826,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cba06002u0RmYVTR87UMFe",
-            "entry_type": "idle",
-            "ordinal": 13,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cba0d001IBkSPzTD6fsmEn",
             "entry_type": "user",
-            "ordinal": 14,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -2108,7 +1840,7 @@
           {
             "entry_id": "msg_18d0cba180019NvFZXnRHNtAJF",
             "entry_type": "assistant",
-            "ordinal": 15,
+            "ordinal": 11,
             "part_count": 1,
             "projected_content": [
               {
@@ -2137,7 +1869,7 @@
           {
             "entry_id": "msg_18d0cba35001g5Y1tdA7bnt0yr",
             "entry_type": "assistant",
-            "ordinal": 16,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -2158,16 +1890,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cba55001qjtjWuwyVPUkxX",
-            "entry_type": "idle",
-            "ordinal": 17,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cba5b0010ISFii6SXTKihb",
             "entry_type": "synthetic",
-            "ordinal": 18,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -2179,7 +1904,7 @@
           {
             "entry_id": "msg_18d0cba62001ILKEjOIzY0HFPB",
             "entry_type": "user",
-            "ordinal": 19,
+            "ordinal": 14,
             "part_count": 1,
             "projected_content": [
               {
@@ -2191,14 +1916,7 @@
           {
             "entry_id": "msg_18d0cba7000158fxZXM5Q1vQdH",
             "entry_type": "assistant",
-            "ordinal": 20,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cba86001EJ96q2yyGavqwl",
-            "entry_type": "idle",
-            "ordinal": 21,
+            "ordinal": 15,
             "part_count": 0,
             "projected_content": []
           }
@@ -2208,7 +1926,7 @@
           "entry_id": "msg_s0_previous_marker"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.0.26-reinjection-current_marker",
@@ -2219,7 +1937,7 @@
           {
             "entry_id": "msg_18d0cb7680015oWH3hAJN0KEfJ",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -2231,7 +1949,7 @@
           {
             "entry_id": "msg_18d0cb8550014q3UugeHuWAudY",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -2250,13 +1968,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cb87b001pJroePt5iRfpe2",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0cb89d0013wsIz0CGR4P1kM",
@@ -2294,23 +2005,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cb8e4001MSWggTIqRAlrwV",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cb9330011Pn8cpSmk6Rtr8",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cb9570012WfKMSYU66kvWC",
             "entry_type": "user",
-            "ordinal": 7,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -2330,7 +2027,7 @@
           {
             "entry_id": "msg_18d0cb976001DpKXLq1IM4OoRd",
             "entry_type": "assistant",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 2,
             "projected_content": [
               {
@@ -2351,16 +2048,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cb990001nbzit4GLANwiRH",
-            "entry_type": "idle",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cb9bb001kOu0JphgmW8kR2",
             "entry_type": "user",
-            "ordinal": 10,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -2372,7 +2062,7 @@
           {
             "entry_id": "msg_18d0cb9c6001JhMsThrnoznbbL",
             "entry_type": "assistant",
-            "ordinal": 11,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -2406,7 +2096,7 @@
           {
             "entry_id": "msg_18d0cb9f100118ICqw7DsW79oi",
             "entry_type": "assistant",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -2427,16 +2117,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cba06002u0RmYVTR87UMFe",
-            "entry_type": "idle",
-            "ordinal": 13,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cba0d001IBkSPzTD6fsmEn",
             "entry_type": "user",
-            "ordinal": 14,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -2448,7 +2131,7 @@
           {
             "entry_id": "msg_18d0cba180019NvFZXnRHNtAJF",
             "entry_type": "assistant",
-            "ordinal": 15,
+            "ordinal": 11,
             "part_count": 1,
             "projected_content": [
               {
@@ -2477,7 +2160,7 @@
           {
             "entry_id": "msg_18d0cba35001g5Y1tdA7bnt0yr",
             "entry_type": "assistant",
-            "ordinal": 16,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -2498,16 +2181,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cba55001qjtjWuwyVPUkxX",
-            "entry_type": "idle",
-            "ordinal": 17,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cba5b0010ISFii6SXTKihb",
             "entry_type": "synthetic",
-            "ordinal": 18,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -2519,7 +2195,7 @@
           {
             "entry_id": "msg_18d0cba62001ILKEjOIzY0HFPB",
             "entry_type": "user",
-            "ordinal": 19,
+            "ordinal": 14,
             "part_count": 1,
             "projected_content": [
               {
@@ -2531,21 +2207,7 @@
           {
             "entry_id": "msg_18d0cba7000158fxZXM5Q1vQdH",
             "entry_type": "assistant",
-            "ordinal": 20,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cba86001EJ96q2yyGavqwl",
-            "entry_type": "idle",
-            "ordinal": 21,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cbadd001L5QTObx3EnA2uZ",
-            "entry_type": "idle",
-            "ordinal": 22,
+            "ordinal": 15,
             "part_count": 0,
             "projected_content": []
           }
@@ -2555,7 +2217,7 @@
           "entry_id": "msg_s0_current_marker"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.0.26-reinjection-after_injection",
@@ -2566,7 +2228,7 @@
           {
             "entry_id": "msg_18d0cb7680015oWH3hAJN0KEfJ",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -2578,7 +2240,7 @@
           {
             "entry_id": "msg_18d0cb8550014q3UugeHuWAudY",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -2597,13 +2259,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cb87b001pJroePt5iRfpe2",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0cb89d0013wsIz0CGR4P1kM",
@@ -2641,23 +2296,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cb8e4001MSWggTIqRAlrwV",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cb9330011Pn8cpSmk6Rtr8",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cb9570012WfKMSYU66kvWC",
             "entry_type": "user",
-            "ordinal": 7,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -2677,7 +2318,7 @@
           {
             "entry_id": "msg_18d0cb976001DpKXLq1IM4OoRd",
             "entry_type": "assistant",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 2,
             "projected_content": [
               {
@@ -2698,16 +2339,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cb990001nbzit4GLANwiRH",
-            "entry_type": "idle",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cb9bb001kOu0JphgmW8kR2",
             "entry_type": "user",
-            "ordinal": 10,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -2719,7 +2353,7 @@
           {
             "entry_id": "msg_18d0cb9c6001JhMsThrnoznbbL",
             "entry_type": "assistant",
-            "ordinal": 11,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -2753,7 +2387,7 @@
           {
             "entry_id": "msg_18d0cb9f100118ICqw7DsW79oi",
             "entry_type": "assistant",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -2774,16 +2408,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cba06002u0RmYVTR87UMFe",
-            "entry_type": "idle",
-            "ordinal": 13,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cba0d001IBkSPzTD6fsmEn",
             "entry_type": "user",
-            "ordinal": 14,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -2795,7 +2422,7 @@
           {
             "entry_id": "msg_18d0cba180019NvFZXnRHNtAJF",
             "entry_type": "assistant",
-            "ordinal": 15,
+            "ordinal": 11,
             "part_count": 1,
             "projected_content": [
               {
@@ -2824,7 +2451,7 @@
           {
             "entry_id": "msg_18d0cba35001g5Y1tdA7bnt0yr",
             "entry_type": "assistant",
-            "ordinal": 16,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -2845,16 +2472,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cba55001qjtjWuwyVPUkxX",
-            "entry_type": "idle",
-            "ordinal": 17,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cba5b0010ISFii6SXTKihb",
             "entry_type": "synthetic",
-            "ordinal": 18,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -2866,7 +2486,7 @@
           {
             "entry_id": "msg_18d0cba62001ILKEjOIzY0HFPB",
             "entry_type": "user",
-            "ordinal": 19,
+            "ordinal": 14,
             "part_count": 1,
             "projected_content": [
               {
@@ -2878,28 +2498,14 @@
           {
             "entry_id": "msg_18d0cba7000158fxZXM5Q1vQdH",
             "entry_type": "assistant",
-            "ordinal": 20,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cba86001EJ96q2yyGavqwl",
-            "entry_type": "idle",
-            "ordinal": 21,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cbadd001L5QTObx3EnA2uZ",
-            "entry_type": "idle",
-            "ordinal": 22,
+            "ordinal": 15,
             "part_count": 0,
             "projected_content": []
           },
           {
             "entry_id": "msg_18d0cbae8001o5XdjGMaj3wQ56",
             "entry_type": "user",
-            "ordinal": 23,
+            "ordinal": 16,
             "part_count": 1,
             "projected_content": [
               {
@@ -2911,7 +2517,7 @@
           {
             "entry_id": "msg_18d0cbaf1001Ut0dRY5ULWyGVZ",
             "entry_type": "assistant",
-            "ordinal": 24,
+            "ordinal": 17,
             "part_count": 1,
             "projected_content": [
               {
@@ -2945,7 +2551,7 @@
           {
             "entry_id": "msg_18d0cbb27001PEjM0tBE96xh51",
             "entry_type": "assistant",
-            "ordinal": 25,
+            "ordinal": 18,
             "part_count": 2,
             "projected_content": [
               {
@@ -2964,13 +2570,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cbb3d001WD221pYKWke7Wh",
-            "entry_type": "idle",
-            "ordinal": 26,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
@@ -2978,7 +2577,7 @@
           "entry_id": "msg_s0_current_marker"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.0.26-reinjection-below.committed",
@@ -2989,7 +2588,7 @@
           {
             "entry_id": "msg_18d0cbba9002sG0t5OENAUs8Us_4",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -3001,7 +2600,7 @@
           {
             "entry_id": "msg_18d0cbba9002sG0t5OENAUs8Us_5",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -3020,19 +2619,12 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cbba9002sG0t5OENAUs8Us_12",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
         "runner_marker": null
       },
-      "outside_served_range": []
+      "below_model_cut": []
     },
     {
       "name": "2.2.3-reinjection-previous_marker",
@@ -3043,7 +2635,7 @@
           {
             "entry_id": "msg_18d0cccc5001NngyZ9mRemD7OO",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -3055,7 +2647,7 @@
           {
             "entry_id": "msg_18d0cce80001kaEPnbyFdQdIbY",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -3074,13 +2666,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cce98001RXQ0S9VguUS34e",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0ccec80013RxEQy0WMbPx40",
@@ -3116,20 +2701,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0ccee3001Viblw51opaTD3w",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0ccf1f00154oYatctv1oTda",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
@@ -3137,7 +2708,7 @@
           "entry_id": "msg_s0_previous_marker"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.2.3-reinjection-before_cut",
@@ -3148,7 +2719,7 @@
           {
             "entry_id": "msg_18d0cccc5001NngyZ9mRemD7OO",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -3160,7 +2731,7 @@
           {
             "entry_id": "msg_18d0cce80001kaEPnbyFdQdIbY",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -3179,13 +2750,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cce98001RXQ0S9VguUS34e",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0ccec80013RxEQy0WMbPx40",
@@ -3223,23 +2787,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0ccee3001Viblw51opaTD3w",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0ccf1f00154oYatctv1oTda",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0ccf4e001Cv71Ae4i43Sd5R",
             "entry_type": "user",
-            "ordinal": 7,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -3259,7 +2809,7 @@
           {
             "entry_id": "msg_18d0ccf72001inWgSdQjQ9Mnz6",
             "entry_type": "assistant",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 2,
             "projected_content": [
               {
@@ -3280,16 +2830,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0ccf82002pnXMGU1St4gmHF",
-            "entry_type": "idle",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0ccfbc001gf4y0atgk1I08s",
             "entry_type": "user",
-            "ordinal": 10,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -3301,7 +2844,7 @@
           {
             "entry_id": "msg_18d0ccfc9001UopMhkIYCL1DGh",
             "entry_type": "assistant",
-            "ordinal": 11,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -3335,7 +2878,7 @@
           {
             "entry_id": "msg_18d0ccfdd001phyUqLc4m1By1S",
             "entry_type": "assistant",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -3356,16 +2899,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0ccfec001438Umh2RBEFe3A",
-            "entry_type": "idle",
-            "ordinal": 13,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0ccffb001CwksrdLm5zheKX",
             "entry_type": "user",
-            "ordinal": 14,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -3377,7 +2913,7 @@
           {
             "entry_id": "msg_18d0cd006001Uv5X8XIRn3H3O6",
             "entry_type": "assistant",
-            "ordinal": 15,
+            "ordinal": 11,
             "part_count": 1,
             "projected_content": [
               {
@@ -3406,7 +2942,7 @@
           {
             "entry_id": "msg_18d0cd01d001v96q2tXP4g1dLz",
             "entry_type": "assistant",
-            "ordinal": 16,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -3427,16 +2963,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd02e001RJJiH18LHGaO1t",
-            "entry_type": "idle",
-            "ordinal": 17,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd03b001uE1d7Y1PZiMDRV",
             "entry_type": "synthetic",
-            "ordinal": 18,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -3448,7 +2977,7 @@
           {
             "entry_id": "msg_18d0cd046001HmQ5Mbz75Y5eMV",
             "entry_type": "user",
-            "ordinal": 19,
+            "ordinal": 14,
             "part_count": 1,
             "projected_content": [
               {
@@ -3460,14 +2989,7 @@
           {
             "entry_id": "msg_18d0cd053001lIj9ajhfDryfHv",
             "entry_type": "assistant",
-            "ordinal": 20,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd05f001wx7Jf87Pu5Ufe8",
-            "entry_type": "idle",
-            "ordinal": 21,
+            "ordinal": 15,
             "part_count": 0,
             "projected_content": []
           }
@@ -3477,7 +2999,7 @@
           "entry_id": "msg_s0_previous_marker"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.2.3-reinjection-current_marker",
@@ -3488,7 +3010,7 @@
           {
             "entry_id": "msg_18d0cccc5001NngyZ9mRemD7OO",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -3500,7 +3022,7 @@
           {
             "entry_id": "msg_18d0cce80001kaEPnbyFdQdIbY",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -3519,13 +3041,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cce98001RXQ0S9VguUS34e",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0ccec80013RxEQy0WMbPx40",
@@ -3563,23 +3078,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0ccee3001Viblw51opaTD3w",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0ccf1f00154oYatctv1oTda",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0ccf4e001Cv71Ae4i43Sd5R",
             "entry_type": "user",
-            "ordinal": 7,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -3599,7 +3100,7 @@
           {
             "entry_id": "msg_18d0ccf72001inWgSdQjQ9Mnz6",
             "entry_type": "assistant",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 2,
             "projected_content": [
               {
@@ -3620,16 +3121,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0ccf82002pnXMGU1St4gmHF",
-            "entry_type": "idle",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0ccfbc001gf4y0atgk1I08s",
             "entry_type": "user",
-            "ordinal": 10,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -3641,7 +3135,7 @@
           {
             "entry_id": "msg_18d0ccfc9001UopMhkIYCL1DGh",
             "entry_type": "assistant",
-            "ordinal": 11,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -3675,7 +3169,7 @@
           {
             "entry_id": "msg_18d0ccfdd001phyUqLc4m1By1S",
             "entry_type": "assistant",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -3696,16 +3190,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0ccfec001438Umh2RBEFe3A",
-            "entry_type": "idle",
-            "ordinal": 13,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0ccffb001CwksrdLm5zheKX",
             "entry_type": "user",
-            "ordinal": 14,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -3717,7 +3204,7 @@
           {
             "entry_id": "msg_18d0cd006001Uv5X8XIRn3H3O6",
             "entry_type": "assistant",
-            "ordinal": 15,
+            "ordinal": 11,
             "part_count": 1,
             "projected_content": [
               {
@@ -3746,7 +3233,7 @@
           {
             "entry_id": "msg_18d0cd01d001v96q2tXP4g1dLz",
             "entry_type": "assistant",
-            "ordinal": 16,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -3767,16 +3254,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd02e001RJJiH18LHGaO1t",
-            "entry_type": "idle",
-            "ordinal": 17,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd03b001uE1d7Y1PZiMDRV",
             "entry_type": "synthetic",
-            "ordinal": 18,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -3788,7 +3268,7 @@
           {
             "entry_id": "msg_18d0cd046001HmQ5Mbz75Y5eMV",
             "entry_type": "user",
-            "ordinal": 19,
+            "ordinal": 14,
             "part_count": 1,
             "projected_content": [
               {
@@ -3800,21 +3280,7 @@
           {
             "entry_id": "msg_18d0cd053001lIj9ajhfDryfHv",
             "entry_type": "assistant",
-            "ordinal": 20,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd05f001wx7Jf87Pu5Ufe8",
-            "entry_type": "idle",
-            "ordinal": 21,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd09f001x1HUlsnFINP95k",
-            "entry_type": "idle",
-            "ordinal": 22,
+            "ordinal": 15,
             "part_count": 0,
             "projected_content": []
           }
@@ -3824,7 +3290,7 @@
           "entry_id": "msg_s0_current_marker"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.2.3-reinjection-after_injection",
@@ -3835,7 +3301,7 @@
           {
             "entry_id": "msg_18d0cccc5001NngyZ9mRemD7OO",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -3847,7 +3313,7 @@
           {
             "entry_id": "msg_18d0cce80001kaEPnbyFdQdIbY",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -3866,13 +3332,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cce98001RXQ0S9VguUS34e",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0ccec80013RxEQy0WMbPx40",
@@ -3910,23 +3369,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0ccee3001Viblw51opaTD3w",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0ccf1f00154oYatctv1oTda",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0ccf4e001Cv71Ae4i43Sd5R",
             "entry_type": "user",
-            "ordinal": 7,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -3946,7 +3391,7 @@
           {
             "entry_id": "msg_18d0ccf72001inWgSdQjQ9Mnz6",
             "entry_type": "assistant",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 2,
             "projected_content": [
               {
@@ -3967,16 +3412,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0ccf82002pnXMGU1St4gmHF",
-            "entry_type": "idle",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0ccfbc001gf4y0atgk1I08s",
             "entry_type": "user",
-            "ordinal": 10,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -3988,7 +3426,7 @@
           {
             "entry_id": "msg_18d0ccfc9001UopMhkIYCL1DGh",
             "entry_type": "assistant",
-            "ordinal": 11,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -4022,7 +3460,7 @@
           {
             "entry_id": "msg_18d0ccfdd001phyUqLc4m1By1S",
             "entry_type": "assistant",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -4043,16 +3481,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0ccfec001438Umh2RBEFe3A",
-            "entry_type": "idle",
-            "ordinal": 13,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0ccffb001CwksrdLm5zheKX",
             "entry_type": "user",
-            "ordinal": 14,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -4064,7 +3495,7 @@
           {
             "entry_id": "msg_18d0cd006001Uv5X8XIRn3H3O6",
             "entry_type": "assistant",
-            "ordinal": 15,
+            "ordinal": 11,
             "part_count": 1,
             "projected_content": [
               {
@@ -4093,7 +3524,7 @@
           {
             "entry_id": "msg_18d0cd01d001v96q2tXP4g1dLz",
             "entry_type": "assistant",
-            "ordinal": 16,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -4114,16 +3545,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd02e001RJJiH18LHGaO1t",
-            "entry_type": "idle",
-            "ordinal": 17,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd03b001uE1d7Y1PZiMDRV",
             "entry_type": "synthetic",
-            "ordinal": 18,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -4135,7 +3559,7 @@
           {
             "entry_id": "msg_18d0cd046001HmQ5Mbz75Y5eMV",
             "entry_type": "user",
-            "ordinal": 19,
+            "ordinal": 14,
             "part_count": 1,
             "projected_content": [
               {
@@ -4147,28 +3571,14 @@
           {
             "entry_id": "msg_18d0cd053001lIj9ajhfDryfHv",
             "entry_type": "assistant",
-            "ordinal": 20,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd05f001wx7Jf87Pu5Ufe8",
-            "entry_type": "idle",
-            "ordinal": 21,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd09f001x1HUlsnFINP95k",
-            "entry_type": "idle",
-            "ordinal": 22,
+            "ordinal": 15,
             "part_count": 0,
             "projected_content": []
           },
           {
             "entry_id": "msg_18d0cd0ac001EMYDTY0npX4Hhy",
             "entry_type": "user",
-            "ordinal": 23,
+            "ordinal": 16,
             "part_count": 1,
             "projected_content": [
               {
@@ -4180,7 +3590,7 @@
           {
             "entry_id": "msg_18d0cd0b8001QEuKbsrnFLQ2uM",
             "entry_type": "assistant",
-            "ordinal": 24,
+            "ordinal": 17,
             "part_count": 1,
             "projected_content": [
               {
@@ -4214,7 +3624,7 @@
           {
             "entry_id": "msg_18d0cd0cd001aPa6G4QudUiVg6",
             "entry_type": "assistant",
-            "ordinal": 25,
+            "ordinal": 18,
             "part_count": 2,
             "projected_content": [
               {
@@ -4233,13 +3643,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cd0e2002zGvyUv1fKajzSZ",
-            "entry_type": "idle",
-            "ordinal": 26,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
@@ -4247,7 +3650,7 @@
           "entry_id": "msg_s0_current_marker"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.2.3-reinjection-between.before",
@@ -4258,7 +3661,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_4",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -4270,7 +3673,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_5",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -4289,13 +3692,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_12",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_15",
@@ -4333,23 +3729,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_23",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_29",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_32",
             "entry_type": "user",
-            "ordinal": 7,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -4369,7 +3751,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_33",
             "entry_type": "assistant",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 2,
             "projected_content": [
               {
@@ -4390,16 +3772,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_40",
-            "entry_type": "idle",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_43",
             "entry_type": "user",
-            "ordinal": 10,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -4411,7 +3786,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_44",
             "entry_type": "assistant",
-            "ordinal": 11,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -4445,7 +3820,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_51",
             "entry_type": "assistant",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -4466,16 +3841,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_58",
-            "entry_type": "idle",
-            "ordinal": 13,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_61",
             "entry_type": "user",
-            "ordinal": 14,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -4487,7 +3855,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_62",
             "entry_type": "assistant",
-            "ordinal": 15,
+            "ordinal": 11,
             "part_count": 1,
             "projected_content": [
               {
@@ -4516,7 +3884,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_69",
             "entry_type": "assistant",
-            "ordinal": 16,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -4537,16 +3905,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_76",
-            "entry_type": "idle",
-            "ordinal": 17,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_80",
             "entry_type": "synthetic",
-            "ordinal": 18,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -4558,7 +3919,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_81",
             "entry_type": "user",
-            "ordinal": 19,
+            "ordinal": 14,
             "part_count": 1,
             "projected_content": [
               {
@@ -4570,28 +3931,14 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_82",
             "entry_type": "assistant",
-            "ordinal": 20,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_85",
-            "entry_type": "idle",
-            "ordinal": 21,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_91",
-            "entry_type": "idle",
-            "ordinal": 22,
+            "ordinal": 15,
             "part_count": 0,
             "projected_content": []
           },
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_94",
             "entry_type": "user",
-            "ordinal": 23,
+            "ordinal": 16,
             "part_count": 1,
             "projected_content": [
               {
@@ -4603,7 +3950,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_95",
             "entry_type": "assistant",
-            "ordinal": 24,
+            "ordinal": 17,
             "part_count": 1,
             "projected_content": [
               {
@@ -4637,7 +3984,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_102",
             "entry_type": "assistant",
-            "ordinal": 25,
+            "ordinal": 18,
             "part_count": 2,
             "projected_content": [
               {
@@ -4656,13 +4003,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_109",
-            "entry_type": "idle",
-            "ordinal": 26,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
@@ -4670,7 +4010,7 @@
           "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_89"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.2.3-reinjection-between.committed",
@@ -4681,7 +4021,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_4",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -4693,7 +4033,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_5",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -4712,13 +4052,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_12",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_15",
@@ -4756,23 +4089,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_23",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_29",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_32",
             "entry_type": "user",
-            "ordinal": 7,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -4792,7 +4111,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_33",
             "entry_type": "assistant",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 2,
             "projected_content": [
               {
@@ -4813,16 +4132,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_40",
-            "entry_type": "idle",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_43",
             "entry_type": "user",
-            "ordinal": 10,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -4834,7 +4146,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_44",
             "entry_type": "assistant",
-            "ordinal": 11,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -4868,7 +4180,7 @@
           {
             "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_51",
             "entry_type": "assistant",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -4887,13 +4199,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_58",
-            "entry_type": "idle",
-            "ordinal": 13,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
@@ -4901,7 +4206,7 @@
           "entry_id": "msg_18d0cd101001Y5RDbQNLd0dFsW_27"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.2.3-reinjection-below.before",
@@ -4912,7 +4217,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_4",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -4924,7 +4229,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_5",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -4943,13 +4248,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_12",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           },
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_15",
@@ -4987,23 +4285,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_23",
-            "entry_type": "idle",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_29",
-            "entry_type": "idle",
-            "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_32",
             "entry_type": "user",
-            "ordinal": 7,
+            "ordinal": 5,
             "part_count": 2,
             "projected_content": [
               {
@@ -5023,7 +4307,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_33",
             "entry_type": "assistant",
-            "ordinal": 8,
+            "ordinal": 6,
             "part_count": 2,
             "projected_content": [
               {
@@ -5044,16 +4328,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_40",
-            "entry_type": "idle",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_43",
             "entry_type": "user",
-            "ordinal": 10,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -5065,7 +4342,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_44",
             "entry_type": "assistant",
-            "ordinal": 11,
+            "ordinal": 8,
             "part_count": 1,
             "projected_content": [
               {
@@ -5099,7 +4376,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_51",
             "entry_type": "assistant",
-            "ordinal": 12,
+            "ordinal": 9,
             "part_count": 2,
             "projected_content": [
               {
@@ -5120,16 +4397,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_58",
-            "entry_type": "idle",
-            "ordinal": 13,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_61",
             "entry_type": "user",
-            "ordinal": 14,
+            "ordinal": 10,
             "part_count": 1,
             "projected_content": [
               {
@@ -5141,7 +4411,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_62",
             "entry_type": "assistant",
-            "ordinal": 15,
+            "ordinal": 11,
             "part_count": 1,
             "projected_content": [
               {
@@ -5170,7 +4440,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_69",
             "entry_type": "assistant",
-            "ordinal": 16,
+            "ordinal": 12,
             "part_count": 2,
             "projected_content": [
               {
@@ -5191,16 +4461,9 @@
             ]
           },
           {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_76",
-            "entry_type": "idle",
-            "ordinal": 17,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_80",
             "entry_type": "synthetic",
-            "ordinal": 18,
+            "ordinal": 13,
             "part_count": 1,
             "projected_content": [
               {
@@ -5212,7 +4475,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_81",
             "entry_type": "user",
-            "ordinal": 19,
+            "ordinal": 14,
             "part_count": 1,
             "projected_content": [
               {
@@ -5224,28 +4487,14 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_82",
             "entry_type": "assistant",
-            "ordinal": 20,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_85",
-            "entry_type": "idle",
-            "ordinal": 21,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_91",
-            "entry_type": "idle",
-            "ordinal": 22,
+            "ordinal": 15,
             "part_count": 0,
             "projected_content": []
           },
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_94",
             "entry_type": "user",
-            "ordinal": 23,
+            "ordinal": 16,
             "part_count": 1,
             "projected_content": [
               {
@@ -5257,7 +4506,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_95",
             "entry_type": "assistant",
-            "ordinal": 24,
+            "ordinal": 17,
             "part_count": 1,
             "projected_content": [
               {
@@ -5291,7 +4540,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_102",
             "entry_type": "assistant",
-            "ordinal": 25,
+            "ordinal": 18,
             "part_count": 2,
             "projected_content": [
               {
@@ -5310,13 +4559,6 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_109",
-            "entry_type": "idle",
-            "ordinal": 26,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
@@ -5324,7 +4566,7 @@
           "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_89"
         }
       },
-      "outside_served_range": null
+      "below_model_cut": null
     },
     {
       "name": "2.2.3-reinjection-below.committed",
@@ -5335,7 +4577,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_4",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 1,
             "projected_content": [
               {
@@ -5347,7 +4589,7 @@
           {
             "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_5",
             "entry_type": "assistant",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 2,
             "projected_content": [
               {
@@ -5366,19 +4608,12 @@
                 "text": "S0_RAW_TAG S0_FINAL"
               }
             ]
-          },
-          {
-            "entry_id": "msg_18d0cd16f002P1xwtIaAXhLwek_12",
-            "entry_type": "idle",
-            "ordinal": 2,
-            "part_count": 0,
-            "projected_content": []
           }
         ],
         "native_cut": null,
         "runner_marker": null
       },
-      "outside_served_range": []
+      "below_model_cut": []
     }
   ],
   "recorded_refused": [
@@ -5672,7 +4907,7 @@
           {
             "entry_id": "synthetic-10",
             "entry_type": "user",
-            "ordinal": 0,
+            "ordinal": 1,
             "part_count": 5,
             "projected_content": [
               {
@@ -5722,7 +4957,7 @@
           {
             "entry_id": "synthetic-20",
             "entry_type": "system",
-            "ordinal": 1,
+            "ordinal": 2,
             "part_count": 1,
             "projected_content": [
               {
@@ -5734,7 +4969,7 @@
           {
             "entry_id": "synthetic-30",
             "entry_type": "synthetic",
-            "ordinal": 2,
+            "ordinal": 3,
             "part_count": 1,
             "projected_content": [
               {
@@ -5746,7 +4981,7 @@
           {
             "entry_id": "synthetic-40",
             "entry_type": "skill",
-            "ordinal": 3,
+            "ordinal": 4,
             "part_count": 1,
             "projected_content": [
               {
@@ -5758,7 +4993,7 @@
           {
             "entry_id": "synthetic-50",
             "entry_type": "location-switched",
-            "ordinal": 4,
+            "ordinal": 5,
             "part_count": 1,
             "projected_content": [
               {
@@ -5770,28 +5005,14 @@
           {
             "entry_id": "synthetic-60",
             "entry_type": "model-switched",
-            "ordinal": 5,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "synthetic-70",
-            "entry_type": "agent-switched",
             "ordinal": 6,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
-            "entry_id": "synthetic-80",
-            "entry_type": "idle",
-            "ordinal": 7,
             "part_count": 0,
             "projected_content": []
           },
           {
             "entry_id": "synthetic-90",
             "entry_type": "shell",
-            "ordinal": 8,
+            "ordinal": 7,
             "part_count": 1,
             "projected_content": [
               {
@@ -5801,16 +5022,9 @@
             ]
           },
           {
-            "entry_id": "synthetic-100",
-            "entry_type": "shell",
-            "ordinal": 9,
-            "part_count": 0,
-            "projected_content": []
-          },
-          {
             "entry_id": "synthetic-110",
             "entry_type": "assistant",
-            "ordinal": 10,
+            "ordinal": 8,
             "part_count": 3,
             "projected_content": [
               {
@@ -5838,7 +5052,7 @@
           {
             "entry_id": "synthetic-130",
             "entry_type": "user",
-            "ordinal": 11,
+            "ordinal": 9,
             "part_count": 1,
             "projected_content": [
               {
@@ -5851,21 +5065,18 @@
         "native_cut": {
           "entry_id": "synthetic-120",
           "boundary_entry_id": "synthetic-120",
-          "first_kept_ordinal": 11
+          "first_kept_ordinal": 9
         },
         "runner_marker": null
       },
-      "outside_served_range": [
+      "below_model_cut": [
         "synthetic-10",
         "synthetic-20",
         "synthetic-30",
         "synthetic-40",
         "synthetic-50",
         "synthetic-60",
-        "synthetic-70",
-        "synthetic-80",
         "synthetic-90",
-        "synthetic-100",
         "synthetic-110"
       ]
     }

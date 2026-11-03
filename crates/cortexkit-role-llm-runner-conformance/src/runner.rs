@@ -11,7 +11,6 @@ use cortexkit_role_llm_runner::points;
 
 use crate::{
     cases::{Case, Ending},
-    compaction,
     crash::{self, CrashObservation},
     drive::Mint,
     progress::{SuiteOptions, SuiteProgress},
@@ -124,17 +123,6 @@ where
                     Err(error)
                 } else if let Ok(Some(reason)) = mode_gate {
                     Ok(Ending::Inapplicable(reason))
-                } else if spec.name == "compaction_setup_durable_once" {
-                    compaction::crash_case(
-                        subject,
-                        &mut driver,
-                        work_dir,
-                        &declared,
-                        &mint,
-                        spec.name,
-                    )
-                    .await
-                    .map(|()| Ending::Passed)
                 } else if spec.name == "input_token_cap_restart_between_episodes" {
                     crate::input_token_cap::restart(
                         subject,
@@ -196,9 +184,6 @@ where
                     }
                     match &crashes[point] {
                         Err(error) => Err(format!("the {point} crash scenario failed: {error}")),
-                        Ok(observed) if spec.name == crash::LEFT_LINEAGE_TAG_CASE => {
-                            crash::check_left_lineage(observed)
-                        }
                         Ok(observed) => crash::check(spec.name, point, observed, &declared)
                             .map(|()| Ending::Passed),
                     }

@@ -1,13 +1,13 @@
 //! Served bytes rebuilt from a host's store (CONTRACT §4.2.1).
 //!
 //! Read stability (§4.2) binds a `mid` to one exact `message` body for its
-//! lineage. A runner that reads from a host need not keep that body: it may
+//! history_version. A runner that reads from a host need not keep that body: it may
 //! keep the body's [`content_digest`] and a `stripped` flag, and rebuild each
 //! read from the host's stored row. [`served_body`] builds the body, removing
 //! the members the profile's strip list names, and [`check_served`] checks it
 //! against the stored digest. On any difference the runner serves nothing:
 //! it refuses the read [`SERVED_BYTES_CHANGED`](crate::errors::SERVED_BYTES_CHANGED)
-//! and serves the message again only under a new lineage.
+//! and serves the message again only under a raised history_version.
 //!
 //! A strip list names the members a host rewrites after a message finished
 //! without changing what the model sees. Leaving them out of every served

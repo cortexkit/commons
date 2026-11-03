@@ -5,38 +5,23 @@
 //! - **tail**: no cursor. The newest page. This is the contract, not a
 //!   default a runner may change.
 //! - **range**: `from_ordinal`. Messages from that ordinal forward.
-//! - **after**: `after_mid` with its `lineage_id`. Messages strictly after
-//!   that message. Refused by name as `lineage_changed` or `unknown_mid`,
+//! - **after**: `after_mid` with its `history_version`. Messages strictly after
+//!   that message. Refused by name as `history_changed` or `unknown_mid`,
 //!   never answered from the tail instead.
 //!
-//! Every read stays within the session's current lineage: the readable
-//! history from its latest cut. Ordinals are session-wide and never
-//! renumbered, so a lineage a cut started begins at the cut's first
-//! retained ordinal, `first_ordinal` on [`HeadMeta`]. A range or
-//! after-message read naming a position below it is refused
-//! `before_lineage_start` with `detail.first_ordinal`
-//! (`errors::BeforeLineageStartDetail`), and the tail is the newest page
-//! within the lineage. Raw messages before the lineage are served by
-//! `session.history` (the `host_history` group, [`crate::history`]), never
-//! by this op; the model view (`view: "model"`) carries that earlier
-//! history only as the compaction view's head.
+//! Reads serve the whole active path from ordinal 1, including entries below
+//! the latest host marker, read from the host's own store. `from_ordinal: 0`
+//! and `from_ordinal: 1` both start at the first entry. A marker hides older
+//! entries from the model, never from reads.
 //!
 //! A page stops at `limit` messages or at the byte cap, whichever comes
 //! first, and carries `next_from_ordinal` whenever it stops before the end
-//! of the transcript. Every page carries the session's `lineage_id`; a read
-//! that names another lineage is refused `lineage_changed`.
+//! of the transcript. Every page carries `history_version` and `incarnation`.
 //!
 //! A page is an ordinal range and nothing more: it is not aligned to turns,
 //! runs or tool-call boundaries, so a tool call and its result may arrive on
 //! different pages.
 //!
-//! With `view: "model"` the page is a [`ModelPage`]: the message list the
-//! next model request would be built from, after hooks and compaction. Its
-//! entries say where they come from ([`EntrySource`]), and tail and range
-//! reads key on transcript ordinals as they do for the raw view. `after_mid`
-//! is refused on the model view, because a message inside a replaced range
-//! has no clean "after" there.
-
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
@@ -45,7 +30,7 @@ pub use descriptors::MediaMode;
 
 /// The `field` an `invalid_params` refusal names when a read combines
 /// fields that exclude each other, or names `after_mid` without
-/// `lineage_id`.
+/// `history_version`.
 pub mod fields {
     pub const MEDIA: &str = "media";
     /// `session.history`'s opaque page cursor.
@@ -57,7 +42,7 @@ pub mod fields {
     /// `session.history`'s backward seek by ordinal, exclusive.
     pub const BEFORE_ORDINAL: &str = "before_ordinal";
     pub const FROM_ORDINAL: &str = "from_ordinal";
-    pub const LINEAGE_ID: &str = "lineage_id";
+    pub const HISTORY_VERSION: &str = "history_version";
     pub const VIEW: &str = "view";
     /// The `session.read` opt-in to each assistant entry's rich UI stamp,
     /// served only by a runner declaring `rich_ui_stamp`.
@@ -72,18 +57,13 @@ pub enum ReadView {
     /// The transcript as written, with each message's final values. The
     /// default.
     Raw,
-    /// The canonical message list the model is given after hooks and
-    /// compaction, answered as a [`ModelPage`]. Served only by a runner that
-    /// declares `model_view`. Tail and range reads only: `after_mid` is
-    /// refused naming `view`.
-    Model,
 }
 
 fn deserialize_view<'de, D>(deserializer: D) -> Result<Option<ReadView>, D::Error>
 where
     D: Deserializer<'de>,
 {
-    crate::strict::optional(deserializer, fields::VIEW, "\"raw\" or \"model\"")
+    crate::strict::optional(deserializer, fields::VIEW, "\"raw\"")
 }
 
 /// The `session.read` request.
@@ -110,14 +90,14 @@ pub struct ReadRequest {
     /// Read forward from this ordinal. Excludes `after_mid`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_ordinal: Option<u64>,
-    /// Read strictly after this message id. Requires `lineage_id`. A `mid`
+    /// Read strictly after this message id. Requires `history_version`. A `mid`
     /// is opaque to consumers: only ever a value a page returned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_mid: Option<String>,
-    /// The lineage the cursor came from. A read naming a lineage other than
-    /// the session's current one is refused `lineage_changed`.
+    /// The history version the cursor came from. A mismatch is refused
+    /// `history_changed`; a cut or append does not invalidate the cursor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lineage_id: Option<String>,
+    pub history_version: Option<u64>,
     /// At most this many messages. The runner may cap it lower.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit: Option<u64>,
@@ -149,12 +129,12 @@ pub struct ReadRequest {
 }
 
 /// The mode a well-formed [`ReadRequest`] selects: the newest page, a range
-/// from an ordinal, or the messages after a message id in a lineage.
+/// from an ordinal, or the messages after a message id at a history version.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReadMode<'a> {
     Tail,
     Range { from_ordinal: u64 },
-    After { mid: &'a str, lineage_id: &'a str },
+    After { mid: &'a str, history_version: u64 },
 }
 
 impl ReadRequest {
@@ -175,18 +155,19 @@ impl ReadRequest {
         }
     }
 
-    /// Messages strictly after `mid` in `lineage_id`.
-    pub fn after(mid: impl Into<String>, lineage_id: impl Into<String>) -> Self {
+    /// Messages strictly after `mid` at `history_version`.
+    pub fn after(mid: impl Into<String>, history_version: u64) -> Self {
         Self {
             after_mid: Some(mid.into()),
-            lineage_id: Some(lineage_id.into()),
+            history_version: Some(history_version),
             ..Self::default()
         }
     }
 
-    /// Check the cursor names `lineage_id`.
-    pub fn with_lineage_id(mut self, lineage_id: impl Into<String>) -> Self {
-        self.lineage_id = Some(lineage_id.into());
+    /// Set the expected history version. The runner refuses a mismatch in
+    /// any read mode.
+    pub fn with_history_version(mut self, history_version: u64) -> Self {
+        self.history_version = Some(history_version);
         self
     }
 
@@ -248,22 +229,20 @@ impl ReadRequest {
         Ok(())
     }
 
-    /// The read mode, or the field an `invalid_params` refusal names:
-    /// `view` when `after_mid` is combined with the model view,
-    /// `from_ordinal` when it is combined with `after_mid`, `lineage_id`
-    /// when `after_mid` comes without it.
+    /// Select tail, range or after-message mode. Return `from_ordinal` when
+    /// combined with `after_mid`, or `history_version` when `after_mid` omits
+    /// it. Normalize range ordinal 0 to 1. View validity is checked while decoding.
     pub fn mode(&self) -> Result<ReadMode<'_>, &'static str> {
-        if self.view == Some(ReadView::Model) && self.media == Some(MediaMode::Descriptors) {
-            return Err(fields::MEDIA);
-        }
-        if self.after_mid.is_some() && self.view == Some(ReadView::Model) {
-            return Err(fields::VIEW);
-        }
-        match (&self.after_mid, self.from_ordinal, &self.lineage_id) {
+        match (&self.after_mid, self.from_ordinal, self.history_version) {
             (Some(_), Some(_), _) => Err(fields::FROM_ORDINAL),
-            (Some(_), None, None) => Err(fields::LINEAGE_ID),
-            (Some(mid), None, Some(lineage_id)) => Ok(ReadMode::After { mid, lineage_id }),
-            (None, Some(from_ordinal), _) => Ok(ReadMode::Range { from_ordinal }),
+            (Some(_), None, None) => Err(fields::HISTORY_VERSION),
+            (Some(mid), None, Some(history_version)) => Ok(ReadMode::After {
+                mid,
+                history_version,
+            }),
+            (None, Some(from_ordinal), _) => Ok(ReadMode::Range {
+                from_ordinal: from_ordinal.max(1),
+            }),
             (None, None, _) => Ok(ReadMode::Tail),
         }
     }
@@ -272,7 +251,7 @@ impl ReadRequest {
 /// A `session.read` page. Decoded leniently: unknown fields are ignored.
 ///
 /// Non-exhaustive so later optional members are additive: use
-/// [`ReadPage::new`], [`ReadPage::no_lineage`] and the `with_*` setters, or
+/// [`ReadPage::new`] and the `with_*` setters, or
 /// decode one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
@@ -286,11 +265,11 @@ pub struct ReadPage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_pruned: Option<crate::archive_prunes_reasoning::ReasoningPruned>,
     pub messages: Vec<ReadMessage>,
-    /// The session's lineage, on every page of a session that has one.
-    /// Absent means the session has no lineage yet: it was never written,
-    /// and the page is empty.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lineage_id: Option<String>,
+    /// The rewrite version of this snapshot, even on an empty page.
+    pub history_version: u64,
+    /// Opaque identity of the runner's session record. Readers cache pages
+    /// under the pair `(history_version, incarnation)`.
+    pub incarnation: String,
     /// Present whenever the page stopped before the end of the transcript,
     /// by count or by bytes: the ordinal to read from next. A single message
     /// larger than the byte cap comes alone on its page, over the cap, with
@@ -309,29 +288,24 @@ pub struct ReadPage {
 }
 
 impl ReadPage {
-    /// A page of a session whose lineage is `lineage_id`.
-    pub fn new(lineage_id: impl Into<String>, messages: Vec<ReadMessage>) -> Self {
+    pub fn new(
+        history_version: u64,
+        incarnation: impl Into<String>,
+        messages: Vec<ReadMessage>,
+    ) -> Self {
         Self {
             pruned_reasoning: Vec::new(),
             reasoning_pruned: None,
             messages,
-            lineage_id: Some(lineage_id.into()),
+            history_version,
+            incarnation: incarnation.into(),
             next_from_ordinal: None,
             head: None,
         }
     }
 
-    /// The page of a session that was never written: empty, with no lineage
-    /// and no `next_from_ordinal`.
-    pub fn no_lineage() -> Self {
-        Self {
-            pruned_reasoning: Vec::new(),
-            reasoning_pruned: None,
-            messages: Vec::new(),
-            lineage_id: None,
-            next_from_ordinal: None,
-            head: None,
-        }
+    pub fn empty(history_version: u64, incarnation: impl Into<String>) -> Self {
+        Self::new(history_version, incarnation, Vec::new())
     }
 
     pub fn with_next_from_ordinal(mut self, next_from_ordinal: u64) -> Self {
@@ -360,323 +334,11 @@ impl ReadPage {
         self
     }
 
-    /// Whether the page is consistent with its lineage: a page without a
-    /// lineage holds no messages and no `next_from_ordinal`, because a
-    /// session that has messages has a lineage.
-    pub fn lineage_consistent(&self) -> bool {
-        self.lineage_id.is_some() || (self.messages.is_empty() && self.next_from_ordinal.is_none())
-    }
-}
-
-/// A `session.read` page of the model view (`view: "model"`). Decoded
-/// leniently: unknown fields are ignored.
-///
-/// It names the compaction state it reflects (`compaction_id` and
-/// `version`, both absent before any compaction applied), so a reader knows
-/// which applied CompactionMessage it saw: the compaction provider's answer
-/// that replaces ranges of raw history with replacement messages. It is what the next request would
-/// be built from, not the bytes a model provider was sent.
-///
-/// Non-exhaustive so later optional members are additive: use
-/// [`ModelPage::new`], [`ModelPage::no_lineage`] and the `with_*` setters,
-/// or decode one.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub struct ModelPage {
-    /// Pruned stored parts actually served, excluding parts hidden by compaction.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pruned_reasoning: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
-    /// The session's prune state, as on a raw page
-    /// ([`ReadPage::reasoning_pruned`]).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning_pruned: Option<crate::archive_prunes_reasoning::ReasoningPruned>,
-    /// Entries in non-decreasing anchor order, insertions first at a tie.
-    pub messages: Vec<ModelEntry>,
-    /// The session's lineage, as on a raw page ([`ReadPage::lineage_id`]):
-    /// absent only for a session never written, whose page is empty.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lineage_id: Option<String>,
-    /// The transcript ordinal from which the next page should continue,
-    /// present when this page stopped early. For an entry anchored at ordinal
-    /// A, the cursor is at least A + 1 for a message, or the replacement's
-    /// exclusive end. All insertions at A travel with that anchored entry,
-    /// even if doing so exceeds the requested count or byte cap; tail
-    /// insertions have no next cursor. The complete encoded reply is served
-    /// only if it fits the transport frame limit
-    /// ([`crate::TRANSPORT_FRAME_LIMIT`], 4,194,304 bytes) including the
-    /// 21-byte header. Otherwise the reply is refused `reply_too_large`; on a
-    /// model-view page, its detail identifies the group of insertions and
-    /// their anchored entry by that entry's `source`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub next_from_ordinal: Option<u64>,
-    /// The position of the last durable event covered by the same snapshot
-    /// as this page, as on a raw page ([`ReadPage::head`]): opaque to
-    /// consumers, absent on a session with no events yet.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub head: Option<Map<String, Value>>,
-    /// The compaction whose latest applied CompactionMessage this page
-    /// reflects. Absent, with `version`, before any compaction applied.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub compaction_id: Option<String>,
-    /// The version of that CompactionMessage. Present exactly when
-    /// `compaction_id` is.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<u64>,
-}
-
-/// One entry of the model view: a message as the next request would carry
-/// it, and where it comes from.
-///
-/// Non-exhaustive so later optional members are additive: use
-/// [`ModelEntry::new`], or decode one.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub struct ModelEntry {
-    /// Which transcript message, or which replaced range, this entry is.
-    pub source: EntrySource,
-    /// The message itself, in the runner's own schema.
-    #[serde(deserialize_with = "descriptors::deserialize_content")]
-    pub message: Value,
-}
-
-/// Where a model-view entry comes from. Tagged by `kind`.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum EntrySource {
-    /// A transcript message passed through, with its hooks applied. It keeps
-    /// its transcript ordinal and `mid`.
-    Message { ordinal: u64, mid: String },
-    /// A compaction replacement standing for the half-open raw transcript
-    /// range `[from_ordinal, to_ordinal)`, from the CompactionMessage named by
-    /// `compaction_id` and `version`. An empty range inserts before
-    /// `from_ordinal`; Setup's head message is `[0, 0)`.
-    Replacement {
-        compaction_id: String,
-        version: u64,
-        from_ordinal: u64,
-        to_ordinal: u64,
-    },
-}
-
-impl EntrySource {
-    /// The transcript ordinal that anchors the entry, including an insertion.
-    pub fn from_ordinal(&self) -> u64 {
-        match self {
-            Self::Message { ordinal, .. } => *ordinal,
-            Self::Replacement { from_ordinal, .. } => *from_ordinal,
-        }
-    }
-
-    /// The last covered transcript ordinal, or `None` for an empty or
-    /// inverted replacement range.
-    pub fn last_covered_ordinal(&self) -> Option<u64> {
-        match self {
-            Self::Message { ordinal, .. } => Some(*ordinal),
-            Self::Replacement {
-                from_ordinal,
-                to_ordinal,
-                ..
-            } => (to_ordinal > from_ordinal).then(|| to_ordinal - 1),
-        }
-    }
-
-    /// Whether this entry inserts without covering a transcript message.
-    pub fn is_insertion(&self) -> bool {
-        matches!(self, Self::Replacement { from_ordinal, to_ordinal, .. } if from_ordinal == to_ordinal)
-    }
-}
-
-impl ModelEntry {
-    pub fn new(source: EntrySource, message: Value) -> Self {
-        Self { source, message }
-    }
-}
-
-/// Why a [`ModelPage`] breaks the model view's paging rules. A consumer
-/// treats such a page as malformed; it is not a refusal.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ModelPageProblem {
-    /// The page has no lineage but carries entries, a next ordinal or a
-    /// compaction state.
-    NoLineage,
-    /// Only one of `compaction_id` and `version` is present.
-    PartialCompactionState,
-    /// The page carries a replacement but names no compaction state.
-    ReplacementWithoutCompactionState,
-    /// A replacement's `to_ordinal` is below its `from_ordinal`.
-    InvertedRange { from_ordinal: u64, to_ordinal: u64 },
-    /// An entry starts below the one before it.
-    OutOfOrder { from_ordinal: u64 },
-    /// An insertion follows a message or non-empty replacement at the same
-    /// anchor. Insertions must precede both at equal ordinals.
-    InsertionAfterEntry { from_ordinal: u64 },
-    /// The page ends with an insertion but has a continuation cursor. The
-    /// anchored entry must travel on this page too; only tail insertions
-    /// may end a page, and their page has no cursor.
-    NonTailInsertion { from_ordinal: u64 },
-    /// An entry starts below the ordinal the page was read from. A
-    /// replacement belongs only on the page holding its `from_ordinal`; a
-    /// page read from inside the replaced range must not repeat it.
-    StartsBeforePage {
-        entry_from_ordinal: u64,
-        from_ordinal: u64,
-    },
-    /// `next_from_ordinal` is not past a covered ordinal or an insertion
-    /// anchor whose anchored entry is absent, so the next page would overlap.
-    NextInsideEntry {
-        next_from_ordinal: u64,
-        last_ordinal: u64,
-    },
-}
-
-impl ModelPage {
-    pub fn with_reasoning_pruned(
-        mut self,
-        state: crate::archive_prunes_reasoning::ReasoningPruned,
-    ) -> Self {
-        self.reasoning_pruned = Some(state);
-        self
-    }
-
-    pub fn with_pruned_reasoning(
-        mut self,
-        parts: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
-    ) -> Self {
-        self.pruned_reasoning = parts;
-        self
-    }
-    /// A page of a session whose lineage is `lineage_id`, before any
-    /// compaction applied.
-    pub fn new(lineage_id: impl Into<String>, messages: Vec<ModelEntry>) -> Self {
-        Self {
-            pruned_reasoning: Vec::new(),
-            reasoning_pruned: None,
-            messages,
-            lineage_id: Some(lineage_id.into()),
-            next_from_ordinal: None,
-            head: None,
-            compaction_id: None,
-            version: None,
-        }
-    }
-
-    /// The page of a session that was never written.
-    pub fn no_lineage() -> Self {
-        Self {
-            pruned_reasoning: Vec::new(),
-            reasoning_pruned: None,
-            messages: Vec::new(),
-            lineage_id: None,
-            next_from_ordinal: None,
-            head: None,
-            compaction_id: None,
-            version: None,
-        }
-    }
-
-    pub fn with_next_from_ordinal(mut self, next_from_ordinal: u64) -> Self {
-        self.next_from_ordinal = Some(next_from_ordinal);
-        self
-    }
-
-    pub fn with_head(mut self, head: Map<String, Value>) -> Self {
-        self.head = Some(head);
-        self
-    }
-
-    /// Name the compaction state the page reflects.
-    pub fn with_compaction(mut self, compaction_id: impl Into<String>, version: u64) -> Self {
-        self.compaction_id = Some(compaction_id.into());
-        self.version = Some(version);
-        self
-    }
-
-    /// Check the model view's paging rules for a range read from
-    /// `from_ordinal` (`None` for a tail read, whose start the runner chose).
-    /// Entries have non-decreasing anchors, with insertions before messages
-    /// or non-empty replacements at a tie. Replacements come whole, once,
-    /// on the page holding their anchor. Insertions travel together with
-    /// their anchored entry even over the page caps. Only tail insertions
-    /// may end a page, without a cursor. The next cursor is past the anchored
-    /// entry, not a reason to skip it. A replacement requires compaction state.
-    pub fn check(&self, from_ordinal: Option<u64>) -> Result<(), ModelPageProblem> {
-        let has_compaction_state = self.compaction_id.is_some() || self.version.is_some();
-        if self.lineage_id.is_none()
-            && (!self.messages.is_empty()
-                || self.next_from_ordinal.is_some()
-                || has_compaction_state)
-        {
-            return Err(ModelPageProblem::NoLineage);
-        }
-        if self.compaction_id.is_some() != self.version.is_some() {
-            return Err(ModelPageProblem::PartialCompactionState);
-        }
-        let mut previous: Option<(u64, bool)> = None;
-        for entry in &self.messages {
-            let anchor = entry.source.from_ordinal();
-            let insertion = entry.source.is_insertion();
-            if let EntrySource::Replacement {
-                from_ordinal,
-                to_ordinal,
-                ..
-            } = entry.source
-            {
-                if to_ordinal < from_ordinal {
-                    return Err(ModelPageProblem::InvertedRange {
-                        from_ordinal,
-                        to_ordinal,
-                    });
-                }
-                if !has_compaction_state {
-                    return Err(ModelPageProblem::ReplacementWithoutCompactionState);
-                }
-            }
-            if let Some(from_ordinal) = from_ordinal {
-                if anchor < from_ordinal {
-                    return Err(ModelPageProblem::StartsBeforePage {
-                        entry_from_ordinal: anchor,
-                        from_ordinal,
-                    });
-                }
-            }
-            if let Some((previous_anchor, previous_insertion)) = previous {
-                if anchor < previous_anchor {
-                    return Err(ModelPageProblem::OutOfOrder {
-                        from_ordinal: anchor,
-                    });
-                }
-                if anchor == previous_anchor && insertion && !previous_insertion {
-                    return Err(ModelPageProblem::InsertionAfterEntry {
-                        from_ordinal: anchor,
-                    });
-                }
-            }
-            previous = Some((anchor, insertion));
-        }
-        if let Some(next_from_ordinal) = self.next_from_ordinal {
-            if let Some(entry) = self.messages.last() {
-                if entry.source.is_insertion() {
-                    return Err(ModelPageProblem::NonTailInsertion {
-                        from_ordinal: entry.source.from_ordinal(),
-                    });
-                }
-            }
-            for entry in &self.messages {
-                // Covered entries bound the cursor. An unpaired insertion
-                // also prevents a cursor from landing on or before its anchor.
-                let last_ordinal = entry
-                    .source
-                    .last_covered_ordinal()
-                    .unwrap_or_else(|| entry.source.from_ordinal());
-                if next_from_ordinal <= last_ordinal {
-                    return Err(ModelPageProblem::NextInsideEntry {
-                        next_from_ordinal,
-                        last_ordinal,
-                    });
-                }
-            }
-        }
-        Ok(())
+    /// Check that incarnation is 1–128 UTF-8 bytes and every served entry
+    /// ordinal is at least 1.
+    pub fn snapshot_consistent(&self) -> bool {
+        (1..=128).contains(&self.incarnation.len())
+            && self.messages.iter().all(|entry| entry.ordinal >= 1)
     }
 }
 
@@ -712,14 +374,18 @@ pub struct ReadMessage {
     /// Original write-time identities of every top-level part in message
     /// order, nested media excluded. Required
     /// in descriptors mode, optional in inline mode. Descriptors list exactly
-    /// the same keys as this entry's complete `tags` rows, in the same order.
+    /// the runner's keys in stored order; readers never derive those keys.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_digests: Option<Vec<descriptors::PartDigest>>,
+    /// Stored-order part keys when `archive_prunes_reasoning` is declared
+    /// and `part_digests` is absent. Readers use these keys, never derive them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub part_keys: Option<Vec<String>>,
     /// The message's position in the transcript. Never reused or
-    /// renumbered within a lineage.
+    /// renumbered within a snapshot.
     pub ordinal: u64,
     /// The message's id, opaque to consumers. Never reused within a
-    /// lineage.
+    /// history_version.
     pub mid: String,
     /// The message itself, carrying its final values: what later steps
     /// render and what executed. Its schema is the runner's.
@@ -737,12 +403,6 @@ pub struct ReadMessage {
     /// declares `dispatch_attribution`, for messages that carry tool calls.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallAttribution>,
-    /// One row per part the runner exposes, in part order: the part's
-    /// stable key, and its `§N§` tag in the current lineage when tagged.
-    /// Present on a runner that declares `tags`. Digests ride separately in
-    /// `part_digests`, including on runners without tags.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<crate::tags::PartTag>,
     /// The message's role (`role::USER`, `role::ASSISTANT`, `role::TOOL`,
     /// `role::SYSTEM`), decoded as an open string, so a consumer learns who
     /// spoke without decoding `message`. Absent when the runner does not
@@ -858,6 +518,22 @@ pub mod role {
 }
 
 impl ReadMessage {
+    pub fn with_part_keys(mut self, keys: Vec<String>) -> Self {
+        self.part_keys = Some(keys);
+        self
+    }
+
+    /// The runner's served identities, preferring write-time digest rows.
+    pub fn served_part_keys(&self) -> Option<Vec<&str>> {
+        self.part_digests
+            .as_ref()
+            .map(|rows| rows.iter().map(|row| row.part.as_str()).collect())
+            .or_else(|| {
+                self.part_keys
+                    .as_ref()
+                    .map(|keys| keys.iter().map(String::as_str).collect())
+            })
+    }
     pub fn with_client_message_id(mut self, client_message_id: impl Into<String>) -> Self {
         self.client_message_id = Some(client_message_id.into());
         self
@@ -873,12 +549,12 @@ impl ReadMessage {
             ordinal,
             digest: None,
             part_digests: None,
+            part_keys: None,
             mid: mid.into(),
             message,
             run: None,
             originals: None,
             tool_calls: Vec::new(),
-            tags: Vec::new(),
             role: None,
             written_at: None,
             delivered_as: None,
@@ -907,11 +583,6 @@ impl ReadMessage {
 
     pub fn with_written_at(mut self, written_at: u64) -> Self {
         self.written_at = Some(written_at);
-        self
-    }
-
-    pub fn with_tags(mut self, tags: Vec<crate::tags::PartTag>) -> Self {
-        self.tags = tags;
         self
     }
 
@@ -1012,44 +683,30 @@ pub struct HeadRequest {}
 /// The `session.head` answer: where the transcript stands, without message
 /// bodies. Decoded leniently.
 ///
-/// It follows the read rule for a session that was never written: no
-/// `lineage_id`, and then none of the lineage-dependent members either
-/// ([`HeadMeta::no_lineage`], checked by [`HeadMeta::lineage_consistent`]).
-///
 /// Non-exhaustive so later optional members are additive: use
-/// [`HeadMeta::new`], [`HeadMeta::no_lineage`] and the `with_*` setters, or
+/// [`HeadMeta::new`], [`HeadMeta::empty`] and the `with_*` setters, or
 /// decode one.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeadMeta {
-    /// The session's lineage. Absent means the session has no lineage yet:
-    /// it was never written.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lineage_id: Option<String>,
     /// The newest message's ordinal. Absent on an empty transcript.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ordinal: Option<u64>,
-    /// The current lineage's first ordinal: the lowest position a range
-    /// read, an after-message read or `session.resolve` may name. Ordinals
-    /// are session-wide, so after a cut it is the cut's first retained
-    /// ordinal, not 0. Present whenever `lineage_id` is, and at most one above
-    /// `last_ordinal` (a cut that retained nothing).
+    /// The first entry the latest host marker keeps for the model, or 1
+    /// without a marker. Reads still reach all entries from ordinal 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub first_ordinal: Option<u64>,
-    /// The cut that started the current lineage's readable history,
-    /// described without its content. Absent on a lineage with no cut, whose
-    /// `first_ordinal` is then 0.
+    /// The last entry hidden from the model by the newest host marker.
+    /// Absent without a cut; markers themselves are never entries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cut: Option<HeadCut>,
-    /// The version of the session's visible history. It rises when the
-    /// lineage changes because of a revert, a recovery that rewrites
-    /// written messages, or a restart after the runner lost its state. It
-    /// does not change at a cut or on an append, and it never decreases. A reader holding a
-    /// position in the visible history keys on it, so a compaction does not
-    /// invalidate the position while a rewrite does. Present whenever
-    /// `lineage_id` is.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub history_version: Option<u64>,
+    /// The sole rewrite marker. It rises on revert, branch switch, recovery
+    /// rewriting written messages, renumbering and re-hosting a session id;
+    /// never on a cut or append, and never decreases. The runner keeps a
+    /// per-id high-water outside discarded/restored data. A version served for
+    /// an earlier history state is never reallocated to a replacement state,
+    /// independently of the never-reused (version, incarnation) pair.
+    pub history_version: u64,
     /// The same opaque position a page's `head` carries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub head: Option<Map<String, Value>>,
@@ -1072,11 +729,11 @@ pub struct HeadMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_run_rich_ui: Option<crate::rich_ui::RichUiStamp>,
     /// When the transcript last changed, in milliseconds since the Unix
-    /// epoch. Present whenever `lineage_id` is.
+    /// epoch. Present after the first transcript change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<u64>,
     /// What a send that names no model can carry. Absent means unknown.
-    /// Outside the lineage rule: a never-written session may state it.
+    /// A never-written session may state it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<HeadInput>,
     /// The runner's recorded selection for the next send that names no model,
@@ -1092,10 +749,10 @@ pub struct HeadMeta {
     /// without the group, absent means unknown. Use [`Self::sender_grant`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<HeadSender>,
-    /// Opaque identity of this key's log, stable across its entire lifetime.
-    /// Absent means unknown; compare only by equality, not lexical order.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub incarnation: Option<String>,
+    /// Opaque 1–128-byte identity minted when the runner's session record is
+    /// created, and new whenever discarded data is re-hosted. Compare only
+    /// by equality, together with `history_version`.
+    pub incarnation: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retention_policy: Option<crate::session_retention::RetentionPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1104,15 +761,15 @@ pub struct HeadMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub released: Option<crate::session_retention::Released>,
     /// The session's prune state (CONTRACT §9.14.1), the authority every
-    /// copy on pages, Setup requests and notices repeats. Only on a runner
+    /// copy on read pages repeats. Only on a runner
     /// that declares `archive_prunes_reasoning`, and absent until the
     /// session's first prune, so a session never written has none. A prune
-    /// is not a lineage change: the value survives cuts and reverts.
+    /// is not a snapshot change: the value survives cuts and reverts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_pruned: Option<crate::archive_prunes_reasoning::ReasoningPruned>,
 }
 
-/// The caller's own delivery grant on `session.head`, independent of lineage.
+/// The caller's own delivery grant on `session.head`, independent of history_version.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeadSender {
@@ -1156,7 +813,7 @@ impl HeadSender {
     }
 }
 
-/// The next-send selection on `session.head`, independent of its lineage.
+/// The next-send selection on `session.head`, independent of its snapshot.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeadModel {
@@ -1264,43 +921,26 @@ impl HeadMeta {
         self.retention_state = Some(state);
         self
     }
-    /// The head of a session whose lineage is `lineage_id` and starts at
-    /// `first_ordinal`. Add the history version with
-    /// [`HeadMeta::with_history_version`] and, when `first_ordinal` is above
-    /// 0, the lineage's cut with [`HeadMeta::with_cut`]: a head without them
-    /// is not [`HeadMeta::lineage_consistent`].
-    pub fn new(lineage_id: impl Into<String>, first_ordinal: u64, updated_at: u64) -> Self {
-        Self {
-            lineage_id: Some(lineage_id.into()),
-            last_ordinal: None,
-            first_ordinal: Some(first_ordinal),
-            cut: None,
-            history_version: None,
-            head: None,
-            last_run_state: None,
-            last_run_error: None,
-            last_run_rich_ui: None,
-            updated_at: Some(updated_at),
-            input: None,
-            model: None,
-            usage: None,
-            sender: None,
-            incarnation: None,
-            retention_policy: None,
-            retention_state: None,
-            released: None,
-            reasoning_pruned: None,
-        }
+    /// A written session's head. Without a marker the model starts at 1.
+    pub fn new(
+        history_version: u64,
+        incarnation: impl Into<String>,
+        first_ordinal: u64,
+        updated_at: u64,
+    ) -> Self {
+        let mut head = Self::empty(history_version, incarnation);
+        head.first_ordinal = Some(first_ordinal);
+        head.updated_at = Some(updated_at);
+        head
     }
 
-    /// The head of a session that was never written: every member absent.
-    pub fn no_lineage() -> Self {
+    /// A never-written session still has a cache identity.
+    pub fn empty(history_version: u64, incarnation: impl Into<String>) -> Self {
         Self {
-            lineage_id: None,
             last_ordinal: None,
             first_ordinal: None,
             cut: None,
-            history_version: None,
+            history_version,
             head: None,
             last_run_state: None,
             last_run_error: None,
@@ -1310,7 +950,7 @@ impl HeadMeta {
             model: None,
             usage: None,
             sender: None,
-            incarnation: None,
+            incarnation: incarnation.into(),
             retention_policy: None,
             retention_state: None,
             released: None,
@@ -1334,7 +974,7 @@ impl HeadMeta {
     }
 
     pub fn with_history_version(mut self, history_version: u64) -> Self {
-        self.history_version = Some(history_version);
+        self.history_version = history_version;
         self
     }
 
@@ -1389,75 +1029,50 @@ impl HeadMeta {
     }
 
     pub fn with_incarnation(mut self, incarnation: impl Into<String>) -> Self {
-        self.incarnation = Some(incarnation.into());
+        self.incarnation = incarnation.into();
         self
     }
 
     /// Whether a reported log identity fits the opaque 1–128-byte wire bound.
     pub fn incarnation_valid(&self) -> bool {
-        self.incarnation
-            .as_ref()
-            .is_none_or(|value| (1..=128).contains(&value.len()))
+        (1..=128).contains(&self.incarnation.len())
     }
 
-    /// Whether the answer is consistent with its lineage. Without a
-    /// `lineage_id`, none of `last_ordinal`, `first_ordinal`, `cut`,
-    /// `history_version`, `head`, `last_run_state` or `updated_at` may be
-    /// present, because a session with any of them has a lineage. With one,
-    /// `updated_at`, `first_ordinal` and `history_version` must be present, `first_ordinal` is at most one above
-    /// `last_ordinal` when that is present, and a lineage without `cut` has
-    /// `first_ordinal` 0; the other members may be absent (an empty
-    /// transcript, no events, no run yet). `last_run_rich_ui` is present only
-    /// beside `last_run_state`, whose run it describes. A consumer
-    /// treats an inconsistent answer as malformed; it is not a refusal.
-    pub fn lineage_consistent(&self) -> bool {
-        match self.lineage_id {
-            None => {
-                self.last_ordinal.is_none()
-                    && self.first_ordinal.is_none()
-                    && self.cut.is_none()
-                    && self.history_version.is_none()
-                    && self.head.is_none()
-                    && self.last_run_state.is_none()
-                    && self.last_run_rich_ui.is_none()
-                    && self.updated_at.is_none()
-                    && self.reasoning_pruned.is_none()
-            }
-            Some(_) => {
-                let bounded = match (self.first_ordinal, self.last_ordinal) {
-                    (Some(first), Some(last)) => first <= last.saturating_add(1),
-                    (first, None) => first.is_some(),
-                    (None, Some(_)) => false,
-                };
-                let cut_named = self.cut.is_some() || self.first_ordinal == Some(0);
-                // The last run's stamp describes the run `last_run_state`
-                // names, so it never stands without one.
-                let stamp_has_run =
-                    self.last_run_rich_ui.is_none() || self.last_run_state.is_some();
-                self.updated_at.is_some()
-                    && self.history_version.is_some()
-                    && bounded
-                    && cut_named
-                    && stamp_has_run
-            }
+    /// Check ordinal bounds, marker metadata and the required record identity.
+    /// A marker limits model input, not the path available to readers.
+    pub fn snapshot_consistent(&self) -> bool {
+        if !self.incarnation_valid() {
+            return false;
         }
+        let stamp_has_run = self.last_run_rich_ui.is_none() || self.last_run_state.is_some();
+        if self.updated_at.is_none() {
+            return self.last_ordinal.is_none()
+                && self.first_ordinal.is_none()
+                && self.cut.is_none()
+                && self.head.is_none()
+                && self.last_run_state.is_none()
+                && self.reasoning_pruned.is_none()
+                && stamp_has_run;
+        }
+        let bounded = match (self.first_ordinal, self.last_ordinal) {
+            (Some(first), Some(last)) => first >= 1 && last >= 1 && first <= last.saturating_add(1),
+            (Some(first), None) => first == 1,
+            _ => false,
+        };
+        bounded && (self.cut.is_some() || self.first_ordinal == Some(1)) && stamp_has_run
     }
 }
 
-/// The cut that started a lineage, on `session.head`: the message the cut
-/// folds last, the one at its `through_ordinal`, described by identity and
-/// never by content. `digest` is that message's content digest
-/// ([`crate::content_digest::content_digest`]), the digest a cut lineage's
-/// `descends_from` names. A cut made before the runner numbered anything
-/// (in a host's history before adoption) names the host's message: the last
-/// one the host's compaction folded away, never one the host keeps visible
-/// after compacting, such as its compaction marker or summary.
+/// The last entry hidden from the model by the newest host marker, described
+/// by identity rather than content. The marker and its summary are not entries.
+/// `digest` is that entry's stored-content checksum. Reads still reach the
+/// whole active path below this boundary.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeadCut {
     pub mid: String,
     pub digest: String,
-    /// When the message was created, in milliseconds since the Unix epoch.
+    /// When the entry was created, in milliseconds since the Unix epoch.
     pub written_at: u64,
 }
 
@@ -1581,12 +1196,15 @@ mod tests {
     use crate::{errors, vectors};
 
     #[test]
-    fn head_incarnation_is_optional_and_bounded_in_bytes() {
+    fn head_incarnation_is_required_and_bounded_in_bytes() {
+        assert!(
+            serde_json::from_value::<HeadMeta>(serde_json::json!({"history_version":1})).is_err()
+        );
         let wire = vectors::load("head-incarnation.json");
         let head: HeadMeta = vectors::round_trip("incarnation", &wire);
         assert!(head.incarnation_valid());
-        assert!(head.lineage_consistent());
-        assert!(HeadMeta::no_lineage().incarnation_valid());
+        assert!(head.snapshot_consistent());
+        assert!(HeadMeta::empty(1, "log-1").incarnation_valid());
         for (value, valid) in [
             ("".into(), false),
             ("x".repeat(128), true),
@@ -1595,7 +1213,7 @@ mod tests {
             ("é".repeat(65), false),
         ] {
             assert_eq!(
-                HeadMeta::no_lineage()
+                HeadMeta::empty(1, "log-1")
                     .with_incarnation(value)
                     .incarnation_valid(),
                 valid
@@ -1607,7 +1225,7 @@ mod tests {
     fn absent_sender_without_head_sender_group_is_unknown() {
         let describe = crate::describe::RoleDescribe::default();
         assert_eq!(
-            HeadMeta::no_lineage().sender_grant(&describe),
+            HeadMeta::empty(1, "log-1").sender_grant(&describe),
             SenderGrant::Unknown
         );
     }
@@ -1617,7 +1235,7 @@ mod tests {
         let describe = crate::describe::RoleDescribe::default()
             .with_capabilities(vec![crate::capabilities::HEAD_SENDER.into()]);
         assert_eq!(
-            HeadMeta::no_lineage().sender_grant(&describe),
+            HeadMeta::empty(1, "log-1").sender_grant(&describe),
             SenderGrant::NoGrant
         );
     }
@@ -1625,7 +1243,7 @@ mod tests {
     #[test]
     fn present_sender_is_granted_with_or_without_head_sender_group() {
         let sender = HeadSender::for_owner(vec!["idle_start".into()]);
-        let head = HeadMeta::no_lineage().with_sender(sender.clone());
+        let head = HeadMeta::empty(1, "log-1").with_sender(sender.clone());
         for capabilities in [vec![], vec![crate::capabilities::HEAD_SENDER.into()]] {
             let describe = crate::describe::RoleDescribe::default().with_capabilities(capabilities);
             assert_eq!(
@@ -1641,7 +1259,7 @@ mod tests {
             serde_json::from_str(crate::vectors::file("head-sender.json").unwrap()).unwrap();
         for case in vector["answers"].as_array().unwrap() {
             let head: HeadMeta = serde_json::from_value(case["answer"].clone()).unwrap();
-            assert!(head.lineage_consistent());
+            assert!(head.snapshot_consistent());
             assert_eq!(
                 serde_json::to_value(head).unwrap(),
                 case["answer"],
@@ -1707,7 +1325,7 @@ mod tests {
             if case["stopped_early"].as_bool().unwrap() {
                 assert!(page.next_from_ordinal.is_some(), "{name}");
             }
-            assert!(page.lineage_consistent(), "{name}");
+            assert!(page.snapshot_consistent(), "{name}");
             if let Some(cap) = case.get("max_bytes").and_then(Value::as_u64) {
                 // An oversize message comes alone, whole, over the cap.
                 assert_eq!(page.messages.len(), 1, "{name}");
@@ -1719,7 +1337,7 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let page: ReadPage = serde_json::from_value(case["page"].clone())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(!page.lineage_consistent(), "{name}");
+            assert!(!page.snapshot_consistent(), "{name}");
         }
         for case in vectors::cases(&file, "tolerated") {
             let name = case["name"].as_str().unwrap();
@@ -1737,289 +1355,12 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let code = case["refusal"]["code"].as_str().unwrap();
             assert!(
-                [errors::LINEAGE_CHANGED, errors::UNKNOWN_MID].contains(&code),
+                [errors::HISTORY_CHANGED, errors::UNKNOWN_MID].contains(&code),
                 "{name}"
             );
             assert!(!errors::is_retryable(code), "{name}");
             serde_json::from_value::<ReadRequest>(case["request"].clone())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
-        }
-    }
-
-    fn model_problem_name(problem: &ModelPageProblem) -> &'static str {
-        match problem {
-            ModelPageProblem::NoLineage => "no_lineage",
-            ModelPageProblem::PartialCompactionState => "partial_compaction_state",
-            ModelPageProblem::ReplacementWithoutCompactionState => {
-                "replacement_without_compaction_state"
-            }
-            ModelPageProblem::InvertedRange { .. } => "inverted_range",
-            ModelPageProblem::OutOfOrder { .. } => "out_of_order",
-            ModelPageProblem::InsertionAfterEntry { .. } => "insertion_after_entry",
-            ModelPageProblem::NonTailInsertion { .. } => "non_tail_insertion",
-            ModelPageProblem::StartsBeforePage { .. } => "starts_before_page",
-            ModelPageProblem::NextInsideEntry { .. } => "next_inside_entry",
-        }
-    }
-
-    #[test]
-    fn model_page_vectors_decode_round_trip_and_follow_the_paging_rules() {
-        let file = vectors::load("read-pages.json");
-        let mut kinds = Vec::new();
-        for case in vectors::cases(&file, "model_pages") {
-            let name = case["name"].as_str().unwrap();
-            let page: ModelPage = vectors::round_trip(name, &case["page"]);
-            page.check(case["from_ordinal"].as_u64())
-                .unwrap_or_else(|problem| panic!("{name}: {problem:?}"));
-            // The case's `compacted` flag says whether a compaction had
-            // applied: if so the page carries both `compaction_id` and
-            // `version`, and if not it carries neither.
-            let compacted = case["compacted"].as_bool().unwrap();
-            assert_eq!(page.compaction_id.is_some(), compacted, "{name}");
-            assert_eq!(page.version.is_some(), compacted, "{name}");
-            for entry in &page.messages {
-                let kind = serde_json::to_value(&entry.source).unwrap()["kind"].clone();
-                kinds.push(kind);
-            }
-        }
-        for kind in ["message", "replacement"] {
-            assert!(kinds.contains(&Value::from(kind)), "no {kind} entry");
-        }
-        for case in vectors::cases(&file, "model_pages_rejected") {
-            if [
-                "inverted_range",
-                "insertion_after_entry",
-                "non_tail_insertion",
-            ]
-            .contains(&case["problem"].as_str().unwrap())
-            {
-                continue;
-            }
-            let name = case["name"].as_str().unwrap();
-            let page: ModelPage = serde_json::from_value(case["page"].clone())
-                .unwrap_or_else(|e| panic!("{name}: {e}"));
-            let problem = page.check(case["from_ordinal"].as_u64()).expect_err(name);
-            assert_eq!(
-                model_problem_name(&problem),
-                case["problem"].as_str().unwrap(),
-                "{name}"
-            );
-        }
-        for case in vectors::cases(&file, "model_pages_undecodable") {
-            let name = case["name"].as_str().unwrap();
-            assert!(
-                serde_json::from_value::<ModelPage>(case["page"].clone()).is_err(),
-                "{name}"
-            );
-        }
-    }
-
-    fn rejected_model_vector(name: &str, expected: ModelPageProblem) {
-        let file = vectors::load("read-pages.json");
-        let case = vectors::cases(&file, "model_pages_rejected")
-            .iter()
-            .find(|case| case["name"] == name)
-            .unwrap();
-        let page: ModelPage = serde_json::from_value(case["page"].clone()).unwrap();
-        assert_eq!(
-            page.check(case["from_ordinal"].as_u64()),
-            Err(expected),
-            "{name}"
-        );
-    }
-
-    #[test]
-    fn model_page_refuses_ending_on_a_non_tail_insertion() {
-        rejected_model_vector(
-            "non-tail page ends between insertion and message five",
-            ModelPageProblem::NonTailInsertion { from_ordinal: 5 },
-        );
-        rejected_model_vector(
-            "next cursor repeats an insertion anchor",
-            ModelPageProblem::NonTailInsertion { from_ordinal: 2 },
-        );
-    }
-
-    #[test]
-    fn model_page_keeps_insertions_and_anchored_entries_together_over_caps() {
-        let file = vectors::load("read-pages.json");
-        for (name, anchor, next) in [
-            (
-                "count cap after insertion keeps message five on the page",
-                5,
-                6,
-            ),
-            (
-                "count cap after insertion keeps replacement on the page",
-                3,
-                7,
-            ),
-            (
-                "several insertions travel together in order over the byte cap",
-                5,
-                6,
-            ),
-        ] {
-            let case = vectors::cases(&file, "model_pages")
-                .iter()
-                .find(|case| case["name"] == name)
-                .unwrap();
-            let page: ModelPage = vectors::round_trip(name, &case["page"]);
-            assert_eq!(page.check(Some(anchor)), Ok(()), "{name}");
-            assert_eq!(page.next_from_ordinal, Some(next), "{name}");
-            let (anchored_entry, insertions) = page.messages.split_last().unwrap();
-            assert!(!anchored_entry.source.is_insertion(), "{name}");
-            assert_eq!(anchored_entry.source.from_ordinal(), anchor, "{name}");
-            assert!(!insertions.is_empty(), "{name}");
-            assert!(
-                insertions
-                    .iter()
-                    .all(|entry| entry.source.is_insertion()
-                        && entry.source.from_ordinal() == anchor),
-                "{name}"
-            );
-            if let Some(limit) = case["limit"].as_u64() {
-                assert!(page.messages.len() as u64 > limit, "{name}");
-            }
-            if let Some(max_bytes) = case["max_bytes"].as_u64() {
-                assert!(
-                    serde_json::to_vec(&page.messages).unwrap().len() as u64 > max_bytes,
-                    "{name}"
-                );
-                assert_eq!(insertions[0].message["text"], "first");
-                assert_eq!(insertions[1].message["text"], "second");
-            }
-        }
-    }
-
-    #[test]
-    fn model_page_refuses_inverted_half_open_range() {
-        rejected_model_vector(
-            "a replacement whose range is inverted",
-            ModelPageProblem::InvertedRange {
-                from_ordinal: 9,
-                to_ordinal: 4,
-            },
-        );
-    }
-
-    #[test]
-    fn model_page_refuses_insertion_after_its_message() {
-        rejected_model_vector(
-            "insertion after message at the same anchor",
-            ModelPageProblem::InsertionAfterEntry { from_ordinal: 2 },
-        );
-    }
-
-    #[test]
-    fn model_page_accepts_insertion_before_its_replacement() {
-        let file = vectors::load("read-pages.json");
-        let case = vectors::cases(&file, "model_pages")
-            .iter()
-            .find(|case| case["name"] == "insertion before replacement at the same anchor")
-            .unwrap();
-        let page: ModelPage = vectors::round_trip("insertion before replacement", &case["page"]);
-        assert_eq!(page.check(Some(2)), Ok(()));
-        assert!(page.messages[0].source.is_insertion());
-        assert!(!page.messages[1].source.is_insertion());
-        assert_eq!(page.messages[1].source.last_covered_ordinal(), Some(4));
-        assert_eq!(page.next_from_ordinal, Some(5));
-    }
-
-    #[test]
-    fn model_page_refuses_insertion_after_its_replacement() {
-        rejected_model_vector(
-            "insertion after replacement at the same anchor",
-            ModelPageProblem::InsertionAfterEntry { from_ordinal: 2 },
-        );
-    }
-
-    #[test]
-    fn model_view_head_and_tail_insertions_are_on_boundary_pages() {
-        let file = vectors::load("read-pages.json");
-        let pages = vectors::cases(&file, "model_pages");
-        let head = pages
-            .iter()
-            .find(|case| case["name"] == "Setup head insertion before message zero")
-            .unwrap();
-        let tail = pages
-            .iter()
-            .find(|case| case["name"] == "tail insertion on the last page")
-            .unwrap();
-        let head: ModelPage = vectors::round_trip("head", &head["page"]);
-        let tail: ModelPage = vectors::round_trip("tail", &tail["page"]);
-        assert_eq!(head.check(Some(0)), Ok(()));
-        assert_eq!(tail.check(head.next_from_ordinal), Ok(()));
-        assert!(head.messages[0].source.is_insertion());
-        assert_eq!(head.messages[0].source.from_ordinal(), 0);
-        assert_eq!(head.messages[0].source.last_covered_ordinal(), None);
-        assert!(tail.messages.last().unwrap().source.is_insertion());
-        assert_eq!(tail.next_from_ordinal, None);
-        assert_eq!(tail.messages.last().unwrap().source.from_ordinal(), 2);
-    }
-
-    #[test]
-    fn model_view_replacement_comes_once_on_the_page_holding_its_from_ordinal() {
-        let file = vectors::load("read-pages.json");
-        let once = &file["replacement_once"];
-        let replacements = |page: &ModelPage| -> Vec<EntrySource> {
-            page.messages
-                .iter()
-                .filter(|entry| matches!(entry.source, EntrySource::Replacement { .. }))
-                .map(|entry| entry.source.clone())
-                .collect()
-        };
-
-        // The series reads the model view from ordinal 0, each read starting
-        // at the previous page's `next_from_ordinal`; together its pages
-        // hold the view's one replacement exactly once.
-        let mut seen = Vec::new();
-        let mut expected_from = None;
-        for case in vectors::cases(once, "series") {
-            let name = case["name"].as_str().unwrap();
-            let from_ordinal = case["from_ordinal"].as_u64().unwrap();
-            if let Some(expected) = expected_from {
-                assert_eq!(
-                    from_ordinal, expected,
-                    "{name}: not where the last page stopped"
-                );
-            }
-            let page: ModelPage = vectors::round_trip(name, &case["page"]);
-            page.check(Some(from_ordinal))
-                .unwrap_or_else(|problem| panic!("{name}: {problem:?}"));
-            for source in replacements(&page) {
-                assert!(source.from_ordinal() >= from_ordinal, "{name}");
-                assert!(!seen.contains(&source), "{name}: {source:?} repeated");
-                seen.push(source);
-            }
-            expected_from = page.next_from_ordinal;
-        }
-        assert_eq!(seen.len(), 1, "the series holds one replacement");
-
-        // A read starting inside that replacement's ordinal range does not
-        // return the replacement again.
-        for case in vectors::cases(once, "intersecting") {
-            let name = case["name"].as_str().unwrap();
-            let from_ordinal = case["from_ordinal"].as_u64().unwrap();
-            let page: ModelPage = vectors::round_trip(name, &case["page"]);
-            page.check(Some(from_ordinal))
-                .unwrap_or_else(|problem| panic!("{name}: {problem:?}"));
-            let replacement = &seen[0];
-            assert!(
-                replacement.from_ordinal() < from_ordinal
-                    && Some(from_ordinal) <= replacement.last_covered_ordinal(),
-                "{name}: the read does not intersect the replacement"
-            );
-            assert!(replacements(&page).is_empty(), "{name}");
-        }
-
-        // A page read from inside the range that does return the
-        // replacement again is malformed.
-        for case in vectors::cases(once, "repeated") {
-            let name = case["name"].as_str().unwrap();
-            let page: ModelPage = serde_json::from_value(case["page"].clone()).unwrap();
-            let problem = page.check(case["from_ordinal"].as_u64()).expect_err(name);
-            assert_eq!(model_problem_name(&problem), "starts_before_page", "{name}");
         }
     }
 
@@ -2040,14 +1381,14 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let head: HeadMeta = vectors::round_trip(name, &case["answer"]);
             assert!(case["answer"].get("messages").is_none(), "{name}");
-            assert!(head.lineage_consistent(), "{name}");
+            assert!(head.snapshot_consistent(), "{name}");
         }
-        assert!(HeadMeta::no_lineage().lineage_consistent());
+        assert!(HeadMeta::empty(1, "log-1").snapshot_consistent());
     }
 
     #[test]
     fn last_run_error_round_trips_every_field() {
-        let head = HeadMeta::new("error-lineage", 0, 1790000001500)
+        let head = HeadMeta::new(1, "log-1", 0, 1790000001500)
             .with_history_version(1)
             .with_last_run_state(LastRunState {
                 run_id: "error-run".into(),
@@ -2072,7 +1413,7 @@ mod tests {
     }
 
     #[test]
-    fn old_head_without_last_run_error_is_byte_identical() {
+    fn head_without_optional_last_run_error_round_trips_exactly() {
         // Pin the pre-existing error head, which predates retry metadata.
         let file = vectors::load("head.json");
         let answer = &file["answers"][1]["answer"];
@@ -2085,8 +1426,8 @@ mod tests {
             serde_json::to_vec(answer).unwrap()
         );
         assert_eq!(
-            serde_json::to_string(&HeadMeta::no_lineage()).unwrap(),
-            "{}"
+            serde_json::to_string(&HeadMeta::empty(1, "log-1")).unwrap(),
+            r#"{"history_version":1,"incarnation":"log-1"}"#
         );
     }
 
@@ -2126,96 +1467,20 @@ mod tests {
         for case in vectors::cases(&file, "answers") {
             let head: HeadMeta =
                 vectors::round_trip(case["name"].as_str().unwrap(), &case["answer"]);
-            assert!(head.lineage_consistent());
+            assert!(head.snapshot_consistent());
             assert_eq!(head.last_run_state.as_ref().unwrap().state, "error");
             assert_eq!(head.last_run_error().unwrap().retry_after_secs(), Some(1.5));
         }
     }
 
     #[test]
-    fn head_answers_inconsistent_with_their_lineage_are_rejected() {
+    fn head_answers_inconsistent_with_their_snapshot_are_rejected() {
         let file = vectors::load("head.json");
         for case in vectors::cases(&file, "inconsistent") {
             let name = case["name"].as_str().unwrap();
             let head: HeadMeta = serde_json::from_value(case["answer"].clone())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
-            assert!(!head.lineage_consistent(), "{name}");
+            assert!(!head.snapshot_consistent(), "{name}");
         }
-    }
-
-    #[test]
-    fn builders_match_the_decoded_shapes() {
-        let request = ReadRequest::after("m7", "lin-1")
-            .with_limit(50)
-            .with_max_bytes(65_536)
-            .with_include_originals(true)
-            .with_view(ReadView::Raw);
-        assert_eq!(
-            request.mode(),
-            Ok(ReadMode::After {
-                mid: "m7",
-                lineage_id: "lin-1"
-            })
-        );
-        let encoded = serde_json::to_value(&request).unwrap();
-        assert_eq!(
-            serde_json::from_value::<ReadRequest>(encoded).unwrap(),
-            request
-        );
-
-        let message = ReadMessage::new(3, "m3", serde_json::json!({"role": "assistant"}))
-            .with_run(RunAttribution {
-                run_id: "r1".into(),
-                episode: "e1".into(),
-                is_final: true,
-            })
-            .with_tool_calls(vec![ToolCallAttribution::new("call_0")
-                .with_call_key("lin-1:42")
-                .with_dispatched_to("aft")
-                .with_indeterminate(true)]);
-        assert!(ReadPage::no_lineage().lineage_consistent());
-        let page = ReadPage::new("lin-1", vec![message])
-            .with_next_from_ordinal(4)
-            .with_head(serde_json::json!({"seq": 9}).as_object().unwrap().clone());
-        let encoded = serde_json::to_value(&page).unwrap();
-        assert_eq!(serde_json::from_value::<ReadPage>(encoded).unwrap(), page);
-        assert_eq!(
-            ReadRequest::range(5).with_lineage_id("lin-1").mode(),
-            Ok(ReadMode::Range { from_ordinal: 5 })
-        );
-        assert_eq!(
-            ReadRequest::after("m7", "lin-1")
-                .with_view(ReadView::Model)
-                .mode(),
-            Err(fields::VIEW)
-        );
-
-        let model = ModelPage::new(
-            "lin-1",
-            vec![
-                ModelEntry::new(
-                    EntrySource::Replacement {
-                        compaction_id: "cmp-1".into(),
-                        version: 2,
-                        from_ordinal: 0,
-                        to_ordinal: 10,
-                    },
-                    serde_json::json!({"role": "user"}),
-                ),
-                ModelEntry::new(
-                    EntrySource::Message {
-                        ordinal: 10,
-                        mid: "m10".into(),
-                    },
-                    serde_json::json!({"role": "assistant"}),
-                ),
-            ],
-        )
-        .with_compaction("cmp-1", 2)
-        .with_next_from_ordinal(11);
-        assert_eq!(model.check(Some(0)), Ok(()));
-        let encoded = serde_json::to_value(&model).unwrap();
-        assert_eq!(serde_json::from_value::<ModelPage>(encoded).unwrap(), model);
-        assert_eq!(ModelPage::no_lineage().check(None), Ok(()));
     }
 }

@@ -12,7 +12,7 @@ use serde_json::{Map, Value};
 /// Where a subscription attaches.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SubscribeFrom {
-    /// Replay every durable event from the start of the lineage.
+    /// Replay every durable event from the start of the active path.
     Start,
     /// Only events after the subscription attaches.
     Live,

@@ -357,7 +357,7 @@ struct Disk {
 }
 
 fn append(s: &mut Stored, role: &str, text: &str) {
-    let ordinal = s.log.len() as u64;
+    let ordinal = s.log.len() as u64 + 1;
     s.log.push(json!({"ordinal":ordinal,"mid":format!("{}-{ordinal}",s.incarnation),"message":{"role":role,"content":[{"type":"text","text":text}]}}));
 }
 
@@ -691,7 +691,7 @@ fn handle(
         );
     };
     if method == ops::SESSION_HEAD {
-        let mut result = json!({"lineage_id":format!("lineage-{}",s.incarnation),"first_ordinal":0,"history_version":1,"updated_at":s.activity,"incarnation":format!("incarnation-{}",s.incarnation),"last_run_state":{"run_id":format!("run-{}",s.started),"state":if s.active {"running"} else {"completed"}},"retention_policy":s.policy,"retention_state":{"source":s.source}});
+        let mut result = json!({"first_ordinal":1,"history_version":1,"updated_at":s.activity,"incarnation":format!("incarnation-{}",s.incarnation),"last_run_state":{"run_id":format!("run-{}",s.started),"state":if s.active {"running"} else {"completed"}},"retention_policy":s.policy,"retention_state":{"source":s.source}});
         if s.pending && fault != "omit_released" && fault != "omit_zero_released" {
             let at = s.released_at.unwrap();
             result["released"] = json!({"at_ms":at,"delete_after_ms":s.activity.max(at) + u64::from(floor) * DAY_MS + u64::from(fault == "wrong_deadline")});
@@ -716,7 +716,7 @@ fn handle(
             return failure(errors::UNKNOWN_SESSION, json!({}));
         }
         return answer(
-            json!({"lineage_id":format!("lineage-{}",s.incarnation),"messages":if s.archive.is_empty() {&s.log} else {&s.archive}}),
+            json!({"history_version":1,"incarnation":format!("incarnation-{}",s.incarnation),"messages":if s.archive.is_empty() {&s.log} else {&s.archive}}),
         );
     }
     if method == ops::SESSION_UPLOAD_BEGIN {

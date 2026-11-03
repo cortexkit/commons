@@ -28,7 +28,7 @@ impl DescribeRequest {
 ///
 /// Decoded leniently: unknown fields, majors, ops and capabilities are
 /// ignored. [`check_describe`] checks strictly only the
-/// `step-transform-provider/v1` major and its required ops.
+/// `step-transform-provider/v2` major and its required ops.
 ///
 /// Non-exhaustive so a later optional member is additive: build one with
 /// [`RoleDescribe::new`] and the `with_*` setters, or decode one.
@@ -49,10 +49,6 @@ pub struct RoleDescribe {
     /// ([`RoleDescribe::unmet_runner_groups`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub runner_groups: Vec<String>,
-    /// Advertised Claude Code capabilities. Discovery alone does not authorize
-    /// the caller to use Claude Code operations.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claude_code: Option<crate::claude_code::ClaudeCodeCapabilities>,
 }
 
 fn alpha() -> String {
@@ -61,9 +57,10 @@ fn alpha() -> String {
 
 /// One served major.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct Major {
     /// The role and major as the manifest spells it, for example
-    /// `step-transform-provider/v1`.
+    /// `step-transform-provider/v2`.
     pub version: String,
     pub ops: Vec<String>,
     /// `alpha`, `beta` or `stable`; see [`Major::stability`]. An answer that
@@ -75,6 +72,7 @@ pub struct Major {
 /// A stability level. Unknown levels decode as [`Stability::Other`] rather
 /// than failing the answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Stability {
     Alpha,
     Beta,
@@ -93,18 +91,13 @@ impl RoleDescribe {
         }
     }
 
-    pub fn with_claude_code(mut self, bundle: crate::claude_code::ClaudeCodeCapabilities) -> Self {
-        self.claude_code = Some(bundle);
-        self
-    }
-
     /// Set the runner groups the provider needs.
     pub fn with_runner_groups(mut self, groups: Vec<String>) -> Self {
         self.runner_groups = groups;
         self
     }
 
-    /// The entry for `version` (for example `step-transform-provider/v1`), if
+    /// The entry for `version` (for example `step-transform-provider/v2`), if
     /// served.
     pub fn major(&self, version: &str) -> Option<&Major> {
         self.majors.iter().find(|major| major.version == version)
@@ -147,16 +140,17 @@ impl Major {
 }
 
 /// Why a `role.describe` answer does not describe a usable
-/// `step-transform-provider/v1` module.
+/// `step-transform-provider/v2` module.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DescribeProblem {
     /// The answer is not a JSON object.
     NotAnObject,
     /// A required field is missing or has the wrong type.
     Undecodable(String),
-    /// No entry in `majors` is `step-transform-provider/v1`.
+    /// No entry in `majors` is `step-transform-provider/v2`.
     MissingMajor { found: Vec<String> },
-    /// The `step-transform-provider/v1` entry lacks a required op.
+    /// The `step-transform-provider/v2` entry lacks a required op.
     MissingOp(&'static str),
 }
 
@@ -172,7 +166,7 @@ impl DescribeProblem {
     }
 }
 
-/// Decode `raw` and check it lists a `step-transform-provider/v1` major with
+/// Decode `raw` and check it lists a `step-transform-provider/v2` major with
 /// every required op. Every problem is returned, not only the first.
 pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>> {
     if !raw.is_object() {

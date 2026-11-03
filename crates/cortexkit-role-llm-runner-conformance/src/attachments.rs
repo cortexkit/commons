@@ -6,7 +6,7 @@ use crate::{
         call, decode, expect_code, expect_error, expect_field, expect_ok, head, read, wait_run_end,
     },
     route::RunnerRoute,
-    subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
+    subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use cortexkit_role_llm_runner::{
@@ -621,21 +621,6 @@ where
         texts.iter().any(|t| t.contains(&marker)),
         "default read has no exact not_requested marker",
     )?;
-    if case.declared.contains(&Capability::ModelView) {
-        let page = ok(
-            route,
-            ops::SESSION_READ,
-            json!({"view":"model","from_ordinal":0}),
-        )
-        .await?;
-        let mut model_texts = Vec::new();
-        strings(&page, &mut model_texts);
-        check(
-            model_texts.iter().any(|text| text.contains(&marker))
-                && !page.to_string().contains(&hash),
-            "default model-view read did not render safe media markers",
-        )?;
-    }
     if nested {
         check(
             texts

@@ -1394,18 +1394,12 @@
     {
       "name": "delivered with a tool result, which stays as stored",
       "entry": {
-        "ordinal": 4,
+        "ordinal": 5,
         "mid": "m4",
         "message": {
           "role": "user",
           "text": "reminder r-1"
         },
-        "tags": [
-          {
-            "part": "0",
-            "tag": "§7§"
-          }
-        ],
         "role": "user",
         "written_at": 1790000004000,
         "delivered_as": {
@@ -1417,7 +1411,7 @@
     {
       "name": "delivered as a turn-scoped system message",
       "entry": {
-        "ordinal": 6,
+        "ordinal": 7,
         "mid": "m6",
         "message": {
           "role": "system",
@@ -1433,7 +1427,7 @@
     {
       "name": "steered into the run",
       "entry": {
-        "ordinal": 8,
+        "ordinal": 9,
         "mid": "m8",
         "message": {
           "role": "user",
@@ -1448,7 +1442,7 @@
     {
       "name": "started a run on an idle session",
       "entry": {
-        "ordinal": 9,
+        "ordinal": 10,
         "mid": "m9",
         "message": {
           "role": "user",

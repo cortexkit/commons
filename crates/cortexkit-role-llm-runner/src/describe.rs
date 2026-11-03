@@ -48,14 +48,6 @@ pub mod problem_names {
     pub const DUPLICATE_DELIVERY_ORDER_MODE: &str = "duplicate_delivery_order_mode";
     pub const DELIVERY_ORDER_STEER_UNDECLARED: &str = "delivery_order_steer_undeclared";
     pub const DELIVERY_ORDER_IDLE_START_UNDECLARED: &str = "delivery_order_idle_start_undeclared";
-    /// The answer declares `compaction` without `tags`, which a compaction
-    /// provider addresses every view edit by.
-    pub const COMPACTION_WITHOUT_TAGS: &str = "compaction_without_tags";
-    /// The answer declares `tag_checkpoint` without `compaction`, whose
-    /// Setup answer carries the checkpoint.
-    pub const TAG_CHECKPOINT_WITHOUT_COMPACTION: &str = "tag_checkpoint_without_compaction";
-    pub const MESSAGE_CHECKPOINT_WITHOUT_TAG_CHECKPOINT: &str =
-        "message_checkpoint_without_tag_checkpoint";
     /// The answer declares `run_cause` without `live_events`, whose
     /// `run_started` event carries the run's cause.
     pub const RUN_CAUSE_WITHOUT_LIVE_EVENTS: &str = "run_cause_without_live_events";
@@ -573,11 +565,6 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         )),
         _ => {}
     }
-    if describe.declares(capabilities::OUTPUT_REFS) && !describe.declares(capabilities::TAGS) {
-        problems.push(DescribeProblem::Undecodable(
-            "output_refs requires tags".into(),
-        ));
-    }
     if describe.declares(capabilities::HELD_CALLS) && !describe.declares(capabilities::RUN_STATUS) {
         problems.push(DescribeProblem::Undecodable(
             "held_calls requires run_status".into(),
@@ -652,25 +639,6 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     }
     if describe.session_capabilities_from.is_none() {
         problems.push(DescribeProblem::MissingSessionCapabilitiesSource);
-    }
-    if describe.declares(capabilities::COMPACTION) && !describe.declares(capabilities::TAGS) {
-        problems.push(DescribeProblem::Undecodable(
-            problem_names::COMPACTION_WITHOUT_TAGS.into(),
-        ));
-    }
-    if describe.declares(capabilities::TAG_CHECKPOINT)
-        && !describe.declares(capabilities::COMPACTION)
-    {
-        problems.push(DescribeProblem::Undecodable(
-            problem_names::TAG_CHECKPOINT_WITHOUT_COMPACTION.into(),
-        ));
-    }
-    if describe.declares(capabilities::MESSAGE_CHECKPOINT)
-        && !describe.declares(capabilities::TAG_CHECKPOINT)
-    {
-        problems.push(DescribeProblem::Undecodable(
-            problem_names::MESSAGE_CHECKPOINT_WITHOUT_TAG_CHECKPOINT.into(),
-        ));
     }
     if describe.declares(capabilities::RUN_CAUSE) && !describe.declares(capabilities::LIVE_EVENTS) {
         problems.push(DescribeProblem::Undecodable(
@@ -1079,9 +1047,6 @@ mod delivery_order_modes_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{capabilities::source, ops, vectors};
-
     fn problem_name(problem: &DescribeProblem) -> &'static str {
         match problem {
             DescribeProblem::NotAnObject => "not_an_object",
@@ -1090,7 +1055,6 @@ mod tests {
                 problem_names::EMPTY_RUN_CANCEL_AT => problem_names::EMPTY_RUN_CANCEL_AT,
                 problem_names::MISSING_RUN_CANCEL_NOW => problem_names::MISSING_RUN_CANCEL_NOW,
                 problem_names::DUPLICATE_RUN_CANCEL_AT => problem_names::DUPLICATE_RUN_CANCEL_AT,
-                problem_names::COMPACTION_WITHOUT_TAGS => problem_names::COMPACTION_WITHOUT_TAGS,
                 problem_names::RUN_CAUSE_WITHOUT_LIVE_EVENTS => {
                     problem_names::RUN_CAUSE_WITHOUT_LIVE_EVENTS
                 }
@@ -1107,6 +1071,8 @@ mod tests {
             DescribeProblem::InvalidRetention => "invalid_retention",
         }
     }
+    use super::*;
+    use crate::{capabilities::source, ops, vectors};
 
     #[test]
     fn head_sender_group_requires_session_head() {
@@ -1464,7 +1430,7 @@ mod adopt_tests {
 }
 
 #[cfg(test)]
-mod tags_and_tool_calls_tests {
+mod tool_call_group_tests {
     use super::*;
     use crate::vectors;
 
@@ -1486,61 +1452,6 @@ mod tags_and_tool_calls_tests {
         let without = check_describe(&file["without"]).unwrap();
         assert!(!without.declares(group));
         assert_eq!(without.missing(&[group]), vec![group]);
-    }
-
-    #[test]
-    fn tags_describe_group_requires_read_and_resolve() {
-        group_describe(
-            "tags-describe.json",
-            capabilities::TAGS,
-            crate::ops::SESSION_RESOLVE,
-        );
-    }
-
-    /// `tag_checkpoint` is discovered like any group, lists the ops of the
-    /// `compaction` group it rides on, and is malformed without it.
-    #[test]
-    fn tag_checkpoint_describe_group_rides_on_compaction() {
-        let file = vectors::load("tag-checkpoint-describe.json");
-        let group = capabilities::TAG_CHECKPOINT;
-        let answer: RoleDescribe = vectors::round_trip(group, &file["accept"]);
-        assert_eq!(check_describe(&file["accept"]).unwrap(), answer);
-        assert!(answer.declares(group));
-        // Without `session.resolve` every group listing it is incomplete,
-        // this one among them.
-        let problems = check_describe(&file["refuse"]).unwrap_err();
-        assert!(problems.contains(&DescribeProblem::GroupIncomplete {
-            capability: group,
-            op: crate::ops::SESSION_RESOLVE,
-        }));
-        let without = check_describe(&file["without"]).unwrap();
-        assert!(!without.declares(group));
-        assert_eq!(without.missing(&[group]), vec![group]);
-        assert_eq!(
-            check_describe(&file["without_compaction"]),
-            Err(vec![DescribeProblem::Undecodable(
-                problem_names::TAG_CHECKPOINT_WITHOUT_COMPACTION.into()
-            )])
-        );
-    }
-
-    #[test]
-    fn message_checkpoint_requires_tag_checkpoint() {
-        let mut value = vectors::load("tag-checkpoint-describe.json")["accept"].clone();
-        value["capabilities"]
-            .as_array_mut()
-            .unwrap()
-            .push("message_checkpoint".into());
-        assert!(check_describe(&value)
-            .unwrap()
-            .declares(capabilities::MESSAGE_CHECKPOINT));
-        value["capabilities"] = serde_json::json!(["message_checkpoint"]);
-        assert_eq!(
-            check_describe(&value),
-            Err(vec![DescribeProblem::Undecodable(
-                problem_names::MESSAGE_CHECKPOINT_WITHOUT_TAG_CHECKPOINT.into()
-            )])
-        );
     }
 
     #[test]

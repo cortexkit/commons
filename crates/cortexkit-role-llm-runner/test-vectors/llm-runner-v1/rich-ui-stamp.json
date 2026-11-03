@@ -264,9 +264,8 @@
         "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
       },
       "answer": {
-        "lineage_id": "L1",
-        "last_ordinal": 3,
-        "first_ordinal": 0,
+        "last_ordinal": 4,
+        "first_ordinal": 1,
         "history_version": 1,
         "last_run_state": {
           "run_id": "run-7",
@@ -276,21 +275,22 @@
           "dialect": "1.0",
           "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
         },
-        "updated_at": 1790000000000
+        "updated_at": 1790000000000,
+        "incarnation": "log-1"
       }
     },
     {
       "name": "the last run is unstamped, after an earlier stamped run",
       "answer": {
-        "lineage_id": "L1",
-        "last_ordinal": 5,
-        "first_ordinal": 0,
+        "last_ordinal": 6,
+        "first_ordinal": 1,
         "history_version": 1,
         "last_run_state": {
           "run_id": "run-8",
           "state": "completed"
         },
-        "updated_at": 1790000001000
+        "updated_at": 1790000001000,
+        "incarnation": "log-1"
       }
     }
   ],
@@ -298,14 +298,14 @@
     {
       "name": "a stamp with no last run",
       "answer": {
-        "lineage_id": "L1",
-        "first_ordinal": 0,
+        "first_ordinal": 1,
         "history_version": 1,
         "last_run_rich_ui": {
           "dialect": "1.0",
           "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
         },
-        "updated_at": 1790000000000
+        "updated_at": 1790000000000,
+        "incarnation": "log-1"
       }
     },
     {
@@ -314,7 +314,9 @@
         "last_run_rich_ui": {
           "dialect": "1.0",
           "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
-        }
+        },
+        "history_version": 1,
+        "incarnation": "log-1"
       }
     }
   ],
@@ -354,7 +356,7 @@
         "catalog_digest": "2b8cf2a58e69aee8016627e9edd23b5931751dc8aa9a715eb291fa07195f585c"
       },
       "entry": {
-        "ordinal": 1,
+        "ordinal": 2,
         "mid": "m1",
         "message": {
           "role": "assistant",
@@ -375,7 +377,7 @@
     {
       "name": "the same entry read without the opt-in",
       "entry": {
-        "ordinal": 1,
+        "ordinal": 2,
         "mid": "m1",
         "message": {
           "role": "assistant",
@@ -392,7 +394,7 @@
     {
       "name": "assistant entry of an unstamped run, read with the opt-in",
       "entry": {
-        "ordinal": 3,
+        "ordinal": 4,
         "mid": "m3",
         "message": {
           "role": "assistant",
@@ -409,7 +411,7 @@
     {
       "name": "user entry of a stamped run, read with the opt-in",
       "entry": {
-        "ordinal": 0,
+        "ordinal": 1,
         "mid": "m0",
         "message": {
           "role": "user",

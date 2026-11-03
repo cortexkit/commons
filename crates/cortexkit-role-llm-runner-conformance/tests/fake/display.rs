@@ -54,64 +54,6 @@ pub(super) fn result_text(content: &Value) -> String {
     }
 }
 
-/// Convert the fake's Anthropic fixture into a wrapped Pi body for the
-/// profile-projection case. The fixture's stored source remains unchanged.
-pub(super) fn pi_body(id: &str, body: &Value) -> Value {
-    let mut message = body.clone();
-    if body["role"] == "user" {
-        if let Some(result) = body["content"]
-            .as_array()
-            .and_then(|parts| parts.first())
-            .filter(|part| part["type"] == "tool_result")
-        {
-            message = json!({"role":"toolResult", "toolCallId":result["tool_use_id"],
-                "content":[{"type":"text", "text":result["content"]}]});
-        }
-    }
-    if let Some(parts) = message["content"].as_array_mut() {
-        for part in parts {
-            if part["type"] == "tool_use" {
-                *part = json!({"type":"toolCall", "id":part["id"],
-                    "name":part["name"], "arguments":part["input"]});
-            }
-        }
-    }
-    json!({"type":"message", "id":id, "parentId":null, "message":message})
-}
-
-/// Synthetic decoded OpenCode 2 fixtures for the profile-projection case.
-/// Ordinary prompts become system notices to exercise notice-role preservation.
-pub(super) fn opencode_v2_body(id: &str, body: &Value) -> Value {
-    let blocks = body["content"].as_array().cloned().unwrap_or_default();
-    if body["role"] == "user" {
-        if let Some(result) = blocks.first().filter(|part| part["type"] == "tool_result") {
-            return json!({"id":id, "type":"assistant", "content":[{
-                "type":"tool", "id":result["tool_use_id"], "name":"fixture_tool",
-                "state":{"status":"completed", "input":{}, "content":[{"type":"text", "text":result["content"]}]}
-            }]});
-        }
-        let text = body["content"]
-            .as_str()
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                blocks
-                    .iter()
-                    .filter_map(|part| part["text"].as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            });
-        return json!({"id":id, "type":"system", "text":text, "description":"Synthetic instruction notice"});
-    }
-    let content: Vec<Value> = blocks.into_iter().map(|part| {
-        if part["type"] == "tool_use" {
-            json!({"type":"tool", "id":part["id"], "name":part["name"], "state":{"status":"running", "input":part["input"]}})
-        } else if part["type"] == "thinking" {
-            json!({"type":"reasoning", "text":part["thinking"]})
-        } else { part }
-    }).collect();
-    json!({"id":id, "type":"assistant", "content":content})
-}
-
 /// The message holding the call `key`, and the name of the tool it calls.
 fn call_holder(sess: &Sess, key: &str) -> (String, String) {
     let Some(message) = sess
@@ -516,6 +458,7 @@ impl Module {
                 DisplayRow::new("assistant", Vec::new()).with_model(self.session_model(session));
             shown.messages.push(
                 DisplayEntry::new(
+                    sess.base + sess.messages.len() as u64,
                     format!("{}.in-progress", sess.lineage),
                     self.world.now(),
                     row,
@@ -674,4 +617,62 @@ impl Module {
                 .collect(),
         )
     }
+}
+
+/// Convert the fake's Anthropic fixture into a wrapped Pi body for the
+/// profile-projection case. The fixture's stored source remains unchanged.
+pub(super) fn pi_body(id: &str, body: &Value) -> Value {
+    let mut message = body.clone();
+    if body["role"] == "user" {
+        if let Some(result) = body["content"]
+            .as_array()
+            .and_then(|parts| parts.first())
+            .filter(|part| part["type"] == "tool_result")
+        {
+            message = json!({"role":"toolResult", "toolCallId":result["tool_use_id"],
+                "content":[{"type":"text", "text":result["content"]}]});
+        }
+    }
+    if let Some(parts) = message["content"].as_array_mut() {
+        for part in parts {
+            if part["type"] == "tool_use" {
+                *part = json!({"type":"toolCall", "id":part["id"],
+                    "name":part["name"], "arguments":part["input"]});
+            }
+        }
+    }
+    json!({"type":"message", "id":id, "parentId":null, "message":message})
+}
+
+/// Synthetic decoded OpenCode 2 fixtures for the profile-projection case.
+/// Ordinary prompts become system notices to exercise notice-role preservation.
+pub(super) fn opencode_v2_body(id: &str, body: &Value) -> Value {
+    let blocks = body["content"].as_array().cloned().unwrap_or_default();
+    if body["role"] == "user" {
+        if let Some(result) = blocks.first().filter(|part| part["type"] == "tool_result") {
+            return json!({"id":id, "type":"assistant", "content":[{
+                "type":"tool", "id":result["tool_use_id"], "name":"fixture_tool",
+                "state":{"status":"completed", "input":{}, "content":[{"type":"text", "text":result["content"]}]}
+            }]});
+        }
+        let text = body["content"]
+            .as_str()
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                blocks
+                    .iter()
+                    .filter_map(|part| part["text"].as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            });
+        return json!({"id":id, "type":"system", "text":text, "description":"Synthetic instruction notice"});
+    }
+    let content: Vec<Value> = blocks.into_iter().map(|part| {
+        if part["type"] == "tool_use" {
+            json!({"type":"tool", "id":part["id"], "name":part["name"], "state":{"status":"running", "input":part["input"]}})
+        } else if part["type"] == "thinking" {
+            json!({"type":"reasoning", "text":part["thinking"]})
+        } else { part }
+    }).collect();
+    json!({"id":id, "type":"assistant", "content":content})
 }

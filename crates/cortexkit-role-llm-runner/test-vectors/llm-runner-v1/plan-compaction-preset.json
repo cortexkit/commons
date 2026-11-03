@@ -1,0 +1,17 @@
+{
+  "accepted": {
+    "compaction_item": {"provider": "example.compactor", "preset": "worker", "params": {}}
+  },
+  "refused": [
+    {
+      "name": "missing session role",
+      "plan": {"compaction_item": {"provider": "example.compactor", "params": {}}},
+      "error": {"code": "invalid_params", "detail": {"field": "plan.compaction_item.preset"}}
+    },
+    {
+      "name": "preset is not a string",
+      "plan": {"compaction_item": {"provider": "example.compactor", "preset": null, "params": {}}},
+      "error": {"code": "invalid_params", "detail": {"field": "plan.compaction_item.preset"}}
+    }
+  ]
+}

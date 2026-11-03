@@ -71,9 +71,8 @@
   "pages": [
     {
       "name": "a display page",
-      "first_ordinal": 0,
+      "first_ordinal": 1,
       "page": {
-        "lineage_id": "lin_1",
         "history_version": 1,
         "older": "c0",
         "messages": [
@@ -90,18 +89,13 @@
                   "text": "earlier"
                 }
               ]
-            }
+            },
+            "ordinal": 1
           },
           {
-            "ordinal": 0,
+            "ordinal": 2,
             "mid": "m0",
             "written_at": 1790000000100,
-            "tags": [
-              {
-                "part": "0",
-                "tag": "§1§"
-              }
-            ],
             "row": {
               "role": "user",
               "text": "hi",
@@ -116,7 +110,7 @@
             }
           },
           {
-            "ordinal": 1,
+            "ordinal": 3,
             "mid": "m1",
             "written_at": 1790000000200,
             "row": {
@@ -132,22 +126,24 @@
               ]
             }
           }
-        ]
-      }
+        ],
+        "incarnation": "log-1"
+      },
+      "incarnation": "log-1",
+      "history_version": 1
     },
     {
       "name": "user rows naming who sent them",
-      "first_ordinal": 0,
+      "first_ordinal": 1,
       "senders": {
         "m0": "ck-core",
         "m2": "ck-thalamus"
       },
       "page": {
-        "lineage_id": "lin_1",
         "history_version": 1,
         "messages": [
           {
-            "ordinal": 0,
+            "ordinal": 1,
             "mid": "m0",
             "written_at": 1790000000100,
             "row": {
@@ -164,7 +160,7 @@
             }
           },
           {
-            "ordinal": 1,
+            "ordinal": 2,
             "mid": "m1",
             "written_at": 1790000000200,
             "row": {
@@ -181,7 +177,7 @@
             }
           },
           {
-            "ordinal": 2,
+            "ordinal": 3,
             "mid": "m2",
             "written_at": 1790000000300,
             "row": {
@@ -199,7 +195,7 @@
             }
           },
           {
-            "ordinal": 3,
+            "ordinal": 4,
             "mid": "m3",
             "written_at": 1790000000400,
             "row": {
@@ -214,8 +210,11 @@
               ]
             }
           }
-        ]
-      }
+        ],
+        "incarnation": "log-1"
+      },
+      "incarnation": "log-1",
+      "history_version": 1
     }
   ],
   "head_inputs": [

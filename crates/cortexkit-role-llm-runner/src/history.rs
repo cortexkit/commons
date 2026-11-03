@@ -1,32 +1,20 @@
-//! `session.history`: the session's whole surviving history, on demand
-//! (the `host_history` group, CONTRACT.md §4.6).
+//! `session.history`: whole active-path history with backward navigation
+//! The `host_history` group adds backward navigation with opaque cursors.
 //!
-//! `session.read` serves only the current lineage, the readable history from
-//! the latest cut. `session.history` pages through everything the session
-//! still holds from its first message: the part before the lineage, which a
-//! runner on a host serves from the host's own storage, and the lineage
-//! itself, which it serves exactly as `session.read` does. It is for an app's
-//! reader and for raw recovery (a model asking to expand a folded range); a
-//! compaction provider never syncs or builds a view from it.
+//! Both read operations reach entries below native markers from the host's
+//! store. Every active-path message counts from 1, including an empty dead
+//! step; marker and control records are not entries. History's opaque cursors
+//! survive a cut or archive prune. Removing or rewriting a cursor's anchor
+//! message, or anything older, invalidates that cursor.
 //!
-//! History is paged by opaque cursors, never by ordinal: a runner that
-//! adopted a session with history already in its host has no ordinals for
-//! that history, and numbering it would mean walking the whole session.
-//! Entries before the first numbered one carry no `ordinal`.
-//!
-//! - **Newest page**: no `cursor`, `from_mid` or `before_mid`.
-//! - **Forward**: `from_mid` reads from that message, inclusive.
-//! - **Backward**: `before_mid` reads the page that ends directly before
-//!   that message, exclusive. A reader holding the `session.read` window
-//!   continues into older history with the `mid` of the window's first
-//!   message; it never infers the session's start from `first_ordinal`,
-//!   because a window can start at ordinal 0 with host history before it.
-//! - **Cursor**: a page's `older` or `newer`.
+//! - No position means the newest page.
+//! - `from_mid` reads forward, inclusive; `before_mid` reads backward, exclusive.
+//! - `cursor` continues a prior page's `older` or `newer` position.
 //! - **Ordinal seeks**: `from_ordinal` reads from that ordinal, inclusive;
 //!   `before_ordinal` reads the page ending directly before it. Only an
 //!   ordinal the runner assigned and still holds is valid; any other is
-//!   refused `unknown_ordinal`. `before_ordinal` at the lowest assigned
-//!   ordinal reaches the newest entries without one, by the boundary rule.
+//!   refused `unknown_ordinal`. Zero aliases the first entry for from_ordinal;
+//!   before_ordinal 1 returns an empty page with no older cursor.
 //!   Paging onward uses the returned cursors.
 //!
 //! Entries run oldest first within a page, and following `older` or `newer`
@@ -46,7 +34,7 @@ fn deserialize_view<'de, D>(deserializer: D) -> Result<Option<ReadView>, D::Erro
 where
     D: Deserializer<'de>,
 {
-    crate::strict::optional(deserializer, fields::VIEW, "\"raw\" or \"model\"")
+    crate::strict::optional(deserializer, fields::VIEW, "\"raw\"")
 }
 
 /// The `session.history` request.
@@ -251,16 +239,14 @@ impl HistoryRequest {
         self.form.unwrap_or_default()
     }
 
-    /// The position the request names, or the field an `invalid_params`
-    /// refusal names: `view` for the model view; in display form, `media`
+    /// The position the request names, or the conflicting display/position
+    /// field an `invalid_params` refusal names: in display form, `media`
     /// or `include_originals` when given (a row always describes media by
     /// refs and carries no originals); `limits` outside display form; and
     /// otherwise the second of `cursor`, `from_mid`, `before_mid`,
     /// `from_ordinal` and `before_ordinal` present, in that order.
+    /// View validity is checked while decoding.
     pub fn mode(&self) -> Result<HistoryMode<'_>, &'static str> {
-        if self.view == Some(ReadView::Model) {
-            return Err(fields::VIEW);
-        }
         if self.form() == HistoryForm::Display {
             if self.media.is_some() {
                 return Err(fields::MEDIA);
@@ -286,7 +272,8 @@ impl HistoryRequest {
             ),
             (
                 fields::FROM_ORDINAL,
-                self.from_ordinal.map(HistoryMode::FromOrdinal),
+                self.from_ordinal
+                    .map(|ordinal| HistoryMode::FromOrdinal(ordinal.max(1))),
             ),
             (
                 fields::BEFORE_ORDINAL,
@@ -307,7 +294,7 @@ impl HistoryRequest {
 /// A `session.history` page. Decoded leniently.
 ///
 /// Non-exhaustive so later optional members are additive: use
-/// [`HistoryPage::new`], [`HistoryPage::no_lineage`] and the `with_*`
+/// [`HistoryPage::new`] and the `with_*`
 /// setters, or decode one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
@@ -317,10 +304,7 @@ pub struct HistoryPage {
     pub pruned_reasoning: Vec<crate::archive_prunes_reasoning::PrunedReasoning>,
     /// Oldest first.
     pub messages: Vec<HistoryEntry>,
-    /// The session's current lineage, as on a `session.read` page. Absent
-    /// only for a session that was never written, whose page is empty.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lineage_id: Option<String>,
+    pub incarnation: String,
     /// The cursor of the page directly before this one. Absent exactly when
     /// nothing older exists.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -329,10 +313,8 @@ pub struct HistoryPage {
     /// nothing newer existed when the page was read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub newer: Option<String>,
-    /// The session's history version, as `session.head` states it. Present
-    /// whenever `lineage_id` is.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub history_version: Option<u64>,
+    /// The rewrite version of this snapshot, including empty pages.
+    pub history_version: u64,
 }
 
 impl HistoryPage {
@@ -343,34 +325,25 @@ impl HistoryPage {
         self.pruned_reasoning = parts;
         self
     }
-    /// A page of a session whose current lineage is `lineage_id`.
-    pub fn new(lineage_id: impl Into<String>, messages: Vec<HistoryEntry>) -> Self {
+    /// A page bound to the session's rewrite version and record identity.
+    pub fn new(
+        history_version: u64,
+        incarnation: impl Into<String>,
+        messages: Vec<HistoryEntry>,
+    ) -> Self {
         Self {
             pruned_reasoning: Vec::new(),
             messages,
-            lineage_id: Some(lineage_id.into()),
+            incarnation: incarnation.into(),
             older: None,
             newer: None,
-            history_version: None,
+            history_version,
         }
     }
 
     pub fn with_history_version(mut self, history_version: u64) -> Self {
-        self.history_version = Some(history_version);
+        self.history_version = history_version;
         self
-    }
-
-    /// The page of a session that was never written: empty, with no
-    /// lineage and no cursors.
-    pub fn no_lineage() -> Self {
-        Self {
-            pruned_reasoning: Vec::new(),
-            messages: Vec::new(),
-            lineage_id: None,
-            older: None,
-            newer: None,
-            history_version: None,
-        }
     }
 
     pub fn with_older(mut self, cursor: impl Into<String>) -> Self {
@@ -383,49 +356,26 @@ impl HistoryPage {
         self
     }
 
-    /// Check the rules a single page shows on its own, against the current
-    /// lineage's `first_ordinal` (`session.head`'s; `None` for a session
-    /// without a lineage): a page without a lineage is empty and has no
-    /// cursors and no history version, and a page with one carries its
-    /// history version; every `mid` appears once; an entry without an ordinal never
-    /// follows one with an ordinal; ordinals rise; and only an entry at or
-    /// after `first_ordinal` carries `tags`.
-    pub fn check(&self, first_ordinal: Option<u64>) -> Result<(), HistoryPageProblem> {
-        let unanchored = !self.messages.is_empty()
-            || self.older.is_some()
-            || self.newer.is_some()
-            || self.history_version.is_some();
-        if self.lineage_id.is_none() && unanchored {
-            return Err(HistoryPageProblem::WithoutLineage);
-        }
-        if self.lineage_id.is_some() && self.history_version.is_none() {
-            return Err(HistoryPageProblem::WithoutHistoryVersion);
+    /// Check the envelope's record identity, unique mids and rising one-based
+    /// ordinals. Markers and controls are not entries. The model's marker
+    /// boundary never limits this check or the read.
+    pub fn check(&self) -> Result<(), HistoryPageProblem> {
+        if !(1..=128).contains(&self.incarnation.len()) {
+            return Err(HistoryPageProblem::InvalidIncarnation);
         }
         let mut seen = std::collections::BTreeSet::new();
-        let mut previous: Option<Option<u64>> = None;
+        let mut previous: Option<u64> = None;
         for entry in &self.messages {
+            if entry.ordinal == 0 {
+                return Err(HistoryPageProblem::InvalidOrdinal(entry.mid.clone()));
+            }
             if !seen.insert(entry.mid.as_str()) {
                 return Err(HistoryPageProblem::DuplicateMid(entry.mid.clone()));
             }
-            match (previous, entry.ordinal) {
-                (Some(Some(_)), None) => {
-                    return Err(HistoryPageProblem::UnnumberedAfterNumbered(
-                        entry.mid.clone(),
-                    ))
-                }
-                (Some(Some(before)), Some(ordinal)) if ordinal <= before => {
-                    return Err(HistoryPageProblem::OrdinalsNotRising(entry.mid.clone()))
-                }
-                _ => {}
+            if previous.is_some_and(|before| entry.ordinal <= before) {
+                return Err(HistoryPageProblem::OrdinalsNotRising(entry.mid.clone()));
             }
             previous = Some(entry.ordinal);
-            let in_window = matches!(
-                (entry.ordinal, first_ordinal),
-                (Some(ordinal), Some(first)) if ordinal >= first
-            );
-            if !entry.tags.is_empty() && !in_window {
-                return Err(HistoryPageProblem::TagsBelowFirstOrdinal(entry.mid.clone()));
-            }
         }
         Ok(())
     }
@@ -435,29 +385,19 @@ impl HistoryPage {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum HistoryPageProblem {
-    /// A page without a lineage carries entries, cursors or a history
-    /// version.
-    WithoutLineage,
-    /// A page with a lineage carries no history version.
-    WithoutHistoryVersion,
+    InvalidIncarnation,
+    InvalidOrdinal(String),
     /// This `mid` appears twice on the page.
     DuplicateMid(String),
-    /// This entry has no ordinal but follows one that has.
-    UnnumberedAfterNumbered(String),
     /// This entry's ordinal is not above the previous entry's.
     OrdinalsNotRising(String),
-    /// This entry carries `tags` but lies below `first_ordinal`, or has no
-    /// ordinal.
-    TagsBelowFirstOrdinal(String),
 }
 
-/// One `session.history` entry: a `session.read` entry whose `ordinal` is
-/// present only where the runner has one, and whose `written_at` is always
-/// present.
+/// One `session.history` entry: a `session.read` entry with required one-based ordinal and write time. Markers and
+/// control records are not entries.
 ///
-/// An entry at or after the current lineage's `first_ordinal` is exactly
-/// the entry `session.read` serves for that message (bytes, ordinal and
-/// tags). An entry below it carries no `tags`. Non-exhaustive: use
+/// Every entry has the same identity and stored bytes as its corresponding `session.read` entry,
+/// including below a model cut. Non-exhaustive: use
 /// [`HistoryEntry::new`] and the `with_*` setters, [`HistoryEntry::from_read`],
 /// or decode one.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -473,12 +413,11 @@ pub struct HistoryEntry {
     /// As on a `session.read` entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part_digests: Option<Vec<descriptors::PartDigest>>,
-    /// The message's session-wide ordinal, where the runner has one. An
-    /// entry served with an ordinal carries the same one in every later
-    /// read; an entry served without one never gains one. A runner never
-    /// numbers history on demand.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ordinal: Option<u64>,
+    pub part_keys: Option<Vec<String>>,
+    /// Required one-based position on the active path. A rewrite raises
+    /// history_version before a position changes; a cut never changes it.
+    pub ordinal: u64,
     /// The message's id, unchanged for the life of the session, and the
     /// same id `session.read` serves for the message. On a runner over a
     /// host, a host-served entry's `mid` is the host's own message id.
@@ -495,10 +434,8 @@ pub struct HistoryEntry {
     pub originals: Option<Vec<Original>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_calls: Vec<ToolCallAttribution>,
-    /// Present only on an entry at or after the current lineage's
-    /// `first_ordinal`, exactly as `session.read` serves them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tags: Vec<crate::tags::PartTag>,
+    /// The message role, as on `ReadMessage::role`: present whenever known,
+    /// including below the model's `first_ordinal`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -506,47 +443,51 @@ pub struct HistoryEntry {
 }
 
 impl HistoryEntry {
-    /// An entry with no ordinal, as the history before a runner's first
-    /// numbered message is served.
-    pub fn new(mid: impl Into<String>, written_at: u64, message: Value) -> Self {
+    pub fn with_part_keys(mut self, keys: Vec<String>) -> Self {
+        self.part_keys = Some(keys);
+        self
+    }
+    /// A counted active-path entry, including messages the host already held
+    /// before the runner began serving the session.
+    pub fn new(ordinal: u64, mid: impl Into<String>, written_at: u64, message: Value) -> Self {
         Self {
             digest: None,
             part_digests: None,
-            ordinal: None,
+            part_keys: None,
+            ordinal,
             mid: mid.into(),
             written_at,
             message,
             run: None,
             originals: None,
             tool_calls: Vec::new(),
-            tags: Vec::new(),
             role: None,
             delivered_as: None,
         }
     }
 
     /// The history entry for a message `session.read` serves as `read`:
-    /// the same bytes, ordinal, tags and envelope. `None` when `read` has
+    /// the same bytes, ordinal, part-digest rows and served part keys. `None` when `read` has
     /// no `written_at`, which every history entry carries.
     pub fn from_read(read: ReadMessage) -> Option<Self> {
         Some(Self {
             digest: read.digest,
             part_digests: read.part_digests,
-            ordinal: Some(read.ordinal),
+            part_keys: read.part_keys,
+            ordinal: read.ordinal,
             mid: read.mid,
             written_at: read.written_at?,
             message: read.message,
             run: read.run,
             originals: read.originals,
             tool_calls: read.tool_calls,
-            tags: read.tags,
             role: read.role,
             delivered_as: read.delivered_as,
         })
     }
 
     pub fn with_ordinal(mut self, ordinal: u64) -> Self {
-        self.ordinal = Some(ordinal);
+        self.ordinal = ordinal;
         self
     }
 
@@ -555,31 +496,20 @@ impl HistoryEntry {
         self
     }
 
-    pub fn with_tags(mut self, tags: Vec<crate::tags::PartTag>) -> Self {
-        self.tags = tags;
-        self
-    }
-
     pub fn with_run(mut self, run: RunAttribution) -> Self {
         self.run = Some(run);
         self
     }
 
-    /// The entry without its `tags`, as history serves a message below the
-    /// current lineage's `first_ordinal`.
-    pub fn without_tags(mut self) -> Self {
-        self.tags = Vec::new();
-        self
-    }
-
     /// Whether this entry and `read` serve the same message the same way:
-    /// the same `mid`, ordinal, bytes and tags. A message both ops serve
+    /// the same `mid`, ordinal, bytes, part-digest rows and served part keys. A message both ops serve
     /// must compare equal.
     pub fn matches_read(&self, read: &ReadMessage) -> bool {
         self.mid == read.mid
-            && self.ordinal == Some(read.ordinal)
+            && self.ordinal == read.ordinal
             && self.message == read.message
-            && self.tags == read.tags
+            && self.part_digests == read.part_digests
+            && self.part_keys == read.part_keys
     }
 }
 
@@ -627,20 +557,18 @@ mod tests {
         for case in vectors::cases(&file, "pages") {
             let name = case["name"].as_str().unwrap();
             let page: HistoryPage = vectors::round_trip(name, &case["page"]);
-            assert_eq!(page.check(case["first_ordinal"].as_u64()), Ok(()), "{name}");
+            assert_eq!(page.check(), Ok(()), "{name}");
         }
         for case in vectors::cases(&file, "pages_refused") {
             let name = case["name"].as_str().unwrap();
             let page: HistoryPage = serde_json::from_value(case["page"].clone())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
-            let problem = page.check(case["first_ordinal"].as_u64()).expect_err(name);
+            let problem = page.check().expect_err(name);
             let spelled = match problem {
-                HistoryPageProblem::WithoutLineage => "without_lineage",
-                HistoryPageProblem::WithoutHistoryVersion => "without_history_version",
+                HistoryPageProblem::InvalidIncarnation => "invalid_incarnation",
+                HistoryPageProblem::InvalidOrdinal(_) => "invalid_ordinal",
                 HistoryPageProblem::DuplicateMid(_) => "duplicate_mid",
-                HistoryPageProblem::UnnumberedAfterNumbered(_) => "unnumbered_after_numbered",
                 HistoryPageProblem::OrdinalsNotRising(_) => "ordinals_not_rising",
-                HistoryPageProblem::TagsBelowFirstOrdinal(_) => "tags_below_first_ordinal",
             };
             assert_eq!(spelled, case["problem"].as_str().unwrap(), "{name}");
         }
@@ -668,25 +596,15 @@ mod tests {
     fn a_window_entry_is_the_read_entry() {
         let read = ReadMessage::new(7, "m7", serde_json::json!({"role": "user"}))
             .with_written_at(1_790_000_000_000)
-            .with_tags(vec![crate::tags::PartTag::tagged("0", "§12§")]);
+            .with_part_keys(vec!["opaque-part-key".into()]);
         let entry = HistoryEntry::from_read(read.clone()).unwrap();
         assert!(entry.matches_read(&read));
-        assert!(!entry.clone().without_tags().matches_read(&read));
         assert_eq!(
             HistoryEntry::from_read(ReadMessage::new(7, "m7", serde_json::json!({}))),
             None
         );
-        let page = HistoryPage::new("lin-2", vec![entry.clone()]).with_history_version(1);
-        assert_eq!(page.check(Some(7)), Ok(()));
-        assert_eq!(
-            page.check(Some(8)),
-            Err(HistoryPageProblem::TagsBelowFirstOrdinal("m7".into()))
-        );
-        assert_eq!(
-            HistoryRequest::from_mid("m1")
-                .with_view(ReadView::Model)
-                .mode(),
-            Err(fields::VIEW)
-        );
+        let page = HistoryPage::new(1, "log-1", vec![entry.clone()]).with_history_version(1);
+        assert_eq!(page.check(), Ok(()));
+        assert_eq!(entry.part_keys, Some(vec!["opaque-part-key".into()]));
     }
 }

@@ -58,7 +58,7 @@ fn case_wait_ms(name: &str, seconds: u64, deletion_ms: u64) -> Result<u64, Strin
     let one_wait = u64::try_from(wait_duration(seconds, deletion_ms)?.as_millis())
         .map_err(|_| "retention wait overflows milliseconds")?;
     match name {
-        "retention_shorten_continues_lineage" => one_wait
+        "retention_shorten_continues_history_version" => one_wait
             .checked_add(1300)
             .ok_or("retention wait overflows milliseconds".into()),
         "retention_equal_noop" | "retention_run_status_expired" | "retention_no_content_served" => {
@@ -137,19 +137,16 @@ fn check_expired(method: &str, reply: Reply, expected: u64) -> Result<(), String
 
 async fn expired_reads<R: RunnerRoute>(
     route: &R,
-    declared: &BTreeSet<Capability>,
+    _declared: &BTreeSet<Capability>,
     run_id: &str,
     expected: u64,
 ) -> Result<(), String> {
-    let mut requests = vec![
+    let requests = vec![
         (ops::SESSION_READ, json!({})),
         (ops::SESSION_READ, json!({"from_ordinal":0})),
         (ops::SESSION_HEAD, json!({})),
         (ops::RUN_RESULT, json!({"run_id":run_id})),
     ];
-    if declared.contains(&Capability::ModelView) {
-        requests.push((ops::SESSION_READ, json!({"view":"model"})));
-    }
     for (method, params) in requests {
         check_expired(method, call(route, method, params).await?, expected)?;
     }
@@ -175,7 +172,7 @@ async fn deletion<S: LlmRunnerSubject>(
 struct Seed<R> {
     session: Session<R>,
     run_id: String,
-    lineage: String,
+    history_version: u64,
     last_activity: u64,
     markers: Vec<String>,
 }
@@ -275,7 +272,7 @@ where
                 .last_run_state
                 .ok_or("seed has no terminal run")?
                 .run_id,
-            lineage: meta.lineage_id.ok_or("seed has no lineage")?,
+            history_version: meta.history_version,
             last_activity: meta.updated_at.ok_or("seed has no last activity")?,
         })
     }
@@ -390,13 +387,13 @@ where
                 let seed = self.retention_seed(None, false).await?;
                 self.retention_refused(Some(&seed), short, None).await?;
             }
-            "retention_shorten_continues_lineage" | "retention_equal_noop" => {
+            "retention_shorten_continues_history_version" | "retention_equal_noop" => {
                 let initial = if name == "retention_equal_noop" {
                     short
                 } else {
                     cap.max_seconds.min(4)
                 };
-                if name == "retention_shorten_continues_lineage" && initial == 1 {
+                if name == "retention_shorten_continues_history_version" && initial == 1 {
                     return Ok(Ending::Inapplicable(
                         "max_seconds is 1, so no positive shorter retention exists".into(),
                     ));
@@ -412,16 +409,18 @@ where
                     return Ok(skipped);
                 }
                 let mut seed = self.retention_seed(Some(initial), false).await?;
-                if name == "retention_shorten_continues_lineage" {
+                if name == "retention_shorten_continues_history_version" {
                     self.wait_retention_time(&seed.session.name, 1300).await?;
                 }
-                // The idle lineage is still inside its OLD retention. A new send
-                // must preserve it, even if the new policy is shorter.
+                // The idle session is still within its previous retention period.
+                // Shortening it must preserve its existing history and version.
                 let (_, meta) = self
                     .retained_send(&mut seed.session, Some(seconds), None)
                     .await?;
-                if meta.lineage_id.as_deref() != Some(&seed.lineage) {
-                    return Err("retention change replaced an unexpired lineage".into());
+                if meta.history_version != seed.history_version {
+                    return Err(
+                        "retention change rewrote an unexpired session's history or version".into(),
+                    );
                 }
                 let (_, messages) = read_all(&seed.session.route).await?;
                 if holding(&messages, &seed.markers[0]) != 1 {
@@ -461,41 +460,41 @@ where
                 meta.input = None;
                 meta.model = None;
                 meta.sender = None;
-                meta.incarnation = None;
-                if read(&unwritten.route, &ReadRequest::tail()).await? != ReadPage::no_lineage()
-                    || meta != HeadMeta::no_lineage()
+                if read(&unwritten.route, &ReadRequest::tail()).await?
+                    != ReadPage::empty(1, "log-1")
+                    || meta != HeadMeta::empty(meta.history_version, meta.incarnation.clone())
                 {
                     return Err("never-written session did not keep its empty success".into());
                 }
-                // Fresh admission fields and no retention: the new lineage must
-                // be forever, not inherit the expired one's policy.
+                // Fresh admission fields and no retention: the recreated session
+                // is kept forever, without inheriting the expired record's policy.
                 seed.session.first = None;
                 let (_, meta) = self.retained_send(&mut seed.session, None, None).await?;
-                if meta.lineage_id.as_deref() == Some(&seed.lineage) {
-                    return Err("fresh send reused the expired lineage".into());
+                if meta.history_version == seed.history_version {
+                    return Err("fresh send reused the expired history_version".into());
                 }
                 let (_, messages) = read_all(&seed.session.route).await?;
                 if seed.markers.iter().any(|m| holding(&messages, m) != 0) {
-                    return Err("fresh lineage replayed expired content".into());
+                    return Err("the recreated session replayed expired content".into());
                 }
                 let error = expect_error(
-                    "old lineage read",
+                    "old history_version read",
                     call(
                         &seed.session.route,
                         ops::SESSION_READ,
-                        json!({"lineage_id":seed.lineage}),
+                        json!({"history_version":seed.history_version}),
                     )
                     .await?,
                 )?;
-                expect_code("old lineage read", &error, errors::LINEAGE_CHANGED)?;
+                expect_code("old history_version read", &error, errors::HISTORY_CHANGED)?;
                 self.wait_retention_time(
                     &seed.session.name,
                     u64::try_from(wait_duration(short, cap.delete_within_ms)?.as_millis())
                         .map_err(|_| "retention wait overflows milliseconds")?,
                 )
                 .await?;
-                if head(&seed.session.route).await?.lineage_id != meta.lineage_id {
-                    return Err("fresh lineage inherited old retention".into());
+                if head(&seed.session.route).await?.history_version != meta.history_version {
+                    return Err("the recreated session inherited the old retention policy".into());
                 }
             }
             "retention_run_status_expired" => {
@@ -557,9 +556,6 @@ where
             (ops::RUN_RESULT.to_owned(), json!({"run_id":seed.run_id})),
             (ops::SESSION_BASELINE.to_owned(), json!({})),
         ];
-        if self.declared.contains(&Capability::ModelView) {
-            probes.push((ops::SESSION_READ.into(), json!({"view":"model"})));
-        }
         let methods: BTreeSet<&str> = described
             .majors
             .iter()
@@ -676,7 +672,8 @@ where
                 .await?;
                 let after = head(&session.route).await?;
                 let run = run_result(&session.route, &last.run_id).await?;
-                if after.lineage_id != before.lineage_id || run.run_state().is_terminal() {
+                if after.history_version != before.history_version || run.run_state().is_terminal()
+                {
                     return Err("held non-terminal run expired or became terminal".into());
                 }
                 read_all(&session.route).await?;
@@ -700,7 +697,7 @@ where
         let seed = Seed {
             session,
             run_id: end.run_id,
-            lineage: meta.lineage_id.ok_or("held session has no lineage")?,
+            history_version: meta.history_version,
             last_activity: meta.updated_at.ok_or("held session has no terminal time")?,
             markers: vec![],
         };

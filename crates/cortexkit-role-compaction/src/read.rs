@@ -49,8 +49,9 @@ pub struct Entry {
     /// one; the runner's notice says so.
     #[serde(deserialize_with = "crate::integer::required")]
     pub ordinal: u64,
-    /// The host's message id. Stable for the life of the message. Nothing may
-    /// derive it from the ordinal or the reverse.
+    /// The host's message id. Stable for the life of the message, and never
+    /// given to a different message within the session, even after a revert
+    /// (P6). Nothing may derive it from the ordinal or the reverse.
     pub mid: String,
     pub role: Role,
     /// Set when a user-role entry was delivered by a module or the runner

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0
+
+- Breaking: publish `step-transform-provider/v2`. Hooks use one scoped route
+  per session, bound to `(harness, session)`; caller and project identity
+  come from daemon route metadata, never request bodies.
+- Add optional `at_ms` to the `pre_user` hook: the new message's time from the
+  runner's machine, so a provider measures the gap since the previous message
+  on one machine's clock.
+- Keep discovery and per-preset declarations available on module-level and
+  pre-session scoped routes. Refuse hooks there per call with `route_unbound`,
+  not at bind. Add focused conformance probes and faulty-provider controls.
+- Remove lineage ancestry/catch-up and transient history refusals, the host
+  protocol that acknowledged or discarded pending hook answers, and the
+  native capability bundle and special admission. Drop their body fields,
+  constants, tests and vectors; see CONTRACT.md's Changes from v1.
+- Retain subject ids, opaque messages and prompt provenance; entry ordinals
+  follow compaction's 1-based numbering. Carry optional opaque `runner_trace`
+  on every hook. Preserve unknown enum values without executing unknown
+  behavior. Ship regenerated v2 vectors with checksums.
+- Depends on `cortexkit-role-llm-runner` 0.8, published alongside this release.
+- Removes the unused capability-checker `subc-protocol` development dependency.
+
 ## 0.4.2
 
 - Requires subc-protocol 0.34 for development checks only; no API or wire change.

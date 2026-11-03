@@ -1,49 +1,60 @@
-//! The `compaction` group's admission check, which keeps a compaction
-//! provider off a runner that cannot host one.
-//!
-//! The compaction interface itself (Setup, advance notices, views, rides,
-//! the ceiling and native markers) is the runner half of
-//! compaction-provider 0.3.0 §3, whose role defines its shapes. A runner owes
-//! it only if it declares the `compaction` group, which requires `tags`
-//! (CONTRACT §3, §11.1). The runner serves no compaction op of its own.
+//! Plan selection of a compaction provider. Protocol obligations belong to
+//! `cortexkit-role-compaction` (`compaction-runner/v1`, `compaction-provider/v2`).
 
 use serde_json::{Map, Value};
 
-use crate::capabilities;
-
-/// The plan member that names the session's compaction provider, and the
-/// `field` an `invalid_params` refusal names when a plan carries it to a
-/// runner that does not declare `compaction`.
+/// The plan member naming the provider, required session-role preset and parameters.
 pub const PLAN_COMPACTION_ITEM: &str = "compaction_item";
 
-/// The `field` of that admission refusal: the plan's `compaction_item`.
-pub const PLAN_COMPACTION_ITEM_FIELD: &str = "plan.compaction_item";
-
-/// The provider a plan's `compaction_item` names, or `None` when the plan
-/// has no `compaction_item` or it names no provider.
+/// The provider named by the plan, if any.
 pub fn plan_compaction_provider(plan: &Map<String, Value>) -> Option<&str> {
     plan.get(PLAN_COMPACTION_ITEM)?.get("provider")?.as_str()
 }
 
-/// Admission's check of a plan against the runner's module-level
-/// capabilities: a plan carrying a `compaction_item` (any value but `null`)
-/// is refused `invalid_params` naming [`PLAN_COMPACTION_ITEM_FIELD`] unless
-/// `declared` includes `compaction`. A runner without the group never calls
-/// a compaction provider, so admitting the plan would leave the session's
-/// compaction owner uncalled. The refusal writes nothing.
-pub fn check_plan_compaction<S: AsRef<str>>(
-    plan: &Map<String, Value>,
-    declared: &[S],
-) -> Result<(), &'static str> {
-    let carries_item = plan
+/// A provider plan must name the session's role explicitly, because
+/// compaction-provider/v2 Setup requires that same preset. No runner default
+/// can stand in for the plan composer's role choice.
+pub fn check_plan(plan: &Map<String, Value>) -> Result<(), &'static str> {
+    if let Some(item) = plan
         .get(PLAN_COMPACTION_ITEM)
-        .is_some_and(|item| !item.is_null());
-    let declares_group = declared
-        .iter()
-        .any(|name| name.as_ref() == capabilities::COMPACTION);
-    if carries_item && !declares_group {
-        Err(PLAN_COMPACTION_ITEM_FIELD)
-    } else {
-        Ok(())
+        .filter(|item| !item.is_null())
+    {
+        if !item.get("preset").is_some_and(Value::is_string) {
+            return Err("plan.compaction_item.preset");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn compaction_plan_requires_an_explicit_role_preset() {
+        let vectors = crate::vectors::load("plan-compaction-preset.json");
+        assert_eq!(check_plan(vectors["accepted"].as_object().unwrap()), Ok(()));
+        for case in vectors["refused"].as_array().unwrap() {
+            assert_eq!(
+                check_plan(case["plan"].as_object().unwrap()),
+                Err(case["error"]["detail"]["field"].as_str().unwrap())
+            );
+        }
+        for item in [
+            json!({"provider":"example.compactor"}),
+            json!({"provider":"example.compactor","preset":null}),
+        ] {
+            assert_eq!(
+                check_plan(json!({"compaction_item":item}).as_object().unwrap()),
+                Err("plan.compaction_item.preset")
+            );
+        }
+        let plan = json!({"compaction_item":{"provider":"example.compactor","preset":"worker","params":{}}});
+        assert_eq!(check_plan(plan.as_object().unwrap()), Ok(()));
+        assert_eq!(
+            plan_compaction_provider(plan.as_object().unwrap()),
+            Some("example.compactor")
+        );
     }
 }

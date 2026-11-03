@@ -13,7 +13,7 @@
     "run_id": "run-wake",
     "state": "completed",
     "final_message": {
-      "ordinal": 1,
+      "ordinal": 2,
       "mid": "m1",
       "text": "<wake in=\"90s\"/>"
     },

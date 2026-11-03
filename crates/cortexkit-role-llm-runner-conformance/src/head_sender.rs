@@ -12,8 +12,8 @@ use crate::{
     cases::{Case, Ending},
     drive::{call, checked_head, head},
     route::{Reply, RunnerRoute},
+    send_helpers::send_and_wait,
     subject::{LlmRunnerSubject, Script, ScriptedTurn},
-    tags::send_and_wait,
 };
 
 fn check(label: &str, got: Option<HeadSender>, expected: Option<HeadSender>) -> Result<(), String> {

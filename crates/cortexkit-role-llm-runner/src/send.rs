@@ -226,6 +226,8 @@ struct WireSendRequest {
         deserialize_with = "crate::service_tier::deserialize_request"
     )]
     service_tier: Option<crate::service_tier::ServiceTier>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    route_decision_id: Option<String>,
     #[serde(flatten)]
     runner_params: Map<String, Value>,
 }
@@ -247,6 +249,7 @@ impl From<WireSendRequest> for SendRequest {
             retention: wire.retention,
             retention_policy: wire.retention_policy,
             service_tier: wire.service_tier,
+            route_decision_id: wire.route_decision_id,
             runner_params: wire.runner_params,
         }
     }
@@ -267,6 +270,7 @@ impl From<SendRequest> for WireSendRequest {
             retention: request.retention,
             retention_policy: request.retention_policy,
             service_tier: request.service_tier,
+            route_decision_id: request.route_decision_id,
             runner_params: request.runner_params,
         }
     }
@@ -400,11 +404,42 @@ pub struct SendRequest {
     /// Fixed by the send starting a run. Absent means standard for a new run,
     /// and inherits the run's level when steering or queueing into that run.
     pub service_tier: Option<crate::service_tier::ServiceTier>,
+    /// A caller's routing decision, fixed for the run. Runners obtaining
+    /// accounts from routing forward it as `route.account_for.decision_id`
+    /// with this run's provider and model. Other runners ignore forwarding
+    /// and reporting, but still freeze the setting for joining sends.
+    pub route_decision_id: Option<String>,
     /// The runner's own send parameters, kept as received.
     pub runner_params: Map<String, Value>,
 }
 
 impl SendRequest {
+    pub fn check_compaction_item(&self) -> Result<(), &'static str> {
+        self.plan
+            .as_ref()
+            .map_or(Ok(()), crate::compaction::check_plan)
+    }
+    pub fn with_route_decision_id(mut self, decision_id: impl Into<String>) -> Self {
+        self.route_decision_id = Some(decision_id.into());
+        self
+    }
+
+    /// Validate against the active run's frozen setting. `None` means no active
+    /// run; `Some(None)` means an active run started without a decision;
+    /// `Some(Some(id))` names its decision. An omitted request value inherits.
+    /// Any explicit different value returns `route_decision_id`, regardless
+    /// of whether the runner obtains accounts from routing.
+    pub fn check_route_decision_id(
+        &self,
+        running: Option<Option<&str>>,
+    ) -> Result<(), &'static str> {
+        if let (Some(requested), Some(frozen)) = (self.route_decision_id.as_deref(), running) {
+            if Some(requested) != frozen {
+                return Err("route_decision_id");
+            }
+        }
+        Ok(())
+    }
     /// Set an explicit request level, including standard. Only None is omitted
     /// on the wire, so an explicit standard cannot inherit a running run's tier.
     pub fn with_service_tier(mut self, tier: crate::service_tier::ServiceTier) -> Self {
@@ -450,6 +485,7 @@ impl SendRequest {
             retention: None,
             retention_policy: None,
             service_tier: None,
+            route_decision_id: None,
             runner_params: Map::new(),
         }
     }
@@ -691,10 +727,10 @@ impl SendRequest {
     }
 
     /// Validate retention before writing anything. `previous` is `None`
-    /// for a fresh lineage and `Some(frozen_retention)` for an existing one,
+    /// for a new session record and `Some(frozen_retention)` for an existing one,
     /// including `Some(None)` for one first sent without retention. Absence
     /// on a later send preserves the current policy, never resets it.
-    /// Expiry of an old lineage must be resolved before this check.
+    /// Resolve expiry of the previous session record before this check.
     /// Pass `None` for `limits` when the capability group is undeclared,
     /// even if an undeclared limits object was supplied in discovery.
     pub fn check_retention(
@@ -865,30 +901,6 @@ impl SendRequest {
         self.delivery_order = Some(order.modes.clone());
         self.runner_params.extend(order.to_members());
         self
-    }
-
-    /// Admission's check of the plan's `render_tags` against `declared` (a
-    /// runner's module-level capabilities): `Err` with the `field` of an
-    /// `invalid_params` refusal (`plan.render_tags`) for a value that is not
-    /// a boolean, or `true` on a runner without `tags`. A request without a
-    /// plan passes.
-    pub fn check_render_tags<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
-        match &self.plan {
-            Some(plan) => crate::tags::check_plan(plan, declared),
-            None => Ok(()),
-        }
-    }
-
-    /// Admission's check of the request's `plan` against `declared` (a
-    /// runner's module-level capabilities): `Err` with the `field` of an
-    /// `invalid_params` refusal (`plan.compaction_item`) when the plan names
-    /// a compaction provider and the runner does not declare `compaction`.
-    /// A request without a plan passes.
-    pub fn check_compaction_item<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
-        match &self.plan {
-            Some(plan) => crate::compaction::check_plan_compaction(plan, declared),
-            None => Ok(()),
-        }
     }
 }
 
@@ -1152,49 +1164,6 @@ mod tests {
                 (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
             }
         }
-    }
-
-    #[test]
-    fn a_compaction_item_is_refused_at_admission_without_the_compaction_group() {
-        let file = vectors::load("send.json");
-        for case in vectors::cases(&file, "compaction_item_checks") {
-            let name = case["name"].as_str().unwrap();
-            let request: SendRequest = vectors::round_trip(name, &case["request"]);
-            let declared: Vec<&str> = case["declares"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|c| c.as_str().unwrap())
-                .collect();
-            match (
-                request.check_compaction_item(&declared),
-                case.get("refusal"),
-            ) {
-                (Ok(()), None) => {}
-                (Err(field), Some(refusal)) => {
-                    assert_eq!(refusal["code"], errors::INVALID_PARAMS, "{name}");
-                    assert_eq!(
-                        errors::refused_field(errors::INVALID_PARAMS, refusal.get("detail")),
-                        Some(field),
-                        "{name}"
-                    );
-                }
-                (outcome, refusal) => panic!("{name}: {outcome:?} against {refusal:?}"),
-            }
-        }
-    }
-
-    #[test]
-    fn a_presetless_compaction_item_is_admitted_without_inventing_a_preset() {
-        let wire = vectors::load("plan-compaction-without-preset.json");
-        let request: SendRequest = vectors::round_trip("presetless compaction item", &wire);
-        assert_eq!(
-            request.check_compaction_item(&[crate::capabilities::COMPACTION]),
-            Ok(())
-        );
-        let encoded = serde_json::to_value(request).unwrap();
-        assert_eq!(encoded["plan"], wire["plan"]);
-        assert!(encoded["plan"]["compaction_item"].get("preset").is_none());
     }
 
     #[test]
@@ -1634,5 +1603,47 @@ mod run_parameter_tests {
         let request = SendRequest::new("hi", "specific")
             .with_runner_params(json!({"tools":["native"]}).as_object().unwrap().clone());
         assert_eq!(request.no_tools(), Ok(Some(false)));
+    }
+}
+
+#[cfg(test)]
+mod routing_decision_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn routing_decision_is_typed_round_trips_and_is_fixed_for_every_run() {
+        let wire = json!({"prompt":"p","send_id":"s","route_decision_id":"chosen","service_tier":"standard","custom":true});
+        let request: SendRequest = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(request.route_decision_id.as_deref(), Some("chosen"));
+        assert!(!request.runner_params.contains_key("route_decision_id"));
+        assert_eq!(serde_json::to_value(&request).unwrap(), wire);
+        assert_eq!(request.check_route_decision_id(None), Ok(()));
+        assert_eq!(
+            request.check_route_decision_id(Some(Some("chosen"))),
+            Ok(())
+        );
+        assert_eq!(
+            request.check_route_decision_id(Some(Some("other"))),
+            Err("route_decision_id")
+        );
+        assert_eq!(
+            request.check_route_decision_id(Some(None)),
+            Err("route_decision_id")
+        );
+        assert_eq!(
+            SendRequest::new("p", "s").check_route_decision_id(Some(Some("chosen"))),
+            Ok(())
+        );
+        assert_eq!(
+            SendRequest::new("p", "s")
+                .with_route_decision_id("chosen")
+                .route_decision_id,
+            Some("chosen".into())
+        );
+        assert!(serde_json::from_value::<SendRequest>(
+            json!({"prompt":"p","send_id":"s","route_decision_id":3})
+        )
+        .is_err());
     }
 }

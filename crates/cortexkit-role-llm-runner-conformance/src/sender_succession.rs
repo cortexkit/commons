@@ -7,8 +7,8 @@ use crate::{
         wait_run_end,
     },
     route::RunnerRoute,
+    send_helpers::{params, send_and_wait},
     subject::{Capability, LlmRunnerSubject, Script, ScriptedTurn},
-    tags::{params, send_and_wait},
 };
 use cortexkit_role_llm_runner::{
     capabilities as groups,

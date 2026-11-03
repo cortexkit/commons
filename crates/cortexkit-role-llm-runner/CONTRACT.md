@@ -35,6 +35,45 @@ the `session_change` request, reply and refusal shapes (§10.2) are pinned.
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation.
 
+## Changes from 0.7
+
+0.8.0 is a breaking release. It removes the compaction-provider/v1
+integration: the compaction, tag_checkpoint and message_checkpoint groups;
+Setup model-call holds and links between successive cut-bounded read windows;
+advance notices, view.get, view_due/view_pending, negotiated truncate and
+tag_bytes_edits; checkpoint/anchor APIs and copied-checkpoint fork detection.
+`cortexkit-role-compaction` owns the replacement protocol. The plan still
+names its provider with compaction_item, now requiring an explicit role preset.
+The run reasons compaction_wait and context_ceiling_wait remain.
+
+Lineages (the former cut-bounded readable windows), lineage_id, descends_from,
+before_lineage_start and lineage_changed are removed. Reads cover the whole
+active path, including below host markers, from ordinal 1; zero aliases that
+start. Entry counting follows the Entry/per-host definitions in
+`cortexkit-role-compaction/CONTRACT.md` W4.1/W4.2: count every active-path
+entry from 1, including empty entries, and exclude markers. These rules
+replace the former host-specific counts.
+history_version replaces the cursor's lineage id and,
+with required incarnation on every head/read/history page, identifies cached
+snapshots and prevents stale cursor reuse after a rewrite.
+
+The tags group, session.resolve, read tag rows, render_tags and model_view
+replacement-entry pages are removed. Part numbering belongs only to the
+compaction contract. Descriptors publish their own part keys; the retained
+part_tag template slot takes the runner's compaction A3 number. output_refs
+no longer requires tags and still captures immutable request-time identities.
+
+Archive pruning remains for sessions without a compaction provider, with
+served per-part keys and retained prune state. The old Setup ready.accepts
+permission and repeat Setup/view-restoration machinery are removed. Provider
+plans cannot prune until the compaction contract defines acceptance.
+
+Run settings gain route_decision_id, fixed per run on every runner, with
+routing forwarding/refusal/caller-reporting rules. Provider tool results use
+the shared 64 KiB measure and a whole tool_result_too_large error, never
+truncation or redispatch. User-command bodies no longer carry session_ref.
+The optional send_status group serves session.send_status and the send.status
+alias until the next breaking release.
 ## 1. Role identity and addressing
 
 - [pinned] A runner lists `llm-runner/v1` in its manifest's
@@ -49,12 +88,14 @@ particular implementation.
   sites (§11.2) are calls the runner makes, not ops it serves, so they are
   not ops in `role.describe`; a runner advertises the ones it runs in
   `role.describe.step_hooks` (§2), and is bound only by those. The
-  compaction interface (§11.1) is not required: it is the `compaction`
-  group.
+  compaction interface (§11.1) is required when the plan names a compaction
+  provider: the runner must implement `cortexkit-role-compaction`, including
+  `compaction-runner/v1` toward that provider. This is a separate protocol,
+  not an llm-runner capability group.
 - [pinned] Everything else is a declared capability group (§3), including
   the operations not every runner serves: `run.status`, `run.cancel`,
   `run.tool_calls`, `session.retract`, `session.adopt` and
-  `session.resolve`. A runner serves a group only if it declares it, and a
+  the reads it serves. A runner serves a group only if it declares it, and a
   consumer uses a group only if it is declared.
 - [pinned] A consumer refuses a module whose `role.describe` lacks a required
   op, by name, before routing anything to it. The check lives in the
@@ -153,7 +194,7 @@ particular implementation.
 
 | Group | Ops (`capabilities::GROUPS`) | Section |
 |---|---|---|
-| `output_refs` | `session.output_refs`, `session.output_ref_read` (requires `tags`) | §9.13 |
+| `output_refs` | `session.output_refs`, `session.output_ref_read` | §9.13 |
 | `tool_upfront` | `session.send` with per-plan-item `upfront`; no added op | §9.18 |
 | `transcript_reads` | `session.read`, `session.head` | §4 |
 | `host_history` | `session.history` | §4.6 |
@@ -165,7 +206,7 @@ particular implementation.
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
 | `read_display_facts` | `session.read` (`include_display_facts`, entry client ids and tool times) | §4.2 |
-| `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `send.status` where served | §9.7 |
+| `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `session.send_status` where served | §9.7 |
 | `rich_ui_stamp` | `session.read` (the `include_rich_ui` opt-in), `session.head` (`last_run_rich_ui`); also the rich UI stamp on assistant display rows and `run_started` where those are served | §9.17 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
 | `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
@@ -177,15 +218,11 @@ particular implementation.
 | `run_cancel_by_interrupt` | no additional op; requires `run_cancel` and `delivery_order` | §6.2 |
 | `dispatch_attribution` | `session.read` (per-call fields) | §5 |
 | `streaming` | `session.read` (`head`), `session.subscribe` | §7 |
-| `model_view` | `session.read` (`view: "model"`) | §8 |
 | `steer` | `session.send` with `delivery: "steer"` | §9 |
 | `queue` | `session.send` with `delivery: "queue"` | §9 |
 | `interrupt` | `session.send` with `delivery: "interrupt"` | §9 |
 | `plans` | `session.send` with `plan` (baseline via required `session.baseline`) | §10.1 |
 | `system_text_default` | `session.send` with preset-less `system_text` plan items | §10.1 |
-| `compaction` | `session.read`, `session.resolve` (it requires `tags`), and the runner half of compaction-provider 0.3.0 §3 | §11.1 |
-| `tag_checkpoint` | `session.read`, `session.resolve` (it requires `compaction`), and honouring a Setup checkpoint | §9.6 |
-| `message_checkpoint` | message and tag anchors in Setup and native marker checkpoints (requires `tag_checkpoint`) | §4.8, §9.6 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `refresh_relaunch` | `session.subscribe`; requires `session_change` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
@@ -201,7 +238,6 @@ particular implementation.
 | `submit_streamed_siblings` | Extends `session.send` in `submit_tool` mode; requires `structured_output`. Earlier siblings may already have been dispatched while the step streamed. A caller requiring that no sibling ever runs must not send `submit_tool` to such a runner, or must offer no tools with side effects in that run. | §6, §9.4 |
 | `structured_output_per_session` | Extends `session.send`; requires `structured_output`. The first admitted send fixes the whole `structured_output` member, present or absent, for the session. A caller wanting a shape only on some runs cannot use such a runner for that session. | §9.4 |
 | `adopt` | `session.adopt` | §9.5 |
-| `tags` | `session.read` (`tags`), `session.resolve` | §9.6 |
 | `run_tool_calls` | `run.tool_calls` | §6.3 |
 | `run_usage` | `run.result` with `usage`, and `run.status` with it where the runner serves that op | §6.4 |
 | `finish_reason` | `run.result` with `finish`, and ended `run.status` with it where served | §6.6 |
@@ -209,7 +245,7 @@ particular implementation.
 | `head_sender` | `session.head` with the attested caller's effective delivery grant in `sender`; absence means no grant | §4.3 |
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
 | `app_readers` | Plan-named read admission; adds no operation of its own | §9.19 |
-| `send_status` | `send.status` | §9.8 |
+| `send_status` | `session.send_status` | §9.8 |
 | `user_commands` | `session.user_command`, `session.user_command_status` | §9.10 |
 | `turn_directives` | `session.send` with `directives`; its answer on `run.result` and `run.status` where served | §9.9 |
 | `interrupt_reason` | `run.result` with durable `reason`; the same on `run.status` and `last_run_state` where served | §6.5 |
@@ -235,12 +271,10 @@ particular implementation.
   op; whether a runner is its own host is not visible in the answer, so a
   consumer that needs the history checks for the group.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
-  `structured_output`, `adopt`, `tags`, `run_tool_calls`, `run_usage`,
+  `structured_output`, `adopt`, `run_tool_calls`, `run_usage`,
   `delivery_order`, `send_status`, `max_steps`, `max_output_tokens` and
   `no_tools`, `turn_directives` and `interrupt_reason` are each declared on their own: a runner may serve any of them without the others,
-  and without `run_ops` or `transcript_reads`. `tags` adds fields to
-  `session.read`, so it requires that op (and `session.resolve`), not all of
-  `transcript_reads`.
+  and without `run_ops` or `transcript_reads`.
 - [pinned] A caller MUST NOT send `directives` unless the runner advertises
   `turn_directives` (§9.9). `check_describe` checks the group for
   `session.send` and `run.result`; `run.status` carries the same answer when
@@ -306,8 +340,7 @@ particular implementation.
 - [pinned] A caller MUST NOT send `session.adopt` unless the runner
   advertises `adopt` (§9.5). `check_describe` checks the group for
   `session.adopt`; it adds no discovery metadata.
-- [pinned] A caller MUST NOT send `session.resolve` unless the runner
-  advertises `tags`, nor `run.tool_calls` unless it advertises
+- [pinned] A caller MUST NOT send `run.tool_calls` unless it advertises
   `run_tool_calls` (§9.6, §6.3). `check_describe` checks each group for its
   ops; neither adds discovery metadata.
 - [pinned] `run_usage` adds `usage` to `run.result` and `run.status`
@@ -325,10 +358,10 @@ particular implementation.
   `queue` (a reminder starting a run, a template send going out as an empty
   prompt). Beside a list they fail closed, because every runner without the
   group, older ones included, refuses the whole send naming `delivery`.
-- [pinned] A caller MUST NOT send `send.status` unless the runner
+- [pinned] A caller MUST NOT send `session.send_status` unless the runner
   advertises `send_status` (§9.8). Against any other runner it follows a
   send by re-sending the full body under the same `send_id` (§9).
-  `check_describe` checks the group for `send.status`; it adds no discovery
+  `check_describe` checks the group for `session.send_status`; it adds no discovery
   metadata.
 - [pinned] `role.describe.run_cancel?: {at: [string, ...]}` optionally
   advertises cancellation points (§6.2). Absence means `now` only.
@@ -341,37 +374,19 @@ particular implementation.
   until a second consumer exists.
 - [pinned] `interrupt` is a group of its own: a runner may steer and queue
   without being able to abort a model stream.
-- [pinned] `compaction` is all of §11.1 or none of it: Setup, advance
-  notices, views applied at step boundaries, rides, the ceiling and native
-  markers. A runner that hosts no sessions of its own (one that only steers
-  sessions another runner hosts) declares none of it, never a stub.
-- [pinned] `compaction` requires `tags`: an answer declaring it without
-  `tags` is malformed, and `check_describe` refuses it by name
-  (`compaction_without_tags`), because a compaction provider addresses every
-  view edit by part key and tag. The group lists `tags`' ops,
-  `session.read` and `session.resolve`.
-- [pinned] `tag_checkpoint` requires `compaction`: an answer declaring it
-  without `compaction` is malformed, and `check_describe` refuses it by
-  name (`tag_checkpoint_without_compaction`), because the checkpoint rides
-  the compaction provider's Setup answer. It lists `compaction`'s ops and
-  adds none (§9.6).
-- [pinned] `message_checkpoint` requires `tag_checkpoint` and lists the
-  same ops, adding none. `check_describe` refuses it alone by name
-  (`message_checkpoint_without_tag_checkpoint`). Its message-lineage
-  requirements do not apply to runners that omit the group (§9.6).
-- [pinned] A compaction provider requires `compaction` of any runner it
-  serves. A session starter never pairs a plan's `compaction_item` with a
-  runner that lacks it, and the runner refuses such a plan at admission
-  (§10.1) as `invalid_params {field: "plan.compaction_item"}`
-  (`SendRequest::check_compaction_item`), so a session never runs with a
-  compaction owner nothing calls.
+- [pinned] A plan naming a compaction provider requires the runner to
+  implement `cortexkit-role-compaction`, including the provider-facing
+  `compaction-runner/v1` role. A session starter never pairs such a plan
+  with a runner that does not implement that protocol. The runner refuses
+  it at admission as `invalid_params {field: "plan.compaction_item"}`,
+  before writing anything. No additional capability group is defined here.
 - [pinned] A session owner sends a mid-session change only to a runner that
   declares `session_change`. A runner without it gets no mid-session
   changes; its owner applies them at the next session instead.
 - [pinned] What consumers require is the consumer's business, checked before
   use. A session owner that reads a runner's sessions requires the five
   read-side groups (`transcript_reads`, `run_ops`, `dispatch_attribution`,
-  `streaming`, `model_view`). A context manager requires `transcript_reads`
+  `streaming`). A context manager requires `transcript_reads`
   unless it has its own reader of the host's transcript.
 
 ## 4. `transcript_reads`: `session.read` and `session.head`
@@ -381,29 +396,22 @@ particular implementation.
 Read admission follows §9.19 when the plan carries `readers`; without that
 member it keeps that runner's current read admission.
 
-`{from_ordinal?, after_mid?, lineage_id?, limit?, max_bytes?,
-include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`ReadRequest`). Three modes (`ReadRequest::mode`):
+`{from_ordinal?, after_mid?, history_version?, limit?, max_bytes?,
+include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`ReadRequest`).
 
-- [pinned] **Tail.** With no cursor, the newest page within the current
-  lineage (§4.5). This is a contract, not a default a runner may change; the
-  suite checks it on a session longer than one page.
-- [pinned] **Range.** `from_ordinal` reads forward from that ordinal. An
-  ordinal below the lineage's `first_ordinal` is refused
-  `before_lineage_start` with `detail.first_ordinal`
-  (`errors::BeforeLineageStartDetail`, §4.5).
-- [pinned] **After a message.** `{after_mid, lineage_id}` reads strictly after
-  that message. It is refused by name as `lineage_changed` (the session's
-  lineage is not `lineage_id`), `unknown_mid` (the lineage has no such
-  message) or `before_lineage_start` (the message lies below the lineage's
-  `first_ordinal`), and never silently answered from the tail.
-- [pinned] `mid` is opaque to consumers: they only pass back a value a page
-  returned.
-- [pinned] A read carrying a `lineage_id` that is not the session's current
-  lineage is refused `lineage_changed`, whatever its mode.
-- [pinned] `after_mid` without `lineage_id` is refused `invalid_params
-  {field: "lineage_id"}`; `after_mid` with `from_ordinal` is refused naming
-  `from_ordinal`; `after_mid` with `view: "model"` is refused naming `view`
-  (§8).
+- [pinned] **Tail.** No cursor means the newest page of the active path.
+- [pinned] **Range.** `from_ordinal` reads forward from that ordinal. 0 and 1
+  both mean from the first entry. The whole active path is available, even
+  below the newest host marker, from the host's own store (§4.5).
+- [pinned] **After a message.** `{after_mid, history_version}` reads strictly
+  after that message. A version mismatch is `history_changed`; an unknown
+  id at the current version is `unknown_mid`. Neither falls back to tail.
+- [pinned] `mid` is opaque. `after_mid` without `history_version` is
+  `invalid_params {field: "history_version"}`; with `from_ordinal` it is
+  refused naming `from_ordinal`. A request explicitly naming another history
+  version is refused `history_changed`, in every mode.
+- [pinned] `view` is absent or `"raw"`. `"model"` and unknown values are
+  refused `invalid_params {field: "view"}`.
 - [pinned] `max_bytes` asks for a byte cap on the page. Absent means the
   runner's default; a value above the runner's maximum is capped to it. Both
   are stated in `role.describe` (§2).
@@ -425,33 +433,20 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   `invalid_params {field: "media"}`. Inline preserves existing non-media
   payload bytes, whole-message paging and `reply_too_large` behavior; §9.12
   defines the text rendering of media on an `attachments` runner.
-  Descriptors are offered only on raw transcript reads and `session.resolve`.
-  `view: "model"` with `media: "descriptors"` is refused before read work with
-  `invalid_params {field: "media"}`; model-view descriptors are not offered.
+  Descriptors are offered on raw transcript reads.
 - [pinned] The request is strict: an unknown field is refused
   `invalid_params` naming it, because a missing cursor changes the question
   (a misspelled `from_ordinal` would otherwise get the newest page).
 
-- [pinned] At the adoption cut, a runner declaring `message_checkpoint`
-  answers `session.read` for the lineage being set up while its Setup call
-  for that lineage is outstanding, without waiting on that Setup, its lock,
-  or any gate it holds. It serves the lineage from its `first_ordinal`
-  onward and never below it, excluding §4.8's uncounted finished-summary,
-  compaction-only and dead-step rows. This lets the provider read surviving rows to
-  build its Setup answer when a moved session recovers at the adoption cut,
-  after a revert removed `cut` or the runner lost its state. Native-cut
-  descent does not need this recovery read: the provider renders kept rows
-  from what it held under the parent lineage. The existing rule that a
-  native-cut Setup never interrupts readers is unchanged (§9.6).
 
 ### 4.2 The page
 
-`{messages, lineage_id, next_from_ordinal?, head?, pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
+`{messages, history_version, incarnation, next_from_ordinal?, head?,
+pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
 
-- [pinned] Every page of a session that has a lineage carries `lineage_id`.
-  A session that was never written has no lineage yet: a read of it returns
-  an empty page with no `lineage_id` and no `next_from_ordinal`, and an
-  absent `lineage_id` means exactly that.
+- [pinned] Every page carries the required cache pair from §4.5, including an
+  empty page for a session never written. An empty page has no continuation
+  unless more entries exist beyond the selected range.
 - [pinned] A page is limited by message count and by bytes, and carries
   `next_from_ordinal` whenever it stops before the end of the transcript.
 - [pinned] A single message larger than the requested byte cap comes alone
@@ -463,65 +458,34 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
 - [pinned] A page is an ordinal range and nothing more. It is not aligned to
   turns, runs or tool-call boundaries: a tool call and its result may arrive
   on different pages.
-- [pinned] Each message (`ReadMessage`) carries `ordinal`, `mid` and its
-  final values: what later steps render and what executed. The raw view and
-  the model view then differ only by compaction.
-- [pinned] **Only finished messages.** `session.read` returns only messages
-  the runner will no longer change, except for declared archive pruning
-  (§9.14.1). A message still being generated (a
-  model step streaming, a tool result being written) is never an entry
-  until it completes. This is stricter than, and contains, the final-values
-  rule above; streaming progress reaches a consumer through the stream
-  (§7), never through a partial entry.
-- [pinned] A runner declaring `message_checkpoint` also excludes §4.8's
-  uncounted host rows from every page: on OpenCode 1, finished summaries,
-  nonempty compaction-only messages and dead steps. A compaction part
-  alongside any other part does not by itself exclude a message.
-- [pinned] **Read stability.** Read stability is scoped to the lineage
-  (§4.5). Once `session.read` has returned an entry
-  under a `lineage_id`, its `message` bytes, `ordinal`, `mid`, `role`,
-  `written_at`, `delivered_as`, and its part keys and tags never change
-  under that lineage, except for declared archive pruning (§9.14.1).
-  Envelope members that report later state move forward
-  only as their own rules say (`run.final`, §6; `tool_calls`'
-  `call_key`, `dispatched_to` and `indeterminate`, §5). A runner that reads
-  from a host serves the bytes it first ingested, never the host's live
-  history: from its own journal, or rebuilt from the host's stored rows and
-  checked against their served digest (§4.2.1). A host change that reaches the
-  model (a revert, an edited part) and a recovery that drops or rewrites a
-  written message (§14, property 4) start a new lineage, so reads of the old
-  one are refused `lineage_changed`; changed bytes never appear under the
-  same lineage except for declared archive pruning (§9.14.1).
-  This includes a change made while the runner was not running. A runner
-  whose host can change stored messages while the runner is stopped checks,
-  when it starts and before its next model call, the messages it froze
-  against the host, and starts a new lineage for any difference.
-  A recovery that only appends, such as closing a never-sent
-  call with its never-executed result (§14, property 4, shape (b)), keeps
-  the lineage, because no byte already written changes. A reader may treat
-  changed bytes under one lineage as a runner defect, except for the
-  precisely listed archive-pruning changes of §9.14.1. Like an OpenCode 1
-  host edit, a late Pi `context_edit` that changes a served message's
-  model-visible content requires the runner to start a new lineage from the
-  target's ordinal at a step boundary. So within one lineage an entry's
-  served body changes only as §9.14.1's archive pruning allows, and its
-  projection reflects every edit that applied when it was served; an edit
-  that predates ingest is simply part of the body served from the start.
-  The runner never renumbers it or changes served bytes in place. The archive-pruning exception changes
-  only listed part payloads, never identity, ordering, tags or write-time digests.
-- [pinned] **Bookkeeping stays out.** Host records a runner writes for its
-  own compaction bookkeeping (a host's native compaction message, summary or
-  entry) are outside the transcript: they never appear in `session.read`
-  and are never rendered to the model on top of the view.
+- [pinned] Each entry (`ReadMessage`) carries `ordinal`, `mid` and its final
+  stored message in the runner's own schema.
+- [pinned] **Settled entries only.** A streaming model step or a tool result
+  still being written is not served until settled. Its storage row still
+  consumes an ordinal. A step that died without content is a settled entry
+  with no parts, even without the host's completion or error flags. Reads
+  never number past a row that may still receive content.
+- [pinned] **Read stability.** At one (`history_version`, `incarnation`) pair,
+  served message bytes, ordinals, ids, role, write time, delivery identity and
+  part keys stay fixed, apart from the precisely listed archive-pruning
+  changes (§9.14.1). Later-state envelope fields advance only under their
+  own rules (`run.final`, §6; call attribution, §5). A host-backed runner
+  serves its ingested bytes or rebuilds and checks them against their served
+  digest (§4.2.1). A revert, branch switch, host edit (including while the
+  runner was stopped), renumbering or recovery rewrite raises history_version
+  before changed bytes are served. An append-only recovery does not.
+- [pinned] **Markers stay out.** The marker records W4.2 identifies, including
+  a completed OpenCode 1 compaction pair, are not entries and never appear in
+  reads. An unfinished pair remains ordinary entries, exactly as W4.2 says.
 - [pinned] **The envelope.** A read entry is `{ordinal, mid, message, run?,
-  originals?, tool_calls?, tags?, role?, written_at?, delivered_as?, digest?,
-  part_digests?, rich_ui?, client_message_id?, tool_times?}`. Every
+  originals?, tool_calls?, role?, written_at?, delivered_as?, digest?,
+  part_digests?, part_keys?, rich_ui?, client_message_id?, tool_times?}`. Every
   runner-neutral fact a consumer relies on rides in the envelope, never only
   inside `message`: the position (`ordinal`, `mid`), who spoke (`role`,
   `read::role`: `user`, `assistant`, `tool`, `system`, decoded open),
   when (`written_at`, milliseconds since the Unix epoch, of the write or of
-  the runner's first ingest of a message its host stored), its part tags
-  (`tags`, §9.6), its run (`run`, §6), its tool calls (`tool_calls`, §5) and,
+  the runner's first ingest of a message its host stored), its part keys
+  (when carried), its run (`run`, §6), its tool calls (`tool_calls`, §5) and,
   for a `delivery_order` send, the mode it went out in (`delivered_as`,
   §9.7). `role` and `written_at` are
   optional: a runner sets them whenever it knows them, which is always for a
@@ -586,7 +550,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   over the threshold still exceeds it, describe additional payloads largest
   first, ties broken by earlier part order, until it fits. Selection depends
   only on that message's own content and these constants, never `max_bytes`,
-  page position or neighboring messages: repeated reads on one lineage return
+  page position or neighboring messages: repeated reads on one history_version return
   identical bytes except for declared archive pruning (§9.14.1). The runner
   selects fewer messages to keep the complete
   page inside the frame. `max_bytes` is still soft for one message: an
@@ -594,31 +558,26 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   `reply_too_large` is non-payload structure exceeding the fixed budget; its
   detail names `ordinal`. `read::descriptors::describe` supplies the shared
   largest-first policy; schema adapters identify payload locations.
-- [pinned] A part key is a runner-defined string, opaque to providers. Providers
-  never derive keys from message bytes; they use only keys the runner served
-  for that message, in `part_digests` and in `tags` rows. Key stability is
-  governed by **Read stability** above (§4.2), not by a serializer-profile key
-  convention.
-- [pinned] Within one message, part keys are unique. In descriptors mode,
-  `part_digests` lists exactly the same keys as the entry's `tags` rows, in
-  the same order. The complete tag-row key list is defined by **Reads** in
-  §9.6; a part without a tag number still has a row there.
+- [pinned] Part keys are runner-defined strings, opaque to readers. Within
+  a message they are unique and `part_digests` supplies them in stored order,
+  one per top-level part. Readers never derive keys from native ids, indexes
+  or message bytes. Archive-pruning runners without digest rows serve
+  `part_keys` instead (§9.14.1).
 - [pinned] In descriptors mode every `ReadMessage` MUST carry `digest` and
   `part_digests: [{part, digest}]`, every top-level part in message order,
   nested media excluded. Both digest fields are optional in inline mode.
   Digests use `content_digest::content_digest`:
   lowercase SHA-256 over RFC 8785 (JCS) of the full stored message or full
   stored part as originally written, before archive pruning (§9.14.1) or any
-  media rendering (§9.12). This is the same function used for compaction
-  notices' `through_digest` and `descends_from`, re-exported by the provider
-  crate; it never hashes descriptors. Digest rows with keys not matching the
+  media rendering (§9.12). The compaction contract W7 uses this same shared function; it never
+  hashes descriptors. Digest rows with keys not matching the
   actual parts, missing rows, duplicate keys or wrong order are decode errors
   in the kit. Ref shapes decode strictly. A compaction provider uses these
   served identities and ref hashes as given, never rehashing a descriptor.
   `ReadMessage::check_descriptor_rows(profile)` checks the provider-visible
   envelope: digest shapes, unique keys, the profile's top-level part count,
-  and exact equality with the entry's tag-row keys in order. Missing tag rows
-  are rejected. Unknown profiles and malformed part containers return errors
+  with one digest row for each stored part. Digest rows themselves publish
+  the keys; a second tag-row list is neither required nor served. Unknown profiles and malformed part containers return errors
   naming the profile.
   `serializer_profile::top_level_part_count(profile, message)` counts the
   following containers without deriving part keys:
@@ -636,11 +595,10 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   `owned-broca`, or `details` on a `pi` message with role `toolResult`.
   `ReadMessage::check_descriptors(keys)` is the runner-side strict check using
   independently known keys in message order; a provider uses the complete keys
-  the entry itself serves in its `tags` rows, never keys derived from bytes.
-- [pinned] Ordinals and `mid`s are never reused or renumbered within a
-  lineage, across any crash. Ordinals are session-wide: a cut starts a new
-  lineage but renumbers nothing, so a message keeps its ordinal and `mid`
-  on every lineage that still holds it (§4.5).
+  the entry itself serves in part_digests, never keys derived from bytes.
+- [pinned] At one cache pair, entry ids and ordinals stay fixed across crashes.
+  A cut renumbers nothing. A revert may reuse a removed ordinal for a new
+  entry only after history_version rises (§4.5).
 - [pinned] With `include_originals`, a hooked message carries `originals:
   [{field, value, provider}]` (`Original`), oldest first.
 - [pinned] With `include_rich_ui`, an assistant entry a stamped run wrote
@@ -651,7 +609,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   the page (§7). It is a JSON object, opaque to consumers, and absent on a
   session with no events.
 - [pinned] Decoded leniently: a consumer ignores fields it does not know.
-  Runners may add their own (a runner's `lineage_state`, say).
+  Runners may add their own (a runner's `history_state`, say).
 
 ### 4.2.1 Served bytes rebuilt from a host's store
 
@@ -659,7 +617,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   served when the host's stored row reproduces them. For such an entry it may
   keep the entry's `digest` instead (the `content_digest` of its `message`,
   §4.2), together with a `stripped` flag, and rebuild every read from the
-  host's stored row. Read stability (§4.2) still holds: under its lineage, a
+  host's stored row. Read stability (§4.2) still holds: at its history_version, a
   `mid` stands for one `message` JSON value, so one `content_digest`. A
   digest only detects a difference and can't restore the body, so a runner
   keeps the body of any message the host can still change in a way the
@@ -671,7 +629,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   body. It refuses the read `served_bytes_changed`, detail `{mid}` naming
   the first such message (`errors::ServedBytesChangedDetail`), and logs the
   difference locally. It then treats the difference as a host change: it
-  serves that message again only under a new lineage (§4.5). Neither digest
+  serves that message again only under a raised history_version (§4.5). Neither digest
   reaches the reader.
 - [pinned] **Strip lists.** A profile's strip list names the members its host
   rewrites after a message finished without changing what the model sees.
@@ -701,55 +659,23 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
 
 ### 4.3 Head metadata
 
-- [pinned] Head metadata without bodies: `{lineage_id, last_ordinal,
-  first_ordinal, cut?, history_version, head, last_run_state, last_run_error?,
-  last_run_rich_ui?, updated_at, input?, model?, usage?, sender?, incarnation?,
-  reasoning_pruned?}`
-  (`HeadMeta`). `reasoning_pruned` is the session's prune state, only on a
-  runner that declares `archive_prunes_reasoning` and only after the
-  session's first prune (§9.14.1).
-- [pinned] `history_version` is a `u64`, on `session.head` and on every
-  `session.history` page. It rises at every lineage change except a cut: a
-  revert, a recovery that rewrites written messages, or a restart after the
-  runner lost its state. It never changes at a cut or when messages are
-  appended. It never decreases, a store restore included: a runner keeps a
-  floor outside the store it restores, so a restored store cannot hand out
-  a lower value. Readers that hold a position in the visible history (an
-  app's claim on a message, say) key on it, so a compaction does not
-  invalidate the position while a rewrite of the visible history does.
-- [pinned] `cut: {mid, digest, written_at}` (`read::HeadCut`) describes the
-  cut that started the lineage's readable history, never its content: the
-  message the cut folds last (the one at the view cut's `through_ordinal`,
-  one below `first_ordinal` for a cut the runner made), its content digest
-  (the digest a cut lineage's `descends_from` names, compaction-provider
-  §5.1) and its creation time. A cut made before the runner numbered
-  anything, in a host's history before the runner adopted the session,
-  names the host's message. Other hosts' own pre-adoption compaction,
-  without a message checkpoint, may start at 0.
-  That message is the last one the host's compaction folded away: the
-  newest message the host no longer carries to the model. It is never a
-  message the host keeps visible after compacting, such as its compaction
-  marker or the summary that marker shows, so a consumer that drops
-  everything up to `cut` never drops the summary with it. A
-  lineage with no cut carries no `cut`, and its `first_ordinal` is 0.
-- [pinned] **The adoption cut (`message_checkpoint` only).** For a session
-  moved from a standalone compaction tool, the Setup checkpoint's
-  `message_count` and `head_cut` identify the adoption cut. It survives
-  exactly while `head_cut.mid` survives. A runner declaring
-  `message_checkpoint` MUST start a lineage at that cut with
-  `first_ordinal = message_count` and `session.head.cut = head_cut`, even
-  when `cut` or the marker rows are gone. A revert removing
-  `head_cut.mid` or an earlier message leaves no adoption cut.
-- [pinned] `first_ordinal` is the current lineage's first ordinal (§4.5):
-  0 for a lineage no cut started, the cut's first retained ordinal for one a
-  cut started. It is present whenever `lineage_id` is, and is at most one
-  above `last_ordinal` (a cut that retained no message).
+- [pinned] Head metadata without bodies: `{last_ordinal?, first_ordinal?,
+  cut?, history_version, incarnation, head?, last_run_state?, last_run_error?,
+  last_run_rich_ui?, updated_at?, input?, model?, usage?, sender?, reasoning_pruned?}`
+  (`HeadMeta`). The required cache identity follows §4.5.
+- [pinned] `first_ordinal` is the first entry the newest host marker keeps for
+  the model, or 1 without a marker. It is at most `last_ordinal + 1` when the
+  cut keeps no entry. It does not bound reads.
+- [pinned] `cut: {mid, digest, written_at}` (`HeadCut`) describes the last
+  entry hidden from the model by that marker, not the marker or summary.
+  Without a cut it is absent. All entries remain readable from ordinal 1.
+
 - [pinned] It is its own op, `session.head`, taking no fields
   (`HeadRequest`); `last_ordinal` is absent on an empty transcript;
   `last_run_state` is `{run_id, state, reason?}` (`LastRunState`) and
   describes the most recent run, never the transcript; `updated_at` is
   milliseconds since the Unix epoch. `last_run_state` is the pinned run
-  summary; a page's `lineage_state` is a runner member, not pinned.
+  summary; a page's `history_state` is a runner member, not pinned.
 - [pinned] `last_run_error?: {class, retry_after_secs?, resets_at_ms?}`
   (`read::LastRunError`, added in 0.7.5) may be present only with
   `last_run_state` whose `state` is `"error"`, and describes that same run.
@@ -773,7 +699,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   plan carries a stamp and describes that same run, so a later unstamped
   run removes it. It sits beside `last_run_state`, as `last_run_error`
   does, so code building `LastRunState` directly keeps compiling. A head
-  carrying it without `last_run_state` is not `lineage_consistent`.
+  carrying it without `last_run_state` is not `snapshot_consistent`.
 - [pinned] An error state without `last_run_error` means "not reported"
   (for example a runner predating 0.7.5), never "permanent". No describe
   group is needed. `class` is an open string: known examples today are
@@ -789,7 +715,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   modalities are accepted but the exact types are unknown. A fact the runner
   lacks is `unknown`, never `no`; `no` is a known fact, such as a runner that
   cannot carry attachments at all. An absent `input` means unknown, so the
-  member needs no group. It is outside the lineage rule below: a
+  member needs no group. It is outside the session record rule below: a
   never-written session may state it.
 - [pinned] `model?: {provider, model, variant?}` (`read::HeadModel`, added
   in 0.6.1) is the selection a send without a named model would use next.
@@ -799,7 +725,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   switch, never the frozen plan's bytes: core does not rewrite a head's plan
   when the person switches models. This describes the next send, not history;
   each run's `by_model` already describes what that run used. Like `input`,
-  `model` is independent of the lineage and may be known before the first send.
+  `model` is independent of the session record and may be known before the first send.
 - [pinned] `sender?: {modes: [<delivery-mode names>], interrupt: bool,
   owner?: true}` (`read::HeadSender`, added in 0.6.1) is the attested caller's
   own delivery grant: the route principal, never anyone else's. The mode
@@ -815,7 +741,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   if the runner reports `sender` for some callers. A present `sender` reports
   a grant with or without the group. Readers can use
   `HeadMeta::sender_grant` (`read::SenderGrant`: `Granted`, `NoGrant`,
-  `Unknown`) to make this distinction. It is independent of lineage.
+  `Unknown`) to make this distinction. It is independent of session record.
 - [pinned] `sender` uses the plan the runner would check on that caller's
   next send. From durable `session.refresh` acceptance, this is the latest
   accepted plan's sender list, even while its model input remains pending
@@ -827,23 +753,12 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   receives `owner: true`, every mode the runner would accept from the owner
   on its next send, and `interrupt: true`. A session with no plan reports
   `sender` only to its owner.
-- [pinned] `incarnation?` (added in 0.6.1) is an opaque string of 1–128
-  bytes, compared by equality only. It needs no group. It is minted when
-  the key's log is first created and changes only when that key's log is
-  created again, such as after a retained session expires and the key
-  restarts at ordinal 0. A new incarnation must never repeat an earlier one
-  for that key, even across a store restore: at least 122 random bits from
-  the OS random source (a UUID v4 qualifies), or anything else that can't
-  come back for a new incarnation; never a counter a restore could rewind.
-- [pinned] The incarnation stays the same across compaction cuts, reverts,
-  restarts, restores of the same log, and moves. The runner carries it in
-  the session's exported move data, so the destination reports the same
-  value. A runner omits `incarnation` unless it can vouch that the value
-  survives every case in that lifetime list (restart, restore, move, cut,
-  revert). It never mints one per process: a per-process value would silently
-  break readers' claims after a restart. Readers key claims on
-  `(incarnation, mid)` when it is present. Absent means unknown; readers
-  then key claims on `lineage_id`, which is safe but expires claims at cuts.
+- [pinned] Required `incarnation` is the opaque session-record identity from
+  §4.5, on the head and every read/history page. It stays fixed while that
+  record survives a cut, append, revert, restart or same-record restore. A
+  discarded record returning under the same session id receives a new value.
+  Readers bind caches to (`history_version`, `incarnation`), not to a process
+  lifetime or to a message id alone.
 - [pinned] `usage?` (`usage::SessionUsage`, added in 0.6.1) is durable session
   spend, behind the `session_usage` describe group. A runner that does not
   declare that group leaves `usage` absent. It has exactly §6.4's `run_usage`
@@ -874,16 +789,14 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   total as the whole session's spend. For runs since `since`, their `run_usage`
   figures add up to session usage field by field, but only for fields every
   counted step reported. Readers must not add an absent value as zero.
-- [pinned] It follows the read rule (§4.2): an absent `lineage_id` means the
-  session has no lineage yet. For a session never written, `lineage_id`,
-  `last_ordinal`, `first_ordinal`, `head`, `last_run_state` and
-  `updated_at` are all absent.
-- [pinned] An answer without `lineage_id` carries none of the other
-  lineage-dependent members, and an answer with `lineage_id` carries `updated_at` and
-  `first_ordinal` and `history_version`, with `cut` whenever
-  `first_ordinal` is above 0 (`HeadMeta::lineage_consistent`). A consumer treats any other answer as
-  malformed; it is not a refusal.
-
+- [pinned] A never-written session still carries the required cache pair.
+  `last_ordinal`, `first_ordinal`, `cut`, event `head`, `last_run_state` and
+  `updated_at` are absent until the corresponding transcript/run exists.
+  For a written session, `updated_at` and `first_ordinal` are present;
+  first_ordinal is at least 1 and no greater than last_ordinal + 1. Without
+  a cut it is 1. `HeadMeta::snapshot_consistent` checks these bounds and
+  whether last_run_rich_ui has a run to describe. An inconsistent answer is
+  malformed, not a refusal.
 ### 4.4 Serializer profiles
 
 - [pinned] A serializer profile names the schema of an entry's `message`
@@ -949,24 +862,17 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
 - [pinned] **`pi`.** A served body is the wrapped journal entry, not a bare
   message or the model-request projection. It is the entry as Pi's session
   loader reads it, with the active path's context edits applied to its
-  model-visible content (see Pi parts and tags): `id`, `parentId`, `type`
+  model-visible content (see Pi parts): `id`, `parentId`, `type`
   and every member an edit does not touch are unchanged, and an entry no
   edit targets is served as its stored row's JSON value. Read stability
   (§4.2) applies to this served form: its write-time digest is the
-  digest of the served body, and its parts are counted over it, so a reader
-  that has only the served row recounts the runner's parts; its tags
-  attach to those parts. `context_edit` entries themselves are never
-  served. Inside the served window, `session.history` entries equal
-  `session.read` (§4.6) and display rows (§4.7) project that same served
-  body. Only host-history pages below the served window serve the host's
-  raw stored entries; they assign no new ordinals, and a reader that needs
-  counts for that stored history uses `pi_session_projection` on the full
-  journal. Served entry types
-  are `message` (`/message/content`, except shell executions), `custom_message`
-  (top-level `content`) and `branch_summary` (top-level `summary`, rendered as
-  branch-summary text). Only `type: "message"` with `message.role: "user"`
-  identifies the user's own text; custom and branch-summary text is not the
-  user's own text even though Pi sends it to the model with user authority.
+  digest of the served body, and descriptor part counts use that body. `context_edit` entries themselves are never
+  served. Along the whole active path, including below markers, history
+  entries equal raw read entries (§4.6), and display rows project that same
+  frozen body. Served entry types are message, custom_message and
+  branch_summary; control records and compaction markers are not entries.
+  Only a message with role user identifies the person's own text; custom
+  and branch-summary text is not relabeled as a person's text.
   Pi 1.3.0 and 1.4.0 source, checksum-pinned with the public vectors:
   `dist/core/session-manager.js` (SM) :166-191 and
   `dist/core/messages.js` (MSG) :40-66,89-115.
@@ -980,11 +886,11 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   active, and entries under any other root are abandoned like any other
   branch.
   Each active-path `message`, `custom_message` and `branch_summary` consumes
-  exactly one ordinal in path order. Every other entry type consumes none:
+  exactly one ordinal in path order, from 1. Every other entry type consumes none:
   the session header, model/thinking settings, labels, context edits and
   compactions included. An entry that projects nothing still consumes its
   ordinal, with zero parts.
-- [pinned] **Pi parts and tags.** Count the blocks produced by Pi's runtime
+- [pinned] **Pi parts.** Count the native blocks produced by Pi's runtime
   entry projection and `convertToLlm`, after applying active-path context
   edits in path order (last edit per target wins). A null replacement removes
   the target's projected content. Non-null replacements change user,
@@ -1032,7 +938,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   parents, edit targets), and choosing the last edit is the caller's job.
   `pi_projected_content(row)` returns one served row's model-visible content,
   the units its parts count, including synthesized shell text and branch
-  summaries, so a codec can compute part digests and tag text from the
+  summaries, so a codec can compute native part digests from the
   served row alone. A planner that reads Pi's
   journal directly, such as an offline move, uses `pi_session_projection`
   on the full journal, so its counts and part positions match what the
@@ -1041,8 +947,9 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
 - [pinned] **Pi native cut.** The latest active-path `compaction` is the
   native cut, like OpenCode 1's native cut (§4.8, §9.6). Neither the record
   nor its `compactionSummary` projection consumes an ordinal or is ever
-  served. Entries before its `firstKeptEntryId` are outside the served
-  range; the retained tail keeps its ordinals (SM:193-229, MSG:48-55,103-109).
+  served. Entries before its `firstKeptEntryId` are hidden from the model,
+  never from reads; all entries keep their ordinals (SM:193-229,
+  MSG:48-55,103-109).
 - [pinned] **Pi sends.** A `session.send` naming a template (`template:
   {id, digest, slots}`, §9.7) is stored as `custom_message` with
   `customType: "cortexkit:<template id>"`, its rendered text in `content`,
@@ -1078,13 +985,13 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   2.2.3 history.ts:93-135,152-179; session-message.ts:125-236 and :135-246,
   respectively. As with `opencode-aisdk`, unfinished messages are withheld
   from reads and history until final (§4.2); streaming is not a partial row.
-- [pinned] **OpenCode 2 ordinals.** Each stored `session_message` row takes
-  exactly one dense zero-based ordinal in ascending native `seq` order, never
-  id or time order. Gaps in `seq` do not create ordinals. The sole exception
-  is `type: "compaction"`: running, failed and completed compactions consume
-  none. Idle, agent-switched and background-shell rows keep ordinals even
-  though they project zero parts. Unfinished rows also reserve their ordinal
-  but are not served until finished. The kept tail is never renumbered.
+- [pinned] **OpenCode 2 ordinals.** W4.2's selected session_message rows take
+  dense ordinals from 1 in native seq order, never id or time order. Gaps in
+  seq do not create gaps. User, synthetic, assistant, skill, system,
+  location-switched, foreground shell and model-switched rows count. Idle,
+  agent-switched and background-shell rows do not. Compaction rows are
+  markers, never entries. Empty users and dead steps remain empty entries;
+  unfinished rows reserve their ordinal but are not served until settled.
 - [pinned] **OpenCode 2 parts.** Count native content units, not provider
   messages. A user row contributes one for nonempty top-level `text`, one per
   `files` entry, and one per supplied `skills[].text`. Skill text precedes
@@ -1105,7 +1012,7 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   and counts, plus an optional native cut and a separate runner marker.
   `serializer_profile::opencode_v2_projected_content(row)` takes one
   decoded served row and returns the same projected native units for it,
-  so a codec holding one row at a time computes part digests and tag text
+  so a codec holding one row at a time computes native part digests
   without wrapping it in a one-row session; it refuses compaction rows and
   checks only the row itself.
   `opencode_v2_session_projection` refuses missing/duplicate `seq`,
@@ -1120,9 +1027,9 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   compaction by `seq` whose stored `data.metadata.keepID` is absent or names a
   different existing message row. A named boundary row is kept inclusively.
   Without `keepID`, the boundary is the compaction itself, so only later
-  ordinal-bearing rows are kept. Rows before the boundary are outside the
-  native served range. Neither the compaction row nor its checkpoint summary
-  is ever served. This profile boundary rule applies to both versions; it is
+  ordinal-bearing rows are kept for the model. Rows before that boundary
+  remain readable. The compaction row, including its summary, is a marker
+  and is never an entry. This profile boundary rule applies to both versions; it is
   not a promise that their provider-history renderers replay a structured tail.
 - [pinned] **OpenCode 2 version compatibility.** The profile follows OpenCode
   2.2's loader; 2.0.x support is best effort. OpenCode 2.0.x's own compactions
@@ -1141,114 +1048,55 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
 - [pinned] **OpenCode 2 runner markers.** A completed compaction whose `keepID`
   names itself is a runner-written cut marker, not a native cut. The helper
   reports the latest such row separately as `runner_marker` (its native row id),
-  beside `native_cut`. It never derives a cut or served range from that marker.
-  The runner's own message checkpoint, with `message_count` and the head cut
-  (§4.8, §9.6), is the authority for a runner-written cut, as for OpenCode 1.
-  The retained tail comes from the runner's own copies; its placement cannot
-  be inferred from native rows. Even if an older native cut is also reported,
-  a runner marker requires the runner's checkpoint to find the effective range.
-  In 2.2.3, history.ts:239-255 resolves `keepID` to a sequence, then selects
-  `start.seq <= seq < compaction.seq`: a self-reference selects no rows.
-  2.0.26's history.ts:83-98 does not resolve `keepID` at all; it loads only
-  rows at or after the compaction. Neither reconstructs an older structured
-  tail from a self-referencing marker. After a revert deletes a marker, the
-  range follows the previous surviving runner marker; with none left, a
-  surviving native cut still bounds it, and otherwise history is whole, like
-  OpenCode 1's revert below a cut (§4.8, §9.6). This applies to valid
-  remaining rows: a 2.0.26 fork with a stale `keepID` is refused, as above.
-- [pinned] **OpenCode 2 authorship and sends.** Only `type: "user"` is the
-  person's own text. Synthetic, system, skill and location-switched rows are
-  model-visible notices, including 2.2 instruction-entry announcements stored
-  as system rows with a `<context key>` body. A `session.send` naming a
-  template (§9.7) is stored as synthetic; every other send is stored as user,
-  whoever sent it. As for Pi, classify by template form, never by sender.
-- [pinned] **OpenCode 2 display and pruning.** `display::opencode_v2` and
-  `display::project` keep the native OpenCode 2 type as the role; notices never
-  become user text. System notices show `description` when present, otherwise
-  `text`. Tool slots show their call and completed result or error. Images
-  use existing refs descriptors, never inline bytes. No archive pruning is
-  defined: a runner using `opencode-v2` does not declare
-  `archive_prunes_reasoning`, because OpenCode 2 has no separate reasoning
-  archive.
-- [pinned] Read stability (§4.2) applies: the runner serves the form it
-  first ingested (`serializer_profile::ingest`). A client re-sending the
-  same message with its cache marker moved (a string `content` turning
-  into a one-block array, or back) does not change the entry.
-- [pinned] For such a session, a compaction view's `replace` and edit
-  `bytes` (compaction-provider 0.3.0) are in this profile's message format.
+  beside native_cut. It never infers a runner-written model boundary from
+  that row's placement. The applied view and marker state under
+  cortexkit-role-compaction determine the model boundary, not this role's
+  removed message-count checkpoints. Every active-path entry remains
+  readable from the host store on either side of the marker. A revert
+  removes markers and entries from the active path; W4.2 recounts what
+  remains, with history_version raised before rewritten positions are served.
+### 4.5 Active path, markers and rewrite identity
 
-### 4.5 Lineage and the read bound
-
-A lineage is the readable history from the session's latest cut: the
-messages `session.read` and `session.resolve` serve. What lies before the
-cut is carried to the model only by the compaction view's head (compaction
-provider 0.5.0 §6) and to readers only by `session.history` (§4.6).
-
-- [pinned] A cut starts a new lineage. A cut is the point through which an
-  applied compaction view's replacements stand for the whole transcript
-  (the view's `cut`, compaction-provider §6, §9); the new lineage's first
-  ordinal is the cut's first retained ordinal, `cut.through_ordinal + 1`.
-- [pinned] For a runner declaring `message_checkpoint`, the adoption cut
-  follows §4.3: the first retained ordinal is `message_count`, not 0,
-  including after a revert that keeps `head_cut.mid` but removes `cut`.
-  The runner MUST NOT read, serve or journal messages at or before that
-  adoption cut to recover the counters or the certified cut description.
-- [pinned] `lineage_id` changes at a cut, at a revert, at a model-visible
-  host edit (§4.2), and at a recovery
-  that drops or rewrites written messages (§14, property 4, shape (a)), and
-  at nothing else. A runner may derive the id from its own storage identity
-  plus the cut, as long as every lineage of the session gets an id of its
-  own.
-- [pinned] A read naming an older lineage, `after_mid` included, is
-  refused `lineage_changed` (§4.1). Read stability (§4.2) holds within one
-  lineage: frozen bytes from the runner's own journal, never the host's
-  live history.
-- [pinned] Ordinals stay session-wide and never renumber. A message keeps
-  its ordinal across every cut. A revert removes messages, and a later
-  message may then take a removed message's ordinal, on the new lineage.
-- [pinned] **A revert below the latest cut.** A revert that removes the
-  latest cut's message (the one the cut folds last, which
-  `session.head.cut` names), or anything before it, undoes that cut. A cut
-  is at or below the revert point while its message survives the revert. The new lineage starts at the newest cut still at or below the
-  revert point: its `first_ordinal` is that cut's first retained ordinal
-  and `session.head.cut` describes that cut. Its first advance notice
-  carries `descends_from` naming, at that cut, the lineage the runner was
-  on when it made the cut (`<lineage>:<cut through_ordinal>:<digest>`, as
-  that cut's own lineage first declared it), only when the runner has such
-  a lineage: a cut made before the runner adopted the session has none, and
-  the notice then carries no `descends_from`. With no cut left, the
-  lineage starts at the session's first message, `first_ordinal` 0 and no
-  `cut`, without `descends_from`. Either way Setup runs again for the new
-  lineage: that is §11.1's rule that Setup runs once per lineage, before
-  the lineage's first model call, which covers every new lineage, one a cut
-  starts included, whether or not it carries `descends_from`; it is not an
-  exception.
-- [pinned] `session.head` states the current lineage's `first_ordinal`
-  (§4.3). A range read, an after-message read and `session.resolve` that
-  name a position below it are refused `before_lineage_start` with
-  `detail.first_ordinal` (§12.1). Nothing is ever served from before the
-  lineage, or from anywhere else, in their place. For `session.resolve`, the
-  position is the part the tag names: a tag at or below the lineage's
-  numbering anchor (the checkpoint the latest cut's marker or the lineage's
-  Setup answer carries, §9.6) names a part before the cut.
-- [pinned] The tail reads the newest page within the lineage.
-- [pinned] `before_lineage_start`, `cursor_expired` and `unknown_ordinal`
-  (§4.6) are new codes. Codes are open strings (§12), so a consumer that predates them
-  treats them as terminal refusals of the one request; no public enum of
-  this crate gains a variant for them.
+- [pinned] `session.read` serves the whole active path from ordinal 1,
+  including entries below the latest host marker. The runner reads those
+  entries from the host's own store. `from_ordinal: 0` and `from_ordinal: 1`
+  both mean from the first entry. A cut hides entries from the model, never
+  from reads. A reverted or abandoned branch is not on the active path.
+- [pinned] Ordinals count the entries defined by `cortexkit-role-compaction`
+  W4.1/W4.2, from 1. Every entry counts, including an entry with no parts.
+  Marker records are never entries. A finished compaction pair is a marker,
+  not two entries. A cut never renumbers entries.
+- [pinned] `history_version` is the only marker that history was rewritten.
+  Every `session.head`, `session.read` page and `session.history` page carries
+  it, even for an empty session. It rises on a revert, branch switch, recovery
+  that rewrites written messages, renumbering, or a re-hosted session id.
+  Switching a live session to the new entry count is a rewrite. It never
+  rises on a cut or append and never decreases, including after restore.
+- [pinned] Every head and every raw or display page carries `incarnation`,
+  an opaque string of 1–128 UTF-8 bytes, minted when the runner's session
+  record is created, and new whenever that record is discarded and the
+  session comes back. Readers bind cached pages to the pair
+  (`history_version`, `incarnation`) and compare incarnation only by equality.
+- [pinned] For a session id, a new history state never reuses a
+  `history_version` already served for an earlier state, even after the
+  runner's data is discarded or restored. The runner keeps a durable
+  per-id high-water outside that data and allocates every replacement
+  history a version above all versions it served before. This version-alone
+  guarantee is independent of incarnation. Repeated reads, cuts and appends
+  continue to use the current version; they do not allocate a new one.
+- [pinned] A re-hosted id never reuses a (`history_version`, `incarnation`)
+  pair it served before. The runner keeps a high-water outside the data it
+  discards or restores; neither a restore nor recreation can reuse that pair.
+- [pinned] `after_mid` requires the page's `history_version`. A mismatch is
+  refused `history_changed`, never answered from the tail. If the version
+  matches but the id is not on the active path, the refusal is `unknown_mid`.
 
 ### 4.6 `host_history`: `session.history`
 
-`session.read` serves the lineage. `session.history` pages through the
-session's whole surviving history, from its first message through the
-current lineage's ancestry: the surviving prefix, never a branch a revert
-left. It is on demand only, for an app's reader and for raw recovery (a
-model asking to expand a folded range). It runs per page, never per step,
-and sits outside the cost rule (§14.2). It is paged by opaque cursors,
-never by ordinal: a runner on a host that adopted an existing session has
-no ordinals for the history before the adoption, and numbering it would
-need the whole-session walk the cost rule removes.
-
+Both read operations reach the whole active path, including entries hidden
+from the model by a marker. `session.history` adds backward navigation and
+opaque older/newer cursors. It serves the surviving path, never a reverted
+or abandoned branch. It is on demand, outside per-step work (§14.2).
 - [pinned] The request is `{cursor?, from_mid?, before_mid?, from_ordinal?,
   before_ordinal?, limit?, max_bytes?, media?, include_originals?, view?}`
   (`history::HistoryRequest`),
@@ -1260,12 +1108,11 @@ need the whole-session walk the cost rule removes.
     exclusive. `cursor` reads the page a previous page's `older` or `newer`
     named.
   - `from_ordinal` reads forward from the entry with that ordinal,
-    inclusive; `before_ordinal` reads the page that ends directly before it,
+    inclusive (0 aliases the first entry); `before_ordinal` reads the page that ends directly before it,
     exclusive. They are valid only for an ordinal the runner assigned and
     still holds: one never assigned, or one a revert removed, is refused
-    `unknown_ordinal`. `before_ordinal` at the lowest assigned ordinal
-    returns the newest entries without an ordinal (an adopted session's
-    history before adoption), by the boundary rule below. Paging onward
+    `unknown_ordinal`. `before_ordinal` at the first entry returns an empty page, with no older
+    cursor. Adopted host entries are part of the same count from 1. Paging onward
     from a seek uses the returned cursors, as from any other position.
   - At most one of `cursor`, `from_mid`, `before_mid`, `from_ordinal` and
     `before_ordinal` is given; a second one is refused `invalid_params`
@@ -1276,11 +1123,9 @@ need the whole-session walk the cost rule removes.
     serves raw entries only. `limit`, `max_bytes` (with the byte caps of
     `role.describe.max_bytes`), `media` and `include_originals` are those of
     `session.read`, with the same oversize and `reply_too_large` rules.
-- [pinned] The page is `{messages, lineage_id, history_version, older?,
-  newer?, pruned_reasoning?}` (`history::HistoryPage`), entries oldest to newest. `lineage_id`
-  is the session's current lineage and `history_version` its history
-  version (§4.3), as `session.head` states them; a never-written session
-  answers an empty page without either.
+- [pinned] The page is `{messages, history_version, incarnation, older?,
+  newer?, pruned_reasoning?}` (`HistoryPage`), oldest first. Required cache
+  identity follows §4.5, including on a never-written session's empty page.
 - [pinned] **Order.** Entries run oldest first within a page. Following
   `older` or `newer` never overlaps or skips an entry.
 - [pinned] **Explicit end.** `older` is absent exactly when nothing older
@@ -1297,43 +1142,21 @@ need the whole-session walk the cost rule removes.
   issued before pruning stays valid. Pages served afterward carry
   `pruned_reasoning` for the parts they serve pruned. A reader continuing a
   walk learns of the payload change from its page, not from `cursor_expired`.
-- [pinned] **Entries** (`history::HistoryEntry`) are `session.read`'s entry
-  envelope (§4.2) with two differences: every entry carries `mid` and
-  `written_at`, and `ordinal` appears only where the runner has one. A
-  runner never numbers history on demand.
-  - `written_at` is the message's creation time; for a host-served entry,
-    the host's own.
-  - An entry's `mid` never changes for the life of the session. Where
-    `session.read` and `session.history` both serve a message, the `mid` is
-    the same; on a runner over a host, a host-served entry's `mid` is the
-    host's own message id.
-  - An entry served with an ordinal carries that same ordinal in every
-    later read, below a cut included. An entry served without one never
-    gains one.
-  - **Boundary order.** The newest entry without an ordinal comes directly
-    before the entry with the lowest ordinal, with nothing between them.
-  - **Window entries.** An entry at or after `first_ordinal` is served
-    exactly as `session.read` serves it: its bytes, its ordinal and its
-    `tags` (`HistoryEntry::matches_read`). An entry below `first_ordinal`
-    carries no `tags`: tag numbers belong to the lineage that shows them.
-  - Frozen bytes: an entry the runner wrote or ingested keeps the bytes it
-    first served, as read stability (§4.2) keeps them.
-- [pinned] **Before the window.** A reader holding the `session.read`
-  window continues into older history with `{before_mid: <mid of the
-  window's first message>}` on a runner that declares `host_history`. It
-  never infers the session's start from `first_ordinal`: an adopted
-  session's window can start at ordinal 0 with host history before it.
-- [pinned] **Edits outside the runner.** Below the window, a runner on a
-  host serves what the host holds at the time of the read. Changes a client
-  makes to the host's stored history outside the runner (deleting or
-  editing an old message through the host's own API) are outside this
-  contract: they are not lineage changes, and a runner need not detect
-  them. A revert is in scope: history never serves a branch a revert left.
-- [pinned] **The lane.** A compaction provider's sync and view building
-  read only through `session.read`, within the current lineage, never
-  through `session.history` (compaction-provider 0.5.0 §5.2). Raw recovery
-  of folded content reads on demand through `session.history` or the
-  host's own reader.
+- [pinned] **Entries** (`HistoryEntry`) use the raw read envelope and carry
+  the host's creation time as `written_at`. A W4.1/W4.2 entry has its
+  session-wide one-based ordinal, assigned at ingest, never numbered only
+  when history is requested. All entries read before a marker remain
+  readable under the same ids, ordinals and stored bytes afterward.
+- [pinned] Whenever both operations serve a message, `HistoryEntry::matches_read`
+  checks identical mid, ordinal, bytes, write time and envelope identities,
+  including below the model's first_ordinal. No tag rows are carried. ordinal is required on every history and display
+  entry; neither operation serves marker or control records as entries.
+- [pinned] A native store edit or recovery rewrite anywhere on the active
+  path raises history_version before changed bytes are served. The runner
+  detects such edits even below a marker; they are not an unversioned
+  exception to read stability.
+- [pinned] A compaction provider's own reads are defined by
+  `cortexkit-role-compaction` (`session.entries`), not by this history lane.
 - Informative, not pinned: a runner on a host typically keeps a durable
   index from `mid` to ordinal, written once at ingest, kept on disk and
   never resident. That satisfies the cost rule (§14.2), which bounds
@@ -1341,7 +1164,7 @@ need the whole-session walk the cost rule removes.
 
 ### 4.7 `history_display`: display rows on `session.history`
 
-`session.read` stays the compaction lane's read: raw or descriptors,
+`session.read` serves stored entries as raw bodies or descriptors,
 finished messages only. `session.history` additionally serves a
 display-ready row for an app's reader on a runner declaring
 `history_display` (added in 0.5.1).
@@ -1356,15 +1179,20 @@ display-ready row for an app's reader on a runner declaring
   by refs and carries no originals (`HistoryRequest::mode`). Positions,
   cursors, `limit`, `max_bytes` and every refusal are those of a raw read.
 - [pinned] The display page (`display::DisplayPage`) is a history page whose
-  entries (`display::DisplayEntry`) are `{ordinal?, mid, written_at, row,
-  tags?}`: the raw entry's `mid`, `written_at`, `ordinal` where present and
-  `tags`, with the canonical `row` in place of `message`. It follows every
+  entries (`display::DisplayEntry`) are `{ordinal, mid, written_at, row,
+  part_keys?}`: the raw entry's required `mid`, `written_at` and `ordinal`,
+  with the canonical row in place of message. An archive-pruning runner
+  copies stored-order keys from the raw entry's part_digests or part_keys.
+  It follows every
   rule of §4.6, and `DisplayPage::check` checks the ones a page shows.
 - [pinned] A row (`display::DisplayRow`) is `{role, text, parts, model?,
   client_message_id?, sender?}`. `parts` keeps the stored message's order; each part
   is `{type, part, ...}`, where `part` is the stored part's key (a content
-  block's index for `anthropic-messages`, the part's `id` for
-  `opencode-aisdk`): `text {text}`, `reasoning {text}`, `tool_call
+  block's index for a producer choosing that key convention on
+  `anthropic-messages`, or the native part id on `opencode-aisdk`). These
+  are examples of producer key choices, never a recipe for readers to
+  construct keys. Row part keys must match the entry's published stored keys.
+  Parts are `text {text}`, `reasoning {text}`, `tool_call
   {tool_call_id, name, arguments, arguments_truncated?, call_key?,
   schema_pin?, started_at?, finished_at?, unanswered?}` with `arguments`
   the call's arguments as compact JSON text (`call_key` and `schema_pin`
@@ -1468,52 +1296,33 @@ display-ready row for an app's reader on a runner declaring
   `null`. Without them the display row's bytes are unchanged. These members
   belong on the display row, never on the stored message body.
 
-### 4.8 Counting messages per host
+### 4.8 Counting entries per host
 
-- [pinned] A runner declaring `message_checkpoint` MUST use the host's
-  counted-message order for message ordinals and `message_count`. For
-  **OpenCode 1**, rows are ordered by `(time_created, id)`, ascending.
-  Counting considers each message together with its stored parts: the host
-  stores parts in separate `part` rows keyed by message id, not inside the
-  message row's `data`. `tags::opencode1_message_counts_with_parts` is the
-  reference predicate, taking the message row's `data` and each stored
-  part's `type` in part order.
-  A row with `summary` equal to JSON `true` or any JSON number equal to 1
-  (so `1` and `1.0` alike, as SQLite's numeric comparison
-  `json_extract(data, '$.summary') = 1` treats them) and `finish` equal to
-  `"stop"` is not counted. These are message counters, not §9.6's
-  part tags.
-- [pinned] For a runner declaring `message_checkpoint` on **OpenCode 1**,
-  a message with one or more parts, all of type `compaction`, is also not
-  counted and is never served. This excludes a native cut's compaction-only
-  marker: §4.5 forbids renumbering retained messages, so the first retained
-  real message after a cut through `t` keeps `first_ordinal = t + 1`.
-  A message with a `compaction` part plus
-  any other part is still counted unless it is a finished summary as above.
-- [pinned] For a runner declaring `message_checkpoint` on **OpenCode 1**,
-  a dead step is also not counted and is never served. A dead step is an
-  assistant message with no parts, no `time.completed` and no `error`
-  (absent or `null`): a step whose loop ended before the model call.
-  OpenCode 1, checked against 1.18.35 (`toModelMessages` and the prompt
-  loop in `prompt.ts`), skips a part-less message when it builds model
-  messages, so the model never sees it, and never adds a part to a dead
-  step later. The rule applies to settled rows: while a step may still
-  write to its assistant, that assistant is unfinished, even when a later
-  row such as a queued prompt already exists, so it is never served (§4.2)
-  and the runner never numbers past it. Any other message with zero parts
-  keeps its existing treatment and counts unless it is a finished summary,
-  including a part-less assistant that finished with an `error`. Keeping
-  those counted confines this rule to dead steps, so ordinals a runner
-  served for such rows stay valid. Every other row counts, including a row
-  whose JSON is malformed.
-- [pinned] A runner declaring `message_checkpoint` MUST NOT serve on any
-  read a host row that these rules do not count, including a marker's own
-  finished summary or compaction-only row. This applies on every served
-  lineage, at adoption and native cuts alike: served ordinals equal the
-  counted-message positions everywhere, so a native cut's `t + 1` matches
-  the messages the runner holds.
-  Runners without the group keep their existing reads.
-- [pinned] Other hosts receive their counting rules when they are adopted.
+The authoritative counting rule is `cortexkit-role-compaction` W4.1/W4.2.
+The per-host helpers in `serializer_profile` implement its rows. They count
+from 1 in host order over the entire active path, not only the model's tail:
+
+- OpenCode 1: every message in `(time_created, id)` order, including dead
+  steps. Only a completed compaction opener/summary pair is a marker. An
+  unfinished opener renders `What did we do so far?`; its summary remains an
+  ordinary assistant entry. An assistant error is an entry with no parts,
+  except an abort with content other than step-start or reasoning. Ignored
+  or empty user text and text/plain or directory files are not parts; a
+  subtask renders `The following tool was executed by the user`.
+- OpenCode 2: user, synthetic, assistant, skill, system, location-switched,
+  foreground shell and model-switched rows, in `seq` order. Empty users and
+  dead steps still count; model-switched has no parts. Compaction rows are
+  markers; idle, agent-switched and background shell rows do not count.
+- Pi and Oh My Pi: active-branch message entries (every role, each toolResult
+  its own entry), custom_message and branch_summary. Compaction is a marker;
+  model_change, context_edit and other controls do not count.
+- A native message log: every message in log order; its marker records never
+  count. Claude Code's new sessions count the merged request messages, not
+  summary requests, as W4.2 defines.
+
+An entry whose result belongs to an earlier call and a step that died before
+content are still entries, with no neutral parts (W4.1). The old dead-step
+exclusion no longer applies. An id and an ordinal never derive from each other.
 
 ## 5. `dispatch_attribution`
 
@@ -1607,8 +1416,10 @@ display-ready row for an app's reader on a runner declaring
     on a run that only waits for a caller (a `paused` run waiting for a retry
     carries none), and never later than that wait's own bound.
 - [pinned] **Waiting at the ceiling** is the first such wait. A run the runner holds at the
-  ceiling while it waits for a compaction view (up to the provider's bound,
-  300 s, say) is waiting, not stalled. It stays in the non-terminal state
+  ceiling while an `over_limit` ride tries to obtain a view that makes the
+  request fit is waiting, not stalled, up to the runner's chosen deadline.
+  Ride triggers and deadlines follow the Rides and compaction.ride sections
+  of `cortexkit-role-compaction/CONTRACT.md` (A9/W5.3). The run stays in the non-terminal state
   `active` and names `reason: context_ceiling_wait`
   (`run::RUN_REASON_CONTEXT_CEILING_WAIT`, `RunReason::ContextCeilingWait`)
   on `run.status`, on `session.head`'s `last_run_state` and on the stream
@@ -1623,24 +1434,14 @@ display-ready row for an app's reader on a runner declaring
   `deadline_ms`. The wait ends in progress, when a view arrived (the reason
   and deadline are gone), or in the terminal `context_ceiling` state with
   `cause: view_timeout`.
-- [pinned] **Waiting for a rewrite ride** (added in 0.5.2) is another. A
-  runner holding a step for a rewrite ride (compaction-provider §8: cause
-  `ttl_expired`, `model_change`, `account_change`, `service_tier_change`, `surface_change` or
-  `chain_reset`) reports
-  the wait once
-  the ride's answer has been pending for 1 s
-  (`run::COMPACTION_WAIT_REPORT_AFTER_MS`): the run stays `active` and names
-  `reason: compaction_wait` (`run::RUN_REASON_COMPACTION_WAIT`,
-  `RunReason::CompactionWait`) with `deadline_ms`, the absolute time the
-  ride's deadline ends (`RunStatus::compaction_wait`), on `run.status`, on
-  `session.head`'s `last_run_state` where served (the reason only), and on
-  a durable `control` event when the wait starts (§7). The reason and the
-  deadline go when the ride resolves: an answer, a refusal or the missed
-  deadline. A ride answered within 1 s is never reported, so a quick
-  `nothing` never shows. How long the ride may take is the compaction
-  provider's choice, within the runner's cap (compaction-provider §4
-  `ride_wait_max_ms` and `ride_wait_ms`); the user sees the wait instead of
-  a silent pause.
+- [pinned] **Waiting for a rewrite ride.** Ride triggers and deadlines are
+  defined by cortexkit-role-compaction A9/W5.3. If the runner is still
+  holding a step after 1 s (COMPACTION_WAIT_REPORT_AFTER_MS), the run remains
+  active and reports reason compaction_wait with the absolute deadline_ms
+  on run.status, the reason on head.last_run_state, and a durable control
+  event when the wait starts. The reason and deadline disappear when the
+  ride resolves or its deadline ends. A ride resolved within 1 s is never
+  reported as a wait. The provider no longer sets a separate wait cap here.
 - [pinned] A provider's own refusal of a request as too long is different:
   that is the provider refusing, and the run ends `error` with
   `provider_code: context_overflow` (§12.2). A runner reports
@@ -1692,25 +1493,14 @@ display-ready row for an app's reader on a runner declaring
   `provider`, `reason` and `provider_detail_code` are optional strings.
   An absent optional member means not measured, never zero.
 - [pinned] `provider_code` is the code callers branch on.
-  `errors::provider_codes` lists the ones this role names (§12.2). A
-  compaction `REFUSE` also carries the provider that ended it as `provider`
-  and its `reason` (§11.1).
-- [pinned] For a compaction `REFUSE`, `provider_code` is the refusal's role
-  `code`: one of the compaction-provider contract's `RefuseCode` values
-  (its §11), or an unknown code recorded as received. Whether a caller
-  retries follows from that code, as the compaction-provider contract fixes
-  it, never from anything else in the error.
-- [pinned] The refusal's optional finer code goes in the separate, optional
+  `errors::provider_codes` lists the ones this role names (§12.2).
+- [pinned] A provider's optional finer code goes in the separate, optional
   `provider_detail_code`: diagnostics only, for logs and display. It never
   replaces `provider_code`, a caller never branches on it, and it never
-  decides retry. The compaction-provider wire calls that finer code
-  `provider_code`; on a run error it is `provider_detail_code`. The two
-  `provider_code` members are different fields: the runner's carries the
-  role code, the provider's carries the finer one.
+  decides retry.
 - [pinned] A run error without a finer code omits `provider_detail_code`.
-  `compaction_unavailable` never carries one: it reports a Setup that failed
-  or a Setup view that did not apply, not a provider refusal with a finer
-  code.
+  A local runner error carries no provider_detail_code unless a peer
+  supplied a finer diagnostic refusal code.
 - [pinned] An unknown `run_id` is refused `unknown_run`, by `run.result`
   and `run.tool_calls` alike (§6.3).
 - [pinned] **Run attribution.** Each message records which run and episode
@@ -1891,7 +1681,7 @@ run.
   also admits the submission's recorded daemon-attested sender on the
   same session. The existing no-owner rule above is unchanged.
 - [pinned] On an expired session, `run.cancel` answers `expired`, writes
-  nothing, and never acts on a lineage started after the expiry (§9.1).
+  nothing, and never acts on a session record started after the expiry (§9.1).
 
 ### 6.3 `run_tool_calls`: `run.tool_calls`
 
@@ -1968,7 +1758,7 @@ what a run called without decoding any message body.
   `served_bytes_changed`, detail `{mid}` naming the first such message in
   page order. It never serves a partial page or a call with `args` absent or
   different. The refusal is not retryable: that run's calls belong to a
-  lineage the host no longer holds, as for a read of that message. Calls
+  session record the host no longer holds, as for a read of that message. Calls
   whose requesting message is not served under §4.2.1 keep the requirements
   above without this rebuild option.
   For example, if a page lists calls from messages A and B in that order,
@@ -2362,7 +2152,7 @@ new members.
      `mid`, with `part` as usual. Exactly one of `mid` and `live_id` is
      present on a delta from a `live_events` runner.
   3. A `live_id` is runner-minted and opaque: 1–128 bytes of ASCII 0x21–0x7E,
-     unique within the session's current lineage, never reused, unchanged across
+     unique within the session's active path, never reused, unchanged across
      a `display_reset` of the same message, and carried the same way by attach
      replay. It never equals any `mid` the session has or will have. Prefer a
      fixed `live-` prefix; a runner whose host ids could start that way chooses
@@ -2414,84 +2204,11 @@ new members.
   step in flight there is nothing to replay. It is the only recovery for
   live state.
 
-## 8. `model_view`
+## 8. Model input
 
-- [pinned] Model-view descriptors are not offered. A request combining
-  `view: "model"` with `media: "descriptors"` is refused before read work as
-  `invalid_params {field: "media"}`. The existing indivisible group rule and
-  `reply_too_large` for an over-frame group are unchanged.
-
-- [pinned] Raw is the default view. The model view is the canonical message
-  list after hooks and compaction. The bytes a model provider was sent are not
-  promised.
-- [pinned] It is `session.read` with `view: "model"` (`ReadView`), answered
-  as `{messages, lineage_id?, next_from_ordinal?, head?, compaction_id?,
-  version?, pruned_reasoning?, reasoning_pruned?}` (`ModelPage`); the last
-  two are §9.14.1's. The value is strict, so an unknown view is
-  refused naming `view`. `lineage_id`, `next_from_ordinal` and `head` mean
-  what they mean on a raw page (§4.2).
-- [pinned] Each entry is `{source, message}` (`ModelEntry`), `message` in the
-  runner's own schema. `source` (`EntrySource`) says what the entry is:
-  - `{kind: "message", ordinal, mid}`: a transcript message passed through,
-    with its hooks applied, keeping its transcript ordinal;
-  - `{kind: "replacement", compaction_id, version, from_ordinal,
-    to_ordinal}`: a compaction replacement, naming the half-open raw range
-    `[from_ordinal, to_ordinal)` it stands for and the CompactionMessage
-    it came from. Only `to_ordinal < from_ordinal` is an invalid range.
-    An empty range inserts before `from_ordinal`; Setup's head message is
-    `[0, 0)`.
-- [pinned] Entries are ordered non-decreasingly by `from_ordinal` (a message's
-  `ordinal` is its anchor). At an equal anchor, insertions come first: an
-  insertion following a message or a non-empty replacement at its anchor
-  is malformed (`ModelPageProblem::InsertionAfterEntry`).
-  - An insertion before a message has a v1 producer: an empty compaction
-    range, such as Setup's head message `[0, 0)` before message 0.
-  - An insertion before a non-empty replacement at the same anchor has no
-    v1 producer. The compaction-provider contract applies the newest
-    CompactionMessage alone (its §8) and gives all of that message's
-    replacement entries its one range (its §12), and hook outputs transform
-    fields on a raw record (§11.2), not additional range entries. A
-    consumer still refuses such a page as malformed (`ModelPage::check`);
-    no live runner can be made to exercise this half (§15).
-- [pinned] A runner applies at most one view per step (§11.1). A second
-  CompactionMessage answered for a step whose view already applied never
-  changes the model view, whatever its version.
-- [pinned] Tail and range reads apply, keyed on transcript ordinals. A
-  replacement is returned whole, exactly once, on the page holding its
-  `from_ordinal`: it is never split, and a later page that intersects its
-  range does not repeat it. The complete encoded reply is served only when it
-  fits the 4,194,304-byte transport frame limit, including its 21-byte header;
-  otherwise the runner refuses `reply_too_large`, naming the model-view group
-  by its anchored entry source (§12).
-- [pinned] An insertion at anchor A travels on the same page as the entry
-  anchored at A: the message holding ordinal A or a replacement whose
-  `from_ordinal` is A. Several insertions at one anchor travel together, in
-  order. The page may exceed its count or byte cap to keep this group whole,
-  like the oversize single-message rule; it never ends between an insertion
-  and its anchored entry. The complete encoded reply is served whole only
-  when it fits the 4,194,304-byte transport frame limit, including its
-  21-byte header; otherwise the runner refuses `reply_too_large`, naming the
-  group by its anchored entry source (§12).
-- [pinned] That page's `next_from_ordinal` is past the anchored entry: A + 1
-  for a message, or the replacement's exclusive `to_ordinal`. An insertion
-  past the last ordinal goes on the last page, with no cursor.
-- [pinned] A page ending on an insertion with `next_from_ordinal` present is
-  malformed (`ModelPageProblem::NonTailInsertion`). A next cursor on or
-  before an insertion anchor whose anchored entry was not returned is also
-  malformed (`ModelPageProblem::NextInsideEntry`).
-- [pinned] `after_mid` with `view: "model"` is refused `invalid_params
-  {field: "view"}` in v1. `after_mid` is defined against the raw lineage,
-  and a message inside a replaced range has no clean "after" in the model
-  view; incremental readers use ordinal cursors.
-- [pinned] The page names the compaction state it reflects: the
-  `compaction_id` and `version` of the latest applied CompactionMessage,
-  both absent before any compaction applied. A page carrying a replacement
-  names it. The view is what the next request would be built from, not the
-  bytes sent.
-- [pinned] A page that breaks these rules is malformed, not a refusal
-  (`ModelPage::check`). The `source` kind is strict: an entry of a kind this
-  role does not define does not decode, because a consumer cannot place it
-  by ordinal.
+Model-view reads and replacement-entry pages are not part of this contract.
+`session.read` serves stored entries only; `view: "model"` is refused
+`invalid_params` naming `view`.
 
 ## 9. `steer`, `queue` and `interrupt`: `session.send` from the owner
 
@@ -2616,7 +2333,7 @@ new members.
     same session.
 - [pinned] A delivered steer. For any `SendReply` to a send delivered as a
   steer into a running run, including the first reply, a re-send, and
-  `send.status`, `state` is the run's state as seen by the runner (`active`
+  `session.send_status`, `state` is the run's state as seen by the runner (`active`
   while the turn runs, `finished` once it has ended), and `delivered.as` is
   `step` with a required `ref` naming the stored delivered message. `step` is
   a value of `Delivered::as`, never of `SendReply::state`; `state: "step"` is
@@ -2635,7 +2352,7 @@ new members.
 - [pinned] Following a queued send. A send answered `pending` with a
   `submission_id` (a `queue` send behind a running run, or a
   `delivery_order` list waiting for a boundary, §9.7) is followed by
-  re-sending the same `send_id`, or by `send.status` on a runner that
+  re-sending the same `send_id`, or by `session.send_status` on a runner that
   declares `send_status` (§9.8). Once it is delivered, the answer says how
   and, where this contract requires it, which run (`SendReply::delivered`,
   `SendReply::run_id`):
@@ -2666,7 +2383,7 @@ new members.
 ### 9.1 `retention`: whole-session transcript lifetime
 
 A runner declaring the `retention` capability group must implement all the
-rules in this section. These rules govern the entire session lineage, not
+rules in this section. These rules govern the entire session record, not
 individual runs: the transcript is append-only and each run's prompt replays
 earlier runs. Deleting individual runs would break that replay.
 
@@ -2680,8 +2397,8 @@ or with a zero maximum (`invalid_retention`).
 `session.send` accepts optional `retention: u64`, in seconds
 (`SendRequest::retention`). The first accepted send freezes it for the whole
 session. Absence on that first send means kept forever. On an existing
-lineage, a later send may shorten the current value; an equal value leaves
-the policy unchanged. A longer value, or any later retention on a lineage
+session record, a later send may shorten the current value; an equal value leaves
+the policy unchanged. A longer value, or any later retention on a session record
 first sent without retention, is refused `invalid_params {field: "retention"}`.
 Absence on a later send leaves the current policy unchanged, never resets it
 to forever. Zero is refused by the same name. A value above `max_seconds` is
@@ -2703,14 +2420,14 @@ steers do not expire either. The clock restarts from the terminal record when
 the last non-terminal run ends.
 
 An accepted send that shortens an idle, unexpired session continues the same
-lineage, preserving earlier messages. It records new activity, and the
+session record, preserving earlier messages. It records new activity, and the
 shorter clock applies from that activity; its active run then defers expiry
 as above. Whether the session was already expired is decided using its old
 retention, never the shorter value supplied by the new send. A session past
 its old retention is expired even if deletion has not finished yet. A send to
-that session starts a fresh lineage, with that send's own retention (absent
-means forever), never replays the expired content and never reuses its lineage
-id. Deletion of the old lineage must not delete the new one.
+that session starts a fresh session record, with that send's own retention (absent
+means forever), never replays the expired content and never reuses its session record
+id. Deletion of the old session record must not delete the new one.
 
 **Deletion.** At expiry the runner durably records a content-free tombstone
 first, then deletes the transcript and every runner-held derived copy,
@@ -2726,13 +2443,13 @@ or results, or caller-supplied free text such as a run `title`. Copies held
 by other modules, including a compaction provider's own state and backups,
 are their owners' responsibility. This contract covers runner-held copies only.
 
-**Reads.** `session.read` (including model view), `session.head` and
+**Reads.** `session.read`, `session.head` and
 `run.result` on an expired session answer an `ERROR` with code `expired` and
 `detail: {expired_at_ms}` (`ExpiredDetail`). A runner that declares
 `run_status` answers `run.status` with the same refusal. A runner that
 declares `run_cancel` or `retract` also answers `expired` to `run.cancel`
 or `session.retract` for an expired session and writes nothing; neither
-may act on a fresh lineage started after the expiry. The conformance suite
+may act on a fresh session record started after the expiry. The conformance suite
 probes `run.status` only. `expired`
 is terminal and never retried. It is not an empty page: that would falsely
 say the session has no messages, rather than that its messages expired.
@@ -2949,12 +2666,14 @@ A runner that declares `retract` serves `session.retract`.
   kept verbatim. **A runner never copies applied into served.** In particular,
   `unknown` wires never emit served, and absence is not confirmation.
 - [pinned] Tier values on records are strings, not the closed request enum:
-  run usage, step metadata, usage rows, route decisions and reports, notice
-  conditions and tier-change events, and rides retain unfamiliar levels.
+  run usage, step metadata, usage rows, and route decisions and reports
+  retain unfamiliar levels.
   Producers fill applied values from `ServiceTier::as_str()` and validate
-  them against `fast`/`ultrafast`, omitting standard; rides and change events
-  also allow `standard`. Producer checks never run as part of record decoding.
-  Readers preserve unknown values, notice digests hash them verbatim, and
+  them against `fast`/`ultrafast`, omitting standard. Producer checks never
+  run as part of record decoding. Compaction conditions and tier-change
+  rides follow the Rides and compaction.ride sections of
+  `cortexkit-role-compaction/CONTRACT.md` (A9/W5.3), not a local notice format.
+  Readers preserve unknown values, and
   pricing at a level the consumer does not recognize remains unconfirmed.
   Provider-stated served strings remain open, including unmapped values.
 - [pinned] `RunUsage` carries those two optional wire members. Applied is the
@@ -2968,27 +2687,26 @@ A runner that declares `retract` serves `session.retract`.
   step, preserving the per-step cost rule (§14.2). The runner persists
   that local accumulator alongside its token totals, so disagreement is not
   forgotten after a restart; it is not an additional role wire member.
-- [pinned] A runner hosting a compaction provider sends
-  `compaction.ride {session_ref, cause: "service_tier_change", service_tier,
-  deadline_ms}` before rendering the first request whose applied level differs
-  from the previous step in that session. The required `service_tier` carries
-  the new level, including `standard` when returning to standard, just as
-  `account_change` carries its required `account` label. It is ignored on
-  other causes and omitted when absent. With no previous step there is no
-  change to ride. An unchanged level does not trigger a ride.
-  A tier change busts the prompt cache: the provider can fold held edits into
-  that same prefix rebuild. Fold and step-boundary timing follow
-  `model_change`, with the same bounded wait, view/nothing answers, cache TTL
-  information for the current model when available, late-answer handling and
-  rule that a rewrite ride never ends the run. The next notice reports
-  `service_tier_change:<level>` for every change, ridden or not, and its
-  conditions include the next applied `service_tier`, omitted for standard.
-- [pinned] Readers first: a compaction provider adopts compaction-provider
-  0.7.12 before any runner sends a non-standard level. Older providers accept
-  the unknown ride cause, but do not include the new notice header in their
-  digest. `step.finished.v1` does **not** carry tier fields yet; consumers read
-  them from usage-steps rows. Adding them to that closed bus publication is a
-  later readers-first change.
+- [pinned] Applied-tier changes follow cortexkit-role-compaction A9/W5.3
+  (tier_change). This role defines no separate ride body or notice header.
+  step.finished.v1 does not carry tier fields; readers obtain them from
+  usage rows until a later readers-first change extends that publication.
+### 9.3.3 `route_decision_id`: caller-owned routing
+
+- [pinned] `session.send` accepts optional string `route_decision_id`, typed
+  beside `service_tier`. A runner that obtains accounts from routing forwards
+  it as `decision_id` on `route.account_for` for that run, with the run's own
+  provider and model. Runners that do not use routing accounts ignore only
+  forwarding and reporting; they still freeze and validate joining sends.
+- [pinned] Routing's `unknown_decision` includes expiration (10 minutes after
+  selection). On that refusal the run ends before any model call, with
+  `error.provider_code: "routing_decision_refused"`, `reason: "unknown_decision"`.
+  The runner never falls back to its own allocation.
+- [pinned] The setting is fixed per run. Omission on a joining send inherits;
+  an explicit different value is `invalid_params` naming `route_decision_id`,
+  without writing the send. It cannot replace the active run's decision.
+- [pinned] A run started under a caller's decision never `route.report`s that
+  decision. The caller is its one reporter.
 
 ### 9.4 `structured_output`: schema-shaped run output
 
@@ -3303,483 +3021,13 @@ without a prompt.
   (§12.1) concerns a scoped send into a session recorded without a scope,
   and is unchanged.
 
-### 9.6 `tags`: runner-rendered part numbers
+### 9.6 Part numbers
 
-The runner renders the transcript, so it shows the model short names for
-its parts: tags, `§N§`. A consumer (a context manager, a model referring to
-an earlier message, a tool using part of an earlier output) names a part by
-the number it was shown, and the runner answers with that part. A tag
-number is only a name the model can see, computed from the transcript.
-Everything durable is keyed by the host's own identity: a message id, the
-part's key and its content digest, never a number.
-
-**Scope.**
-
-- [pinned] Numbering and rendering apply only to a session whose frozen
-  plan renders tags (`render_tags: true`, below). On a session whose plan
-  does not, every `session.read` part row carries its key and no number,
-  `session.resolve` refuses every well-formed tag `unknown_tag`, and the
-  model's text is exposed as written.
-- [pinned] Cleaning (below) is per message: each piece of the model's text
-  is cleaned according to the frozen plan of the run that wrote it,
-  whatever the current run renders. A session that later stops rendering
-  tags still has its earlier replies cleaned, and text written by a run
-  that rendered no tags is never cleaned on any exposure.
-
-**Which parts count.**
-
-- [pinned] A part counts if and only if the runner renders it with a
-  visible number. One predicate drives both counting and rendering, so the
-  two cannot drift apart: a runner maps each part it renders onto
-  `tags::PartKind` and asks `tags::counts`.
-  - Counted: user text, a tool result with non-empty exposed text (error
-    text included), the model's own text, and a tool result holding only
-    images apart from empty text blocks, which renders
-    a short text label carrying its number (`tags::image_label`, `§N§
-    [image]`) where the provider accepts text beside the image (on
-    Anthropic's API, a text block before the image inside the
-    `tool_result`), so a context manager can reach a screenshot.
-  - A tool result is one part, whatever its blocks: a compaction provider
-    keeps or drops the whole result, never a block inside it. Empty exposed
-    text blocks are ignored for counting and number placement. With no
-    non-empty text, images alone select `ToolResultImageOnly`; any non-image
-    media (a PDF or other file, alone or beside images) selects
-    `ToolResultMediaOnly`, counted once with `tags::media_label` (`§N§ [media]`).
-    `tags::tool_result_kind` classifies the whole result.
-  - A tool result with neither non-empty exposed text nor media is
-    `EmptyText` and is not counted. This includes a result carried only as
-    a structured value with no text block, such as a legacy reply with only
-    `structuredContent` or an imported transcript's JSON tool result: some
-    providers receive the value as an object, not text, so no number can be
-    written on it consistently across providers. A text block whose text
-    happens to be JSON is ordinary text and counts.
-  - A steer the runner stores as a user message counts, as a reminder or a
-    delivered notice stored that way does. A `turn_system` message (§9.7)
-    does not.
-  - Never counted: images and files in a user message, reasoning and
-    thinking blocks, tool calls (the call's result carries the number), the
-    history head, compaction-marker messages, and a text part whose
-    exposed text is empty.
-- [pinned] The same parts count on every provider, including those whose
-  text parts carry provider state (a Gemini thought signature, ChatGPT's
-  `phase`): the model must be able to predict its own next number. Seeing
-  `§100§` and `§101§`, its next text part is `§102§`.
-
-**Numbers.**
-
-- [pinned] A part's number is the checkpoint plus its position
-  (`tags::try_number_parts`). The checkpoint counts the counted parts before
-  the cut, the first retained message. Positions run in the order the
-  runner renders the history from the cut, never in storage order: a steer
-  stored while a tool call ran but rendered after that call's result is
-  numbered after the result. The computation is deterministic, so no
-  per-part ledger is stored.
-- [pinned] A runner refuses a checkpoint whose numbering would pass
-  `u64::MAX`, and never repeats a number: `tags::try_number_parts` answers
-  `NumberingOverflow {checkpoint, counted}` instead of numbers.
-  A numbering that ends exactly at `u64::MAX` is accepted. The older
-  `tags::number_parts` saturates there, giving two parts one number, and is
-  deprecated. `tag-numbering.json` pins both (`overflow`).
-- [pinned] The cut is keyed on the field, not on who wrote the marker
-  (`tags::Marker::cut`): a marker's `tail_start_id` when present, otherwise
-  the message holding its compaction part. That covers standalone Magic
-  Context's markers and native markers that omit `tail_start_id` when they
-  retain nothing. A marker not in effect is never an anchor.
-- [pinned] The anchor falls back in this order (`tags::anchor`): the newest
-  in-effect marker carrying a checkpoint for this session, then earlier
-  in-effect markers carrying one, then the Setup checkpoint at its own cut
-  message (`tag_checkpoint`, below). Only when that message no longer
-  exists, after a revert past it, does the runner number from the session
-  start with the Setup checkpoint's number, on a new lineage. With no
-  anchor at all, it numbers from the session start at zero.
-- [pinned] A fallback renumbers nothing. When the anchor falls back past a
-  newer in-effect marker that lost its key, to an older keyed marker, to the
-  Setup checkpoint or to the session start, numbering counts every counted
-  part from that anchor's cut, the parts the newer markers summarized
-  included, by kind exactly as they were counted when rendered, in the
-  order they rendered while the anchor's marker was the newest (on OpenCode,
-  storage order with marker pairs skipped): the runner feeds
-  `tags::try_number_parts` those parts, not only the ones it renders now. A
-  compaction message and its summary never count, wherever they sit and
-  with or without the key; a counted part dropped with `drop: true`
-  keeps its number and still counts, though it is left out of the request. So the numbers equal the ones computed with every key
-  present, the numbers the model saw, and the lineage does not change,
-  apart from the Setup cut gone rule above. `tag-numbering.json` pins three
-  shapes: the newest key lost with an older keyed marker; every key lost,
-  falling back to the Setup checkpoint or to the session start; and a newer
-  cut inside the older marker's retained tail.
-- [pinned] A runner writes the checkpoint on its own compaction markers,
-  in the same write as the marker and never sent to the model:
-  `{tag_checkpoint, session}` (`tags::MarkerCheckpoint`), naming the
-  session it was written for. On OpenCode it is one extra key on the
-  compaction part, `"cortexkit"`; never the summary's metadata, which
-  OpenCode forwards to the provider. A marker that lost its key is no
-  anchor, never a checkpoint of zero.
-- [pinned] On Pi the key is the member `details.cortexkit_checkpoint` of the
-  runner's `compaction` entry (`tags::PI_MARKER_CHECKPOINT_MEMBER`), written
-  in the same append as the entry. Neither host copies anything from a
-  compaction entry's `details` into model content. Pi builds the
-  compaction-summary message from `summary`, `tokensBefore` and `timestamp`,
-  and the model content from `summary` alone (SM:184-189, MSG:40-55,97-106,
-  as §4.2 cites them). Oh My Pi 18.10.4 builds it from `summary` plus the
-  provider replay and archive blocks it keeps in `preserveData`, and reads
-  only `details.kind`, to decide whether to keep an earlier request
-  (`packages/coding-agent/src/session/session-context.ts:417-418,483-540,557-560`,
-  `packages/agent/src/compaction/messages.ts:243-262`). `details` may hold
-  other members, such as an extension's own record, a runner's private
-  records, or the `details.cortexkit` record of an early draft, which
-  `display-pi.json`'s recorded `entry-021` carries. A reader takes only
-  `details.cortexkit_checkpoint`, so none of those is ever an anchor.
-  `tags::pi_marker_checkpoint(entry, session)` returns the member only when
-  the entry is a `compaction` whose `details.cortexkit_checkpoint` decodes
-  as `tags::MarkerCheckpoint` naming that session, and ignores every other
-  member. Whether the entry is the in-effect compaction on the active path
-  stays the runner's to decide.
-- [pinned] An offline move that adopts a Pi head writes that member on the
-  in-effect `compaction` entry and rewrites only the entry's
-  `firstKeptEntryId`, to the first retained entry, in one atomic replacement
-  of the journal. The entry keeps its `id`, `parentId`, place in the file,
-  `timestamp`, `summary` and every other member, including every other
-  member of `details`. `message-checkpoint.json` pins the entry before and
-  after the apply, and entries that are no anchor.
-- [pinned] Gaps exist only behind the tail: a checkpoint may count parts no
-  longer rendered, or numbers an earlier tagger handed out. Under an
-  applied view, a part edited with `drop: true` is left out of the request
-  entirely, whatever its profile or kind, as compaction-provider §7 pins: no
-  part and no placeholder is sent. If the part counted, it keeps its number
-  and still counts. A provider that wants the model to see a runner-rendered
-  placeholder sends an applicable truncate edit instead, such as
-  `truncate: "placeholder"`, rendered through `tags::truncate_part`.
-- [pinned] With compaction Setup's `view_features: ["truncate"]`, the
-  provider may send a part edit containing `truncate` instead of bytes.
-  Render it with `tags::truncate_part(profile: &str, part: &Value,
-  container: PartContainer, mode: TruncateMode, number: Option<u64>,
-  drop_attachments: bool) -> Result<Value, TruncateRefusal>`, then apply the
-  part's ordinary tag. Container context comes from the stored row, never
-  the view; OpenCode tools are result containers, and Pi tool-result blocks
-  need their enclosing message's role. Self-identifying result parts on
-  other profiles must agree with the container. Unknown or inapplicable
-  modes refuse `view_refused:<version>:truncate_kind`. When the part has no
-  number or its plan renders no tags, pass `None` for `[dropped]` without a
-  number. Compaction-provider §6.1 pins the complete per-profile and UTF-16
-  edit-marker rules, and `truncate.json` pins them.
-- [pinned] With Setup's `tag_bytes_edits` token, render a counted bytes-edited
-  part's own tag exactly as if kept as written. The runner adds no tags
-  inside a replace range's bytes; they remain final. A history head never
-  counts. Without the token,
-  replaced bytes remain final under compaction-provider §6.
-- [pinned] A runner never walks the whole session to number it. It keeps
-  the tail's numbers and the next number in memory, and what it holds
-  always equals a fresh computation from the anchor: a revert or a reorder
-  recomputes from the cut, never just keeps counting upward.
-  `session.resolve` never answers a number inside summarized history: a
-  number that names a part before the lineage's first ordinal is refused
-  `before_lineage_start` (§4.5), which the runner decides from the anchor's
-  checkpoint without walking anything. Raw recovery of such a part reads
-  `session.history` (§4.6).
-
-**Lineage.**
-
-- [pinned] Any renumbering of a part a read has already exposed starts a
-  new lineage (§4.2): a revert, a recomputed reorder, the move of a session
-  from standalone Magic Context (whose every visible number changes once),
-  a detected restore, and the fallback to the session start above. A switch
-  from a stored ledger (below) renumbers nothing and keeps the lineage.
-  Within one lineage a number names one part, and a re-read answers the
-  same numbers.
-- [pinned] A cut starts a new lineage too (§4.5), though it renumbers
-  nothing: the new lineage numbers from the cut's checkpoint, as the
-  numbering rules above say, so every part the new lineage still shows
-  keeps the number it showed before the cut, and tags count from the cut as
-  0.4.x specified. Numbers may repeat across lineages; a number reused after a
-  revert is fine. Undo, revert and rewind stay within the session as
-  lineage changes.
-- [pinned] A renumbering the runner detects during a step takes effect at
-  the next step boundary, never before that step's tool calls have run.
-  So between a model reply and its tool calls, the current lineage is the
-  one the model saw. That is what lets a context manager resolve a number
-  in a tool call against the session's current numbering, locally and
-  without naming the numbering it means: `session.resolve` carries no
-  anchor for this reason. A runner that could change lineage within a turn
-  would need that anchor back, and this contract does not give it one.
-
-**`tag_checkpoint`: the Setup checkpoint.**
-
-**`message_checkpoint`: two anchors (opt-in).**
-
-- [pinned] Every rule in this block applies only to runners declaring
-  `message_checkpoint`, which requires `tag_checkpoint`; runners without
-  it, including existing `tag_checkpoint` runners, keep the rules below
-  and their existing conformance verdicts.
-- [pinned] A Setup checkpoint is `{tag_checkpoint, cut, message_count?,
-  head_cut?}`. The new members are sent together or neither, only to a
-  runner declaring `message_checkpoint`. `message_count` is a `u64`: the
-  count of host messages before `cut` under §4.8, excluding its uncounted
-  rows (on OpenCode 1, finished summaries, compaction-only rows and dead
-  steps), frozen at the move, both `cut`'s
-  ordinal and the adoption lineage's `first_ordinal`. `head_cut` reuses
-  `read::HeadCut`: `{mid, digest, written_at}` for the counted message
-  immediately before `cut`, the last message the move folded. Its digest
-  uses the ordinary §4.2 full stored-content digest procedure; `written_at`
-  is the host creation time as a JSON `u64` in milliseconds since the Unix
-  epoch, not a date string. The provider certifies it offline.
-  For a moved session on a runner declaring the group, a Setup answer
-  carrying the checkpoint includes both members.
-- [pinned] A runner declaring `message_checkpoint` MUST keep the message
-  boundary separate from the tag anchor. Falling back to an older tag
-  anchor or the session start for tags never moves a surviving message
-  lineage's `first_ordinal`. When `cut` is gone but `head_cut.mid`
-  survives, it MUST anchor both counters immediately after `head_cut.mid`:
-  the next counted message has ordinal `message_count`, and the next
-  counted part has tag `tag_checkpoint + 1` (checked for overflow). It
-  never serves `head_cut.mid` or earlier messages on lineage reads, or holds
-  them in its lineage window. This overrides
-  the session-start fallback for moved sessions only. If `head_cut.mid`
-  is also gone, no adoption cut remains; the tag session-start fallback
-  still applies, but the provider refuses Setup before a model call.
-- [pinned] A runner declaring `message_checkpoint` MUST write
-  `message_count` and `head_cut` beside `tag_checkpoint` and `session` on
-  every native marker key, atomically with the marker. For a native cut
-  through ordinal `t`, `message_count = t + 1`, using checked arithmetic
-  (`tags::next_message_count`); it MUST refuse a cut whose addition
-  overflows. `head_cut` describes message `t`, using the same digest and
-  timestamp rules as Setup.
-- [pinned] For a runner declaring `message_checkpoint`, §4.8's uncounted
-  rows, including a marker's finished summary, compaction-only rows and
-  dead steps,
-  MUST NOT appear on any read, on adoption or native lineages. Message
-  ordinals are contiguous over the counted rows; a native marker's `t + 1`
-  uses that same order.
-- [pinned] On reload, a runner declaring `message_checkpoint` MUST restore
-  `first_ordinal` and `session.head.cut` from the marker without walking
-  history. A marker whose key is lost supplies only the existing tag
-  fallback, never a reason to move the current message lineage to an older
-  cut. It MUST NOT interpret a missing message or tag counter as 0; an
-  incomplete checkpoint cannot restore a message lineage. Unknown or
-  inconsistent head or marker state fails Setup closed by name.
-- [pinned] A runner declaring `message_checkpoint` answers `session.head`
-  while its own Setup call for that session is outstanding, without waiting
-  on that Setup, its lock, or any gate the outstanding Setup holds. It takes
-  `first_ordinal` and `cut` from the newest in-effect marker key carrying
-  `message_count` and `head_cut`, or else from the checkpoint it stored from
-  an earlier Setup answer. When it has neither, `session.head` carries no
-  cut and `first_ordinal` 0, and the provider refuses the moved session as
-  compaction-provider §4's head check specifies. The provider's reverse
-  `session.head` uses compaction-provider §4 `compaction.setup`'s existing
-  reverse-call rule: “For calls about the conversation—`session.read`,
-  `session.head`, `session.resolve`, sends into it, and reminders—the provider
-  opens its own route to the runner using exactly the identity above.”
-- [pinned] A moved session on a runner without `message_checkpoint` is
-  refused at Setup with terminal `message_checkpoint_unsupported` (the
-  existing `tag_checkpoint_unsupported` still applies without that group).
-
-**Setup lifetime and legacy tag-only fallback.**
-
-- [pinned] A runner that declares `tag_checkpoint` (it requires
-  `compaction`, §3) honours a Setup checkpoint `{tag_checkpoint, cut}`
-  (`tags::SetupCheckpoint`) on its compaction provider's Setup answer
-  (compaction-provider §4): it anchors the number at the `cut` message,
-  used only when no in-effect marker carries a checkpoint for this
-  session, so the numbers are the same with or without the marker's key.
-  If the cut message is gone (a revert past it), the runner numbers from
-  the session start with that number, on a new lineage. The checkpoint is
-  permanent for the session, needs no report back, and survives a lost
-  marker key and runner restarts.
-  The tag-only fallback in this paragraph is unchanged for runners without
-  `message_checkpoint`; the opt-in two-anchor block above overrides it for
-  moved sessions on runners declaring that group.
-- [pinned] Setup runs once per lineage, before the lineage's first model
-  call (§11.1), so each Setup checkpoint the runner records belongs to
-  exactly one lineage: a lineage's numbering is anchored only by the
-  checkpoint its own Setup answered, never by one recorded for another
-  lineage.
-- [pinned] A Setup checkpoint comes only on a Setup without
-  `descends_from` (compaction-provider §4): a session moved in from
-  standalone Magic Context, a Claude Code conversation coming off the
-  full-array route, a runner that lost its state, and a revert below a cut
-  made before the runner adopted the session. On a lineage a cut starts,
-  whose Setup carries `descends_from`, numbering continues from the old
-  lineage's highest number: the parts the cut retained keep their numbers,
-  and the next counted part takes the number after the old lineage's
-  highest. A runner that receives `checkpoint` on a Setup with
-  `descends_from` treats the answer as a failed Setup: no model call, and
-  the run ends `error` with `provider_code` `compaction_unavailable` and
-  `reason` `checkpoint_on_descent` (compaction-provider
-  `setup::CHECKPOINT_ON_DESCENT`).
-- [pinned] While a tag-rendering run waits for the answer to a Setup
-  without `descends_from`, whose checkpoint may move the numbering anchor,
-  a runner may refuse `session.read` and `session.resolve` `transient`.
-  The adoption-cut `session.read` rule for a runner declaring
-  `message_checkpoint` (§4.1) is an exception: that read must answer while
-  Setup is outstanding. This changes neither the `session.resolve`
-  allowance nor the rules for runners without `message_checkpoint`.
-  It never does so while a Setup with `descends_from` (a cut's) is pending:
-  a cut's Setup never interrupts readers.
-- [pinned] A compaction provider refuses Setup for a session it moved from
-  standalone Magic Context, on a runner without `tag_checkpoint`, with the
-  terminal `tag_checkpoint_unsupported` (compaction-provider §10).
-- [pinned] For a session with standalone state and no completed move, the
-  provider refuses Setup `standalone_session_not_migrated`. Where standalone
-  runs in-process, a runner that has never served the session hands it to
-  standalone in the same step; one that has served it, and every runner on
-  a host without standalone, fails the run by name and never forwards the
-  unmanaged history (compaction-provider §4).
-
-**Forks.**
-
-- [pinned] A session the runner knows was forked or cloned from a managed
-  session (one whose plan names a compaction provider) is never enrolled.
-  The runner refuses `session.send` and `session.adopt` for it with the
-  terminal `fork_unsupported {parent?}` (§12.1,
-  `errors::ForkUnsupportedDetail`), writing nothing, with a message such as
-  "Forks aren't supported for Magic Context sessions; use undo instead".
-  An in-process host refuses the person's own turn the same way.
-- [pinned] A runner refuses only forks it can know about. On OpenCode a
-  fork is known by a copied marker checkpoint naming another session,
-  which is the `{parent}` (`tags::anchor` answers it); a fork of a session
-  that never compacted carries nothing of the runner's and is an ordinary
-  session.
-
-**Switching from a stored ledger.**
-
-- [pinned] One rule for every runner that numbered parts from a stored
-  ledger before (`runner-tags/v1`, or a gateway's own ledger): it switches
-  at a session's next run, or, on a runner whose sessions advance by user
-  turns, its next user turn. Parts already written or admitted keep their
-  stored numbers, so no exposed part is renumbered and the lineage stays
-  the same. The first run (or user turn) under these rules records the
-  ledger's high-water as its starting checkpoint, on that run's frozen
-  configuration, anchored at that run's first part; numbers are computed
-  from there, by these rules, on the same lineage. A compaction cut before
-  that anchor covers only parts numbered by the ledger; a cut after it
-  counts from the anchor.
-- [pinned] A detected restore of such a runner's store is not a switch: it
-  starts a new lineage, numbered from the restored high-water.
-
-**What the model writes.**
-
-- [pinned] The model's own tag notation is cleaned by a port of the tag
-  cleaning in standalone Magic Context, the plugin that manages context inside
-  OpenCode and Pi (`tags::clean_model_text`, from its
-  `tag-content-primitives.ts` and `text-complete.ts`): remove a leading run
-  of `§N§`; remove every complete `§N§` anywhere; remove malformed `§N">§…`
-  shapes; remove a `§N` closed with an improvised character, but never a
-  `§` followed by digits, then `.` and a digit (a section reference such as
-  `§5.1` or `§12.3`, at any digit count); remove any stray `§`, then trim.
-  Bare digits are never removed. The function is idempotent. Standalone's
-  own rule backtracks one digit before a decimal (`§12.3` cleans to `2.3`
-  there). This port instead preserves the whole section number, so the two
-  differ for a `§` followed by two or more digits and a decimal.
-- [pinned] Cleaning runs on every exposure (`tags::exposed_model_text`):
-  `session.read`, `session.resolve`, the final text of `run.result`, every
-  render, and the summarizer's feed. Every reader and the model see the same
-  text produced by the shared cleaning function. Storage may keep the raw
-  text.
-- [pinned] An in-process host MUST also clean at its own save seam
-  (OpenCode's `experimental.text.complete`, Pi's `message_end`), because its
-  own UI and other plugins read the host store outside the runner. It
-  cleans only a reply whose writing run rendered tags, judged by that
-  message's own record of its run's frozen plan, never by the session's
-  current setting, and never a structured-output reply. Exposure stays
-  authoritative: a seam that does not fire (an aborted reply, a hook error
-  the host swallows) leaves raw text only in the host's own copy, never in
-  anything the runner exposes, and cleaning text that is already clean
-  changes nothing. This does not apply to the Claude Code gateway, which is
-  not an in-process host and has no save seam: Claude Code's own file keeps
-  the raw text, and the gateway cleans on every exposure.
-- [pinned] Never cleaned, at any seam: signed thinking, encrypted
-  reasoning, a tool call's arguments (dispatched exactly as the model wrote
-  them), and the final text of a structured-output run (§9.4), which
-  `run.result` answers from the runner's own record of the raw text.
-- [pinned] The cleaning applies on every provider: no provider-state
-  exception remains.
-
-**Freeze.**
-
-- [pinned] The numbering and cleaning rules are frozen per run under one
-  named feature, `runner-tags/v2` (`tags::RULES_FEATURE`), recorded with
-  the rest of the run's frozen configuration. A run keeps the rules it was
-  frozen under for its whole life.
-
-**Reads.**
-
-- [pinned] On a runner that declares `tags`, every `session.read` entry
-  carries `tags: [{part, tag?}]` (`tags::PartTag`), one row per part the
-  runner exposes, in the message's part order, beside the message as
-  `tool_calls` are: `tag` is the number the part shows in the current
-  lineage, present on a counted part of a tag-rendering session and absent
-  otherwise, so a reader learns every part's key from the rows alone.
-  `part` is the runner's own key for the part within its message (an index
-  or a part id), opaque to consumers: the host identity a consumer keys
-  its durable state by, and the one `session.resolve` answers with. Once a
-  part is exposed its key never changes. Decoding stays lenient: a reader
-  of a runner without `tags` finds no `tags`. Where a message came from
-  (its attestation) is not in this revision.
-- [pinned] Content digests ride separately from tags (§4.2): required in
-  descriptors mode and optional in inline mode.
-
-**Resolve.**
-
-- [pinned] `session.resolve {tag, range?, media?}` (`tags::ResolveRequest`) is
-  strict: an unknown field is refused `invalid_params` naming it, and the
-  request names no session (§1). `range` is `{start, end}`
-  (`tags::CharRange`), a half-open range of the part's content counted in
-  Unicode scalar values: not bytes, and not UTF-16 code units, so a range
-  names the same text in every language.
-- [pinned] The answer is `{tag, ordinal, mid, part, content, range?}`
-  (`tags::ResolveReply`), decoded leniently: `content` is the part's
-  exposed content, or the requested range of it (`tags::slice`): a text
-  part's text, cleaned when it is the model's text a tag-rendering run
-  wrote; an image-only tool result in the runner's own stored encoding of
-  it. `range` echoes the request's. `media` defaults to `"inline"` and accepts
-  only `"inline"` and `"descriptors"`, refusing other values with
-  `invalid_params {field: "media"}`. Inline keeps the existing string content
-  and frame refusal behavior. Descriptors uses the same in-place ref shapes,
-  threshold and fixed budget as §4.2; `content`
-  may then be a JSON ref or a structured part with refs. Character ranges are
-  validated and applied to exposed text before describing that text.
-- [pinned] `session.resolve` answers about the session's current lineage:
-  the part that shows the number now, with its current `ordinal` and
-  `mid`. A number that names a part below the lineage's `first_ordinal` is
-  refused `before_lineage_start` with `detail.first_ordinal` (§4.5), never
-  answered.
-- [pinned] A malformed tag is refused `invalid_params {field: "tag"}`. A
-  well-formed tag that no part of the current lineage carries is refused
-  `unknown_tag`, terminal (§12.1). Resolve never answers a left lineage's
-  content. A range whose `start` is after its `end`, or whose `end` is past
-  the content, is refused `invalid_params {field: "range"}`; an empty range
-  within the content answers `""`.
-- [pinned] Resolve writes nothing.
-
-**Rendering.**
-
-- [pinned] With `render_tags: true`, the runner renders a counted text
-  part as its number, one space (U+0020), then the part's text with any
-  leading tag notation stripped (`tags::render_counted_text`,
-  `tags::RENDER_SEPARATOR`): only `§`-shaped notation, never bare digits,
-  in up to eight rounds (`tags::strip_leading_tag_notation`). Rendering
-  what it rendered gives the same bytes again. A tool result's number
-  prefixes its first non-empty exposed text block (`tags::numbered_block_index`);
-  later text blocks and all media blocks render as exposed, unnumbered.
-  Thus `[text, image, text]` takes one number on block 0, `[image, text]`
-  and `["", text]` put it on block 1, and `[image, ""]` uses the image label.
-  A tool result without non-empty text renders its image-only or media-only
-  label once, where the provider accepts text beside media; a part that does
-  not count renders as exposed, with
-  no number (`tags::render_part`). A compaction provider builds the same
-  bytes for its placeholders. `tags.json` and `tag-cleaning.json` pin
-  rendered parts.
-- [pinned] Whether tags are rendered to the model is the session's fetch
-  plan's `render_tags` member (`tags::PLAN_RENDER_TAGS`), composed by core
-  in the same plan object `SendRequest::plan` carries (§10.1): `true`
-  numbers, renders and cleans by these rules; absent, `null` or `false`
-  does none of it. A plan carrying a non-boolean, or `render_tags: true` to
-  a runner without `tags`, is refused at admission `invalid_params {field:
-  "plan.render_tags"}`, writing nothing (`tags::check_plan`,
-  `SendRequest::check_render_tags`). `render_tags` is part of the plan, so
-  it is frozen with it, and a later plan that differs in it is
-  `plan_drift` like any other difference.
-
+Part numbering, tag notation and reply cleaning are defined only by
+`cortexkit-role-compaction` A3 and W4. The `tags` group, `session.resolve`,
+read-entry tag rows and `render_tags` plan setting are not part of this role.
+Opaque per-part identities are carried by `part_digests` or, for an
+`archive_prunes_reasoning` entry without digests, `part_keys` (§9.14.1).
 ### 9.7 `delivery_order`: ordered delivery modes, plan senders and templates
 
 A send does not always want to become a turn. A module's reminder should
@@ -3899,7 +3147,7 @@ say who may send and which texts are system text.
   its first boundary.
 - [pinned] Until it is delivered, a queued send answers `pending` with its
   `submission_id`, as a queued send does today (§9). Once delivered, a
-  re-send of its `send_id` (or `send.status`, §9.8) answers how it went out,
+  re-send of its `send_id` (or `session.send_status`, §9.8) answers how it went out,
   durably, as §9 says for following a queued send: `step` with `ref` the
   stored row id and `run_id` required exactly when the runner declares
   `run_ops`, or `turn` with `run_id` the run it started. A `step` receipt's
@@ -3950,7 +3198,7 @@ say who may send and which texts are system text.
   the part is already gone, and, for a queued send whose part goes before
   it is delivered, the terminal send state `template_part_gone`
   (`send::states::TEMPLATE_PART_GONE`), never delivered, which a re-send of
-  its `send_id` (or `send.status`) answers with `slot`, as an expired send
+  its `send_id` (or `session.send_status`) answers with `slot`, as an expired send
   answers `expired`. The sender recomposes on its next pass. Once a
   template send is delivered, its rendered text is stored byte for byte;
   later provider rendering follows the authority rules below.
@@ -4093,7 +3341,7 @@ say who may send and which texts are system text.
      namespace.
   Send records keep §9's session lifetime, so a client can keep retrying
   after the switch for as long as the relation stays in the plan.
-- [pinned] The successor may read `send.status` for the predecessor's sends
+- [pinned] The successor may read `session.send_status` for the predecessor's sends
   on a runner serving that operation, looked up in the same order; neither
   namespace holding the id answers `unknown_send`. It
   gains no sends, stop or withdrawals on the predecessor's behalf, and
@@ -4104,7 +3352,12 @@ say who may send and which texts are system text.
   at a run boundary. `sender_succession::predecessor` selects one hop from
   that current list.
 
-### 9.8 `send_status`: `send.status`
+### 9.8 `send_status`: `session.send_status`
+
+A runner declaring the optional `send_status` group serves both
+`session.send_status` (canonical) and `send.status` (alias until the next
+breaking release), with identical requests, answers, authorization and no
+side effects. Neither name is required without the group.
 
 A caller that follows a queued send (§9) re-sends its full body under the
 same `send_id`. A runner that declares `send_status` also answers the same
@@ -4117,7 +3370,7 @@ re-send their bodies.
   session (§1), and carries no part of the send's body.
 - [pinned] The answer is what a re-send of that `send_id`, with the
   body it was accepted with, would answer at that moment, **except that
-  `send.status` never acts**: a `SendReply`
+  `session.send_status` never acts**: a `SendReply`
   (`send_status::SendStatusReply`), with §9's `state`, `run_id`,
   `submission_id` and `delivered` rules. In particular, a delivered steer's
   `step` receipt has `run_id` exactly when the runner declares `run_ops`, and
@@ -4130,13 +3383,13 @@ re-send their bodies.
   §9.7, including its declared one-hop succession lookup). A `send_id`
   the session has no record of in either applicable namespace is
   refused `unknown_send`, terminal (§12.1); nothing is written.
-- [pinned] `send.status` writes nothing and dispatches nothing: it never
+- [pinned] `session.send_status` writes nothing and dispatches nothing: it never
   admits, delivers, re-queues or retries a send, and it is not activity
   for retention (§9.1). Where a re-send would itself act by re-driving a run
-  paused for re-authentication, `send.status` reports the current durable fate:
+  paused for re-authentication, `session.send_status` reports the current durable fate:
   `state: "paused"` with its `pause_reason`, and the run stays paused.
   Resuming is the caller's choice, by re-sending the accepted body.
-- [pinned] A caller sends `send.status` only to a runner that declares
+- [pinned] A caller sends `session.send_status` only to a runner that declares
   `send_status` (§3). Against any other runner it falls back to re-sending
   the full body under the same `send_id`. This ordinary `session.send` retry
   may act as §9 describes, including re-driving a paused run.
@@ -4237,8 +3490,8 @@ re-send their bodies.
   no commands and refuses every invocation with `no_person`. Admission
   refuses duplicate command names from different plan providers with
   `user_command_collision {name, providers}`.
-- [pinned] `session.user_command {session_ref, command, input,
-  invocation_id}` is owner-only, like `session.baseline`; every other caller
+- [pinned] `session.user_command {command, input, invocation_id}` acts on the
+  route-bound session and carries no session selector. It is owner-only, like `session.baseline`; every other caller
   is refused `scope_owner_mismatch`. It returns `{call_key, reply}`, where
   `reply` is the first stored `UserCommandReply`; after a lost provider reply,
   that stored answer is runner-assigned `outcome_unknown`. Input is forwarded
@@ -4257,7 +3510,7 @@ re-send their bodies.
   The runner stores terminal `outcome_unknown` as the answer and status instead
   of forwarding again; every retry and status read replays that outcome. Its
   text tells the person the command may have run.
-- [pinned] `session.user_command_status {session_ref, call_key}` is also
+- [pinned] `session.user_command_status {call_key}` is also
   owner-only. It returns `{state, text, progress: [text], job?}`: the latest
   state, the first reply's or terminal result's text, and progress in order
   (the last 20, at most 64 KiB total). State accepts unrecognized strings and
@@ -4367,9 +3620,9 @@ its host's file storage, not a second copy of the host's media store.
   `[media not shown: kind=… mime=… bytes=… sha256=<first 12 hex> reason=not_requested]`.
   Each media part of a multi-part tool result becomes the same marker, and
   the result is the existing text form built from its parts in order (joined
-  by a single `\n`, without a trailing newline), not a new multi-part shape. Strict readers, including
-  compaction readers, therefore see only their existing shapes. The rule
-  also applies to inline history and resolve reads where those are served.
+   by a single `\n`, without a trailing newline), not a new multi-part shape.
+   Strict readers therefore see only their existing shapes. The rule
+   also applies to inline history reads where those are served.
 - [pinned] `media: "blocks"` returns each message the way the runner stores
   it, media included: a stored block, or whatever bytes the runner's own
   schema keeps inline for that media (a `data:` URL, say). This group adds no
@@ -4397,15 +3650,14 @@ its host's file storage, not a second copy of the host's media store.
   it, including an image in a tool result. Every other digest, even one
   held for an unreferenced committed upload or another session, is refused
   `unknown_media`. Knowing a hash never grants another session's bytes.
-- [informative] Thumbnails and full-size renders are the reader's job
-  (Thalamus renders on demand); runners never store those derived renders.
+- [informative] Thumbnails and full-size renders are the reader's job;
+  runners never store those derived renders.
   Images OpenCode already holds as data URLs in its file parts are served
   by digest like any other media.
 
 ### 9.13 `output_refs`: immutable references to tool outputs
 
-- [pinned] The `output_refs` group requires `tags` and applies only to a
-  session whose frozen plan renders tags. It serves `session.output_refs`
+- [pinned] The independent `output_refs` group serves `session.output_refs`
   and `session.output_ref_read`. A plan item may carry `output_refs: bool`,
   absent meaning false. A runner without the group refuses any plan carrying
   the member on any item, even false, before writing anything, as
@@ -4433,7 +3685,7 @@ its host's file storage, not a second copy of the host's media store.
   slot is scanned in `program` mode, never as data or reply text. Missing and
   non-string slots are not scanned. Non-slot arguments, and tools declared on
   a send (which have no plan item or catalog), get no call set.
-- [pinned] Resolve against the request numbering the writing step saw, as of
+- [pinned] Resolve against the compaction A3 request numbering the writing step saw, as of
   the durable commit storing the message or call. Persist records in that
   commit or derive them identically from durably stored inputs at that commit.
   Never resolve them against later numbering. Tool-result text and nested
@@ -4463,7 +3715,7 @@ its host's file storage, not a second copy of the host's media store.
   of the records array in encounter order, retaining null fields and omitting
   absent `mime` and `reason`. `test-vectors/llm-runner-v1/output-refs.json`
   pins the exact canonical bytes and digest. Records survive compaction and
-  lineage changes; rewind removes records with their message, and session
+  history rewrites; rewind removes records with their message, and session
   retention removes them with the session.
 - [pinned] `session.output_refs {set_id, after?}` returns `{records, next?}`,
   at most 32 records and 16,384 bytes for the complete encoded page. `after`
@@ -4626,7 +3878,7 @@ its host's file storage, not a second copy of the host's media store.
   kinds it lists.
 - [pinned] Pruning is allowed only in an archived session at rest: no active
   run and no queued send, the same exclusion as retention deletion. It is
-  an in-place payload change, not a cut, revert or new lineage.
+  an in-place payload change, not a cut, revert or raised history_version.
 - [pinned] The kinds (`archive_prunes_reasoning::kinds`) mean:
   - `reasoning`: empty a reasoning part's payload, keeping `text: ""` when
     its format requires text, and removing optional signatures and encrypted
@@ -4698,32 +3950,10 @@ its host's file storage, not a second copy of the host's media store.
   the call's result, and dropping text would change the conversation. The
   stored parts are unchanged by this; only the outgoing request leaves them
   out.
-- [pinned] **Applied edits are pruned with their parts** (since 0.7.12). A runner can
-  hold an applied view (compaction-provider §6) whose keep-range part edit
-  re-serializes a part it later prunes: a drop placeholder on an
-  `opencode-aisdk` tool part, where call and result share one part, still
-  carries the call's `thoughtSignature` in `metadata`. When a runner
-  prunes, it MUST apply the same per-profile rule to every part edit of its
-  applied view at a message it prunes whose bytes carry what that prune
-  removes, exactly as it applies the rule to the stored part, in the same
-  commit as the prune. The check is per message, as for a refused view
-  (below): an edit naming any part of the pruned message counts. Nothing
-  the runner sends after the prune, its first request before any provider
-  pass included, carries pre-prune bytes, and the model view it serves
-  shows the rewritten edit. The runner never drops the edit to get there:
-  dropping a drop-placeholder edit would put the original content back.
-  If an edit holds a pruned part in a form the profile's rule cannot
-  express, so that applying the rule would leave the removed content in
-  place, the runner refuses to prune that message.
-  `archive_prunes_reasoning::prune_part_in` (one part, one kind) and
-  `prune_edit_in` (an edit's bytes, every kind recorded at its message) are
-  the reference; `PruneRefused::Inexpressible` is the refusal. The
-  `applied_edits` of `reasoning-pruned-profiles.json` give, for each
-  profile that carries `signature`, an applied edit before and after the
-  prune.
+
 - [pinned] A pruned part stays at the same index with the same type and key.
-  Thus `m<ordinal>#<index>`, tags, resolve's `part`, `part_digests` positions
-  and reminder slots never move. Lineage, ordinals, tags, `history_version`
+  Thus `part_digests` positions, served part keys and reminder slots never
+  move. Ordinals and `history_version`
   and history cursors are unchanged. Removing a signature never changes whether a part counts;
   a `signature`-kind text part keeps its number and its exact text.
 - [pinned] Message `digest` and every `part_digests` entry retain their
@@ -4731,10 +3961,8 @@ its host's file storage, not a second copy of the host's media store.
 - [pinned] Every page serving a pruned part carries
   `pruned_reasoning: [{mid, part, kind, bytes, sha256}]`
   (`archive_prunes_reasoning::PrunedReasoning`), for exactly the pruned parts
-  it serves. This applies to raw and model `session.read` (`ReadPage`,
-  `ModelPage`) and raw and display `session.history` (`HistoryPage`,
-  `DisplayPage`), on every read, not only the first after pruning. A model
-  page does not list a stored part hidden by compaction. The member is absent
+  it serves. This applies to raw `session.read` (`ReadPage`) and raw and display `session.history` (`HistoryPage`,
+  `DisplayPage`), on every read, not only the first after pruning. The member is absent
   when no served part was pruned. `bytes` is the length of the original
   stored part's RFC 8785 (JCS) bytes, the bytes `content_digest` hashes;
   `sha256` equals its write-time `part_digests` entry's `digest`.
@@ -4743,11 +3971,11 @@ its host's file storage, not a second copy of the host's media store.
   each listed entry's `sha256` equals that part's write-time digest. A reader
   may rely on this to accept the change and replace its held copy. Part
   identity and digests do not move when it does so.
-- [pinned] A runner never prunes a session enrolled with a compaction provider
-  whose latest recorded `compaction.setup` ready answer did not list
-  `pruned_reasoning` in `accepts`. Omission or an empty list grants no
-  permission. Sessions with no compaction provider are unaffected by this
-  enrollment gate.
+- [pinned] A runner whose plan names a compaction provider does not prune
+  reasoning until `cortexkit-role-compaction` defines how a provider accepts
+  pruned reasoning. A runner with no compaction provider may prune under the
+  rules of this section.
+
 - [pinned] **Prune state.** A runner keeps, for each session it has pruned,
   `reasoning_pruned: {generation, through_ordinal, at_ms}`
   (`archive_prunes_reasoning::ReasoningPruned`). It is absent until the
@@ -4758,85 +3986,19 @@ its host's file storage, not a second copy of the host's media store.
   ordinal any prune of the session has touched; it never decreases.
   `at_ms` is when the latest prune committed, in milliseconds since the Unix
   epoch, for display only: no party compares it with its own clock. A prune
-  is not a lineage change, so cuts and reverts leave the value as it is. A
+  is not a history rewrite, so cuts and reverts leave the value as it is. A
   runner that does not declare this group never sends the member.
-- [pinned] **Where it is carried.** `session.head` carries it as
-  `reasoning_pruned` and is the authority. Raw and model `session.read`
-  pages (`ReadPage`, `ModelPage`) repeat it, and so does every Setup request
-  and every advance notice the runner sends to an enrolled compaction
-  provider (compaction-provider §4, §5). Those copies are a convenience: each
-  reports the value as of when it was built. Every copy is absent exactly
-  when the head's is.
-- [pinned] **Setup before work after a prune.** After pruning a session
-  enrolled with a compaction provider, the runner calls that provider's
-  Setup before any other call to it for a run on the session: before any
-  `view.get` or `compaction.ride` and before the run's first model call.
-  The request carries `reasoning_pruned` exactly as the head reports it, so
-  a provider can reconcile at Setup alone, with no check on every notice.
-  This is a repeat Setup within the lineage (compaction-provider §4). A ready
-  answer replaces only the recorded `accepts` and, while no view has
-  applied in the lineage, the recorded `initial`. The frozen `ceiling` and
-  `ride_wait_ms`, any checkpoint, and the current view once one has applied
-  stay as they are. The runner checks a replacement `initial` with the
-  restore rule below, `initial` standing for the ordinals of its range; one
-  that would restore pruned content is a failed Setup naming
-  `pruned_reasoning_restored` (`archive_prunes_reasoning::PRUNED_REASONING_RESTORED`):
-  no model call, run error `compaction_unavailable`. A refusal or a failure
-  ends the run as any Setup refusal or failure does, and the next send calls
-  Setup again, still carrying `reasoning_pruned`. Once a post-prune Setup is
-  answered and recorded, the next one is due after the next prune.
-- [pinned] **A view that restores pruned content is refused.** The rule is
-  about content, not the shape of the edit: the runner refuses any view
-  whose edits would put content its prune removed back into a message it
-  pruned. It reports `view_refused:<version>:pruned_reasoning_restored` on
-  its next advance notice (compaction-provider §7) and keeps its current
-  view. A view fetched with `view.get` and one carried by a ride answer are
-  checked alike. These are every form in which a view sends bytes in place
-  of the transcript (compaction-provider §6), and each is checked:
-  - a `replace` range's `bytes`, against every ordinal the range stands
-    for. A range stands for `[from, to)`; the first range of a lineage whose
-    `first_ordinal` is above 0 also stands for every ordinal below it,
-    because it carries the view's head;
-  - a keep range's part edit with `bytes`, against the message at the
-    edit's `ordinal`, whichever of its parts the edit names, so moving the
-    content into a sibling part does not get it past;
-  - a part edit with `drop: true` sends no bytes and restores nothing.
-  Provider-authored bytes for a pruned message count whatever their
-  origin: they cover a held part re-serialized inside an edit, not only new
-  content. A part edit that trims a tool output but re-encodes the held
-  part's call with its thought signature, or that edits `text_with_state`
-  text but re-encodes the held `provider_state` signature, restores what a
-  `signature` prune removed and is refused like new content would be.
-  A post-prune Setup's `initial` is checked by the same rule (above). The
-  check follows the kind the runner recorded for each pruned part of the
-  message, using the kind names of this section, and covers only what that
-  prune removed:
-  - `reasoning`: any reasoning content, whether reasoning text, a reasoning
-    signature, or redacted or encrypted reasoning data;
-  - `opaque_reasoning`: only an encrypted or opaque reasoning payload; a
-    readable summary may be sent;
-  - `signature`: a provider signature on a non-reasoning part.
-  `archive_prunes_reasoning::carries_pruned_content`,
-  `archive_prunes_reasoning::restored_part` (replace ranges and `initial`)
-  and `archive_prunes_reasoning::restored_by_edit` (part edits) are the
-  reference over the stored formats this section names (`owned-broca`),
-  their `_in(profile, ...)` forms over each profile of the per-profile
-  table, and
-  compaction-provider's `CompactionView::restored_pruned_part` and
-  `restored_pruned_part_in` apply them
-  to a whole view. Part digests do not change on a prune,
-  so the check is against the runner's stored prune state (which parts it
-  pruned, at which ordinals, with which kind), never against digests. The
-  refusal is permanent for that view's body: the runner applies nothing
-  from it, now or at a later boundary. The ordinal and part it found are for
-  the runner's own logs and do not travel on the wire.
-- [pinned] **The index window.** A runner may serve `session.head` from an
-  index it updates right after the pruned payloads commit. For that moment a
-  head read can report the previous generation while pages already serve
-  pruned bytes. Neither side treats this as a defect: a provider that reads
-  the stale generation and sends a view rendered from its held copy gets
-  `pruned_reasoning_restored`, then reads `session.head` again, reconciles
-  its held copies, and only then builds another view.
+- [pinned] **Where it is carried.** `session.head` carries `reasoning_pruned`
+  as the authority and every `session.read` page repeats its snapshot value.
+  The field remains absent until the first prune.
+- [pinned] Every entry served by an `archive_prunes_reasoning` runner carries
+  its stored-order part keys: `part_digests` supplies them when present;
+  otherwise `part_keys: [string]` supplies them, including an empty list for
+  an entry with no parts. Display entries carry `part_keys` from the source
+  entry. Each `pruned_reasoning[].part` names a key served by that entry.
+  Readers match those served keys; they never construct a key from message
+  contents, native ids or indexes.
+
 - [informative] Reopening continues without the pruned reasoning. Before
   pruning a model family, the runner is responsible for ensuring that its
   model provider accepts the resulting history.
@@ -5061,7 +4223,7 @@ froze for a run to every assistant reply the run writes.
   when the rest of the plan, including `compaction_item`, applies at the next
   run; the old provider keeps read access until that switch, so a running
   compaction is not cut off mid-run. Plan-named senders may also
-  read `send.status` for their own sends and, under `sender_succession`,
+  read `session.send_status` for their own sends and, under `sender_succession`,
   their current plan predecessor's sends only. Local operator tools on a
   direct connection remain admitted for as long as the development admission
   stands, on runners that admit them; a runner that never admits them need
@@ -5074,9 +4236,9 @@ froze for a run to every assistant reply the run writes.
   `run.cancel` (owner-only unless `run_cancel_by_interrupt` admits a sender
   holding the interrupt grant), `session.retract` (owner-only unless
   `retract_own_send` admits a send's recorded sender), or another sender's
-  `send.status`. Other reads, such as `run.result` and `run.tool_calls`, keep
+  `session.send_status`. Other reads, such as `run.result` and `run.tool_calls`, keep
   their own admission rules; `readers` restricts only the six operations
-  above and `send.status`.
+  above and `session.send_status`.
 - [pinned] `readers` participates in the plan's identity. Like `senders`, it
   is admission policy, not model input: both follow the single at-acceptance
   rule in §10.2, not the next-run rule. `app_readers::check_plan` validates
@@ -5190,27 +4352,20 @@ froze for a run to every assistant reply the run writes.
   forwarding nothing. The refusal is terminal and never timed. With the
   declaration present, the runner admits the item and forwards it unchanged:
   it never invents a preset.
-- [pinned] A plan carrying a `compaction_item`, sent to a runner that does
-  not declare `compaction`, is refused at admission `invalid_params {field:
-  "plan.compaction_item"}` and writes nothing
-  (`SendRequest::check_compaction_item`).
-- [pinned] The `compaction_item` names the session's compaction provider as
-  `provider`, a module id, inside `compaction_item: {provider, preset?,
-  params}`, frozen with the plan (`plan_compaction_provider`). It is the
-  provider the runner calls Setup on and sends notices and rides to (§11.1).
-- [pinned] A plan item names a preset only for a provider whose preset-less
-  catalog answer lists it. When `compaction_item` carries no `preset`, the
-  runner's calls to that compaction provider carry none either: it never
-  invents one and never sends an empty string.
+- [pinned] `compaction_item: {provider, preset, params}` names the compaction
+  provider and the session's role preset (for example head, worker or reader).
+  `preset` is required. Admission refuses a missing or non-string preset as
+  `invalid_params {field: "plan.compaction_item.preset"}`, before writing.
+  `compaction::check_plan` and `SendRequest::check_compaction_item` supply
+  that check. The runner passes the preset unchanged to Setup as the new
+  compaction contract requires; it never invents or defaults one.
 - [pinned] The runner records the session's role versions, its frozen scope
   identity, the fetched tools and text, the composition and the joined system
   text with its join version in its start record. A session keeps its role
   versions for life.
 - [pinned] The plan travels as `plan` on the session's first send, carried
   verbatim (`SendRequest::plan`).
-- [pinned] The plan's optional `render_tags` member decides whether part
-  tags are rendered to the model (§9.6); absent means off. Its optional
-  `senders` member names the session's other senders and their templates
+- [pinned] The plan's optional `senders` member names the session's other senders and their templates
   (§9.7); absent means the owner alone. Its optional `readers` member
   restricts read admission on a runner declaring `app_readers` (§9.19);
   absent keeps that runner's current read admission.
@@ -5339,7 +4494,7 @@ every request, answer and refusal.
   at the pending change's rung point under the next-run rule: `immediately`
   means the next run; deferred rungs wait for the `session.flush_prefix` or
   rebuild reaching their point. The runner relaunches only that session's
-  private host with the new plan, preserving history bytes, lineage and
+  private host with the new plan, preserving history bytes, history_version and
   message ordinals. Several pending changes cost one relaunch. After success,
   `applied_generation` moves and `effective` names the new plan as usual.
   Sender and reader admission do not wait for the relaunch or its success:
@@ -5404,8 +4559,9 @@ every request, answer and refusal.
   reason}` event on the durable `session.subscribe` control lane, even
   without `live_events`. No existing session-change event fits this notice.
   The event is prompt notice; the lenient baseline is the recovery record.
-- [pinned] For runners declaring `compaction`, a changed tool surface changes
-  the provider prefix: after the relaunch succeeds and before the session's
+- [pinned] For a session whose plan names a compaction provider, a changed
+  tool or system-text surface follows `cortexkit-role-compaction` A9/W5.3:
+  after the relaunch succeeds and before the session's
   first model request on the newly installed surface, send `compaction.ride`
   with cause `surface_change`,
   so queued provider work lands in that same rebuild. The same ride-before-
@@ -5414,8 +4570,8 @@ every request, answer and refusal.
   no ride: its provider surface and cached prefix did not change, and removals
   are enforced at the offered-set gate only. If fallback does change the tool
   list the model receives, it is a surface change and its ride goes first.
-  These rules make the existing compaction rewrite-ride ordering explicit
-  for session changes; an attempted relaunch alone is never a ride cause.
+  This is the new compaction contract's surface-change ordering, not a
+  capability-group condition. An attempted relaunch alone is never a ride cause.
 
 **`session.refresh_policy {generation, policy, send_id}`**
 (`RefreshPolicyRequest`, strict).
@@ -5453,107 +4609,21 @@ every request, answer and refusal.
 ## 11. Calls the runner makes
 
 The hook call sites and the tool-call rules (§11.2, §11.3) are required of
-every runner (§1). The compaction interface (§11.1) is owed by a runner
-that declares the `compaction` group (§3), and only by one. Their wire
+every runner (§1). A plan naming a compaction provider requires the runner
+to implement `cortexkit-role-compaction`, including its provider-facing
+`compaction-runner/v1` role (§11.1); admission refuses the plan otherwise (§3).
+Their wire
 shapes belong to the provider roles named; this role states what the runner
 owes.
 
-### 11.1 The compaction interface
+### 11.1 Compaction
 
-- [pinned] A runner that declares `compaction` owes everything in this
-  section; a runner that does not owes none of it, and never calls a
-  compaction provider.
-- [pinned] It implements the runner half of compaction-provider 0.3.0 §3,
-  which that contract defines (its §4 to §10) and this one does not restate:
-  - Setup (`compaction.setup`), called once per lineage, before the
-    lineage's first model call, for every new lineage, one a cut starts
-    included, so each Setup answer, and each tag checkpoint it carries,
-    belongs to exactly one lineage (§4.5, §9.6). A runner may run a cut's
-    Setup as soon as it prepares the view that carries the cut, off the
-    step, so the first step after a cut never waits on the provider; no
-    model call is made without a `ready` answer, and a refusal means no
-    model call. A lineage a cut, a revert or a recovery started calls Setup
-    again before its first model call. The Setup of a lineage a cut
-    started, or a revert restarted at a cut the runner had a lineage at,
-    carries `descends_from: {lineage_id, through_ordinal}` naming the old
-    lineage at that cut, whatever the provider's `setup_descends_from`
-    says, because the provider published that cut;
-    the provider keeps its state across the call (compaction-provider
-    §4). The initial CompactionMessage is recorded before that model call,
-    and Setup does not run again within the lineage while the runner holds
-    that record. A runner that no longer holds it, as when a detected
-    restore starts a new lineage whose recorded Setup answer did not
-    survive or that the runner discards with the lost lineage (§9.6),
-    calls Setup again before its next model call, as after a failed Setup
-    (compaction-provider §4). A runner declaring `archive_prunes_reasoning`
-    also calls it after a prune, before any other call to the provider for
-    a run on the session (§9.14.1);
-  - advance notices on ck-bus after every committed transcript change the
-    provider should see, from which the provider reads with `session.read`
-    (§4) and `session.resolve` (§9.6), within the current lineage, never
-    with `session.history`. The first notice of a lineage a cut started
-    carries `descends_from` naming the previous lineage at the cut
-    (compaction-provider §5.1). Optional `history_edit_cost` describes the
-    next model call on the session's current route: `suffix` re-costs from
-    an edited already-sent message onward (prefix-byte prompt caching), and
-    `full_resend` breaks a provider-side response chain on any such edit,
-    forcing full input. Send it on every notice when known, omit it when
-    unknown; unfamiliar values read as absent. It is pricing-only, never a
-    correctness signal, and absence keeps existing pricing. Every provider
-    must first pin compaction-provider 0.7.9 or later defining the header:
-    older readers omit undefined headers from the notice digest;
-  - views: fetched with `view.get` on `view_ready`, checked, written durably
-    to the runner's write-ahead log and applied only at a step boundary,
-    then rendered for every request until a newer view applies, including
-    across restarts and while the provider is down. A view's ranges tile
-    from the lineage's `first_ordinal`; the runner refuses a view whose
-    ranges start anywhere else (`view_refused:<version>:ranges_start`,
-    compaction-provider §7), and one whose replace range or part edit would
-    restore pruned content (`view_refused:<version>:pruned_reasoning_restored`,
-    §9.14.1). A view with a cut starts a new lineage once it applies (§4.5);
-  - rides (`compaction.ride`) when the runner's prefix is being rewritten
-    anyway, and at the ceiling. `chain_reset` is a rewrite cause sent before
-    rendering only when the runner already knows the next request carries
-    full input whatever the provider does, such as no usable chain on a
-    kept connection retired for age or closed after idling, or no kept
-    connection at run start. It never rides after rendering or for resends
-    discovered only at send time (a retry or a refused continuation). If
-    `history_edit_cost` is sent, `chain_reset` is sent only with
-    `full_resend`. It uses the same bounded wait and answers as
-    `model_change`, without requiring its model-specific `cache_ttl`
-    refresh. Older providers decode it as an unknown cause and answer
-    `nothing`;
-  - the ceiling Setup sets, with the `context_ceiling` refusal and run state
-    and the `context_ceiling_wait` status (§6) wherever those surfaces are
-    served. A runner that serves none of them, such as one without
-    `run_ops` that fronts a host's own requests, reports the ceiling to its
-    host instead: the refused host request carries the window, the size and
-    the cause;
-  - native markers, where the runner's host has them, kept outside the
-    transcript (§4.2).
-- [pinned] It requires `tags` (§9.6): views address parts by their key and
-  tag.
-- [pinned] A Setup `REFUSE` ends the run `error`. The run error's
-  `provider_code` is the answer's role `code` (`RefuseCode` in the
-  compaction-provider contract), with `provider` and `reason`; the answer's
-  optional finer code, which the provider's wire names `provider_code`,
-  becomes the run error's `provider_detail_code` (§6). Nothing is added to
-  history, no model call is made, and the session remains usable: the next
-  send calls Setup again.
-- [pinned] `compaction_unavailable` means the step has no usable compaction
-  state. Either Setup failed, which covers no answer, a timeout, and an
-  answer this contract rejects (such as `checkpoint_on_descent` or
-  `pruned_reasoning_restored`), or an outstanding Setup `view_due` or
-  `view_pending` did not apply (`compaction-provider/v1` §7, reason
-  `view_due_unapplied`). No model call is made, the run error carries no
-  `provider_detail_code`, and the session remains usable: the next send
-  calls Setup again. After a failed first Setup no initial CompactionMessage
-  is recorded; after a failed repeat Setup the lineage keeps what it had
-  (§9.14.1).
-- [pinned] The runner serves no compaction op: every call goes from the
-  runner to the provider, and the provider learns what changed from
-  notices. The shapes are the `compaction-provider/v1` role's, not this
-  crate's.
+The runner's compaction obligations are defined by `cortexkit-role-compaction`
+(`compaction-runner/v1` and `compaction-provider/v2`). This contract does not
+redefine Setup, notices, views, rides, ceiling, host markers or checkpoints.
+The plan's `compaction_item {provider, preset, params}` names the provider.
+The run reasons `compaction_wait` and `context_ceiling_wait` report waiting
+on the rides and usable-window ceiling defined by that contract (§6).
 
 ### 11.2 Hook call sites
 
@@ -5591,6 +4661,24 @@ owes.
   `tool_semantics_changed`, `tool_unavailable` and `capability_not_admitted`
   refusals as that call's error result and never re-dispatches the call.
 
+### 11.3.1 Provider result size
+
+A runner measures each provider result as returned, before rendering or adding
+prefixes, with tool-provider 0.15.0's shared 64 KiB model-visible measure
+(`result::model_visible_bytes`, `legacy_model_visible_bytes`). The inclusive
+limit is 65,536 bytes. Select the measure by negotiated format, not JSON
+appearance; refusals count their message and late replies count their payload.
+An oversized completed result becomes an error result (`tool_result_too_large`)
+carrying its measured `bytes` and `limit: 65536`. Its model-visible text says
+the tool ran, its output was discarded, and the call must not be repeated just
+to see the output. The runner never
+truncates the output and never re-runs the call. A held first reply remains
+pending and its late answer is still collected. An oversized refusal keeps
+its refusal code; its message is replaced by size-discard text. The replacement
+message does not claim execution occurred, and the refusal never authorizes
+repeating the call just to recover its message.
+Images and structuredContent are excluded exactly as tool-provider defines.
+
 ### 11.4 Tool outage errors
 
 When a tool call is refused because its provider module is restarting or
@@ -5626,19 +4714,16 @@ treats it as a terminal refusal of that one request.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a plan's `compaction_item` sent to a runner without `compaction`; a plan's `render_tags` that is not a boolean, or `true` without `tags`; a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); a malformed tag or an out-of-range `range` on `session.resolve`; an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
-| `lineage_changed` | a read names a lineage that is not the session's | — | no: re-read from the tail |
-| `served_bytes_changed` | a read would serve a message whose body, rebuilt from the host's store, differs from the digest it was first served with (§4.2.1); or a `run.tool_calls` page rebuilds `args` from a requesting message under the same whole-message digest check (`served_bytes::served_body` and `check_served`), and that rebuild differs or its host row is gone (§6.3). The whole page is refused, never a partial page or a call with absent or different `args` | `{mid}` (`errors::ServedBytesChangedDetail`), the first such message in page order; no content or digest | no. For a read: the changed message is served again only under a new lineage, so re-read from the tail. For `run.tool_calls`: don't retry that page; the requesting message can't be reproduced, and reading the current transcript doesn't recover the original run's arguments |
-| `unknown_mid` | `after_mid` names no message in the lineage; a `session.history` `from_mid` or `before_mid` names no message of the session's history (§4.6) | — | no |
-| `before_lineage_start` | a range read, an after-message read or a `session.resolve` names a position below the current lineage's `first_ordinal` (§4.5) | `{first_ordinal}` (`errors::BeforeLineageStartDetail`) | no: read from `first_ordinal`, or read older history with `session.history` |
+| `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a compaction_item without a string preset (field plan.compaction_item.preset); a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
+| `history_changed` | a read cursor names another history_version | — | no: read a fresh page |
+| `served_bytes_changed` | a read would serve a message whose body, rebuilt from the host's store, differs from the digest it was first served with (§4.2.1); or a `run.tool_calls` page rebuilds `args` from a requesting message under the same whole-message digest check (`served_bytes::served_body` and `check_served`), and that rebuild differs or its host row is gone (§6.3). The whole page is refused, never a partial page or a call with absent or different `args` | `{mid}` (`errors::ServedBytesChangedDetail`), the first such message in page order; no content or digest | no. For a read: the changed message is served again only under a raised history_version, so re-read from the tail. For `run.tool_calls`: don't retry that page; the requesting message can't be reproduced, and reading the current transcript doesn't recover the original run's arguments |
+| `unknown_mid` | `after_mid` names no message in the session record; a `session.history` `from_mid` or `before_mid` names no message of the session's history (§4.6) | — | no |
 | `unknown_ordinal` | a `session.history` `from_ordinal` or `before_ordinal` names an ordinal the runner never assigned, or one a revert removed (§4.6) | — | no |
 | `cursor_expired` | a `session.history` cursor whose entry, or an entry older than it, a revert or rewrite removed or changed, or one minted for another session (§4.6) | — | no: page again from the newest page or a held `mid` |
-| `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit (`TRANSPORT_FRAME_LIMIT`), including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "model_group", source}` (the model-view anchored entry's existing `EntrySource`), `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message, atomic group or call |
+| `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit (`TRANSPORT_FRAME_LIMIT`), including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message or call |
 | `unknown_run` | `run.result` or `run.tool_calls` names no run of the session | — | no |
-| `unknown_tag` | `session.resolve` names a well-formed tag that no part of the session's current lineage carries: one no part shows in this lineage, including one that named a part only under a lineage it has left (§9.6) | — | no |
-| `fork_unsupported` | a `session.send` or `session.adopt` for a session the runner knows was forked or cloned from a managed session, one whose plan names a compaction provider (§9.6) | `{parent?}`: the session it was forked from, when known (`errors::ForkUnsupportedDetail`) | no |
 | `template_part_gone` | a template send whose `part_tag` slot names a part the request that would carry it does not show (§9.7); a queued send meeting it later ends in the send state of the same name instead | `{slot}` (`errors::TemplatePartGoneDetail`) | no |
-| `unknown_send` | `send.status` names a `send_id` the session has no record of for the caller (§9.8) | — | no |
+| `unknown_send` | `session.send_status` names a `send_id` the session has no record of for the caller (§9.8) | — | no |
 | `unknown_session` | an upload into a session that does not exist (§9.12) | — | no |
 | `unknown_upload` | append, commit or send names an unknown upload (§9.12) | — | no |
 | `upload_not_committed` | a send names an open upload | — | no |
@@ -5649,7 +4734,7 @@ treats it as a terminal refusal of that one request.
 | `upload_sha256_mismatch` | commit finds a different SHA-256 | — | no |
 | `media_unsupported` | a send's media is unsupported by the frozen model | — | no |
 | `unknown_media` | the bound session's history does not reference the digest | — | no |
-| `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner waited the compaction provider's bound and no view came), `provider_unavailable` (no compaction provider at setup, or it is unreachable at the ceiling) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
+| `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner's chosen over-limit ride deadline elapsed without a view that made the request fit), `provider_unavailable` (the compaction provider is unreachable for the over-limit ride) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |
 | `retention_required` | first send or adopt omitted a required policy (§9.14) | — | no |
 | `retention_conflict` | policy differs from the starter's frozen policy (§9.14) | `frozen` (policy) | no |
@@ -5695,6 +4780,11 @@ treats it as a terminal refusal of that one request.
 
 ### 12.2 Run errors (`errors::provider_codes`)
 
+`routing_decision_refused` is a terminal pre-model-call error when routing
+refuses the caller's decision as unknown_decision (including expiration).
+`reason` is unknown_decision. The runner neither allocates independently nor
+reports the caller's decision (§9.3.3).
+
 Runner-side error classes are open strings, not a closed enum. In addition
 to the provider codes below, this role names the following runner-side class
 (`errors::run_error_classes`):
@@ -5710,7 +4800,6 @@ The provider codes this role names:
 
 | Provider code | When |
 |---|---|
-| `compaction_unavailable` | Setup failed (no answer, a timeout, or an answer this contract rejects), or an outstanding Setup `view_due` or `view_pending` did not apply; no model call is made, and no `provider_detail_code` is carried (§11.1) |
 | `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
 | `context_overflow` | the provider refused the request as exceeding the model's context window. Not the ceiling: a stop the runner decides itself before sending is the `context_ceiling` run state or refusal (§6, §12.1), never this code |
 | `output_ceiling` | the provider's output-token ceiling prevents a complete response |
@@ -5725,11 +4814,11 @@ The provider codes this role names:
 | `access_terminated_error` | the provider terminated the account's access; the seat is unable to run |
 | `insufficient_quota` | a legacy alias of `billing_exhausted`, for already recorded run errors only |
 
-A compaction `REFUSE` adds the compaction-provider contract's `RefuseCode`
-values (its §10) as `provider_code`; this role does not repeat them. Their
-retryability, and that of `compaction_unavailable`, is the
-compaction-provider contract's. A stop at the context ceiling is never a
-provider code: it is the `context_ceiling` refusal or run state (§6).
+Compaction refusals and unavailable providers follow the Refusals and
+Failures and restarts sections of `cortexkit-role-compaction/CONTRACT.md`
+(W1.3/A14), not a separate set of llm-runner provider codes.
+A stop at the context ceiling is never a provider code:
+it is the `context_ceiling` refusal or run state (§6).
 
 - [pinned] A consumer MUST treat `cyber_policy`, `bio_policy`,
   `misalignment_policy_violation` and `content_filter` as provider policy
@@ -5748,6 +4837,11 @@ as `plan_param_refused`, are send refusals and do not belong in this list.
 above.
 
 ### 12.3 Tool-result reasons (`errors::tool_result_reasons`)
+
+- [pinned] `tool_result_too_large`: the tool ran, but the result's measured
+  model-visible size exceeded 65,536 bytes. The synthetic error carries
+  `bytes` and `limit: 65536`, says the output was discarded and the call must
+  not be repeated just to see it. No truncation or redispatch (§11.3.1).
 
 - [pinned] `outcome_unknown`: the call had a dispatch intent and no result at
   a restart; it may or may not have run, and is never re-dispatched.
@@ -5777,14 +4871,13 @@ above.
 - [pinned] Every field is declared required or optional.
 - [pinned] **Lenient** (unknown fields ignored; enumerations decoded as open
   strings): `role.describe`, every reply and session-stream event a consumer decodes
-  (`ReadPage`, `ModelPage`, `HeadMeta`, `HistoryPage`, `RunResult`, `SubscribeEvent`,
-  `SendReply`, `BaselineReply`, `AdoptReply`, `ResolveReply`,
+  (`ReadPage`, `HeadMeta`, `HistoryPage`, `RunResult`, `SubscribeEvent`,
+  `SendReply`, `BaselineReply`, `AdoptReply`,
   `ToolCallsPage`, `RefreshReply`, `RefreshPolicyReply`,
   `FlushPrefixReply`, and the `run.status`, `run.cancel` and
   `session.retract` answers). Leniency is inside the answer: the reply body
   around it is exactly `{"result": <answer>}` (§1). A run call's `outcome`, a ceiling's
-  `cause` and a read entry's `delivered_as.mode` are open strings. One
-  exception: a model-view entry's `source` kind is strict (§8).
+  `cause` and a read entry's `delivered_as.mode` are open strings.
 - [pinned] **Closed live hint**: `step.finished.v1` refuses every unknown
   member (§14.3), while its status and classification strings stay open.
   `role.describe.step_events` is likewise closed and checked by name.
@@ -5794,7 +4887,7 @@ above.
 - [pinned] **Strict on unknown fields** wherever absence changes the
   question: `session.read`, `session.head`, `session.history`, `run.result`, `run.status`,
   `run.tool_calls`, `session.subscribe`, `session.baseline`,
-  `session.adopt`, `session.resolve`, `session.refresh`,
+  `session.adopt`, `session.refresh`,
   `session.refresh_policy` and `session.flush_prefix` requests. A
   runner refuses an unknown field with `invalid_params` naming it.
 - [pinned] **Lenient on fields, strict on values** where the request grows:
@@ -5826,11 +4919,13 @@ What a runner owes across a crash, stated as properties the suite checks
 (§15) by killing the runner at each point below and restarting it on the same
 state root (`cortexkit-role-harness`):
 
-1. [pinned] **Ids are never reused.** Message ids and ordinals are never
-   reused or renumbered across a kill. Pages read before and after a kill
-   agree on every message both contain.
-2. [pinned] **A lineage change is visible.** A read naming the old lineage
-   after a lineage change, a cut's included, is refused `lineage_changed`.
+1. [pinned] **Restart preserves identity.** A restart alone never reuses
+   message ids or changes ordinals. Pages read before and after a kill at
+   the same history version agree on every message both contain. A recovery
+   that rewrites written messages raises `history_version` (§4.5).
+2. [pinned] **A history rewrite is visible.** A read naming the old
+   `history_version` after a rewrite is refused `history_changed`. A cut
+   is not a rewrite: it never raises the version or invalidates the read.
 3. [pinned] **One terminal per run.** Every run reaches exactly one terminal
    state. A run cut by a kill ends `interrupted`, never `cancelled`, and
    never gets a second terminal.
@@ -5849,10 +4944,10 @@ state root (`cortexkit-role-harness`):
      Neither the cut-run transcript nor the follow-up transcript carries its
      id or `call_key`, attribution, or result. The assistant step's text may
      also be dropped, or retained exactly once without the call. Dropping or
-     rewriting a written message starts a new lineage, whether or not a
-     reader saw the message (the runner cannot know): reads of the old
-     lineage are refused `lineage_changed`, and a reader resyncs from the
-     new one.
+     rewriting a written message starts a raised history_version, whether or not a
+     reader saw the message (the runner cannot know): reads naming the old
+     `history_version` are refused `history_changed`, and a reader resyncs
+     at the new version.
    - **(b) Keep it and close it.** The runner keeps the call and appends a
      never-executed result for it in the same durable commit as the run's
      `interrupted` terminal state, the shape a hard stop gives every
@@ -5864,15 +4959,15 @@ state root (`cortexkit-role-harness`):
      indeterminate; `run.tool_calls` (§6.3) lists it with `outcome:
      not_executed`; no later model request carries the call without its
      result; and the follow-up never writes a second result for it. Nothing
-     written is dropped or rewritten, so the lineage stays the same and
+     written is dropped or rewritten, so `history_version` stays the same and
      every message already read keeps its bytes.
 
    Read stability (§4.2) holds without exception in both shapes above:
-   dropping the call (a) moves to a new lineage because it changes written
-   bytes, and keeping and closing it (b) keeps the lineage only because it
-   appends and changes none.
-5. [pinned] **Replay, not re-invocation.** Applied compaction and every hook
-   output replay from durable state without calling the provider again. A
+   dropping the call (a) moves to a raised history_version because it changes written
+   bytes, and keeping and closing it (b) keeps `history_version` only because
+   it appends and changes none.
+5. [pinned] **Replay, not re-invocation.** Every durable hook output
+   replays from stored state without calling the provider again. A
    step whose hook outputs never became durable re-runs its hooks; nothing
    they would change was sent.
 6. [pinned] **Keyed sends are idempotent across a kill.** A keyed send
@@ -5885,7 +4980,7 @@ state root (`cortexkit-role-harness`):
     which calls it marks indeterminate. The informational record is never
     included in model input.
  9. **Expiry deletion survives a crash.** A durable retention tombstone makes
-    the lineage unreadable; restart finishes deleting its transcript and all
+    the session record unreadable; restart finishes deleting its transcript and all
     runner-held derived copies (§9.1).
 10. [pinned] **A forwarded person command is never resent after an indeterminate
     result.** Its invocation key is durable before forwarding. If the reply is not
@@ -5900,8 +4995,6 @@ their role.
 |---|---|---|
 | `Admitted` | the start record; no model request sent | 1, 6 |
 | `SendRecorded` | a send's message with its `send_id` (and PreUser output); no reply sent | 6 |
-| `CompactionApplied` | a fetched view recorded in the write-ahead log; the step that first renders it not sent | 5 |
-| `FoldRecorded` | a prefix rebuild applying a pending change; its request not sent | 5 |
 | `StepRecorded` | an assistant step with its PostAssistant output; no dispatch intent | 4, 5 |
 | `DispatchIntent` | a call's dispatch intent; the call may have been sent | 4, 7 |
 | `ToolResultRecorded` | a call's result with its PostTool output | 4, 5 |
@@ -5946,11 +5039,6 @@ real process kill.
 - [pinned] `session_ref` is a correlation key, not proof of identity: a
   direct caller chooses its own bind fields. Authorization still rests on
   the daemon-stamped principal and scope.
-
-- [pinned] The conformance case `session_ref_uses_runner_identity` requires
-  `compaction` and `queue` and the adapter's runner module id declaration.
-  Bus-captured advance-notice headers must match the shared derivation, not
-  a folder-based reference.
 
 ## 14.2 Per-step cost and memory
 
@@ -6073,157 +5161,16 @@ to the session's whole length.
   adapter evidence fails by case name; a later read alone does not prove
   publish-after-durability.
 
-## 15. Conformance suite (planned)
+## 15. Conformance suite
 
-A separate `cortexkit-role-llm-runner-conformance` crate, run by each runner
-in its own CI against its real module over real routes, never a double. It
-drives the runner with a scripted model provider and scripted compaction and
-step-transform providers. It will check:
-
-Crash recovery may be runner-driven (the runner resumes the cut run) or sender-driven (the runner seals the cut run `interrupted`, then the sender resumes with a new send on the same session), and the compaction cases accept both.
-
-| Case | Requires |
-|---|---|
-| `tool_upfront_preserves_offered_tools` | `tool_upfront`, `queue`, `transcript_reads`; a plan with a hint is admitted and offers exactly the same two tools to the scripted model as the plan without it; not applicable by name without the group or `upfront_plan_fields` |
-| `tool_upfront_stale_refused` | same requirements and a direct storage snapshot through `upfront_durable_state`; an unoffered name refuses `plan_stale` whose `detail.differences` contains its `upfront` entry, with the snapshot, head and transcript unchanged and no model dispatch |
-| `run_cancel_step_boundary_finishes_tool_batch` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model/tool calls; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; owner-only, idempotent repeat, recorded tool results and no further model step |
-| `run_cancel_unlisted_at_refused` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model call; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; `invalid_params` naming `at`, no state or transcript change |
-| `run_cancel_step_boundary_escalates_to_now` | `run_cancel`, `queue`, `transcript_reads`, `run_ops`, held model call; reported as a named skip unless the live `role.describe.run_cancel.at` lists `step_boundary`; terminal reached without releasing the model |
-| `compaction_setup_durable_once` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`, and `FoldRecorded` (initial answer/fold durable before first model call) |
-| `model_view_half_open_ranges_and_travel` | `compaction`, `model_view`, `queue`, `transcript_reads`, `run_ops`; Setup's head insertion precedes and travels with message zero over both caps and is not repeated on the next page, and the held model request carries the canonical view |
-| `compaction_unavailable_distinct_from_refuse` | `compaction`, `queue`, `transcript_reads`, `run_ops`; Setup-only unavailability and role/finer Setup refusal codes |
-| the runner half of compaction-provider 0.3.0 §3 (notices, views, rides, the ceiling, native markers) | no live case yet; a later conformance release adds them |
-| `archive_pruning_generation`, `archive_pruning_restored_view_refused`, `archive_pruning_restored_edit_refused`, `archive_pruning_setup_after_prune`, `archive_pruning_setup_initial_replaced` | `archive_prunes_reasoning`, `transcript_reads`, `queue`; all but the first also `compaction`, and the last also `model_view`; inapplicable by name without the group (§9.14.1): `reasoning_pruned` is absent before the first prune, generation 1 after it and one higher after a later prune, with `through_ordinal` the highest pruned ordinal, and pages and notices repeat the head; a view whose replace range carries the pruned original is refused `view_refused:<version>:pruned_reasoning_restored` and never rendered, and so is a view whose keep-range part edit sends a pruned part's original bytes; the first provider call after a prune is a Setup carrying the head's `reasoning_pruned`; a post-prune Setup's new `initial` replaces the pre-prune one while no view has applied |
-| `archive_pruning_applied_edit_pruned` (kit 0.15.14) | `archive_prunes_reasoning`, `transcript_reads`, `queue`, `compaction`; inapplicable by name without the group, without `model_view`, or when the fixture has no part of the `signature` kind (§9.14.1): a view whose keep-range part edit re-serializes a signed part applies before the prune, and right after the prune, with no run between, the model view serves that edit with the profile's prune rule applied (`prune_part_in`), neither its pre-prune signature nor the stored part in its place |
-| `role_describe_shape`, `role_describe_cacheable`, `role_describe_groups_complete` | — |
-| `extra_op_still_admitted` | — |
-| `baseline_owner_only`, `baseline_matches_admission_reply`, `baseline_not_yet_before_first_request` | — |
-| `compaction_item_without_group_refused_writes_nothing` | a subject that does not declare `compaction` |
-| `tail_read_is_newest_page` (on a session longer than one page), `range_read_stops_by_count`, `range_read_stops_by_bytes`, `after_mid_reads_strictly_after`, `after_mid_unknown_mid_refused`, `read_other_lineage_refused`, `lineage_id_on_every_page`, `unknown_read_field_refused`, `head_has_no_bodies`, `include_originals`, `oversize_message_alone_on_its_page`, `never_written_session_empty_page`, `never_written_session_empty_head`, `describe_states_max_bytes` | `transcript_reads` |
-| `run_result_completed_final_text`, `run_result_text_parts_joined_unchanged`, `run_result_completed_no_text_is_empty`, `run_result_interrupted_not_cancelled`, `run_attribution_per_message` | `run_ops` |
-| `dispatched_to_per_call`, `indeterminate_until_closed`, `sibling_calls_distinct_call_keys`, `recurring_model_id_distinct_call_keys` | `dispatch_attribution` |
-| `subscribe_from_head_no_gap_no_duplicate` | `streaming` |
-| `model_view_differs_only_by_compaction`, `model_view_entry_sources`, `model_view_replacement_once_on_its_first_page`, `model_view_after_mid_refused`, `model_view_names_compaction_state` | `model_view` |
-| `session_refresh_applies_from_next_run`, `session_refresh_waits_for_its_rung`, `session_refresh_repeat_same_answer`, `session_refresh_generation_stale_refused`, `session_refresh_tool_outside_host_set_refused` | `session_change`, `queue`, `run_ops`, and the adapter's refresh plans and model-request observations; each answer shape of `session.refresh`, an identical repeat answered the same, `generation_stale`, and `tool_outside_host_set` for a tool outside the host's fixed set and for a changed definition under a kept name (inapplicable on a host that fixes no tool set) |
-| `session_refresh_never_changes_a_running_run`, `flush_prefix_applies_pending` | the above, and held tool calls; a refresh, or a flush, while a run is running leaves that run's tools unchanged and applies at the next run |
-| `refresh_unsupported_rung_refused`, `refresh_policy_superseded_refused`, `refresh_policy_already_applied_refused` | `session_change`; planned |
-| `steer_lands_at_step_boundary`, `steer_never_between_call_and_result` | `steer` |
-| `guaranteed_steer_never_pending_or_unknown` | `run_ops`, `queue`, `transcript_reads`; not applicable without `steer`, on a runner that declares `steer_receipt: confirm`, or without a held tool call; a delivered step receipt names the joined run |
-| `steer_without_run_ops_reports_state_and_step` | `steer`, `queue`, `transcript_reads`, held tool call, and no `run_ops`; a steer into the active turn answers `active` or `finished`, `delivered.as: "step"`, a non-empty `ref`, and no `run_id`; `step` is never a state value |
-| `resend_steer_delivered_stable` | `queue`, `transcript_reads`; not applicable without `steer` |
-| `queue_starts_next_turn` | `queue` |
-| `interrupt_cancels_then_starts`, `interrupt_waits_for_running_tool` | `interrupt` |
-| `undeclared_delivery_refused` | a delivery mode the subject does not declare |
-| `send_id_retry_same_answer`, `send_id_reuse_refused_naming_field`, `delivery_change_refused`, `unknown_delivery_refused`, `pre_user_refuse_writes_nothing`, `steer_inherits_frozen_runner_params` | `steer`, `queue` or `interrupt` |
-| `send_id_retry_settled_same_answer` | `steer` or `queue`, and `run_ops` |
-| `send_id_retry_written_once`, `send_id_reuse_writes_nothing`, `delivery_change_writes_nothing` | `steer`, `queue` or `interrupt`, and `transcript_reads` |
-| `crash_at_StepRecorded`: resumes with exactly one dispatch or seals `interrupted` without dispatch; the call is never indeterminate and no later request carries it without a result; a seal either drops the call (or its step) and moves the session to a new lineage whose old reads are refused `lineage_changed`, or keeps the call and lineage with its never-executed result in the message right after it, already written once the run ended, and every message read before the kill unchanged | `transcript_reads`, `dispatch_attribution`, and `StepRecorded` |
-| `crash_at_<point>` for the other points in §14, asserting their properties | the points the harness declares |
-| `retention_honoured`, `retention_no_content_served`, `retention_shorten_continues_lineage`, `retention_equal_noop`, `retention_lengthen_refused`, `retention_late_opt_in_refused`, `retention_zero_refused`, `retention_above_max_refused` | `retention`, `queue`, `transcript_reads`, `run_ops` |
-| `retention_run_status_expired` | the above; not applicable unless the major lists `run.status` (§6.1) |
-| `retention_without_group_refused` | `queue`; not applicable when `retention` is declared |
-| `retention_active_run_never_expires` | `retention`, `queue`, `transcript_reads`, `run_ops`, held non-terminal run (active or paused) |
-| `crash_at_RetentionTombstoned` | `retention`, `queue`, `transcript_reads`, `run_ops`, and `RetentionTombstoned`; real process kill, expiry remains readable by name and deletion completion is reported after restart |
-| `structured_output_final_text_enforced_passed`, `structured_output_final_text_with_tools_refused`, `structured_output_submit_tool_ends_run`, `structured_output_reserved_name_refused`, `structured_output_absent_without_submit`, `structured_output_failed_validation_completes`, `structured_output_not_inherited`, `structured_output_external_ref_refused`, `structured_output_sibling_never_dispatched` | `structured_output`, `queue`, `transcript_reads`, `run_ops`; the adapter's tool-set send fields, route support switch and model-request observations; reported as a named skip without `structured_output` |
-| `structured_output_streamed_siblings` | `submit_streamed_siblings`, `structured_output`, `queue`, `transcript_reads`, `run_ops`; checks the streamed-sibling variant instead of `structured_output_sibling_never_dispatched` when the group is declared |
-| `structured_output_frozen_across_restart` | the above, and `ToolResultRecorded`; the next model request after a restart carries the same tools and schema bytes |
-| `adopt_binds_owner_without_a_run`, `adopt_exact_repeat_replays_reply`, `adopt_send_id_reuse_names_plan`, `adopt_plan_drift_refused`, `adopt_other_owner_refused`, `adopt_same_owner_readopts` | `adopt`, `transcript_reads`; the adapter's host-start hook and host plans; the live `role.describe` must declare `adopt` before any `session.adopt` is sent; reported as a named skip without `adopt` |
-| `adopt_during_active_run` | the above, and a held tool call; a run the person started in their own app (§9.5), before any role request, is in progress during the adoption and completes after it |
-| `adopt_then_owner_sends` | the above, and `queue`; the owner's send after adoption runs, another caller's is refused |
-| `adopt_host_turn_is_a_run` | `adopt`, `transcript_reads`, `run_ops`, and the adapter's host-start hook; the person's own turn has a `run_id` on `session.head`, `run.result` answers it, and `run.status` and `session.subscribe` show it where declared; the owner's next send is a run of its own; inapplicable when the adapter cannot start a host turn |
-| `tags_on_every_read_entry`, `tags_numbers_stable_within_a_lineage`, `tags_only_on_tag_rendering_sessions`, `tags_resolve_returns_exposed_content`, `tags_resolve_unknown_tag_refused`, `tags_resolve_range_refused`, `tags_model_written_tags_cleaned_on_exposure`, `tags_count_only_parts_rendered_with_a_number` | `tags`, `queue`, `transcript_reads`; the adapter's plan-member send fields carrying `render_tags: true` (§9.6: numbering applies only to tag-rendering sessions), and without it for the untagged halves; the live `role.describe` must declare `tags` before any `session.resolve` is sent; the structured-output half of the cleaning case where `structured_output` is declared, and the image-only half of the counting case where the adapter's tool provider answers an image-only result, each named as unchecked otherwise; reported as a named skip without `tags` |
-| `tags_numbered_in_rendered_order` | `tags`, `queue`, `transcript_reads`, `steer`, held tool calls, and the adapter's record of each model request's rendered texts; a steer sent while a call is held: the last request's texts carry exactly the numbers `session.read` reports, increasing in the order the model saw them; inapplicable when the runner rendered the steer where it stored it |
-| `tags_renumbering_waits_for_the_step_boundary` | `tags`, `queue`, `transcript_reads`, `steer`, held tool calls; while the call is held, a steer changes neither the lineage nor a number read before it; the call runs once; afterwards a part a read exposed carries another number only on a new lineage |
-| `tags_setup_checkpoint_anchors_at_its_cut` | `tags`, `tag_checkpoint`, `compaction`, `queue`, `transcript_reads`; a Setup checkpoint of 500 cut at the session's first message numbers the prompt 501 and the answer 502 |
-| `tags_lost_marker_key_keeps_numbers` | `tags` and adapter hooks to compact in the host and drop a key; fallback preserves every exposed number and lineage |
-| `tags_host_store_cleaned_at_the_save_seam` | `tags` and a host-store read hook; tagged replies are clean there, untagged replies and structured-output replies remain raw |
-| `compaction_standalone_refusal_lifecycle` | `compaction`; handoff only before first service on in-process hosts, otherwise a named failure; the late rule requires an adapter Setup-repeat hook |
-| `user_commands_cutoff_after_forward`, `user_commands_cutoff_before_forward` | `user_commands` and a cutoff adapter; `outcome_unknown` after forwarding, `failed` before, retained and replayed without another forward |
-| `media_descriptors_image_bytes`, `media_descriptors_nested_media` | `transcript_reads` and byte-backed adapter fixtures; top-level and nested media hashes cover decoded bytes |
-| `media_descriptors_frame_budget`, `media_descriptors_utf8_head` | fixture-backed over-frame arguments are served as refs; a text head ends before a crossing UTF-8 character |
-| `media_descriptors_inline_unchanged`, `media_descriptors_full_content_digests`, `media_descriptors_pairing`, `media_descriptors_part_keys` | inline compatibility, full-inline identities, pairing preservation and strict digest-row keys |
-| `media_descriptors_stable_across_pages` | multipart fixture; fixed-budget fallback is independent of page position and byte cap |
-| `media_descriptors_model_view_refused` | `model_view`; descriptors are refused before read work, naming `media` |
-| `head_names_the_cut`, `notice_carries_first_ordinal`, `revert_below_the_cut_restarts_at_the_previous_cut`, `revert_below_a_cut_before_adoption_has_no_descent` | the cut cases' requirements; the revert cases also need the adapter's revert hook, and the last the hook that gives a session a host cut before adoption; inapplicable by name without them: `session.head.cut` names the cut message by `mid`, digest and time, and a lineage without a cut has none; every notice on a cut lineage carries `first_ordinal`; a revert below the latest cut restarts at the previous cut with `descends_from` naming the lineage at that cut, or at the first message with no cut and no descent, and Setup runs again; a cut that predates the runner's first lineage gives no `descends_from` |
-| `cut_starts_a_new_lineage`, `old_lineage_reads_refused_after_a_cut`, `read_below_first_ordinal_refused`, `ordinals_never_renumber_across_a_cut`, `setup_once_per_lineage`, `view_ranges_start_at_first_ordinal`, `cut_lineage_notice_descends_from` | `compaction`, `queue`, `transcript_reads`, and the adapter's view-publishing hook and notice observation; inapplicable by name without the hook: after a view with a cut applies, `lineage_id` changes and `first_ordinal` is the cut's first retained ordinal; reads naming the old lineage (`after_mid` included) are refused `lineage_changed`; range and after-message reads below `first_ordinal` are refused `before_lineage_start` with `detail.first_ordinal`; retained messages keep their ordinals and `mid`s; Setup runs exactly once in each lineage; a view tiling from 0 on the cut lineage is refused `view_refused:<version>:ranges_start`; the cut lineage's first notice descends from the old lineage at the cut |
-| `checkpoint_on_descending_setup_refused`, `cut_setup_leaves_reads_alone`, `cut_numbering_continues_from_the_old_lineage` | the cut cases' requirements, with `tag_checkpoint` for the first, the adapter's Setup-hold hooks and a runner that ever holds reads for the second, and `tags` with a tag-rendering plan for the third: a checkpoint on a cut lineage's Setup fails it `checkpoint_on_descent` with no model request; reads of the new lineage are served while a cut's Setup is pending; retained parts keep their numbers and the next part numbers one above the old lineage's highest |
-| `history_version_unchanged_by_a_cut`, `history_version_rises_at_a_revert`, `history_from_ordinal_and_before_ordinal`, `history_unknown_ordinal_refused`, `history_before_lowest_ordinal_reaches_unnumbered_entries` | `host_history`, `queue`, `transcript_reads`; the cut case also `compaction`, `run_ops` and the view hook, the revert case the revert hook, the last a session with host history before the runner's first numbered message: `history_version` is unchanged on `session.head` and history pages by a cut and rises at a revert; ordinal seeks page from and before an assigned ordinal; an unassigned or reverted ordinal is refused `unknown_ordinal`; `before_ordinal` at the lowest ordinal reaches the unnumbered entries |
-| `history_pages_back_to_the_first_message`, `history_mid_matches_read`, `history_no_tags_below_first_ordinal`, `history_ordinal_kept_below_the_cut`, `history_cursor_survives_a_cut`, `history_never_serves_a_reverted_branch`, `history_cursor_expired_after_a_revert_past_it`, `history_boundary_order`, `history_before_mid_continues_below_the_window` | `host_history`, `queue`, `transcript_reads`; the cut cases need the view-publishing hook, the revert cases the adapter's revert hook, and the last two a session with host history before the runner's first numbered message; each inapplicable by name without its hook |
-| `per_step_cost_scales_with_new_messages` | `queue`, `transcript_reads` or `run_ops`, and the adapter's seeding hook, which writes finished messages through the runner's own store behind a cut; inapplicable without it, never passed: the median step time with 150,000 seeded messages is at most 2.0 times the median with 1,000 |
-| `tags_fork_of_a_managed_session_refused` | `tags`, `compaction`, `queue`, `transcript_reads`, and the adapter's fork hook; a send into, and an adoption of, a fork of a managed session is refused `fork_unsupported`, writing nothing; inapplicable when the adapter cannot create a fork the runner can detect, since a runner refuses only forks it can know about |
-| `tags_resolve_answers_the_current_lineage` | `tags`, `queue`, `transcript_reads`, `dispatch_attribution`, and `StepRecorded`; reads the `crash_at_StepRecorded` scenario: after a seal that moves the session to a new lineage (§14, shape (a)), every number the new lineage shows (up to 64) resolves to the part showing it there, never to a part of the lineage left, a number above its highest is refused `unknown_tag`, and the cut run's prompt carries a number; inapplicable when the runner resumes the run or keeps the call on its lineage (shape (b)); reported as a named skip without `tags` |
-| `delivery_order_never_starts_a_run`, `delivery_order_dedupe_supersedes_queued`, `delivery_order_expired_never_delivered`, `delivery_order_unnamed_sender_refused` | `delivery_order`, `queue`, `transcript_reads`, `steer`; the adapter's plan-member send fields and a plan-named sender identity; the live `role.describe` must declare `delivery_order` before any list is sent; reported as a named skip without `delivery_order` or `steer` |
-| `delivery_order_members_without_list_refused` | `delivery_order`, `queue`, `transcript_reads`; list members beside a string or absent `delivery` are refused naming the member and write nothing |
-| `delivery_order_list_refused_without_group` | `queue`, `transcript_reads`; not applicable when `delivery_order` is declared: a list in `delivery` is refused `invalid_params` naming `delivery` and writes nothing |
-| `delivery_order_first_possible_mode` | the above, and a held tool call: a list goes out with the next tool result when it names `tool_result` first, and starts a run on an idle session through `idle_start` |
-| `delivery_order_undeclared_mode_refused` | `delivery_order`, `queue`, `transcript_reads`, held tool call, and `steer` left undeclared; `[steer]` is refused `delivery_unsupported` with the exact list in `detail.delivery` and writes nothing; `[steer, idle_start]` is accepted, skips the undeclared `steer` at the active boundary, then starts at the idle boundary; inapplicable when `steer` is declared |
-| `delivery_order_declared_modes_respected` | `delivery_order`, `queue`, `transcript_reads`, and the live describe member `delivery_order_modes`; all non-empty ordered lists of distinct undeclared modes are refused `delivery_unsupported` with the original list in `detail.delivery` and no writes; every list containing a listed mode is accepted |
-| `delivery_order_retract_pending_tool_result` | `retract`, `delivery_order`, `queue`, `transcript_reads`, and a held tool call; a `[tool_result]` send waits with `pending` and `submission_id`, `session.retract` answers `retracted` then `not_pending`, and after the call is released the send is never delivered |
-| `retract_own_send_sender_retracted` | opt-in `retract_own_send`, `retract`, `delivery_order`, `queue`, `steer`, `transcript_reads`; the daemon-attested sender withdraws its own pending steer, a resend is `send_retracted`, and the submission is not delivered at the next delivery opportunity |
-| `retract_own_send_other_sender_refused` | same requirements; another non-owner is refused `scope_owner_mismatch`, even with a forged `sender` request field; the submission stays pending and is delivered on the owner's next turn; all three cases report not applicable by name without `retract_own_send` |
-| `retract_own_send_shared_send_id_isolated` | same requirements; two non-owner senders reuse a `send_id` for pending steers; sender A withdraws its own submission, its second retract is `not_pending`, and sender B's submission stays pending until the owner's next turn delivers it; not applicable by name without `retract_own_send` |
-| `delivery_order_steer_receipt_durable_across_restart` | `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, and a held tool call; on a separate storage directory for this case, the harness restart hook (without a process kill): a `[steer]` list sent while a run waits on a held call answers `pending` with a `submission_id`, is delivered once as a steer when the call is released, and a re-send of its `send_id` answers `delivered: {as: "step", ref}` with `run_id` the run it joined, before the restart and unchanged after it; reported as a named skip without `delivery_order`, `steer` or `run_ops` |
-| `send_status_answers_as_a_resend_after_restart` | `send_status`, `delivery_order`, `queue`, `transcript_reads`, `steer`, `run_ops`, and a held tool call; `send.status` of the same send answers what a re-send answers, `step` with the joined run's `run_id`, before the restart and after it, never `pending`; the live `role.describe` must declare `send_status` before any `send.status` is sent; reported as a named skip without `send_status`, `delivery_order`, `steer` or `run_ops` |
-| `send_status_unknown_send_refused` | `send_status`, `queue`, `transcript_reads`; `send.status` of a settled send answers what its re-send answers, one of a `send_id` the session has no record of is refused `unknown_send`, and one carrying an unknown field is refused `invalid_params` naming it |
-| `run_context_ceiling_wait_is_not_a_stall` | `queue`, `transcript_reads`, and the adapter's held context-ceiling wait; the run reads `active` with `reason: context_ceiling_wait` on `session.head` (and on `run.status`, with a future `deadline_ms`, where the major lists it) while held, then completes when a view arrives, or ends `context_ceiling` with `cause: view_timeout` when none does |
-| `delivery_order_template_renders_as_system` | `delivery_order`, `queue`, `transcript_reads`; needs `steer` for user-authority fallback or a route that supports `turn_system`, and is inapplicable when neither is available; the template send carrying empty `prompt` is refused naming `template` |
-| `delivery_order_bad_slot_refused` | `delivery_order`, `queue`, `transcript_reads`; an out-of-range slot is refused naming `template` and writes nothing |
-| `delivery_order_template_part_gone_refused` | `delivery_order`, `queue`, `transcript_reads`, `tags`; on a tag-rendering session, a template send whose `part_tag` slot names a part the session does not show is refused `template_part_gone` naming the slot and writes nothing; one naming a shown part is accepted |
-| `read_stable_across_host_metadata_change` | `queue`, `transcript_reads`, and the adapter's host-side metadata change: a re-read under the same lineage returns identical entries |
-| `run_tool_calls_positions_identify_siblings` | `run_tool_calls`, `queue`, `transcript_reads`; two sibling calls have positions 0 and 1 at their requesting message's ordinal, independent of intervening text/reasoning parts |
-| `run_tool_calls_result_ordinal_tracks_storage` | `run_tool_calls`, `queue`, `transcript_reads`, held tool call; no result ordinal while open, and a finished call's `result_ordinal >= ordinal` locates the stored result |
-| `interrupt_reason_shutdown_durable` | `interrupt_reason`, `queue`, `transcript_reads`, `run_ops`, held tool call; orderly handle stop and restart preserve `runner_shutdown` across result, status where served and `last_run_state` |
-| `turn_directives_in`, `turn_directives_note`, `turn_directives_off`, `turn_directives_not_requested_reports_none`, `turn_directives_unknown_refused` | `turn_directives`, `queue` (`run_ops` for result cases); scripted trailing tags on completed runs report exactly the requested forms, unrequested tags report none, invalid names/shapes/duplicates are refused naming `directives`; `run.status` is checked where served |
-| `turn_directives_max_steps_reports_none`, `turn_directives_cancelled_reports_none` | the above plus `max_steps`, or `run_cancel` and held tool calls; non-completed runs report no directives, including the held non-terminal state |
-| `run_tool_calls_listed_in_dispatch_order`, `run_tool_calls_unknown_run_refused` | `run_tool_calls`, `queue`, `transcript_reads`; one call per page under `limit: 1`, following `next`; reported as a named skip without `run_tool_calls` |
-| `run_tool_calls_indeterminate_until_result` | the above, and a held tool call |
-| `run_usage_counts_reported_steps` | `run_usage`, `queue`, `run_ops`; after a two-step scripted run whose provider reports input, cache-read, cache-write and output counts but no reasoning, `run.result` carries `usage` with `steps: 2`, the scripted totals, `by_model` summing to them, and `reasoning_tokens` absent rather than `0`; `run.status`, where the major lists it, carries the same `usage`; reported as a named skip without `run_usage` |
-| `session_usage_sums_runs_since_first` | `session_usage`, `run_usage`, `queue`, `run_ops`, `transcript_reads`; two runs sum to session spend for reported fields, with `since` naming the first counted run |
-| `session_usage_rewind_never_decreases` | same groups; a rewind of visible history does not reduce or reset spend |
-| `session_usage_unknown_fields_absent` | same groups; reasoning usage no scripted step reported stays absent, never zero |
-| `head_model_reflects_recorded_switch` | `queue`, `transcript_reads`; when the runner reports a model and the adapter can record a switch, the head follows that switch, not the frozen plan |
-| `head_sender_is_callers_effective_grant` | `head_sender`, `queue`, `transcript_reads`; a plan names A with `idle_start` and `interrupt` unset and B with both set, and, when the runner declares `app_readers`, lists both in `readers`; on admitted reads A gets supported modes minus `idle_start` and `interrupt: false`, B gets all supported modes and `interrupt: true`, an unnamed caller gets no grant or is refused `scope_owner_mismatch`, and the owner gets all supported modes, interrupt and `owner: true`; with `app_readers` a refusal of A or B fails the case; without it, a `scope_owner_mismatch` refusal of A or B ends the case as inapplicable, and any other refusal fails it; an undeclared `head_sender` group or defaulted identity hooks are inapplicable, with no supported-mode-based fallback |
-| `refresh_added_sender_admitted_at_acceptance` | `session_change`, `delivery_order`, `queue`, `transcript_reads` and named-principal routes; an idle refresh admits the newly named sender before any next run; also checked mid-run when the adapter holds tool calls; prefers a deferred rung |
-| `refresh_removed_sender_refused_at_acceptance` | Same groups and routes; a removed sender is refused `scope_owner_mismatch` before another run, with no observable durable-state change |
-| `app_readers_listed_reader_admitted`, `app_readers_unlisted_reader_refused`, `app_readers_reader_cannot_send` | `app_readers`, `queue`, `transcript_reads` and named-principal routes; a listed reader can read head and transcript, an unlisted principal is refused both reads, and a read-only principal cannot send; not applicable by name without the groups or routes |
-| `call_identity_key_matches_attribution` | `call_identity`, `queue`, `transcript_reads`, either `dispatch_attribution` or `run_tool_calls`, and `history_display` with `host_history` or `live_events` with `streaming`; every display tool call and live tool event of two dispatched sibling calls carries the `call_key` §5 exposes for that call when `dispatch_attribution` is declared, otherwise the one `run.tool_calls` (§6.3) lists for the run that scenario's send started, matched by `tool_call_id`; not applicable without `call_identity` or when neither `dispatch_attribution` nor `run_tool_calls` is declared |
-| `call_identity_pin_frozen_at_dispatch` | as above; each entry of a dispatched call carries the `schema_pin` the tool provider received with it, and still does after the catalog changes the tool's definition and another run; the catalog half is reported unchecked when the adapter cannot change the definition |
-| `call_identity_denied_call_has_no_pin` | as above; a call denied before dispatch carries no `schema_pin`, and `call_key` exactly as §5 exposes it when `dispatch_attribution` is declared, otherwise as §6.3 exposes it for that run's call with the same `tool_call_id`; inapplicable without the adapter's denial fixture |
-| `head_incarnation_survives_cut_and_changes_on_recreation` | `queue`, `transcript_reads`; a reported incarnation stays equal across a real cut and differs after creation of a new log at the same key; defaulted cut/re-create hooks are inapplicable |
-| `max_steps_seals_pending_calls` | `max_steps`, `queue`, `transcript_reads`, `run_ops`; a tool-calling model stops after the requested number of responses in `max_steps`, with every pending call's never-executed result already readable at the terminal and no pending call dispatched |
-| `max_steps_final_step_completes` | `max_steps`, `queue`, `run_ops`; with `max_steps: 1`, a model whose one step is text ends `completed` with its final message, and with its directives where `turn_directives` is declared, never `max_steps` |
-| `max_steps_submit_result_completes` | `max_steps`, `structured_output`, `queue`, `transcript_reads`, `run_ops`; with `max_steps: 1`, a step calling `submit_result` ends `completed` with the submitted value and its sibling `skipped_after_submit`, never `max_steps` |
-| `max_output_tokens_caps_response` | `max_output_tokens`, `run_usage`, `queue`, `transcript_reads`, `run_ops`; the actual dispatched output maximum and the single response's reported usage are positive and never above the requested cap, including a request above the model's own maximum |
-| `no_tools_offered_to_model` | `no_tools`, `queue`, `transcript_reads`; an unsuppressed control offers tools and `tools: []` offers none, observed at the scripted model |
-| `no_tools_later_plan_send_refused` | `no_tools`, `queue`, `transcript_reads`; a fetch-plan session refuses any later `tools` member naming `tools`, writing nothing; reported inapplicable by name when the adapter cannot create a plan session |
-| `run_status_undelivered_steers_present_when_clean` | `run_status`, `queue`; an ended run's status carries `undelivered_steers`, `[]` when every steer was rendered or none was sent |
-| `held_calls_lists_waiting_call` | `held_calls`, `run_status`, `queue`, `transcript_reads`, `run_ops`; a scripted held first reply lists its call key, tool, provider, held reason and receipt time while waiting |
-| `held_calls_applies_late_result` | the above plus rendered model-input observations; applying the provider's late result removes the entry and continues the run with that result |
-| `held_calls_not_started_becomes_tool_result` | the above plus rendered model-input observations; a `not_started` late entry continues the run with a tool result saying the call never ran |
-| `held_calls_expired_becomes_tool_result` | the above plus rendered model-input observations; an `expired` late entry removes the held call and continues the run with a tool result saying its answer expired |
-| `held_calls_status_event_matches_run_status` | `held_calls`, `run_status`, `queue`, `transcript_reads`, `run_ops`, `streaming`; while a call is held, a durable control event lists exactly the held calls `run.status` lists, and after the late result no event lists that call again. This document does not mark which control events are status events, so the case cannot require the event that clears the list |
-
-The `context_ceiling` refusal and run state (§6, §12.1) have no live case:
-the suite has no way to bring a runner's context to its ceiling. They are
-tested against `context-ceiling.json` in this crate.
-
-Consumer-side rules no live runner can be made to exercise (an unknown run
-state, an unknown event kind, a describe answer with a partial group, a
-model page that repeats a replacement, a completed run without its final
-message) are tested against the vectors in this crate.
-The equal-anchor rule's insertion-before-message half is live conformance
-(`model_view_half_open_ranges_and_travel`). Its
-insertion-before-non-empty-replacement half has no v1 producer (§8):
-compaction-provider §8 applies the newest CompactionMessage alone, §12
-gives every replacement its entire range, and hook outputs are fields on a
-transformed raw record, not range insertions. It is tested against the
-vectors only and is not claimed as live runner conformance.
-
-Verdict, as for `tool-provider/v1`: a case whose requirements the subject
-does not declare is skipped, never passed; a run with skips is "conforming
-for declared capabilities", naming them; a run fails if any case fails or if
-no kill ended a real process.
-
+`cortexkit-role-llm-runner-conformance` 0.17.0 pins this 0.8.0 contract.
+Its `CASES` registry names each executable check and its capability gates.
+New checks cover history_version on read pages, stale-cursor history_changed,
+from_ordinal 0, required incarnation on head/read/history pages, route_decision_id
+fixed per run, user commands without session_ref, both send-status names,
+served pruning keys, and replacement (not truncation or redispatch) of oversized
+tool results. Every check has a deliberately faulty fake rejected by name.
+Provider-protocol and compaction-runner conformance are not in this kit.
 ## Not in v1
 
 - A neutral, role-defined message schema. Message bodies stay in each
@@ -6231,104 +5178,9 @@ no kill ended a real process.
   each runner's schema.
 - An observation stream of read-only session events.
 
-## Open questions
+## Further evolution
 
-Each open question lists the options seen. A settled question keeps its number and records
-the decision; the items it governs are pinned above.
-
-- **Q1. The request envelope.** Settled: `{method, params}` on the runner's
-  session-bound management route (§1).
-- **Q2. The `role.describe` shape.** Settled: `majors` plus top-level
-  `capabilities`, the shape `tool-provider/v1` uses (§2).
-- **Q3. The session-capability source.** Settled as drafted:
-  `session_capabilities_from: "admission" | "baseline"` (§2).
-- **Q4. Hosting compaction.** Settled: not a required op but a
-  `compaction` group, all or nothing, owning everything in §11.1. A runner
-  that only steers sessions it does not host declares none of it.
-  `REQUIRED_OPS` is `role.describe` and `session.baseline`. In 0.3.0 the
-  group is the runner half of compaction-provider 0.3.0 §3 and requires
-  `tags`; the synchronous `compaction.ready` op it once owned is removed. A
-  plan with a `compaction_item` on a runner without the group is refused at
-  admission `invalid_params {field: "plan.compaction_item"}` and writes
-  nothing (§3, §10.1, §11.1).
-- **Q5. Head metadata.** Settled as drafted: its own op `session.head`, with
-  `updated_at` in milliseconds since the epoch and `last_run_state` as
-  `{run_id, state, reason?}` (§4.3).
-- **Q6. The byte cap.** Settled: the request member is `max_bytes`; the
-  runner states its default and maximum in `role.describe`; a single message
-  larger than the cap comes alone on its page, over the cap, with
-  `next_from_ordinal` set, and is never truncated. It is served whole only
-  when the complete encoded reply fits the 4,194,304-byte transport frame
-  limit, including the 21-byte header; otherwise it is refused
-  `reply_too_large` (§2, §4, §12).
-- **Q7. The message body.** Settled: the runner's own schema, opaque to the
-  role. A neutral schema is not in v1.
-- **Q8. The model view.** Settled, in the compaction provider's role
-  owner's shape: each entry carries a `source`, `{kind: "message", ordinal,
-  mid}` or `{kind: "replacement", compaction_id, version, from_ordinal,
-  to_ordinal}`, with half-open ranges and empty ranges inserting before
-  their anchor. Entries are non-decreasing by anchor, insertions first at a
-  tie. Tail and range reads apply, keyed on transcript ordinals; a
-  replacement is returned
-  whole, once, on the page holding its `from_ordinal` (tail insertions on
-  the last page) when the complete encoded reply fits the 4,194,304-byte
-  transport frame limit, including the 21-byte header; otherwise the reply
-  is refused `reply_too_large` (§12). `after_mid` with
-  `view: "model"` is refused `invalid_params {field: "view"}` in v1. The page
-  names the compaction state it reflects, `compaction_id` and `version`,
-  both absent before any compaction (§8).
-- **Q9. `run.result`.** Settled: a run that has not ended answers its current
-  state with no final message; `max_steps` is a terminal state of the role;
-  `transform_unavailable` stays a runner state, decoded open (§6). The
-  separator, chosen by the session owner's role owner, is the empty string:
-  text parts are concatenated exactly as emitted. A completed run whose
-  final message has no text parts answers `final_message {text: ""}`, so an
-  absent `final_message` means only that the run has not ended (§6).
-- **Q10. Episodes.** Settled as drafted: an opaque string (§6).
-- **Q11. Dispatch attribution placement.** Settled as drafted: a per-message
-  `tool_calls` list beside the message body, and a group that extends
-  `session.read` requires only that op (§3, §5).
-- **Q12. `interrupt`.** Settled: its own capability group. A runner refuses a
-  delivery mode it does not declare as `delivery_unsupported` with
-  `detail.delivery`, never falling back to `queue`. A `delivery_order` list
-  with no individually declared mode is refused the same way, with the whole
-  list in `detail.delivery` (§9.7). An absent `delivery` is `queue`, a
-  declared group like the others, and a runner that admits sessions declares
-  it (§3, §9).
-- **Q13. The mark.** Settled: `mark` is not a member of the role (§9).
-- **Q14. Change ops.** Settled, as the session owner's role owner chose:
-  role ops in their own group, `session_change`, holding `session.refresh
-  {plan, policy, generation}`, `session.refresh_policy {generation, policy,
-  send_id}` and `session.flush_prefix`, with their refusals
-  (`rung_unsupported`, `pending_superseded`, `already_applied`). A runner
-  without the group gets no mid-session changes, and owners never send them
-  undeclared (§3, §10.2).
-- **Q15. The admission reply and baseline.** Settled as drafted: one nested
-  `baseline` object, the same struct `session.baseline` answers, with
-  `not_yet` as the answer before the first request (§10).
-- **Q16. Unnamed codes.** Settled: `invalid_params` stays, and
-  `tool-provider/v1`'s `invalid_request` is a difference between roles;
-  `send_id_reuse` names the differing field in `detail.field` when the
-  runner can identify it; the drafted
-  names `unknown_run`, `tool_name_collision`, `plan_drift` and
-  `scope_owner_mismatch` stay (§12).
-- **Q17. A session with no lineage yet.** Settled, a third option: a read of
-  a session never written returns an empty page with no `lineage_id` and no
-  `next_from_ordinal`, and an absent `lineage_id` means no lineage yet (§4.2).
-  `session.head` follows the same rule: for such a session every member of
-  its answer is absent (§4.3).
-- **Q18. Subscription spellings.** Settled as drafted: `start`, `live` or a
-  `head` object passed back verbatim, and events pinned only as far as
-  `kind` and `cursor` (§7).
-- **Q19. Owner sends on a runner with its own send parameters.** Settled: a
-  `steer` or `interrupt` into an existing session takes every runner
-  parameter it omits from the session's frozen values (§9).
-- **Q20. Kill points.** Settled: the list in §14. Approval-gated calls'
-  points join with the runner's approve-gate work; `SendRecorded` is not
-  split.
-- **Q21. Stability.** Settled: stability is data, never part of a capability
-  name. Each major in `role.describe` carries `stability`, `alpha`, `beta` or
-  `stable`, read as `alpha` when absent; this draft is `alpha` (§2).
-- **Q22. `run.status` beyond its pinned members.** Settled: an unknown
-  `run_id` answers `{state: "unknown"}`, not an error. The session-level
-  form, request `{}`, is optional within `run_status` (§6.1).
+This release does not define the compaction provider's acceptance of pruned
+reasoning. A runner whose plan names one therefore does not prune (§9.14.1).
+Other capabilities and their documented optional fields remain independently
+discovered; unknown reply fields continue to be ignored (§13).

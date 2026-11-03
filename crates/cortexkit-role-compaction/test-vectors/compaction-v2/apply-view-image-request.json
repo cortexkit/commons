@@ -1,0 +1,29 @@
+{
+  "method": "session.apply_view",
+  "params": {
+    "view": {
+      "checksum": "35e64dd114651dac2811639d6fdaed3e89e71e565464e16f7759f3fc241cdb4f",
+      "edits": [
+        {
+          "at": "start",
+          "message": {
+            "id": "insert-image",
+            "images": [
+              {
+                "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=",
+                "media_type": "image/png"
+              }
+            ],
+            "role": "user",
+            "texts": [
+              "An invented visual summary."
+            ]
+          },
+          "op": "insert",
+          "since": 1
+        }
+      ],
+      "version": 1
+    }
+  }
+}

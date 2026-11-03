@@ -52,7 +52,7 @@
       "initial": {"run_id": "r1", "state": "active"},
       "requests": [{"run_id": "r1", "at": "step_boundary"}],
       "answers": ["ack"],
-      "terminal": {"run_id": "r1", "state": "completed", "final_message": {"ordinal": 1, "mid": "m1", "text": "done"}}
+      "terminal": {"run_id": "r1", "state": "completed", "final_message": {"ordinal": 2, "mid": "m1", "text": "done"}}
     },
     {
       "name": "an ended run is not active regardless of cancellation point",

@@ -28,25 +28,5 @@
     {"service_tier_applied":"ultrafast","service_tier_served":"provider-special"},
     {"service_tier_served":"standard"},
     {}
-  ],
-  "ride": {"session_ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","cause":"service_tier_change","service_tier":"fast","deadline_ms":1000},
-  "notice_without": {
-    "session_ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "seq":"1",
-    "lineage_id":"lineage",
-    "through_ordinal":"1",
-    "through_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "est_tokens":"10",
-    "model":"example-model"
-  },
-  "notice_with": {
-    "session_ref":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "seq":"1",
-    "lineage_id":"lineage",
-    "through_ordinal":"1",
-    "through_digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-    "est_tokens":"10",
-    "model":"example-model",
-    "service_tier":"fast"
-  }
+  ]
 }

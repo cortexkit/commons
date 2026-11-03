@@ -2,7 +2,9 @@
   "_about": "User-command group and owner relay. Baseline absence reuses the existing baseline fixture byte for byte under JCS. No view timing mark is defined.",
   "unknown_user_command": {
     "code": "unknown_user_command",
-    "detail": {"command": "ctx-missing"}
+    "detail": {
+      "command": "ctx-missing"
+    }
   },
   "baselines": [
     {
@@ -152,7 +154,6 @@
     }
   ],
   "request": {
-    "session_ref": "0123456789abcdef0123456789abcdef",
     "command": "ctx-wrapup",
     "input": " 20\n ",
     "invocation_id": "host-invocation-1"
@@ -166,7 +167,6 @@
     }
   },
   "status_request": {
-    "session_ref": "0123456789abcdef0123456789abcdef",
     "call_key": "runner/invocation-1"
   },
   "statuses": [

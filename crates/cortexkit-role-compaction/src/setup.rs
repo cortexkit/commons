@@ -22,6 +22,10 @@ pub struct SetupRequest {
     /// provider decides what each preset enables.
     pub preset: String,
     pub model: ModelRef,
+    /// Whether the session's model reads images. Set only when known; absent
+    /// means unknown. A provider inserts images only when this is `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepts_images: Option<bool>,
     /// The model's context window in tokens.
     #[serde(deserialize_with = "crate::integer::required")]
     pub context_window: u64,
@@ -86,6 +90,7 @@ impl SetupRequest {
         Self {
             preset: preset.into(),
             model,
+            accepts_images: None,
             context_window,
             output_reserve,
             rules,
@@ -94,6 +99,11 @@ impl SetupRequest {
             applied_view: None,
             newest: None,
         }
+    }
+
+    pub fn with_accepts_images(mut self, accepts_images: bool) -> Self {
+        self.accepts_images = Some(accepts_images);
+        self
     }
 
     pub fn with_applied_view(mut self, applied_view: AppliedView) -> Self {

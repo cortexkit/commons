@@ -141,7 +141,8 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::RUN_USAGE, ops::RUN_RESULT).await?;
+    crate::send_helpers::require_declared(&session.route, groups::RUN_USAGE, ops::RUN_RESULT)
+        .await?;
     let prompt = case.mint.next("usage-prompt");
     let send_id = case.mint.next("usage-send");
     let reply: SendReply = decode(

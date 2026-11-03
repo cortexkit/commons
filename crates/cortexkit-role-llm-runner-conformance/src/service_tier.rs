@@ -1,4 +1,4 @@
-//! Tier refusals, truthful usage, and cross-provider ride arrival order.
+//! Tier refusals, fixed run settings and truthful served-tier usage.
 
 use cortexkit_role_llm_runner::{
     capabilities, describe::RoleDescribe, ops, send::SendReply, service_tier::ServiceTier,
@@ -173,46 +173,6 @@ where
                 .map_err(|e| e.to_string())?;
             result?;
             wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
-        }
-        "service_tier_ride_before_changed_request" => {
-            for tier in [
-                ServiceTier::Standard,
-                ServiceTier::Fast,
-                ServiceTier::Fast,
-                ServiceTier::Standard,
-            ] {
-                let reply = send(case, &mut session, tier).await?;
-                wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
-            }
-            let requests = case
-                .subject
-                .model_requests(&session.name)
-                .await
-                .map_err(|e| e.to_string())?;
-            if requests.len() != 4 {
-                return Err(format!(
-                    "expected four tier requests, got {}",
-                    requests.len()
-                ));
-            }
-            for (request, (tier, rides)) in requests.iter().zip([
-                (ServiceTier::Standard, 0),
-                (ServiceTier::Fast, 1),
-                (ServiceTier::Fast, 1),
-                (ServiceTier::Standard, 2),
-            ]) {
-                if request
-                    .service_tier_applied
-                    .as_deref()
-                    .unwrap_or("standard")
-                    != tier.as_str()
-                    || request.service_tier_change_rides != Some(rides)
-                {
-                    return Err(format!(
-                        "tier ride did not precede exactly the changed request: {request:?}"
-                    ));
-                }
-            }
         }
         "service_tier_unknown_never_echoed" => {
             let reply = send(case, &mut session, ServiceTier::Fast).await?;

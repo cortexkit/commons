@@ -17,25 +17,21 @@ use std::{collections::BTreeSet, path::Path};
 
 use cortexkit_role_harness::{CrashDriver, KillPoint, Trigger};
 use cortexkit_role_llm_runner::{
-    capabilities as groups,
     errors::{self, tool_result_reasons},
     ops, points,
     read::{HeadMeta, ReadMessage, ReadRequest},
     run::{RunResult, RunState},
     send::SendReply,
-    tags::{self, ResolveReply, ResolveRequest},
 };
-use serde_json::Value;
 
 use crate::{
-    cases::{entries_for, Ending},
+    cases::entries_for,
     drive::{
         call, check_unique, decode, expect_code, expect_ok, head, holding, read_all, read_refusal,
         result_marker, run_result, send_params, wait_run_end, Mint, MAX_POLLS,
     },
-    route::{Reply, RunnerRoute},
+    route::RunnerRoute,
     subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall, ScriptedTurn},
-    tags::{entry_holding, require_declared},
 };
 
 /// The run-ops case that has no scenario of its own: it reads `run.result`
@@ -43,16 +39,11 @@ use crate::{
 /// point only once.
 const INTERRUPTED_CASE: &str = "run_result_interrupted_not_cancelled";
 
-/// The tags case that has no scenario of its own: it resolves tags in the
-/// session the `StepRecorded` kill cut, after a seal that left its lineage.
-pub const LEFT_LINEAGE_TAG_CASE: &str = "tags_resolve_answers_the_current_lineage";
-
-/// The most tag numbers [`LEFT_LINEAGE_TAG_CASE`] resolves, so a long
-/// session is not sent thousands of requests.
-const MAX_RESOLVED_TAGS: usize = 64;
-
 /// What one crash scenario observed.
 pub struct CrashObservation {
+    history_version_before_b: Option<u64>,
+    history_version_after_b: Option<u64>,
+    stale_cursor_read: Option<Result<(), String>>,
     /// Session A's transcript before the kill, and after the restart.
     before_a: Vec<ReadMessage>,
     after_a: Vec<ReadMessage>,
@@ -76,33 +67,19 @@ pub struct CrashObservation {
     /// Store the resulting transcript or the error from sending, waiting or reading;
     /// absent when recovery did not take this sealing branch.
     sealed_follow_up: Option<Result<Vec<ReadMessage>, String>>,
-    /// At `StepRecorded`, session B's lineage after an earlier finished run,
-    /// read before the kill, and its lineage after the restart. A recovery
-    /// that drops or rewrites the cut step must move B to a new lineage.
-    lineage_before_b: Option<String>,
-    lineage_after_b: Option<String>,
+    /// At `StepRecorded`, session B's history_version after an earlier finished run,
+    /// read before the kill, and its history_version after the restart. A recovery
+    /// that drops or rewrites the cut step must move B to a new history_version.
     /// At `StepRecorded`, session B's transcript read before the kill, after
-    /// its earlier run ended. A recovery that keeps B's lineage must read
+    /// its earlier run ended. A recovery that keeps B's history_version must read
     /// these messages back unchanged.
     before_b: Vec<ReadMessage>,
-    /// At `StepRecorded`, when B's lineage changed across the restart: `Ok`
-    /// when a read naming the old lineage was refused `lineage_changed`, or
-    /// what was answered instead. Absent when the lineage did not change.
-    old_lineage_read: Option<Result<(), String>>,
-    /// At `StepRecorded`, with `tags` declared, after a seal that moved B to
-    /// a new lineage and an owner follow-up on it: `Ok` with the tags no
-    /// part of the new lineage carries, each refused `unknown_tag`, or what
-    /// was answered instead. Absent when the scenario took no such branch.
-    left_lineage_tags: Option<Result<Vec<String>, String>>,
 }
 
 /// The kill point a case's scenario cuts at, if it is a crash case.
 pub fn point_of(case: &str) -> Option<&'static str> {
     if case == INTERRUPTED_CASE {
         return Some(points::DISPATCH_INTENT);
-    }
-    if case == LEFT_LINEAGE_TAG_CASE {
-        return Some(points::STEP_RECORDED);
     }
     let name = case.strip_prefix("crash_at_")?;
     points::ALL.iter().copied().find(|point| *point == name)
@@ -152,7 +129,7 @@ where
     let (b_step, step_text) = mint.text("step");
     let (b_final, final_text) = mint.text("final");
     let b_call = mint.call("call_b");
-    // At StepRecorded, B first runs one finished turn, so its lineage can be
+    // At StepRecorded, B first runs one finished turn, so its history_version can be
     // read before the kill and compared after the recovery.
     let earlier_b = point == points::STEP_RECORDED;
     let mut b_turns = Vec::new();
@@ -187,11 +164,11 @@ where
         .session_route(handle.inner(), &name_b, &owner)
         .await
         .map_err(|e| format!("opening the route of {name_b}: {e}"))?;
-    let mut lineage_before_b = None;
     let mut earlier_run = None;
     let mut before_b = Vec::new();
+    let mut history_version_before_b = None;
     if earlier_b {
-        let mut params = send_params(
+        let params = send_params(
             subject,
             &name_b,
             true,
@@ -199,16 +176,6 @@ where
             &mint.next("send"),
             None,
         );
-        // On a tags runner B renders tags, so the left-lineage case has
-        // numbers to resolve: numbering applies only to such sessions.
-        if declared.contains(&Capability::Tags) {
-            if let Ok(fields) = crate::tags::rendering_fields(subject, &name_b) {
-                let mut rendering = Value::Object(fields);
-                rendering["prompt"] = params["prompt"].clone();
-                rendering["send_id"] = params["send_id"].clone();
-                params = rendering;
-            }
-        }
         let reply: SendReply = decode(
             "session.send",
             expect_ok(
@@ -218,7 +185,7 @@ where
         )?;
         wait_run_end(subject, &route_b, declared, None, &reply).await?;
         let head_before = head(&route_b).await?;
-        lineage_before_b = head_before.lineage_id;
+        history_version_before_b = Some(head_before.history_version);
         earlier_run = head_before.last_run_state.map(|last| last.run_id);
         before_b = read_all(&route_b).await?.1;
     }
@@ -286,17 +253,23 @@ where
     let (_, after_a) = read_all(&route_a).await?;
     let (_, after_b) = read_all(&route_b).await?;
     let head_b = head(&route_b).await?;
-    let head_b_lineage = head_b.lineage_id.clone();
-    let old_lineage_read = match &lineage_before_b {
-        Some(old) if head_b_lineage.as_ref() != Some(old) => {
-            let what = "a read naming B's lineage from before the kill";
-            let request = ReadRequest::tail().with_lineage_id(old);
-            Some(
-                read_refusal(&route_b, what, &request)
-                    .await
-                    .and_then(|error| expect_code(what, &error, errors::LINEAGE_CHANGED)),
+    let history_version_after_b = Some(head_b.history_version);
+    let stale_cursor_read = match (history_version_before_b, before_b.first()) {
+        (Some(version), Some(first)) if version != head_b.history_version => Some(
+            read_refusal(
+                &route_b,
+                "cursor from before the rewrite",
+                &ReadRequest::after(&first.mid, version),
             )
-        }
+            .await
+            .and_then(|error| {
+                expect_code(
+                    "cursor from before the rewrite",
+                    &error,
+                    errors::HISTORY_CHANGED,
+                )
+            }),
+        ),
         _ => None,
     };
     let invocations_after = subject.tool_invocations(&b_call.arguments).await;
@@ -349,16 +322,10 @@ where
     } else {
         None
     };
-    let left_lineage_tags = match (&sealed_follow_up, &old_lineage_read) {
-        (Some(Ok(follow_up)), Some(_)) if declared.contains(&Capability::Tags) => {
-            Some(resolve_left_lineage(&route_b, follow_up, &prompt).await)
-        }
-        (Some(Err(error)), Some(_)) if declared.contains(&Capability::Tags) => Some(Err(format!(
-            "the owner follow-up on the new lineage failed, so its tags could not be read: {error}"
-        ))),
-        _ => None,
-    };
     Ok(CrashObservation {
+        history_version_before_b,
+        history_version_after_b,
+        stale_cursor_read,
         before_a,
         after_a,
         after_b,
@@ -372,108 +339,8 @@ where
         call: b_call,
         final_text,
         sealed_follow_up,
-        lineage_before_b,
-        lineage_after_b: head_b_lineage,
         before_b,
-        old_lineage_read,
-        left_lineage_tags,
     })
-}
-
-/// In the lineage a seal moved session B to, resolve the numbers its parts
-/// carry (at most [`MAX_RESOLVED_TAGS`] of them): each answers the part of the
-/// new lineage that shows it, never a part of the lineage the session left,
-/// though numbers may repeat across lineages. A number above the new
-/// lineage's highest is refused `unknown_tag`, and the cut run's prompt
-/// resolves where it now sits. Answers the numbers resolved.
-async fn resolve_left_lineage<R: RunnerRoute>(
-    route: &R,
-    messages: &[ReadMessage],
-    prompt: &str,
-) -> Result<Vec<String>, String> {
-    require_declared(route, groups::TAGS, ops::SESSION_RESOLVE).await?;
-    let carried: Vec<(String, &ReadMessage, String)> = messages
-        .iter()
-        .flat_map(|m| {
-            m.tags
-                .iter()
-                .filter_map(move |row| Some((row.tag.clone()?, m, row.part.clone())))
-        })
-        .take(MAX_RESOLVED_TAGS)
-        .collect();
-    let mut resolved = Vec::new();
-    for (tag, entry, part) in &carried {
-        let what = format!("session.resolve of {tag}, which the new lineage shows");
-        let reply: ResolveReply = decode(
-            &what,
-            expect_ok(
-                &what,
-                call(
-                    route,
-                    ops::SESSION_RESOLVE,
-                    serde_json::to_value(ResolveRequest::new(tag)).expect("serializes"),
-                )
-                .await?,
-            )?,
-        )?;
-        if reply.ordinal != entry.ordinal || reply.mid != entry.mid || &reply.part != part {
-            return Err(format!(
-                "{what} answered ordinal {} mid {} part {}, but the new lineage reads it on \
-                 ordinal {} mid {} part {part}: resolve answers the current lineage, never the \
-                 one the session left",
-                reply.ordinal, reply.mid, reply.part, entry.ordinal, entry.mid
-            ));
-        }
-        resolved.push(tag.clone());
-    }
-    let highest = carried
-        .iter()
-        .filter_map(|(tag, _, _)| tags::parse_tag(tag))
-        .max()
-        .unwrap_or(0);
-    let above = tags::format_tag(highest + 1).expect("positive");
-    let what = format!("session.resolve of {above}, above every number the new lineage shows");
-    match call(
-        route,
-        ops::SESSION_RESOLVE,
-        serde_json::to_value(ResolveRequest::new(&above)).expect("serializes"),
-    )
-    .await?
-    {
-        Reply::Response(body) => {
-            return Err(format!(
-                "{what} answered {body}: a number no part of the current lineage carries is \
-                 refused unknown_tag, never answered with a left lineage's content"
-            ))
-        }
-        Reply::Error(error) => expect_code(&what, &error, errors::UNKNOWN_TAG)?,
-    }
-    let entry = entry_holding(messages, prompt)?;
-    if !entry.tags.iter().any(|row| row.tag.is_some()) {
-        return Err(format!(
-            "the cut run's prompt at ordinal {} carries no number in the new lineage",
-            entry.ordinal
-        ));
-    }
-    Ok(resolved)
-}
-
-/// [`LEFT_LINEAGE_TAG_CASE`], against the `StepRecorded` scenario.
-pub fn check_left_lineage(observed: &CrashObservation) -> Result<Ending, String> {
-    match &observed.left_lineage_tags {
-        Some(Ok(resolved)) if resolved.is_empty() => Ok(Ending::Inapplicable(
-            "the seal moved the session to a new lineage that shows no number, so there is \
-             nothing to resolve"
-                .into(),
-        )),
-        Some(Ok(_)) => Ok(Ending::Passed),
-        Some(Err(reason)) => Err(reason.clone()),
-        None => Ok(Ending::Inapplicable(
-            "the StepRecorded recovery resumed the run or kept the never-sent call on the same \
-             lineage (shape (b)), so the session left no lineage whose tags could be asked for"
-                .into(),
-        )),
-    }
 }
 
 /// Check `case` against the scenario observed at `point`.
@@ -743,9 +610,9 @@ fn expect_kept_step(messages: &[ReadMessage], observed: &CrashObservation) -> Re
 /// model history:
 ///
 /// - (a) drop the call, which rewrites a written message and so moves the
-///   session to a new lineage, whose old reads are refused `lineage_changed`;
+///   session to a new history_version, whose old reads are refused `history_changed`;
 /// - (b) keep the call and append its never-executed result in the commit
-///   that ends the run, which only appends and so keeps the lineage.
+///   that ends the run, which only appends and so keeps the history_version.
 ///
 /// The cut-run transcript decides the shape: no attribution entry for the
 /// call is shape (a), an entry is shape (b). A failure names the shape it
@@ -768,7 +635,7 @@ fn check_sealed_history(
     };
     if entries_for(cut, id).is_empty() {
         check_dropped(observed, cut, follow_up, &carries_call).map_err(|reason| {
-            format!("closest to shape (a), the call dropped on a new lineage: {reason}")
+            format!("closest to shape (a), the call dropped on a new history_version: {reason}")
         })
     } else {
         check_kept(observed, cut, follow_up, &carries_call).map_err(|reason| {
@@ -780,7 +647,7 @@ fn check_sealed_history(
 }
 
 /// Shape (a): the never-sent call is gone from the cut-run and follow-up
-/// transcripts, and the session is on a new lineage whose predecessor's
+/// transcripts, and the session is on a new history_version whose predecessor's
 /// reads are refused.
 fn check_dropped(
     observed: &CrashObservation,
@@ -817,26 +684,29 @@ fn check_dropped(
         "the later assistant turn",
     )?;
     // Dropping the call (and maybe its text) rewrote a written message,
-    // so the recovery must have started a new lineage (§4.2, §14).
-    if observed.lineage_before_b.is_none() || observed.lineage_after_b == observed.lineage_before_b
+    // so the recovery must have started a new history_version (§4.2, §14).
+    if observed.history_version_before_b.is_none()
+        || observed.history_version_after_b == observed.history_version_before_b
     {
         return Err(format!(
-            "the recovery dropped the never-sent call from history but kept lineage {:?}: \
-             dropping or rewriting a written message starts a new lineage",
-            observed.lineage_after_b
+            "the recovery dropped the never-sent call from history but kept history_version {:?}: \
+             dropping or rewriting a written message starts a new history_version",
+            observed.history_version_after_b
         ));
     }
-    match &observed.old_lineage_read {
+    match &observed.stale_cursor_read {
         Some(Ok(())) => Ok(()),
         Some(Err(reason)) => Err(format!(
-            "the lineage moved from {:?} to {:?}, but {reason}",
-            observed.lineage_before_b, observed.lineage_after_b
+            "the history_version moved from {:?} to {:?}, but {reason}",
+            observed.history_version_before_b, observed.history_version_after_b
         )),
-        None => Err("the lineage moved, but no read of the old lineage was observed".into()),
+        None => Err(
+            "the history_version moved, but no read of the old history_version was observed".into(),
+        ),
     }
 }
 
-/// Shape (b): the lineage is unchanged and every message read before the
+/// Shape (b): the history_version is unchanged and every message read before the
 /// kill reads back the same; the call is kept, not indeterminate, and the
 /// message right after it carries its result, already in the transcript
 /// read once the run ended. The follow-up only appends: the sealed
@@ -849,11 +719,14 @@ fn check_kept(
     carries_call: &dyn Fn(&ReadMessage) -> bool,
 ) -> Result<(), String> {
     let id = &observed.call.tool_call_id;
-    match (&observed.lineage_before_b, &observed.lineage_after_b) {
+    match (
+        &observed.history_version_before_b,
+        &observed.history_version_after_b,
+    ) {
         (Some(before), Some(after)) if before == after => {}
         (before, after) => {
             return Err(format!(
-                "the kept call needs the lineage unchanged, but it read {before:?} before the kill \
+                "the kept call needs the history_version unchanged, but it read {before:?} before the kill \
                  and {after:?} after it"
             ))
         }
@@ -863,7 +736,7 @@ fn check_kept(
         if after != Some(message) {
             return Err(format!(
                 "ordinal {} read {message:?} before the kill and {after:?} after the seal under \
-                 the same lineage: a seal that keeps the lineage only appends, so a message \
+                 the same history_version: a seal that keeps the history_version only appends, so a message \
                  already read never changes",
                 message.ordinal
             ));

@@ -1,108 +1,55 @@
-//! `transform.hook`: one hook call.
-//!
-//! Every call carries the session's opaque name, the plan item's preset and
-//! params (so the provider resolves the same frozen config on every call
-//! without remembering it), and the subject: the value the hook may change,
-//! with what identifies it. The runner calls a hook before the record it
-//! transforms is written. A runner may supply its reserved message id and
-//! ordinal, and an opaque whole message, when it cannot serve `session.read`.
-//!
-//! Decoded leniently on fields, strictly on `hook` and `phase`: a provider
-//! that does not know a hook refuses the call rather than answer it as
-//! another.
+//! Hook requests carry subjects, never caller identity. The route supplies
+//! the session binding, attested runner and project scope.
 
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::{Map, Value};
 
-use crate::subscription::{Hook, Phase};
-pub use crate::subscription::{SubjectPartProblem, UnservedSubject};
+use crate::subscription::{Hook, Phase, SubjectPartProblem};
 
-/// History inherited by a new lineage, through the given ordinal inclusive.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[non_exhaustive]
-pub struct DescendsFrom {
-    pub lineage_id: String,
-    pub through_ordinal: u64,
-}
-
-impl DescendsFrom {
-    pub fn new(lineage_id: impl Into<String>, through_ordinal: u64) -> Self {
-        Self {
-            lineage_id: lineage_id.into(),
-            through_ordinal,
-        }
-    }
-}
-
-/// A provider may enforce this cap on a hook carrying `message`: 3 MiB for
-/// the compact JSON request, including the whole message. Never truncate it.
-/// It sits below the subc daemon's 4 MiB per-connection queue budget, so a
-/// request at the cap plus its frame envelope cannot by itself make the
-/// daemon close the provider's connection.
+/// Optional compact-JSON request cap for hooks carrying a whole message.
+/// The 3 MiB cap leaves room below the daemon's 4 MiB connection queue.
 pub const DEFAULT_HOOK_CAP_BYTES: usize = 3 * 1024 * 1024;
 
-/// The `transform.hook` request.
+/// The `transform.hook` request, on a session-bound route.
+///
+/// For every hook request, call [`Self::check_subject_fields`] to reject
+/// unknown hooks/phases, ordinal zero and invalid subject/message pairing,
+/// and call [`Self::validate`] to check `subject_part`. Deserialization alone
+/// does not perform these semantic checks. Before interpreting a supplied
+/// `message`, additionally call [`Self::check_message_profile`]. The
+/// whole-message size check ([`Self::check_message_size`]) is optional.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HookCall {
-    /// The runner's opaque name for the session, one component of the provider's
-    /// per-session state key, never used to choose what it returns.
-    pub session: String,
-    /// The caller-chosen harness named in the session's key
-    /// (for example `harness-a`). This differs from the route's bind harness,
-    /// the harness a connection declares when it opens the route; a runner
-    /// always declares `runner`. Required: a request without it does
-    /// not decode. A provider keys a runner conversation on
-    /// `(runner, harness, session)`, where runner is the daemon-attested
-    /// principal's bare module id, never `reserved:<id>` or a body field. `project_root` is route
-    /// metadata only and never part of that key.
-    pub harness: String,
-    /// The session's current lineage. Absent only on `pre_user` for the
-    /// first message of a session nothing has been written to.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lineage_id: Option<String>,
-    /// The runner's message id. Present together with `subject_ordinal`.
+    /// Stable message id, independent of the entry ordinal. Present together
+    /// with `subject_ordinal` or not at all.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_mid: Option<String>,
-    /// The subject's position in the current lineage, reserved by the runner.
+    /// Entry position counted from 1, following compaction W4.1/W4.2.
+    /// Present together with `subject_mid` or not at all; zero is invalid.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_ordinal: Option<u64>,
-    /// The whole new message in the runner's schema, named by the opaque
-    /// `params.serializer_profile`. Requires both subject identity fields.
-    /// Providers must recognise the profile before interpreting this value.
+    /// Whole message in the schema named by `params.serializer_profile`.
+    /// Explicit null is present and requires both subject identity fields.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present_message"
     )]
     pub message: Option<Value>,
-    /// Exact provider-message JSON bytes after removing only recognized
-    /// transport cache markers, not a serialization of the parsed message.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub raw_message: Option<String>,
-    /// On the first hook of a lineage, the history it continues. A provider
-    /// must hold the named lineage through this ordinal, never guess it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub descends_from: Option<DescendsFrom>,
-    /// Previous durably served watermark in this lineage. Absence is not zero
-    /// and grants no ordinal-confirmed promotion.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub served_through_ordinal: Option<u64>,
-    /// Subjects whose pending output must burn before promotion. Omit an empty
-    /// list; admission and idempotent burning are the provider's responsibility.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub unserved_subjects: Option<Vec<UnservedSubject>>,
-    /// Opaque part identity on a host tool subject, not its tool call id.
+    /// Opaque part identity, not the display-only tool call id. When present,
+    /// must be nonempty and at most 256 UTF-8 bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject_part: Option<String>,
-    /// Scheduling hint on the last hook of a pass, never an acknowledgement.
-    /// Hosts omit it unless true; omitted or false signals no barrier.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pass_complete: Option<bool>,
-    /// The plan item's preset, verbatim.
+    /// Optional runner diagnostics, carried without interpretation on any hook.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_message"
+    )]
+    pub runner_trace: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
-    /// The plan item's params, verbatim.
     #[serde(default)]
     pub params: Map<String, Value>,
     #[serde(flatten)]
@@ -110,71 +57,17 @@ pub struct HookCall {
 }
 
 impl HookCall {
-    /// Enforce message and envelope byte caps only for a daemon-attested
-    /// connection whose frozen plan selects the Claude Code capability.
-    pub fn validate_claude_code(
-        &self,
-        lane: &crate::claude_code::ClaudeCodeLane,
-        principal: &str,
-        connection: &str,
-    ) -> Result<(), crate::claude_code::InvalidParams> {
-        use crate::claude_code::InvalidParams;
-        let Some(bundle) = lane.selected_for(principal, connection)? else {
-            return Ok(());
-        };
-        crate::claude_code::check_raw_message(self.raw_message.as_deref())?;
-        #[derive(Serialize)]
-        struct MessageAndRawBytes<'a> {
-            #[serde(skip_serializing_if = "Option::is_none")]
-            message: Option<&'a Value>,
-            #[serde(skip_serializing_if = "Option::is_none")]
-            raw_message: Option<&'a str>,
-        }
-        let message = MessageAndRawBytes {
-            message: self.message.as_ref(),
-            raw_message: self.raw_message.as_deref(),
-        };
-        if serde_json::to_vec(&message)
-            .map_err(|_| InvalidParams::new("message"))?
-            .len()
-            > bundle.caps.single_message_bytes
-        {
-            return Err(InvalidParams::new("message"));
-        }
-        let envelope = crate::OpRequest::new(crate::ops::TRANSFORM_HOOK, self);
-        if serde_json::to_vec(&envelope)
-            .map_err(|_| InvalidParams::new("message"))?
-            .len()
-            >= bundle.caps.hook_envelope_bytes
-        {
-            return Err(InvalidParams::new("message"));
-        }
-        Ok(())
-    }
-
-    pub fn new(session: impl Into<String>, harness: impl Into<String>, subject: Subject) -> Self {
+    pub fn new(subject: Subject) -> Self {
         Self {
-            session: session.into(),
-            harness: harness.into(),
-            lineage_id: None,
             subject_mid: None,
             subject_ordinal: None,
             message: None,
-            raw_message: None,
-            descends_from: None,
-            served_through_ordinal: None,
-            unserved_subjects: None,
             subject_part: None,
-            pass_complete: None,
+            runner_trace: None,
             preset: None,
             params: Map::new(),
             subject,
         }
-    }
-
-    pub fn with_lineage(mut self, lineage_id: impl Into<String>) -> Self {
-        self.lineage_id = Some(lineage_id.into());
-        self
     }
 
     pub fn with_subject_identity(mut self, mid: impl Into<String>, ordinal: u64) -> Self {
@@ -183,28 +76,8 @@ impl HookCall {
         self
     }
 
-    pub fn with_raw_message(mut self, raw_message: impl Into<String>) -> Self {
-        self.raw_message = Some(raw_message.into());
-        self
-    }
-
     pub fn with_message(mut self, message: Value) -> Self {
         self.message = Some(message);
-        self
-    }
-
-    pub fn with_descends_from(mut self, descends_from: DescendsFrom) -> Self {
-        self.descends_from = Some(descends_from);
-        self
-    }
-
-    pub fn with_served_through_ordinal(mut self, ordinal: u64) -> Self {
-        self.served_through_ordinal = Some(ordinal);
-        self
-    }
-
-    pub fn with_unserved_subjects(mut self, subjects: Vec<UnservedSubject>) -> Self {
-        self.unserved_subjects = Some(subjects);
         self
     }
 
@@ -213,25 +86,31 @@ impl HookCall {
         self
     }
 
-    pub fn with_pass_complete(mut self, pass_complete: bool) -> Self {
-        self.pass_complete = Some(pass_complete);
+    pub fn with_runner_trace(mut self, trace: Value) -> Self {
+        self.runner_trace = Some(trace);
         self
     }
 
-    /// Validate non-empty, at-most-256-byte part ids without normalisation.
-    /// Also call [`Self::check_host_fields`] for subject/message pairing. These
-    /// checks do not establish host admission or watermark monotonicity.
+    /// Check only the nonempty, at-most-256-UTF-8-byte `subject_part` rule,
+    /// without normalization. Also call [`Self::check_subject_fields`] on
+    /// every hook request, even when no whole message is supplied.
     pub fn validate(&self) -> Result<(), SubjectPartProblem> {
-        crate::subscription::check_subject_part(self.subject_part.as_deref())?;
-        crate::subscription::validate_unserved_subjects(
-            self.unserved_subjects.as_deref().unwrap_or_default(),
-        )
+        crate::subscription::check_subject_part(self.subject_part.as_deref())
     }
 
-    /// Validate before interpreting or ingesting host-supplied history.
-    /// Shape decoding alone does not enforce the subject pairing rule.
+    /// On every hook request, reject unknown hooks/phases, ordinal zero and
+    /// invalid subject/message pairing, even when `message` is absent.
+    /// Deserialization alone does not perform these semantic checks.
     /// Refuse a failure with `invalid_params`, naming the problem's field.
-    pub fn check_host_fields(&self) -> Result<(), HookProblem> {
+    pub fn check_subject_fields(&self) -> Result<(), HookProblem> {
+        if self.subject_ordinal == Some(0) {
+            return Err(HookProblem::SubjectOrdinalZero);
+        }
+        if matches!(self.subject, Subject::Unknown { .. })
+            || matches!(self.subject.phase(), Some(Phase::Unknown(_)))
+        {
+            return Err(HookProblem::UnknownSubject);
+        }
         if self.message.is_some() && (self.subject_mid.is_none() || self.subject_ordinal.is_none())
         {
             return Err(HookProblem::MessageWithoutSubject);
@@ -259,6 +138,21 @@ impl HookCall {
         Ok(())
     }
 
+    /// Call before interpreting `message`; a provider may instead ignore it
+    /// when the required history is available through another supported path.
+    pub fn check_message_profile(&self, supported: &[&str]) -> Result<(), HookProblem> {
+        if self.message.is_some()
+            && !self
+                .params
+                .get("serializer_profile")
+                .and_then(Value::as_str)
+                .is_some_and(|profile| supported.contains(&profile))
+        {
+            return Err(HookProblem::SerializerProfile);
+        }
+        Ok(())
+    }
+
     pub fn with_item(mut self, preset: Option<String>, params: Map<String, Value>) -> Self {
         self.preset = preset;
         self.params = params;
@@ -272,11 +166,15 @@ fn present_message<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<
     Value::deserialize(deserializer).map(Some)
 }
 
-/// Why host-supplied hook fields are invalid. All use `invalid_params`.
+/// Why subject fields are invalid. All use `invalid_params`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HookProblem {
     MessageWithoutSubject,
     SubjectOrdinalMissing,
+    SubjectOrdinalZero,
+    UnknownSubject,
+    SerializerProfile,
     SubjectMidMissing,
     RequestTooLarge,
 }
@@ -286,18 +184,20 @@ impl HookProblem {
     pub fn field(self) -> &'static str {
         match self {
             Self::MessageWithoutSubject | Self::RequestTooLarge => "message",
-            Self::SubjectOrdinalMissing => "subject_ordinal",
+            Self::SubjectOrdinalMissing | Self::SubjectOrdinalZero => "subject_ordinal",
+            Self::UnknownSubject => "hook",
+            Self::SerializerProfile => "params.serializer_profile",
             Self::SubjectMidMissing => "subject_mid",
         }
     }
 }
 
+open_tagged! {
 /// What the hook acts on, tagged by `hook`.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-#[serde(tag = "hook", rename_all = "snake_case")]
-pub enum Subject {
+#[derive(Clone, Debug, PartialEq)]
+pub enum Subject, "hook" {
     /// A user message, or a steered or queued prompt, before it is written.
-    PreUser {
+    PreUser => "pre_user" {
         /// The text of each of the message's text blocks, in message order
         /// ([`Subject::blocks`]).
         blocks: Vec<String>,
@@ -309,10 +209,17 @@ pub enum Subject {
         /// a human turn. Decoded open.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delivery: Option<String>,
+        /// The message's time in milliseconds since the Unix epoch (UTC), from
+        /// the runner's machine: the host's creation time when the host stamps
+        /// it, otherwise the runner's clock at the hook call. With it, a
+        /// provider measures the gap since the previous message on one
+        /// machine's clock. When it's absent, the provider uses its own clock.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at_ms: Option<u64>,
     },
     /// A completed assistant message's text, before it is written. Never
     /// reasoning, signatures or tool calls.
-    PostAssistant {
+    PostAssistant => "post_assistant" {
         /// The step that produced the message, opaque.
         step_id: String,
         /// The text of each of the message's text blocks, in message order.
@@ -320,7 +227,7 @@ pub enum Subject {
         blocks: Vec<String>,
     },
     /// A tool call before it executes.
-    PreTool {
+    PreTool => "pre_tool" {
         step_id: String,
         phase: Phase,
         /// The tool's model-facing name.
@@ -337,7 +244,7 @@ pub enum Subject {
         input: Value,
     },
     /// A tool's result before it is written.
-    PostTool {
+    PostTool => "post_tool" {
         step_id: String,
         tool: String,
         tool_call_id: String,
@@ -350,6 +257,7 @@ pub enum Subject {
         is_error: bool,
     },
 }
+}
 
 impl Subject {
     pub fn hook(&self) -> Hook {
@@ -358,12 +266,13 @@ impl Subject {
             Self::PostAssistant { .. } => Hook::PostAssistant,
             Self::PreTool { .. } => Hook::PreTool,
             Self::PostTool { .. } => Hook::PostTool,
+            Self::Unknown { name, .. } => Hook::Unknown(name.clone()),
         }
     }
 
     pub fn phase(&self) -> Option<Phase> {
         match self {
-            Self::PreTool { phase, .. } => Some(*phase),
+            Self::PreTool { phase, .. } => Some(phase.clone()),
             _ => None,
         }
     }
@@ -377,7 +286,7 @@ impl Subject {
             Self::PreUser { blocks, .. }
             | Self::PostAssistant { blocks, .. }
             | Self::PostTool { blocks, .. } => Some(blocks),
-            Self::PreTool { .. } => None,
+            Self::PreTool { .. } | Self::Unknown { .. } => None,
         }
     }
 
@@ -395,44 +304,23 @@ mod tests {
     use super::*;
     use crate::vectors;
 
-    /// Every request in the `requests` list of `hook-requests.json`, which
-    /// covers each hook at least once, names its caller's harness, and the
-    /// field survives a round trip.
     #[test]
-    fn every_hook_request_round_trips_its_harness() {
+    fn every_hook_uses_route_identity_only() {
         let file = vectors::load("hook-requests.json");
         let mut hooks = Vec::new();
         for case in vectors::cases(&file, "requests") {
-            let name = case["name"].as_str().unwrap();
-            let call = vectors::round_trip::<HookCall>(name, &case["request"]);
-            assert_eq!(call.harness, "broca", "{name}");
+            let call =
+                vectors::round_trip::<HookCall>(case["name"].as_str().unwrap(), &case["request"]);
+            let wire = serde_json::to_value(&call).unwrap();
+            for field in ["session", "harness", "lineage_id"] {
+                assert!(wire.get(field).is_none(), "{field}");
+            }
             hooks.push(call.subject.hook());
         }
         for hook in Hook::ALL {
             assert!(hooks.contains(&hook), "{hook:?} has no request vector");
         }
     }
-
-    /// `harness` is required: removing it from any request in the
-    /// `requests` list of `hook-requests.json` makes the request fail to
-    /// decode, and the error names the field.
-    #[test]
-    fn a_hook_request_without_harness_is_refused_by_name() {
-        let file = vectors::load("hook-requests.json");
-        for case in vectors::cases(&file, "requests") {
-            let name = case["name"].as_str().unwrap();
-            let mut request = case["request"].clone();
-            assert!(
-                request.as_object_mut().unwrap().remove("harness").is_some(),
-                "{name}"
-            );
-            let error = serde_json::from_value::<HookCall>(request)
-                .expect_err(name)
-                .to_string();
-            assert!(error.contains("missing field `harness`"), "{name}: {error}");
-        }
-    }
-
     #[test]
     fn hook_request_vectors_round_trip() {
         let file = vectors::load("hook-requests.json");
@@ -453,6 +341,15 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             serde_json::from_value::<HookCall>(case["request"].clone())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+        for case in vectors::cases(&file, "unsupported") {
+            let name = case["name"].as_str().unwrap();
+            let call = vectors::round_trip::<HookCall>(name, &case["request"]);
+            assert_eq!(
+                call.check_subject_fields(),
+                Err(HookProblem::UnknownSubject),
+                "{name}"
+            );
         }
         for case in vectors::cases(&file, "undecodable") {
             vectors::refused::<HookCall>(case["name"].as_str().unwrap(), &case["request"]);

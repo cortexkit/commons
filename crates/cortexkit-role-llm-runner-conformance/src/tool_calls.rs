@@ -13,8 +13,8 @@ use crate::{
     cases::Case,
     drive::{call, decode, expect_code, expect_error, expect_field, expect_ok, head, read_all},
     route::{Reply, RunnerRoute},
+    send_helpers::send_and_wait,
     subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
-    tags::send_and_wait,
 };
 
 type Check = Result<(), String>;
@@ -146,8 +146,12 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::RUN_TOOL_CALLS, ops::RUN_TOOL_CALLS)
-        .await?;
+    crate::send_helpers::require_declared(
+        &session.route,
+        groups::RUN_TOOL_CALLS,
+        ops::RUN_TOOL_CALLS,
+    )
+    .await?;
     let prompt = case.mint.next("listed-prompt");
     send_and_wait(case, &mut session, None, &prompt, &Map::new()).await?;
     let run_id = last_run(&session.route).await?;
@@ -209,8 +213,12 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::RUN_TOOL_CALLS, ops::RUN_TOOL_CALLS)
-        .await?;
+    crate::send_helpers::require_declared(
+        &session.route,
+        groups::RUN_TOOL_CALLS,
+        ops::RUN_TOOL_CALLS,
+    )
+    .await?;
     let prompt = case.mint.next("unknown-run-prompt");
     send_and_wait(case, &mut session, None, &prompt, &Map::new()).await?;
     let what = "run.tool_calls for a run the session does not have";
@@ -265,10 +273,14 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::RUN_TOOL_CALLS, ops::RUN_TOOL_CALLS)
-        .await?;
+    crate::send_helpers::require_declared(
+        &session.route,
+        groups::RUN_TOOL_CALLS,
+        ops::RUN_TOOL_CALLS,
+    )
+    .await?;
     let prompt = case.mint.next("held-prompt");
-    let params = crate::tags::params(
+    let params = crate::send_helpers::params(
         case,
         &session,
         None,
@@ -372,8 +384,12 @@ where
             },
         )
         .await?;
-    crate::tags::require_declared(&session.route, groups::RUN_TOOL_CALLS, ops::RUN_TOOL_CALLS)
-        .await?;
+    crate::send_helpers::require_declared(
+        &session.route,
+        groups::RUN_TOOL_CALLS,
+        ops::RUN_TOOL_CALLS,
+    )
+    .await?;
     send_and_wait(case, &mut session, None, "call position probe", &Map::new()).await?;
     let calls = list(&session.route, &last_run(&session.route).await?, 10).await?;
     if calls.len() != 2 {

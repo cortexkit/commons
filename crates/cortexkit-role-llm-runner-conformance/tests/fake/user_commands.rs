@@ -122,6 +122,11 @@ impl Module {
         method: &str,
         params: Value,
     ) -> Result<Reply, Killed> {
+        if self.world.defects.user_command == Some("session_ref_required")
+            && params.get("session_ref").is_none()
+        {
+            return Ok(invalid("session_ref"));
+        }
         if !self.world.serves(groups::USER_COMMANDS) {
             return Ok(refuse(errors::USER_COMMANDS_UNSUPPORTED, None));
         }

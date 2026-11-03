@@ -26,10 +26,10 @@ use crate::{
         wait_run_end,
     },
     route::{Reply, RunnerRoute},
+    send_helpers::{params, require_declared, send_and_wait},
     subject::{
         Capability, LlmRunnerSubject, PlanSenderIdentity, Script, ScriptedPart, ScriptedTurn,
     },
-    tags::{params, require_declared, send_and_wait},
 };
 
 type Check = Result<(), String>;
@@ -1442,7 +1442,7 @@ where
     delivered_once(&messages, "Context is 82% full.", mode)
 }
 
-/// On a session whose plan renders tags, a template send whose `part_tag`
+/// With the adapter's captured part-number mapping, a template send whose `part_tag`
 /// slot names a part the session does not show is refused
 /// `template_part_gone` naming the slot, writing nothing; one naming a part
 /// it shows is accepted.
@@ -1469,16 +1469,10 @@ where
     let entry = PlanSender::new(&identity.module).with_templates(vec![template.clone()]);
     let mut members = Map::new();
     members.insert("senders".into(), json!([entry]));
-    members.insert(
-        cortexkit_role_llm_runner::tags::PLAN_RENDER_TAGS.into(),
-        json!(true),
-    );
     let fields = case
         .subject
         .send_fields_with_plan(&session.name, true, &members)
-        .ok_or(
-            "the subject builds no plan carrying senders and render_tags, which this case requires",
-        )?;
+        .ok_or("the subject builds no plan carrying senders, which this case requires")?;
     let opening = case.mint.next("part-gone-opening");
     send_and_wait(case, &mut session, Some(&fields), &opening, &Map::new()).await?;
     let named = case
@@ -1490,10 +1484,14 @@ where
     let shown = messages
         .iter()
         .find_map(|m| {
-            m.tags
-                .iter()
-                .find(|row| row.tag.is_some())
-                .map(|row| json!({ "mid": m.mid, "part": row.part }))
+            case.subject
+                .read_parts(&m.message)
+                .into_iter()
+                .find_map(|(part, _)| {
+                    case.subject
+                        .shown_part_number(&session.name, &m.mid, &part)
+                        .map(|_| json!({ "mid": m.mid, "part": part }))
+                })
         })
         .ok_or("the session shows no numbered part to name in a part_tag slot")?;
     let template_send = |part: Value| {

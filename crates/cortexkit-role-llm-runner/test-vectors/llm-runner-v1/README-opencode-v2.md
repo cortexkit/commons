@@ -103,11 +103,11 @@ those references (`projector.ts:226-238`). Captured rows are never repaired.
 ## Expected results
 
 `opencode-v2-session.json` specifies every ordinal, part count, projected native
-unit, native cut and ID outside the served range for each captured snapshot.
+unit, native cut and ID hidden from the model, never from reads for each captured snapshot.
 The helper's test compares every field, checks standalone counts and repeats
 with input order reversed. In `after_cut`, the kept assistant tool row has
-ordinal 4, not 0. `marker_next` is a separate session: its stored `keepID`
-names the first user row, so its profile boundary is ordinal 0 even though the
+its original one-based ordinal, never a new ordinal 0. `marker_next` is a separate session: its stored `keepID`
+names the first user row, so its profile boundary is ordinal 1 even though the
 provider request starts with a checkpoint. Neither compaction row nor summary
 is a served entry. These are the profile's agreed boundaries, not a claim that
 both upstream provider-history renderers preserve a structured historical tail.
@@ -121,14 +121,14 @@ and falls back to the previous one; the `below` revert removes both, leaving
 whole surviving history. The 2.0.26 `between.before`, `between.committed` and
 `below.before` fork snapshots instead pin named stale-reference refusals. Its
 `below.committed` snapshot is valid again because both markers are gone.
-The runner's checkpoint (`message_count` and the head cut,
-CONTRACT.md §4.8/§9.6) determines a runner-written cut, not native row placement.
+The durable compaction protocol state determines a runner-written model
+cut, not native row placement; this role has no message_count checkpoint.
 No marker or revert vector is synthetic. The recording is request-side
 reinjection evidence, not production qualification or proof that every model
 request path replays a restored tail.
-`outside_served_range: null` in the expected results means a runner marker
-requires the runner's own checkpoint; it does not assert an empty excluded
-prefix. With neither a native cut nor a runner marker, that list is empty.
+`below_model_cut: null` in the expected results means a runner marker
+requires durable compaction state for the model boundary; it does not
+assert that reads exclude any prefix. With neither a native cut nor a runner marker, that list is empty.
 
 `display-opencode-v2.json` gives decoded bodies (`data` plus `id` and `type`)
 and literal display rows for both versions: user text/image, reasoning and raw

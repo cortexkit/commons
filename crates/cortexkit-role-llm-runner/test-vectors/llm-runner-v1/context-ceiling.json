@@ -1,7 +1,7 @@
 {
   "refusals": [
     {
-      "name": "send refused: no view came within the provider's bound",
+      "name": "send refused: no fitting view came before the runner's ride deadline",
       "op": "session.send",
       "refusal": {
         "code": "context_ceiling",
@@ -108,8 +108,7 @@
       "deadline_ms": 1790000300000
     },
     "head": {
-      "lineage_id": "lin-1",
-      "last_ordinal": 7,
+      "last_ordinal": 8,
       "head": {
         "seq": 12
       },
@@ -118,7 +117,9 @@
         "state": "active",
         "reason": "context_ceiling_wait"
       },
-      "updated_at": 1790000000000
+      "updated_at": 1790000000000,
+      "history_version": 1,
+      "incarnation": "log-1"
     },
     "event": {
       "kind": "control",
@@ -160,8 +161,7 @@
       "deadline_ms": 1790000004000
     },
     "head": {
-      "lineage_id": "lin-1",
-      "last_ordinal": 9,
+      "last_ordinal": 10,
       "head": {
         "seq": 15
       },
@@ -170,7 +170,9 @@
         "state": "active",
         "reason": "compaction_wait"
       },
-      "updated_at": 1790000001000
+      "updated_at": 1790000001000,
+      "history_version": 1,
+      "incarnation": "log-1"
     },
     "event": {
       "kind": "control",
