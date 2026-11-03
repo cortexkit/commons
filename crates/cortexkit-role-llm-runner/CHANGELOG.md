@@ -15,6 +15,21 @@
   restoring it or ending the run. `tool_outside_host_set` applies only to
   runners without `refresh_relaunch`.
 
+## 0.8.1
+
+- `session.user_command` accepts the 0.7 input member `session_ref`, and
+  `session.read` accepts the 0.7 input member `lineage_id`. The decoder takes
+  an absent, null or string value and discards it, and these request types
+  omit both on serialization. Every other unknown member of those two
+  requests is still refused. This lets a runner accept 0.7-shaped requests
+  during a staged migration; replies, numbering and cursor checks follow 0.8.
+  The support is temporary and scheduled for removal in 0.9.
+- `lineage_id` does not supply `history_version`: an `after_mid` read without
+  it is still refused `invalid_params {field: "history_version"}`, and the
+  caller fetches a fresh head and page instead of reusing old ordinals.
+- Add `read-renumbering-switch.json`, illustrating one session's read before
+  and after the switch to 0.8 numbering.
+
 ## 0.8.0
 
 - Require ordinal on every history and display entry. Pre-adoption host

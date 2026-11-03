@@ -64,6 +64,13 @@ pub struct Entry {
     /// session), the host's own write time.
     #[serde(deserialize_with = "crate::integer::required")]
     pub written_at: u64,
+    /// When the host marked the message finished, in milliseconds since the
+    /// Unix epoch, from the host's own stamp. Absent while the entry is
+    /// unfinished or when the host records no stamp; time-marker readers then
+    /// use `written_at`. Excluded from [`entry_digest`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
+    pub completed_at: Option<u64>,
     /// Checksum of the entry's role, notice origin and parts, with the parts
     /// in full form ([`entry_digest`]).
     pub digest: String,
@@ -223,8 +230,9 @@ pub struct Head {
 
 /// Checksum of an entry's role, notice origin (left out when absent) and
 /// parts, each part with its `id`, `tag` and `digest`, as [`Entry::digest`]
-/// carries it. The ordinal, `mid`, write time, usage and `generated_under`
-/// are not hashed. Pass full parts: compact parts hash to a different value.
+/// carries it. The ordinal, `mid`, `written_at`, `completed_at`, usage and
+/// `generated_under` are not hashed. Pass full parts: compact parts hash to a
+/// different value.
 pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -> String {
     #[derive(Serialize)]
     struct Digested<'a> {
@@ -258,6 +266,7 @@ impl Entry {
             role,
             notice: None,
             written_at,
+            completed_at: None,
             digest,
             parts,
             usage: None,
@@ -270,6 +279,12 @@ impl Entry {
     pub fn with_notice(mut self, notice: NoticeOrigin) -> Self {
         self.notice = Some(notice);
         self.digest = entry_digest(self.role.clone(), self.notice.as_ref(), &self.parts);
+        self
+    }
+
+    /// Set the host's completion stamp without changing the content checksum.
+    pub fn with_completed_at(mut self, completed_at: u64) -> Self {
+        self.completed_at = Some(completed_at);
         self
     }
 
@@ -435,6 +450,50 @@ mod tests {
         assert_ne!(
             expected,
             crate::digest::content_digest(&json!({"role": "user", "notice": null, "parts": []}))
+        );
+    }
+
+    #[test]
+    fn completed_at_is_optional_and_round_trips() {
+        let entry = Entry::new(1, "m1", Role::Assistant, 1000, vec![]);
+        let wire = serde_json::to_value(&entry).unwrap();
+        assert!(wire.get("completed_at").is_none());
+        assert_eq!(serde_json::from_value::<Entry>(wire).unwrap(), entry);
+        assert_eq!(entry.completed_at, None);
+
+        for completed_at in [0, 2000, 9_007_199_254_740_991] {
+            let finished = entry.clone().with_completed_at(completed_at);
+            let wire = serde_json::to_value(&finished).unwrap();
+            assert_eq!(wire["completed_at"], completed_at);
+            assert_eq!(serde_json::from_value::<Entry>(wire).unwrap(), finished);
+        }
+    }
+
+    #[test]
+    fn completed_at_obeys_timestamp_integer_rules() {
+        let entry = Entry::new(1, "m1", Role::Assistant, 1000, vec![]);
+        for invalid in [
+            json!(9007199254740992_u64),
+            json!(-1),
+            json!(1.5),
+            json!("2000"),
+        ] {
+            let mut wire = serde_json::to_value(&entry).unwrap();
+            wire["completed_at"] = invalid;
+            assert!(serde_json::from_value::<Entry>(wire).is_err());
+        }
+    }
+
+    #[test]
+    fn completed_at_does_not_change_the_entry_checksum() {
+        let entry = Entry::new(1, "m1", Role::Assistant, 1000, vec![]);
+        let expected = crate::digest::content_digest(&json!({"role": "assistant", "parts": []}));
+        assert_eq!(entry.digest, expected);
+        let finished = entry.with_completed_at(2000);
+        assert_eq!(finished.digest, expected);
+        assert_eq!(
+            entry_digest(finished.role, finished.notice.as_ref(), &finished.parts),
+            expected
         );
     }
 }

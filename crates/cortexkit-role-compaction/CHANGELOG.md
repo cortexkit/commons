@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.2
+
+- The contract now requires a runner whose Setup is refused (any code) or
+  unanswered, with no view applied, to end the current run `error` with
+  `provider_code: compaction_unavailable` before any model call, and to call
+  Setup again before the next send (W1.3a, S1). Before, a refused Setup left
+  such a session running without compaction. A runner with an applied view
+  keeps using it and calls Setup again at its next S1 trigger.
+- Add optional `Entry::completed_at` and `with_completed_at` for the host's
+  completion timestamp in epoch milliseconds, under the same integer rules as
+  `written_at`. Missing fields decode as absent and are omitted on the wire.
+- Specify which host stamp each runner returns, and that the field is absent
+  while an entry is unfinished. Time markers use `completed_at`, or
+  `written_at` when it is absent; moved or imported history keeps the clock
+  skew caveat (U3).
+- Specify that a stored entry may gain a previously absent `completed_at`
+  without a transcript change: it enters none of the W7 checksums, and adding
+  it alone needs no notice (P5, N1, W4.9, W5.2).
+- Add optional-timestamp round-trip and integer-boundary tests, plus a vector
+  and tests showing unchanged entry digests. Existing vectors are unchanged.
+
 ## 0.2.1
 
 - Depend on llm-runner 0.8 (the one-based entry contract).

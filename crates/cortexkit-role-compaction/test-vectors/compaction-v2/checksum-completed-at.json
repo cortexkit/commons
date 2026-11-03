@@ -1,0 +1,36 @@
+{
+  "checksum": "27afbeafc67209e78060eff10c1532c66226da4860b25e60815c78cc990c348f",
+  "with_completed_at": {
+    "completed_at": 1700000060000,
+    "digest": "27afbeafc67209e78060eff10c1532c66226da4860b25e60815c78cc990c348f",
+    "mid": "message-finished",
+    "ordinal": 1,
+    "parts": [
+      {
+        "digest": "a3d93788e1170326e8d95a2d87f33f1d19a7412b719fe66a12e514671d7437ac",
+        "id": "part-finished",
+        "kind": "text",
+        "tag": 1,
+        "text": "An invented reply."
+      }
+    ],
+    "role": "assistant",
+    "written_at": 1700000000000
+  },
+  "without_completed_at": {
+    "digest": "27afbeafc67209e78060eff10c1532c66226da4860b25e60815c78cc990c348f",
+    "mid": "message-finished",
+    "ordinal": 1,
+    "parts": [
+      {
+        "digest": "a3d93788e1170326e8d95a2d87f33f1d19a7412b719fe66a12e514671d7437ac",
+        "id": "part-finished",
+        "kind": "text",
+        "tag": 1,
+        "text": "An invented reply."
+      }
+    ],
+    "role": "assistant",
+    "written_at": 1700000000000
+  }
+}

@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.17.1
 
+- Pin `cortexkit-role-llm-runner =0.8.1`. Its `ReadRequest` and
+  `UserCommandRequest` decoders accept the two legacy 0.7 input members while
+  still refusing every other unknown member of those requests. The kit adds
+  no route-level case for them.
 - Fix `head_sender_is_callers_effective_grant` for runners whose default
   read admission refuses non-owners. §4.3 reports `sender` only on reads the
   runner admits, and §9.19 keeps a runner's own read admission when the plan

@@ -1,4 +1,4 @@
-# llm-runner/v1 vectors for runner 0.8.0
+# llm-runner/v1 vectors for runner 0.8.1
 
 The role capability remains `llm-runner/v1`; 0.8.0 is a breaking contract
 release. `src/vectors.rs::FILES` is the exact ordered inventory and
@@ -15,6 +15,14 @@ entry, not a message ordinal. Stale after-mid cursors are refused
 `history_changed`. Native marker boundaries are model boundaries, never read
 bounds. The vector identities are opaque; neither a mid nor a part key may
 be derived from an ordinal by a reader.
+
+`read-renumbering-switch.json` illustrates one session before and after it
+adopts 0.8 numbering. The same two messages move from ordinals 0,1 to 1,2.
+The before page carries `lineage_id` and neither `history_version` nor
+`incarnation`. The after page omits `lineage_id`, carries `incarnation`, and
+reports `history_version: 5`, above the old head's version 4, which the
+wrapper records as `history_version_before_switch`. It illustrates the
+shapes; it does not run an upgrade.
 
 `read-descriptors.json` pins in-place payload references and write-time
 message/part digests. Digest rows themselves publish stored-order opaque
@@ -61,7 +69,7 @@ results/status/cancel/usage, subscriptions, delivery templates and senders,
 attachments, immutable output references, user commands, retention,
 structured output, tool identity, display/live events and rich-UI stamps.
 `plan-compaction-preset.json` pins the required explicit session-role preset
-and its named admission refusal. User-command bodies have no session_ref.
+and its named admission refusal. Encoded user-command bodies have no session_ref.
 The send-status describe vectors require both canonical session.send_status
 and its send.status alias for the optional group.
 

@@ -46,8 +46,9 @@ tag_bytes_edits; checkpoint/anchor APIs and copied-checkpoint fork detection.
 names its provider with compaction_item, now requiring an explicit role preset.
 The run reasons compaction_wait and context_ceiling_wait remain.
 
-Lineages (the former cut-bounded readable windows), lineage_id, descends_from,
-before_lineage_start and lineage_changed are removed. Reads cover the whole
+Lineages (the former cut-bounded readable windows), lineage_id in replies,
+descends_from, before_lineage_start and lineage_changed are removed. In 0.8.1,
+requests accept and ignore lineage_id until 0.9 (§4.1). Reads cover the whole
 active path, including below host markers, from ordinal 1; zero aliases that
 start. Entry counting follows the Entry/per-host definitions in
 `cortexkit-role-compaction/CONTRACT.md` W4.1/W4.2: count every active-path
@@ -71,7 +72,8 @@ plans cannot prune until the compaction contract defines acceptance.
 Run settings gain route_decision_id, fixed per run on every runner, with
 routing forwarding/refusal/caller-reporting rules. Provider tool results use
 the shared 64 KiB measure and a whole tool_result_too_large error, never
-truncation or redispatch. User-command bodies no longer carry session_ref.
+truncation or redispatch. Newly encoded user-command bodies omit session_ref
+(0.8.1 still accepts and discards it on input).
 The optional send_status group serves session.send_status and the send.status
 alias until the next breaking release.
 ## 1. Role identity and addressing
@@ -396,7 +398,7 @@ alias until the next breaking release.
 Read admission follows §9.19 when the plan carries `readers`; without that
 member it keeps that runner's current read admission.
 
-`{from_ordinal?, after_mid?, history_version?, limit?, max_bytes?,
+`{from_ordinal?, after_mid?, history_version?, lineage_id?, limit?, max_bytes?,
 include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`ReadRequest`).
 
 - [pinned] **Tail.** No cursor means the newest page of the active path.
@@ -410,6 +412,15 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   `invalid_params {field: "history_version"}`; with `from_ordinal` it is
   refused naming `from_ordinal`. A request explicitly naming another history
   version is refused `history_changed`, in every mode.
+- [pinned] For a staged migration from 0.7, `session.read` accepts a legacy
+  `lineage_id` input member (absent, null or a string) and discards its
+  value; `ReadRequest` omits it on serialization. It does not validate
+  continuity and does not supply `history_version`: a 0.7-shaped
+  `{after_mid, lineage_id}` request is still refused `invalid_params
+  {field: "history_version"}`, and the caller fetches a fresh head and page
+  instead of continuing with ordinals from the old numbering. Replies and
+  numbering follow 0.8. This input-only support is scheduled for removal in
+  0.9; callers stop sending the member before then.
 - [pinned] `view` is absent or `"raw"`. `"model"` and unknown values are
   refused `invalid_params {field: "view"}`.
 - [pinned] `max_bytes` asks for a byte cap on the page. Absent means the
@@ -1786,8 +1797,8 @@ what a run called without decoding any message body.
 
 A runner that declares `run_usage` reports what its model providers
 reported for a run's steps as `usage` on `run.result` (§6) and `run.status`
-(§6.1), so a consumer (the phone's agent page, core) shows every worker
-run's token usage whichever runner served it.
+(§6.1), so a consumer interface shows every worker run's token usage
+whichever runner served it.
 
 - [pinned] `usage` is `{steps, unreported_steps, input_tokens?,
   cached_input_tokens?, cache_write_tokens?, output_tokens?,
@@ -3490,8 +3501,12 @@ re-send their bodies.
   no commands and refuses every invocation with `no_person`. Admission
   refuses duplicate command names from different plan providers with
   `user_command_collision {name, providers}`.
-- [pinned] `session.user_command {command, input, invocation_id}` acts on the
-  route-bound session and carries no session selector. It is owner-only, like `session.baseline`; every other caller
+- [pinned] `session.user_command {command, input, invocation_id, session_ref?}`
+  accepts a legacy `session_ref` input member (absent, null or a string) for
+  a staged migration from 0.7, and discards its value; `UserCommandRequest`
+  omits it on serialization. It does not select or validate the session: the
+  route binds the session. Every other unknown member of this request is
+  still refused. This input-only support is scheduled for removal in 0.9. The operation is owner-only, like `session.baseline`; every other caller
   is refused `scope_owner_mismatch`. It returns `{call_key, reply}`, where
   `reply` is the first stored `UserCommandReply`; after a lost provider reply,
   that stored answer is runner-assigned `outcome_unknown`. Input is forwarded

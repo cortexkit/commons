@@ -1,7 +1,7 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.0** pins `cortexkit-role-llm-runner =0.8.0`. Both are breaking
-releases of the existing `llm-runner/v1` role. The runner's
+Version **0.17.1** pins `cortexkit-role-llm-runner =0.8.1`, the compatibility
+patch for the breaking 0.8 release of the existing `llm-runner/v1` role. The runner's
 [CONTRACT.md](../cortexkit-role-llm-runner/CONTRACT.md) is normative; the public
 `CASES` registry names every executable case, its requirements and what it
 checks.

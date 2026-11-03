@@ -25,10 +25,9 @@ const SECTION: char = '§';
 /// The original whitespace is not retained.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CleanedReply {
-    /// The first number among the prefixes the model wrote at the start that
-    /// fits a `u64`, if any. Every leading prefix is stripped, including one
-    /// whose number overflows, so after an oversized first prefix this is the
-    /// next prefix's number. Re-prefixing with the same number reproduces the original
+    /// The first leading prefix's number, if it fits a `u64`; otherwise
+    /// `None`. Every leading prefix is stripped, but a later prefix never
+    /// supplies this number. Re-prefixing with the same number reproduces the original
     /// bytes only when the reply already uses the canonical prefix and cleaning
     /// leaves the remainder unchanged. For the contract's broader original-byte
     /// preservation rule, retain and conditionally reuse the original reply.
@@ -59,13 +58,17 @@ pub fn clean_reply(text: &str) -> CleanedReply {
 
 /// Split the well-formed prefixes a model wrote at the start (`§N§`, each
 /// followed by any whitespace, as often as repeated) from the text. Returns
-/// the first of those numbers that fits a `u64`, if any, and the rest. Every
-/// leading prefix is stripped, including one whose number overflows.
+/// the number of the first prefix, the model's own tag (W4.6), and the rest.
+/// When that first number does not fit a `u64`, the model named no valid
+/// tag and the result is `None`: a later prefix never stands in for it.
+/// Every leading prefix is stripped either way.
 pub fn split_leading(text: &str) -> (Option<u64>, &str) {
     let mut rest = text;
     let mut first = None;
+    let mut seen = false;
     while let Some(length) = well_formed_pair(rest) {
-        if first.is_none() {
+        if !seen {
+            seen = true;
             first = rest[SECTION.len_utf8()..length - SECTION.len_utf8()]
                 .parse()
                 .ok();

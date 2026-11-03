@@ -17,7 +17,8 @@
 //! hint is also closed: unknown members must not become a user-content channel.
 //!
 //! The session an op acts on is the session the route is bound to; no
-//! request in this crate names its session.
+//! request selects its session. The legacy `session_ref` that
+//! `session.user_command` still accepts in 0.8.1 is discarded.
 
 #![forbid(unsafe_code)]
 

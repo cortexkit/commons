@@ -116,7 +116,8 @@ impl Refusal {
     }
 
     /// `params` does not decode into the op's request. A bug in the caller:
-    /// it logs and does not retry.
+    /// it logs it. A runner refused this on `compaction.setup` applies W1.3a;
+    /// on other methods the caller does not retry.
     pub fn invalid_params(field: &str, message: impl Into<String>) -> Self {
         Self::new(
             codes::INVALID_PARAMS,
@@ -134,10 +135,11 @@ impl Refusal {
         )
     }
 
-    /// Setup names a preset the provider does not know. The runner logs it
-    /// and gets no new views: a view already applied stays applied and Setup
-    /// runs again at the next S1 trigger, while a session with no view runs
-    /// without compaction.
+    /// Setup names a preset the provider does not know. The runner logs it and
+    /// handles it as any refused Setup (W1.3a): a view already applied stays
+    /// applied and Setup runs again at the next S1 trigger, while a session
+    /// with no view ends the turn as `compaction_unavailable` before any model
+    /// call.
     pub fn unknown_preset(preset: &str) -> Self {
         Self::new(
             codes::UNKNOWN_PRESET,

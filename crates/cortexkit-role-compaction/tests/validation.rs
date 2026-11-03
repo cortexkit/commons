@@ -51,7 +51,7 @@ fn protocol_integer_boundaries() {
     );
     boundaries::<Entry>(
         json!({"ordinal": 1, "mid": "message-a", "role": "user", "written_at": 0, "digest": "example", "parts": [part]}),
-        &["ordinal", "written_at"],
+        &["ordinal", "written_at", "completed_at"],
     );
     boundaries::<Part>(part, &["tag"]);
     boundaries::<StepUsage>(

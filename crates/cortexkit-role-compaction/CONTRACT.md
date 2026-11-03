@@ -33,7 +33,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | P2 | The part model covers every content type of the AI SDK's provider prompt (LanguageModelV4), so every model provider's history maps to it (W4.2 to W4.5, W4.10). |
 | P3 | A tool part is one item at the call's position, holding both call and result even when the host stores them apart. Dropping it removes both. |
 | P4 | Compact detail keeps what the provider plans with and leaves out the bulk (W4.8). Checksums are always over the full content. |
-| P5 | A stored entry changes only when a tool call in it gets its result (even when the host stores that result in a later message) or a send is delivered with one of its results (W4.9). Any other change is a transcript change. |
+| P5 | A stored entry changes only when a tool call in it gets its result (even when the host stores that result in a later message) or a send is delivered with one of its results (W4.9). It may also gain a previously absent `completed_at`, which is not a transcript change (W4.9). Any other change is a transcript change. |
 | P6 | Within a session, a message id is never given to a different message, even after a revert or branch switch; the same message keeps its id if it returns to the active path. A part's id is unique within its message, so within the session's state a provider identifies a part by `(mid, part id)` and keys durable part state on both. |
 
 ## A3. Tag numbers
@@ -53,7 +53,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| S1 | The runner calls `compaction.setup` (W5.1) when it starts serving a session whose preset has a compaction provider, after its own restart, and when a notice answers `setup_required` or a ride is refused `unknown_session`. |
+| S1 | The runner calls `compaction.setup` (W5.1) when it starts serving a session whose preset has a compaction provider, after its own restart, before the next send after a Setup that failed with no view applied (W1.3a), and when a notice answers `setup_required` or a ride is refused `unknown_session`. |
 | S2 | Setup either answers `ready` or fails with a refusal (W1.3) naming why. It never carries content, and the provider never reads the transcript inside it. |
 | S3 | A second Setup for a session the provider already holds keeps the provider's state; both sides restart the notice count (W5.2 `seq`). |
 | S4 | If the applied view differs from the one the provider holds (version or checksum), the provider adopts the runner's with `session.applied_view`. |
@@ -63,7 +63,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. |
+| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. An entry only gaining `completed_at` is not such a change (W4.9). |
 | N2 | The provider answers at once and does the work afterwards. The runner never waits on that work. |
 | N3 | The runner sends a session's notices one at a time: the next only after the previous one was answered. Changes made while a notice is unanswered go into the next notice, so a slow provider never builds a queue. Before a ride, the runner sends any change not yet noticed. |
 | N4 | A notice is a convenience, not the source of truth. The provider keeps its own position, and reads any gap with `session.entries`. |
@@ -118,7 +118,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 |---|---|
 | U1 | Before storing a message a person wrote, the runner runs the `pre_user` hook of `step-transform-provider/v2` and stores the message with the provider's prepend and append operations. |
 | U2 | The provider declares the hook for presets that use it with a budget of 1,500 ms and `on_unavailable: pass`: on a timeout or an error the message is stored unchanged. |
-| U3 | The `pre_user` hook carries an optional `at_ms`, the new message's time taken on the runner's machine (`step-transform-provider/v2`). Compared with write times recorded on that same machine, it measures the gap between messages without clock skew between machines. When `at_ms` is absent, the provider uses its own clock. Gaps measured against history written on another machine (moved or imported) are estimates either way. |
+| U3 | For a time marker, the provider takes the previous message's `completed_at`, or its `written_at` when it has none (W4.1), and compares it with the new message's time: the `pre_user` hook's optional `at_ms`, taken on the runner's machine (`step-transform-provider/v2`), or the provider's own clock when `at_ms` is absent. Times from the same machine carry no clock skew. Gaps against moved or imported history, or between different clocks, are estimates. |
 
 ## A11. Messages and runs the provider asks for
 
@@ -171,10 +171,15 @@ Codes and what the caller does next:
 
 | Code | `detail` | Meaning | Caller's next step |
 |---|---|---|---|
-| `invalid_params` | `field` | `params` does not decode into the op's request. | A bug in the caller: log it, do not retry. |
-| `unknown_method` | `method` | The route's role does not serve this method. | A bug in the caller: log it, do not retry. |
-| `unknown_preset` | `preset` | Setup names a preset the provider does not know. | The runner logs it and gets no new views. A session that already applies a view keeps applying it and calls Setup again at its next S1 trigger; a session with no view runs without compaction. |
+| `invalid_params` | `field` | `params` does not decode into the op's request. | A bug in the caller: log it. On `compaction.setup` the runner applies W1.3a; on other methods it does not retry. |
+| `unknown_method` | `method` | The route's role does not serve this method. | A bug in the caller: log it, do not retry. On `compaction.setup` (for example from a provider that predates this contract), the runner handles it as a refused Setup (W1.3a). |
+| `unknown_preset` | `preset` | Setup names a preset the provider does not know. | The runner logs it and handles it as a refused Setup (W1.3a). |
 | `unknown_session` | | A ride for a session the provider holds no Setup for. | The runner treats it as `nothing`, then calls Setup before its next notice. |
+
+**W1.3a A refused or unanswered Setup.** When `compaction.setup` is refused, with any code (`invalid_params`, `unknown_method` and `unknown_preset` included), or gets no answer within the runner's deadline, the runner gets no new views from that Setup:
+
+- **A view already applied:** the runner keeps applying it (F1) and calls Setup again at its next S1 trigger.
+- **No view applied:** the current run ends `error` with `provider_code: compaction_unavailable` before any model call, and the runner calls Setup again before the next send. After that Setup failure the runner makes no model call for the current turn.
 
 `setup_required` is an answer of `compaction.notice`, not a refusal (W5.2). A view the runner refuses is an answer of `session.apply_view`, not a refusal (W5.5).
 
@@ -184,7 +189,7 @@ Codes and what the caller does next:
 
 | Value | Received by | Treated as |
 |---|---|---|
-| Setup answer | runner | A Setup refusal, handled as for `unknown_preset`: a view already applied stays applied. |
+| Setup answer | runner | A Setup refusal, handled as W1.3a: a view already applied stays applied, and with no view the turn ends `compaction_unavailable` before any model call. |
 | Notice answer | runner | `setup_required`: the runner calls Setup before its next notice. |
 | Ride answer | runner | `nothing`. |
 | `session.apply_view` answer | provider | Outcome unconfirmed: the provider doesn't send that view again, and reads the runner's applied view (`session.applied_view`) before relying on either outcome. |
@@ -291,12 +296,21 @@ An entry is every record on the active path that the model sees or that holds pa
 | `role` | `user`, `assistant`, `system` | `system` is a turn-scoped system entry (llm-runner's `turn_system` delivery); it holds text parts only. |
 | `notice` | `NoticeOrigin`, optional | Set when a module or the runner delivered a user-role entry (a reminder, a wake, a notice) rather than a person typing it. `sender`: the module id. `template`: the plan template it was rendered from, when it was. |
 | `written_at` | integer | When the host first stored the message. It does not change when the entry is updated. For a message the runner did not store itself (history from before the runner, a moved session), the host's own write time. |
+| `completed_at` | integer, optional | When the host marked the message finished, from the host's own stamp, in epoch milliseconds under the same integer rules as `written_at` (W1.2). Absent while the entry is unfinished, when the host never marks that kind of message finished (for example a user message), or when imported history has no such stamp. Readers that need a time then use `written_at`. |
 | `digest` | string | Checksum of `role`, `notice` and `parts`, with the parts in full form (W7). |
 | `parts` | array of `Part` | In host order. May be empty. |
 | `usage` | `StepUsage`, optional | Assistant entries: what the request that produced it reported. |
 | `generated_under` | `AppliedView`, optional | Assistant entries: the view applied to the request that produced it; absent when none was. PR2 checks against it. |
 
 Allowed kinds by role: `user` (and notices): `text`, `file`. `assistant`: `text`, `reasoning`, `tool`, `file`, `opaque`. `system`: `text`.
+
+When an entry is finished and its host records a completion stamp, the runner returns that stamp as `completed_at`. Host mappings:
+
+- OpenCode: the message's `time.completed`.
+- Pi: the journal entry's timestamp.
+- A runner that keeps its own log: the assistant step's end time, and for a tool-result entry, the latest answer time among that step's calls.
+
+The field is absent while the entry is unfinished, including while a tool part in it is `running`. A later read may add it (W4.9).
 
 **W4.2 Which records are entries, per host.** One rule (W4.1); the table says which storage records it means on each host. It differs from the standalone plugin's counting on several hosts, and the move converts stored ordinals (MV4).
 
@@ -375,6 +389,8 @@ The prefix is the number between two section signs followed by one space: `ยง12ย
 
 **W4.9 What may change.** A stored entry changes only when a tool part in it goes from `running` to a final status with its result (also when the host stores that result in a later message), or when a send is delivered with one of its results. The runner then sends the changed entry again in its next notice. Any other change to a stored entry is a transcript change (W5.2 `transcript_changed`).
 
+A stored entry may also gain a previously absent `completed_at`. That alone is not a transcript change: `completed_at` enters none of the W7 checksums, and adding it alone needs no notice. When the same update also changes a tool result or delivers a send, the rules above still apply and the notice carries the entry with its `completed_at`. A `completed_at` once served does not change.
+
 **W4.10 Mapping from the AI SDK provider prompt (LanguageModelV4),** for runners and as the completeness check of this model:
 
 | AI SDK | Neutral model |
@@ -418,7 +434,7 @@ Answer: `{"answer": "ready"}`. Refusals: `unknown_preset`, `invalid_params`.
 
 ### W5.2 `compaction.notice` (provider)
 
-When the runner sends one: after a message is stored (a user, notice or system entry; an assistant entry at the end of its model step, never while it streams); after an entry changes (W4.9); after a revert or branch switch; after it refused a view at a step boundary; after it wrote a host marker. Changes made while a notice is unanswered go into the next one (N3).
+When the runner sends one: after a message is stored (a user, notice or system entry; an assistant entry at the end of its model step, never while it streams); after an entry changes (W4.9; an entry only gaining `completed_at` does not count); after a revert or branch switch; after it refused a view at a step boundary; after it wrote a host marker. Changes made while a notice is unanswered go into the next one (N3).
 
 Request:
 
@@ -572,6 +588,8 @@ Every checksum is the lowercase hex SHA-256 of the value's RFC 8785 (JCS) serial
 | Part `digest` | The part's object in full form without `id`, `tag` and `digest`. |
 | Entry `digest` | `{"role", "notice", "parts"}`, with each part in full form including its `id`, `tag` and `digest`. |
 | View `checksum` | `{"version", "edits"}`, including inserted images and their base64 data. Empty `images` arrays hash as absent (W1.6). |
+
+Entry timing metadata (`written_at` and `completed_at`) enters none of these checksums.
 
 # Open points
 

@@ -1,6 +1,8 @@
 //! `compaction.setup`, served by the provider. The runner calls it when it
-//! starts serving a session, after its own restart, and when the provider
-//! answers a notice `setup_required` or refuses a ride `unknown_session` (S1). Setup only
+//! starts serving a session, after its own restart, before the next send
+//! after a Setup that failed with no view applied (W1.3a), and when the
+//! provider answers a notice `setup_required` or refuses a ride
+//! `unknown_session` (S1). Setup only
 //! announces the session; it never carries messages, and the provider reads
 //! the transcript afterwards, never inside Setup.
 //!

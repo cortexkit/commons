@@ -1,0 +1,48 @@
+{
+  "name": "the same session across the 0.7 to 0.8 renumbering switch",
+  "session_ref": "session-cobalt",
+  "history_version_before_switch": 4,
+  "before": {
+    "messages": [
+      {
+        "ordinal": 0,
+        "mid": "message-cedar",
+        "message": {
+          "role": "user",
+          "content": [{ "type": "text", "text": "Summarize the sample." }]
+        }
+      },
+      {
+        "ordinal": 1,
+        "mid": "message-maple",
+        "message": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "A short summary." }]
+        }
+      }
+    ],
+    "lineage_id": "lineage-cobalt"
+  },
+  "after": {
+    "messages": [
+      {
+        "ordinal": 1,
+        "mid": "message-cedar",
+        "message": {
+          "role": "user",
+          "content": [{ "type": "text", "text": "Summarize the sample." }]
+        }
+      },
+      {
+        "ordinal": 2,
+        "mid": "message-maple",
+        "message": {
+          "role": "assistant",
+          "content": [{ "type": "text", "text": "A short summary." }]
+        }
+      }
+    ],
+    "history_version": 5,
+    "incarnation": "record-cobalt"
+  }
+}

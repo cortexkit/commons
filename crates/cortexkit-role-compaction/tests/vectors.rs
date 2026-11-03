@@ -467,6 +467,27 @@ fn samples() -> Vec<(&'static str, Value)> {
             "checksum": entry.digest,
         }),
     ));
+    let entry = Entry::new(
+        1,
+        "message-finished",
+        Role::Assistant,
+        1_700_000_000_000,
+        vec![Part::new(
+            "part-finished",
+            PartBody::Text {
+                text: "An invented reply.".into(),
+            },
+        )
+        .with_tag(1)],
+    );
+    samples.push((
+        "checksum-completed-at.json",
+        json!({
+            "without_completed_at": entry,
+            "with_completed_at": entry.clone().with_completed_at(1_700_000_060_000),
+            "checksum": entry.digest,
+        }),
+    ));
     samples
 }
 
@@ -500,6 +521,31 @@ fn check(name: &str, json: Value) {
         assert_eq!(method, ops::SESSION_ENTRIES);
         let refusal = wire::params::<ReadRequest>(params).unwrap_err();
         assert_eq!(value(refusal), json["refusal"]);
+    } else if name == "checksum-completed-at.json" {
+        assert!(json["without_completed_at"].get("completed_at").is_none());
+        assert_eq!(
+            json["with_completed_at"]["completed_at"],
+            1_700_000_060_000_u64
+        );
+        let mut without_stamp = json["with_completed_at"].clone();
+        without_stamp
+            .as_object_mut()
+            .unwrap()
+            .remove("completed_at");
+        assert_eq!(without_stamp, json["without_completed_at"]);
+        for form in ["with_completed_at", "without_completed_at"] {
+            round_trip::<Entry>(json[form].clone());
+            let entry: Entry = serde_json::from_value(json[form].clone()).unwrap();
+            assert_eq!(entry.digest, json["checksum"].as_str().unwrap());
+            assert_eq!(
+                cortexkit_role_compaction::read::entry_digest(
+                    entry.role,
+                    entry.notice.as_ref(),
+                    &entry.parts
+                ),
+                json["checksum"].as_str().unwrap()
+            );
+        }
     } else if name == "checksum-empty-attachments.json" {
         assert_eq!(json["with_empty"]["parts"][0]["attachments"], json!([]));
         assert!(json["without_empty"]["parts"][0]

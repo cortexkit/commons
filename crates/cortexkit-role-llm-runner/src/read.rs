@@ -73,6 +73,13 @@ where
 /// read as a tail request. A runner refuses a field it does not serve with
 /// `invalid_params` naming it.
 ///
+/// For a staged migration from 0.7, decoding accepts a legacy `lineage_id`
+/// (absent, null or a string) and discards it; serializing omits it. It does
+/// not validate continuity or replace `history_version`: an `after_mid`
+/// request without that version is still refused `invalid_params` naming
+/// `history_version`, so the caller fetches a fresh head and page rather than
+/// reusing old ordinals. Scheduled for removal in 0.9.
+///
 /// Non-exhaustive so a later optional member is additive: build one with
 /// [`ReadRequest::tail`], [`ReadRequest::range`] or [`ReadRequest::after`]
 /// and the `with_*` setters, or decode one.
@@ -80,6 +87,8 @@ where
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct ReadRequest {
+    #[serde(default, rename = "lineage_id", skip_serializing)]
+    _lineage_id: crate::wire::DiscardedOptionalString,
     /// Payload representation; absent means `inline`.
     #[serde(
         default,
@@ -1287,6 +1296,47 @@ mod tests {
         );
     }
     #[test]
+    fn legacy_0_7_read_discards_lineage_id_but_stays_strict() {
+        let mut legacy = serde_json::json!({"from_ordinal": 0, "lineage_id": "lineage-sample"});
+        let request: ReadRequest = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(request, ReadRequest::range(0));
+        assert_eq!(request.mode(), Ok(ReadMode::Range { from_ordinal: 1 }));
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({"from_ordinal": 0})
+        );
+
+        legacy["lineage_idd"] = serde_json::json!("lineage-sample");
+        let error = serde_json::from_value::<ReadRequest>(legacy).unwrap_err();
+        assert!(
+            error.to_string().contains("unknown field `lineage_idd`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn legacy_0_7_after_mid_requires_history_version() {
+        let request: ReadRequest = serde_json::from_value(serde_json::json!({
+            "after_mid": "message-sample", "lineage_id": "lineage-sample"
+        }))
+        .unwrap();
+        assert_eq!(request.mode(), Err(fields::HISTORY_VERSION));
+        let refusal = vectors::load("read-requests.json")["refused"][0].clone();
+        assert_eq!(refusal["refusal"]["code"], errors::INVALID_PARAMS);
+        assert_eq!(
+            refusal["refusal"]["detail"]["field"],
+            fields::HISTORY_VERSION
+        );
+        assert_eq!(
+            request.with_history_version(7).mode(),
+            Ok(ReadMode::After {
+                mid: "message-sample",
+                history_version: 7
+            })
+        );
+    }
+
+    #[test]
     fn request_vectors_decode_round_trip_and_select_their_mode() {
         let file = vectors::load("read-requests.json");
         for case in vectors::cases(&file, "accepted") {
@@ -1318,6 +1368,29 @@ mod tests {
 
     #[test]
     fn page_vectors_decode_and_round_trip() {
+        let switch = vectors::load("read-renumbering-switch.json");
+        let before = &switch["before"];
+        let after: ReadPage = vectors::round_trip("renumbered page", &switch["after"]);
+        assert!(after.snapshot_consistent());
+        assert_eq!(switch["history_version_before_switch"], 4);
+        assert_eq!(after.history_version, 5);
+        assert_eq!(after.incarnation, "record-cobalt");
+        assert_eq!(before["lineage_id"], "lineage-cobalt");
+        assert!(before.get("history_version").is_none());
+        assert!(before.get("incarnation").is_none());
+        assert!(switch["after"].get("lineage_id").is_none());
+        let old_messages = before["messages"].as_array().unwrap();
+        assert_eq!(old_messages.len(), 2);
+        assert_eq!(after.messages.len(), 2);
+        assert_eq!(old_messages[0]["ordinal"], 0);
+        assert_eq!(old_messages[1]["ordinal"], 1);
+        assert_eq!(after.messages[0].ordinal, 1);
+        assert_eq!(after.messages[1].ordinal, 2);
+        for (old, new) in old_messages.iter().zip(&after.messages) {
+            assert_eq!(old["mid"], new.mid);
+            assert_eq!(old["message"], new.message);
+        }
+
         let file = vectors::load("read-pages.json");
         for case in vectors::cases(&file, "pages") {
             let name = case["name"].as_str().unwrap();

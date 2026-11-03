@@ -318,6 +318,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/read-pages.json"),
     ),
     (
+        "read-renumbering-switch.json",
+        include_str!("../test-vectors/llm-runner-v1/read-renumbering-switch.json"),
+    ),
+    (
         "read-requests.json",
         include_str!("../test-vectors/llm-runner-v1/read-requests.json"),
     ),

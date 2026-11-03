@@ -22,6 +22,19 @@
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{Map, Value};
 
+// Decode-only compatibility fields must not retain a value or affect equality.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DiscardedOptionalString;
+
+impl<'de> serde::Deserialize<'de> for DiscardedOptionalString {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        <Option<String> as serde::Deserialize>::deserialize(deserializer).map(|_| Self)
+    }
+}
+
 /// The one top-level key of a reply body.
 pub const RESULT_KEY: &str = "result";
 

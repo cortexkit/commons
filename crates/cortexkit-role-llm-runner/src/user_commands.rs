@@ -112,6 +112,10 @@ pub struct FrozenUserCommand {
     pub command: UserCommand,
 }
 
+/// A route-bound user command. For a staged migration from 0.7, decoding
+/// accepts a legacy `session_ref` (absent, null or a string) and discards it;
+/// serializing omits it. It does not select or validate the session: the
+/// route binds it. Scheduled for removal in 0.9.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 #[serde(deny_unknown_fields)]
@@ -119,6 +123,8 @@ pub struct UserCommandRequest {
     pub command: String,
     pub input: String,
     pub invocation_id: String,
+    #[serde(default, rename = "session_ref", skip_serializing)]
+    _session_ref: crate::wire::DiscardedOptionalString,
 }
 
 impl UserCommandRequest {
@@ -131,6 +137,7 @@ impl UserCommandRequest {
             command: command.into(),
             input: input.into(),
             invocation_id: invocation_id.into(),
+            _session_ref: crate::wire::DiscardedOptionalString,
         }
     }
 }
@@ -223,6 +230,28 @@ mod tests {
 
     fn data() -> Value {
         serde_json::from_str(vectors::file("user-commands.json").unwrap()).unwrap()
+    }
+
+    #[test]
+    fn legacy_0_7_user_command_discards_session_ref_but_stays_strict() {
+        let current = json!({
+            "command": "summarize", "input": "briefly", "invocation_id": "invocation-sample"
+        });
+        let mut legacy = current.clone();
+        legacy["session_ref"] = json!("session-sample");
+        let request: UserCommandRequest = serde_json::from_value(legacy.clone()).unwrap();
+        assert_eq!(
+            request,
+            UserCommandRequest::new("summarize", "briefly", "invocation-sample")
+        );
+        assert_eq!(serde_json::to_value(request).unwrap(), current);
+
+        legacy["session_reff"] = json!("session-sample");
+        let error = serde_json::from_value::<UserCommandRequest>(legacy).unwrap_err();
+        assert!(
+            error.to_string().contains("unknown field `session_reff`"),
+            "{error}"
+        );
     }
 
     #[test]

@@ -15,9 +15,11 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use cortexkit_role_compaction::part::{OutputFormat, Part, PartBody, ToolStatus};
+use cortexkit_role_compaction::part::{FileMedia, OutputFormat, Part, PartBody, ToolStatus};
 use cortexkit_role_compaction::read::{Entry, NoticeOrigin, Role};
-use cortexkit_role_compaction::view::{Edit, EditOp, InsertAt, InsertedMessage, View, ViewRefusal};
+use cortexkit_role_compaction::view::{
+    Edit, EditOp, InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -99,12 +101,16 @@ pub struct RenderPlan {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "item", rename_all = "snake_case")]
 pub enum PlanItem {
-    /// A message the view inserts, rendered with exactly these texts and
-    /// never numbered.
+    /// A message the view inserts, rendered with exactly these texts, then
+    /// these images in the host's own form, and never numbered.
     Insert {
         id: String,
         role: Role,
         texts: Vec<String>,
+        /// Only on a user-role message, PNG, in standard padded base64
+        /// (contract W6.5). Left out when empty.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<InsertedImage>,
     },
     /// A transcript entry the model sees, with the parts it keeps in host
     /// order.
@@ -121,6 +127,7 @@ impl PlanItem {
             id: message.id.clone(),
             role: message.role.clone(),
             texts: message.texts.clone(),
+            images: message.images.clone(),
         }
     }
 }
@@ -259,6 +266,17 @@ pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal
                         id: message.id.clone(),
                     });
                 }
+                // W6.5: images only on a user-role message, PNG only, as
+                // standard padded base64. A runner never decodes them
+                // otherwise, so the check is here, before anything renders.
+                if !message.images.is_empty() && message.role != Role::User {
+                    return Err(unsupported());
+                }
+                if message.images.iter().any(|image| {
+                    image.media_type != PNG || base64_decoded_len(&image.data).is_none()
+                }) {
+                    return Err(unsupported());
+                }
                 match at {
                     InsertAt::Start => inserts_at_start.push(message),
                     InsertAt::Before(mid) => {
@@ -360,7 +378,12 @@ pub fn apply_edits(entries: &[Entry], edits: &[Edit]) -> Result<Vec<RenderedMess
         .items
         .iter()
         .map(|item| match item {
-            PlanItem::Insert { id, role, texts } => render_inserted(id, role.clone(), texts),
+            PlanItem::Insert {
+                id,
+                role,
+                texts,
+                images,
+            } => render_inserted(id, role.clone(), texts, images),
             PlanItem::Entry {
                 ordinal,
                 mid,
@@ -630,23 +653,80 @@ fn string_of(value: &Value) -> String {
     value.as_str().unwrap_or_default().to_owned()
 }
 
-fn render_inserted(id: &str, role: Role, texts: &[String]) -> RenderedMessage {
+/// The one media type an inserted image may have (contract W6.5).
+const PNG: &str = "image/png";
+
+/// An inserted message in the neutral part model: its texts, then one inline
+/// file part per image. Part ids are `<message-id>:<index>`, with image
+/// indexes continuing after the texts; no part gets a tag number. The neutral
+/// model holds media metadata only, so a file part carries the image's decoded
+/// size, not its bytes; the runner renders the bytes from the plan.
+fn render_inserted(
+    id: &str,
+    role: Role,
+    texts: &[String],
+    images: &[InsertedImage],
+) -> RenderedMessage {
+    let texts = texts
+        .iter()
+        .map(|text| PartBody::Text { text: text.clone() });
+    let images = images.iter().map(|image| {
+        PartBody::File(FileMedia::inline(
+            image.media_type.clone(),
+            base64_decoded_len(&image.data),
+        ))
+    });
     RenderedMessage {
         source: Source::Inserted { id: id.to_owned() },
         role,
         notice: None,
         parts: texts
-            .iter()
+            .chain(images)
             .enumerate()
-            .map(|(index, text)| {
-                Part::new(
-                    format!("{id}:{index}"),
-                    PartBody::Text { text: text.clone() },
-                )
-            })
+            .map(|(index, body)| Part::new(format!("{id}:{index}"), body))
             .collect(),
         final_text: BTreeSet::new(),
     }
+}
+
+/// The number of bytes `data` decodes to, when it is standard padded base64
+/// (RFC 4648 section 4) as contract W6.5 requires: the standard alphabet, a
+/// length that is a multiple of four, `=` padding only as the last one or two
+/// characters, and zero unused bits before the padding. An empty string is
+/// refused, since no image has zero bytes. PNG contents are not checked.
+pub fn base64_decoded_len(data: &str) -> Option<u64> {
+    let bytes = data.as_bytes();
+    if bytes.is_empty() || !bytes.len().is_multiple_of(4) {
+        return None;
+    }
+    let padding = bytes.iter().rev().take_while(|&&byte| byte == b'=').count();
+    if padding > 2 {
+        return None;
+    }
+    let body = &bytes[..bytes.len() - padding];
+    let value = |byte: u8| match byte {
+        b'A'..=b'Z' => Some(byte - b'A'),
+        b'a'..=b'z' => Some(byte - b'a' + 26),
+        b'0'..=b'9' => Some(byte - b'0' + 52),
+        b'+' => Some(62),
+        b'/' => Some(63),
+        _ => None,
+    };
+    let mut last = 0;
+    for &byte in body {
+        last = value(byte)?;
+    }
+    // With two `=` the last character carries 4 unused bits, with one `=` it
+    // carries 2; a canonical encoder leaves them zero.
+    let unused_mask = match padding {
+        2 => 0b1111,
+        1 => 0b11,
+        _ => 0,
+    };
+    if last & unused_mask != 0 {
+        return None;
+    }
+    Some((bytes.len() / 4 * 3 - padding) as u64)
 }
 
 /// Check that a new view's `since` values are honest against the view the
