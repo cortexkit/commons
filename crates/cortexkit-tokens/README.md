@@ -24,8 +24,9 @@ cargo add cortexkit-tokens@0.1
   which is an assumption, not an upper bound.
 - `reasoning::generated` and `reasoning::measured`: what a step's reasoning
   costs when it is sent again, first from the step's usage, then as the
-  residual of two consecutive requests that share a prefix. The caller must
-  establish the prefix and count everything else appended, framing included.
+  residual of two consecutive requests that share a prefix, capped by the
+  step's reported output. The caller must establish the prefix and count
+  everything else appended, framing included.
 - `Family::token_family()`: a compatibility label such as `claude-v5/1`, the
   family and its counting revision. Counts are only comparable under the same
   label; callers store it and recompute counts under another. Maintainers bump

@@ -72,19 +72,21 @@ pub enum Unmeasured {
     /// The difference was negative: something counted as appended wasn't
     /// sent, or the count is wrong.
     Negative,
-    /// The residual exceeds the supplied generation estimate, which this
-    /// function uses as its acceptance ceiling; the pair or its accounting
-    /// may be unsuitable.
-    AboveGenerated,
+    /// The residual exceeds the step's reported output, which no replay of
+    /// its reasoning can cost; the pair or its accounting may be unsuitable.
+    AboveOutput,
 }
 
 /// The residual `later_input - earlier_input - appended`, accepted when the
 /// caller asserts an unchanged prefix and the residual lies in
-/// `0..=generated`. These checks are only arithmetic plausibility: the caller
+/// `0..=step_output`, where `step_output` is the step's reported output
+/// tokens, reasoning included. The ceiling is the whole output rather than
+/// the reasoning estimate, so an estimate that is off doesn't reject a good
+/// measurement. These checks are only arithmetic plausibility: the caller
 /// must establish that the requests are consecutive, that their usage totals
 /// are comparable, and that `appended` holds every other added cost,
 /// framing included. On rejection, callers keep their previous estimate.
-pub fn measured(pair: Pair, generated: u64) -> Result<u64, Unmeasured> {
+pub fn measured(pair: Pair, step_output: u64) -> Result<u64, Unmeasured> {
     if !pair.same_prefix {
         return Err(Unmeasured::PrefixChanged);
     }
@@ -94,8 +96,8 @@ pub fn measured(pair: Pair, generated: u64) -> Result<u64, Unmeasured> {
         return Err(Unmeasured::Negative);
     }
     let residual = residual as u64;
-    if residual > generated {
-        return Err(Unmeasured::AboveGenerated);
+    if residual > step_output {
+        return Err(Unmeasured::AboveOutput);
     }
     Ok(residual)
 }
@@ -130,11 +132,11 @@ mod tests {
 
     #[test]
     fn the_difference_is_the_reasoning() {
-        // 10,000 tokens before; the step's text, tool call and result add 1,200
-        // and its reasoning 650.
-        assert_eq!(measured(pair(10_000, 11_850, 1_200), 700), Ok(650));
+        // 10,000 tokens before; the step (900 output tokens) adds 1,200 of
+        // text, tool call and result, and its reasoning 650.
+        assert_eq!(measured(pair(10_000, 11_850, 1_200), 900), Ok(650));
         // Reasoning the provider didn't replay costs nothing.
-        assert_eq!(measured(pair(10_000, 11_200, 1_200), 700), Ok(0));
+        assert_eq!(measured(pair(10_000, 11_200, 1_200), 900), Ok(0));
     }
 
     #[test]
@@ -143,14 +145,14 @@ mod tests {
             same_prefix: false,
             ..pair(10_000, 11_850, 1_200)
         };
-        assert_eq!(measured(changed, 700), Err(Unmeasured::PrefixChanged));
+        assert_eq!(measured(changed, 900), Err(Unmeasured::PrefixChanged));
         assert_eq!(
-            measured(pair(10_000, 11_000, 1_200), 700),
+            measured(pair(10_000, 11_000, 1_200), 900),
             Err(Unmeasured::Negative)
         );
         assert_eq!(
-            measured(pair(10_000, 13_000, 1_200), 700),
-            Err(Unmeasured::AboveGenerated)
+            measured(pair(10_000, 13_000, 1_200), 900),
+            Err(Unmeasured::AboveOutput)
         );
     }
 }
