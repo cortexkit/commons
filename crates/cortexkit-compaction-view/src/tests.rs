@@ -6,7 +6,9 @@ use cortexkit_role_compaction::part::{
 };
 use cortexkit_role_compaction::read::{Entry, Role};
 use cortexkit_role_compaction::rules::{EditCost, ProviderRules, RuleBreak, SignedParts};
-use cortexkit_role_compaction::view::{Edit, EditOp, InsertAt, InsertedMessage, View, ViewRefusal};
+use cortexkit_role_compaction::view::{
+    Edit, EditOp, InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
+};
 use serde_json::json;
 
 use crate::render::{apply, apply_edits, check_carried, Source};
@@ -845,6 +847,21 @@ mod vector_file {
         )
     }
 
+    /// A start insert carrying one image: a one-pixel PNG unless `data` says
+    /// otherwise.
+    fn image_head(role: Role, media_type: &str, data: &str) -> Edit {
+        Edit::new(
+            1,
+            EditOp::Insert {
+                at: InsertAt::Start,
+                message: InsertedMessage::new("m0", role, vec!["<memory-mural/>".into()])
+                    .with_images(vec![InsertedImage::new(media_type, data)]),
+            },
+        )
+    }
+
+    const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
     fn cut(since: u64, through: &str) -> Edit {
         Edit::new(
             since,
@@ -1122,6 +1139,36 @@ mod vector_file {
                 json!({"text": "  §12§ Done.\n\n"}),
             ),
             (
+                "a first prefix too large for a number names no tag, and a later one never stands in",
+                "clean_reply",
+                json!({"text": "§18446744073709551616§ §7§ Done."}),
+            ),
+            (
+                "a user insert's PNG renders after its texts",
+                "plan",
+                plan(vec![image_head(Role::User, "image/png", PIXEL)]),
+            ),
+            (
+                "an image on an assistant insert refuses the view by name",
+                "plan",
+                plan(vec![image_head(Role::Assistant, "image/png", PIXEL)]),
+            ),
+            (
+                "an image that isn't PNG refuses the view by name",
+                "plan",
+                plan(vec![image_head(Role::User, "image/jpeg", PIXEL)]),
+            ),
+            (
+                "image data that isn't standard padded base64 refuses the view by name",
+                "plan",
+                plan(vec![image_head(Role::User, "image/png", "iVBORw0K-_8=")]),
+            ),
+            (
+                "an inserted image renders as an inline file part with its size",
+                "apply",
+                json!({"entries": t, "view": View::seal(1, vec![image_head(Role::User, "image/png", PIXEL)])}),
+            ),
+            (
                 "an entry's checksum",
                 "entry_digest",
                 json!({"role": "user", "parts": [text("t1", 1, "please fix")]}),
@@ -1145,10 +1192,16 @@ mod vector_file {
     /// Retaining historical pins and requiring version bumps for supported
     /// rendering changes are release-review obligations; runners persist and
     /// check the version themselves when replay compatibility is required.
-    const PLAN_OUTPUTS: &[(u32, &str)] = &[(
-        1,
-        "c851d76033d54c137256800577344dd5e3ee040a8f4f8cf9ece2e41bb905c665",
-    )];
+    const PLAN_OUTPUTS: &[(u32, &str)] = &[
+        (
+            1,
+            "c851d76033d54c137256800577344dd5e3ee040a8f4f8cf9ece2e41bb905c665",
+        ),
+        (
+            2,
+            "d754710059e69b97ce69ec66cca6ef9af5442a104a82d81b3a42ed6ce4332529",
+        ),
+    ];
 
     /// The functions whose output a runner renders, or renders from.
     const RENDERING: &[&str] = &[
@@ -1280,4 +1333,30 @@ fn text_can_take_a_files_place() {
         apply_edits(&entries, &bad),
         Err(ViewRefusal::BadField { .. })
     ));
+}
+
+mod images_and_prefixes {
+    use crate::clean::split_leading;
+    use crate::render::base64_decoded_len;
+
+    #[test]
+    fn the_first_prefix_is_the_models_tag_even_when_it_overflows() {
+        assert_eq!(split_leading("§7§ §8§ Done"), (Some(7), "Done"));
+        assert_eq!(
+            split_leading("§18446744073709551616§ §7§ Done"),
+            (None, "Done")
+        );
+        assert_eq!(split_leading("Done"), (None, "Done"));
+    }
+
+    #[test]
+    fn only_standard_padded_base64_decodes() {
+        assert_eq!(base64_decoded_len("YQ=="), Some(1));
+        assert_eq!(base64_decoded_len("YWI="), Some(2));
+        assert_eq!(base64_decoded_len("YWJj"), Some(3));
+        assert_eq!(base64_decoded_len("a+/9"), Some(3));
+        for bad in ["", "YQ", "YQ=", "Y===", "YQ==YQ==", "-_8=", "YW J", "YQ=\n"] {
+            assert_eq!(base64_decoded_len(bad), None, "{bad:?}");
+        }
+    }
 }

@@ -59,13 +59,17 @@ pub fn clean_reply(text: &str) -> CleanedReply {
 
 /// Split the well-formed prefixes a model wrote at the start (`§N§`, each
 /// followed by any whitespace, as often as repeated) from the text. Returns
-/// the first of those numbers that fits a `u64`, if any, and the rest. Every
-/// leading prefix is stripped, including one whose number overflows.
+/// the number of the first prefix, the model's own tag (W4.6), and the rest.
+/// When that first number does not fit a `u64`, the model named no valid
+/// tag and the result is `None`: a later prefix never stands in for it.
+/// Every leading prefix is stripped either way.
 pub fn split_leading(text: &str) -> (Option<u64>, &str) {
     let mut rest = text;
     let mut first = None;
+    let mut seen = false;
     while let Some(length) = well_formed_pair(rest) {
-        if first.is_none() {
+        if !seen {
+            seen = true;
             first = rest[SECTION.len_utf8()..length - SECTION.len_utf8()]
                 .parse()
                 .ok();
