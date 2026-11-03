@@ -50,6 +50,8 @@ pub enum Capability {
     SystemTextDefault,
     /// Chunked uploads, send references and session-scoped media reads.
     Attachments,
+    /// Non-template sends with media content need no prompt text.
+    MediaOnlySend,
     /// The `transcript_reads` group: `session.read` and `session.head`.
     TranscriptReads,
     /// The `host_history` group: `session.history`, the session's whole
@@ -177,6 +179,7 @@ impl Capability {
         Self::ArchivePrunesReasoning,
         Self::SystemTextDefault,
         Self::Attachments,
+        Self::MediaOnlySend,
         Self::TranscriptReads,
         Self::HostHistory,
         Self::RunOps,
@@ -241,6 +244,7 @@ impl Capability {
             Self::ArchivePrunesReasoning => groups::ARCHIVE_PRUNES_REASONING,
             Self::SystemTextDefault => groups::SYSTEM_TEXT_DEFAULT,
             Self::Attachments => groups::ATTACHMENTS,
+            Self::MediaOnlySend => groups::MEDIA_ONLY_SEND,
             Self::UserCommands => groups::USER_COMMANDS,
             Self::TranscriptReads => groups::TRANSCRIPT_READS,
             Self::HostHistory => groups::HOST_HISTORY,

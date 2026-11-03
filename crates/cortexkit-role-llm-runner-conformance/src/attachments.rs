@@ -247,6 +247,101 @@ where
     result.map(|()| Ending::Passed)
 }
 
+pub(crate) async fn media_only_send<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+) -> Result<Ending, String>
+where
+    S::Route: RunnerRoute,
+{
+    let s = case
+        .open(
+            "media_only_send",
+            Script {
+                turns: (0..3)
+                    .map(|_| ScriptedTurn::new(vec![ScriptedPart::Text("photo received".into())]))
+                    .collect(),
+            },
+        )
+        .await?;
+    let Some(fields) = case.subject.attachment_model_fields(&s.name, true) else {
+        return Ok(Ending::Inapplicable(
+            "the adapter cannot configure a committed-upload fixture".into(),
+        ));
+    };
+    let mut params = case.params(&s, "open upload session", &case.mint.next("send"), None);
+    params.as_object_mut().unwrap().extend(fields);
+    let reply: SendReply = decode(
+        "open media-only session",
+        ok(&s.route, ops::SESSION_SEND, params).await?,
+    )?;
+    wait_run_end(case.subject, &s.route, case.declared, None, &reply).await?;
+    let bytes = png();
+    let id = upload(&s.route, &bytes).await?;
+    let hash = sha256_hex(&bytes);
+    for prompt in [None, Some("")] {
+        let prior = read(&s.route, &ReadRequest::range(0)).await?;
+        let from = prior
+            .messages
+            .iter()
+            .map(|m| m.ordinal + 1)
+            .max()
+            .unwrap_or(0);
+        let before = head(&s.route).await?.last_run_state.map(|r| r.run_id);
+        let mut params = case.params(&s, "", &case.mint.next("send"), None);
+        if prompt.is_none() {
+            params.as_object_mut().unwrap().remove("prompt");
+        }
+        params["content"] = json!([{"type":"upload", "upload_id":id}]);
+        let reply: SendReply = decode(
+            "media-only send",
+            ok(&s.route, ops::SESSION_SEND, params).await?,
+        )?;
+        wait_run_end(
+            case.subject,
+            &s.route,
+            case.declared,
+            before.as_deref(),
+            &reply,
+        )
+        .await?;
+        let descriptors = read(
+            &s.route,
+            &ReadRequest::range(from).with_media(MediaMode::Descriptors),
+        )
+        .await?;
+        let media_message = descriptors
+            .messages
+            .iter()
+            .find(|m| {
+                let body = m.message.to_string();
+                body.contains("media_ref") && body.contains(&hash)
+            })
+            .ok_or("media-only send did not store the uploaded media")?;
+        let blocks = read(
+            &s.route,
+            &ReadRequest::range(from).with_media(MediaMode::Blocks),
+        )
+        .await?;
+        let stored = blocks
+            .messages
+            .iter()
+            .find(|m| m.mid == media_message.mid)
+            .ok_or("media-only send has no stored user message")?;
+        check(
+            stored.role.as_deref().is_none_or(|role| role == "user"),
+            "media-only send stored media outside a user message",
+        )?;
+        // One upload must occupy the only stored part. Inspect native parts,
+        // not inline reads, which replace media with text markers.
+        check(
+            case.subject.read_parts(&stored.message).len() == 1,
+            "media-only send stored a text part beside the media",
+        )?;
+    }
+    media(&s.route, &hash, &bytes).await?;
+    Ok(Ending::Passed)
+}
+
 async fn ordinary<S: LlmRunnerSubject>(case: &Case<'_, S>, name: &str) -> Check
 where
     S::Route: RunnerRoute,

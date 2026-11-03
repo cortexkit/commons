@@ -376,7 +376,8 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
         missing.extend(spec.requires_any);
     }
     if !missing.is_empty() {
-        if spec.name.starts_with("sender_succession_")
+        if spec.name == "media_only_send"
+            || spec.name.starts_with("sender_succession_")
             || spec.name.starts_with("live_ids_")
             || spec.name.starts_with("message_senders_")
             || spec.name.starts_with("read_display_facts_")

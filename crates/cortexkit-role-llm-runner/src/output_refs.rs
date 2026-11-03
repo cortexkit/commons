@@ -1,7 +1,16 @@
 //! Immutable references to the tool outputs in the request that wrote a reply.
 //!
 //! Runners supply the writing request's durably captured part-number mapping,
-//! never a mapping reconstructed from the current transcript, and retain
+//! never a mapping reconstructed from the current transcript. Any durable
+//! storage that reproduces that mapping exactly qualifies; it need not be a
+//! per-request copy. For example, per-message records of the numbers each part
+//! received can be combined with each request's record of which parts it showed.
+//! A recorded reference keeps its original part binding, even if a later revert
+//! or branch switch lets numbering reuse that number for another part; within
+//! one request's shown parts each number names exactly one part. A reference
+//! resolves only to a part the writing
+//! request actually showed; any other number is `unknown_tag`. The writing
+//! request is the model request that produced that reply step. Runners retain
 //! returned snapshots as long as any record names them.
 
 use std::collections::BTreeMap;

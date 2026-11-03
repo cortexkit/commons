@@ -40,6 +40,14 @@
       "retryable": false
     },
     {
+      "code": "media_too_large",
+      "retryable": false,
+      "detail": {
+        "max_image_bytes": 5000000,
+        "max_image_dimension": 8192
+      }
+    },
+    {
       "code": "unknown_media",
       "retryable": false
     },

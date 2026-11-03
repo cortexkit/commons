@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.5
+
+- Pin `cortexkit-role-llm-runner =0.8.4`. Add `media_only_send` conformance:
+  a declaring runner accepts a committed upload without prompt text and
+  stores a user message containing media alone, with no empty text part.
+  Report the case inapplicable by name without the group or upload fixture.
+  Faulty fakes cover refusal and an extra empty text part.
+- The contract adds head image-size limits and `media_too_large`; no new kit
+  case checks those limits because the faithful fake does not decode images
+  and cannot enforce pixel dimensions.
+
 ## 0.17.4
 
 - Pin `cortexkit-role-llm-runner =0.8.3`. Add flow-scope frozen-plan sender

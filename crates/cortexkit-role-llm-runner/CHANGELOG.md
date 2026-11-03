@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.8.4
+
+- Add opt-in `media_only_send`, requiring `attachments`: a non-template send
+  with non-empty media content may omit `prompt` or send it empty. In that
+  case it stores media parts alone, never an empty text part. Sends with
+  neither prompt text nor media remain refused naming `template`.
+- Add `SendRequest::check_prompt_for` and `delivery_order_for` for declaring
+  runners. The existing helpers retain their strict prompt behaviour, and
+  template sends still carry no `prompt`, regardless of media content.
+- Add optional `HeadInput` facts and builders for `max_image_bytes` (uploaded
+  file bytes, not base64 size) and `max_image_dimension` (longest side for one
+  image). Unknown limits remain omitted. A send whose committed image upload
+  exceeds a reported limit is refused at admission, before any write, as
+  non-retryable `media_too_large`, with only the exceeded limits in
+  `MediaTooLargeDetail`; add its constructor and vector.
+- Clarify that output-reference numbering may use any durable storage that
+  exactly reproduces the producing model request's mapping, not necessarily
+  a per-request copy. A recorded reference's part binding never changes, even
+  when later numbering reuses its number, and references resolve only to
+  parts that request actually showed; other numbers are `unknown_tag`.
+
 ## 0.8.3
 
 - Refuse plans naming anyone but the frozen flow/run opener at send admission

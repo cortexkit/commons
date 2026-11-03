@@ -373,6 +373,7 @@ pub const CASES: &[CaseSpec] = &[
     case("read_stable_across_host_metadata_change", &[Queue, TranscriptReads, Capability::HostMetadataChange],
         "a re-read after the host changes the session's metadata, under the same history version, answers the same entries byte for byte"),
     case("media_descriptors_image_bytes", &[TranscriptReads, Queue, RunOps], "media_ref hashes decoded image bytes; adapter image fixture required"),
+    case("media_only_send", &[Capability::MediaOnlySend, Capability::Attachments, TranscriptReads, Queue, RunOps], "a committed upload with absent or empty prompt is accepted and stored as a user message with media alone, without a text part"),
     case("attachments_lifecycle", &[Capability::Attachments, TranscriptReads, Queue, RunOps], "chunked upload into an existing session, status, lost-append-reply resume, commit, send and digest read including metadata probe and EOF"),
     case("attachments_restart_gone", &[Capability::Attachments, TranscriptReads, Queue, RunOps], "restart loses open uploads as gone, never open at zero; committed references survive"),
     case("attachments_chunk_cap", &[Capability::Attachments, TranscriptReads, Queue, RunOps], "exactly 2 MiB accepted, one byte over refused without changing received"),

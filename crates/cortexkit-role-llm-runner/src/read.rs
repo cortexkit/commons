@@ -915,6 +915,16 @@ pub struct HeadInput {
     /// means the modalities are accepted but the exact types are unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mime_types: Option<Vec<String>>,
+    /// The largest image the head model accepts, measured as the image
+    /// file's own bytes as uploaded. If a provider limits the base64-encoded
+    /// size, the runner converts that limit to file bytes. Absent means unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_bytes: Option<u64>,
+    /// The longest side in pixels, as the limit for one image in a request.
+    /// A provider's stricter limit for a request holding many images is outside
+    /// this fact. Absent means unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_dimension: Option<u32>,
 }
 
 /// The values of [`HeadInput::attachments`].
@@ -930,6 +940,8 @@ impl HeadInput {
             attachments: attachments.into(),
             modalities: None,
             mime_types: None,
+            max_image_bytes: None,
+            max_image_dimension: None,
         }
     }
 
@@ -940,6 +952,16 @@ impl HeadInput {
 
     pub fn with_mime_types(mut self, mime_types: Vec<String>) -> Self {
         self.mime_types = Some(mime_types);
+        self
+    }
+
+    pub fn with_max_image_bytes(mut self, max_image_bytes: u64) -> Self {
+        self.max_image_bytes = Some(max_image_bytes);
+        self
+    }
+
+    pub fn with_max_image_dimension(mut self, max_image_dimension: u32) -> Self {
+        self.max_image_dimension = Some(max_image_dimension);
         self
     }
 
@@ -1480,6 +1502,38 @@ mod tests {
             assert!(!errors::is_retryable(code), "{name}");
             serde_json::from_value::<ReadRequest>(case["request"].clone())
                 .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+    }
+
+    #[test]
+    fn head_input_image_limits_are_optional_facts() {
+        let legacy = r#"{"attachments":"yes"}"#;
+        let input: HeadInput = serde_json::from_str(legacy).unwrap();
+        assert_eq!(input, HeadInput::new(attachments::YES));
+        assert_eq!(input.max_image_bytes, None);
+        assert_eq!(input.max_image_dimension, None);
+        assert_eq!(serde_json::to_string(&input).unwrap(), legacy);
+
+        let limited = input
+            .with_max_image_bytes(5_000_000)
+            .with_max_image_dimension(8192);
+        let wire = serde_json::json!({
+            "attachments": "yes", "max_image_bytes": 5_000_000,
+            "max_image_dimension": 8192
+        });
+        assert_eq!(serde_json::to_value(&limited).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<HeadInput>(wire).unwrap(), limited);
+        for (input, expected) in [
+            (
+                HeadInput::new("unknown").with_max_image_bytes(1),
+                serde_json::json!({"attachments":"unknown", "max_image_bytes":1}),
+            ),
+            (
+                HeadInput::new("unknown").with_max_image_dimension(1),
+                serde_json::json!({"attachments":"unknown", "max_image_dimension":1}),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(input).unwrap(), expected);
         }
     }
 

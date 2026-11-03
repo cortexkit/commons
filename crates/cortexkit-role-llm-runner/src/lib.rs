@@ -186,6 +186,9 @@ pub mod capabilities {
 
     /// Session-scoped uploads, upload references on sends and media by digest.
     pub const ATTACHMENTS: &str = "attachments";
+    /// Non-template sends may omit or empty `prompt` when `content` is
+    /// non-empty, storing media parts alone. Requires [`ATTACHMENTS`].
+    pub const MEDIA_ONLY_SEND: &str = "media_only_send";
 
     /// Tail, range and after-message reads, head metadata and `history_version`
     /// on every page.
@@ -383,6 +386,7 @@ pub mod capabilities {
                 ops::SESSION_READ,
             ],
         ),
+        (MEDIA_ONLY_SEND, &[ops::SESSION_SEND]),
         (
             USER_COMMANDS,
             &[ops::SESSION_USER_COMMAND, ops::SESSION_USER_COMMAND_STATUS],

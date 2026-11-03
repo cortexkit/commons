@@ -213,6 +213,7 @@ alias until the next breaking release.
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
 | `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
 | `attachments` | `session.upload_begin`, `session.upload_append`, `session.upload_status`, `session.upload_commit`, `session.media_read`, `session.send`, `session.read` | §9.12 |
+| `media_only_send` | `session.send` with media content and no prompt text; requires `attachments` | §9, §9.12 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
 | `held_calls` | `run.status` and run status events with held tool calls | §6.1 |
@@ -737,7 +738,7 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   `transient`, `permanent`, `auth_required`, `context_overflow` and
   `provider_unavailable`; older records may say `auth`. Readers decode and
   retain any value, including unknown ones.
-- [pinned] `input?: {attachments, modalities?, mime_types?}`
+- [pinned] `input?: {attachments, modalities?, mime_types?, max_image_bytes?, max_image_dimension?}`
   (`read::HeadInput`, added in 0.5.1) describes what a send that names no
   model can carry. `attachments` is `yes`, `no` or `unknown`, decoded open
   (an unknown value reads as `unknown`). `modalities` come from the model
@@ -748,6 +749,15 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   cannot carry attachments at all. An absent `input` means unknown, so the
   member needs no group. It is outside the session record rule below: a
   never-written session may state it.
+- [pinned] `input.max_image_bytes?: u64` is the largest image the head model
+  accepts, measured as the image file's own bytes as uploaded. If a provider
+  limits the base64-encoded size, the runner converts that limit to file
+  bytes. `input.max_image_dimension?: u32` is the longest side in pixels, as
+  the limit for one image in a request. A provider's stricter limit for a
+  request holding many images is outside this fact and its admission check.
+  Absent means unknown for either fact. Existing heads omit both fields when
+  the limits are unknown; reporting a limit requires admission enforcement
+  for committed uploads (§9.12).
 - [pinned] `model?: {provider, model, variant?}` (`read::HeadModel`, added
   in 0.6.1) is the selection a send without a named model would use next.
   It is optional, needs no describe group, and absent means unknown. The
@@ -2307,13 +2317,20 @@ Model-view reads and replacement-entry pages are not part of this contract.
   context is at or over its ceiling is refused `context_ceiling {window,
   size, cause}` and writes nothing (§6, §12.1).
 - [pinned] Owner sends MUST carry a `send_id`. `prompt` is optional in the
-  type (`SendRequest::prompt`, `Option<String>`) only so that a template
-  send can omit it: a send naming a plan `template` (§9.7) carries no
-  `prompt` member, and every other send carries a non-empty `prompt`. A
-  runner checks this before writing anything (`SendRequest::check_prompt`):
-  a template send carrying `prompt`, even an empty one, and a send without a
-  template and without a non-empty `prompt`, are refused `invalid_params
-  {field: "template"}`.
+  type (`SendRequest::prompt`, `Option<String>`): a send naming a plan
+  `template` (§9.7) carries no `prompt` member. Every non-template send
+  carries a non-empty `prompt`, except that a runner declaring
+  `media_only_send` accepts non-empty `content` with an absent or empty
+  `prompt` (§9.12). The group requires `attachments`; `check_describe`
+  refuses it without that group as `media_only_send_without_attachments`.
+  A runner checks the prompt rule before writing anything
+  (`SendRequest::check_prompt_for`, passing its declaration). A template send
+  carrying `prompt`, even an empty one, is refused `invalid_params
+  {field: "template"}`, regardless of `content`. A non-template send with
+  neither non-empty `prompt` nor non-empty `content` is refused the same
+  way. Without the group, every non-template send without a non-empty
+  `prompt` is refused naming `template`, regardless of `content`;
+  `SendRequest::check_prompt` keeps this strict behaviour.
   `session.adopt` (§9.5) is not a send: it carries a `send_id` and a plan,
   and no prompt.
 - [pinned] One `send_id` namespace covers all three modes, and `delivery` is
@@ -3295,12 +3312,19 @@ say who may send and which texts are system text.
 
 - [pinned] A send has one text, whatever mode carries it: its `prompt`, or,
   for a send naming a plan template, the text the runner renders from that
-  template and the send's slots. A template send carries `template: {id,
+  template and the send's slots. The sole exception is a non-template send
+  to a runner declaring `media_only_send` with non-empty `content` and an
+  absent or empty `prompt`: that send has no text and stores media parts
+  alone (§9.12).
+  A template send carries `template: {id,
   digest, slots}` (`delivery_order::TemplateUse`, strict) and no `prompt`
   member at all; a template beside a `prompt`, empty or not, or a send
-  without a template and without a non-empty `prompt`, is refused
-  `invalid_params {field: "template"}` (`SendRequest::check_prompt`, which
-  `SendRequest::delivery_order` applies).
+  without a template and without a non-empty `prompt` outside the
+  media-only exception, is refused `invalid_params {field: "template"}`.
+  Content never relaxes the template rule. `SendRequest::check_prompt_for`
+  and `SendRequest::delivery_order_for` take the runner's declaration;
+  `SendRequest::check_prompt` and `SendRequest::delivery_order` retain the
+  strict rule for runners without the group.
 - [pinned] The runner renders the template from the plan's template for
   that sender and the send's slots, validating every slot itself
   (`delivery_order::render`); the sender's word is never enough. A send
@@ -3741,7 +3765,12 @@ its host's file storage, not a second copy of the host's media store.
 - [pinned] `session.send` adds optional `content: [{type: "upload",
   upload_id}, ...]` (`attachments::ContentPart`), in order, after the
   existing prompt text. Absent `content` is omitted and prompt-only sends
-  keep their bytes. The prompt and template rules of §9 are unchanged.
+  keep their bytes. A runner declaring `media_only_send` accepts a
+  non-template send with non-empty `content` and an absent or empty `prompt`:
+  the stored user message has the media parts alone, with no text part added
+  for the empty prompt. Without that group, a non-template send still
+  requires a non-empty `prompt`. A template send always omits `prompt`,
+  regardless of `content`; its rendered text precedes the media (§9).
   Each id must be committed in this session: an open id is refused
   `upload_not_committed`. Admission checks all references before writing
   anything, including the send's idempotency record. Media types are checked
@@ -3749,6 +3778,19 @@ its host's file storage, not a second copy of the host's media store.
   freeze when starting a run, using the same facts as `session.head.input`.
   A known unsupported modality or MIME type is refused `media_unsupported`
   and writes nothing; an unknown fact is not a known lack of support.
+- [pinned] A runner reporting `max_image_bytes` or `max_image_dimension` in
+  `session.head.input` MUST refuse at admission a send whose committed image
+  upload exceeds a reported limit, before writing anything, including the
+  send's idempotency record. The non-retryable refusal is `media_too_large`
+  with `detail: {max_image_bytes?, max_image_dimension?}`
+  (`errors::MediaTooLargeDetail`), naming only the limit or limits exceeded.
+  The byte limit measures the image file's own bytes as uploaded, not its
+  base64-encoded size; a provider's encoded-size limit is converted to file
+  bytes. The dimension limit is the longest side in pixels for one image in
+  a request; a provider's stricter limit for a request holding many images is
+  outside this check. Limits are checked against the frozen
+  model of a joined run, or the model the send would freeze for a new run,
+  as with modality and MIME support. An absent limit is unknown.
 - [pinned] Default inline `session.read` never exposes new block types.
   Every media block becomes a text block whose text is exactly
   `[media not shown: kind=… mime=… bytes=… sha256=<first 12 hex> reason=not_requested]`.
@@ -3822,8 +3864,18 @@ its host's file storage, not a second copy of the host's media store.
 - [pinned] Resolve against the compaction A3 request numbering the writing step saw, as of
   the durable commit storing the message or call. Persist records in that
   commit or derive them identically from durably stored inputs at that commit.
-  Never resolve them against later numbering. Tool-result text and nested
-  images resolve to the stored output part, not rendered bytes: no tag prefix
+  Never resolve them against later numbering or a mapping reconstructed from
+  the current transcript. Any durable storage that reproduces the writing
+  request's mapping exactly qualifies; it need not be a per-request copy.
+  For example, per-message records of the numbers each part received can be
+  combined with each request's record of which parts it showed. A recorded
+  reference's binding to a part MUST NOT change, even if a revert or branch
+  switch later lets A3 numbering give that number to another part; within one
+  request's shown parts each number names exactly one part. A reference
+  resolves only to a part the writing request actually showed; any other
+  number is `unknown_tag`. The writing request
+  means the model request that produced that reply step. Tool-result text and
+  nested images resolve to the stored output part, not rendered bytes: no tag prefix
   or text injected during rendering. User and model text record `unresolved`
   / `not_a_tool_output`; an absent number records `unresolved` / `unknown_tag`.
   Running calls have no number. A held result records `held`, its `call_key`
@@ -4897,6 +4949,7 @@ treats it as a terminal refusal of that one request.
 | `upload_size_mismatch` | an append overruns the declared size, or commit finds a different size | — | no |
 | `upload_sha256_mismatch` | commit finds a different SHA-256 | — | no |
 | `media_unsupported` | a send's media is unsupported by the frozen model | — | no |
+| `media_too_large` | a committed image exceeds a reported model limit | `max_image_bytes?`, `max_image_dimension?` (only limits exceeded) | no |
 | `unknown_media` | the bound session's history does not reference the digest | — | no |
 | `context_ceiling` | a `session.send` that would start or join a run while the session's context is at or over its ceiling (§6); never a model or provider failure | `{window, size, cause}` (`errors::ContextCeilingDetail`): the window and the request's estimated size in tokens, and `cause`, an open string: `view_timeout` (the runner's chosen over-limit ride deadline elapsed without a view that made the request fit), `provider_unavailable` (the compaction provider is unreachable for the over-limit ride) or `over_window` (the request cannot fit even after the current view) | no; a router charges no backoff to the model for it |
 | `expired` | a read of an expired session (§9.1), including `run.status`, `run.cancel` and `session.retract` where their groups are declared | `expired_at_ms` (Unix epoch milliseconds) | no |

@@ -370,9 +370,11 @@ impl Budget {
 #[serde(from = "WireSendRequest", into = "WireSendRequest")]
 #[non_exhaustive]
 pub struct SendRequest {
-    /// The prompt text: required, and not empty, on every send but a
-    /// template send, which carries no `prompt` and whose text the runner
-    /// renders from the plan's template ([`Self::check_prompt`]).
+    /// The prompt text: required and non-empty except for a template send
+    /// (whose text the runner renders, with no `prompt` member), or a
+    /// non-template send with non-empty `content` to a runner declaring
+    /// `media_only_send` ([`Self::check_prompt_for`]). An absent or empty
+    /// prompt on that media-only send adds no stored text part.
     pub prompt: Option<String>,
     /// Ordered committed upload references, rendered after the prompt.
     /// Send only to a runner declaring `attachments`.
@@ -511,10 +513,18 @@ impl SendRequest {
     /// its kind, or `Ok`. A send naming a `template` (a list member, read
     /// from `runner_params`) carries no `prompt` at all: the runner renders
     /// its one text, and a `prompt` beside it, even an empty one, would be a
-    /// second text. Every other send carries a non-empty `prompt`. Both
-    /// refusals name `template`, since the template is what decides which
-    /// shape the send must have.
+    /// second text. Every other send carries a non-empty `prompt`. Refusals
+    /// name `template`, since the template decides which shape the send must
+    /// have. This keeps the strict rule for runners without `media_only_send`;
+    /// declaring runners use [`Self::check_prompt_for`] instead.
     pub fn check_prompt(&self) -> Result<(), &'static str> {
+        self.check_prompt_for(false)
+    }
+
+    /// Like [`Self::check_prompt`], but a runner declaring `media_only_send`
+    /// accepts a non-template send with non-empty `content` and an absent or
+    /// empty `prompt`. A template send still carries no `prompt` at all.
+    pub fn check_prompt_for(&self, media_only_send: bool) -> Result<(), &'static str> {
         let template = self
             .runner_params
             .contains_key(crate::delivery_order::TEMPLATE_FIELD);
@@ -523,6 +533,7 @@ impl SendRequest {
             self.prompt.is_none()
         } else {
             prompt
+                || (media_only_send && self.content.as_ref().is_some_and(|parts| !parts.is_empty()))
         };
         if ok {
             Ok(())
@@ -863,12 +874,21 @@ impl SendRequest {
     pub fn delivery_order(
         &self,
     ) -> Result<Option<crate::delivery_order::DeliveryOrder>, &'static str> {
+        self.delivery_order_for(false)
+    }
+
+    /// Like [`Self::delivery_order`], validating the prompt with
+    /// [`Self::check_prompt_for`] for a runner's `media_only_send` declaration.
+    pub fn delivery_order_for(
+        &self,
+        media_only_send: bool,
+    ) -> Result<Option<crate::delivery_order::DeliveryOrder>, &'static str> {
         let order = crate::delivery_order::DeliveryOrder::decode(
             self.delivery_order.as_deref(),
             &self.runner_params,
         )?;
         if order.is_some() {
-            self.check_prompt()?;
+            self.check_prompt_for(media_only_send)?;
         }
         Ok(order)
     }
@@ -1432,6 +1452,74 @@ mod input_cap_tests {
 mod prompt_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn media_only_send_accepts_content_without_prompt_only_when_declared() {
+        let content = [crate::attachments::ContentPart::upload(
+            "invented-photo-upload",
+        )];
+        for prompt in [None, Some("")] {
+            let mut wire = json!({"content": content, "send_id": "media-send"});
+            if let Some(prompt) = prompt {
+                wire["prompt"] = json!(prompt);
+            }
+            let request: SendRequest = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(request.check_prompt_for(true), Ok(()));
+            assert_eq!(request.check_prompt_for(false), Err("template"));
+            assert_eq!(request.check_prompt(), Err("template"));
+
+            wire["delivery"] = json!(["idle_start"]);
+            let request: SendRequest = serde_json::from_value(wire).unwrap();
+            assert!(request.delivery_order_for(true).unwrap().is_some());
+            assert_eq!(request.delivery_order_for(false), Err("template"));
+            assert_eq!(request.delivery_order(), Err("template"));
+        }
+    }
+
+    #[test]
+    fn media_only_send_still_requires_text_or_content() {
+        for prompt in [None, Some("")] {
+            for content in [None, Some(Vec::<crate::attachments::ContentPart>::new())] {
+                let mut wire = json!({"send_id": "empty-send"});
+                if let Some(prompt) = prompt {
+                    wire["prompt"] = json!(prompt);
+                }
+                if let Some(content) = content {
+                    wire["content"] = json!(content);
+                }
+                let request: SendRequest = serde_json::from_value(wire).unwrap();
+                assert_eq!(request.check_prompt_for(true), Err("template"));
+                assert_eq!(request.check_prompt_for(false), Err("template"));
+                assert_eq!(request.check_prompt(), Err("template"));
+            }
+        }
+    }
+
+    #[test]
+    fn media_only_send_does_not_relax_template_prompt_rule() {
+        for prompt in [None, Some(""), Some("words")] {
+            let mut wire = json!({
+                "send_id": "template-media-send", "delivery": ["idle_start"],
+                "template": {"id": "photo", "digest": "invented-digest"},
+                "content": [crate::attachments::ContentPart::upload("invented-photo-upload")]
+            });
+            if let Some(prompt) = prompt {
+                wire["prompt"] = json!(prompt);
+            }
+            let request: SendRequest = serde_json::from_value(wire).unwrap();
+            let expected = if prompt.is_none() {
+                Ok(())
+            } else {
+                Err("template")
+            };
+            for declared in [false, true] {
+                assert_eq!(request.check_prompt_for(declared), expected);
+                assert_eq!(request.delivery_order_for(declared).map(|_| ()), expected);
+            }
+            assert_eq!(request.check_prompt(), expected);
+            assert_eq!(request.delivery_order().map(|_| ()), expected);
+        }
+    }
 
     #[test]
     fn only_a_template_send_omits_its_prompt() {

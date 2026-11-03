@@ -725,6 +725,12 @@ async fn run(subject: &FakeSubject) -> SuiteReport {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case == "media_only_send"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason.starts_with("missing groups:") && reason.contains("media_only_send"))
+    {
+        return;
+    }
     if (ADMISSION_REFRESH_CASES.contains(&case) || APP_READER_CASES.contains(&case))
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason.starts_with("runner does not declare ") || reason == "adapter supplies no named-principal routes")
@@ -1128,6 +1134,7 @@ fn faithful_runner_with_all_supported_groups() -> FakeSubject {
     subject.claim_process_kill = true;
     subject.descriptor_fixtures = true;
     subject.capabilities.insert(Capability::Attachments);
+    subject.capabilities.insert(Capability::MediaOnlySend);
     subject.enable_retention();
     subject.capabilities.insert(Capability::InputTokenCap);
     subject.capabilities.insert(Capability::StructuredOutput);
@@ -1477,7 +1484,8 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             );
             continue;
         }
-        if spec.name.starts_with("sender_succession_")
+        if spec.name == "media_only_send"
+            || spec.name.starts_with("sender_succession_")
             || spec.name.starts_with("live_ids_")
             || spec.name.starts_with("message_senders_")
             || spec.name.starts_with("read_display_facts_")
@@ -6229,6 +6237,75 @@ fn attachment_subject(defect: &'static str) -> FakeSubject {
     subject.capabilities.insert(Capability::DeliveryOrder);
     subject.enable_retention();
     subject
+}
+
+fn media_only_subject(defect: &'static str) -> FakeSubject {
+    let mut subject = attachment_subject(defect);
+    subject.capabilities.insert(Capability::MediaOnlySend);
+    subject.claim_process_kill = true;
+    subject
+}
+
+#[tokio::test]
+async fn media_only_send_reference_fake() {
+    for data_url in [false, true] {
+        let mut subject = media_only_subject("");
+        subject.data_url_media = data_url;
+        subject.defects.attachments_store_data_url = data_url;
+        let report = run(&subject).await;
+        assert_eq!(
+            report.outcome("media_only_send"),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+        assert_none_failed_but(&report, &[]);
+    }
+    println!("PASS media_only_send: absent and empty prompts store media alone");
+}
+
+async fn media_only_fault(defect: &'static str, expected: &str) {
+    let control = run(&media_only_subject("")).await;
+    assert_eq!(
+        control.outcome("media_only_send"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        control.render()
+    );
+    let report = run(&media_only_subject(defect)).await;
+    let reason = failed(&report, "media_only_send");
+    assert!(reason.contains(expected), "{defect}: {reason}");
+    assert_none_failed_but(&report, &["media_only_send"]);
+    println!("FAIL media_only_send ({defect}): {reason}");
+}
+
+#[tokio::test]
+async fn media_only_send_refusal_fails_by_name() {
+    media_only_fault("media_only_send_refused", "invalid_params").await;
+}
+
+#[tokio::test]
+async fn media_only_send_empty_text_fails_by_name() {
+    media_only_fault("media_only_send_empty_text", "stored a text part").await;
+}
+
+#[tokio::test]
+async fn media_only_send_is_inapplicable_without_group_or_upload_fixture() {
+    for (subject, reason) in [
+        (attachment_subject(""), "media_only_send"),
+        (
+            media_only_subject("media_only_send_no_upload_fixture"),
+            "committed-upload fixture",
+        ),
+    ] {
+        let report = run(&subject).await;
+        assert!(
+            matches!(report.outcome("media_only_send"), Some(CaseOutcome::Inapplicable { reason: got }) if got.contains(reason)),
+            "{}",
+            report.render()
+        );
+        println!("N/A media_only_send: {reason}");
+    }
 }
 
 #[tokio::test]

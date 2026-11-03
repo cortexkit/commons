@@ -135,6 +135,7 @@ where
             }
             name if name.starts_with("output_refs_") => crate::output_refs::run(self, name).await,
             name if name.starts_with("held_calls_") => crate::held_calls::run(self, name).await,
+            "media_only_send" => crate::attachments::media_only_send(self).await,
             name if name.starts_with("attachments_") => crate::attachments::run(self, name).await,
             name if name.starts_with("media_") => crate::media::run(self, name).await,
             "user_commands_cutoff_after_forward" | "user_commands_cutoff_before_forward" => {

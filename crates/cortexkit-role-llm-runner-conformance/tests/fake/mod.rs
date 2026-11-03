@@ -3370,10 +3370,11 @@ impl Module {
         if let Err(field) = request.client_message_id(&self.world.groups) {
             return Ok(invalid(field));
         }
-        // A send that is not a list send must carry a non-empty prompt; a
-        // list send's prompt is checked with its members below.
+        let media_only_send = self.world.serves(groups::MEDIA_ONLY_SEND)
+            && self.world.defects.attachments != "media_only_send_refused";
+        // List sends validate the same prompt rule with their members below.
         if request.delivery_order.is_none() || !self.world.serves(groups::DELIVERY_ORDER) {
-            if let Err(field) = request.check_prompt() {
+            if let Err(field) = request.check_prompt_for(media_only_send) {
                 return Ok(invalid(field));
             }
         }
@@ -3414,7 +3415,7 @@ impl Module {
             }
         }
         if self.world.serves(groups::DELIVERY_ORDER) {
-            match request.delivery_order() {
+            match request.delivery_order_for(media_only_send) {
                 Err(_)
                     if request.delivery_order.is_none()
                         && self.world.defects.order_members_without_list_accepted => {}
@@ -3882,6 +3883,7 @@ impl Module {
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
                     "route_decision_id": request.route_decision_id,
                     "attachment_parts": attachment_parts,
+                    "keep_empty_text": self.world.defects.attachments == "media_only_send_empty_text",
                     "stored_as": stored_as,
                     "attachment_accepts": request.runner_params.get("attachment_accepts"),
                     "delivery": delivery, "run_id": run_id, "admitted": admitted,
@@ -6027,7 +6029,12 @@ impl LlmRunnerSubject for FakeSubject {
     ) -> Result<(), HarnessError> {
         self.publish_late(arguments, entry)
     }
-    fn attachment_model_fields(&self, _session: &str, accepts: bool) -> Option<Map<String, Value>> {
+    fn attachment_model_fields(&self, session: &str, accepts: bool) -> Option<Map<String, Value>> {
+        if self.defects.attachments == "media_only_send_no_upload_fixture"
+            && session.contains("media_only_send")
+        {
+            return None;
+        }
         Some(Map::from_iter([(
             "attachment_accepts".into(),
             json!(accepts),

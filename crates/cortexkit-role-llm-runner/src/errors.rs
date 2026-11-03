@@ -50,7 +50,28 @@ attachment_codes! {
     UPLOAD_SIZE_MISMATCH, is_upload_size_mismatch, "upload_size_mismatch";
     UPLOAD_SHA256_MISMATCH, is_upload_sha256_mismatch, "upload_sha256_mismatch";
     MEDIA_UNSUPPORTED, is_media_unsupported, "media_unsupported";
+    MEDIA_TOO_LARGE, is_media_too_large, "media_too_large";
     UNKNOWN_MEDIA, is_unknown_media, "unknown_media";
+}
+
+/// Report only the image limits the committed upload exceeds. Byte limits
+/// count the uploaded file's own bytes, not its base64 representation.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct MediaTooLargeDetail {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_dimension: Option<u32>,
+}
+
+impl MediaTooLargeDetail {
+    pub fn new(max_image_bytes: Option<u64>, max_image_dimension: Option<u32>) -> Self {
+        Self {
+            max_image_bytes,
+            max_image_dimension,
+        }
+    }
 }
 
 /// A contiguous append retry resumes at the runner's acknowledged byte count.
@@ -523,6 +544,7 @@ pub const CODES: &[&str] = &[
     UPLOAD_SIZE_MISMATCH,
     UPLOAD_SHA256_MISMATCH,
     MEDIA_UNSUPPORTED,
+    MEDIA_TOO_LARGE,
     UNKNOWN_MEDIA,
     USER_COMMAND_COLLISION,
     UNKNOWN_USER_COMMAND,
@@ -695,6 +717,47 @@ pub mod provider_codes {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn media_too_large_is_terminal_and_names_only_exceeded_limits() {
+        assert!(CODES.contains(&MEDIA_TOO_LARGE));
+        assert!(is_media_too_large("media_too_large"));
+        assert!(!is_retryable(MEDIA_TOO_LARGE));
+        for (bytes, dimension, expected) in [
+            (
+                Some(5_000_000),
+                None,
+                serde_json::json!({"max_image_bytes":5_000_000}),
+            ),
+            (
+                None,
+                Some(8192),
+                serde_json::json!({"max_image_dimension":8192}),
+            ),
+            (
+                Some(5_000_000),
+                Some(8192),
+                serde_json::json!({"max_image_bytes":5_000_000,"max_image_dimension":8192}),
+            ),
+        ] {
+            let detail = MediaTooLargeDetail::new(bytes, dimension);
+            assert_eq!(serde_json::to_value(&detail).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_value::<MediaTooLargeDetail>(expected).unwrap(),
+                detail
+            );
+        }
+        let file = vectors::load("errors.json");
+        let vector = vectors::cases(&file, "codes")
+            .iter()
+            .find(|case| case["code"] == MEDIA_TOO_LARGE)
+            .unwrap();
+        assert_eq!(vector["retryable"], false);
+        assert_eq!(
+            vector["detail"],
+            serde_json::to_value(MediaTooLargeDetail::new(Some(5_000_000), Some(8192))).unwrap()
+        );
+    }
 
     #[test]
     fn upstream_plan_drift_bytes_round_trip() {

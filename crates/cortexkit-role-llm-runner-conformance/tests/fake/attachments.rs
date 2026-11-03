@@ -387,7 +387,11 @@ pub fn add_parts(body: &mut Value, record: &Value) {
             })
             .collect();
         let prompt = record.get("prompt").unwrap_or(&body["text"]);
-        let mut all = vec![json!({"type":"text","text":prompt})];
+        let mut all = Vec::new();
+        if prompt.as_str().is_some_and(|text| !text.is_empty()) || record["keep_empty_text"] == true
+        {
+            all.push(json!({"type":"text","text":prompt}));
+        }
         all.extend(parts);
         body.as_object_mut().unwrap().remove("text");
         body["parts"] = json!(all);

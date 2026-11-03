@@ -27,6 +27,7 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const MEDIA_ONLY_SEND_WITHOUT_ATTACHMENTS: &str = "media_only_send_without_attachments";
     pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_RUN_CANCEL: &str =
         "run_cancel_by_interrupt_without_run_cancel";
     pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_DELIVERY_ORDER: &str =
@@ -514,6 +515,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     }
     for (group, dependency, problem) in [
         (
+            capabilities::MEDIA_ONLY_SEND,
+            capabilities::ATTACHMENTS,
+            problem_names::MEDIA_ONLY_SEND_WITHOUT_ATTACHMENTS,
+        ),
+        (
             capabilities::RETRACT_OWN_SEND,
             capabilities::RETRACT,
             problem_names::RETRACT_OWN_SEND_WITHOUT_RETRACT,
@@ -847,6 +853,10 @@ mod opt_in_dependency_tests {
     #[test]
     fn opt_in_groups_require_their_dependencies() {
         for (group, dependencies) in [
+            (
+                capabilities::MEDIA_ONLY_SEND,
+                vec![capabilities::ATTACHMENTS],
+            ),
             (capabilities::RETRACT_OWN_SEND, vec![capabilities::RETRACT]),
             (
                 capabilities::RUN_CANCEL_BY_INTERRUPT,
