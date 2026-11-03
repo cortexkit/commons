@@ -4593,6 +4593,45 @@ async fn mixed_size_fallback_frame_budget_case() {
     assert_passed(&report, "media_descriptors_frame_budget");
 }
 
+#[tokio::test]
+async fn descriptor_budget_frame_rejects_smallest_first_by_name() {
+    let mut subject = FakeSubject::new(Defects {
+        media: Some("smallest_first"),
+        ..Defects::default()
+    });
+    subject.descriptor_fixtures = true;
+    subject.descriptor_case = Some("media_descriptors_frame_budget");
+    let report = run(&subject).await;
+    let name = "media_descriptors_frame_budget";
+    let reason = failed(&report, name);
+    assert!(reason.contains("largest-first fallback"), "{reason}");
+    println!("{name}: {reason}");
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
+async fn descriptor_budget_stable_passes_and_rejects_page_position_by_name() {
+    let name = "media_descriptors_stable_across_pages";
+    for defect in [None, Some("page_position")] {
+        let mut subject = FakeSubject::new(Defects {
+            media: defect,
+            ..Defects::default()
+        });
+        subject.descriptor_fixtures = true;
+        subject.descriptor_case = Some(name);
+        let report = run(&subject).await;
+        if defect.is_some() {
+            let reason = failed(&report, name);
+            assert!(reason.contains("descriptor selection changed"), "{reason}");
+            println!("{name}: {reason}");
+            assert_none_failed_but(&report, &[name]);
+        } else {
+            assert_passed(&report, name);
+            assert_none_failed_but(&report, &[]);
+        }
+    }
+}
+
 /// The cases where a step reaches `max_steps` without the limit cutting
 /// anything off.
 const FINAL_STEP_CASES: &[&str] = &[
@@ -6238,6 +6277,80 @@ fn output_refs_subject(defect: Option<&'static str>) -> FakeSubject {
 }
 
 #[tokio::test]
+async fn numbered_part_cases_without_compaction_are_inapplicable_not_failed() {
+    let mut subject = output_refs_subject(None);
+    subject.without_compaction_item = true;
+    subject.capabilities.insert(Capability::DeliveryOrder);
+    let report = run(&subject).await;
+    for name in cases_of(&["output_refs_"])
+        .into_iter()
+        .filter(|name| {
+            ![
+                "output_refs_unsupported_plan",
+                "output_refs_without_compaction_unknown_tag",
+            ]
+            .contains(name)
+        })
+        .chain(["delivery_order_template_part_gone_refused"])
+    {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("plan.compaction_item") && reason.contains("no part numbers")),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_eq!(
+        report.outcome("output_refs_without_compaction_unknown_tag"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    println!(
+        "output_refs_scanning: {:?}",
+        report.outcome("output_refs_scanning")
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn numbered_part_cases_with_compaction_but_missing_numbers_still_fail() {
+    let mut subject = output_refs_subject(None);
+    subject.defects.shown_part_numbers_missing = true;
+    subject.capabilities.insert(Capability::DeliveryOrder);
+    let report = run(&subject).await;
+    let names: Vec<_> = cases_of(&["output_refs_"])
+        .into_iter()
+        .filter(|name| {
+            ![
+                "output_refs_unsupported_plan",
+                "output_refs_without_compaction_unknown_tag",
+            ]
+            .contains(name)
+        })
+        .chain(["delivery_order_template_part_gone_refused"])
+        .collect();
+    for name in &names {
+        assert!(
+            failed(&report, name).contains("no rendered tag")
+                || failed(&report, name).contains("no numbered part")
+        );
+    }
+    assert_none_failed_but(&report, &names);
+}
+
+#[tokio::test]
+async fn output_refs_without_compaction_late_resolution_fails_by_name() {
+    let report = run(&output_refs_subject(Some(
+        "output_refs_without_compaction_late_resolution",
+    )))
+    .await;
+    let name = "output_refs_without_compaction_unknown_tag";
+    assert!(failed(&report, name).contains("changed after a later tool output"));
+    println!("{name}: {}", failed(&report, name));
+    assert_none_failed_but(&report, &[name]);
+}
+
+#[tokio::test]
 async fn output_refs_faithful_runner_passes_all_cases() {
     let report = run(&output_refs_subject(None)).await;
     for name in cases_of(&["output_refs_"])
@@ -6467,6 +6580,10 @@ macro_rules! output_refs_fault {
     };
 }
 output_refs_fault!(output_refs_fault_scanning, "output_refs_scanning");
+output_refs_fault!(
+    output_refs_fault_without_compaction_unknown_tag,
+    "output_refs_without_compaction_unknown_tag"
+);
 output_refs_fault!(
     output_refs_fault_shared_samples,
     "output_refs_shared_samples"

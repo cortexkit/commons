@@ -936,9 +936,11 @@ pub trait LlmRunnerSubject: Harness {
         Ok(false)
     }
 
-    /// Build admission fields with a tag-rendering plan whose scripted tool
-    /// provider declares data:token and program:source:rich-ui/1 slots, and
-    /// whose provider item opts into output_refs. Do not synthesize replies.
+    /// Build admission fields whose scripted tool provider declares data:token
+    /// and program:source:rich-ui/1 slots and opts into output_refs. Numbered
+    /// reference cases require plan.compaction_item; without it they are
+    /// inapplicable. The unnumbered case removes that item from these fields.
+    /// Do not synthesize replies.
     fn output_refs_fields(&self, _session: &str) -> Result<Map<String, Value>, HarnessError> {
         Err(HarnessError::new(
             "output reference plan is not implemented",
@@ -1408,8 +1410,8 @@ pub trait LlmRunnerSubject: Harness {
     }
 
     /// A tool result containing `texts` as separate text payloads, preserving
-    /// their order. Used to test descriptor selection when individually
-    /// inline-sized text payloads together exceed the per-message budget.
+    /// their order. Retained for adapter compatibility; descriptor-budget
+    /// fixtures use assistant text to avoid oversized provider results.
     fn multipart_tool_result(&self, _texts: &[String]) -> Option<Value> {
         None
     }

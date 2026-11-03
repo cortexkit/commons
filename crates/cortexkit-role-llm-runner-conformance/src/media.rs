@@ -27,9 +27,8 @@ const FRAME_IMAGE_BYTES: usize = 2_400_000;
 /// so an inline read of that message must be refused.
 const FRAME_ARGUMENT_BYTES: usize = 2_200_000;
 
-/// Number and size of the equal text parts in the stable-across-pages case's
-/// result: 3,584,000 bytes, over the descriptor message budget yet within one
-/// daemon-delivered provider reply.
+/// Number and size of the equal assistant text parts in the stable-across-pages
+/// case: 3,584,000 bytes in one message, over the descriptor message budget.
 const STABLE_PARTS: usize = 14;
 const STABLE_PART_BYTES: usize = 250 * 1024;
 
@@ -116,21 +115,19 @@ fn crc32(bytes: &[u8]) -> u32 {
     !crc
 }
 
-/// What a media case hands the scripted tool provider, before the adapter
-/// shapes the results in its host's schema. The run and the frame guard test
-/// both read it, so the guard measures exactly what a case scripts.
+/// Model text and tool-provider payloads scripted by a media case. The run and
+/// provider guards share the fixture so they measure the same scripted payloads.
 struct Fixture {
     /// Decoded bytes of the image result.
     image: Vec<u8>,
-    /// Texts of a multipart result that replaces the image result.
-    multipart: Option<Vec<String>>,
+    /// Separate text parts in one assistant message. Their aggregate can exceed
+    /// the descriptor budget without exceeding the tool-result text limit.
+    assistant: Option<Vec<String>>,
     /// The `oversize` argument of each call in the image call's step whose
     /// arguments are too large to stay inline in a descriptors read; the
     /// first goes on the image call, each later one on a sibling call of its
     /// own.
     oversize: Vec<Value>,
-    /// Texts of the mixed-size fallback result scripted in the same step.
-    mixed: Option<Vec<String>>,
     /// Top-level argument members of the image call besides `marker` and
     /// `oversize`. The pairing case names them `id` and `name`, as tool
     /// parameters often are: inside arguments a descriptors read replaces
@@ -148,8 +145,13 @@ fn fixture(name: &str) -> Fixture {
     };
     Fixture {
         image,
-        multipart: (name == "media_descriptors_stable_across_pages")
-            .then(|| vec!["x".repeat(STABLE_PART_BYTES); STABLE_PARTS]),
+        assistant: match name {
+            "media_descriptors_stable_across_pages" => {
+                Some(vec!["x".repeat(STABLE_PART_BYTES); STABLE_PARTS])
+            }
+            "media_descriptors_frame_budget" => Some(mixed_fallback_texts()),
+            _ => None,
+        },
         // Two sibling calls in one step instead of one over-frame argument:
         // each call's request to the tool provider fits the daemon frame,
         // while the assistant message holding both does not.
@@ -160,7 +162,6 @@ fn fixture(name: &str) -> Fixture {
         } else {
             vec![]
         },
-        mixed: frame.then(mixed_fallback_texts),
         arguments: if pairing {
             vec![
                 ("id", json!("argument-id")),
@@ -300,12 +301,6 @@ where
     let text = format!("{}🦀{}", "a".repeat(4095), "z".repeat(PART_INLINE_MAX));
     let mut tool = case.mint.call("descriptor-tool");
     tool.result = image;
-    if let Some(texts) = &fixture.multipart {
-        tool.result = case
-            .subject
-            .multipart_tool_result(texts)
-            .ok_or("the media adapter cannot supply multipart results")?;
-    }
     let mut oversize = fixture.oversize.into_iter();
     if let Some(argument) = oversize.next() {
         tool.arguments["oversize"] = argument;
@@ -326,24 +321,18 @@ where
         sibling.arguments["oversize"] = argument;
         calls.push(ScriptedPart::ToolCall(sibling));
     }
-    if let Some(texts) = &fixture.mixed {
-        let Some(result) = case.subject.multipart_tool_result(texts) else {
-            return Ok(Ending::Inapplicable(
-                "the adapter cannot supply a mixed-size multipart result".into(),
-            ));
-        };
-        let mut mixed = case.mint.call("mixed-fallback-tool");
-        mixed.result = result;
-        calls.push(ScriptedPart::ToolCall(mixed));
-    }
-    let turns = vec![
-        ScriptedTurn::new(calls),
-        ScriptedTurn::new(vec![ScriptedPart::Text(if head {
+    // Fallback selection is per message, so keep the below-threshold payloads
+    // together as model text, not as an oversized provider result that §11.3.1
+    // would replace with tool_result_too_large (or a host would join into one part).
+    let answer = match fixture.assistant {
+        Some(texts) => texts.into_iter().map(ScriptedPart::Text).collect(),
+        None => vec![ScriptedPart::Text(if head {
             text.clone()
         } else {
             marker.clone()
-        })]),
-    ];
+        })],
+    };
+    let turns = vec![ScriptedTurn::new(calls), ScriptedTurn::new(answer)];
     let provider_rows = name == "media_descriptors_provider_rows";
     let mut session = case
         .open(
@@ -583,17 +572,10 @@ mod tests {
     /// own tool-result fields, which differ from the reference schema below.
     const ENVELOPE_ALLOWANCE: usize = 16 * 1024;
 
-    fn text_result(texts: &[String]) -> Value {
-        json!({"type":"tool_result","tool_use_id":"call","content":texts
-            .iter()
-            .map(|text| json!({"type":"text","text":text}))
-            .collect::<Vec<_>>()})
-    }
-
     /// Every payload a scripted tool provider receives (a call's arguments)
     /// or returns (a call's result) in the media case `name`, shaped in a
-    /// reference host schema: images as base64 content blocks, multipart
-    /// results as text blocks.
+    /// reference host schema, with images as base64 content blocks. Aggregate
+    /// fallback text is model output, not a provider payload.
     fn provider_payloads(name: &str) -> Vec<(String, Value)> {
         let fixture = fixture(name);
         let image = json!({"type":"image","source":{"type":"base64",
@@ -602,12 +584,6 @@ mod tests {
             "image result".to_owned(),
             json!({"type":"tool_result","tool_use_id":"call","content":[image]}),
         )];
-        if let Some(texts) = &fixture.multipart {
-            payloads.push(("multipart result".to_owned(), text_result(texts)));
-        }
-        if let Some(texts) = &fixture.mixed {
-            payloads.push(("mixed-size result".to_owned(), text_result(texts)));
-        }
         for (i, oversize) in fixture.oversize.into_iter().enumerate() {
             let mut arguments = json!({"marker":"cf-call-0000000000-args","oversize":oversize});
             if i == 0 {
@@ -770,6 +746,41 @@ mod tests {
         assert!(
             over.is_empty(),
             "provider payloads that cannot cross the daemon's {DAEMON_FRAME_MAX}-byte frame: {over:#?}"
+        );
+    }
+
+    #[test]
+    fn media_fixture_result_text_stays_within_provider_limit() {
+        // These reference-schema results contain only text and image blocks.
+        // For negotiated `tool-result/v1` image parts, image bytes do not count
+        // toward the model-visible provider-result limit.
+        fn text_bytes(value: &Value) -> usize {
+            if value["type"] == "text" {
+                return value["text"].as_str().unwrap().len();
+            }
+            match value {
+                Value::Array(items) => items.iter().map(text_bytes).sum(),
+                Value::Object(fields) => fields.values().map(text_bytes).sum(),
+                _ => 0,
+            }
+        }
+        let mut oversized = Vec::new();
+        for name in [
+            "media_descriptors_frame_budget",
+            "media_descriptors_stable_across_pages",
+        ] {
+            for (what, payload) in provider_payloads(name) {
+                if what.ends_with("result") {
+                    let bytes = text_bytes(&payload);
+                    if bytes > 65_536 {
+                        oversized.push(format!("{name}: {what} has {bytes} text bytes"));
+                    }
+                }
+            }
+        }
+        assert!(
+            oversized.is_empty(),
+            "oversized provider results: {oversized:#?}"
         );
     }
 }

@@ -1,6 +1,6 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.1** pins `cortexkit-role-llm-runner =0.8.1`, the compatibility
+Version **0.17.2** pins `cortexkit-role-llm-runner =0.8.1`, the compatibility
 patch for the breaking 0.8 release of the existing `llm-runner/v1` role. The runner's
 [CONTRACT.md](../cortexkit-role-llm-runner/CONTRACT.md) is normative; the public
 `CASES` registry names every executable case, its requirements and what it
@@ -79,9 +79,12 @@ opaque part keys come from the served envelope, not a reader's invented index.
 | `archive_pruning_provider_blocks_pruning` | Prune a plan with a compaction provider before acceptance is specified. |
 | `tool_result_too_large_is_error` | Cut provider output short or lose the synthetic reason, measured bytes, limit or discard text. |
 | `tool_result_too_large_not_repeated` | Dispatch an oversized-result call again. |
+| `output_refs_without_compaction_unknown_tag` | Resolve a reply reference without `plan.compaction_item`, change its `unresolved` / `unknown_tag` record after another tool output, or serve content for it instead of `unknown_ref`. |
 
-Each new check is exercised against a deliberately faulty fake and verifies
-rejection under the case's name. Existing unrelated admission, send receipts,
+Each new case is exercised against a deliberately faulty fake and verifies
+rejection under the case's name. The unnumbered-reference case has
+immediate- and late-resolution fakes; no fake reaches its `unknown_ref`
+read check. Existing unrelated admission, send receipts,
 run results, usage, display/live events, attachments, retention, cancellation,
 structured output, tool identity and crash guarantees remain in the registry.
 
@@ -92,8 +95,12 @@ provider and model; the test does not synthesize routing replies.
 
 ## Part numbers without the removed tags group
 
-The retained `part_tag` template slot and immutable `output_refs` cases still
-need the number actually shown for a message/part. Implement
+The retained `delivery_order_template_part_gone_refused` and numbered
+`output_refs_*` fixtures need the number actually shown for a message/part.
+They are **not applicable** when the kit's opening plan has no
+`compaction_item`. The kit and adapter decide applicability from the opening
+plan's `compaction_item`, never from the runner's answer. If the plan has a
+compaction item, missing shown numbers still fail the existing assertions. Implement
 `shown_part_number(session, mid, part)` using the runner's captured request
 mapping, whose numbers follow
 [compaction A3, Tag numbers](../cortexkit-role-compaction/CONTRACT.md#a3-tag-numbers). The kit does not compute numbers
@@ -101,7 +108,34 @@ from read ordinals or part keys and does not call `session.resolve`.
 `part_digests` itself supplies descriptor keys in stored order; no duplicate
 tag-row identity surface is required.
 
+`output_refs_unsupported_plan` does not require numbers. The separate
+`output_refs_without_compaction_unknown_tag` case removes `compaction_item`
+from the adapter's output-reference plan, writes a reply reference after a
+tool output, and checks `state: "unresolved"`, `reason: "unknown_tag"` and
+`tag: "1"` (§9.13). It appends another tool output and checks the original
+records are unchanged. `session.output_ref_read` must refuse `unknown_ref`
+both before and after that append. The numbered `output_refs_*` fixtures and
+`output_refs_without_compaction_unknown_tag` require the runner to declare
+`output_refs`; the unsupported-plan case runs on non-advertisers.
+
 ## Oversized results and historical snapshot fixtures
+
+`media_descriptors_frame_budget` and `media_descriptors_stable_across_pages`
+put their aggregate fallback text in one **assistant message**, not a tool
+result. The 19 mixed-size or 14 equal-size parts each fit `PART_INLINE_MAX`
+but together exceed `DESCRIPTOR_MESSAGE_MAX`. The former checks largest-first
+selection (including the earlier-part tie break); the latter requires exactly
+two `text_ref`s for its 14 assistant text parts, not counting the image's
+`media_ref`, and identical read messages on single-message pages with
+`max_bytes: 1024`.
+The frame case also keeps two sibling calls with over-threshold arguments
+and requires an inline read of their combined message to refuse
+`reply_too_large`. The aggregate text is assistant output, so it no longer
+consumes the provider-result budget, and no host has to keep separate text
+parts inside one tool result. The image must use a negotiated result format
+that leaves image bytes out of the model-visible measure (`tool-result/v1`
+image parts). The kit's guard checks text bytes in its reference fixture
+schema, not every adapter's wire result.
 
 `oversized_tool_result` decodes the actual native stored size-error result,
 including its reason, `bytes`, `limit`, error state and model-visible text.

@@ -121,7 +121,7 @@ where
         "delivery_order_unnamed_sender_refused" => passed(unnamed_sender(case).await),
         "delivery_order_template_renders_as_system" => passed(template_renders(case).await),
         "delivery_order_bad_slot_refused" => passed(bad_slot(case).await),
-        "delivery_order_template_part_gone_refused" => passed(part_gone(case).await),
+        "delivery_order_template_part_gone_refused" => part_gone(case).await,
         "delivery_order_ungranted_interrupt_refused" => passed(ungranted_interrupt(case).await),
         "delivery_order_granted_interrupt_interrupts" => granted_interrupt(case).await,
         "delivery_order_named_sender_queue_string_admitted" => {
@@ -1446,7 +1446,7 @@ where
 /// slot names a part the session does not show is refused
 /// `template_part_gone` naming the slot, writing nothing; one naming a part
 /// it shows is accepted.
-async fn part_gone<S>(case: &Case<'_, S>) -> Check
+async fn part_gone<S>(case: &Case<'_, S>) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
@@ -1473,6 +1473,12 @@ where
         .subject
         .send_fields_with_plan(&session.name, true, &members)
         .ok_or("the subject builds no plan carrying senders, which this case requires")?;
+    if !crate::send_helpers::has_compaction_item(&fields) {
+        return Ok(Ending::Inapplicable(
+            "the kit's opening plan has no plan.compaction_item, so no part numbers are shown"
+                .into(),
+        ));
+    }
     let opening = case.mint.next("part-gone-opening");
     send_and_wait(case, &mut session, Some(&fields), &opening, &Map::new()).await?;
     let named = case
@@ -1544,7 +1550,7 @@ where
         )
         .await?,
     )?;
-    Ok(())
+    Ok(Ending::Passed)
 }
 
 async fn bad_slot<S>(case: &Case<'_, S>) -> Check

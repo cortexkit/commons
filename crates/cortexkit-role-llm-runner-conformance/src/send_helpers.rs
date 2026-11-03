@@ -10,6 +10,15 @@ use cortexkit_role_llm_runner::{describe::RoleDescribe, ops, send::SendReply};
 use serde_json::{json, Map, Value};
 type Check = Result<(), String>;
 
+/// Applicability follows the plan the kit sends, not numbers reported by the runner.
+/// Without a compaction item there is no compaction A3 numbering to test.
+pub(crate) fn has_compaction_item(fields: &Map<String, Value>) -> bool {
+    fields
+        .get("plan")
+        .and_then(|plan| plan.get("compaction_item"))
+        .is_some_and(|item| !item.is_null())
+}
+
 pub(crate) async fn require_declared<R: RunnerRoute>(route: &R, group: &str, op: &str) -> Check {
     let describe: RoleDescribe = decode(
         "role.describe",

@@ -1,7 +1,7 @@
 //! Immutable output-reference records, observed through the runner's routes.
 
 use crate::{
-    cases::{Case, Ending},
+    cases::{Case, Ending, Session},
     drive::{call, decode, expect_code, expect_error, expect_field, expect_ok, read_all},
     route::RunnerRoute,
     subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
@@ -165,6 +165,87 @@ fn stored_tool_text<S: LlmRunnerSubject>(
     }
 }
 
+async fn without_compaction<S>(
+    case: &Case<'_, S>,
+    session: &mut Session<S::Route>,
+    mut fields: Map<String, Value>,
+) -> Check<Ending>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    // Keep the adapter's tool fixture, but deliberately open an unnumbered session.
+    if let Some(plan) = fields.get_mut("plan").and_then(Value::as_object_mut) {
+        plan.remove("compaction_item");
+    }
+    case.subject
+        .install_script(
+            &session.name,
+            Script {
+                turns: vec![
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(case.mint.call("unnumbered"))]),
+                    ScriptedTurn::new(vec![ScriptedPart::Text("$$tc(1)".into())]),
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(case.mint.call("later-output"))]),
+                    ScriptedTurn::new(vec![ScriptedPart::Text("later output".into())]),
+                ],
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    crate::send_helpers::send_and_wait(
+        case,
+        session,
+        Some(&fields),
+        "write an unnumbered reference",
+        &Map::new(),
+    )
+    .await?;
+    let sets = descriptors(&session.route).await?;
+    let descriptor = sets
+        .iter()
+        .find(|set| set.count > 0 && set.call_key.is_none())
+        .ok_or("unnumbered reference has no output_refs descriptor")?;
+    let before = records(&session.route, descriptor).await?;
+    if before.len() != 1
+        || before[0].tag.as_deref() != Some("1")
+        || before[0].state != "unresolved"
+        || before[0].reason.as_deref() != Some("unknown_tag")
+    {
+        return Err(
+            "without plan.compaction_item, a reference must record unresolved / unknown_tag".into(),
+        );
+    }
+    for later in [false, true] {
+        if later {
+            crate::send_helpers::send_and_wait(
+                case,
+                session,
+                None,
+                "append another tool output",
+                &Map::new(),
+            )
+            .await?;
+            if records(&session.route, descriptor).await? != before {
+                return Err("an unnumbered reference changed after a later tool output".into());
+            }
+        }
+        expect_code(
+            "unnumbered reference content",
+            &expect_error(
+                "unnumbered reference content",
+                call(
+                    &session.route,
+                    ops::SESSION_OUTPUT_REF_READ,
+                    json!({"ref_id":before[0].ref_id,"offset":0,"length":1}),
+                )
+                .await?,
+            )?,
+            "unknown_ref",
+        )?;
+    }
+    Ok(Ending::Passed)
+}
+
 pub async fn run<S>(case: &Case<'_, S>, name: &str) -> Check<Ending>
 where
     S: LlmRunnerSubject,
@@ -248,6 +329,15 @@ where
         .subject
         .output_refs_fields(&session.name)
         .map_err(|e| e.to_string())?;
+    if name == "output_refs_without_compaction_unknown_tag" {
+        return without_compaction(case, &mut session, fields).await;
+    }
+    if !crate::send_helpers::has_compaction_item(&fields) {
+        return Ok(Ending::Inapplicable(
+            "the kit's opening plan has no plan.compaction_item, so no part numbers are shown"
+                .into(),
+        ));
+    }
     let marker = case.mint.next("stored-output");
     let user_marker = case.mint.next("user-text");
     let model_marker = case.mint.next("model-text");

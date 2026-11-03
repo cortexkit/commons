@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.17.2
+
+- Grade numbered `output_refs_*` fixtures and
+  `delivery_order_template_part_gone_refused` inapplicable when the kit's
+  opening plan has no `compaction_item`. Applicability follows the kit and
+  adapter's admission fields, not missing numbers in a runner reply. Plans
+  with a compaction item retain the existing assertions and still fail when
+  required shown numbers are missing. The unsupported-plan case is unchanged.
+- Add `output_refs_without_compaction_unknown_tag`: remove `compaction_item`
+  from the adapter's reference plan and check a reply reference records
+  `unresolved` / `unknown_tag` with `tag: "1"`, remains unchanged after another
+  tool output, and refuses content reads as `unknown_ref` before and after.
+  Faulty fakes resolve the reference immediately or after the later output;
+  both are rejected by the new case's name. Keep the contract pin at `=0.8.1`.
+- Move the aggregate text in `media_descriptors_frame_budget` and
+  `media_descriptors_stable_across_pages` from oversized multipart tool
+  results to separate text parts in one assistant message. Each fixture
+  still exceeds `DESCRIPTOR_MESSAGE_MAX` with individually inline-sized
+  text, preserving largest-first/tie selection and per-message page
+  stability checks, so the fallback text no longer comes from a tool result
+  that §11.3.1 would replace with `tool_result_too_large`. The image still
+  relies on a negotiated format that excludes image bytes from that measure.
+  The frame case keeps its two oversize sibling call arguments and inline
+  `reply_too_large` check. Neither case needs multipart tool-result storage.
+
 ## 0.17.1
 
 - Pin `cortexkit-role-llm-runner =0.8.1`. Its `ReadRequest` and

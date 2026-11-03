@@ -99,6 +99,14 @@ pub(super) fn capture(sess: &Sess, record: &Value, defects: &Defects) -> Value {
     }
     if let Some(defect) = defects.output_refs.filter(|name| sess.name.contains(name)) {
         match defect {
+            "output_refs_without_compaction_unknown_tag" => {
+                for set in &mut sets {
+                    for record in &mut set.records {
+                        record.state = "resolved".into();
+                        record.reason = None;
+                    }
+                }
+            }
             "output_refs_scanning" => {
                 if record["parts"].to_string().contains("$$tc(") && sets[0].records.is_empty() {
                     let mut r = Resolution::new();
@@ -183,8 +191,24 @@ pub(super) fn capture(sess: &Sess, record: &Value, defects: &Defects) -> Value {
 }
 
 pub(super) fn apply(sess: &mut Sess, kind: &str, record: &Value, defects: &Defects) {
-    let defect = defects.output_refs.filter(|name| sess.name.contains(name));
+    let defect = defects.output_refs.filter(|name| {
+        sess.name.contains(name)
+            || (*name == "output_refs_without_compaction_late_resolution"
+                && sess
+                    .name
+                    .contains("output_refs_without_compaction_unknown_tag"))
+    });
     if kind == "step" {
+        if defect == Some("output_refs_without_compaction_late_resolution")
+            && record["parts"].to_string().contains("later output")
+        {
+            for set in &mut sess.output_refs.sets {
+                for record in &mut set.records {
+                    record.state = "resolved".into();
+                    record.reason = None;
+                }
+            }
+        }
         let mid = sess.messages.last().unwrap().mid.clone();
         let sets: Vec<StoredSet> =
             serde_json::from_value(record["output_sets"].clone()).unwrap_or_default();

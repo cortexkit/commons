@@ -258,6 +258,7 @@ pub struct Defects {
     pub session_usage_unknown_zero: bool,
     pub head_model_from_plan: bool,
     pub output_refs: Option<&'static str>,
+    pub shown_part_numbers_missing: bool,
     pub held_calls_never_listed: bool,
     pub held_calls_stale: bool,
     pub held_calls_event_missing: bool,
@@ -918,6 +919,7 @@ struct Sess {
     head_model: Option<cortexkit_role_llm_runner::read::HeadModel>,
     output_refs: output_refs::State,
     output_refs_enabled: bool,
+    has_compaction_item: bool,
     attachment_accepts: Option<bool>,
     ever_served: bool,
     standalone_handed_off: bool,
@@ -1052,6 +1054,9 @@ fn rendered_texts(sess: &Sess) -> Vec<String> {
 
 fn part_numbers(sess: &Sess) -> BTreeMap<(String, String), u64> {
     let mut numbers = BTreeMap::new();
+    if !sess.has_compaction_item {
+        return numbers;
+    }
     let mut next = sess.number_offset + 1;
     for message in sess.archive.iter().chain(&sess.messages) {
         for (key, _) in media::parts(&message.body) {
@@ -1533,6 +1538,7 @@ impl Module {
                         .filter(|value| !value.is_null())
                         .map(|value| serde_json::from_value(value.clone()).unwrap()),
                     output_refs_enabled: record["output_refs_enabled"] == json!(true),
+                    has_compaction_item: record["has_compaction_item"] == json!(true),
                     rich_ui_plan: record["rich_ui_plan"] == json!(true),
                     rich_ui: record
                         .get("rich_ui")
@@ -3725,6 +3731,7 @@ impl Module {
                 json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage,
                         "tools": tools,
                         "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("tool_items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
+                        "has_compaction_item": request.plan.as_ref().and_then(|plan|plan.get("compaction_item")).is_some_and(|item| !item.is_null()),
                         "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
                         "readers": request.plan.as_ref().and_then(|plan| plan.get("readers")),
                         "rich_ui_plan": rich_ui_plan, "rich_ui": rich_ui,
@@ -5158,6 +5165,7 @@ pub struct FakeSubject {
     pub head_sender_fixtures: bool,
     pub head_sender_group: bool,
     pub output_refs_group: bool,
+    pub without_compaction_item: bool,
     /// Declare `call_identity`: display tool calls and live tool events
     /// carry each call's `call_key` and dispatched `schema_pin`.
     pub call_identity_group: bool,
@@ -5296,6 +5304,7 @@ impl FakeSubject {
             model_failure_fixture: true,
             finish_reason_fixture: true,
             output_refs_group: false,
+            without_compaction_item: false,
             call_identity_group: false,
             rich_ui_stamp_group: false,
             upfront_group: false,
@@ -5584,6 +5593,9 @@ impl LlmRunnerSubject for FakeSubject {
         Ok(true)
     }
     fn shown_part_number(&self, session: &str, mid: &str, part: &str) -> Option<u64> {
+        if self.defects.shown_part_numbers_missing {
+            return None;
+        }
         self.modules
             .lock()
             .unwrap()
@@ -5838,6 +5850,10 @@ impl LlmRunnerSubject for FakeSubject {
     fn output_refs_fields(&self, session: &str) -> Result<Map<String, Value>, HarnessError> {
         let mut fields = self.send_fields(session, true);
         fields["plan"]["tool_items"] = json!([{"provider":TOOL_MODULE,"output_refs":true}]);
+        if !self.without_compaction_item {
+            fields["plan"]["compaction_item"] =
+                json!({"provider":"fixture-compaction","preset":"identity"});
+        }
         Ok(fields)
     }
 
@@ -6204,6 +6220,12 @@ impl LlmRunnerSubject for FakeSubject {
         let mut fields = self.send_fields(session, first);
         if let Some(plan) = fields.get_mut("plan").and_then(Value::as_object_mut) {
             plan.extend(members.clone());
+            if session.contains("order-part-gone") && !self.without_compaction_item {
+                plan.insert(
+                    "compaction_item".into(),
+                    json!({"provider":"fixture-compaction","preset":"identity"}),
+                );
+            }
         }
         Some(fields)
     }
