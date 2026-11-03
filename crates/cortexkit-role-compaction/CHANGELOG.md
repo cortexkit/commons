@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.2.3
+
+- The contract now says who may call the runner (W2.5). A runner admits a
+  `compaction-runner/v1` route only when the daemon-attested caller is the
+  session's selected provider, `compaction_item.provider` of the plan applied
+  to the session, for every op on that role, reads included. Otherwise it
+  refuses `compaction_not_permitted` at bind, and it may also refuse single
+  calls. `detail.reason` is an open string; `provider_mismatch`,
+  `no_compaction_item` and `session_not_held` are defined. Before, the
+  contract did not specify this check.
+- When a change takes effect that leaves a caller without that authority (a
+  different provider, no compaction item, or the runner no longer holding the
+  session), the runner closes that caller's routes or refuses every later call
+  on them. A runner may instead refuse a refresh that changes the provider.
+- On `compaction_not_permitted`, or when the runner closes such a route, the
+  provider suspends work for that session, keeps its state and resumes only
+  after a later Setup from the same runner for the same session answers
+  `ready`. A runner calls Setup on the new provider when
+  an applied plan changes provider (S1).
+- Add `codes::COMPACTION_NOT_PERMITTED`, the `not_permitted_reasons`
+  constants and `Refusal::compaction_not_permitted`, with the
+  `refusal-compaction-not-permitted.json` vector. The crate supplies the wire
+  form only; runners implement the check.
+
 ## 0.2.2
 
 - The contract now requires a runner whose Setup is refused (any code) or

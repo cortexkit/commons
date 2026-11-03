@@ -153,6 +153,18 @@ impl Refusal {
     pub fn unknown_session() -> Self {
         Self::new(codes::UNKNOWN_SESSION, "no Setup for this session", None)
     }
+
+    /// Builds the `compaction_not_permitted` refusal a runner returns at bind,
+    /// or on a single call, under W2.5. This helper performs no authorization
+    /// check and does not validate `reason`: the defined reasons are in
+    /// [`not_permitted_reasons`], and any other string is carried as given.
+    pub fn compaction_not_permitted(reason: &str) -> Self {
+        Self::new(
+            codes::COMPACTION_NOT_PERMITTED,
+            "the caller is not this session's compaction provider",
+            Some(json!({ "reason": reason })),
+        )
+    }
 }
 
 /// Refusal codes. Each names why.
@@ -170,6 +182,22 @@ pub mod codes {
     /// step-transform-provider/v2, which refuses each unbound transform.hook
     /// call while answering role.describe and transform.declare on any route.
     pub const ROUTE_UNBOUND: &str = "route_unbound";
+    /// A `compaction-runner/v1` route or call whose attested caller the runner
+    /// cannot authorize for the bound session (W2.5). `detail.reason` says why.
+    pub const COMPACTION_NOT_PERMITTED: &str = "compaction_not_permitted";
+}
+
+/// The `detail.reason` strings defined today for a `compaction_not_permitted`
+/// refusal. The set is open: a provider handles an unknown reason exactly like
+/// a defined one (W2.5, W1.5).
+pub mod not_permitted_reasons {
+    /// The applied plan's compaction item names a different provider.
+    pub const PROVIDER_MISMATCH: &str = "provider_mismatch";
+    /// The applied plan has no compaction item.
+    pub const NO_COMPACTION_ITEM: &str = "no_compaction_item";
+    /// The route carries a bind identity, but the runner holds no session
+    /// under this contract for it.
+    pub const SESSION_NOT_HELD: &str = "session_not_held";
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ use cortexkit_role_compaction::{
         AppliedViewAnswer, AppliedViewRequest, ApplyViewAnswer, ApplyViewRequest, Edit, EditOp,
         InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
     },
-    wire::{self, codes, Refusal},
+    wire::{self, codes, not_permitted_reasons, Refusal},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
@@ -406,6 +406,12 @@ fn samples() -> Vec<(&'static str, Value)> {
                 codes::ROUTE_UNBOUND,
                 "Expected a bound session",
                 None,
+            )),
+        ),
+        (
+            "refusal-compaction-not-permitted.json",
+            value(Refusal::compaction_not_permitted(
+                not_permitted_reasons::PROVIDER_MISMATCH,
             )),
         ),
     ]);

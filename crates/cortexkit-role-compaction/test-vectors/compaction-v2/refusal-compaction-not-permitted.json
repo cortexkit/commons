@@ -1,0 +1,7 @@
+{
+  "code": "compaction_not_permitted",
+  "detail": {
+    "reason": "provider_mismatch"
+  },
+  "message": "the caller is not this session's compaction provider"
+}

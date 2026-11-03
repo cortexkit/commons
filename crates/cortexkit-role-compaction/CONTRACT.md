@@ -22,7 +22,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | R5 | A session's preset is a name only. The provider decides what each preset enables; the runner never sends feature flags. |
 | R6 | A session's provider also serves its tools (`tool-provider/v1`: `tool.catalog`, `tool.call`) and the `pre_user` hook (`step-transform-provider/v2`, defined by the `cortexkit-role-step-transform-provider` crate from 0.5.0: `transform.declare`, `transform.hook`). This contract does not redefine them. |
 | R7 | Every compaction call and every `transform.hook` is about the session its route is bound to. Each side opens one route per session and per role to the other (W2); step-transform discovery and declaration may also use a route without a session (W2.1). No request body names a runner, a session or a project. |
-| R8 | Identity comes only from the daemon: the caller is the module the daemon attests for the route, the session is the route's bind identity, and the project is the daemon's scope stamp on the route. Refusals: W2.4. |
+| R8 | Identity comes only from the daemon: the caller is the module the daemon attests for the route, the session is the route's bind identity, and the project is the daemon's scope stamp on the route. Refusals: W2.4; who may call the runner: W2.5. |
 
 
 ## A2. The neutral part model
@@ -53,7 +53,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| S1 | The runner calls `compaction.setup` (W5.1) when it starts serving a session whose preset has a compaction provider, after its own restart, before the next send after a Setup that failed with no view applied (W1.3a), and when a notice answers `setup_required` or a ride is refused `unknown_session`. |
+| S1 | The runner calls `compaction.setup` (W5.1) when it starts serving a session whose preset has a compaction provider, when an applied plan names a different compaction provider (to the new provider, W2.5), after its own restart, before the next send after a Setup that failed with no view applied (W1.3a), and when a notice answers `setup_required` or a ride is refused `unknown_session`. |
 | S2 | Setup either answers `ready` or fails with a refusal (W1.3) naming why. It never carries content, and the provider never reads the transcript inside it. |
 | S3 | A second Setup for a session the provider already holds keeps the provider's state; both sides restart the notice count (W5.2 `seq`). |
 | S4 | If the applied view differs from the one the provider holds (version or checksum), the provider adopts the runner's with `session.applied_view`. |
@@ -175,6 +175,7 @@ Codes and what the caller does next:
 | `unknown_method` | `method` | The route's role does not serve this method. | A bug in the caller: log it, do not retry. On `compaction.setup` (for example from a provider that predates this contract), the runner handles it as a refused Setup (W1.3a). |
 | `unknown_preset` | `preset` | Setup names a preset the provider does not know. | The runner logs it and handles it as a refused Setup (W1.3a). |
 | `unknown_session` | | A ride for a session the provider holds no Setup for. | The runner treats it as `nothing`, then calls Setup before its next notice. |
+| `compaction_not_permitted` | `reason` | The runner refuses a `compaction-runner/v1` route or call from a caller that is not the session's selected provider (W2.5). | The provider suspends work for that session until a new Setup answers `ready` (W2.5). |
 
 **W1.3a A refused or unanswered Setup.** When `compaction.setup` is refused, with any code (`invalid_params`, `unknown_method` and `unknown_preset` included), or gets no answer within the runner's deadline, the runner gets no new views from that Setup:
 
@@ -205,6 +206,7 @@ Codes and what the caller does next:
 | Output format | provider and runner | `output` is never replaced; the whole part may still be dropped. |
 | Attachment item or file transport | provider and runner | Never interpreted or rewritten. An `attachments` edit keeps it by naming its id, or removes it by leaving the id out, as for a drop. |
 | Edit `op`, insert `at` or inserted message `role` | runner | The view is refused `unsupported_edit` (W6.5). |
+| `compaction_not_permitted` `detail.reason` | provider | The same as every defined reason: the provider suspends work for that session until a new Setup (W2.5). |
 | `session.entries` `select` | runner | Refused `invalid_params` naming `select`. |
 
 **W1.6 Empty arrays.** An array marked "may be left out when empty" may be omitted and reads as empty. Today these fields are tool `attachments` and `delivered`, notice `events` and `entries`, and inserted message `images`. Checksums are computed over the form that leaves these empty arrays out, even when the received object explicitly includes them, so a known object is normalized before its JSON Canonicalization Scheme (JCS) serialization (this crate's typed serializers do it). Hashing raw JSON as received does not normalize it. Empty arrays inside opaque payloads (tool `input`, replace `value`) are never removed.
@@ -219,22 +221,42 @@ Codes and what the caller does next:
 | `tool-provider` `v1` | `tool.catalog`, `tool.call` (published) |
 | `step-transform-provider` `v2` | `role.describe` and `transform.declare` are answered on any route of this role, including module-level routes and scoped routes opened before a session exists, so a plan composer can declare before hook routes exist. `transform.hook` requires a route bound to a session; otherwise that call is refused `route_unbound` (W2.4). |
 
-**W2.2 Routes the provider opens to the runner,** one per session and per role, bound the same way:
+**W2.2 Routes the provider opens to the runner,** one per session and per role, bound the same way. Only the session's own compaction provider may open a `compaction-runner/v1` route (W2.5):
 
 | Role | Ops on it |
 |---|---|
 | `compaction-runner` `v1` | `session.entries`, `session.apply_view`, `session.applied_view` |
 | `llm-runner` `v1` | `session.send`, `run.result` (published) |
 
-**W2.3 Identity.** A session is keyed by three values, none from a request body: `runner`, the module id the daemon attests for the route (for example `example-runner`); `harness`, the host the session lives in (for example `opencode`, `pi`); and `session`, the host’s own session id. `harness` and `session` stay the same when a session moves from a standalone host to a runner. The project is the daemon’s scope stamp on the route: `workdir` and, when present, `project_id`.
+**W2.3 Identity.** A session is keyed by three values, none from a request body: `runner`, the runner's module id (for example `example-runner`), which is the daemon-attested caller on routes the runner opens (W2.1) and the receiving module on routes the provider opens (W2.2); `harness`, the host the session lives in (for example `opencode`, `pi`); and `session`, the host’s own session id. `harness` and `session` stay the same when a session moves from a standalone host to a runner. The project is the daemon’s scope stamp on the route: `workdir` and, when present, `project_id`.
 
-**W2.4 Route refusals,** given when the route is opened (bind), not per op, except for `step-transform-provider/v2`: `role.describe` and `transform.declare` are answered on any route of that role, including module-level routes and scoped routes opened before a session exists. An unbound route is allowed to open for that role; a `transform.hook` on it is refused per call with `route_unbound`. Compaction routes still require a bound session at bind.
+**W2.4 Route refusals** are normally given when a route is opened (bind), not per op. Two exceptions:
+
+- `compaction_not_permitted` may also be given on a single call. After the caller loses its authority, W2.5 requires the runner either to close its routes or to refuse every later call on them with this code.
+- `step-transform-provider/v2` answers `role.describe` and `transform.declare` on any route of that role, including module-level routes and scoped routes opened before a session exists, and refuses a `transform.hook` on an unbound route with `route_unbound`.
+
+Compaction routes require a bound session at bind.
 
 | Code | Meaning |
 |---|---|
 | `unattested_runner` | The daemon attests no module for the caller. |
 | `unknown_route_role` | The route declares none of the roles its receiver serves, or more than one. |
-| `route_unbound` | The route has no bound session. Refused at bind except for `step-transform-provider/v2`, where it refuses a `transform.hook` call, not `role.describe` or `transform.declare`. |
+| `route_unbound` | The route carries no bind identity. Refused at bind except for `step-transform-provider/v2`, where it refuses a `transform.hook` call, not `role.describe` or `transform.declare`. |
+| `compaction_not_permitted` | The runner cannot authorize the caller for the bound session under W2.5. `detail.reason` says why; its defined values are in W2.5. |
+
+**W2.5 Who may call the runner.** A runner admits a `compaction-runner/v1` route only when the module the daemon attests for the caller is the session's selected provider: `compaction_item.provider` of the plan currently applied to the session. That is the effective plan under llm-runner's next-run rule (its §10.2), not an accepted refresh that is still pending. This covers every op on that role, reads included: `session.entries` returns the transcript and `session.apply_view` changes what the model sees. Otherwise the runner refuses `compaction_not_permitted` at bind. `detail.reason` is an open string; the values defined today are:
+
+| `reason` | When |
+|---|---|
+| `provider_mismatch` | The applied plan's compaction item names a different provider. |
+| `no_compaction_item` | The applied plan has no compaction item. |
+| `session_not_held` | The route carries a bind identity, but the runner holds no session under this contract for it. A route with no bind identity is `route_unbound` (W2.4). |
+
+A runner may also check each call and refuse it with the same code. When a change takes effect that leaves a caller without this authority, the runner closes that caller's existing `compaction-runner/v1` routes for the session, or refuses every later call on them with this code. Such changes are: an applied plan that names a different provider, an applied plan with no compaction item, and the runner ceasing to hold the session. A runner may instead refuse a `session.refresh` that would change the compaction item's provider, with `invalid_params {field: "plan.compaction_item"}`; that conforms too.
+
+On this code, whatever the reason, and when the runner closes such a route, the provider suspends its work for that (`runner`, `harness`, `session`). It logs the reason, keeps its state (S3) and opens no further routes for that session. It resumes only after a later `compaction.setup` from that same attested runner for the same session answers `ready`. Setup does not bypass this rule, and the provider still reads the transcript only after Setup (S2).
+
+On routes the runner opens, the provider keys session state by (`runner`, `harness`, `session`) with `runner` the attested caller (W2.3). Another caller therefore cannot reach an existing runner's state by reusing its bind values, and the provider needs no matching plan check for that isolation.
 
 ## W3. Shared values
 
