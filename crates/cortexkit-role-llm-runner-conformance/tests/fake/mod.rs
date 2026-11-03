@@ -212,6 +212,10 @@ pub struct Defects {
     /// precedence.
     pub closed_default_reads: bool,
     pub scoped_start_hook_unavailable: bool,
+    pub flow_start_hook_unavailable: bool,
+    pub frozen_plan_senders_accepted: Option<&'static str>,
+    pub alternate_empty_identity: bool,
+    pub empty_identity_disagrees: bool,
     pub scoped_start_admits_carrier: bool,
     pub scoped_start_writes_before_refusal: bool,
     pub app_readers_reject_listed: bool,
@@ -796,6 +800,7 @@ struct Killed;
 
 #[derive(Clone, Debug)]
 struct Msg {
+    completed_at: Option<u64>,
     ordinal: u64,
     mid: String,
     body: Value,
@@ -915,6 +920,7 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    frozen_opener: Option<String>,
     number_offset: u64,
     moved_head: Option<cortexkit_role_llm_runner::read::HeadCut>,
     incarnation: Option<String>,
@@ -1020,6 +1026,7 @@ impl Sess {
     fn push(&mut self, body: Value, run_id: &str, calls: Vec<String>) -> u64 {
         let ordinal = self.base + self.messages.len() as u64;
         self.messages.push(Msg {
+            completed_at: None,
             ordinal,
             mid: format!("{}.m{ordinal}", self.lineage),
             host_body: body.clone(),
@@ -1530,6 +1537,7 @@ impl Module {
                 Sess {
                     incarnation: record["incarnation"].as_str().map(str::to_owned),
                     owner: text("owner"),
+                    frozen_opener: record["frozen_opener"].as_str().map(str::to_owned),
                     lineage: text("lineage"),
                     base: 1,
                     first_ordinal: 1,
@@ -2158,6 +2166,9 @@ impl Module {
         let at = record["at"].as_u64().unwrap_or_default();
         for message in sess.messages.iter_mut().filter(|m| m.written_at == 0) {
             message.written_at = at;
+            if message.body["role"] == "assistant" {
+                message.completed_at = Some(at);
+            }
         }
         live_events(sess, &kind, record, &messages_before, &self.world.defects);
         output_refs::apply(sess, &kind, record, &self.world.defects);
@@ -3366,6 +3377,42 @@ impl Module {
                 return Ok(invalid(field));
             }
         }
+        let flow_scope = stamp
+            .scope
+            .as_ref()
+            .is_some_and(|scope| scope.scope_ref == "flow-scope");
+        let frozen_opener = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(session)
+            .and_then(|sess| sess.frozen_opener.clone())
+            .or_else(|| flow_scope.then(|| stamp.principal.clone()));
+        if let Some(opener) = &frozen_opener {
+            if opener != &stamp.principal {
+                return Ok(refuse(
+                    errors::SCOPE_SENDER_MISMATCH,
+                    Some(json!({"field":"sender"})),
+                ));
+            }
+        }
+        if self.world.defects.frozen_plan_senders_accepted != Some("send") {
+            if let Some(plan) = &request.plan {
+                let senders = match order::plan_senders(plan) {
+                    Ok(senders) => senders,
+                    Err(field) => return Ok(invalid(field)),
+                };
+                if let Err(field) = cortexkit_role_llm_runner::scope_admission::check_plan_senders(
+                    frozen_opener.as_deref(),
+                    &senders,
+                ) {
+                    if self.world.defects.frozen_plan_senders_accepted == Some("send_write") {
+                        self.commit(session, json!({"kind":"start", "owner":stamp.scope.as_ref().map(|scope| &scope.owner), "lineage":"refused-plan-write"}))?;
+                    }
+                    return Ok(invalid(field));
+                }
+            }
+        }
         if self.world.serves(groups::DELIVERY_ORDER) {
             match request.delivery_order() {
                 Err(_)
@@ -3397,9 +3444,15 @@ impl Module {
                 if let Err((code, field)) = cortexkit_role_llm_runner::scope_admission::check_start(
                     &scope.owner,
                     &stamp.principal,
-                    cortexkit_role_llm_runner::scope_admission::ScopeKind::Plain,
+                    if flow_scope {
+                        cortexkit_role_llm_runner::scope_admission::ScopeKind::Flow {
+                            flow_id: "flow-fixture",
+                        }
+                    } else {
+                        cortexkit_role_llm_runner::scope_admission::ScopeKind::Plain
+                    },
                     None,
-                    cortexkit_role_llm_runner::scope_admission::StartPolicy::default(),
+                    cortexkit_role_llm_runner::scope_admission::StartPolicy::new(flow_scope, false),
                 ) {
                     if self.world.defects.scoped_start_writes_before_refusal {
                         self.commit(
@@ -3751,7 +3804,8 @@ impl Module {
             };
             self.commit(
                 session,
-                json!({ "kind": "start", "owner": stamp.principal, "lineage": lineage,
+                json!({ "kind": "start", "owner": stamp.scope.as_ref().map_or(stamp.principal.as_str(), |scope| scope.owner.as_str()), "lineage": lineage,
+                        "frozen_opener": frozen_opener,
                         "tools": tools,
                         "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("tool_items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
                         "has_compaction_item": request.plan.as_ref().and_then(|plan|plan.get("compaction_item")).is_some_and(|item| !item.is_null()),
@@ -4082,7 +4136,15 @@ impl Module {
             if request.history_version.is_some() {
                 return refuse(errors::HISTORY_CHANGED, None);
             }
-            return respond(ReadPage::empty(1, "log-1"));
+            return respond(
+                if self.world.defects.alternate_empty_identity
+                    || self.world.defects.empty_identity_disagrees
+                {
+                    ReadPage::empty(73, "unwritten-placeholder")
+                } else {
+                    ReadPage::empty(1, "log-1")
+                },
+            );
         };
         if request.history_version.as_ref().is_some_and(|lineage| {
             *lineage != sess.history_version && !self.world.defects.stale_cursor_accepted
@@ -4156,6 +4218,13 @@ impl Module {
                     || self.world.defects.read_display_facts == Some("default_leak")
                 {
                     entry.client_message_id = m.client_message_id.clone();
+                    entry.completed_at = match self.world.defects.read_display_facts {
+                        Some("completion_missing") => None,
+                        Some("completion_on_user") if m.body["role"] == "user" => {
+                            Some(m.written_at)
+                        }
+                        _ => m.completed_at,
+                    };
                     let times = self.world.read_tool_times.lock().unwrap();
                     entry.tool_times = m
                         .calls
@@ -4329,7 +4398,11 @@ impl Module {
         }
         let sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get(session) else {
-            let mut head = HeadMeta::empty(1, "log-1");
+            let mut head = if self.world.defects.alternate_empty_identity {
+                HeadMeta::empty(73, "unwritten-placeholder")
+            } else {
+                HeadMeta::empty(1, "log-1")
+            };
             if stamp.principal == "reserved:owner" && !self.world.defects.head_sender_owner_absent {
                 head = head.with_sender(cortexkit_role_llm_runner::read::HeadSender::for_owner(
                     self.head_supported_modes(),
@@ -6140,6 +6213,21 @@ impl LlmRunnerSubject for FakeSubject {
         Some((carrier, owner))
     }
 
+    fn flow_session_start_stamps(&self) -> Option<(RouteStamp, RouteStamp)> {
+        if self.defects.flow_start_hook_unavailable {
+            return None;
+        }
+        let mut owner = self.owner_stamp();
+        owner.scope = Some(cortexkit_role_harness::ScopeStamp {
+            owner: owner.principal.clone(),
+            scope_ref: "flow-scope".into(),
+            scope_epoch: 1,
+        });
+        let mut opener = owner.clone();
+        opener.principal = "flow-carrier".into();
+        Some((opener, owner))
+    }
+
     async fn session_route(
         &self,
         handle: &FakeHandle,
@@ -6481,6 +6569,10 @@ impl LlmRunnerSubject for FakeSubject {
 
     fn delivery_clock_now_ms(&self) -> Option<u64> {
         (self.defects.succession != Some("missing_clock")).then(|| self.world().now())
+    }
+
+    fn reports_read_completed_at(&self) -> bool {
+        self.defects.read_display_facts != Some("completion_missing_hook")
     }
 
     async fn seed_read_tool_times(

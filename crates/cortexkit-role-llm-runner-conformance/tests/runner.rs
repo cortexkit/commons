@@ -3,6 +3,97 @@
 
 mod fake;
 
+fn frozen_plan_subject(defect: Option<&'static str>) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        frozen_plan_senders_accepted: defect,
+        ..Defects::default()
+    });
+    subject.capabilities.extend([
+        Capability::Plans,
+        Capability::DeliveryOrder,
+        Capability::SessionChange,
+    ]);
+    subject
+}
+
+#[tokio::test]
+async fn frozen_plan_senders_send_faithful_runner_passes() {
+    let report = run(&frozen_plan_subject(None)).await;
+    assert_feature_passed(&report, "frozen_plan_senders_send_refused");
+}
+
+#[tokio::test]
+async fn frozen_plan_senders_refresh_faithful_runner_passes() {
+    let report = run(&frozen_plan_subject(None)).await;
+    assert_feature_passed(&report, "frozen_plan_senders_refresh_refused");
+}
+
+#[tokio::test]
+async fn frozen_plan_senders_accepting_fakes_fail_by_case_name() {
+    for (defect, name) in [
+        ("send", "frozen_plan_senders_send_refused"),
+        ("refresh", "frozen_plan_senders_refresh_refused"),
+    ] {
+        let report = run(&frozen_plan_subject(Some(defect))).await;
+        let reason = failed(&report, name);
+        assert!(reason.contains("not refused"), "{name}: {reason}");
+        assert!(report.render().contains(&format!("FAIL {name}")));
+    }
+}
+
+#[tokio::test]
+async fn frozen_plan_senders_missing_flow_hook_is_inapplicable_by_name() {
+    let mut subject = frozen_plan_subject(None);
+    subject.defects.flow_start_hook_unavailable = true;
+    let report = run(&subject).await;
+    for name in [
+        "frozen_plan_senders_send_refused",
+        "frozen_plan_senders_refresh_refused",
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn frozen_plan_senders_write_before_refusal_fakes_fail_by_case_name() {
+    for (defect, name) in [
+        ("send_write", "frozen_plan_senders_send_refused"),
+        ("refresh_write", "frozen_plan_senders_refresh_refused"),
+    ] {
+        let report = run(&frozen_plan_subject(Some(defect))).await;
+        let reason = failed(&report, name);
+        assert!(reason.contains("head or history"), "{name}: {reason}");
+        assert!(report.render().contains(&format!("FAIL {name}")));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn retention_honoured_accepts_another_placeholder_identity() {
+    let mut subject = FakeSubject::new(Defects {
+        alternate_empty_identity: true,
+        ..Defects::default()
+    });
+    subject.enable_retention();
+    let report = run(&subject).await;
+    assert_feature_passed(&report, "retention_honoured");
+}
+
+#[tokio::test(start_paused = true)]
+async fn retention_honoured_rejects_disagreeing_placeholder_identities() {
+    let mut subject = FakeSubject::new(Defects {
+        empty_identity_disagrees: true,
+        ..Defects::default()
+    });
+    subject.enable_retention();
+    let report = run(&subject).await;
+    let reason = failed(&report, "retention_honoured");
+    assert!(reason.contains("never-written"), "{reason}");
+}
+
 #[tokio::test]
 async fn scoped_session_start_owner_only_accepts_owner_guard() {
     let report = run(&FakeSubject::new(Defects::default())).await;
@@ -7675,6 +7766,38 @@ fn read_facts_subject(defect: Option<&'static str>) -> FakeSubject {
     );
     subject.capabilities.insert(Capability::ClientMessageId);
     subject
+}
+
+#[tokio::test]
+async fn read_display_facts_completed_at_faithful_runner_passes() {
+    let report = run(&read_facts_subject(None)).await;
+    assert_feature_passed(&report, "read_display_facts_completed_at");
+}
+
+#[tokio::test]
+async fn read_display_facts_completed_at_faults_fail_by_case_name() {
+    for defect in ["completion_missing", "completion_on_user"] {
+        let report = run(&read_facts_subject(Some(defect))).await;
+        let reason = failed(&report, "read_display_facts_completed_at");
+        assert!(reason.contains("completed_at"), "{defect}: {reason}");
+        assert!(report
+            .render()
+            .contains("FAIL read_display_facts_completed_at"));
+    }
+}
+
+#[tokio::test]
+async fn read_display_facts_completed_at_missing_host_finish_is_inapplicable_by_name() {
+    let report = run(&read_facts_subject(Some("completion_missing_hook"))).await;
+    assert!(
+        matches!(
+            report.outcome("read_display_facts_completed_at"),
+            Some(CaseOutcome::Inapplicable { .. })
+        ),
+        "{}",
+        report.render()
+    );
+    assert_feature_passed(&report, "read_display_facts_opt_in_envelope");
 }
 
 #[tokio::test]

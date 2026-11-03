@@ -156,3 +156,60 @@ fn samples_round_trip_and_pin_unchanged_message_values() {
         assert_eq!(serde_json::to_value(request).unwrap(), succession[key]);
     }
 }
+
+#[test]
+fn completed_at_and_reasoning_summaries_round_trip_without_changing_message_bytes() {
+    use cortexkit_role_llm_runner::{
+        display,
+        read::{ReadPage, ReasoningSummary},
+    };
+    let facts: serde_json::Value = serde_json::from_str(include_str!(
+        "../test-vectors/llm-runner-v1/read-display-facts.json"
+    ))
+    .unwrap();
+    let plain: ReadPage = serde_json::from_value(facts["assistant_page"].clone()).unwrap();
+    let plain_bytes = serde_json::to_vec(&plain).unwrap();
+    assert_eq!(
+        serde_json::to_value(&plain).unwrap(),
+        facts["assistant_page"]
+    );
+    for (key, member) in [
+        ("completed_page", "completed_at"),
+        ("reasoning_summaries_page", "reasoning_summaries"),
+    ] {
+        let page: ReadPage = serde_json::from_value(facts[key].clone()).unwrap();
+        assert_eq!(serde_json::to_value(&page).unwrap(), facts[key]);
+        assert_eq!(page.messages[0].message, plain.messages[0].message);
+        let mut stripped = serde_json::to_value(&page).unwrap();
+        stripped["messages"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove(member);
+        let stripped: ReadPage = serde_json::from_value(stripped).unwrap();
+        assert_eq!(serde_json::to_vec(&stripped).unwrap(), plain_bytes);
+    }
+    let entry = plain.messages[0].clone().with_completed_at(200);
+    assert_eq!(
+        serde_json::to_value(&entry).unwrap(),
+        facts["completed_page"]["messages"][0]
+    );
+    let summary = ReasoningSummary::new(1, "An invented summary.");
+    let wire = serde_json::to_value(&summary).unwrap();
+    let decoded: ReasoningSummary = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(decoded, summary);
+    assert_eq!(
+        wire,
+        serde_json::json!({"part":1,"text":"An invented summary."})
+    );
+    assert_eq!(
+        display::reasoning_summary(&plain.messages[0].message["content"][1]).as_deref(),
+        Some(summary.text.as_str())
+    );
+    let entry = plain.messages[0]
+        .clone()
+        .with_reasoning_summaries(vec![summary]);
+    assert_eq!(
+        serde_json::to_value(&entry).unwrap(),
+        facts["reasoning_summaries_page"]["messages"][0]
+    );
+}

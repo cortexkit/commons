@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.8.3
+
+- Refuse plans naming anyone but the frozen flow/run opener at send admission
+  and refresh, before any write, as `invalid_params` naming `plan.senders`.
+  Add the pure `scope_admission::check_plan_senders` helper.
+- Add opt-in `completed_at` and `reasoning_summaries` read display facts, with
+  builders and byte-preserving default serialization. Completion is a host
+  finish stamp for assistant entries; summaries index stored content parts.
+- Add `display::reasoning_summary` for readable Responses summaries only,
+  never opaque content. The `anthropic-messages`, `opencode-aisdk` and `pi`
+  projections show such a part as reasoning where they keep it as its own
+  display part, without adding stored parts; Pi's tool-result aggregation is
+  unchanged.
+- Pin runner-initiated host restart/rebuild recovery, for every runner, to
+  the recorded effective surface, without refetch or catalog drift; a pending
+  refresh is processed afterwards under the normal rules. Failed restore or
+  verification ends the next run `host_relaunch_failed`, never the session;
+  provider definition changes end a dispatched call, not the session.
+- Extend display-fact vectors with completion and reasoning-summary read
+  samples; default message bytes and digests are unchanged.
+
 ## 0.8.2
 
 - Require the attested owner to create a session under a plain scope, before

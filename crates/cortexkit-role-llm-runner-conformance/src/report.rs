@@ -141,7 +141,8 @@ pub const CASES: &[CaseSpec] = &[
     CaseSpec { name: "sender_succession_undeclared_refused", requires: ORDER, requires_any: &[], requires_undeclared_any: &[Capability::SenderSuccession], checks: "an undeclared succeeds plan is refused naming the indexed field, with no transcript write" },
     case("delivery_deadline_retry_keeps_original_expiry", ORDER, "a same-sender changed-deadline retry gets the receipt, but the original deadline still expires the send"),
     case("read_display_facts_opt_in_envelope", READ_FACTS, "client ids and ordered tool times appear beside mid, with the decoded message unchanged"),
-    case("read_display_facts_default_absent", READ_FACTS, "a default read omits both display-fact members"),
+    case("read_display_facts_default_absent", READ_FACTS, "a default read omits all display-fact members"),
+    case("read_display_facts_completed_at", &[Capability::ReadDisplayFacts, Queue, TranscriptReads], "a finished assistant entry carries a host completion time and user entries never do; no comparison against other timestamps; inapplicable when the adapter cannot report host finishes"),
     CaseSpec { name: "read_display_facts_undeclared_refused", requires: READS, requires_any: &[], requires_undeclared_any: &[Capability::ReadDisplayFacts], checks: "an undeclared read opt-in is refused naming include_display_facts" },
     case("service_tier_unsupported_before_model", &[Queue, RunOps],
         "an unsupported level is refused with unsupported_tier before any model call"),
@@ -555,6 +556,16 @@ pub const CASES: &[CaseSpec] = &[
         "scoped_session_start_owner_only",
         &[Queue, TranscriptReads],
         "a non-owner carrier's first send under a plain scope is refused scope_owner_mismatch with no visible session: the owner sees an empty read and head, and no ready baseline; the case observes wire replies, not storage, and is inapplicable without the adapter's plain-scope route hook",
+    ),
+    case(
+        "frozen_plan_senders_send_refused",
+        &[Queue, TranscriptReads, Capability::Plans, Capability::DeliveryOrder],
+        "a send under an admitted flow scope refuses a plan naming anyone but the frozen opener as invalid_params naming plan.senders, with unchanged head/history; inapplicable without real flow-scope routes",
+    ),
+    case(
+        "frozen_plan_senders_refresh_refused",
+        &[Queue, TranscriptReads, Capability::Plans, Capability::DeliveryOrder, Capability::SessionChange],
+        "a refresh under an admitted flow scope refuses a plan naming anyone but the frozen opener as invalid_params naming plan.senders, with unchanged head/history; inapplicable without real flow-scope routes",
     ),
     case(
         "baseline_matches_admission_reply",

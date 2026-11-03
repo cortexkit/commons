@@ -150,6 +150,9 @@ where
             "describe_states_max_bytes" => passed(self.describe_states_max_bytes().await),
             "baseline_owner_only" => passed(self.baseline_owner_only().await),
             "scoped_session_start_owner_only" => crate::scope_admission::run(self).await,
+            "frozen_plan_senders_refresh_refused" | "frozen_plan_senders_send_refused" => {
+                crate::scope_admission::plan_senders(self, name).await
+            }
             "baseline_matches_admission_reply" => self.baseline_matches_admission_reply().await,
             "tail_read_is_newest_page" => passed(self.tail_read_is_newest_page().await),
             "range_read_stops_by_count" => passed(self.range_read_stops_by_count().await),
@@ -172,6 +175,7 @@ where
                 crate::sender_succession::run(self, name).await
             }
             "read_display_facts_opt_in_envelope"
+            | "read_display_facts_completed_at"
             | "read_display_facts_default_absent"
             | "read_display_facts_undeclared_refused" => {
                 crate::read_display_facts::run(self, name).await

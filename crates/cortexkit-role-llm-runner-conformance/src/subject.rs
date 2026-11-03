@@ -116,7 +116,8 @@ pub enum Capability {
     DeliveryOrder,
     /// One-hop retry/status lookup through a plan sender's predecessor.
     SenderSuccession,
-    /// Opt-in client ids and tool times on raw read entries.
+    /// Opt-in client ids, tool times, assistant completion times and reasoning
+    /// summaries on raw read entries.
     ReadDisplayFacts,
     /// `send.status`: what a re-send of a `send_id` would answer, without
     /// its body.
@@ -1104,6 +1105,15 @@ pub trait LlmRunnerSubject: Harness {
         None
     }
 
+    /// An admitted flow-scope opener and its scope owner, under the same
+    /// daemon-attested flow scope. The opener may be the owner. Routes opened
+    /// with these stamps must really carry the flow attribute, not a request
+    /// field. Return None when the runner or adapter cannot open such sessions;
+    /// frozen-plan sender cases then report inapplicable by name.
+    fn flow_session_start_stamps(&self) -> Option<(RouteStamp, RouteStamp)> {
+        None
+    }
+
     /// Open the management route for `session` under `stamp`, as a real
     /// caller with that identity would. Cases use each session name once per
     /// conformance run; the runner adapter may map the name to a native
@@ -1663,6 +1673,13 @@ pub trait LlmRunnerSubject: Harness {
     /// deadline checks; `None` makes those checks inapplicable.
     fn delivery_clock_now_ms(&self) -> Option<u64> {
         None
+    }
+
+    /// Whether scripted assistant messages record host finish stamps that can
+    /// be exposed as `completed_at`. False makes the completion display-fact
+    /// case inapplicable by name, without skipping the other display facts.
+    fn reports_read_completed_at(&self) -> bool {
+        false
     }
 
     /// Seed per-call display metadata independently of the read route. The

@@ -199,7 +199,8 @@ pub mod capabilities {
     /// `session.history` with `form: "display"`: each entry as a canonical
     /// row (`display::DisplayRow`), cut only by the caller's `limits`.
     pub const HISTORY_DISPLAY: &str = "history_display";
-    /// Opt-in client ids and per-call times beside `session.read` message bodies.
+    /// Opt-in client ids, per-call times, assistant completion times and
+    /// reasoning summaries beside `session.read` message bodies.
     pub const READ_DISPLAY_FACTS: &str = "read_display_facts";
     /// The pinned live events on `session.subscribe` (`live::LiveEvent`):
     /// durable message, tool and run lifecycle events, display deltas with

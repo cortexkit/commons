@@ -241,6 +241,25 @@ impl Module {
         if let Err(field) = request.check_sender_succession(&self.world.groups) {
             return Ok(invalid(&field));
         }
+        if self.world.defects.frozen_plan_senders_accepted != Some("refresh") {
+            let senders =
+                match cortexkit_role_llm_runner::delivery_order::plan_senders(&request.plan) {
+                    Ok(senders) => senders,
+                    Err(field) => return Ok(invalid(field)),
+                };
+            if let Err(field) = cortexkit_role_llm_runner::scope_admission::check_plan_senders(
+                sess.frozen_opener.as_deref(),
+                &senders,
+            ) {
+                if self.world.defects.frozen_plan_senders_accepted == Some("refresh_write") {
+                    self.commit(
+                        session,
+                        json!({"kind":"start", "owner":sess.owner, "lineage":"refused-plan-write"}),
+                    )?;
+                }
+                return Ok(invalid(field));
+            }
+        }
         if let Err(field) = request.check_policy() {
             return Ok(invalid(field));
         }

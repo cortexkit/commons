@@ -636,6 +636,48 @@ fn anthropic_file(block: &Value, part: String) -> Result<Option<FilePart>, Proje
     }
 }
 
+/// Extract readable OpenAI Responses summary text from a stored
+/// `redacted_reasoning {provider_format, data}` part. Accepts only the
+/// `open_ai_responses` and `open_ai_responses_chatgpt` formats, with `data` a
+/// string holding the Responses item as JSON. Returns `None` for any other
+/// part, or when no non-empty summary text exists. Opaque content never
+/// contributes to the returned text.
+pub fn reasoning_summary(part: &Value) -> Option<String> {
+    use crate::archive_prunes_reasoning::provider_state_formats::{
+        OPEN_AI_RESPONSES, OPEN_AI_RESPONSES_CHATGPT,
+    };
+    if str_of(part, "type") != "redacted_reasoning"
+        || !matches!(
+            str_of(part, "provider_format"),
+            OPEN_AI_RESPONSES | OPEN_AI_RESPONSES_CHATGPT
+        )
+    {
+        return None;
+    }
+    let item: Value = serde_json::from_str(part.get("data")?.as_str()?).ok()?;
+    let texts: Vec<_> = item
+        .get("summary")?
+        .as_array()?
+        .iter()
+        .filter_map(|entry| {
+            (str_of(entry, "type") == "summary_text")
+                .then(|| entry.get("text").and_then(Value::as_str))
+                .flatten()
+        })
+        .collect();
+    if texts.iter().all(|text| text.is_empty()) {
+        return None;
+    }
+    Some(texts.join("\n\n"))
+}
+
+fn redacted_reasoning(part: String, stored: &Value) -> DisplayPart {
+    match reasoning_summary(stored) {
+        Some(text) => DisplayPart::Reasoning(TextPart::new(part, text)),
+        None => other(part, "redacted_reasoning"),
+    }
+}
+
 fn other(part: String, kind: &str) -> DisplayPart {
     DisplayPart::Other(OtherPart {
         part,
@@ -648,7 +690,9 @@ fn other(part: String, kind: &str) -> DisplayPart {
 /// blocks. `text` and `thinking` blocks become text and reasoning,
 /// `tool_use` a tool call, `tool_result` a tool result (its nested text
 /// joined, its nested images and documents as files), `image` and
-/// `document` files. Any other block, a `redacted_thinking` or a
+/// `document` files. A Responses `redacted_reasoning` block becomes a reasoning
+/// part when [`reasoning_summary`] returns text, and an `other` part when it
+/// returns `None`. Any other block, a `redacted_thinking` or a
 /// text-sourced document included, is an `other` part. The body names no
 /// model, so the runner fills `model` itself.
 pub fn anthropic_messages(
@@ -678,6 +722,7 @@ pub fn anthropic_messages(
         let key = index.to_string();
         let kind = str_of(block, "type");
         parts.push(match kind {
+            "redacted_reasoning" => redacted_reasoning(key, block),
             "text" => DisplayPart::Text(TextPart::new(key, str_of(block, "text"))),
             "thinking" => DisplayPart::Reasoning(TextPart::new(key, str_of(block, "thinking"))),
             "tool_use" => arguments_part(
@@ -788,7 +833,9 @@ fn opencode_file(value: &Value, part: String) -> Result<FilePart, ProjectionErro
 /// `completed` or `error`, its result (`state.output` with
 /// `state.attachments` as files, or `state.error` as an error); a `file`
 /// part a file. The bookkeeping parts ([`OPENCODE_BOOKKEEPING_PARTS`]) are
-/// left out, and any other part is an `other` part.
+/// left out. A Responses `redacted_reasoning` part becomes a reasoning part when
+/// [`reasoning_summary`] returns text, and an `other` part when it returns
+/// `None`; any other part is an `other` part.
 pub fn opencode_aisdk(
     body: &Value,
     limits: Option<&Limits>,
@@ -813,6 +860,7 @@ pub fn opencode_aisdk(
             .map_or_else(|| index.to_string(), str::to_owned);
         let kind = str_of(part, "type");
         match kind {
+            "redacted_reasoning" => parts.push(redacted_reasoning(key, part)),
             "text" => parts.push(DisplayPart::Text(TextPart::new(key, str_of(part, "text")))),
             "reasoning" => parts.push(DisplayPart::Reasoning(TextPart::new(
                 key,
@@ -1077,6 +1125,7 @@ pub fn pi(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, Projectio
     for (index, block) in blocks.iter().enumerate() {
         let key = index.to_string();
         parts.push(match str_of(block, "type") {
+            "redacted_reasoning" => redacted_reasoning(key, block),
             "text" => DisplayPart::Text(TextPart::new(key, str_of(block, "text"))),
             "thinking" => DisplayPart::Reasoning(TextPart::new(key, str_of(block, "thinking"))),
             "toolCall" => arguments_part(
@@ -1286,6 +1335,76 @@ impl DisplayPage {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reasoning_summary_reads_only_responses_summary_texts() {
+        use serde_json::json;
+        let mut part = json!({"type":"redacted_reasoning",
+            "provider_format":"open_ai_responses",
+            "data":json!({"type":"reasoning", "id":"rs_invented",
+                "summary":[{"type":"summary_text", "text":"First observation."},
+                    {"type":"ignored", "text":"Do not show this."},
+                    {"type":"summary_text", "text":"Second observation."}],
+                "encrypted_content":"invented-opaque-bytes"}).to_string()});
+        for format in ["open_ai_responses", "open_ai_responses_chatgpt"] {
+            part["provider_format"] = json!(format);
+            assert_eq!(
+                reasoning_summary(&part).as_deref(),
+                Some("First observation.\n\nSecond observation.")
+            );
+        }
+        part["provider_format"] = json!("other-provider");
+        assert_eq!(reasoning_summary(&part), None);
+        part["provider_format"] = json!("open_ai_responses");
+        part["type"] = json!("reasoning");
+        assert_eq!(reasoning_summary(&part), None);
+        part["type"] = json!("redacted_reasoning");
+        for data in [
+            "not JSON",
+            "{}",
+            r#"{"summary":[]}"#,
+            r#"{"summary":[{"type":"summary_text","text":""}],"encrypted_content":"invented"}"#,
+        ] {
+            part["data"] = json!(data);
+            assert_eq!(reasoning_summary(&part), None, "{data}");
+        }
+    }
+
+    #[test]
+    fn reasoning_summary_projects_without_adding_stored_parts() {
+        use serde_json::json;
+        let part = json!({"type":"redacted_reasoning",
+            "provider_format":"open_ai_responses_chatgpt",
+            "data":r#"{"summary":[{"type":"summary_text","text":"A visible thought."}],"encrypted_content":"invented"}"#});
+        let bodies = [
+            (
+                ANTHROPIC_MESSAGES,
+                json!({"role":"assistant", "content":[part.clone()]}),
+            ),
+            (
+                OPENCODE_AISDK,
+                json!({"info":{"role":"assistant"}, "parts":[part.clone()]}),
+            ),
+            (
+                PI,
+                json!({"type":"message", "message":{"role":"assistant", "content":[part]}}),
+            ),
+        ];
+        for (profile, body) in bodies {
+            let original = body.clone();
+            let row = project(profile, &body, None).unwrap();
+            assert_eq!(body, original);
+            assert_eq!(
+                row.parts,
+                vec![DisplayPart::Reasoning(TextPart::new(
+                    "0",
+                    "A visible thought."
+                ))],
+                "{profile}"
+            );
+            assert_eq!(row.text, "");
+        }
+    }
 
     #[test]
     fn base64_decode_accepts_canonical_padded_and_unpadded_input() {

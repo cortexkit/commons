@@ -1,13 +1,20 @@
 //! Pure checks for session creation under a daemon-attested scope.
 //!
-//! These helpers implement the start-policy and frozen comparisons for inputs
-//! from an already-validated bind stamp and durable session record, never
-//! request-supplied identities. They do not validate the stamp, perform plan
-//! admission, persist the freeze or select execution authority. The runner
-//! must enforce their results before any write. Unscoped sends bypass this
-//! module; plan admission remains a separate check.
+//! These helpers implement scoped-start, frozen-send and plan-sender checks.
+//! Route and opener identities must come from an already-validated bind stamp
+//! and the session's recorded freeze, or from the validated creation decision
+//! before its first write. Plan-sender identities come from the supplied plan
+//! and are compared with that trusted opener; they are not evidence of the
+//! caller's identity. The helpers do not validate stamps, perform other plan
+//! admission checks, persist the freeze or select execution authority. The
+//! runner must enforce their results before any write. Unscoped sends bypass
+//! the start and frozen-send checks; a plan without a frozen opener is
+//! unaffected.
 
-use crate::errors::{self, scope_mismatch_fields as fields};
+use crate::{
+    delivery_order::{PlanSender, PLAN_SENDERS_FIELD},
+    errors::{self, scope_mismatch_fields as fields},
+};
 
 /// The kind and identifying attribute of the route's attested session scope.
 /// A scope never carries both `flow_id` and `run_id`: the daemon refuses such
@@ -135,6 +142,23 @@ pub fn check_frozen(
     Ok(())
 }
 
+/// Check a plan's senders against the opener frozen by a flow or run scope.
+/// An absent freeze leaves ordinary sessions unaffected. An absent or empty
+/// sender list grants nobody else access. The runner must refuse with
+/// `invalid_params` naming the returned field before writing any state, on
+/// both send admission and refresh, whether or not it uses this helper.
+pub fn check_plan_senders(
+    frozen_opener: Option<&str>,
+    senders: &[PlanSender],
+) -> Result<(), &'static str> {
+    if let Some(opener) = frozen_opener {
+        if senders.iter().any(|sender| sender.module != opener) {
+            return Err(PLAN_SENDERS_FIELD);
+        }
+    }
+    Ok(())
+}
+
 fn attributes(kind: ScopeKind<'_>) -> (Option<&str>, Option<&str>) {
     match kind {
         ScopeKind::Plain => (None, None),
@@ -146,6 +170,26 @@ fn attributes(kind: ScopeKind<'_>) -> (Option<&str>, Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frozen_plan_senders_admit_only_the_opener() {
+        let opener = vec![PlanSender::new("flow-carrier")];
+        let other = vec![PlanSender::new("owner-module")];
+        let mixed = vec![
+            PlanSender::new("flow-carrier"),
+            PlanSender::new("owner-module"),
+        ];
+        for senders in [[].as_slice(), opener.as_slice()] {
+            assert_eq!(check_plan_senders(Some("flow-carrier"), senders), Ok(()));
+        }
+        for senders in [&other, &mixed] {
+            assert_eq!(
+                check_plan_senders(Some("flow-carrier"), senders),
+                Err("plan.senders")
+            );
+            assert_eq!(check_plan_senders(None, senders), Ok(()));
+        }
+    }
 
     #[test]
     fn scoped_start_obeys_owner_and_optional_policy_before_freezing() {

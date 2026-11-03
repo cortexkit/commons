@@ -1,4 +1,4 @@
-# llm-runner/v1 vectors for runner 0.8.2
+# llm-runner/v1 vectors for runner 0.8.3
 
 The role capability remains `llm-runner/v1`; 0.8.0 is a breaking contract
 release. `src/vectors.rs::FILES` is the exact ordered inventory and

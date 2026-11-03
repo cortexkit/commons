@@ -461,7 +461,7 @@ where
                 meta.model = None;
                 meta.sender = None;
                 if read(&unwritten.route, &ReadRequest::tail()).await?
-                    != ReadPage::empty(1, "log-1")
+                    != ReadPage::empty(meta.history_version, meta.incarnation.clone())
                     || meta != HeadMeta::empty(meta.history_version, meta.incarnation.clone())
                 {
                     return Err("never-written session did not keep its empty success".into());

@@ -42,6 +42,9 @@ where
             "describe groups do not support this question".into(),
         ));
     }
+    if name == "read_display_facts_completed_at" {
+        return completed_at(case).await;
+    }
     let calls: Vec<_> = (0..3)
         .map(|index| case.mint.call(&format!("display-call-{index}")))
         .collect();
@@ -106,7 +109,10 @@ where
         .ok_or("read page has no messages array")?;
     if name == "read_display_facts_default_absent" {
         if entries.iter().any(|entry| {
-            entry.get("client_message_id").is_some() || entry.get("tool_times").is_some()
+            entry.get("client_message_id").is_some()
+                || entry.get("tool_times").is_some()
+                || entry.get("completed_at").is_some()
+                || entry.get("reasoning_summaries").is_some()
         }) {
             return Err("default read exposed display facts without opt-in".into());
         }
@@ -156,12 +162,65 @@ where
             .ok_or("read entry is not an object")?
             .remove("client_message_id");
         stripped.as_object_mut().unwrap().remove("tool_times");
+        stripped.as_object_mut().unwrap().remove("completed_at");
+        stripped
+            .as_object_mut()
+            .unwrap()
+            .remove("reasoning_summaries");
         if &stripped != plain {
             return Err("opt-in changed other envelope members".into());
         }
     }
     if !user_found || !calls_found {
         return Err("fixture did not expose the sent user message and call batch".into());
+    }
+    Ok(Ending::Passed)
+}
+
+async fn completed_at<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    if !case.subject.reports_read_completed_at() {
+        return Ok(Ending::Inapplicable(
+            "adapter cannot report host assistant finishes".into(),
+        ));
+    }
+    let (answer, marker) = case.mint.text("finished-assistant");
+    let mut session = case
+        .open(
+            "read-completed",
+            Script {
+                turns: vec![ScriptedTurn::new(vec![answer])],
+            },
+        )
+        .await?;
+    let prompt = case.mint.next("completion-user");
+    send_and_wait(case, &mut session, None, &prompt, &serde_json::Map::new()).await?;
+    let decorated = page(&session.route, true).await?;
+    let mut assistant = false;
+    let mut user = false;
+    for entry in decorated["messages"]
+        .as_array()
+        .ok_or("read page has no messages")?
+    {
+        let body = entry["message"].to_string();
+        if body.contains(&marker) {
+            assistant = true;
+            entry["completed_at"]
+                .as_u64()
+                .ok_or("finished assistant entry omitted completed_at")?;
+        }
+        if body.contains(&prompt) || entry["role"] == "user" {
+            user = true;
+            if entry.get("completed_at").is_some() {
+                return Err("user entry carried completed_at".into());
+            }
+        }
+    }
+    if !assistant || !user {
+        return Err("completion fixture did not expose both assistant and user entries".into());
     }
     Ok(Ending::Passed)
 }

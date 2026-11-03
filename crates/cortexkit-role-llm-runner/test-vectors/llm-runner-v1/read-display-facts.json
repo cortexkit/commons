@@ -129,6 +129,53 @@
     "history_version": 1,
     "incarnation": "log-1"
   },
+  "assistant_page": {
+    "messages": [{
+      "ordinal": 3,
+      "mid": "m2",
+      "message": {"role": "assistant", "content": [
+        {"type": "text", "text": "An invented answer."},
+        {"type": "redacted_reasoning", "provider_format": "open_ai_responses",
+          "data": "{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"An invented summary.\"}],\"encrypted_content\":\"invented-opaque-bytes\"}"}
+      ]},
+      "role": "assistant",
+      "written_at": 100
+    }],
+    "history_version": 1,
+    "incarnation": "log-1"
+  },
+  "completed_page": {
+    "messages": [{
+      "ordinal": 3,
+      "mid": "m2",
+      "message": {"role": "assistant", "content": [
+        {"type": "text", "text": "An invented answer."},
+        {"type": "redacted_reasoning", "provider_format": "open_ai_responses",
+          "data": "{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"An invented summary.\"}],\"encrypted_content\":\"invented-opaque-bytes\"}"}
+      ]},
+      "role": "assistant",
+      "written_at": 100,
+      "completed_at": 200
+    }],
+    "history_version": 1,
+    "incarnation": "log-1"
+  },
+  "reasoning_summaries_page": {
+    "messages": [{
+      "ordinal": 3,
+      "mid": "m2",
+      "message": {"role": "assistant", "content": [
+        {"type": "text", "text": "An invented answer."},
+        {"type": "redacted_reasoning", "provider_format": "open_ai_responses",
+          "data": "{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\",\"text\":\"An invented summary.\"}],\"encrypted_content\":\"invented-opaque-bytes\"}"}
+      ]},
+      "role": "assistant",
+      "written_at": 100,
+      "reasoning_summaries": [{"part": 1, "text": "An invented summary."}]
+    }],
+    "history_version": 1,
+    "incarnation": "log-1"
+  },
   "undeclared_refusal": {
     "code": "invalid_params",
     "detail": {

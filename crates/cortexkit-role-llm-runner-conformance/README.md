@@ -1,7 +1,9 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.3** pins `cortexkit-role-llm-runner =0.8.2`, which specifies the
-scoped session-creation policy and frozen-send checks. The role remains
+Version **0.17.4** pins `cortexkit-role-llm-runner =0.8.3`, adding frozen-plan
+sender refusals, completion display facts and a correction to compare
+never-written reads against their head identity.
+The role remains
 `llm-runner/v1` after the breaking 0.8 release. The runner's
 [CONTRACT.md](../cortexkit-role-llm-runner/CONTRACT.md) is normative; the public
 `CASES` registry names every executable case, its requirements and what it
@@ -95,8 +97,21 @@ structured output, tool identity and crash guarantees remain in the registry.
 under the same daemon-admitted plain scope, with no flow or run id. The adapter
 must open real routes with those stamps. Without the hook, the scoped-start
 case reports `Inapplicable` by name. Flow and run scope creation is optional
-under the contract, so no case requires admission there. The case observes
-the wire replies and checks for no visible session; it cannot inspect storage.
+under the contract, so no case requires admission there without a fixture.
+`flow_session_start_stamps()` optionally supplies a real flow-scope opener and
+owner. The `frozen_plan_senders_send_refused` and
+`frozen_plan_senders_refresh_refused` cases require `invalid_params` naming
+`plan.senders` for a plan naming anyone but that opener, with unchanged head,
+history and baseline. Without real flow-scope routes they are inapplicable by
+name. `reports_read_completed_at()` enables `read_display_facts_completed_at`:
+a finished assistant entry has a host finish stamp, and user entries have none.
+The case does not compare it to other timestamps: `written_at` can be first
+ingest rather than creation time. Without host finish reporting that
+case is inapplicable, without skipping the other display-fact checks.
+These cases observe public wire replies, not storage. The scoped-start case
+checks that refusal leaves no visible session. The frozen-plan cases check
+that refusal leaves the existing session's head, history and baseline
+unchanged.
 
 The whole-display case uses a kept non-error result above the app's result
 bound and below the provider acceptance limit. It does not exercise error-result

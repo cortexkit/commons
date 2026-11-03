@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.4
+
+- Pin `cortexkit-role-llm-runner =0.8.3`. Add flow-scope frozen-plan sender
+  refusal cases for refresh and send, checking `plan.senders` and unchanged
+  head/history, with optional real-flow adapter fixtures and faulty fakes.
+- Extend display-fact checks with assistant completion stamps and a named
+  inapplicable outcome when the adapter cannot report host finishes. Default
+  reads omit all display facts. Faulty fakes exercise completion violations.
+  The completion case does not check the time's value against any other
+  timestamp: `written_at` can be first-ingest time, not creation time.
+- Fix `retention_honoured` to compare a never-written read against its head's
+  `history_version` and `incarnation`, not fixed values `1` and `log-1`.
+  Cover matching arbitrary placeholders and disagreeing read/head identities.
+
 ## 0.17.3
 
 - Pin `cortexkit-role-llm-runner =0.8.2` and add

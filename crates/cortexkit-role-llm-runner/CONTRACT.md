@@ -207,7 +207,7 @@ alias until the next breaking release.
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
-| `read_display_facts` | `session.read` (`include_display_facts`, entry client ids and tool times) | §4.2 |
+| `read_display_facts` | `session.read` (`include_display_facts`, entry client ids, tool times, assistant completion times and reasoning summaries) | §4.2, §4.7.1 |
 | `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `session.send_status` where served | §9.7 |
 | `rich_ui_stamp` | `session.read` (the `include_rich_ui` opt-in), `session.head` (`last_run_rich_ui`); also the rich UI stamp on assistant display rows and `run_started` where those are served | §9.17 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
@@ -480,7 +480,8 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   served message bytes, ordinals, ids, role, write time, delivery identity and
   part keys stay fixed, apart from the precisely listed archive-pruning
   changes (§9.14.1). Later-state envelope fields advance only under their
-  own rules (`run.final`, §6; call attribution, §5). A host-backed runner
+  own rules (`run.final`, §6; call attribution, §5; display facts, below).
+  A host-backed runner
   serves its ingested bytes or rebuilds and checks them against their served
   digest (§4.2.1). A revert, branch switch, host edit (including while the
   runner was stopped), renumbering or recovery rewrite raises history_version
@@ -490,7 +491,8 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   reads. An unfinished pair remains ordinary entries, exactly as W4.2 says.
 - [pinned] **The envelope.** A read entry is `{ordinal, mid, message, run?,
   originals?, tool_calls?, role?, written_at?, delivered_as?, digest?,
-  part_digests?, part_keys?, rich_ui?, client_message_id?, tool_times?}`. Every
+  part_digests?, part_keys?, rich_ui?, client_message_id?, tool_times?,
+  completed_at?, reasoning_summaries?}`. Every
   runner-neutral fact a consumer relies on rides in the envelope, never only
   inside `message`: the position (`ordinal`, `mid`), who spoke (`role`,
   `read::role`: `user`, `assistant`, `tool`, `system`, decoded open),
@@ -512,11 +514,29 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
 - [pinned] A runner declaring `read_display_facts` serves these facts only
   when `include_display_facts` is true, beside `mid` on `read::ReadMessage`,
   never inside `message`. Neither bodies, serializer profiles nor message
-  or part digests change. Without the opt-in both members are absent and
-  default replies keep their exact bytes.
+  or part digests change. These envelope members never enter stored message
+  bodies or the inputs to message and part content digests; the metadata they
+  come from may be stored separately. A stored reasoning part, including any
+  summary inside it, is unchanged and stays part of the normal digest input.
+  Without the opt-in all display-fact members are absent and default replies
+  keep their exact bytes.
 - [pinned] `client_message_id?: string` is present on an entry written by a
   send carrying that id, with exactly the value on its display row (§9.11).
   A host-typed entry or a send without that id carries none.
+- [pinned] `completed_at?: u64`: an assistant entry MUST carry it when the
+  host recorded that message's finish time, and its value is that time in
+  Unix epoch milliseconds (§4.7.1). It is absent while that message is
+  unfinished, when no finish time was recorded, and on every non-assistant
+  entry. A later read of the same entry may gain it.
+- [pinned] `reasoning_summaries?: [{part: u32, text: string}]`
+  (`read::ReasoningSummary`) contains one entry per `redacted_reasoning` part
+  for which `display::reasoning_summary` returns `Some`, in part order. `part`
+  is the zero-based index of the stored top-level content part. When
+  `part_keys` or `part_digests` is present, it names the row at that index;
+  it is not that row's opaque part key.
+  A runner fills it with that helper (or an implementation that produces the
+  same text) and omits an empty list. A runner never stores or serves the
+  summary as an extra message part; served message bytes do not change.
 - [pinned] `tool_times?: [{tool_call_id, started_at?, finished_at?, unanswered?,
   call_key?, schema_pin?}]` (`read::ToolTime`) has one item per tool call,
   in the message's call order. Times and outcomes follow §4.7.1: copy stored
@@ -1221,6 +1241,26 @@ display-ready row for an app's reader on a runner declaring
   text parts as `run.result` does (§6). Media is described by the
   `media_ref` descriptors mode serves (§4.2), never inlined; a URL stays a
   URL.
+- [pinned] A runner or reader that displays reasoning may show the readable
+  summary of a `redacted_reasoning {data, provider_format}` part as a
+  `reasoning` display part. `display::reasoning_summary` accepts only
+  `open_ai_responses` and `open_ai_responses_chatgpt`, with `data` a string
+  holding the Responses item as JSON. It parses `data` and reads its
+  array-valued `summary` member, selects the string `text` of each entry
+  whose `type` is `summary_text` (ignoring other entries and non-string
+  texts), and joins the selected strings with `"\n\n"` in order. It returns
+  none for invalid JSON, a missing or non-array `summary`, or no non-empty
+  selected string; empty strings are kept in an otherwise non-empty join. It
+  never reads or returns `encrypted_content` or another field as text. Other
+  part kinds and formats return none. The `anthropic-messages`,
+  `opencode-aisdk` and `pi` shared projections recognize this part, and
+  `opencode-v2` does not, since its stored format has its own reasoning slots.
+  Where a projection keeps the stored part as its own display part, `Some`
+  becomes a `reasoning` part with the same stored key and `None` an `other
+  {kind: "redacted_reasoning"}` part. Pi's existing tool-result aggregation
+  is unchanged. A runner MUST NOT
+  store or serve it as an extra message part: stored parts are what the
+  session holds and replays, counted by numbering, token counts and digests.
 - [pinned] The row comes from one pure function per serializer profile
   (`display::anthropic_messages`, `display::opencode_aisdk`, or
   `display::project` by name). A runner calls it on the entry's stored body
@@ -1296,7 +1336,15 @@ display-ready row for an app's reader on a runner declaring
   `session.read` entry: everything this section adds is on the display row
   or the request.
 
-### 4.7.1 Tool times and unanswered outcomes
+### 4.7.1 Tool times, completion times and unanswered outcomes
+
+- [pinned] Under `read_display_facts`, with `include_display_facts: true`,
+  an assistant entry MUST carry `completed_at` beside `mid` when the host
+  recorded that message's finish time, never inside the stored message. Its
+  value is that time in Unix epoch milliseconds. It is absent while that
+  message is unfinished, when no finish time was recorded, and on every
+  non-assistant entry. A later read may gain it without changing stored
+  message bytes or content digests.
 
 - [pinned] A display row's `tool_call` part (`display::ToolCallPart`) may
   carry `started_at`, the call's dispatch time, and `finished_at`, the time
@@ -2339,6 +2387,14 @@ Model-view reads and replacement-entry pages are not part of this contract.
   refusal. Sessions without a freeze keep the existing send-admission rules.
   Read admission stays governed by §9.19; the frozen checks apply to sends,
   not reads.
+  On a frozen session, a plan supplied at `session.send` admission or
+  `session.refresh` MUST NOT name any sender other than the frozen opener.
+  A plan that does is refused `invalid_params {field: "plan.senders"}` before
+  anything is written. An absent `senders` list or one naming only the opener
+  is unaffected; sessions without a freeze keep the ordinary plan rules.
+  `scope_admission::check_plan_senders` provides this pure comparison, returning
+  the refusal field. The runner MUST enforce it whether or not it uses the
+  helper.
   `scope_admission::check_start` and `scope_admission::check_frozen` provide
   the start-policy and frozen comparisons for inputs from an already-validated
   bind stamp and durable session record. They do not validate the stamp,
@@ -4411,6 +4467,10 @@ froze for a run to every assistant reply the run writes.
   `session.adopt` refuses a plan other than the one applied at host start
   with the same `plan_drift {frozen, sent}` (§9.5).
 - [pinned] Any refusal during admission writes nothing.
+- [pinned] On a session frozen under a flow or run scope (§9), admission
+  checks the plan's `senders` against the frozen opener, including on the
+  creating send. Naming anyone else refuses `invalid_params {field:
+  "plan.senders"}` before any write (`scope_admission::check_plan_senders`).
 - [pinned] Any tool item's `upfront` requires `tool_upfront` and a well-formed
   list, or admission refuses `invalid_params` naming
   `plan.tool_items[<i>].upfront`. After that item's fetch and exclusions, missing
@@ -4537,6 +4597,9 @@ every request, answer and refusal.
   policy as an accepted refresh) gets the same answer as the refresh it
   repeats, and fetches and writes nothing (`session_change::refresh_order`).
 - [pinned] Refusals, none of which writes anything:
+  - `invalid_params {field: "plan.senders"}` when a session frozen under a
+    flow or run scope receives a plan naming anyone but its frozen opener
+    (§9, `scope_admission::check_plan_senders`);
   - admission's `fetch_unavailable {provider}` (retryable), `plan_stale
     {differences}` and `tool_name_collision {name, providers}` (§10.1);
   - `rung_unsupported {surface, rung}` (`RungUnsupportedDetail`), when the
@@ -4555,6 +4618,29 @@ every request, answer and refusal.
     name is refused the same way, naming those tools. `names` is sorted.
     System text, and which of the set's tools the plan offers, may change.
 
+- [pinned] This rule applies to every session with a stored plan-managed
+  surface, whether or not the runner declares `session_change` or
+  `refresh_relaunch`. When a runner restarts or rebuilds a session's host for
+  its own reasons (its own process restarted, the host crashed, or a parked
+  host resumes), it reinstalls the session's effective surface: the
+  runner-managed tool definitions, offered subset and supplied system text
+  recorded when the current plan last applied. Host-owned tools outside that
+  managed surface are not part of it. Recovery alone never refetches plan
+  items, never accepts or applies a different plan, and never treats a
+  provider's newer catalog, or a host that registers no tools at launch
+  because the runner installs them per request, as drift. It restores the
+  recorded surface first; at the next run boundary an already accepted
+  pending change whose rung has been reached is then processed under the
+  normal application and `refresh_relaunch` rules, and a recovery rebuild may
+  be what reaches that rung. Tools change only through an accepted refresh. `plan_stale` is an admission and refresh refusal (§10.1,
+  §10.2); a runner never ends a session for it, or for any failure to relaunch.
+  If a provider can no longer serve a stored definition, it refuses that call
+  at dispatch (`tool_schema_changed` / `tool_semantics_changed` against the
+  frozen `schema_pin`); that ends the call, not the session. If the runner
+  cannot restore and verify the recorded surface, the next run ends `error`
+  with class `host_relaunch_failed` before any model request, and the session
+  stays; it is never ended.
+
 **Opt-in `refresh_relaunch`.**
 
 - [pinned] This group requires `session_change` and the `session.subscribe`
@@ -4568,7 +4654,7 @@ every request, answer and refusal.
   from the offered subset without changing the host's registered set needs
   no relaunch; neither does changing only system text or which registered
   tools are offered.
-- [pinned] A relaunch happens only at a run boundary with no run in progress,
+- [pinned] A refresh relaunch happens only at a run boundary with no run in progress,
   at the pending change's rung point under the next-run rule: `immediately`
   means the next run; deferred rungs wait for the `session.flush_prefix` or
   rebuild reaching their point. The runner relaunches only that session's
@@ -4873,7 +4959,7 @@ to the provider codes below, this role names the following runner-side class
 
 | Error class | When |
 |---|---|
-| `host_relaunch_failed` | the run ends `error` with no further model request because a required `refresh_relaunch` change could not be installed and verified on the host, a failed relaunch's fallback could not restore and verify the previous surface, or a request's surface that someone else changed mid-run was not restored; a pending change stays pending (§10.2) |
+| `host_relaunch_failed` | the run ends `error` with no further model request because a required `refresh_relaunch` change could not be installed and verified on the host, a failed relaunch's fallback could not restore and verify the previous surface, a request's surface that someone else changed mid-run was not restored, or a runner-initiated host restart or rebuild could not reinstall and verify the stored effective surface; a pending change stays pending and the session is never ended (§10.2) |
 
 [pinned] A run that ends `error` because of a provider names the code
 callers branch on as `provider_code` in its run error, and any finer

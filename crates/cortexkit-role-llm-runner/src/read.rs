@@ -131,8 +131,9 @@ pub struct ReadRequest {
     /// `false`, and a read without it is answered exactly as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub include_rich_ui: bool,
-    /// Add client ids and per-call times beside message bodies. Only served
-    /// by a runner declaring `read_display_facts`; absent means false.
+    /// Add client ids, completion times, reasoning summaries and per-call times
+    /// beside message bodies. Only served by a runner declaring
+    /// `read_display_facts`; absent means false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub include_display_facts: bool,
 }
@@ -441,9 +442,42 @@ pub struct ReadMessage {
     /// Present only with `include_display_facts`, never inside `message`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_message_id: Option<String>,
+    /// When the host recorded this assistant message's finish, in Unix epoch
+    /// milliseconds. Only with `include_display_facts`, where an assistant
+    /// entry must carry it once the host recorded a finish time. Absent while
+    /// the message is unfinished, when no finish was recorded, and on other
+    /// roles. A later read may gain it without changing stored message bytes or
+    /// content digests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<u64>,
+    /// Readable Responses summaries, in stored part order, only with
+    /// `include_display_facts`. This envelope member adds no stored message
+    /// parts and is excluded from message and part content-digest inputs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reasoning_summaries: Vec<ReasoningSummary>,
     /// One item per tool call, in call order, only with `include_display_facts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_times: Vec<ToolTime>,
+}
+
+/// A readable summary of one stored Responses reasoning part, not an extra
+/// message part. `part` is the zero-based index of the stored top-level
+/// content part; with `part_keys` present it names the row at that index, not
+/// that row's opaque key.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ReasoningSummary {
+    pub part: u32,
+    pub text: String,
+}
+
+impl ReasoningSummary {
+    pub fn new(part: u32, text: impl Into<String>) -> Self {
+        Self {
+            part,
+            text: text.into(),
+        }
+    }
 }
 
 /// A read entry's per-call display facts, copied from stored call metadata.
@@ -553,6 +587,16 @@ impl ReadMessage {
         self
     }
 
+    pub fn with_completed_at(mut self, completed_at: u64) -> Self {
+        self.completed_at = Some(completed_at);
+        self
+    }
+
+    pub fn with_reasoning_summaries(mut self, summaries: Vec<ReasoningSummary>) -> Self {
+        self.reasoning_summaries = summaries;
+        self
+    }
+
     pub fn new(ordinal: u64, mid: impl Into<String>, message: Value) -> Self {
         Self {
             ordinal,
@@ -569,6 +613,8 @@ impl ReadMessage {
             delivered_as: None,
             rich_ui: None,
             client_message_id: None,
+            completed_at: None,
+            reasoning_summaries: Vec::new(),
             tool_times: Vec::new(),
         }
     }
