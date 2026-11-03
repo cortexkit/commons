@@ -11,3 +11,13 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/cortexkit/commons"
 authors = ["Ufuk Altinok"]
+
+# The previous compaction contract (cortexkit-role-compaction-provider) still
+# builds against the published llm-runner 0.7 line, which depends on
+# cortexkit-rich-ui-syntax from crates.io. Without this patch the workspace
+# would hold two identical 0.3.0 copies of that crate, and `cargo -p
+# cortexkit-rich-ui-syntax` would refuse as ambiguous. The path copy matches
+# the published 0.3.0. If the path crate moves to an incompatible version,
+# Cargo stops applying this patch and the two copies differ by version.
+[patch.crates-io]
+cortexkit-rich-ui-syntax = { path = "crates/cortexkit-rich-ui-syntax" }

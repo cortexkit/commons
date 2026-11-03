@@ -652,15 +652,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cortexkit-rich-ui-syntax"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "98509395f8f7afce4127b6c6e1f1eaf11ee20fba57a86c27a21da67e10a3bc45"
-dependencies = [
- "pulldown-cmark",
-]
-
-[[package]]
 name = "cortexkit-role-agent-data"
 version = "0.2.4"
 dependencies = [
@@ -773,7 +764,7 @@ version = "0.7.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6de7e5d6e67be031c3049e40f41a3fa78b3bff821bd35dc8c6cf21328593112"
 dependencies = [
- "cortexkit-rich-ui-syntax 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "cortexkit-rich-ui-syntax",
  "serde",
  "serde_jcs",
  "serde_json",
@@ -784,7 +775,7 @@ dependencies = [
 name = "cortexkit-role-llm-runner"
 version = "0.8.0"
 dependencies = [
- "cortexkit-rich-ui-syntax 0.3.0",
+ "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
  "serde",
  "serde_jcs",
@@ -798,7 +789,7 @@ version = "0.17.0"
 dependencies = [
  "async-trait",
  "base64",
- "cortexkit-rich-ui-syntax 0.3.0",
+ "cortexkit-rich-ui-syntax",
  "cortexkit-role-harness",
  "cortexkit-role-llm-runner 0.8.0",
  "cortexkit-role-tool-provider",
