@@ -32,8 +32,8 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | P1 | An entry is every record of the host's transcript, on the active path, that the model sees or that holds part of what it sees, in host order. Marker records are never entries. One rule for every host; which storage records it means per host is W4.2. An entry may have no parts, and then renders nothing. |
 | P2 | The part model covers every content type of the AI SDK's provider prompt (LanguageModelV4), so every model provider's history maps to it (W4.2 to W4.5, W4.10). |
 | P3 | A tool part is one item at the call's position, holding both call and result even when the host stores them apart. Dropping it removes both. |
-| P4 | Compact detail keeps what the provider plans with and leaves out the bulk (W4.8). Checksums are always over the full content. |
-| P5 | A stored entry changes only when a tool call in it gets its result (even when the host stores that result in a later message) or a send is delivered with one of its results (W4.9). It may also gain a previously absent `completed_at`, which is not a transcript change (W4.9). Any other change is a transcript change. |
+| P4 | Compact detail keeps what the provider plans with and leaves out the bulk (W4.8). Checksums use the full-detail projections defined in W7, minus the metadata W7 lists. |
+| P5 | A stored entry changes only when a tool call in it gets its result (even when the host stores that result in a later message) or a send is delivered with one of its results (W4.9). It may also gain a previously absent `completed_at`, which is not a transcript change (W4.9). Count metadata updates alone (W4.11) are not entry changes; an update that also includes a notice trigger still sends the notice normally. Any other change is a transcript change. |
 | P6 | Within a session, a message id is never given to a different message, even after a revert or branch switch; the same message keeps its id if it returns to the active path. A part's id is unique within its message, so within the session's state a provider identifies a part by `(mid, part id)` and keys durable part state on both. |
 
 ## A3. Tag numbers
@@ -63,7 +63,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. An entry only gaining `completed_at` is not such a change (W4.9). |
+| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. An entry only gaining `completed_at` does not require a notice; neither do count metadata updates alone (W4.9, W4.11). An update that also includes a notice trigger still sends the notice normally. |
 | N2 | The provider answers at once and does the work afterwards. The runner never waits on that work. |
 | N3 | The runner sends a session's notices one at a time: the next only after the previous one was answered. Changes made while a notice is unanswered go into the next notice, so a slow provider never builds a queue. Before a ride, the runner sends any change not yet noticed. |
 | N4 | A notice is a convenience, not the source of truth. The provider keeps its own position, and reads any gap with `session.entries`. |
@@ -161,7 +161,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 **W1.1 Requests.** Every op is one request on a route. The body is the JSON object `{"method": "<op name>", "params": <request object>}`. A successful answer's body is the op's answer object.
 
-**W1.2 Values.** The contract's own integer fields (ordinals, counts, sizes, versions, `seq`, and the like) are JSON numbers in the range 0..2^53−1 (0..9007199254740991), so JavaScript `JSON.parse` can round-trip them exactly. Decoding refuses a larger number as `invalid_params` naming the field. This ceiling does not apply inside opaque JSON payloads, such as tool `input` and replace `value`, or to the payload kept for an unknown tagged value (W1.5); those keep their numbers unchanged (W4.4, W7). Unknown fields on known objects are ignored (W1.4), not kept. Times are milliseconds since the Unix epoch, UTC. Sizes are bytes. Token counts are in the model provider's own tokens. Strings are UTF-8. An optional field that is absent is left out of the object, never sent as `null`.
+**W1.2 Values.** The contract's own integer fields (ordinals, counts, sizes, versions, `seq`, and the like) are JSON numbers in the range 0..2^53−1 (0..9007199254740991), so JavaScript `JSON.parse` can round-trip them exactly. Decoding refuses a larger number as `invalid_params` naming the field. This ceiling does not apply inside opaque JSON payloads, such as tool `input` and replace `value`, or to the payload kept for an unknown tagged value (W1.5); those keep their numbers unchanged (W4.4, W7). Unknown fields on known objects are ignored (W1.4), not kept. Times are milliseconds since the Unix epoch, UTC. Sizes are bytes. Token counts the model provider reports (`usage`, `last_prompt_tokens`) are in the model provider's own tokens; runner-sent W4.11 counts use the response's `token_family` counter, which may be a stand-in (`token_family_exact`). Strings are UTF-8. An optional field that is absent is left out of the object, never sent as `null`.
 
 **W1.3 Refusals.** An op that cannot be answered fails with the transport's error frame `{code, message, detail?}`. `code` is a stable snake_case name; `message` is text for people that no program parses; machine-readable fields go in `detail`. A refusal changes nothing on the side that refused.
 
@@ -199,7 +199,7 @@ Codes and what the caller does next:
 | Notice event | provider | A change whose reach it doesn't know: it reads the whole active path again before relying on its state. |
 | `rules.signed_parts` | provider | `bound`. |
 | `rules.history_edit_cost` | provider | `full_resend`. |
-| Part kind | provider | An opaque part (W4.5): it may be dropped, never replaced, and is carried unchanged. |
+| Part kind | provider | An opaque part (W4.5): it may be dropped, never replaced, and its remaining payload is carried unchanged. `tokens` remains reserved Part envelope metadata (W4.11). |
 | Entry role | provider | Every part of that entry is handled as an opaque part. |
 | `seal` | provider and runner | A sealed part: it may be dropped, never replaced (PR5). |
 | Tool `status` | provider and runner | `running`: never dropped, replaced or cut. |
@@ -292,6 +292,8 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | For the current model and account. |
 | `last_prompt_tokens` | integer, optional | The prompt size the model provider reported for the session's newest model request: uncached input plus cache reads plus cache writes. Absent before the first request, or when the provider reported none. Requests of child sessions do not count. |
+| `system_tokens` | `{count, exact}`, optional | Count of the runner's own system text for the next request under these conditions, excluding system entries; in notices only, never rides (W4.11). |
+| `tools_tokens` | `{count, exact}`, optional | Count of the tool definitions for the next request under these conditions; in notices only, never rides (W4.11). |
 
 **W3.6 `Cursor`:** where an entry sits. `ordinal` (W4.1), `mid` (the message id) and `digest` (the entry checksum, W7). A provider holding an entry with the same three values is caught up to it.
 
@@ -319,9 +321,10 @@ An entry is every record on the active path that the model sees or that holds pa
 | `notice` | `NoticeOrigin`, optional | Set when a module or the runner delivered a user-role entry (a reminder, a wake, a notice) rather than a person typing it. `sender`: the module id. `template`: the plan template it was rendered from, when it was. |
 | `written_at` | integer | When the host first stored the message. It does not change when the entry is updated. For a message the runner did not store itself (history from before the runner, a moved session), the host's own write time. |
 | `completed_at` | integer, optional | When the host marked the message finished, from the host's own stamp, in epoch milliseconds under the same integer rules as `written_at` (W1.2). Absent while the entry is unfinished, when the host never marks that kind of message finished (for example a user message), or when imported history has no such stamp. Readers that need a time then use `written_at`. |
-| `digest` | string | Checksum of `role`, `notice` and `parts`, with the parts in full form (W7). |
+| `digest` | string | Checksum of the full-detail projection of `role`, `notice` and `parts` defined in W7, minus the metadata W7 lists. |
 | `parts` | array of `Part` | In host order. May be empty. |
 | `usage` | `StepUsage`, optional | Assistant entries: what the request that produced it reported. |
+| `reasoning_tokens` | `{count, measured}`, optional | Assistant entries: the step's reasoning count (W4.11), separate from reported `usage`. |
 | `generated_under` | `AppliedView`, optional | Assistant entries: the view applied to the request that produced it; absent when none was. PR2 checks against it. |
 
 Allowed kinds by role: `user` (and notices): `text`, `file`. `assistant`: `text`, `reasoning`, `tool`, `file`, `opaque`. `system`: `text`.
@@ -352,9 +355,10 @@ The field is absent while the entry is unfinished, including while a tool part i
 | `kind` | `text`, `reasoning`, `tool`, `file`, `opaque` | W4.4 to W4.6. |
 | `tag` | integer, optional | The part's number (A3), when it is numbered (W4.7). |
 | `seal` | `none`, `signed`, `encrypted` | Below. Absent means `none`. |
-| `digest` | string | Checksum of the part in full form without `id`, `tag` and `digest` (W7): its kind, kind fields and `seal`. |
+| `tokens` | `{count}` or `{input, output}`, optional | Reserved Part envelope member for every kind; W4.11 defines which known kinds carry counts. W1.5 preserves the remaining payload of an unknown kind. |
+| `digest` | string | Checksum of the part in full form without `id`, `tag`, `digest` and `tokens` (W7): its kind, content fields and `seal`. |
 
-- `text`: `text` (string), the text without any tag prefix, cleaned per W4.6 for assistant replies. A text block the host stores empty is not a part: it carries nothing and takes no number, and the runner keeps it with its row (OpenCode 1 keeps one as a separator between signed thinking blocks and sends it as `" "`). Text that becomes empty only through W4.6 cleaning stays a part.
+- `text`: `text` (string), the text without any tag prefix, cleaned per W4.6 for assistant replies; `tokens` (`{count}`, optional, W4.11). A text block the host stores empty is not a part: it carries nothing and takes no number, and the runner keeps it with its row (OpenCode 1 keeps one as a separator between signed thinking blocks and sends it as `" "`). Text that becomes empty only through W4.6 cleaning stays a part.
 - `reasoning`: `text` (string, optional), the visible reasoning text or summary when the model provider returned any; `text_bytes` (integer, optional), its size.
 - `seal` says what the model provider checks when the part is sent back:
   - `signed`: a provider signature binds it to what came before it. Anthropic thinking and redacted thinking; Gemini thought signatures on text, tool calls and files (open point 5).
@@ -377,6 +381,7 @@ The field is absent while the entry is unfinished, including while a tool part i
 | `attachments` | array of `Attachment` | Files and opaque items the result carries besides its text; may be left out when empty. |
 | `approval` | object, optional | A provider-executed call's approval answer: `approved` (boolean) and `reason` (string, optional). |
 | `delivered` | array of `Delivered` | Text sent with delivery `tool_result` (A11) and rendered after this result, in delivery order; may be left out when empty. Each: `sender` (module id), `template` (string, optional), `text` (string; absent in compact form), `text_bytes` (integer). |
+| `tokens` | `{input, output}`, optional | Present only once the result exists; running tools omit it. Separate counts let the provider estimate the saving from replacing the tool's output, keeping the call/result structure (W4.11). |
 
 An `Attachment` is `id` (stable within its tool part) plus the fields of a `file` or an `opaque` item (W4.5), told apart by `kind`.
 
@@ -394,6 +399,8 @@ An `Attachment` is `id` (stable within its tool part) plus the fields of a `file
   | `duration_ms` | integer, optional | For audio and video, when known. |
   | `reasoning` | boolean | The model produced it as part of its reasoning (AI SDK `reasoning-file`). Absent means `false`. |
 
+  A file part may also carry `tokens` (`{count}`, optional), counted by the reading model's image rule. Other media (audio, video, PDF) omit it unless the runner has a counting rule (W4.11).
+
   A transcript `file` part carries metadata only: `session.entries` never returns its bytes. Inserted images are a separate case and carry their bytes as base64 (W6.2).
 - `opaque`: provider-specific content the runner sends back as it is (AI SDK `custom`, Anthropic's server-side fallback). `provider_kind` (string, `provider.type`, for example `anthropic.fallback`) and `size` (integer, optional). It can only be dropped.
 
@@ -407,11 +414,13 @@ Never numbered: reasoning, files, opaque parts, the text of `system` entries, an
 
 The prefix is the number between two section signs followed by one space: `§12§ `. The runner renders it in front of a text part's text and a tool result's `output`. A tool result with no text renders the prefix followed by `[image]` when every attachment is an image, or `[file]` otherwise.
 
-**W4.8 Compact form.** A part in compact form leaves out a tool part's `output`, each `delivered` text (their sizes stay), and a reasoning part's `text`. Everything else, including the full tool `input` and every text part, stays. `digest` is always the full-content checksum, so an edit computed from the compact form names the exact part.
+**W4.8 Compact form.** A part in compact form leaves out a tool part's `output`, each `delivered` text (their sizes stay), and a reasoning part's `text`. Everything else, including the full tool `input` and every text part, stays. `digest` is always the checksum of W7's full-detail projection minus its listed metadata, so an edit computed from compact detail names the exact part.
 
 **W4.9 What may change.** A stored entry changes only when a tool part in it goes from `running` to a final status with its result (also when the host stores that result in a later message), or when a send is delivered with one of its results. The runner then sends the changed entry again in its next notice. Any other change to a stored entry is a transcript change (W5.2 `transcript_changed`).
 
 A stored entry may also gain a previously absent `completed_at`. That alone is not a transcript change: `completed_at` enters none of the W7 checksums, and adding it alone needs no notice. When the same update also changes a tool result or delivers a send, the rules above still apply and the notice carries the entry with its `completed_at`. A `completed_at` once served does not change.
+
+Count metadata updates alone (W4.11) are not entry changes, never divergence, and require no notice; they enter none of the W7 checksums. A changed count under the same family is an update, not a transcript change. If the same update includes a notice trigger, the runner sends the notice normally.
 
 **W4.10 Mapping from the AI SDK provider prompt (LanguageModelV4),** for runners and as the completeness check of this model:
 
@@ -432,6 +441,33 @@ A stored entry may also gain a previously absent `completed_at`. That alone is n
 | Gemini thought signatures (`providerOptions.google.thoughtSignature`) | `seal: signed` on that part |
 
 Provider options a host keeps on a part (cache control, citations) are the runner's: it renders them with the part as it is, and decides which stay valid for a replaced field.
+
+**W4.11 Optional token counts.** These additive fields require no new capability. A runner may send part `tokens` and assistant-entry `reasoning_tokens` in `session.entries` pages and notices, including compact parts. Reasoning parts have no per-part count. An absent count means the provider keeps its own estimate, never zero.
+
+**Coverage.** Part counts cover full content as the runner renders it to the model provider, without message framing, using that family's counter. They describe full content, not a view's rendering.
+
+| Part / field | Counted content |
+|---|---|
+| Text `tokens.count` | Text including its tag prefix when the runner renders one. |
+| Tool `tokens.input` | Tool name plus arguments as rendered. |
+| Tool `tokens.output` | Everything in the result as rendered: text (including any tag prefix), delivered text and images by the reading model's image rule. |
+| File `tokens.count` | The reading model's image rule; other media (audio, video, PDF) omit `tokens` unless the runner has a rule. |
+
+**Families.** Every page or notice carrying any of these counts MUST carry `token_family`. A session has one family at a time. The reader adopts the family named by each response in receipt order and MUST discard held counts of any other family. All counts added by this section in that response use its family. The family is a runner-assigned id for counting rules, not a model-name format (for example `claude-v5/1`); compare the whole string by equality only. It changes whenever the same input would count differently; the runner then recounts everything, for example on a model switch.
+
+Alongside `token_family`, a page or notice may carry `token_family_exact` (boolean). `true` means the family uses the model's own tokenizer; `false` means a stand-in, for example o200k for an unknown model. Absent means unknown and readers treat it as `false`.
+
+**Part stability.** The runner counts each part once for unchanged content within one family. Once sent, that count MUST NOT change while the content and family are unchanged. A part not yet counted omits `tokens`. A tool part gets `tokens` only once its result exists; a running tool omits it. A tool result arriving is a W4.9 change, and its new count accompanies the changed entry.
+
+**Reasoning estimate.** Assistant-entry `reasoning_tokens` is `{count, measured}`. With `measured: false`, the count is the model provider's separately reported reasoning tokens when available. Only when no reasoning figure is reported is it the step's output tokens minus every counted non-reasoning output, files included; omit it when that accounting is unavailable. The estimate may change on a later page.
+
+**Measured reasoning.** With `measured: true`, the runner MUST check from its own serialization that request N's rendered prompt is a byte prefix of request N+1's: system, tools and messages in the provider's wire format as the provider receives them, excluding sampling settings. Checking only the message list handed to a host is insufficient and always means `measured: false`. Request N is the request that produced the assistant entry being measured. The value is input(N+1) − input(N) − A − F. Here input(N) is request N's total prompt tokens as defined for `last_prompt_tokens`: uncached input plus cache reads plus cache writes. A is the count of everything actually appended to the checked prompt between the two requests, as rendered there (not the full-content counts where an edit makes them differ), except the step's reasoning being inferred. F is the family's message-frame cost per appended message, not already in A. Both request prompt totals, the step's reported output tokens (reasoning included, i.e. what the step generated), and every operand of A and F must be available; otherwise no measured value is sent. Keep the value only if 0 ≤ value ≤ that output total.
+
+**Reasoning stability.** Once sent with `measured: true`, the runner MUST freeze the value within its entry and family: no later page in that family may change it; providers may rely on that. On a family change, the runner sends a new value only if it can measure again, otherwise it omits it.
+
+**Surface counts.** Notice conditions may carry `system_tokens` and `tools_tokens`, each `{count, exact}`, for the request the runner sends next under these conditions. They never go in rides. `system_tokens` covers the runner's own system text, not system entries (those are parts); `tools_tokens` covers tool definitions. `exact: true` means the counted bytes are the bytes the model provider receives; `exact: false` means the runner counted what it handed the host, which rendered the final format. Providers may use inexact counts for reporting but SHOULD NOT use them for drop decisions. All `count`, `input` and `output` values follow W1.2; `measured` and `exact` are booleans.
+
+**Notice budget.** The W5.2 budget is on the serialized compact `entries` array. Drop entry counts (`tokens`, `reasoning_tokens`) first, then the entries if still over budget. Condition counts stay, and `token_family` stays whenever any count remains. Providers may read omitted entries and their counts with `session.entries`; condition counts are not returned there. Counts, `token_family` and `token_family_exact` sit outside every W7 checksum.
 
 ## W5. Ops
 
@@ -456,7 +492,7 @@ Answer: `{"answer": "ready"}`. Refusals: `unknown_preset`, `invalid_params`.
 
 ### W5.2 `compaction.notice` (provider)
 
-When the runner sends one: after a message is stored (a user, notice or system entry; an assistant entry at the end of its model step, never while it streams); after an entry changes (W4.9; an entry only gaining `completed_at` does not count); after a revert or branch switch; after it refused a view at a step boundary; after it wrote a host marker. Changes made while a notice is unanswered go into the next one (N3).
+When the runner sends one: after a message is stored (a user, notice or system entry; an assistant entry at the end of its model step, never while it streams); after an entry changes (W4.9; an entry only gaining `completed_at`, or count metadata updates alone, does not count); after a revert or branch switch; after it refused a view at a step boundary; after it wrote a host marker. If an update also includes a notice trigger, send the notice normally. Changes made while a notice is unanswered go into the next one (N3).
 
 Request:
 
@@ -466,8 +502,10 @@ Request:
 | `newest` | `Cursor`, optional | The newest entry after the change; absent only when the transcript is empty, including after a revert to an empty transcript. |
 | `applied_view` | `AppliedView`, optional | The view the runner applies now: not an accepted view still waiting for the next step boundary. Absent when it applies none. |
 | `conditions` | `Conditions` | W3.5. |
+| `token_family` | string, optional | Required when the notice carries W4.11 counts; applies to all of them. |
+| `token_family_exact` | boolean, optional | Alongside `token_family`: the model's own tokenizer (`true`) or a stand-in (`false`); absent is unknown and treated as `false` (W4.11). |
 | `events` | array of `Event` | Below. Empty when nothing but entries changed; may be left out when empty. |
-| `entries` | array of `Entry` | In compact form, oldest first: every entry stored since the previous notice, plus every changed entry again. Empty when they would exceed 1,048,576 bytes of JSON; the provider then reads them. May be left out when empty. |
+| `entries` | array of `Entry` | In compact form, oldest first: every entry stored since the previous notice, plus every changed entry again. The serialized compact array's budget is 1,048,576 bytes. Drop entry counts first, then omit the entries if still over budget; condition counts stay, and `token_family` stays whenever any count remains (W4.11). The provider may read omitted entries with `session.entries`, which does not return condition counts. May be left out when empty. |
 
 Events, each an object with an `event` field:
 
@@ -522,6 +560,8 @@ Answer:
 | Field | Type | Meaning |
 |---|---|---|
 | `entries` | array of `Entry` | |
+| `token_family` | string, optional | Required when the page carries W4.11 counts; applies to all of them. |
+| `token_family_exact` | boolean, optional | Alongside `token_family`: the model's own tokenizer (`true`) or a stand-in (`false`); absent is unknown and treated as `false` (W4.11). |
 | `next_after` | integer, optional | For `by: after`: the ordinal to continue after when more entries match than fit. Absent when the page reaches the end. |
 | `head` | object | `newest` (`Cursor`, optional) and `applied_view` (`AppliedView`, optional) at the moment of the read. |
 
@@ -607,11 +647,12 @@ Every checksum is the lowercase hex SHA-256 of the value's RFC 8785 (JCS) serial
 
 | Checksum | Over |
 |---|---|
-| Part `digest` | The part's object in full form without `id`, `tag` and `digest`. |
-| Entry `digest` | `{"role", "notice", "parts"}`, with each part in full form including its `id`, `tag` and `digest`. |
+| Part `digest` | The part's object in full form without `id`, `tag`, `digest` and `tokens`. |
+| Entry `digest` | `{"role", "notice", "parts"}`, with each part in full form including its `id`, `tag` and `digest`, but without its `tokens`. |
 | View `checksum` | `{"version", "edits"}`, including inserted images and their base64 data. Empty `images` arrays hash as absent (W1.6). |
 
 Entry timing metadata (`written_at` and `completed_at`) enters none of these checksums.
+Count metadata (`tokens`, assistant-entry `reasoning_tokens`, condition `system_tokens` and `tools_tokens`), `token_family` and `token_family_exact` also enter none of these checksums. `tokens` is reserved in the Part envelope even for unknown kinds; the remaining unknown-kind payload is preserved under W1.5. Opaque payload fields with the same names are content, not count metadata, and remain in checksums.
 
 # Open points
 

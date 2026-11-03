@@ -34,8 +34,8 @@ pub struct SessionRef {
 
 /// One message of the transcript, as stored. Views never change entries;
 /// they change what the runner renders from them. The parts come in full or
-/// compact form ([`Detail`]); the checksums are always computed over the full
-/// content.
+/// compact form ([`Detail`]); checksums use W7's full-detail projections,
+/// minus the metadata W7 lists.
 ///
 /// Kinds allowed by role: user entries (notices included) hold text and
 /// files; assistant entries hold text, reasoning, tool, file and opaque
@@ -71,13 +71,18 @@ pub struct Entry {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::integer::optional")]
     pub completed_at: Option<u64>,
-    /// Checksum of the entry's role, notice origin and parts, with the parts
-    /// in full form ([`entry_digest`]).
+    /// Checksum of W7's full-detail projection of role, notice origin and
+    /// parts, minus the metadata W7 lists ([`entry_digest`]).
     pub digest: String,
     pub parts: Vec<Part>,
     /// For an assistant entry: what the request that produced it reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<StepUsage>,
+    /// Assistant step reasoning in the page or notice's `token_family`.
+    /// Absent means estimate. Once sent as measured, the value is frozen
+    /// within its entry and family (W4.11). Excluded from [`entry_digest`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<crate::tokens::ReasoningTokens>,
     /// For an assistant entry: the view applied to the request that produced
     /// it. Signed reasoning is bound to the history as rendered under that
     /// view, so the view library's rule check compares against it.
@@ -208,6 +213,16 @@ pub enum Select, "by" {
 #[non_exhaustive]
 pub struct ReadPage {
     pub entries: Vec<Entry>,
+    /// Opaque count family, required when this page carries W4.11 counts.
+    /// Adopt each response's family in receipt order and discard held counts
+    /// from other families. Compare the whole id by equality only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_family: Option<String>,
+    /// Whether the family uses the model's own tokenizer (`true`) rather
+    /// than a stand-in (`false`). Absent is unknown, treated as `false`.
+    /// Sent alongside `token_family`; excluded from all W7 checksums.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_family_exact: Option<bool>,
     /// For [`Select::After`]: the ordinal to continue after when more entries
     /// match than fit the page. Absent when the page reaches the end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -231,7 +246,8 @@ pub struct Head {
 /// Checksum of an entry's role, notice origin (left out when absent) and
 /// parts, each part with its `id`, `tag` and `digest`, as [`Entry::digest`]
 /// carries it. The ordinal, `mid`, `written_at`, `completed_at`, usage and
-/// `generated_under` are not hashed. Pass full parts: compact parts hash to a
+/// `generated_under`, reasoning counts and part `tokens` are not hashed.
+/// Pass full parts: compact parts hash to a
 /// different value.
 pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -> String {
     #[derive(Serialize)]
@@ -241,11 +257,18 @@ pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -
         notice: Option<&'a NoticeOrigin>,
         parts: &'a [Part],
     }
-    crate::digest::checksum(&Digested {
+    let mut value = serde_json::to_value(Digested {
         role,
         notice,
         parts,
     })
+    .expect("contract types always serialize");
+    // Strip only part metadata, never similarly named fields in tool input
+    // or other opaque content.
+    for part in value["parts"].as_array_mut().unwrap() {
+        part.as_object_mut().unwrap().remove("tokens");
+    }
+    crate::digest::content_digest(&value)
 }
 
 impl Entry {
@@ -270,6 +293,7 @@ impl Entry {
             digest,
             parts,
             usage: None,
+            reasoning_tokens: None,
             generated_under: None,
         }
     }
@@ -290,6 +314,11 @@ impl Entry {
 
     pub fn with_usage(mut self, usage: StepUsage) -> Self {
         self.usage = Some(usage);
+        self
+    }
+
+    pub fn with_reasoning_tokens(mut self, tokens: crate::tokens::ReasoningTokens) -> Self {
+        self.reasoning_tokens = Some(tokens);
         self
     }
 
@@ -403,11 +432,23 @@ impl ReadPage {
             entries,
             head,
             next_after: None,
+            token_family: None,
+            token_family_exact: None,
         }
     }
 
     pub fn with_next_after(mut self, next_after: u64) -> Self {
         self.next_after = Some(next_after);
+        self
+    }
+
+    pub fn with_token_family(mut self, family: impl Into<String>) -> Self {
+        self.token_family = Some(family.into());
+        self
+    }
+
+    pub fn with_token_family_exact(mut self, exact: bool) -> Self {
+        self.token_family_exact = Some(exact);
         self
     }
 }

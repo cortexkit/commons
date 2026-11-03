@@ -29,7 +29,13 @@ pub struct Part {
     /// What the model provider checks when the part is sent back.
     #[serde(default, skip_serializing_if = "Seal::is_none")]
     pub seal: Seal,
-    /// Checksum of the part without `id`, `tag` and `digest`
+    /// Optional count metadata in the page or notice's `token_family`.
+    /// Reserved in the envelope for every kind, including unknown kinds;
+    /// conforming senders use it only as W4.11 allows. Never included in a
+    /// checksum; absent means estimate. Decoding checks shape, not conformance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<crate::tokens::PartTokens>,
+    /// Checksum of the part without `id`, `tag`, `digest` and `tokens`
     /// ([`body_digest`]). A replace edit names the checksum it was computed
     /// from, so it never lands on a changed part.
     pub digest: String,
@@ -47,6 +53,7 @@ impl Part {
         Self {
             id: id.into(),
             tag: None,
+            tokens: None,
             seal,
             digest,
             body,
@@ -55,6 +62,11 @@ impl Part {
 
     pub fn with_tag(mut self, tag: u64) -> Self {
         self.tag = Some(tag);
+        self
+    }
+
+    pub fn with_tokens(mut self, tokens: crate::tokens::PartTokens) -> Self {
+        self.tokens = Some(tokens);
         self
     }
 
@@ -67,8 +79,8 @@ impl Part {
 
     /// The compact form of a full part: tool output, the text of sends
     /// delivered with a tool result, and reasoning text are left out, and
-    /// only their sizes remain. The checksum stays the one computed over the
-    /// full content, so an edit computed from the compact form still names
+    /// only their sizes remain. The checksum stays the one computed over W7's
+    /// full-detail projection, so an edit computed from compact detail still names
     /// the exact part. Notices carry parts in this form.
     pub fn compact(&self) -> Part {
         let mut body = self.body.clone();
@@ -88,6 +100,7 @@ impl Part {
         Part {
             id: self.id.clone(),
             tag: self.tag,
+            tokens: self.tokens,
             seal: self.seal.clone(),
             digest: self.digest.clone(),
             body,
@@ -392,7 +405,7 @@ pub struct Opaque {
     pub size: Option<u64>,
 }
 
-/// Checksum of a part without its `id`, `tag` and `digest`: its seal (left
+/// Checksum of a part without its `id`, `tag`, `digest` and `tokens`: its seal (left
 /// out when `none`), kind and kind fields. Pass the full body: a compact body
 /// hashes to a different value.
 pub fn body_digest(seal: Seal, body: &PartBody) -> String {

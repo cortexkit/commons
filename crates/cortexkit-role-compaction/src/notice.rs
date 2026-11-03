@@ -1,6 +1,8 @@
-//! `compaction.notice`, served by the provider. After every durable write to
-//! a session's transcript, the runner sends where the transcript stands, plus
-//! the new entries in compact form. The provider acknowledges at once and does
+//! `compaction.notice`, served by the provider. On each W5.2 notice trigger,
+//! the runner sends where the transcript stands, plus new and changed entries
+//! in compact form. Count metadata updates alone do not trigger a notice;
+//! an update that also includes a trigger sends the notice normally.
+//! The provider acknowledges at once and does
 //! its work afterwards, so the runner never waits on it.
 //!
 //! A notice is a convenience, not the source of truth: the provider keeps its
@@ -15,10 +17,11 @@ use crate::rules::ProviderRules;
 use crate::setup::ModelRef;
 use crate::view::{AppliedView, ViewRefusal};
 
-/// Above roughly this many bytes of entries, a notice carries none and the
-/// provider reads them instead, keeping every call far below the transport's
-/// frame limit. Compact form keeps text parts and full tool inputs, so large
-/// text, a large tool input or many entries can reach it.
+/// Budget for the serialized compact `entries` array. Drop entry counts
+/// first, then omit entries if still over budget; the provider may read them
+/// with `session.entries`. Condition counts stay, and family metadata stays
+/// whenever any count remains. Compact detail keeps text and full tool inputs,
+/// so large text, a large tool input or many entries can reach this limit.
 pub const ENTRIES_BUDGET_BYTES: usize = 1 << 20;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -35,13 +38,25 @@ pub struct NoticeRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_view: Option<AppliedView>,
     pub conditions: Conditions,
+    /// Opaque count family, required when this notice carries W4.11 counts.
+    /// Adopt each response's family in receipt order and discard held counts
+    /// from other families. Compare the whole id by equality only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_family: Option<String>,
+    /// Whether the family uses the model's own tokenizer (`true`) rather
+    /// than a stand-in (`false`). Absent is unknown, treated as `false`.
+    /// Sent alongside `token_family`; excluded from all W7 checksums.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_family_exact: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub events: Vec<Event>,
     /// Entries written since the previous notice, oldest first, in compact
     /// form. A message that changes after it was sent (a running tool gets
     /// its result, or a send is delivered with it) is sent again at the same
     /// ordinal, even when the host stored the result in a later message.
-    /// Empty when they would exceed [`ENTRIES_BUDGET_BYTES`].
+    /// Drop entry counts first to fit [`ENTRIES_BUDGET_BYTES`], then omit
+    /// entries if still over budget. Condition counts stay; `session.entries`
+    /// returns omitted entries and their counts, never condition counts.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entries: Vec<Entry>,
 }
@@ -66,6 +81,14 @@ pub struct Conditions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::integer::optional")]
     pub last_prompt_tokens: Option<u64>,
+    /// Count of the runner's own system text for the next request under these
+    /// conditions, excluding system entries. Notices only, never rides (W4.11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_tokens: Option<crate::tokens::SurfaceTokens>,
+    /// Count of the next request's tool definitions under these conditions.
+    /// Notices only, never rides (W4.11).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools_tokens: Option<crate::tokens::SurfaceTokens>,
 }
 
 open_tagged! {
@@ -118,6 +141,8 @@ impl NoticeRequest {
             newest: None,
             conditions,
             applied_view: None,
+            token_family: None,
+            token_family_exact: None,
             events: Vec::new(),
             entries: Vec::new(),
         }
@@ -142,6 +167,16 @@ impl NoticeRequest {
         self.entries = entries;
         self
     }
+
+    pub fn with_token_family(mut self, family: impl Into<String>) -> Self {
+        self.token_family = Some(family.into());
+        self
+    }
+
+    pub fn with_token_family_exact(mut self, exact: bool) -> Self {
+        self.token_family_exact = Some(exact);
+        self
+    }
 }
 
 impl Conditions {
@@ -159,6 +194,8 @@ impl Conditions {
             output_reserve,
             rules,
             last_prompt_tokens: None,
+            system_tokens: None,
+            tools_tokens: None,
         }
     }
 
@@ -169,6 +206,16 @@ impl Conditions {
 
     pub fn with_last_prompt_tokens(mut self, last_prompt_tokens: u64) -> Self {
         self.last_prompt_tokens = Some(last_prompt_tokens);
+        self
+    }
+
+    pub fn with_system_tokens(mut self, tokens: crate::tokens::SurfaceTokens) -> Self {
+        self.system_tokens = Some(tokens);
+        self
+    }
+
+    pub fn with_tools_tokens(mut self, tokens: crate::tokens::SurfaceTokens) -> Self {
+        self.tools_tokens = Some(tokens);
         self
     }
 }

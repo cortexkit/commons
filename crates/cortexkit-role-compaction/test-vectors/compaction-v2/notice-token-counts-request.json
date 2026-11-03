@@ -1,0 +1,118 @@
+{
+  "method": "compaction.notice",
+  "params": {
+    "conditions": {
+      "context_window": 200000,
+      "model": {
+        "model": "example-model",
+        "provider": "example-provider"
+      },
+      "output_reserve": 10000,
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "bound"
+      },
+      "system_tokens": {
+        "count": 120,
+        "exact": true
+      },
+      "tools_tokens": {
+        "count": 230,
+        "exact": false
+      }
+    },
+    "entries": [
+      {
+        "digest": "0d76278b60e7827cec279a9539f8e0ca3f0b3b6b611c330062d6f88b8b3515e4",
+        "mid": "message-counted-a",
+        "ordinal": 1,
+        "parts": [
+          {
+            "digest": "a3d93788e1170326e8d95a2d87f33f1d19a7412b719fe66a12e514671d7437ac",
+            "id": "text-a",
+            "kind": "text",
+            "tag": 1,
+            "text": "An invented reply.",
+            "tokens": {
+              "count": 4
+            }
+          },
+          {
+            "call_id": "call-a",
+            "digest": "e7675e05811bc68608f2541206e383ba84f873e36b3a3f44affc902ee16740f3",
+            "id": "tool-a",
+            "input": {
+              "query": "invented",
+              "tokens": {
+                "count": 7
+              }
+            },
+            "kind": "tool",
+            "name": "example-tool",
+            "output_bytes": 19,
+            "status": "completed",
+            "tag": 2,
+            "tokens": {
+              "input": 12,
+              "output": 5
+            }
+          },
+          {
+            "digest": "fa6316932e0ba5dfa99a3c84773a59d3d73cf08e5c6b926c1020186a54e04486",
+            "height": 32,
+            "id": "file-a",
+            "kind": "file",
+            "mime": "image/png",
+            "size": 64,
+            "tokens": {
+              "count": 85
+            },
+            "transport": "inline",
+            "width": 32
+          },
+          {
+            "digest": "640e4cb43f7256c71be0b7eec6e01d47a8055bb6ccd32d412b69f7fddbfd2747",
+            "id": "reasoning-a",
+            "kind": "reasoning",
+            "seal": "signed",
+            "text_bytes": 20
+          }
+        ],
+        "reasoning_tokens": {
+          "count": 20,
+          "measured": false
+        },
+        "role": "assistant",
+        "written_at": 1700000000000
+      },
+      {
+        "digest": "1df90f0f4389cf91a2aa274898815eb1aba923cbd9ea2412801b39e2c754f999",
+        "mid": "message-counted-b",
+        "ordinal": 2,
+        "parts": [
+          {
+            "digest": "b16950a7026a21540faa1720638ac7e7f1749351ea81935700b9ddc847100d7a",
+            "id": "text-b",
+            "kind": "text",
+            "tag": 3,
+            "text": "Another invented reply."
+          }
+        ],
+        "reasoning_tokens": {
+          "count": 18,
+          "measured": true
+        },
+        "role": "assistant",
+        "written_at": 1700000001000
+      }
+    ],
+    "newest": {
+      "digest": "1df90f0f4389cf91a2aa274898815eb1aba923cbd9ea2412801b39e2c754f999",
+      "mid": "message-counted-b",
+      "ordinal": 2
+    },
+    "seq": 1,
+    "token_family": "claude-v5/1",
+    "token_family_exact": false
+  }
+}

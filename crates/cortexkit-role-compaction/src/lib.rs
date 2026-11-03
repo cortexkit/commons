@@ -16,8 +16,8 @@
 //!   ([`part`], [`read`]), whatever its host stores, so a provider needs no
 //!   decoder per harness;
 //! - the runner calls Setup when it starts serving a session, and again
-//!   whenever the provider has lost it ([`setup`]); after every durable
-//!   write it sends a notice with the new entries in compact form
+//!   whenever the provider has lost it ([`setup`]); on the W5.2 notice
+//!   triggers it sends new and changed entries in compact form
 //!   ([`notice`]); and before a request that rewrites the model provider's
 //!   prompt cache anyway, or that would not fit, it asks for a view and waits
 //!   for the answer ([`ride`]);
@@ -46,6 +46,7 @@ pub mod read;
 pub mod ride;
 pub mod rules;
 pub mod setup;
+pub mod tokens;
 pub mod view;
 pub mod wire;
 
@@ -81,7 +82,8 @@ pub const LLM_RUNNER_ROLE: (&str, &str) = ("llm-runner", "v1");
 pub mod ops {
     /// Served by the provider: start managing a session ([`crate::setup`]).
     pub const COMPACTION_SETUP: &str = "compaction.setup";
-    /// Served by the provider: new entries were written ([`crate::notice`]).
+    /// Served by the provider: transcript changes and other W5.2 notice
+    /// triggers ([`crate::notice`]), not count metadata updates alone.
     pub const COMPACTION_NOTICE: &str = "compaction.notice";
     /// Served by the provider: the runner asks for a view now ([`crate::ride`]).
     pub const COMPACTION_RIDE: &str = "compaction.ride";

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.4
+
+- Add optional runner token counts on text, tool and file parts, assistant
+  reasoning, and notice system text and tool definitions. Pages and notices
+  name their opaque `token_family` and may identify whether it uses the model's
+  own tokenizer with `token_family_exact`; absent counts still mean estimate.
+- Define full-content coverage, part-count stability within a family, family
+  adoption, measured-reasoning operands and freezing within an entry and family,
+  and next-request notice-only surface counts. Drop entry counts first to fit
+  the serialized compact entries-array budget; condition counts stay.
+  Count metadata updates alone do not change entries or trigger notices;
+  updates that also include a notice trigger send the notice normally.
+  Count and family metadata enter no checksum, including on unknown part kinds.
+- Add counted page and notice vectors, checksum-invariance and numeric-boundary
+  tests, and stable canonical pretty-printed fixture-byte checks, plus typed
+  round-trips for existing wire samples.
+
 ## 0.2.3
 
 - The contract now says who may call the runner (W2.5). A runner admits a

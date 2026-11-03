@@ -65,6 +65,32 @@ fn later_tagged_values_retain_their_name_and_payload() {
 }
 
 #[test]
+fn unknown_part_kind_keeps_payload_and_reads_tokens_as_envelope_metadata() {
+    for tokens in [json!({"count": 3}), json!({"input": 5, "output": 7})] {
+        let raw = json!({
+            "id": "part-future", "digest": "invented-checksum", "tag": 7,
+            "kind": "future_value", "tokens": tokens,
+            "payload": {"tokens": {"count": "opaque"}, "x": [1, true]},
+            "other": "unchanged"
+        });
+        let part: Part = serde_json::from_value(raw.clone()).unwrap();
+        assert!(matches!(&part.body, PartBody::Unknown { name, .. } if name == "future_value"));
+        let expected: cortexkit_role_compaction::tokens::PartTokens =
+            serde_json::from_value(tokens).unwrap();
+        assert_eq!(part.tokens, Some(expected));
+        assert_eq!(
+            serde_json::to_value(&part.body).unwrap(),
+            json!({
+                "kind": "future_value", "other": "unchanged",
+                "payload": {"tokens": {"count": "opaque"}, "x": [1, true]}
+            })
+        );
+        assert_eq!(serde_json::to_value(part.compact()).unwrap(), raw);
+        assert_eq!(serde_json::to_value(part).unwrap(), raw);
+    }
+}
+
+#[test]
 fn malformed_known_values_are_not_mistaken_for_later_variants() {
     macro_rules! rejects {
         ($ty:ty, $value:expr) => {

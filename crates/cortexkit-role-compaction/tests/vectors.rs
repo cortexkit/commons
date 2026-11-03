@@ -21,6 +21,8 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
+mod support;
+
 fn value(value: impl Serialize) -> Value {
     serde_json::to_value(value).unwrap()
 }
@@ -494,6 +496,11 @@ fn samples() -> Vec<(&'static str, Value)> {
             "checksum": entry.digest,
         }),
     ));
+    samples.push(("entries-token-counts.json", value(support::counted_page())));
+    samples.push((
+        "notice-token-counts-request.json",
+        request(ops::COMPACTION_NOTICE, support::counted_notice()),
+    ));
     samples
 }
 
@@ -616,11 +623,18 @@ fn wire_vectors_round_trip() {
                 std::fs::write(path, bytes).unwrap();
             }
         }
-        let saved: Value =
-            serde_json::from_slice(&std::fs::read(root.join(name)).unwrap()).unwrap();
+        let bytes = std::fs::read(root.join(name)).unwrap();
+        let saved: Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(
             saved, generated,
             "{name}: regenerate vectors after an intentional wire change"
+        );
+        // Fixtures use sorted JSON object keys, pretty printing and one newline.
+        // Preserve those bytes as well as the decoded wire value.
+        assert_eq!(
+            bytes,
+            format!("{}\n", serde_json::to_string_pretty(&generated).unwrap()).as_bytes(),
+            "{name}: fixture bytes changed"
         );
         check(name, saved);
     }

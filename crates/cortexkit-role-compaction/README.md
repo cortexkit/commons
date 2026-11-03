@@ -6,7 +6,7 @@ and view libraries share this contract without depending on an implementation.
 
 ```toml
 [dependencies]
-cortexkit-role-compaction = "0.2.0"
+cortexkit-role-compaction = "0.2.4"
 ```
 
 See [CONTRACT.md](CONTRACT.md) for the protocol rules and
