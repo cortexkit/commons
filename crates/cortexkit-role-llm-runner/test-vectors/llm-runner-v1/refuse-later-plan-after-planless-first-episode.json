@@ -3,7 +3,7 @@
     "prompt": "A planless first episode",
     "send_id": "first"
   },
-  "later_plan": "plans/broca-head.json",
+  "later_plan": "plans/runner-a-head.json",
   "expected": {
     "admitted": false,
     "code": "plan_drift",
@@ -12,5 +12,5 @@
     },
     "writes": "nothing"
   },
-  "settled": "BROCA, room #881"
+  "settled": "runner maintainers"
 }

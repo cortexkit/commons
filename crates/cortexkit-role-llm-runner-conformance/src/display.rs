@@ -382,9 +382,14 @@ where
     Ok(())
 }
 
-/// Without limits, a call's arguments and result larger than every bound of
-/// the apps' limits are served whole and unflagged; with those limits, both
-/// are cut.
+fn whole_result_text() -> String {
+    "r".repeat(APP_LIMITS.result_bytes as usize * 2)
+}
+
+/// Without limits, arguments and a kept non-error result above the app's
+/// normal bounds are served whole. The fixture stays below the pre-render
+/// provider acceptance limit; that limit does not bound rendered display text.
+/// This case does not exercise error-result truncation.
 async fn whole<S>(case: &Case<'_, S>) -> Check
 where
     S: LlmRunnerSubject,
@@ -392,9 +397,15 @@ where
 {
     let mut call = case.mint.call("display-whole");
     let long_arguments = "a".repeat(APP_LIMITS.arguments_bytes as usize * 2);
-    let long_result = "r".repeat(APP_LIMITS.error_result_bytes as usize * 2);
+    let long_result = whole_result_text();
     call.arguments["text"] = json!(long_arguments);
     call.result["text"] = json!(long_result);
+    let result_bytes = serde_json::to_vec(&call.result)
+        .map_err(|e| e.to_string())?
+        .len();
+    if result_bytes > cortexkit_role_llm_runner::tool_result_limit::MAX_MODEL_VISIBLE_BYTES {
+        return Err("whole-display fixture exceeds the provider-result size limit".into());
+    }
     let session = written(case, call.clone()).await?;
     let shown = display_walk(&session.route, None).await?;
     for part in shown.iter().flat_map(|e| &e.row.parts) {
@@ -767,4 +778,17 @@ where
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn whole_display_fixture_exceeds_app_bound_but_is_kept() {
+        let text = whole_result_text();
+        assert!(text.len() > 16_384);
+        let result = json!({"text": text});
+        assert!(serde_json::to_vec(&result).unwrap().len() <= 65_536);
+    }
 }

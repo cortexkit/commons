@@ -552,6 +552,11 @@ pub const CASES: &[CaseSpec] = &[
         "after the owner's first send, session.baseline answers the owner ready with a baseline and refuses another caller scope_owner_mismatch",
     ),
     case(
+        "scoped_session_start_owner_only",
+        &[Queue, TranscriptReads],
+        "a non-owner carrier's first send under a plain scope is refused scope_owner_mismatch with no visible session: the owner sees an empty read and head, and no ready baseline; the case observes wire replies, not storage, and is inapplicable without the adapter's plain-scope route hook",
+    ),
+    case(
         "baseline_matches_admission_reply",
         &[Queue],
         "on a runner whose session capabilities come from admission, the first send's reply carries a baseline equal to what session.baseline answers",
@@ -764,7 +769,7 @@ pub const CASES: &[CaseSpec] = &[
     case("display_limits_cut_on_a_utf8_boundary", DISPLAY,
         "with limits falling inside a multi-byte character of a call's arguments and of its result, each is cut to the last character boundary at or below its bound with arguments_truncated or truncated set, and nothing else changes"),
     case("display_without_limits_is_whole", DISPLAY,
-        "without limits a call's arguments and result larger than the apps' bounds are served whole and unflagged; with the apps' limits both fit their bounds"),
+        "without limits, arguments and a kept non-error result above the app's result bound are served whole and unflagged; app limits bound both; the fixture stays below the provider acceptance limit, which measures pre-render output and does not bound rendered display text; error-result truncation is not exercised"),
     case("display_pages_carry_finished_messages_only", DISPLAY,
         "while a model step is held, the display walk serves exactly the raw walk's finished entries and no row for the step in flight; once the run ends, the answer is there"),
     case("client_message_id_on_display_rows_never_in_read", CLIENT_ID,

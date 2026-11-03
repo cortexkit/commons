@@ -582,9 +582,12 @@ pub fn effective_senders(
 /// is the route's attested principal, `owner` the session's recorded owner
 /// (`None` before the first send), `senders` the plan's, and `modes` the
 /// send's list (or its legacy equivalent). With `owner` `None` this check
-/// passes without a plan grant: on a new session the runner records the
-/// first attested sender as owner when it admits that send; this helper
-/// doesn't record anything. With a recorded owner, the owner passes with any
+/// passes without a plan grant. The runner must separately enforce §9's
+/// scoped-start policy and frozen-send check, for example with
+/// [`crate::scope_admission`]. This helper has no scope stamp and checks only
+/// plan grants. An unscoped new
+/// session records its first attested sender as owner. This helper records
+/// nothing. With a recorded owner, the owner passes with any
 /// list; any other caller passes only when the plan names it, and may list
 /// `idle_start` only when its entry grants it. `Err`
 /// is the refusal: `scope_owner_mismatch` with no field for an unnamed caller, or

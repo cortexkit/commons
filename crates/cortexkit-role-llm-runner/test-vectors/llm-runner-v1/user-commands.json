@@ -12,7 +12,7 @@
       "baseline": {
         "items": [
           {
-            "provider": "prefrontal-core",
+            "provider": "owner-module",
             "item": "system_text",
             "item_digest": "1111111111111111111111111111111111111111111111111111111111111111",
             "preflight_digest": "2222222222222222222222222222222222222222222222222222222222222222"
@@ -24,7 +24,7 @@
             "preflight_digest": "4444444444444444444444444444444444444444444444444444444444444444"
           },
           {
-            "provider": "magic-context",
+            "provider": "compaction-provider",
             "item": "system_text",
             "item_digest": "5555555555555555555555555555555555555555555555555555555555555555",
             "preflight_digest": "6666666666666666666666666666666666666666666666666666666666666666"
@@ -59,14 +59,14 @@
           "ordered_hook_phases": true
         }
       },
-      "encoded_jcs": "{\"accepted_generation\":0,\"applied_generation\":0,\"composition_digest\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"items\":[{\"item\":\"system_text\",\"item_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"preflight_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"provider\":\"prefrontal-core\"},{\"item\":\"tools\",\"item_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"preflight_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"provider\":\"aft\"},{\"item\":\"system_text\",\"item_digest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"preflight_digest\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"provider\":\"magic-context\"}],\"rungs\":{\"system_text\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"],\"tools\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"]},\"session_capabilities\":{\"mid_session_appends\":true,\"ordered_hook_phases\":true},\"tool_names\":[\"bash\",\"browser_use\",\"ctx_reduce\",\"edit\",\"read\"]}"
+      "encoded_jcs": "{\"accepted_generation\":0,\"applied_generation\":0,\"composition_digest\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"items\":[{\"item\":\"system_text\",\"item_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"preflight_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"provider\":\"owner-module\"},{\"item\":\"tools\",\"item_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"preflight_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"provider\":\"aft\"},{\"item\":\"system_text\",\"item_digest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"preflight_digest\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"provider\":\"compaction-provider\"}],\"rungs\":{\"system_text\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"],\"tools\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"]},\"session_capabilities\":{\"mid_session_appends\":true,\"ordered_hook_phases\":true},\"tool_names\":[\"bash\",\"browser_use\",\"ctx_reduce\",\"edit\",\"read\"]}"
     },
     {
       "name": "present",
       "baseline": {
         "items": [
           {
-            "provider": "prefrontal-core",
+            "provider": "owner-module",
             "item": "system_text",
             "item_digest": "1111111111111111111111111111111111111111111111111111111111111111",
             "preflight_digest": "2222222222222222222222222222222222222222222222222222222222222222"
@@ -78,7 +78,7 @@
             "preflight_digest": "4444444444444444444444444444444444444444444444444444444444444444"
           },
           {
-            "provider": "magic-context",
+            "provider": "compaction-provider",
             "item": "system_text",
             "item_digest": "5555555555555555555555555555555555555555555555555555555555555555",
             "preflight_digest": "6666666666666666666666666666666666666666666666666666666666666666"
@@ -114,14 +114,14 @@
         },
         "user_commands": [
           {
-            "provider": "magic-context",
+            "provider": "compaction-provider",
             "name": "ctx-wrapup",
             "description": "Summarize older history now",
             "argument_hint": "[messages to keep]"
           }
         ]
       },
-      "encoded_jcs": "{\"accepted_generation\":0,\"applied_generation\":0,\"composition_digest\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"items\":[{\"item\":\"system_text\",\"item_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"preflight_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"provider\":\"prefrontal-core\"},{\"item\":\"tools\",\"item_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"preflight_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"provider\":\"aft\"},{\"item\":\"system_text\",\"item_digest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"preflight_digest\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"provider\":\"magic-context\"}],\"rungs\":{\"system_text\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"],\"tools\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"]},\"session_capabilities\":{\"mid_session_appends\":true,\"ordered_hook_phases\":true},\"tool_names\":[\"bash\",\"browser_use\",\"ctx_reduce\",\"edit\",\"read\"],\"user_commands\":[{\"argument_hint\":\"[messages to keep]\",\"description\":\"Summarize older history now\",\"name\":\"ctx-wrapup\",\"provider\":\"magic-context\"}]}"
+      "encoded_jcs": "{\"accepted_generation\":0,\"applied_generation\":0,\"composition_digest\":\"7777777777777777777777777777777777777777777777777777777777777777\",\"items\":[{\"item\":\"system_text\",\"item_digest\":\"1111111111111111111111111111111111111111111111111111111111111111\",\"preflight_digest\":\"2222222222222222222222222222222222222222222222222222222222222222\",\"provider\":\"owner-module\"},{\"item\":\"tools\",\"item_digest\":\"3333333333333333333333333333333333333333333333333333333333333333\",\"preflight_digest\":\"4444444444444444444444444444444444444444444444444444444444444444\",\"provider\":\"aft\"},{\"item\":\"system_text\",\"item_digest\":\"5555555555555555555555555555555555555555555555555555555555555555\",\"preflight_digest\":\"6666666666666666666666666666666666666666666666666666666666666666\",\"provider\":\"compaction-provider\"}],\"rungs\":{\"system_text\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"],\"tools\":[\"on_prefix_rebuild\",\"on_system_rebuild\",\"on_history_rebuild\",\"immediately\"]},\"session_capabilities\":{\"mid_session_appends\":true,\"ordered_hook_phases\":true},\"tool_names\":[\"bash\",\"browser_use\",\"ctx_reduce\",\"edit\",\"read\"],\"user_commands\":[{\"argument_hint\":\"[messages to keep]\",\"description\":\"Summarize older history now\",\"name\":\"ctx-wrapup\",\"provider\":\"compaction-provider\"}]}"
     }
   ],
   "plans": [
@@ -199,7 +199,7 @@
   "collision": {
     "name": "ctx-wrapup",
     "providers": [
-      "magic-context",
+      "compaction-provider",
       "other-provider"
     ]
   },
@@ -222,7 +222,7 @@
     {
       "safe": true,
       "registered": true,
-      "result": "magic-context-ctx-wrapup"
+      "result": "compaction-provider-ctx-wrapup"
     }
   ]
 }

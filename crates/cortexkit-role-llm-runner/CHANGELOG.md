@@ -1,6 +1,27 @@
 # Changelog
 
-## Unreleased
+## 0.8.2
+
+- Require the attested owner to create a session under a plain scope, before
+  any write. Flow scopes may admit an owner or carrier; run scopes may admit
+  only non-owner openers. Runners may be stricter. Pin the admitted sender and
+  scope attributes and name later mismatches in sender/flow/run/agent order.
+  Frozen-send checks apply even to the scope owner and plan-named senders;
+  neither a plan grant nor the optional unkeyed non-owner policy overrides
+  them. Read admission is unchanged. Add the four mismatch codes and their
+  `detail.field` wire names, with non-retryable entries in the error vectors.
+- Add opt-in pure `scope_admission` helpers for start policy and frozen-send
+  checks. Existing delivery-order helpers retain their signatures and plan
+  grant checks; runners enforce scope admission separately before any write.
+- Clarify that reads create no record and an id without a current record
+  serves a reserved, empty-only placeholder incarnation. A replacement history
+  version is allocated once, strictly greater than every previously served
+  version, using the durable high-water; repeated reads keep it. The first
+  send creates the real record and incarnation.
+- Replace illustrative module ids in samples with role names: `owner-module`,
+  `compaction-provider`, `app-server`, `runner-a-head` and `tool-provider`.
+  Replace provenance and display-case prose with neutral role words. The
+  published serializer-profile identifier is unchanged.
 
 - Contract text only (§10.2): a `refresh_relaunch` relaunch may reinstall
   the host's tools and system text in place, where the host supports that,

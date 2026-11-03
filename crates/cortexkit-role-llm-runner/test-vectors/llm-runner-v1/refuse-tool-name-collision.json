@@ -1,18 +1,18 @@
 {
   "design": "D 4.5 'Tool-name collisions refuse admission'; plan decision 5 (exclude)",
-  "plan": "plans/broca-head-plexus-no-exclude.json",
-  "composition": "compositions/broca-head-plexus-no-exclude.json",
+  "plan": "plans/runner-a-head-tool-provider-no-exclude.json",
+  "composition": "compositions/runner-a-head-tool-provider-no-exclude.json",
   "expected": {
     "admitted": false,
     "code": "tool_name_collision",
     "detail": {
       "name": "web_search",
       "providers": [
-        "plexus",
-        "prefrontal-core"
+        "tool-provider",
+        "owner-module"
       ]
     },
     "writes": "nothing"
   },
-  "settled": "BROCA, room #881"
+  "settled": "runner maintainers"
 }

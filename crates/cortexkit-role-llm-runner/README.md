@@ -2,13 +2,14 @@
 
 Wire types, small validation helpers and checksum-pinned vectors for
 `llm-runner/v1`: transcript reads, run results, subscriptions, session sends
-and the frozen session baseline. Version **0.8.1** accepts and discards two
+and the frozen session baseline. Version **0.8.2** adds scoped session-start
+checks and frozen sender/attribute mismatch helpers. Version 0.8.1 accepts and discards two
 0.7 input members during migration to the breaking 0.8 contract: `session_ref`
 on `session.user_command` and `lineage_id` on `session.read`. Replies and
 numbering follow 0.8. The role capability name remains `llm-runner/v1`.
 
 [CONTRACT.md](CONTRACT.md) is the complete normative contract. The separate
-`cortexkit-role-llm-runner-conformance` 0.17.1 crate drives real runners over
+`cortexkit-role-llm-runner-conformance` 0.17.3 crate drives real runners over
 their management routes; this crate has no transport or runtime.
 
 ## Compaction and entry counting

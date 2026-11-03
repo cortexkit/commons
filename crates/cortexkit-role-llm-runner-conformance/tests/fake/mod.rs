@@ -211,6 +211,9 @@ pub struct Defects {
     /// read API, nor the separate subscription path; a `readers` list takes
     /// precedence.
     pub closed_default_reads: bool,
+    pub scoped_start_hook_unavailable: bool,
+    pub scoped_start_admits_carrier: bool,
+    pub scoped_start_writes_before_refusal: bool,
     pub app_readers_reject_listed: bool,
     pub app_readers_admit_unlisted: bool,
     pub app_readers_reader_can_send: bool,
@@ -3389,6 +3392,26 @@ impl Module {
         let delivery = request.delivery().as_str().to_owned();
         let old = self.sessions.lock().unwrap().get(session).cloned();
         let mut existing = old.clone().filter(|s| s.expired_at.is_none());
+        if existing.is_none() && !self.world.defects.scoped_start_admits_carrier {
+            if let Some(scope) = &stamp.scope {
+                if let Err((code, field)) = cortexkit_role_llm_runner::scope_admission::check_start(
+                    &scope.owner,
+                    &stamp.principal,
+                    cortexkit_role_llm_runner::scope_admission::ScopeKind::Plain,
+                    None,
+                    cortexkit_role_llm_runner::scope_admission::StartPolicy::default(),
+                ) {
+                    if self.world.defects.scoped_start_writes_before_refusal {
+                        self.commit(
+                            session,
+                            json!({"kind": "start", "owner": scope.owner,
+                            "lineage": format!("lin-{session}")}),
+                        )?;
+                    }
+                    return Ok(refuse(code, field.map(|field| json!({"field": field}))));
+                }
+            }
+        }
         let directives = if self.world.serves(groups::TURN_DIRECTIVES) {
             match request.directives() {
                 Ok(names) => names.unwrap_or_default(),
@@ -6100,6 +6123,21 @@ impl LlmRunnerSubject for FakeSubject {
             principal: "reserved:stranger".into(),
             scope: None,
         }
+    }
+
+    fn scoped_session_start_stamps(&self) -> Option<(RouteStamp, RouteStamp)> {
+        if self.defects.scoped_start_hook_unavailable {
+            return None;
+        }
+        let mut owner = self.owner_stamp();
+        owner.scope = Some(cortexkit_role_harness::ScopeStamp {
+            owner: owner.principal.clone(),
+            scope_ref: "plain-scope".into(),
+            scope_epoch: 1,
+        });
+        let mut carrier = owner.clone();
+        carrier.principal = "reserved:carrier".into();
+        Some((carrier, owner))
     }
 
     async fn session_route(

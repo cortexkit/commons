@@ -4,6 +4,63 @@
 mod fake;
 
 #[tokio::test]
+async fn scoped_session_start_owner_only_accepts_owner_guard() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert_passed(&report, "scoped_session_start_owner_only");
+}
+
+#[tokio::test]
+async fn scoped_session_start_owner_only_rejects_carrier_admission_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        scoped_start_admits_carrier: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "scoped_session_start_owner_only");
+    assert!(reason.contains("not refused"), "{reason}");
+    assert!(report
+        .render()
+        .contains("FAIL scoped_session_start_owner_only"));
+}
+
+#[tokio::test]
+async fn scoped_session_start_owner_only_without_hook_is_inapplicable() {
+    let report = run(&FakeSubject::new(Defects {
+        scoped_start_hook_unavailable: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        matches!(
+            report.outcome("scoped_session_start_owner_only"),
+            Some(CaseOutcome::Inapplicable { .. })
+        ),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn scoped_session_start_owner_only_rejects_written_refusal_by_name() {
+    let report = run(&FakeSubject::new(Defects {
+        scoped_start_writes_before_refusal: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "scoped_session_start_owner_only");
+    assert!(reason.contains("visible session"), "{reason}");
+    assert!(report
+        .render()
+        .contains("FAIL scoped_session_start_owner_only"));
+}
+
+#[tokio::test]
+async fn display_whole_keeps_fixture_within_result_limit() {
+    let report = run(&displaying(Defects::default())).await;
+    assert_passed(&report, "display_without_limits_is_whole");
+}
+
+#[tokio::test]
 async fn mode3_read_and_run_contracts_accept_a_faithful_runner() {
     let mut subject = declaring(Capability::SendStatus, Defects::default());
     subject.capabilities.insert(Capability::Plans);

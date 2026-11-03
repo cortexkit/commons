@@ -1,7 +1,8 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.2** pins `cortexkit-role-llm-runner =0.8.1`, the compatibility
-patch for the breaking 0.8 release of the existing `llm-runner/v1` role. The runner's
+Version **0.17.3** pins `cortexkit-role-llm-runner =0.8.2`, which specifies the
+scoped session-creation policy and frozen-send checks. The role remains
+`llm-runner/v1` after the breaking 0.8 release. The runner's
 [CONTRACT.md](../cortexkit-role-llm-runner/CONTRACT.md) is normative; the public
 `CASES` registry names every executable case, its requirements and what it
 checks.
@@ -80,6 +81,8 @@ opaque part keys come from the served envelope, not a reader's invented index.
 | `tool_result_too_large_is_error` | Cut provider output short or lose the synthetic reason, measured bytes, limit or discard text. |
 | `tool_result_too_large_not_repeated` | Dispatch an oversized-result call again. |
 | `output_refs_without_compaction_unknown_tag` | Resolve a reply reference without `plan.compaction_item`, change its `unresolved` / `unknown_tag` record after another tool output, or serve content for it instead of `unknown_ref`. |
+| `scoped_session_start_owner_only` | Admit a non-owner carrier's session-creating send under a plain scope, or show a visible session after refusing `scope_owner_mismatch`: the owner must see an empty read and head, and no ready baseline. |
+| `display_without_limits_is_whole` | Cut arguments or a kept non-error tool result without requested limits; the fixture exceeds the app's 16,384-byte result bound but stays below the pre-render provider acceptance limit. Error-result truncation is not exercised. |
 
 Each new case is exercised against a deliberately faulty fake and verifies
 rejection under the case's name. The unnumbered-reference case has
@@ -87,6 +90,18 @@ immediate- and late-resolution fakes; no fake reaches its `unknown_ref`
 read check. Existing unrelated admission, send receipts,
 run results, usage, display/live events, attachments, retention, cancellation,
 structured output, tool identity and crash guarantees remain in the registry.
+
+`scoped_session_start_stamps()` optionally supplies carrier and owner stamps
+under the same daemon-admitted plain scope, with no flow or run id. The adapter
+must open real routes with those stamps. Without the hook, the scoped-start
+case reports `Inapplicable` by name. Flow and run scope creation is optional
+under the contract, so no case requires admission there. The case observes
+the wire replies and checks for no visible session; it cannot inspect storage.
+
+The whole-display case uses a kept non-error result above the app's result
+bound and below the provider acceptance limit. It does not exercise error-result
+truncation. CONTRACT §11.3.1 measures pre-render provider output, so that limit
+does not bound rendered display text.
 
 The run-fixed routing-decision case uses `route_decision_id_fixture(session)`.
 Its default literal suits runners without routing accounts. A routing-backed

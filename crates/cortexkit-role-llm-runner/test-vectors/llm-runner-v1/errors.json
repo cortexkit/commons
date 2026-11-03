@@ -134,6 +134,34 @@
       "retryable": false
     },
     {
+      "code": "scope_sender_mismatch",
+      "retryable": false,
+      "detail": {
+        "field": "sender"
+      }
+    },
+    {
+      "code": "scope_flow_id_mismatch",
+      "retryable": false,
+      "detail": {
+        "field": "flow_id"
+      }
+    },
+    {
+      "code": "scope_run_id_mismatch",
+      "retryable": false,
+      "detail": {
+        "field": "run_id"
+      }
+    },
+    {
+      "code": "scope_agent_id_mismatch",
+      "retryable": false,
+      "detail": {
+        "field": "agent_id"
+      }
+    },
+    {
       "code": "scope_adoption_refused",
       "retryable": false
     },

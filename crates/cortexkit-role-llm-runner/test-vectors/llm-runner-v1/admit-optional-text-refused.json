@@ -1,6 +1,6 @@
 {
-  "plan": "plans/broca-head-optional-text.json",
-  "composition": "compositions/broca-head-optional-text.json",
+  "plan": "plans/runner-a-head-optional-text.json",
+  "composition": "compositions/runner-a-head-optional-text.json",
   "fetches": [
     {
       "provider": "notes-provider",
@@ -19,5 +19,5 @@
       }
     ]
   },
-  "settled": "BROCA, room #881"
+  "settled": "runner maintainers"
 }

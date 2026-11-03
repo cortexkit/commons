@@ -49,6 +49,7 @@ mod route;
 mod run_parameters;
 mod run_usage;
 mod runner;
+mod scope_admission;
 mod send_helpers;
 mod sender_succession;
 mod service_tier;

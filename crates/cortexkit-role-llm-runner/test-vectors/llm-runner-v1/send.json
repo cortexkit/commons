@@ -319,9 +319,9 @@
       "retryable": false,
       "refusal": {
         "code": "pre_user_unavailable",
-        "message": "magic-context PreUser hook unavailable",
+        "message": "compaction-provider PreUser hook unavailable",
         "detail": {
-          "provider": "magic-context"
+          "provider": "compaction-provider"
         }
       }
     },
@@ -492,7 +492,7 @@
         "plan": {
           "items": [],
           "compaction_item": {
-            "provider": "magic-context"
+            "provider": "compaction-provider"
           }
         }
       }
@@ -509,7 +509,7 @@
         "plan": {
           "items": [],
           "compaction_item": {
-            "provider": "magic-context"
+            "provider": "compaction-provider"
           }
         }
       },

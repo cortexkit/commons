@@ -1096,6 +1096,14 @@ pub trait LlmRunnerSubject: Harness {
     /// starts, for the owner-only cases.
     fn stranger_stamp(&self) -> RouteStamp;
 
+    /// A non-owner carrier and the scope owner, admitted by the daemon under
+    /// the same plain scope (no flow id or run id). `session_route` must open
+    /// real routes with these stamps. Return None when the adapter cannot
+    /// expose this fixture; its scoped-start case is then named inapplicable.
+    fn scoped_session_start_stamps(&self) -> Option<(RouteStamp, RouteStamp)> {
+        None
+    }
+
     /// Open the management route for `session` under `stamp`, as a real
     /// caller with that identity would. Cases use each session name once per
     /// conformance run; the runner adapter may map the name to a native

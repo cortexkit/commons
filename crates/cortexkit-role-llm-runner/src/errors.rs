@@ -342,10 +342,31 @@ pub const DELIVERY_UNSUPPORTED: &str = "delivery_unsupported";
 /// run's own retry or an interrupt. Nothing was written.
 pub const RUN_PAUSED: &str = "run_paused";
 
-/// The caller is not the identity allowed to drive the session: a send, a
-/// `session.baseline` request or a `session.adopt`, from anyone but the
-/// session's owner.
+/// The caller is not allowed to create or drive the session. Scoped creation
+/// requires the owner on a plain scope, excludes the owner on a run scope,
+/// and follows the runner's optional flow/run start policy.
 pub const SCOPE_OWNER_MISMATCH: &str = "scope_owner_mismatch";
+
+/// A scoped send's attested opener differs from the session's frozen sender.
+/// Nothing was written; `detail.field` is `sender`.
+pub const SCOPE_SENDER_MISMATCH: &str = "scope_sender_mismatch";
+/// A scoped send's flow id differs from the session's frozen flow id.
+/// Nothing was written; `detail.field` is `flow_id`.
+pub const SCOPE_FLOW_ID_MISMATCH: &str = "scope_flow_id_mismatch";
+/// A scoped send's run id differs from the session's frozen run id.
+/// Nothing was written; `detail.field` is `run_id`.
+pub const SCOPE_RUN_ID_MISMATCH: &str = "scope_run_id_mismatch";
+/// A scoped send's agent id differs from the session's frozen agent id.
+/// Nothing was written; `detail.field` is `agent_id`.
+pub const SCOPE_AGENT_ID_MISMATCH: &str = "scope_agent_id_mismatch";
+
+/// Wire names for scoped-send refusal details, in mismatch precedence order.
+pub mod scope_mismatch_fields {
+    pub const SENDER: &str = "sender";
+    pub const FLOW_ID: &str = "flow_id";
+    pub const RUN_ID: &str = "run_id";
+    pub const AGENT_ID: &str = "agent_id";
+}
 
 /// A scoped send into a session recorded without a scope that cannot adopt
 /// the stamped one. `detail` is `no_recorded_principal` or
@@ -525,6 +546,10 @@ pub const CODES: &[&str] = &[
     DELIVERY_UNSUPPORTED,
     RUN_PAUSED,
     SCOPE_OWNER_MISMATCH,
+    SCOPE_SENDER_MISMATCH,
+    SCOPE_FLOW_ID_MISMATCH,
+    SCOPE_RUN_ID_MISMATCH,
+    SCOPE_AGENT_ID_MISMATCH,
     SCOPE_ADOPTION_REFUSED,
     SCOPE_UNSUPPORTED,
     FETCH_UNAVAILABLE,
@@ -553,10 +578,18 @@ pub fn is_retryable(code: &str) -> bool {
     )
 }
 
-/// The field an `invalid_params` or `send_id_reuse` refusal names, or `None`
-/// for any other code or a detail without `field`.
+/// The field an `invalid_params`, `send_id_reuse`, or scoped-send mismatch
+/// refusal names, or `None` for any other code or a detail without `field`.
 pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a str> {
-    if code != INVALID_PARAMS && code != SEND_ID_REUSE {
+    if !matches!(
+        code,
+        INVALID_PARAMS
+            | SEND_ID_REUSE
+            | SCOPE_SENDER_MISMATCH
+            | SCOPE_FLOW_ID_MISMATCH
+            | SCOPE_RUN_ID_MISMATCH
+            | SCOPE_AGENT_ID_MISMATCH
+    ) {
         return None;
     }
     detail?.get("field")?.as_str()
@@ -688,7 +721,7 @@ mod tests {
         let detail: ToolNameCollisionDetail =
             vectors::exact_object_round_trip(name, "\"detail\": ", 4);
         assert_eq!(detail.name, "web_search");
-        assert_eq!(detail.providers, ["plexus", "prefrontal-core"]);
+        assert_eq!(detail.providers, ["tool-provider", "owner-module"]);
     }
 
     #[test]
@@ -786,6 +819,45 @@ mod tests {
         );
         assert_eq!(refused_field(UNKNOWN_MID, Some(&detail)), None);
         assert_eq!(refused_field(INVALID_PARAMS, None), None);
+    }
+
+    #[test]
+    fn scoped_send_mismatches_are_named_terminal_and_expose_their_fields() {
+        for (code, field, wire_code, wire_field) in [
+            (
+                SCOPE_SENDER_MISMATCH,
+                scope_mismatch_fields::SENDER,
+                "scope_sender_mismatch",
+                "sender",
+            ),
+            (
+                SCOPE_FLOW_ID_MISMATCH,
+                scope_mismatch_fields::FLOW_ID,
+                "scope_flow_id_mismatch",
+                "flow_id",
+            ),
+            (
+                SCOPE_RUN_ID_MISMATCH,
+                scope_mismatch_fields::RUN_ID,
+                "scope_run_id_mismatch",
+                "run_id",
+            ),
+            (
+                SCOPE_AGENT_ID_MISMATCH,
+                scope_mismatch_fields::AGENT_ID,
+                "scope_agent_id_mismatch",
+                "agent_id",
+            ),
+        ] {
+            assert_eq!(code, wire_code);
+            assert_eq!(field, wire_field);
+            assert!(CODES.contains(&code));
+            assert!(!is_retryable(code));
+            let detail = serde_json::json!({"field": field});
+            assert_eq!(refused_field(code, Some(&detail)), Some(wire_field));
+            assert_eq!(refused_field(code, None), None);
+            assert_eq!(refused_field(code, Some(&serde_json::json!({}))), None);
+        }
     }
 }
 

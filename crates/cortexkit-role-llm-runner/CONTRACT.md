@@ -801,6 +801,13 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   figures add up to session usage field by field, but only for fields every
   counted step reported. Readers must not add an absent value as zero.
 - [pinned] A never-written session still carries the required cache pair.
+  Reads create no record. An id without a current record serves a reserved
+  placeholder incarnation that never identifies a real record. A replacement
+  history version is allocated once, strictly above every version previously
+  served for that id, using §4.5's durable high-water; repeated reads keep it.
+  The placeholder pair (incarnation and version) means only "empty". The first
+  send creates the record and its real incarnation, so readers always reload
+  after that send.
   `last_ordinal`, `first_ordinal`, `cut`, event `head`, `last_run_state` and
   `updated_at` are absent until the corresponding transcript/run exists.
   For a written session, `updated_at` and `first_ordinal` are present;
@@ -2286,9 +2293,58 @@ Model-view reads and replacement-entry pages are not part of this contract.
   nothing.
 - [pinned] A steered prompt written before PreUser existed is never run
   through PreUser later, on resume or replay.
-- [pinned] Owner sends use the session's frozen scope. A runner MAY admit
-  unkeyed non-owner sends, without retry idempotency; otherwise any other
-  caller is refused `scope_owner_mismatch`.
+- [pinned] Subject to the scoped-start policy and frozen-send checks below,
+  owner sends use the session's frozen scope. A runner MAY admit unkeyed
+  non-owner sends, without retry idempotency; otherwise any other caller is
+  refused `scope_owner_mismatch`. This optional policy never overrides a
+  frozen-send refusal.
+- [pinned] **Creating a session under a scope.** Runners MUST check the
+  daemon's bind stamp: the attested opener principal, scope owner and scope
+  attributes, never identities supplied in a send. A plain scope has neither
+  `flow_id` nor `run_id`; a flow scope carries `flow_id`, and a run scope
+  carries `run_id`. A scope never carries both: the daemon refuses such a
+  record as `scope_run_id_with_flow_id`.
+  - Under a plain scope, a runner MUST admit a session-creating send only
+    when the attested opener is the scope's owner. Any other opener is
+    refused `scope_owner_mismatch` before any write: no session record,
+    history or run.
+  - Under a flow scope, a runner MAY admit a session-creating send from an
+    opener the daemon admitted under that scope, owner or carrier. If it
+    does, it freezes that opener as the session's sender, together with the
+    `flow_id`, `run_id` and `agent_id` attributes (including absence).
+  - Under a run scope, a runner MAY admit a session-creating send only from
+    an admitted opener that is not the scope's owner, and freezes the sender
+    and attributes in the same way.
+  - A runner may be stricter than these MAY rules, admitting fewer openers;
+    for example, it may admit only one known executor on run scopes.
+  On an unscoped session, the first admitted sender establishes the owner.
+  On a scoped creation, the scope owner supplies execution and spend authority,
+  and the attested opener is recorded as the sender. Freezing a carrier as
+  sender transfers none of the owner's authority. Creating a scoped session
+  attributes it, and its spend, to the scope's owner.
+  A carrier listing means "may reach this target under this scope", not
+  "may act as the owner".
+- [pinned] Later sends to a session frozen this way are refused before any
+  write on the first mismatch in this order:
+  1. another attested principal: `scope_sender_mismatch`,
+     `detail: {field: "sender"}`;
+  2. a different `flow_id`: `scope_flow_id_mismatch`,
+     `detail: {field: "flow_id"}`;
+  3. a different `run_id`: `scope_run_id_mismatch`,
+     `detail: {field: "run_id"}`;
+  4. a different `agent_id`: `scope_agent_id_mismatch`,
+     `detail: {field: "agent_id"}`.
+  These checks apply to the scope owner and plan-named senders too: neither
+  a plan grant (§9.7) nor the optional unkeyed non-owner policy overrides a
+  refusal. Sessions without a freeze keep the existing send-admission rules.
+  Read admission stays governed by §9.19; the frozen checks apply to sends,
+  not reads.
+  `scope_admission::check_start` and `scope_admission::check_frozen` provide
+  the start-policy and frozen comparisons for inputs from an already-validated
+  bind stamp and durable session record. They do not validate the stamp,
+  perform plan admission, persist the freeze or select execution authority;
+  the runner remains responsible for those steps. Unscoped sends do not use
+  these helpers.
 - [pinned] **Authority stays the owner's** (stated in 0.5.2 for every
   runner). A run that a non-owner's send starts or joins (a plan-named
   sender's, §9.7, or an unkeyed non-owner send above) runs under the
@@ -3275,7 +3331,8 @@ say who may send and which texts are system text.
 
 - [pinned] The plan's optional `senders: [{module, idle_start?, interrupt?,
   templates?, succeeds?}]` (`delivery_order::PlanSender`) names the modules other than
-  the owner whose sends the session admits, and the templates each may use.
+  the owner whose sends the session admits, subject to §9's frozen-send checks,
+  and the templates each may use.
   Each entry, its grants included, is frozen at admission with the plan,
   then replaced at durable `session.refresh` acceptance, not at the next run
   (§10.2's sender-admission exception).
@@ -3290,13 +3347,19 @@ say who may send and which texts are system text.
 - [pinned] A sender grant grants no transcript reads. Plan-named readers
   are a separate opt-in admission policy (§9.19 `app_readers`).
 - [pinned] The first send, before an owner is recorded, is admitted without
-  a sender grant and sets the owner. After that, on a runner that declares
+  a sender grant, subject to §9's scoped-creation rule:
+  a plan grant never authorizes creation under someone else's plain scope.
+  On an unscoped session the first admitted sender establishes the owner;
+  on a scoped creation the scope owner supplies execution and spend authority
+  and the attested opener is recorded as the sender (§9).
+  After that, on a runner that declares
   `delivery_order`, a send from anyone but the owner is admitted only when
   the plan names the sender, matched on
   the route's attested principal, never on a request field
   (`delivery_order::admit`); any other caller is refused
   `scope_owner_mismatch`, writing nothing. This replaces §9's permission to
-  admit unkeyed non-owner sends on such a runner.
+  admit unkeyed non-owner sends on such a runner. Neither these plan grants
+  nor the owner's status overrides §9's frozen-send check.
 - [pinned] A named sender may list `idle_start`, and so start a run, only
   when its entry grants `idle_start: true`; otherwise its list (or its
   string `queue` or `steer`, which stand for lists holding `idle_start`) is
@@ -4759,7 +4822,11 @@ treats it as a terminal refusal of that one request.
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose legacy delivery mode is undeclared, or a `delivery_order` list with no declared member (§9.7) | `delivery`: the mode string or the ordered list as sent | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |
-| `scope_owner_mismatch` | an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7), `session.baseline`, `run.cancel` (except `now` from that session's current interrupt-granted plan sender on a `run_cancel_by_interrupt` runner, §6.2), `session.retract` (except that submission's recorded daemon-attested sender on a `retract_own_send` runner, §9.2), `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
+| `scope_owner_mismatch` | a scoped session-creating send disallowed by §9's creation policy: a plain-scope non-owner, a run-scope owner, or an opener rejected by the runner's optional flow or run policy; or an owner-only call from anyone but the owner: `session.send` (except an admitted unkeyed non-owner send, §9, or, on a `delivery_order` runner, a send from a sender the plan names, §9.7; all subject to §9's frozen-send checks), `session.baseline`, `run.cancel` (except `now` from that session's current interrupt-granted plan sender on a `run_cancel_by_interrupt` runner, §6.2), `session.retract` (except that submission's recorded daemon-attested sender on a `retract_own_send` runner, §9.2), `session.adopt` (§9.5), `session.user_command` or `session.user_command_status` (§9.10) | the accepted identity | no |
+| `scope_sender_mismatch` | a later send's attested opener differs from the frozen sender (§9); checked before flow, run and agent | `{field: "sender"}` | no |
+| `scope_flow_id_mismatch` | a later send's flow id differs from the frozen value (§9); checked before run and agent | `{field: "flow_id"}` | no |
+| `scope_run_id_mismatch` | a later send's run id differs from the frozen value (§9); checked before agent | `{field: "run_id"}` | no |
+| `scope_agent_id_mismatch` | a later send's agent id differs from the frozen value (§9) | `{field: "agent_id"}` | no |
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline, including when a `session.refresh` fetch misses its deadline (§10.2) | `provider` | **yes** |

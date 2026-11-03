@@ -233,7 +233,7 @@
   ],
   "templates": {
     "sender": {
-      "module": "ck-mc",
+      "module": "compaction-provider",
       "templates": [
         {
           "id": "ctx_pressure",
@@ -806,7 +806,7 @@
       "plan": {
         "senders": [
           {
-            "module": "ck-mc",
+            "module": "compaction-provider",
             "templates": [
               {
                 "id": "ctx_pressure",
@@ -839,7 +839,7 @@
             "idle_start": true
           },
           {
-            "module": "ck-thalamus",
+            "module": "app-server",
             "idle_start": true,
             "interrupt": true
           }
@@ -863,7 +863,7 @@
       "plan": {
         "senders": [
           {
-            "module": "ck-mc"
+            "module": "compaction-provider"
           }
         ]
       },
@@ -1107,7 +1107,7 @@
     },
     {
       "name": "a plan-named sender",
-      "caller": "ck-mc",
+      "caller": "compaction-provider",
       "owner": "reserved:owner",
       "modes": [
         "tool_result",
@@ -1116,7 +1116,7 @@
     },
     {
       "name": "a plan-named sender without the grant cannot start a run",
-      "caller": "ck-mc",
+      "caller": "compaction-provider",
       "owner": "reserved:owner",
       "modes": [
         "steer",
@@ -1156,7 +1156,7 @@
         "steer"
       ],
       "request_field": {
-        "sender": "ck-mc"
+        "sender": "compaction-provider"
       },
       "refusal": {
         "code": "scope_owner_mismatch"
@@ -1176,7 +1176,7 @@
     },
     {
       "name": "a named sender granted interrupt interrupts as the owner does",
-      "caller": "ck-thalamus",
+      "caller": "app-server",
       "owner": "reserved:owner",
       "request": {
         "send_id": "s-app-int",
@@ -1186,7 +1186,7 @@
     },
     {
       "name": "a named sender without the interrupt grant is refused",
-      "caller": "ck-mc",
+      "caller": "compaction-provider",
       "owner": "reserved:owner",
       "request": {
         "send_id": "s-mc-int",
@@ -1231,7 +1231,7 @@
     },
     {
       "name": "a named sender granted idle_start sends the string queue",
-      "caller": "ck-thalamus",
+      "caller": "app-server",
       "owner": "reserved:owner",
       "request": {
         "send_id": "s-app-queue",
@@ -1260,7 +1260,7 @@
     },
     {
       "name": "a named sender without idle_start sends the string queue",
-      "caller": "ck-mc",
+      "caller": "compaction-provider",
       "owner": "reserved:owner",
       "request": {
         "send_id": "s-mc-queue",
@@ -1279,12 +1279,12 @@
     {
       "name": "same sender, same key, still queued: replaced",
       "queued": {
-        "sender": "ck-mc",
+        "sender": "compaction-provider",
         "key": "k",
         "delivered": false
       },
       "arriving": {
-        "sender": "ck-mc",
+        "sender": "compaction-provider",
         "key": "k"
       },
       "replaces": true
@@ -1292,12 +1292,12 @@
     {
       "name": "already delivered: kept",
       "queued": {
-        "sender": "ck-mc",
+        "sender": "compaction-provider",
         "key": "k",
         "delivered": true
       },
       "arriving": {
-        "sender": "ck-mc",
+        "sender": "compaction-provider",
         "key": "k"
       },
       "replaces": false
@@ -1310,7 +1310,7 @@
         "delivered": false
       },
       "arriving": {
-        "sender": "ck-mc",
+        "sender": "compaction-provider",
         "key": "k"
       },
       "replaces": false
@@ -1318,12 +1318,12 @@
     {
       "name": "another key: kept",
       "queued": {
-        "sender": "ck-mc",
+        "sender": "compaction-provider",
         "key": "k",
         "delivered": false
       },
       "arriving": {
-        "sender": "ck-mc",
+        "sender": "compaction-provider",
         "key": "j"
       },
       "replaces": false
@@ -1331,12 +1331,12 @@
     {
       "name": "no key: kept",
       "queued": {
-        "sender": "ck-mc",
+        "sender": "compaction-provider",
         "key": null,
         "delivered": false
       },
       "arriving": {
-        "sender": "ck-mc",
+        "sender": "compaction-provider",
         "key": null
       },
       "replaces": false

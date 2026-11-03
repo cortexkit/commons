@@ -85,7 +85,7 @@
         "error": {
           "class": "permanent",
           "provider_code": "context_too_large",
-          "provider": "magic-context",
+          "provider": "compaction-provider",
           "message": "switch to a larger model"
         }
       }

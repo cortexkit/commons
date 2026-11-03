@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.17.3
+
+- Pin `cortexkit-role-llm-runner =0.8.2` and add
+  `scoped_session_start_owner_only`: an optional adapter hook opens a plain
+  scope as a non-owner carrier. The case requires `scope_owner_mismatch` and
+  no visible session (empty owner read and head, no ready baseline), or reports
+  inapplicable when the hook is absent. It observes wire replies, not storage.
+- Repair `display_without_limits_is_whole` to use a kept non-error result
+  above the app's result bound and below the provider acceptance limit.
+  Error-result truncation is not exercised. The provider limit measures
+  pre-render output and does not bound rendered display text.
+- The pinned runner vectors replace illustrative module ids in samples with
+  role names: `owner-module`, `compaction-provider`, `app-server`,
+  `runner-a-head` and `tool-provider`. The published serializer-profile
+  selector stays unchanged.
+
 ## 0.17.2
 
 - Grade numbered `output_refs_*` fixtures and

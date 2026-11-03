@@ -334,7 +334,7 @@ mod tests {
         for row in data["host_names"].as_array().unwrap() {
             assert_eq!(
                 host_command_name(
-                    "magic-context",
+                    "compaction-provider",
                     "ctx-wrapup",
                     row["safe"].as_bool().unwrap(),
                     row["registered"].as_bool().unwrap()

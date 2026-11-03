@@ -43,6 +43,7 @@ pub mod read;
 pub mod retract;
 pub mod rich_ui;
 pub mod run;
+pub mod scope_admission;
 pub mod send;
 pub mod send_status;
 pub mod sender_succession;
