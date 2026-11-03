@@ -82,6 +82,21 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         durable: "m_broca",
         filter_subjects: &["event.magic-context.compaction.>"],
     },
+    // Intended for the browser and computer-use module's cursor badge, which
+    // it clears when a runner's turn ends; turn starts let it ignore a late end
+    // from an older turn. This entry grants the durable EVENT reader only. The
+    // bus module derives live-hint subscriptions from these filters, and when
+    // to subscribe is the consumer's own behaviour.
+    EventConsumer {
+        module_id: "cerebellum",
+        durable: "m_cerebellum",
+        filter_subjects: &[
+            "event.thalamus-harness.turn_started.v1",
+            "event.thalamus-harness.turn_ended.v1",
+            "event.thalamus-pi.turn_started.v1",
+            "event.thalamus-pi.turn_ended.v1",
+        ],
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

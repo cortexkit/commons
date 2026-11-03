@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.10
+
+- Add `cerebellum` as a reader of the runners' turn events through
+  `m_cerebellum`, with four exact filters: `turn_started.v1` and
+  `turn_ended.v1` from `thalamus-harness` and from `thalamus-pi`. Its grant
+  keeps the ordinary participant permissions and adds only the EVENT-stream
+  pull, acknowledgement and consumer-info permissions for `m_cerebellum`.
+  This crate adds no live-hint permissions; the bus module that issues
+  credentials derives its live-hint subscriptions from these filters.
+
 ## 0.2.9
 
 - Add `thalamus-pi` (the Pi runner) as a reader of Magic Context's compaction

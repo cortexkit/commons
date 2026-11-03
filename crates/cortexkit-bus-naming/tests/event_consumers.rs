@@ -90,6 +90,19 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
                 [format!("ck.{account}.event.magic-context.compaction.>")]
             );
         }
+        let cerebellum = specs
+            .iter()
+            .find(|spec| spec.consumer.durable == "m_cerebellum")
+            .unwrap();
+        assert_eq!(
+            cerebellum.consumer.filter_subjects,
+            [
+                format!("ck.{account}.event.thalamus-harness.turn_started.v1"),
+                format!("ck.{account}.event.thalamus-harness.turn_ended.v1"),
+                format!("ck.{account}.event.thalamus-pi.turn_started.v1"),
+                format!("ck.{account}.event.thalamus-pi.turn_ended.v1"),
+            ]
+        );
     }
 }
 
