@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.5
+
+- `cache_expired` now means proven expiry only: the runner's own clock shows
+  its last request for the session, keep-warm requests included, is older
+  than the cache lifetime it requested. A runner that cannot tell, including
+  after its own restart without a durable record of its last request, sends
+  no `cache_expired` (RD3, F3). Providers treat the cause as a rebuild that
+  costs nothing extra, so an unproven report could prompt needless provider
+  work, including a new view, depending on the provider's policy.
+- RD3 names what proof needs: the lifetime the runner asked the model
+  provider for, the last request's time on the same clock, kept durably to
+  survive a restart. RD5 says how a provider reads a missing cause, and the
+  ride deadline's note no longer suggests a cold cache.
+- A runner lists `cache_expired` in `detects` only for routes where it keeps
+  that clock (RD5). The wire is unchanged.
+
 ## 0.2.4
 
 - Add optional runner token counts on text, tool and file parts, assistant

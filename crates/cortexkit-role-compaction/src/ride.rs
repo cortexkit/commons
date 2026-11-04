@@ -54,9 +54,10 @@ impl RideRequest {
 #[serde(from = "String", into = "String")]
 #[non_exhaustive]
 pub enum RideCause {
-    /// The prompt cache expired: the runner's last send (keep-warm requests
-    /// included) is older than the cache lifetime it requested, or it cannot
-    /// know, for example after its own restart.
+    /// The prompt cache is proven expired: by the runner's own clock, its last
+    /// send (keep-warm requests included) is older than the cache lifetime it
+    /// requested. A runner that cannot tell, for example after its own restart
+    /// without a durable record of that send, sends no `cache_expired` (RD3).
     CacheExpired,
     /// The runner restarts its request chain (OpenAI chained requests).
     ChainReset,
