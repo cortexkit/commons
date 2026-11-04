@@ -45,6 +45,9 @@ where
     if name == "read_display_facts_completed_at" {
         return completed_at(case).await;
     }
+    if name == "read_display_facts_created_at" {
+        return created_at(case).await;
+    }
     let calls: Vec<_> = (0..3)
         .map(|index| case.mint.call(&format!("display-call-{index}")))
         .collect();
@@ -112,6 +115,7 @@ where
             entry.get("client_message_id").is_some()
                 || entry.get("tool_times").is_some()
                 || entry.get("completed_at").is_some()
+                || entry.get("created_at").is_some()
                 || entry.get("reasoning_summaries").is_some()
         }) {
             return Err("default read exposed display facts without opt-in".into());
@@ -163,6 +167,7 @@ where
             .remove("client_message_id");
         stripped.as_object_mut().unwrap().remove("tool_times");
         stripped.as_object_mut().unwrap().remove("completed_at");
+        stripped.as_object_mut().unwrap().remove("created_at");
         stripped
             .as_object_mut()
             .unwrap()
@@ -173,6 +178,85 @@ where
     }
     if !user_found || !calls_found {
         return Err("fixture did not expose the sent user message and call batch".into());
+    }
+    Ok(Ending::Passed)
+}
+
+async fn created_at<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let (answer, marker) = case.mint.text("created-assistant");
+    let mut session = case
+        .open(
+            "read-created",
+            Script {
+                turns: vec![ScriptedTurn::new(vec![answer])],
+            },
+        )
+        .await?;
+    let prompt = case.mint.next("creation-user");
+    send_and_wait(case, &mut session, None, &prompt, &serde_json::Map::new()).await?;
+    let initial = page(&session.route, true).await?;
+    let entries = initial["messages"]
+        .as_array()
+        .ok_or("read page has no messages")?;
+    let mut expected = Vec::new();
+    for (label, text) in [("user", &prompt), ("assistant", &marker)] {
+        let entry = entries
+            .iter()
+            .find(|entry| entry["message"].to_string().contains(text))
+            .ok_or_else(|| format!("creation fixture did not expose the {label} entry"))?;
+        let mid = entry["mid"].as_str().ok_or("read entry has no mid")?;
+        // Three separated candidates ensure neither of the two other timestamps
+        // can be mistaken for the seeded host fact, even near u64 boundaries.
+        let created = [120_000_u64, 240_000, 360_000]
+            .into_iter()
+            .find(|candidate| {
+                ["written_at", "completed_at"].iter().all(|field| {
+                    entry[*field]
+                        .as_u64()
+                        .is_none_or(|time| candidate.abs_diff(time) >= 60_000)
+                })
+            })
+            .ok_or("could not separate the seeded creation time from other timestamps")?;
+        if !case
+            .subject
+            .seed_host_created_at(&session.name, mid, created)
+            .await
+            .map_err(|e| e.to_string())?
+        {
+            return Ok(Ending::Inapplicable(
+                "adapter could not seed a host creation time via seed_host_created_at".into(),
+            ));
+        }
+        expected.push((mid.to_owned(), created));
+    }
+    let plain = page(&session.route, false).await?;
+    if plain["messages"]
+        .as_array()
+        .ok_or("default read page has no messages")?
+        .iter()
+        .any(|entry| entry.get("created_at").is_some())
+    {
+        return Err("default read exposed created_at without opt-in".into());
+    }
+    let decorated = page(&session.route, true).await?;
+    let shown = decorated["messages"]
+        .as_array()
+        .ok_or("opt-in read page has no messages")?;
+    for (mid, created) in expected {
+        let entry = shown
+            .iter()
+            .find(|entry| entry["mid"] == mid)
+            .ok_or("creation fixture entry disappeared after seeding")?;
+        if entry["created_at"].as_u64() != Some(created) {
+            return Err(format!(
+                "entry {mid} omitted or changed created_at: expected seeded host time {created}, got {}",
+                entry["created_at"]
+            ));
+        }
     }
     Ok(Ending::Passed)
 }

@@ -207,7 +207,7 @@ alias until the next breaking release.
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
-| `read_display_facts` | `session.read` (`include_display_facts`, entry client ids, tool times, assistant completion times and reasoning summaries) | §4.2, §4.7.1 |
+| `read_display_facts` | `session.read` (`include_display_facts`, entry client ids, creation times, tool times, assistant completion times and reasoning summaries) | §4.2, §4.7.1 |
 | `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `session.send_status` where served | §9.7 |
 | `rich_ui_stamp` | `session.read` (the `include_rich_ui` opt-in), `session.head` (`last_run_rich_ui`); also the rich UI stamp on assistant display rows and `run_started` where those are served | §9.17 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
@@ -493,7 +493,7 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
 - [pinned] **The envelope.** A read entry is `{ordinal, mid, message, run?,
   originals?, tool_calls?, role?, written_at?, delivered_as?, digest?,
   part_digests?, part_keys?, rich_ui?, client_message_id?, tool_times?,
-  completed_at?, reasoning_summaries?}`. Every
+  created_at?, completed_at?, reasoning_summaries?}`. Every
   runner-neutral fact a consumer relies on rides in the envelope, never only
   inside `message`: the position (`ordinal`, `mid`), who spoke (`role`,
   `read::role`: `user`, `assistant`, `tool`, `system`, decoded open),
@@ -524,6 +524,28 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
 - [pinned] `client_message_id?: string` is present on an entry written by a
   send carrying that id, with exactly the value on its display row (§9.11).
   A host-typed entry or a send without that id carries none.
+- [pinned] `created_at?: u64`: the host's recorded creation timestamp for
+  this message, in Unix epoch milliseconds. For an entry written by a send,
+  that's when the host accepted the send; a queued send or steer keeps that
+  acceptance time, and later delivery or insertion into the transcript
+  doesn't replace it. For an assistant message, the host's own
+  message-creation timestamp qualifies, such as the time a host records when
+  it starts the message or sends the request that produces it; no separate
+  request-start or first-output time is required. A runner never derives
+  `created_at` from its own write, ingest or serve time, and never
+  reconstructs it from other timestamps. `written_at` keeps its meaning,
+  write time or first-ingest time, and the two may coincide. It applies to
+  any role. An entry MUST carry it when the host recorded a creation time;
+  it is absent when none was recorded. A runner serves it exactly as
+  recorded, never adjusted against other times. Host clocks can step, so
+  readers must not assume `created_at <= completed_at`: a reader showing an
+  elapsed time computes the difference without unsigned underflow and
+  clamps a negative result to zero. It rides the existing
+  `read_display_facts` group, served only with `include_display_facts:
+  true`, beside `mid`, never inside `message`. Without that flag it's absent
+  and default replies keep their exact bytes, and it never enters stored
+  bodies or message/part digest inputs. A later read of the same entry may
+  gain it.
 - [pinned] `completed_at?: u64`: an assistant entry MUST carry it when the
   host recorded that message's finish time, and its value is that time in
   Unix epoch milliseconds (§4.7.1). It is absent while that message is
@@ -1346,7 +1368,20 @@ display-ready row for an app's reader on a runner declaring
   `session.read` entry: everything this section adds is on the display row
   or the request.
 
-### 4.7.1 Tool times, completion times and unanswered outcomes
+### 4.7.1 Tool times, creation/completion times and unanswered outcomes
+
+- [pinned] Under `read_display_facts`, with `include_display_facts: true`,
+  `created_at?: u64` beside `mid` is the host's recorded creation timestamp
+  in Unix epoch milliseconds, on any role: send acceptance (kept for a
+  queued send or steer), or the host's own creation timestamp for an
+  assistant message (§4.2 "Opt-in display facts" gives the full rule). It
+  MUST be present when the host recorded it, otherwise absent, and a later
+  read may gain it. Serve it exactly as recorded, never derived from the
+  runner's write, ingest or serve time and never adjusted against other
+  times. Host clocks can step, so readers must not assume
+  `created_at <= completed_at`, and clamp a negative displayed duration to
+  zero. Without the flag `created_at` is absent and default reply bytes are
+  unchanged; it never enters stored bodies or message/part digest inputs.
 
 - [pinned] Under `read_display_facts`, with `include_display_facts: true`,
   an assistant entry MUST carry `completed_at` beside `mid` when the host

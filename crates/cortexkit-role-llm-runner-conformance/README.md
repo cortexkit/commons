@@ -1,8 +1,7 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.4** pins `cortexkit-role-llm-runner =0.8.3`, adding frozen-plan
-sender refusals, completion display facts and a correction to compare
-never-written reads against their head identity.
+Version **0.17.6** pins `cortexkit-role-llm-runner =0.8.5`, adding host creation
+time display-fact checks with independently seeded user and assistant times.
 The role remains
 `llm-runner/v1` after the breaking 0.8 release. The runner's
 [CONTRACT.md](../cortexkit-role-llm-runner/CONTRACT.md) is normative; the public
@@ -85,6 +84,7 @@ opaque part keys come from the served envelope, not a reader's invented index.
 | `output_refs_without_compaction_unknown_tag` | Resolve a reply reference without `plan.compaction_item`, change its `unresolved` / `unknown_tag` record after another tool output, or serve content for it instead of `unknown_ref`. |
 | `scoped_session_start_owner_only` | Admit a non-owner carrier's session-creating send under a plain scope, or show a visible session after refusing `scope_owner_mismatch`: the owner must see an empty read and head, and no ready baseline. |
 | `display_without_limits_is_whole` | Cut arguments or a kept non-error tool result without requested limits; the fixture exceeds the app's 16,384-byte result bound but stays below the pre-render provider acceptance limit. Error-result truncation is not exercised. |
+| `read_display_facts_created_at` | Omit or change a recorded host creation time, substitute `written_at` or `completed_at`, or expose it without the opt-in. |
 
 Each new case is exercised against a deliberately faulty fake and verifies
 rejection under the case's name. The unnumbered-reference case has
@@ -108,6 +108,13 @@ a finished assistant entry has a host finish stamp, and user entries have none.
 The case does not compare it to other timestamps: `written_at` can be first
 ingest rather than creation time. Without host finish reporting that
 case is inapplicable, without skipping the other display-fact checks.
+`seed_host_created_at(session, mid, created_at_ms)` sets the host's recorded
+creation time for an existing entry, independently of the read route. The
+`read_display_facts_created_at` case seeds user and assistant times at least
+60 seconds from any `written_at` or `completed_at` the initial read returns,
+then requires exact values with the opt-in and absence without it. When the
+hook returns false (the default), that case is `Inapplicable` with a reason
+naming the hook, never passed.
 These cases observe public wire replies, not storage. The scoped-start case
 checks that refusal leaves no visible session. The frozen-plan cases check
 that refusal leaves the existing session's head, history and baseline

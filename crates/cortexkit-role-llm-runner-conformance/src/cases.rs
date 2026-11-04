@@ -177,6 +177,7 @@ where
             }
             "read_display_facts_opt_in_envelope"
             | "read_display_facts_completed_at"
+            | "read_display_facts_created_at"
             | "read_display_facts_default_absent"
             | "read_display_facts_undeclared_refused" => {
                 crate::read_display_facts::run(self, name).await

@@ -7852,6 +7852,49 @@ async fn read_display_facts_completed_at_faithful_runner_passes() {
 }
 
 #[tokio::test]
+async fn read_display_facts_created_at_faithful_runner_passes() {
+    let report = run(&read_facts_subject(None)).await;
+    assert_feature_passed(&report, "read_display_facts_created_at");
+}
+
+async fn assert_created_at_fault(defect: &'static str) {
+    let report = run(&read_facts_subject(Some(defect))).await;
+    let reason = failed(&report, "read_display_facts_created_at");
+    assert!(reason.contains("created_at"), "{defect}: {reason}");
+    assert!(report
+        .render()
+        .contains("FAIL read_display_facts_created_at"));
+    println!("{defect}: FAIL read_display_facts_created_at: {reason}");
+}
+
+#[tokio::test]
+async fn read_display_facts_created_at_written_at_substitution_fails_by_name() {
+    assert_created_at_fault("creation_from_written").await;
+}
+
+#[tokio::test]
+async fn read_display_facts_created_at_omission_fails_by_name() {
+    assert_created_at_fault("creation_missing").await;
+}
+
+#[tokio::test]
+async fn read_display_facts_created_at_completed_at_substitution_fails_by_name() {
+    assert_created_at_fault("creation_from_completed").await;
+}
+
+#[tokio::test]
+async fn read_display_facts_created_at_missing_hook_is_inapplicable_by_name() {
+    let report = run(&read_facts_subject(Some("creation_missing_hook"))).await;
+    match report.outcome("read_display_facts_created_at") {
+        Some(CaseOutcome::Inapplicable { reason }) => {
+            assert!(reason.contains("seed_host_created_at"), "{reason}");
+        }
+        other => panic!("expected inapplicable, got {other:?}\n{}", report.render()),
+    }
+    assert_feature_passed(&report, "read_display_facts_opt_in_envelope");
+}
+
+#[tokio::test]
 async fn read_display_facts_completed_at_faults_fail_by_case_name() {
     for defect in ["completion_missing", "completion_on_user"] {
         let report = run(&read_facts_subject(Some(defect))).await;

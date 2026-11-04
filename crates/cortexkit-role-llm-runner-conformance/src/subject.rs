@@ -1686,6 +1686,20 @@ pub trait LlmRunnerSubject: Harness {
         false
     }
 
+    /// Store exactly `created_at_ms` (Unix epoch milliseconds) as the host's
+    /// recorded creation time for the entry `mid` in `session`, independently of
+    /// the read route and without changing its write or completion times. Return
+    /// `Ok(true)` once seeded, or `Ok(false)` if the adapter can't seed that host
+    /// fact; the creation-time case is then inapplicable, never a pass.
+    async fn seed_host_created_at(
+        &self,
+        _session: &str,
+        _mid: &str,
+        _created_at_ms: u64,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
     /// Seed per-call display metadata independently of the read route. The
     /// calls already exist in `session`; use the supplied order and preserve
     /// absent times/outcomes. Return false when the adapter cannot arrange

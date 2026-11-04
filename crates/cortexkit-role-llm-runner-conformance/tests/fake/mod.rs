@@ -623,6 +623,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    host_created_at: Mutex<BTreeMap<(String, String), u64>>,
     read_tool_times: Mutex<BTreeMap<String, Vec<cortexkit_role_llm_runner::read::ToolTime>>>,
     step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents,
     step_publications: Mutex<
@@ -4220,6 +4221,20 @@ impl Module {
                     || self.world.defects.read_display_facts == Some("default_leak")
                 {
                     entry.client_message_id = m.client_message_id.clone();
+                    entry.created_at = match self.world.defects.read_display_facts {
+                        Some("creation_missing") => None,
+                        Some("creation_from_written") => Some(m.written_at),
+                        Some("creation_from_completed") if m.body["role"] == "assistant" => {
+                            m.completed_at
+                        }
+                        _ => self
+                            .world
+                            .host_created_at
+                            .lock()
+                            .unwrap()
+                            .get(&(session.to_owned(), m.mid.clone()))
+                            .copied(),
+                    };
                     entry.completed_at = match self.world.defects.read_display_facts {
                         Some("completion_missing") => None,
                         Some("completion_on_user") if m.body["role"] == "user" => {
@@ -5457,6 +5472,7 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    host_created_at: Mutex::new(BTreeMap::new()),
                     read_tool_times: Mutex::new(BTreeMap::new()),
                     step_event_policy: self.step_event_policy.clone(),
                     step_publications: Mutex::new(BTreeMap::new()),
@@ -6580,6 +6596,23 @@ impl LlmRunnerSubject for FakeSubject {
 
     fn reports_read_completed_at(&self) -> bool {
         self.defects.read_display_facts != Some("completion_missing_hook")
+    }
+
+    async fn seed_host_created_at(
+        &self,
+        session: &str,
+        mid: &str,
+        created_at_ms: u64,
+    ) -> Result<bool, HarnessError> {
+        if self.defects.read_display_facts == Some("creation_missing_hook") {
+            return Ok(false);
+        }
+        self.world()
+            .host_created_at
+            .lock()
+            .unwrap()
+            .insert((session.into(), mid.into()), created_at_ms);
+        Ok(true)
     }
 
     async fn seed_read_tool_times(

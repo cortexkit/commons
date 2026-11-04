@@ -75,6 +75,35 @@ fn display_facts_are_opt_in_and_beside_unchanged_body() {
 }
 
 #[test]
+fn created_at_round_trips_for_any_role_without_adjusting_clocks_or_body() {
+    for role in ["user", "assistant", "tool", "system"] {
+        let plain = ReadMessage::new(1, "m1", json!({"role":role,"content":"hello"}))
+            .with_role(role)
+            .with_written_at(200);
+        assert_eq!(plain.created_at, None);
+        let plain_wire = serde_json::to_value(&plain).unwrap();
+        let decoded: ReadMessage = serde_json::from_value(plain_wire.clone()).unwrap();
+        assert_eq!(decoded.created_at, None);
+        assert_eq!(serde_json::to_value(decoded).unwrap(), plain_wire);
+        for created in [0, 300, u64::MAX] {
+            let mut entry = plain.clone().with_created_at(created);
+            if role == "assistant" {
+                entry = entry.with_completed_at(100);
+            }
+            let mut wire = serde_json::to_value(&entry).unwrap();
+            assert_eq!(wire["created_at"], json!(created));
+            assert_eq!(wire["message"], plain_wire["message"]);
+            let decoded: ReadMessage = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(decoded.created_at, Some(created));
+            assert_eq!(decoded, entry);
+            wire.as_object_mut().unwrap().remove("created_at");
+            wire.as_object_mut().unwrap().remove("completed_at");
+            assert_eq!(wire, plain_wire);
+        }
+    }
+}
+
+#[test]
 fn delivery_deadline_retry_matches_without_changing_content_comparison() {
     let original = DeliveryOrder::new(vec![Mode::ToolResult])
         .with_dedupe_key("key")

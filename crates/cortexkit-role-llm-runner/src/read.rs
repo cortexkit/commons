@@ -131,7 +131,7 @@ pub struct ReadRequest {
     /// `false`, and a read without it is answered exactly as before.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub include_rich_ui: bool,
-    /// Add client ids, completion times, reasoning summaries and per-call times
+    /// Add client ids, creation/completion times, reasoning summaries and per-call times
     /// beside message bodies. Only served by a runner declaring
     /// `read_display_facts`; absent means false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -442,6 +442,18 @@ pub struct ReadMessage {
     /// Present only with `include_display_facts`, never inside `message`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_message_id: Option<String>,
+    /// The host's recorded creation timestamp for this message, in Unix epoch
+    /// milliseconds, exactly as recorded, on any role. A send's entry carries
+    /// the host's acceptance time, kept for queued sends and steers; an
+    /// assistant message carries the host's own message-creation timestamp.
+    /// Only with `include_display_facts`, required when the host recorded one,
+    /// otherwise absent. Never derived from the runner's write, ingest or serve
+    /// time, and never adjusted against `completed_at`. Host clocks can step,
+    /// so a reader showing a duration clamps a negative one to zero. A later
+    /// read may gain it, without changing stored bodies or message/part digest
+    /// inputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
     /// When the host recorded this assistant message's finish, in Unix epoch
     /// milliseconds. Only with `include_display_facts`, where an assistant
     /// entry must carry it once the host recorded a finish time. Absent while
@@ -592,6 +604,11 @@ impl ReadMessage {
         self
     }
 
+    pub fn with_created_at(mut self, created_at: u64) -> Self {
+        self.created_at = Some(created_at);
+        self
+    }
+
     pub fn with_reasoning_summaries(mut self, summaries: Vec<ReasoningSummary>) -> Self {
         self.reasoning_summaries = summaries;
         self
@@ -613,6 +630,7 @@ impl ReadMessage {
             delivered_as: None,
             rich_ui: None,
             client_message_id: None,
+            created_at: None,
             completed_at: None,
             reasoning_summaries: Vec::new(),
             tool_times: Vec::new(),

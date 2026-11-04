@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.5
+
+- Add optional `ReadMessage::created_at` and `with_created_at` to the
+  `read_display_facts` group, served when `include_display_facts: true`: the
+  host's recorded creation timestamp for any role, never derived from the
+  runner's write, ingest or serve time or from other timestamps. Queued sends
+  and steers keep the host's send acceptance time; assistant entries carry the
+  host's own message-creation timestamp. Host clocks may step, so no ordering
+  against completion time is guaranteed and readers clamp a negative displayed
+  duration to zero. Default reply bytes, stored bodies and message/part content
+  digests remain unchanged.
+
 ## 0.8.4
 
 - Add opt-in `media_only_send`, requiring `attachments`: a non-template send

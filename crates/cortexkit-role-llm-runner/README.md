@@ -2,7 +2,12 @@
 
 Wire types, small validation helpers and checksum-pinned vectors for
 `llm-runner/v1`: transcript reads, run results, subscriptions, session sends
-and the frozen session baseline. Version **0.8.3** adds frozen-plan sender
+and the frozen session baseline. Version **0.8.5** adds opt-in `created_at`
+read facts: the host's recorded message creation time, for any role, served
+verbatim beside `mid` and never substituted with runner ingest time. Default
+read bytes, stored bodies and content digests stay unchanged. Host clocks can
+step, so readers should clamp displayed durations rather than assume creation
+precedes completion. Version 0.8.3 adds frozen-plan sender
 checks, completion and reasoning-summary read facts, readable Responses summary
 projection, and stored-surface recovery rules for host restarts. Version 0.8.2
 adds scoped session-start checks and frozen sender/attribute mismatch helpers.
@@ -12,7 +17,7 @@ on `session.user_command` and `lineage_id` on `session.read`. Replies and
 numbering follow 0.8. The role capability name remains `llm-runner/v1`.
 
 [CONTRACT.md](CONTRACT.md) is the complete normative contract. The separate
-`cortexkit-role-llm-runner-conformance` 0.17.4 crate drives real runners over
+`cortexkit-role-llm-runner-conformance` 0.17.6 crate drives real runners over
 their management routes; this crate has no transport or runtime.
 
 ## Compaction and entry counting

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.6
+
+- Pin `cortexkit-role-llm-runner =0.8.5`. Add
+  `read_display_facts_created_at`, checking exact seeded host creation
+  timestamps on user and assistant entries, chosen at least 60 seconds from
+  any `written_at` or `completed_at` the initial read returns, and absent
+  without `include_display_facts`. The optional `seed_host_created_at` adapter
+  hook defaults to false; when it returns false the case is inapplicable with
+  a reason naming the hook, never a pass. Faulty fakes cover omission and
+  substitution of write or completion time.
+- Include creation time in default-absence checks and in comparisons
+  requiring decoded entries to stay unchanged once display-fact fields are
+  removed.
+
 ## 0.17.5
 
 - Pin `cortexkit-role-llm-runner =0.8.4`. Add `media_only_send` conformance:

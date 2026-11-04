@@ -143,6 +143,7 @@ pub const CASES: &[CaseSpec] = &[
     case("read_display_facts_opt_in_envelope", READ_FACTS, "client ids and ordered tool times appear beside mid, with the decoded message unchanged"),
     case("read_display_facts_default_absent", READ_FACTS, "a default read omits all display-fact members"),
     case("read_display_facts_completed_at", &[Capability::ReadDisplayFacts, Queue, TranscriptReads], "a finished assistant entry carries a host completion time and user entries never do; no comparison against other timestamps; inapplicable when the adapter cannot report host finishes"),
+    case("read_display_facts_created_at", &[Capability::ReadDisplayFacts, Queue, TranscriptReads], "user and assistant entries carry exactly their seeded host creation times, seeded at least 60 s from the initial read's written_at and completed_at, only with the opt-in; inapplicable when seed_host_created_at returns false"),
     CaseSpec { name: "read_display_facts_undeclared_refused", requires: READS, requires_any: &[], requires_undeclared_any: &[Capability::ReadDisplayFacts], checks: "an undeclared read opt-in is refused naming include_display_facts" },
     case("service_tier_unsupported_before_model", &[Queue, RunOps],
         "an unsupported level is refused with unsupported_tier before any model call"),
