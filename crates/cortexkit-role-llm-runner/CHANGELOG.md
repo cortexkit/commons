@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- Contract §4.2.2: an assistant reply whose producing request carried a
+  runner-rendered part number is served with W4.6's cleaning
+  (`clean_reply(text).text`) applied to its reply text payloads, listed per
+  profile, on `session.read`, raw `session.history`, display rows,
+  `run.result`'s final text and live text deltas. Reasoning, tool calls and
+  results, attachments and a structured-output run's final message are
+  untouched, as is the host's stored copy. Scope is decided once per
+  message and never reclassified by later plan changes. The served pipeline
+  is strip, then clean, then digest. A runner that starts cleaning
+  already-served messages validates each old body against its digest, and
+  from the raised history_version on serves only cleaned digests, computing
+  them on read until it has persisted them. Text only; no API change.
+
 ## 0.8.5
 
 - Add optional `ReadMessage::created_at` and `with_created_at` to the

@@ -711,6 +711,82 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   after that release is stripped, so a tool preparing a moved session
   computes its served bytes with `served_body(profile, row, true)`.
 
+### 4.2.2 Cleaned replies
+
+A model shown runner-rendered part-number prefixes (`cortexkit-role-compaction`
+A3, W4.7) may reproduce tag notation in its replies. For the messages and
+read surfaces below, the runner serves each reply text with W4.6's syntactic
+cleaning applied. The cleaning removes matching notation wherever it occurs
+and trims surrounding whitespace, so it also changes literal `§N§` or `§5.1`
+that a model meant as content; it does not tell decoration from content.
+
+- [pinned] **Scope.** An assistant message is in scope when the model request
+  that produced it carried at least one runner-rendered part-number prefix
+  (W4.7, after the view was applied). The runner decides this before it emits
+  the message's display deltas and records the decision durably with the
+  message. An imported or adopted message is in scope when its source records
+  that its producing request carried one. When neither is known, the runner
+  decides once at ingest: in scope when the session's applied plan at that
+  moment names a compaction provider, out of scope otherwise. A recorded
+  decision always wins over that fallback, and later plan changes never
+  reclassify a message. User, tool and system messages are never in scope,
+  and neither is the final assistant message of a run admitted with
+  `structured_output` (§9.4): that reply is the JSON the caller asked for,
+  and cleaning would change a literal `§` inside it, so it is served as
+  emitted. A runner that decides scope per session may instead treat every
+  message of a session whose runs use `structured_output` as out of scope,
+  decided once for the session.
+- [pinned] **Which text.** Only these payloads of an in-scope message change:
+
+  | Profile | Payloads cleaned |
+  | --- | --- |
+  | `anthropic-messages` | a string `content`, or the `text` of each `content[i]` with `type: "text"` |
+  | `opencode-aisdk` | the `text` of each `parts[i]` with `type: "text"` |
+  | `opencode-v2` | the text of each assistant `content` slot of kind `text` (§4.4) |
+  | `pi` | a string `/message/content`, or the `text` of each `/message/content[i]` with `type: "text"` |
+  | `owned-broca` | the `text` of each `content[i]` with `type: "text"` or `type: "text_with_state"` (its `provider_state` is untouched) |
+
+  Reasoning, tool calls and their arguments, tool results, attachments and
+  every other member are never cleaned. Cleaning changes only those strings:
+  it never adds or removes a part, changes a key, or touches a container.
+- [pinned] **The cleaning.** Each payload is replaced by
+  `cortexkit_compaction_view::clean::clean_reply(text).text`. A runner may call
+  that function or reproduce it exactly, checked against the view library's
+  cleaning vectors. On these read surfaces the cleaned text is served even
+  when it is empty. That is a presentation rule for reads only: W4.6's rule
+  that a model route which rejects empty text gets the original still governs
+  what the runner sends a model. Neutral projection and numbering (W4.3,
+  `session.entries`) start from the host's original payload, never from a
+  served cleaned body: an originally empty block stays unnumbered, and a
+  non-empty one that cleans to empty stays a part. A tool preparing a moved
+  session reads host rows, not served bodies, for the same reason.
+- [pinned] **Where.** `session.read` and raw `session.history` serve the
+  cleaned body. Display rows (§4.7) and `run.result`'s `final_message.text`
+  (§6) are built from it, and live text deltas follow §7.1. The host's
+  stored copy is untouched.
+- [pinned] **Served bytes.** For an in-scope message the runner rebuilds the
+  profile body with the entry's retained strip flag (§4.2.1), then cleans
+  the payloads above, then computes or checks the message digest and every
+  `part_digests` entry over that cleaned body, before building descriptors,
+  media references or display rows. `served_bytes::served_body` and
+  `served_bytes::check_served` only strip; for an in-scope message a runner
+  applies the cleaning to `served_body`'s result and checks the cleaned body's
+  digest itself. An adoption or import that computes served bytes follows the
+  same order. §9.14.1's rules for identities taken before pruning are
+  unchanged.
+- [pinned] **Moving existing messages.** A runner that starts cleaning
+  messages it has already served uncleaned does it as a history rewrite
+  (§4.5). For each such message it first reproduces the body it served
+  before and checks it against the retained digest, or uses the retained
+  body; if it can't, it treats the message as changed by the host and
+  follows `served_bytes_changed`, never re-hashing the current host row as
+  if it were the old body. From the moment history_version rises, every read
+  of the message, inline, descriptor or blocks, serves the cleaned body and
+  the cleaned body's message and part digests, keeping part keys and order.
+  The runner may persist those digests later, in bounded batches; until a
+  message's are persisted, it computes them on read after that validation.
+  It never serves a pre-clean digest at the raised history_version.
+
 ### 4.3 Head metadata
 
 - [pinned] Head metadata without bodies: `{last_ordinal?, first_ordinal?,
@@ -1295,8 +1371,8 @@ display-ready row for an app's reader on a runner declaring
   session holds and replays, counted by numbering, token counts and digests.
 - [pinned] The row comes from one pure function per serializer profile
   (`display::anthropic_messages`, `display::opencode_aisdk`, or
-  `display::project` by name). A runner calls it on the entry's stored body
-  and then fills what the body lacks: `model` (the recorded model that wrote
+  `display::project` by name). A runner calls it on the entry's served body
+  (§4.2.2) and then fills what the body lacks: `model` (the recorded model that wrote
   it; an `anthropic-messages` body names none),
   `client_message_id` (§9.11) and `sender` (below), and on a runner
   declaring `call_identity` each tool call's `call_key` and `schema_pin`
@@ -1466,8 +1542,12 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   finish of the last model step), and a run that has not ended answers
   its current state with no final message. [pinned] The separator is the
   empty string (`run::TEXT_SEPARATOR`, `run::join_text_parts`): text parts
-  are concatenated exactly as emitted, with nothing inserted, so a JSON
-  value a provider split across parts reads back whole.
+  are concatenated with nothing inserted. For a message outside §4.2.2 that
+  preserves provider-split text, so a JSON value a provider split across
+  parts reads back whole. For a message in scope, the joined parts are the
+  cleaned served ones; cleaning trims each part, so the join can differ from
+  what was emitted. A structured-output run's final message is out of scope,
+  so its text, and the input §9.4 parses, is exactly as emitted.
 - [pinned] A completed run whose final message has no text parts (reasoning
   only, or a provider's safety halt) answers `final_message` with `text:
   ""`, never an absent `final_message`. An absent `final_message` then means
@@ -2245,7 +2325,15 @@ new members.
   `text_delta {message_id, delta, tool_call_id?}`, `reasoning_delta
   {message_id, delta}`, `tool_input_delta {tool_call_id, delta}`,
   `display_gap {dropped}` and `display_reset`. `message_id` is the model
-  provider's id and may be empty. On a `live_events` runner the deltas also
+  provider's id and may be empty. For an assistant message in scope of
+  §4.2.2, grouped by the part's key: in the last display epoch for that
+  part (since the attach snapshot or the latest `display_reset`), the
+  snapshot text plus the `text_delta`s that followed, concatenated, equal
+  that part's cleaned served text once it is final. Attach snapshots carry
+  cleaned text too. A runner may hold back text while a `§` sequence or
+  trailing whitespace is unresolved, anywhere in the part. If a final
+  rewrite changes the text, the runner sends `display_reset` and the
+  replacement. On a `live_events` runner the deltas also
   carry `part` (the key the stored row gives the part) and exactly one of
   `mid` (the stored message's final id) or, with the `live_ids` opt-in below,
   `live_id`. Without that opt-in, `mid` is known from the first delta and
@@ -3199,7 +3287,8 @@ without a prompt.
 ### 9.6 Part numbers
 
 Part numbering, tag notation and reply cleaning are defined only by
-`cortexkit-role-compaction` A3 and W4. The `tags` group, `session.resolve`,
+`cortexkit-role-compaction` A3 and W4. Serving cleaned replies is §4.2.2.
+The `tags` group, `session.resolve`,
 read-entry tag rows and `render_tags` plan setting are not part of this role.
 Opaque per-part identities are carried by `part_digests` or, for an
 `archive_prunes_reasoning` entry without digests, `part_keys` (§9.14.1).
