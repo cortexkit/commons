@@ -81,4 +81,9 @@ pub use subject::{
 
 /// The one tool every scripted call names. The runner adapter's scripted tool
 /// provider serves it, and the session plan it builds makes it available.
+///
+/// Its input schema is [`call_identity::DISPATCHED_DEFINITION`]'s: an object
+/// whose `marker` is a required string, with other members allowed. Every
+/// scripted call to it carries a string `marker`, so its input passes that
+/// schema's validation on a host that checks input before running a call.
 pub const SCRIPTED_TOOL: &str = "conformance_echo";

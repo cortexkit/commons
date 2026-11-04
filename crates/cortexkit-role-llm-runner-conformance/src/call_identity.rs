@@ -13,9 +13,10 @@
 //! ([`LlmRunnerSubject::dispatched_schema_pin`]), which the runner cannot
 //! change after the fact.
 //!
-//! The module also publishes the tool definitions an adapter installs for
-//! these cases ([`DISPATCHED_DEFINITION`], [`CHANGED_DEFINITION`]), with the
-//! pins `tool-provider/v1` gives them.
+//! The module also publishes the baseline and changed tool definitions these
+//! cases use ([`DISPATCHED_DEFINITION`], [`CHANGED_DEFINITION`]), with the
+//! pins `tool-provider/v1` gives them. The baseline is also the schema served
+//! for [`crate::SCRIPTED_TOOL`] throughout the kit.
 
 use std::collections::BTreeMap;
 

@@ -6494,6 +6494,24 @@ impl LlmRunnerSubject for FakeSubject {
     }
 
     async fn install_script(&self, session: &str, script: Script) -> Result<(), HarnessError> {
+        // The scripted tool's input schema requires a string `marker`
+        // (`SCRIPTED_TOOL`'s docs). A host that validates input refuses a
+        // call without one and never runs it, so a case scripting such a call
+        // fails on that host for a reason the case doesn't test. Refusing it
+        // here makes that a failure of the kit's own tests instead.
+        for turn in &script.turns {
+            for part in &turn.parts {
+                if let ScriptedPart::ToolCall(call) = part {
+                    if call.tool == SCRIPTED_TOOL && !call.arguments["marker"].is_string() {
+                        return Err(HarnessError::new(format!(
+                            "scripted call {} to {SCRIPTED_TOOL} has no string `marker` in its \
+                             arguments, which the tool's input schema requires: {}",
+                            call.tool_call_id, call.arguments
+                        )));
+                    }
+                }
+            }
+        }
         self.world()
             .scripts
             .lock()

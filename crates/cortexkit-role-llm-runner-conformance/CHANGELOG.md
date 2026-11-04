@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.7
+
+- Every scripted call to `SCRIPTED_TOOL` now carries a string `marker`, which
+  its input schema (`call_identity::DISPATCHED_DEFINITION`) requires. The
+  `tool_result_too_large_is_error`, `tool_result_too_large_not_repeated`,
+  `output_refs_slots` and `output_refs_shared_samples` cases sent `nonce`
+  without `marker`, so a host that validates tool input refused the call
+  before running it, and those cases failed for a reason they don't test.
+  `SCRIPTED_TOOL`'s docs now state the schema. The kit's own fake-runner
+  tests reject an installed `SCRIPTED_TOOL` call without a top-level string
+  `marker`, so a new case that does this fails those tests.
+
 ## 0.17.6
 
 - Pin `cortexkit-role-llm-runner =0.8.5`. Add

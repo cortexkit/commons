@@ -15,7 +15,7 @@ where
     S::Route: RunnerRoute,
 {
     let id = case.mint.next("large-output-call");
-    let args = json!({"nonce":case.mint.next("large-output-args")});
+    let args = json!({"marker":case.mint.next("large-output-args")});
     let call = ScriptedToolCall {
         tool_call_id: id.clone(),
         tool: SCRIPTED_TOOL.into(),

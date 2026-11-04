@@ -446,7 +446,7 @@ where
     let mut parts = vec![ScriptedPart::Text(text)];
     if name == "output_refs_slots" {
         let mut call = case.mint.call("refs-slots");
-        call.arguments = json!({"nonce":case.mint.next("arg"),"data":format!("extra $$tc({tag})"),"program":format!("export const x = $$tc({tag})\nexport const y = \"$$tc({tag})\""),"other":format!("$$tc({tag})")});
+        call.arguments = json!({"marker":case.mint.next("arg"),"data":format!("extra $$tc({tag})"),"program":format!("export const x = $$tc({tag})\nexport const y = \"$$tc({tag})\""),"other":format!("$$tc({tag})")});
         parts.push(ScriptedPart::ToolCall(call));
     }
     if name == "output_refs_shared_samples" {
@@ -468,7 +468,7 @@ where
                     } else {
                         "program"
                     };
-                    call.arguments = json!({"nonce":case.mint.next("arg"),slot:sample["source"]});
+                    call.arguments = json!({"marker":case.mint.next("arg"),slot:sample["source"]});
                     parts.push(ScriptedPart::ToolCall(call));
                 }
             }
