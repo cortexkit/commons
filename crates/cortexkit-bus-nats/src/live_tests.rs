@@ -19,7 +19,7 @@ use tempfile::TempDir;
 use tokio::net::TcpStream;
 use tokio::time::{sleep, Instant};
 
-use crate::{ConnectConfig, NatsConnection};
+use crate::{CloseOutcome, ConnectConfig, NatsConnection};
 
 const ADMIN_PUBLIC: &str = "UADMIN";
 const PARTICIPANT_PUBLIC: &str = "UPARTICIPANT";
@@ -1103,4 +1103,167 @@ async fn the_delivery_authority_reads_its_room_durable_and_no_one_else_can() {
         .await
         .expect_err("the delivery authority must not pull m_other");
     refused(error, &foreign_pull);
+}
+
+/// Closing an idle connection returns `Closed`, ends its empty subscription,
+/// and makes a new subscription through a clone fail. Calling `close` again
+/// also returns `Closed`.
+#[tokio::test]
+async fn close_drains_and_every_clone_and_subscription_ends() {
+    use futures_util::StreamExt;
+
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let connection = connect(&server.url, "UCLOSING").await;
+    let clone = connection.clone();
+    let mut subscription = connection
+        .subscribe("ck.test.close")
+        .await
+        .expect("subscribe before close");
+
+    assert_eq!(
+        connection
+            .close(Duration::from_secs(5))
+            .await
+            .expect("close"),
+        CloseOutcome::Closed
+    );
+    assert!(
+        subscription.next().await.is_none(),
+        "a drained subscription ends"
+    );
+    assert!(
+        clone.subscribe("ck.test.after").await.is_err(),
+        "a clone refuses a new subscription after close"
+    );
+    assert_eq!(
+        connection
+            .close(Duration::from_millis(100))
+            .await
+            .expect("close again"),
+        CloseOutcome::Closed
+    );
+}
+
+/// A loopback TCP proxy in front of a test server whose forwarding can be cut
+/// and restored. Clients see their server go away and come back while the
+/// proxy keeps its port bound, so no other test can take that port meanwhile,
+/// which restarting a server on a released port would allow.
+struct OutageProxy {
+    url: String,
+    up: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    links: std::sync::Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    accept: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for OutageProxy {
+    fn drop(&mut self) {
+        self.accept.abort();
+        self.cut();
+    }
+}
+
+impl OutageProxy {
+    async fn to(target: &str) -> Self {
+        use std::sync::atomic::Ordering;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind proxy");
+        let url = format!(
+            "127.0.0.1:{}",
+            listener.local_addr().expect("proxy address").port()
+        );
+        let up = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let links = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let target = target.to_owned();
+        let accept = tokio::spawn({
+            let up = up.clone();
+            let links = links.clone();
+            async move {
+                while let Ok((mut inbound, _)) = listener.accept().await {
+                    // While cut, a connection is accepted and dropped at once,
+                    // so the client's reconnect attempt fails fast.
+                    if !up.load(Ordering::SeqCst) {
+                        continue;
+                    }
+                    let target = target.clone();
+                    links
+                        .lock()
+                        .expect("links lock")
+                        .push(tokio::spawn(async move {
+                            if let Ok(mut outbound) = TcpStream::connect(target).await {
+                                let _ = tokio::io::copy_bidirectional(&mut inbound, &mut outbound)
+                                    .await;
+                            }
+                        }));
+                }
+            }
+        });
+        Self {
+            url,
+            up,
+            links,
+            accept,
+        }
+    }
+
+    /// Drops every forwarded connection and refuses new ones.
+    fn cut(&self) {
+        self.up.store(false, std::sync::atomic::Ordering::SeqCst);
+        for link in self.links.lock().expect("links lock").drain(..) {
+            link.abort();
+        }
+    }
+
+    fn restore(&self) {
+        self.up.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// With its server cut off, a short `close` returns `Pending`. Once the server
+/// is reachable again, the drain that call queued closes the connection by
+/// itself: a new subscription is refused without another drain being sent.
+/// A later `close` then returns `Closed`.
+#[tokio::test]
+async fn close_while_disconnected_is_pending_then_closes_after_reconnect() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let proxy = OutageProxy::to(&server.url).await;
+    let connection = connect(&proxy.url, "UPENDING").await;
+
+    proxy.cut();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while connection.client().connection_state() != async_nats::connection::State::Disconnected {
+        assert!(Instant::now() < deadline, "the client never saw the outage");
+        sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        connection
+            .close(Duration::from_millis(300))
+            .await
+            .expect("close while disconnected"),
+        CloseOutcome::Pending
+    );
+
+    proxy.restore();
+    // A raw subscribe only queues a command, so it succeeds while the
+    // connection lives and fails once its handler has exited.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while connection.client().subscribe("ck.test.probe").await.is_ok() {
+        assert!(
+            Instant::now() < deadline,
+            "the first drain never closed the connection after it reconnected"
+        );
+        sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        connection
+            .close(Duration::from_millis(100))
+            .await
+            .expect("close after the drain ran"),
+        CloseOutcome::Closed
+    );
 }

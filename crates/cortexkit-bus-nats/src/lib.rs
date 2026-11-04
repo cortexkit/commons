@@ -10,7 +10,7 @@ mod register;
 mod stream;
 mod work_queue;
 
-pub use connection::{ConnectConfig, NatsConnection, NatsPermissionViolations};
+pub use connection::{CloseOutcome, ConnectConfig, NatsConnection, NatsPermissionViolations};
 pub use register::{NatsRegister, NatsRegisterWatch};
 pub use stream::{NatsStream, NatsStreamCursor};
 pub use work_queue::NatsWorkQueue;

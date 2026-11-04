@@ -36,6 +36,24 @@ impl ConnectConfig {
     }
 }
 
+/// What [`NatsConnection::close`] observed before returning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CloseOutcome {
+    /// The connection's handler has exited: closure was observed, or the
+    /// command channel was already gone. This does not by itself confirm a
+    /// graceful drain; a configured reconnect limit can also end a connection.
+    /// The underlying NATS connection, shared by every clone and every handle
+    /// built from it, accepts no new NATS operations. Local accessors and
+    /// already-buffered register watch results may still succeed.
+    Closed,
+    /// Closure was not confirmed in time, usually because the connection is
+    /// disconnected and reconnecting. A background task keeps trying to queue
+    /// the drain, and the drain runs if the connection reconnects and resumes
+    /// processing commands.
+    Pending,
+}
+
 #[derive(Clone)]
 pub struct NatsConnection {
     client: Client,
@@ -139,6 +157,67 @@ impl NatsConnection {
             return Err(violation.as_denied());
         }
         Ok(subscriber)
+    }
+
+    /// Requests a connection-wide drain and waits for the connection to close.
+    ///
+    /// Draining unsubscribes every subscription, flushes queued messages and
+    /// closes the connection without reconnecting. The underlying connection is
+    /// shared by every clone of this one and every handle built from it.
+    ///
+    /// It waits for closure for `deadline`, then makes one final probe that can
+    /// take up to another 50 ms, and returns [`CloseOutcome::Pending`] if
+    /// closure is still unconfirmed.
+    ///
+    /// While async-nats is reconnecting it processes no client commands, so
+    /// this call can't make a queued drain run sooner. With unlimited
+    /// reconnects (the default), a client that can never reconnect keeps
+    /// retrying for the life of its runtime; a configured reconnect limit ends
+    /// it without draining. So a caller replacing a connection must keep the old
+    /// one able to authenticate, through its configured auth options or auth
+    /// callback, for the drain to complete after an outage. `close` doesn't
+    /// refresh credentials.
+    pub async fn close(&self, deadline: Duration) -> BusResult<CloseOutcome> {
+        // Subscribe before requesting the drain to avoid a subscribe-after-
+        // drain race. A `Closed` event emitted earlier, or dropped, is caught
+        // by the enqueue checks instead.
+        let mut events = self.events.subscribe();
+        // Keep the drain's enqueue attempt alive after this call returns, even
+        // while it waits for room in a full command queue.
+        let client = self.client.clone();
+        let mut queued = Some(tokio::spawn(async move { client.drain().await.is_ok() }));
+        let closed = async {
+            loop {
+                tokio::select! {
+                    result = async { queued.as_mut().expect("guarded by is_some").await }, if queued.is_some() => {
+                        queued = None;
+                        // Only a refused enqueue means the command channel is
+                        // gone. A failed task proves nothing about the
+                        // connection, so keep waiting for the event.
+                        if let Ok(false) = result {
+                            return true;
+                        }
+                    }
+                    event = events.recv() => match event {
+                        Ok(Event::Closed) => return true,
+                        // A lagging receiver may have dropped `Closed`; the
+                        // final probe covers that case.
+                        Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                        Err(broadcast::error::RecvError::Closed) => return false,
+                    },
+                }
+            }
+        };
+        if let Ok(true) = tokio::time::timeout(deadline, closed).await {
+            return Ok(CloseOutcome::Closed);
+        }
+        // Once the connection's handler has exited, a drain is refused at once
+        // because its command channel is gone. A live connection accepts it,
+        // which is harmless, or keeps it waiting behind a full queue.
+        match tokio::time::timeout(Duration::from_millis(50), self.client.drain()).await {
+            Ok(Err(_)) => Ok(CloseOutcome::Closed),
+            _ => Ok(CloseOutcome::Pending),
+        }
     }
 
     pub(crate) fn jetstream(&self) -> async_nats::jetstream::Context {
