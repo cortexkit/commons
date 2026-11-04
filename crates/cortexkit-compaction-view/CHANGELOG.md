@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.2
+
+- 24 more `clean_reply` vectors: reply-cleaning edge cases (adjacent and
+  doubled section signs, section references, broken tag endings, tag zero,
+  oversized and lone tags, non-breaking spaces). The library's behaviour is
+  unchanged, and `PLAN_VERSION` stays 2.
+- The rendering pin now covers growing prefixes of the vector cases: the
+  latest version's row lists prefix checkpoints, and cases added at the end
+  get a longer prefix in the same row, so new coverage needs no version bump.
+  With the committed checksums unchanged, a changed output in any covered
+  case, old or new, fails the pin; for an intentional rendering change,
+  release review bumps `PLAN_VERSION` and adds a row.
+- `vectors/SHA256SUMS` matches the new `cases.json`.
+
 ## 0.1.1
 
 - Requires `cortexkit-role-compaction` 0.2.1.

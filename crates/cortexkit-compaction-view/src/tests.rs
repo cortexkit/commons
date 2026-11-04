@@ -1183,6 +1183,130 @@ mod vector_file {
                 "seal_view",
                 json!({"version": 3, "edits": [drop_part(2, "a1", "k1")]}),
             ),
+            // Cases added after a version was pinned go here, at the end, and
+            // are pinned by a longer prefix in `PLAN_OUTPUTS`. These
+            // reply-cleaning inputs are the ones an earlier runner-side
+            // cleaner was compared against; they agreed on every one.
+            (
+                "reply cleaning edge case: two leading tags",
+                "clean_reply",
+                json!({"text": "§1§ §2§ Done."}),
+            ),
+            (
+                "reply cleaning edge case: a tag after the text",
+                "clean_reply",
+                json!({"text": "Done §3§."}),
+            ),
+            (
+                "reply cleaning edge case: a section reference",
+                "clean_reply",
+                json!({"text": "§5.1 applies"}),
+            ),
+            (
+                "reply cleaning edge case: two section references",
+                "clean_reply",
+                json!({"text": "§12.3 and §4"}),
+            ),
+            (
+                "reply cleaning edge case: a broken tag ending",
+                "clean_reply",
+                json!({"text": "§9\"> broken"}),
+            ),
+            (
+                "reply cleaning edge case: a broken tag ending before a tag",
+                "clean_reply",
+                json!({"text": "§9\">§10§ text"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a colon",
+                "clean_reply",
+                json!({"text": "§7: note"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before letters",
+                "clean_reply",
+                json!({"text": "§7a word"}),
+            ),
+            (
+                "reply cleaning edge case: a lone trailing section sign",
+                "clean_reply",
+                json!({"text": "trailing §"}),
+            ),
+            (
+                "reply cleaning edge case: a doubled section sign",
+                "clean_reply",
+                json!({"text": "§§ double"}),
+            ),
+            (
+                "reply cleaning edge case: a reply that is only a tag",
+                "clean_reply",
+                json!({"text": "§1§"}),
+            ),
+            (
+                "reply cleaning edge case: a padded tag",
+                "clean_reply",
+                json!({"text": "  §2§  padded  "}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a count",
+                "clean_reply",
+                json!({"text": "§99 files"}),
+            ),
+            (
+                "reply cleaning edge case: no section sign",
+                "clean_reply",
+                json!({"text": "2024 roadmap"}),
+            ),
+            (
+                "reply cleaning edge case: tags on separate lines",
+                "clean_reply",
+                json!({"text": "§1§\n\n§2§ multi"}),
+            ),
+            (
+                "reply cleaning edge case: adjacent tags inside text",
+                "clean_reply",
+                json!({"text": "a §3§§4§ b"}),
+            ),
+            (
+                "reply cleaning edge case: letters between section signs",
+                "clean_reply",
+                json!({"text": "§x§ not a tag"}),
+            ),
+            (
+                "reply cleaning edge case: tag zero",
+                "clean_reply",
+                json!({"text": "§0§ zero"}),
+            ),
+            (
+                "reply cleaning edge case: an oversized tag alone",
+                "clean_reply",
+                json!({"text": "§18446744073709551616§ big"}),
+            ),
+            (
+                "reply cleaning edge case: non-breaking spaces around a tag",
+                "clean_reply",
+                json!({"text": "\u{a0}§5§\u{a0}nbsp"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a parenthesis",
+                "clean_reply",
+                json!({"text": "§6) closer"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a bracket",
+                "clean_reply",
+                json!({"text": "§6] closer"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a dash",
+                "clean_reply",
+                json!({"text": "§6- dash"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before an underscore",
+                "clean_reply",
+                json!({"text": "§6_ under"}),
+            ),
         ]
     }
 
@@ -1192,14 +1316,36 @@ mod vector_file {
     /// Retaining historical pins and requiring version bumps for supported
     /// rendering changes are release-review obligations; runners persist and
     /// check the version themselves when replay compatibility is required.
-    const PLAN_OUTPUTS: &[(u32, &str)] = &[
+    ///
+    /// A row pins checksums of growing prefixes of the rendering outputs, in
+    /// case order, as `(cases covered, checksum)`. The test checks the latest
+    /// row only: its version must equal `PLAN_VERSION`, its counts must grow,
+    /// every listed checksum must match, and its last count must cover every
+    /// rendering output. Adding cases at the end of `cases()` appends a longer
+    /// prefix to the latest row without touching its earlier ones, so new
+    /// coverage needs no version bump. Earlier rows are kept for release review
+    /// and not checked here; version 1's `usize::MAX` is a historical pin, not
+    /// a coverage count.
+    const PLAN_OUTPUTS: &[(u32, &[(usize, &str)])] = &[
         (
             1,
-            "c851d76033d54c137256800577344dd5e3ee040a8f4f8cf9ece2e41bb905c665",
+            &[(
+                usize::MAX,
+                "c851d76033d54c137256800577344dd5e3ee040a8f4f8cf9ece2e41bb905c665",
+            )],
         ),
         (
             2,
-            "d754710059e69b97ce69ec66cca6ef9af5442a104a82d81b3a42ed6ce4332529",
+            &[
+                (
+                    32,
+                    "d754710059e69b97ce69ec66cca6ef9af5442a104a82d81b3a42ed6ce4332529",
+                ),
+                (
+                    56,
+                    "fa9f74315c5e6d76c949b1a337f29de1982a41ee3a88ea08eb0dc4d1b8715bd6",
+                ),
+            ],
         ),
     ];
 
@@ -1212,32 +1358,47 @@ mod vector_file {
         "clean_reply",
     ];
 
-    fn rendered_checksum() -> String {
-        let vectors = generate();
-        let mut outputs: Vec<&Value> = Vec::new();
-        outputs.extend(
-            vectors
-                .iter()
-                .filter(|vector| RENDERING.contains(&vector.function.as_str()))
-                .map(|vector| &vector.output),
-        );
+    /// The rendering outputs in case order, and the checksum of the first
+    /// `count` of them plus a sample tag prefix.
+    fn rendered_checksum(outputs: &[&Value], count: usize) -> String {
         let prefix = json!(crate::tags::tag_prefix(12));
-        outputs.push(&prefix);
-        cortexkit_role_compaction::digest::checksum(&outputs)
+        let mut pinned: Vec<&Value> = outputs.iter().take(count).copied().collect();
+        pinned.push(&prefix);
+        cortexkit_role_compaction::digest::checksum(&pinned)
     }
 
     #[test]
     fn rendered_bytes_change_only_with_a_new_plan_version() {
         for pair in PLAN_OUTPUTS.windows(2) {
             assert!(pair[0].0 < pair[1].0, "versions rise: {pair:?}");
-            assert_ne!(pair[0].1, pair[1].1, "a new version renders differently");
         }
-        let (version, checksum) = PLAN_OUTPUTS.last().expect("a pinned version");
+        let (version, prefixes) = PLAN_OUTPUTS.last().expect("a pinned version");
         assert_eq!(*version, crate::PLAN_VERSION);
+        let vectors = generate();
+        let outputs: Vec<&Value> = vectors
+            .iter()
+            .filter(|vector| RENDERING.contains(&vector.function.as_str()))
+            .map(|vector| &vector.output)
+            .collect();
+        for pair in prefixes.windows(2) {
+            assert!(pair[0].0 < pair[1].0, "prefixes grow: {pair:?}");
+        }
+        for (count, checksum) in *prefixes {
+            assert_eq!(
+                *checksum,
+                rendered_checksum(&outputs, *count),
+                "checksum mismatch for the first {count} rendering cases; check the case \
+                 order and the pin. If supported rendering behaviour changed, bump \
+                 PLAN_VERSION and add its row to PLAN_OUTPUTS"
+            );
+        }
+        let (covered, _) = prefixes.last().expect("a pinned prefix");
         assert_eq!(
-            *checksum,
-            rendered_checksum(),
-            "the rendered bytes changed: bump PLAN_VERSION and add its row to PLAN_OUTPUTS"
+            *covered,
+            outputs.len(),
+            "every rendering case is pinned: append ({}, <checksum>) to version {version}'s \
+             prefixes after adding cases at the end of cases()",
+            outputs.len()
         );
     }
 
