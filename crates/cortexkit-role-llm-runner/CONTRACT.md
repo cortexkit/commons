@@ -206,6 +206,7 @@ alias until the next breaking release.
 | `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
+| `head_selection` | `session.send`, `session.head`; requires `plans`; selection through `session.refresh` additionally requires `session_change` | §9.3.4 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
 | `read_display_facts` | `session.read` (`include_display_facts`, entry client ids, creation times, tool times, assistant completion times and reasoning summaries) | §4.2, §4.7.1 |
 | `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `session.send_status` where served | §9.7 |
@@ -791,7 +792,7 @@ that a model meant as content; it does not tell decoration from content.
 
 - [pinned] Head metadata without bodies: `{last_ordinal?, first_ordinal?,
   cut?, history_version, incarnation, head?, last_run_state?, last_run_error?,
-  last_run_rich_ui?, updated_at?, input?, model?, usage?, sender?, reasoning_pruned?}`
+  last_run_rich_ui?, updated_at?, input?, model?, service_tier?, usage?, sender?, reasoning_pruned?}`
   (`HeadMeta`). The required cache identity follows §4.5.
 - [pinned] `first_ordinal` is the first entry the newest host marker keeps for
   the model, or 1 without a marker. It is at most `last_ordinal + 1` when the
@@ -861,10 +862,17 @@ that a model meant as content; it does not tell decoration from content.
   It is optional, needs no describe group, and absent means unknown. The
   `variant` member is absent when the selection names none, exactly as in
   `by_model` (§6.4). The runner reads its own record of the latest model
-  switch, never the frozen plan's bytes: core does not rewrite a head's plan
-  when the person switches models. This describes the next send, not history;
+  switch, not the frozen plan's bytes. Under `head_selection`, a
+  durably accepted changed `plan.model` records a switch immediately (§9.3.4),
+  before another run starts; an unchanged or absent member does not overwrite
+  a later host-side switch. This describes the next send, not history;
   each run's `by_model` already describes what that run used. Like `input`,
   `model` is independent of the session record and may be known before the first send.
+- [pinned] Optional top-level `service_tier` is the tier a send naming none
+  would use next, not the last run's tier. It is an open string on read.
+  Under `head_selection`, absent means `standard`; without that group,
+  readers treat absence as unknown, not confirmation of standard. A newly
+  accepted choice is visible immediately, even before a subsequent run.
 - [pinned] `sender?: {modes: [<delivery-mode names>], interrupt: bool,
   owner?: true}` (`read::HeadSender`, added in 0.6.1) is the attested caller's
   own delivery grant: the route principal, never anyone else's. The mode
@@ -2889,7 +2897,8 @@ A runner that declares `retract` serves `session.retract`.
 ### 9.3.2 `service_tier`: provider service levels
 
 - [pinned] The abstract levels are `standard`, `fast` and `ultrafast`.
-  Absence means `standard` for a send that starts a run; a send into a running
+  Absence means `standard` for a send that starts a run unless `head_selection`
+  supplies a plan default (§9.3.4); a send into a running
   run inherits its tier. A runner maps these levels to its provider's
   request fields; the mapping is not a contract value. For example, a runner
   might map `fast` to OpenAI's `service_tier: "priority"`. It never silently
@@ -2970,6 +2979,81 @@ A runner that declares `retract` serves `session.retract`.
   without writing the send. It cannot replace the active run's decision.
 - [pinned] A run started under a caller's decision never `route.report`s that
   decision. The caller is its one reporter.
+
+### 9.3.4 `head_selection`: durable next-run model and tier
+
+- [pinned] A runner declares this opt-in group only when it can accept an
+  owner-selected session model. A runner that can never change a session's
+  model does not declare it. The group requires `plans`; `check_describe`
+  refuses a declaration without it as `head_selection_without_plans`.
+  Selecting through `session.refresh` additionally requires `session_change`.
+  A runner with `plans` but without `session_change` can still accept
+  `plan.model` on a session-creating send. `service_tier` is required only to accept
+  non-standard tiers: without that group, only `standard` or an absent tier
+  is accepted.
+- [pinned] The optional plan member is
+  `model: {provider: string, model: string, variant?: string,
+  service_tier?: "standard" | "fast" | "ultrafast"}`
+  (`head_selection::PlanModel`). The object is strict: unknown members,
+  missing required strings or malformed values refuse `invalid_params`
+  with `detail: {field: "plan.model"}`. An unknown tier spelling is refused
+  as an unsupported tier, not as a generic decode error.
+  A present `plan.model` is the complete selection: its omitted `service_tier`
+  means `standard`, not the previous default. Comparing selections for a
+  change treats omitted tier and explicit `"standard"` as equal.
+- [pinned] At `session.refresh`, and at the plan of a session-creating send,
+  a runner validates the choice before accepting anything. A model the host
+  cannot select or serve (including a missing provider sign-in or a host that
+  cannot change to it) refuses `invalid_params`, detail
+  `{field: "plan.model", reason: "unsupported_model"}`. A tier the runner
+  cannot apply on that model's route under its declared §9.3.2 `service_tiers`
+  levels, or any non-standard tier without `service_tier`, refuses
+  `invalid_params`, detail
+  `{field: "plan.model.service_tier", reason: "unsupported_tier"}`.
+  Neither refusal writes anything or changes `session.head`.
+  `head_selection::check_plan` takes a side-effect-free host route resolver:
+  discovery alone cannot establish model availability or provider sign-in.
+- [pinned] Callers send `plan.model` only to runners declaring
+  `head_selection`. A runner with `plans` but without this group leaves the
+  unrecognised member uninterpreted, preserving the plan verbatim like other
+  unknown plan members (§10.1). It is not confirmation that a choice took
+  effect. A runner without `plans` still refuses a plan-bearing send as §10.1
+  requires.
+- [pinned] The choice governs runs starting after the refresh is durably
+  accepted, never a run already running. On a session-creating send it
+  governs the first run. Other model-facing plan changes still obey §10.2's
+  rung; selection changes do not wait for a tools or text rebuild.
+- [pinned] For a run-starting send the tier precedence is explicit send
+  `service_tier`, then the session's latest recorded default tier, then
+  `standard`. That default is first set from `plan.model.service_tier` and
+  may later change through a host-switch fallback; it is never re-read
+  from the original frozen plan.
+  `head_selection::check_send_tier` supplies that check. A joining send
+  inherits the running run's fixed tier; a different explicit tier remains
+  `run_tier_fixed`, regardless of a newly accepted plan default.
+- [pinned] For a run-starting send the model is the one the send itself
+  selects, where the runner accepts one as a runner parameter. Otherwise it
+  is the runner's latest recorded switch. Two things record a switch: a
+  durably accepted refresh that changes a present `plan.model`, and a model
+  change the host itself records, such as a person picking a model in the
+  host's interface. The latest of these wins, ordered by when
+  the runner recorded it, so a later host switch supersedes an earlier plan
+  choice and a later changed plan supersedes an earlier host switch.
+- [pinned] A refresh whose `plan.model` is unchanged, or absent, records no
+  switch, so it never overrides a host switch made since. An absent
+  `plan.model` neither selects nor clears anything, including the default
+  tier. Returning a head to `standard` takes a present `plan.model` with its
+  tier omitted or with explicit `service_tier: "standard"`.
+- [pinned] A host switch changes only the model and keeps the recorded
+  default tier. If that tier cannot be applied on the new model's route,
+  the runner sets the default to `standard` when it records the switch.
+  `session.head` shows the resulting model and default tier immediately,
+  never a tier a send without an explicit choice could not use.
+- [pinned] `session.head.model` and top-level `service_tier` describe the next
+  send without an explicit choice (§4.3). A changed plan choice appears as
+  soon as acceptance is durable, before any run. Model or tier changes still
+  use the compaction contract's existing `model_change` / `tier_change`
+  causes; this group defines no new cause or notice shape.
 
 ### 9.4 `structured_output`: schema-shaped run output
 
@@ -4643,6 +4727,10 @@ froze for a run to every assistant reply the run writes.
   `session.adopt` refuses a plan other than the one applied at host start
   with the same `plan_drift {frozen, sent}` (§9.5).
 - [pinned] Any refusal during admission writes nothing.
+- [pinned] `plan.model` selects the next-run model and optional default tier
+  under `head_selection` (§9.3.4). It is checked before accepting admission;
+  the creating send uses it on the first run. Unknown plan members remain
+  uninterpreted and preserved verbatim, including `model` without the group.
 - [pinned] On a session frozen under a flow or run scope (§9), admission
   checks the plan's `senders` against the frozen opener, including on the
   creating send. Naming anyone else refuses `invalid_params {field:
@@ -4709,7 +4797,8 @@ every request, answer and refusal.
   The earliest it applies is the start of the next run, and the
   `immediately` rung means "from the next run". No step ever sees text or
   tools its run did not start with.
-- [pinned] Except for sender and reader admission, a change applies at the
+- [pinned] Except for sender and reader admission and `head_selection`
+  (§9.3.4), a change applies at the
   start of the first run at or after its rung's point: `immediately` at the
   next run; `on_prefix_rebuild`,
   `on_system_rebuild` and `on_history_rebuild` at the first run that starts
@@ -4725,7 +4814,9 @@ every request, answer and refusal.
   straight away, whatever the policy rung and even while a run is in progress. This
   covers `delivery_order::admit`, `delivery_order::admit_delivery`, the
   `interrupt` grant, `idle_start`, templates and sender succession (§9.7), and read admission
-  (§9.19). Every other part of the plan keeps the next-run rule above: this
+  (§9.19). `head_selection` records a changed choice at acceptance too, but
+  uses it only for later runs, independent of the rung (§9.3.4). Every other
+  part of the plan keeps the next-run rule above: the admission
   exception changes who may send or read, not the text or tools a run
   started with. The offered-set gate that refuses calls to removed tools at
   once (relaunch, below) is a separate rule and unchanged.
@@ -4757,7 +4848,10 @@ every request, answer and refusal.
   exactly as admission does (§10.1), and holds them as the pending change,
   replacing any change pending before. It applies the change at the rung's
   point under the next-run rule, except that senders and readers govern
-  admission from durable acceptance as above.
+  admission from durable acceptance as above, and a changed `plan.model`
+  governs later runs from that acceptance under `head_selection`. The
+  `applies_from_next_run` flag still describes the rest of the new plan,
+  not the independently recorded selection.
 - [pinned] The answer is `{accepted_generation, pending: {generation,
   policy}, run_in_progress, applies_from_next_run}` (`RefreshReply`):
   - `applies_from_next_run` is true when the next run will use the rest of
@@ -5093,6 +5187,9 @@ treats it as a terminal refusal of that one request.
 | `scope_adoption_refused` | a scoped send into a session recorded without a scope that cannot adopt it | `no_recorded_principal` or `principal_mismatch {recorded}` | no |
 | `scope_unsupported` | a send under a scope on a daemon without scopes | — | no |
 | `fetch_unavailable` | a required plan item missed the admission deadline, including when a `session.refresh` fetch misses its deadline (§10.2) | `provider` | **yes** |
+| `invalid_params` | malformed `plan.model` under `head_selection`, before accepting admission or refresh (§9.3.4) | `{field: "plan.model"}` | no |
+| `invalid_params` | `plan.model` names a model the host cannot select or serve (§9.3.4); nothing written | `{field: "plan.model", reason: "unsupported_model"}` | no |
+| `invalid_params` | `plan.model.service_tier` is unsupported on the chosen route, including non-standard without `service_tier` (§9.3.4); nothing written | `{field: "plan.model.service_tier", reason: "unsupported_tier"}` | no |
 | `system_text_preset_required` | a preset-less `system_text` item's provider lacks `system-text-default/v1`; nothing is written or forwarded; never timed (§10.1) | `provider` (module id) | no: terminal |
 | `plan_stale` | fetched items disagree with the composition, or (on a `rich_ui_stamp` runner) fetched system-text answers declare different rich UI stamps (§9.17) | `differences` | no: re-plan |
 | `tool_name_collision` | tools share a model-facing name | `name`, `providers` (every provider that offered it) | no |

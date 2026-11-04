@@ -172,6 +172,100 @@ const SERVICE_TIER_CHECKS: &[&str] = &[
     "service_tier_report_members_accepted",
 ];
 
+async fn decision_tier_fault_fails_by_name(defects: Defects) {
+    let report = run_suite(&FakeSubject::new(defects)).await;
+    let expected = "service_tier_eligible_account";
+    assert_eq!(report.failing(), [expected], "{}", report.render());
+    eprintln!("FAIL {expected}: {:?}", report.outcome(expected));
+}
+
+#[tokio::test]
+async fn service_tier_decision_answer_requires_chosen() {
+    decision_tier_fault_fails_by_name(Defects {
+        decision_tier_chosen_missing: true,
+        ..Defects::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn service_tier_repeated_decision_tier_requires_chosen() {
+    decision_tier_fault_fails_by_name(Defects {
+        repeated_decision_tier_wrong: true,
+        ..Defects::default()
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn account_for_tier_faithful_and_undeclared_routers_pass() {
+    let report = run_suite(&FakeSubject::new(Defects::default())).await;
+    for name in ["account_for_tier_available", "account_for_tier_fallback"] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CheckOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    let report = run_suite(&FakeSubject::without_service_tier(Defects::default())).await;
+    assert_eq!(
+        report.outcome("account_for_tier_undeclared"),
+        Some(&CheckOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    for name in ["account_for_tier_available", "account_for_tier_fallback"] {
+        assert!(
+            matches!(
+                report.outcome(name),
+                Some(CheckOutcome::NotApplicable { .. })
+            ),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn account_for_tier_faulty_routers_fail_by_name() {
+    for (defects, expected, undeclared) in [
+        (
+            Defects {
+                account_tier_ignores: true,
+                ..Defects::default()
+            },
+            "account_for_tier_available",
+            false,
+        ),
+        (
+            Defects {
+                account_tier_skip_fast: true,
+                ..Defects::default()
+            },
+            "account_for_tier_fallback",
+            false,
+        ),
+        (
+            Defects {
+                account_tier_undeclared_fast: true,
+                ..Defects::default()
+            },
+            "account_for_tier_undeclared",
+            true,
+        ),
+    ] {
+        let subject = if undeclared {
+            FakeSubject::without_service_tier(defects)
+        } else {
+            FakeSubject::new(defects)
+        };
+        let report = run_suite(&subject).await;
+        assert_eq!(report.failing(), [expected], "{}", report.render());
+        eprintln!("FAIL {expected}: {:?}", report.outcome(expected));
+    }
+}
+
 #[tokio::test]
 async fn service_tier_faulty_routers_fail_each_case_by_name() {
     for (defects, expected, because) in [
@@ -269,6 +363,7 @@ const HOLD_CHECKS: &[&str] = &[
 async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_passes() {
     let report = run_suite(&FakeSubject::without_hold_control(Defects::default())).await;
     let mut not_applicable = vec![
+        "account_for_tier_undeclared",
         "continue_undeclared_group_refuses_mode",
         "undeclared_harness_group_refuses_member",
     ];
@@ -456,6 +551,7 @@ async fn without_harness_group_requests_are_refused() {
     assert_eq!(
         report.not_applicable(),
         [
+            "account_for_tier_undeclared",
             "continue_undeclared_group_refuses_mode",
             "requested_harness_is_hosted_and_echoed",
             "undeclared_prefer_group_refuses_member",
@@ -642,6 +738,7 @@ async fn passes_every_check(subject: &FakeSubject) {
     assert_eq!(report.checks.len(), CHECKS.len());
     for check in &report.checks {
         if [
+            "account_for_tier_undeclared",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
             "undeclared_exclude_providers_group_refuses_member",
@@ -1280,6 +1377,7 @@ async fn without_exclude_providers_group_its_checks_are_not_applicable() {
     assert_eq!(
         report.not_applicable(),
         [
+            "account_for_tier_undeclared",
             "continue_undeclared_group_refuses_mode",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",

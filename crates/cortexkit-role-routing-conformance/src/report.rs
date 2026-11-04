@@ -14,6 +14,9 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("account_for_tier_available", "account_for records fast and pins an account whose plan includes it"),
+    check("account_for_tier_fallback", "account_for steps ultrafast down to fast then standard, recording each choice"),
+    check("account_for_tier_undeclared", "a caller sends no tier to a non-declaring router and receives standard admission"),
     check("continue_offer_excludes_exhausted_account", "account_continue: an offer never names the exhausted account"),
     check("continue_offer_preserves_provider", "account_continue: the offered credential has the previous provider"),
     check("continue_offer_preserves_auth_method", "account_continue: the offered credential has the previous auth method"),
@@ -23,7 +26,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("continue_changed_question_refused_by_selection_id", "account_continue: a reused selection id with a changed parsed question is invalid_request naming selection_id; the first answer stands"),
     check("continue_hold_unknown_until_stays_unknown", "account_continue: a hold with unknown reset omits until_ms, never substitutes now"),
     check("continue_undeclared_group_refuses_mode", "without account_continue: continue is invalid_request naming mode"),
-    check("service_tier_eligible_account", "service_tier: only an account whose plan includes the chosen tier is admitted for the decision"),
+    check("service_tier_eligible_account", "service_tier: decision admission uses an eligible account and records its non-standard tier with or without a repeated request tier"),
     check("service_tier_fallback_order", "service_tier: ultrafast falls back to fast then standard, recording service_tier_chosen"),
     check("service_tier_absent_is_standard", "service_tier: an absent tier means standard"),
     check("service_tier_report_members_accepted", "service_tier: a declaring router accepts both tier members in report usage"),

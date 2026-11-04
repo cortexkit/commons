@@ -169,6 +169,7 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub head_selection: Option<&'static str>,
     pub compaction_preset_missing_accepted: bool,
     pub marker_hides_reads: bool,
     pub missing_history_version: bool,
@@ -927,6 +928,8 @@ struct Sess {
     incarnation: Option<String>,
     session_usage: Option<cortexkit_role_llm_runner::usage::SessionUsage>,
     head_model: Option<cortexkit_role_llm_runner::read::HeadModel>,
+    plan_model: Option<cortexkit_role_llm_runner::head_selection::PlanModel>,
+    pending_head_model: Option<cortexkit_role_llm_runner::head_selection::PlanModel>,
     output_refs: output_refs::State,
     output_refs_enabled: bool,
     has_compaction_item: bool,
@@ -1150,6 +1153,33 @@ pub struct Module {
 }
 
 impl Module {
+    fn selection(
+        &self,
+        plan: &Map<String, Value>,
+    ) -> Result<Option<cortexkit_role_llm_runner::head_selection::PlanModel>, Reply> {
+        use cortexkit_role_llm_runner::{
+            describe::RoleDescribe,
+            head_selection::{check_plan, PlanModelProblem},
+        };
+        let mut describe = RoleDescribe::default();
+        describe.capabilities = self.world.groups.clone();
+        describe.service_tiers = Some(service_tier::support());
+        match check_plan(&json!(plan), &describe, |model| {
+            (model.provider != "unavailable").then(|| "openai.responses".into())
+        }) {
+            Ok(model) => Ok(model),
+            Err(problem)
+                if (problem == PlanModelProblem::UnsupportedTier
+                    && self.world.defects.head_selection == Some("accept_tier"))
+                    || (problem == PlanModelProblem::UnsupportedModel
+                        && self.world.defects.head_selection == Some("accept_model")) =>
+            {
+                Ok(serde_json::from_value(plan["model"].clone()).ok())
+            }
+            Err(problem) => Err(refuse(errors::INVALID_PARAMS, Some(problem.detail()))),
+        }
+    }
+
     fn session_model(&self, session: &str) -> String {
         self.world
             .models
@@ -1587,6 +1617,51 @@ impl Module {
         let messages_before: BTreeSet<String> =
             sess.messages.iter().map(|m| m.mid.clone()).collect();
         session_change::apply(sess, &kind, record);
+        if kind == "refresh"
+            && record["selection"].is_null()
+            && self.world.defects.head_selection == Some("absent_clears")
+        {
+            sess.plan_model = None;
+            sess.head_model = None;
+        }
+        if matches!(kind.as_str(), "start" | "refresh") {
+            if let Ok(mut model) = serde_json::from_value::<
+                cortexkit_role_llm_runner::head_selection::PlanModel,
+            >(record["selection"].clone())
+            {
+                if self.world.defects.head_selection == Some("keep_fast_omitted")
+                    && model.service_tier.is_none()
+                {
+                    model.service_tier = sess
+                        .plan_model
+                        .as_ref()
+                        .and_then(|previous| previous.service_tier);
+                }
+                if sess.plan_model.as_ref() != Some(&model)
+                    || self.world.defects.head_selection == Some("unchanged_overrides")
+                {
+                    if self.world.defects.head_selection == Some("late_head") {
+                        sess.pending_head_model = Some(model.clone());
+                    } else {
+                        let mut selected = cortexkit_role_llm_runner::read::HeadModel::new(
+                            &model.provider,
+                            &model.model,
+                        );
+                        selected.variant.clone_from(&model.variant);
+                        sess.head_model = Some(selected);
+                    }
+                    sess.plan_model = Some(model);
+                }
+            }
+        }
+        if kind == "send" {
+            if let Some(model) = sess.pending_head_model.take() {
+                let mut selected =
+                    cortexkit_role_llm_runner::read::HeadModel::new(model.provider, model.model);
+                selected.variant = model.variant;
+                sess.head_model = Some(selected);
+            }
+        }
         if matches!(kind.as_str(), "send" | "steer" | "step" | "terminal")
             && (self.world.retention_defect != RetentionDefect::ClockNotRestarted
                 || sess.last_activity == 0)
@@ -3314,6 +3389,14 @@ impl Module {
                 }
             }
         }
+        let selection = if let Some(plan) = params.get("plan").and_then(Value::as_object) {
+            match self.selection(plan) {
+                Ok(model) => model,
+                Err(reply) => return Ok(reply),
+            }
+        } else {
+            None
+        };
         if let Some(reply) = self.tier_send(session, &params) {
             return Ok(reply);
         }
@@ -3809,6 +3892,7 @@ impl Module {
                 json!({ "kind": "start", "owner": stamp.scope.as_ref().map_or(stamp.principal.as_str(), |scope| scope.owner.as_str()), "lineage": lineage,
                         "frozen_opener": frozen_opener,
                         "tools": tools,
+                        "selection": selection,
                         "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("tool_items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
                         "has_compaction_item": request.plan.as_ref().and_then(|plan|plan.get("compaction_item")).is_some_and(|item| !item.is_null()),
                         "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
@@ -4488,7 +4572,7 @@ impl Module {
                 supported,
             ));
         }
-        if self.world.serves(groups::SESSION_USAGE) {
+        if self.world.serves(groups::SESSION_USAGE) || self.world.serves(groups::HEAD_SELECTION) {
             let original =
                 cortexkit_role_llm_runner::read::HeadModel::new(FAKE_PROVIDER, FAKE_MODEL);
             head = head.with_model(if self.world.defects.head_model_from_plan {
@@ -4496,6 +4580,14 @@ impl Module {
             } else {
                 sess.head_model.clone().unwrap_or(original)
             });
+            if self.world.serves(groups::HEAD_SELECTION) && sess.pending_head_model.is_none() {
+                head.service_tier = sess
+                    .plan_model
+                    .as_ref()
+                    .and_then(|model| model.service_tier)
+                    .filter(|tier| !tier.is_standard())
+                    .map(|tier| tier.as_str().into());
+            }
             if let Some(mut usage) = sess.session_usage.clone() {
                 if self.world.defects.session_usage_sum_wrong {
                     usage.totals = sess.runs.last().unwrap().usage.clone();
@@ -5765,6 +5857,28 @@ impl LlmRunnerSubject for FakeSubject {
         Ok("seeded-decision".into())
     }
 
+    async fn head_selection_models(
+        &self,
+        session: &str,
+    ) -> Result<Option<[cortexkit_role_llm_runner::head_selection::PlanModel; 2]>, HarnessError>
+    {
+        use cortexkit_role_llm_runner::head_selection::PlanModel;
+        if self.defects.head_selection == Some("no_fixture") {
+            return Ok(None);
+        }
+        self.configure_service_tier(session, "head_selection")
+            .await?;
+        let mut model = PlanModel::new(FAKE_PROVIDER, "selected-next-model");
+        if self.capabilities.contains(&Capability::ServiceTier) {
+            model =
+                model.with_service_tier(cortexkit_role_llm_runner::service_tier::ServiceTier::Fast);
+        }
+        Ok(Some([
+            model,
+            PlanModel::new("unavailable", "unavailable-model"),
+        ]))
+    }
+
     async fn configure_service_tier(
         &self,
         session: &str,
@@ -5936,6 +6050,9 @@ impl LlmRunnerSubject for FakeSubject {
         &self,
         session: &str,
     ) -> Result<Option<cortexkit_role_llm_runner::read::HeadModel>, HarnessError> {
+        if self.defects.head_selection == Some("no_switch") {
+            return Ok(None);
+        }
         let model =
             cortexkit_role_llm_runner::read::HeadModel::new(FAKE_PROVIDER, "recorded-next-model")
                 .with_variant("fast");

@@ -39,7 +39,7 @@ impl ServiceTier {
     }
 }
 
-/// Read the raw select member before generic decoding, so an unknown level
+/// Read a raw request member before generic decoding, so an unknown level
 /// receives `unsupported_tier` naming `service_tier`, not a decode error.
 pub fn parse_request(
     value: Option<&serde_json::Value>,
@@ -52,6 +52,38 @@ pub fn parse_request(
             .map(Some)
             .ok_or("unsupported_tier"),
     }
+}
+
+pub(crate) fn parse_member(
+    value: Option<&serde_json::Value>,
+) -> Result<Option<ServiceTier>, crate::errors::Refusal> {
+    parse_request(value).map_err(|reason| {
+        let mut refusal = crate::errors::Refusal::invalid_request("service_tier", reason);
+        refusal.detail.insert("reason".into(), reason.into());
+        refusal
+    })
+}
+
+/// Eligible levels in descending order, never upgrading the request.
+pub fn fallback(requested: ServiceTier) -> impl Iterator<Item = ServiceTier> {
+    ServiceTier::ALL
+        .iter()
+        .rev()
+        .copied()
+        .filter(move |tier| *tier <= requested)
+}
+
+/// Producer-side tier check used by `select::check_answer` and available to
+/// account-answer producers. It checks only that the chosen tier is present
+/// when one was requested and does not exceed the request, so it allows a
+/// step-down. A decision-bound `route.account_for` answer must instead return
+/// exactly the decision's chosen non-standard tier (§5.5): pass that tier as
+/// the effective request here and also require equality.
+pub fn check_chosen(requested: Option<ServiceTier>, chosen: Option<&str>) -> bool {
+    !(requested.is_some() && chosen.is_none())
+        && chosen.is_none_or(|tier| {
+            ServiceTier::parse(tier).is_some_and(|tier| tier <= requested.unwrap_or_default())
+        })
 }
 
 pub(crate) fn deserialize_request<'de, D: serde::Deserializer<'de>>(

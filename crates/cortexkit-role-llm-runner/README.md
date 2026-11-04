@@ -1,5 +1,14 @@
 # cortexkit-role-llm-runner
 
+The opt-in `head_selection` group accepts a strict `plan.model` selection for
+later runs (or the creating send's first run). `head_selection::check_plan`
+validates it using discovery plus a side-effect-free host route resolver;
+unavailable models and unsupported tiers refuse before acceptance. The next
+choice appears immediately on `session.head.model` and optional top-level
+`service_tier`. Explicit send choices override defaults for that run, and an
+unchanged plan refresh never resets a later host-side switch. See CONTRACT
+§9.3.4 for timing, precedence and refusal details.
+
 Wire types, small validation helpers and checksum-pinned vectors for
 `llm-runner/v1`: transcript reads, run results, subscriptions, session sends
 and the frozen session baseline. Version **0.8.5** adds opt-in `created_at`

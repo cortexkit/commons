@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.8
+
+- Pin `cortexkit-role-llm-runner =0.8.6` and check opt-in head selection:
+  inherited plan tiers, explicit send-tier overrides, immediate head visibility,
+  unsupported model and tier refusal without changing the head, and unchanged
+  refreshes after a host-side switch when the adapter supports that hook.
+- Add deliberately faulty runners rejected by each new check's name.
+- Require `plans` and `session_change` for the refresh-based cases; check
+  that a present model with its tier omitted resets fast to standard.
+- Head-selection coverage does not yet check which model a run used, that a
+  creating send's `plan.model` drives its first run, or send-model precedence.
+
 ## 0.17.7
 
 - Every scripted call to `SCRIPTED_TOOL` now carries a string `marker`, which

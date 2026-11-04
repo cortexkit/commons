@@ -341,6 +341,11 @@ mod submit_variant_verdict_tests {
 /// The outcome of a case that cannot run against this subject: skipped
 /// with what it lacks, or inapplicable. `None` when the case can run.
 fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome> {
+    if spec.name.starts_with("head_selection_") && !declared.contains(&Capability::HeadSelection) {
+        return Some(CaseOutcome::Inapplicable {
+            reason: "head_selection is not declared".into(),
+        });
+    }
     if spec.name.starts_with("finish_reason_") && !declared.contains(&Capability::FinishReason) {
         return Some(CaseOutcome::Inapplicable {
             reason: "finish_reason is not declared".into(),
@@ -378,6 +383,7 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
     if !missing.is_empty() {
         if spec.name == "media_only_send"
             || spec.name.starts_with("sender_succession_")
+            || spec.name.starts_with("head_selection_")
             || spec.name.starts_with("live_ids_")
             || spec.name.starts_with("message_senders_")
             || spec.name.starts_with("read_display_facts_")

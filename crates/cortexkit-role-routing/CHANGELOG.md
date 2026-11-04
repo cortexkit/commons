@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0
+
+- Rust API break: `AccountForAnswer` and `AccountPin` are now
+  non-exhaustive. Construct both types with `new` instead of struct literals
+  so future optional fields can be additive. `with_service_tier_chosen` is
+  available on `AccountForAnswer` only.
+
+- Extend `route.account_for` under `service_tier` with optional request
+  `service_tier` and answer `service_tier_chosen`, using selection's existing
+  plan eligibility and ordered fallback. Legacy requests and replies are
+  unchanged when these members are absent.
+- A decision-bound account answer records the decision's non-standard chosen
+  tier even when the request does not repeat `service_tier`.
+
 ## 0.5.7
 
 - Add the opt-in `account_continue` group for switching a run durably paused

@@ -557,14 +557,7 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
 ) -> Result<SelectRequest, Refusal> {
     let members = Members::of(params)?;
     let consumer = members.text("consumer", None)?;
-    let service_tier = crate::service_tier::parse_request(members.object.get("service_tier"))
-        .map_err(|reason| {
-            let mut refusal = members.refuse("service_tier", reason);
-            refusal
-                .detail
-                .insert("reason".into(), Value::String(reason.into()));
-            refusal
-        })?;
+    let service_tier = crate::service_tier::parse_member(members.object.get("service_tier"))?;
     if service_tier.is_some()
         && !capabilities
             .iter()
@@ -890,12 +883,10 @@ impl std::fmt::Display for AnswerProblem {
 /// `fell_back`). A chosen tier must be recognised and may not upgrade the
 /// request. This is stricter than record decoding, which retains unknown tiers.
 pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<(), AnswerProblem> {
-    if (request.service_tier.is_some() && answer.service_tier_chosen.is_none())
-        || answer.service_tier_chosen.as_deref().is_some_and(|tier| {
-            crate::service_tier::ServiceTier::parse(tier)
-                .is_none_or(|tier| tier > request.service_tier.unwrap_or_default())
-        })
-    {
+    if !crate::service_tier::check_chosen(
+        request.service_tier,
+        answer.service_tier_chosen.as_deref(),
+    ) {
         return Err(AnswerProblem::ServiceTier);
     }
     if let Some(runners) = &request.runners {

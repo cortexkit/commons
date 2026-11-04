@@ -87,6 +87,13 @@ pub struct RequestedAccount {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AccountForRequest {
+    /// Send only to a router declaring `service_tier`; absence means standard.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::service_tier::deserialize_request"
+    )]
+    pub service_tier: Option<crate::service_tier::ServiceTier>,
     /// The call about to be made.
     pub provider: String,
     pub model: String,
@@ -144,6 +151,7 @@ impl AccountForRequest {
     ) -> Self {
         Self {
             provider: provider.into(),
+            service_tier: None,
             model: model.into(),
             affinity_model: None,
             conversation_key: conversation_key.into(),
@@ -235,10 +243,12 @@ impl AccountForRequest {
         self.mode.clone().unwrap_or(AccountMode::Admit)
     }
 
-    /// The request with every default applied, for comparing bodies that
-    /// share an `admission_id`.
+    /// The request with canonical defaults, for comparing bodies that share
+    /// an `admission_id`. Standard tier is represented by absence so legacy
+    /// normalized requests do not gain a new wire member.
     pub fn normalized(&self) -> Self {
         let mut normalized = self.clone();
+        normalized.service_tier = normalized.service_tier.filter(|tier| !tier.is_standard());
         normalized
             .affinity_model
             .get_or_insert_with(|| self.model.clone());
@@ -254,6 +264,11 @@ impl AccountForRequest {
     /// Whether `other` is the same body as this one, defaults applied.
     pub fn same_body(&self, other: &Self) -> bool {
         self.normalized() == other.normalized()
+    }
+
+    pub fn with_service_tier(mut self, tier: crate::service_tier::ServiceTier) -> Self {
+        self.service_tier = Some(tier);
+        self
     }
 }
 
@@ -278,6 +293,7 @@ pub struct Account {
 
 /// The conversation's pin to the account.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct AccountPin {
     pub id: String,
     pub generation: u64,
@@ -286,6 +302,26 @@ pub struct AccountPin {
     /// The runner renews before this.
     pub lease_valid_until_ms: u64,
     pub mode: AccountMode,
+}
+
+impl AccountPin {
+    pub fn new(
+        id: impl Into<String>,
+        generation: u64,
+        affinity_expires_at_ms: u64,
+        admission_valid_until_ms: u64,
+        lease_valid_until_ms: u64,
+        mode: AccountMode,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            generation,
+            affinity_expires_at_ms,
+            admission_valid_until_ms,
+            lease_valid_until_ms,
+            mode,
+        }
+    }
 }
 
 /// Why the provider chose the account, for logs.
@@ -303,11 +339,38 @@ pub struct AccountReason {
 
 /// The `route.account_for` answer.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct AccountForAnswer {
     pub admission: Admission,
     pub account: Account,
     pub pin: AccountPin,
     pub reason: AccountReason,
+    /// Readers preserve any string value, including unfamiliar tiers.
+    /// Explicit tier requests always receive the chosen level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_chosen: Option<String>,
+}
+
+impl AccountForAnswer {
+    pub fn new(
+        admission: Admission,
+        account: Account,
+        pin: AccountPin,
+        reason: AccountReason,
+    ) -> Self {
+        Self {
+            admission,
+            account,
+            pin,
+            reason,
+            service_tier_chosen: None,
+        }
+    }
+
+    pub fn with_service_tier_chosen(mut self, tier: crate::service_tier::ServiceTier) -> Self {
+        self.service_tier_chosen = Some(tier.as_str().into());
+        self
+    }
 }
 
 /// Validate and decode `route.account_for` params. A bad member is
@@ -315,8 +378,25 @@ pub struct AccountForAnswer {
 /// `expected_pin` name `expected_pin`, and a mode this crate does not name
 /// names `mode`.
 pub fn parse_account_for_request(params: &Value) -> Result<AccountForRequest, Refusal> {
+    parse_account_for_request_serving::<&str>(params, &[])
+}
+
+/// Tier-aware admission for the declared capability set. Without `service_tier`,
+/// preserve the legacy parser's treatment of that unknown member: ignore it.
+pub fn parse_account_for_request_serving<C: AsRef<str>>(
+    params: &Value,
+    capabilities: &[C],
+) -> Result<AccountForRequest, Refusal> {
     let members = Members::of(params)?;
     let request = AccountForRequest {
+        service_tier: if capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::SERVICE_TIER)
+        {
+            crate::service_tier::parse_member(members.object.get("service_tier"))?
+        } else {
+            None
+        },
         provider: members.text("provider", None)?,
         model: members.text("model", None)?,
         affinity_model: members.optional_text("affinity_model", None)?,

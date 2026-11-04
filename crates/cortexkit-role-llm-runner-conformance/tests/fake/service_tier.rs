@@ -37,12 +37,34 @@ impl Module {
             .is_some_and(|sess| sess.runs.iter().any(|run| run.state == "active"));
         let mut states = self.world.service_tiers.lock().unwrap();
         let state = states.get_mut(session)?;
-        let requested = match cortexkit_role_llm_runner::service_tier::parse_request(
+        let mut requested = match cortexkit_role_llm_runner::service_tier::parse_request(
             params.get("service_tier"),
         ) {
             Ok(tier) => tier,
             Err(problem) => return Some(refuse(errors::INVALID_PARAMS, Some(problem.detail()))),
         };
+        if !active && self.world.serves(groups::HEAD_SELECTION) {
+            let plan_tier = self
+                .sessions
+                .lock()
+                .unwrap()
+                .get(session)
+                .and_then(|sess| sess.plan_model.as_ref())
+                .and_then(|model| model.service_tier)
+                .or_else(|| {
+                    params
+                        .get("plan")
+                        .and_then(|plan| plan.get("model"))
+                        .and_then(|model| model.get("service_tier"))
+                        .and_then(Value::as_str)
+                        .and_then(ServiceTier::parse)
+                });
+            if self.world.defects.head_selection == Some("plan_wins") {
+                requested = plan_tier.or(requested);
+            } else if self.world.defects.head_selection != Some("ignore_tier") {
+                requested = requested.or(plan_tier);
+            }
+        }
         let declared: ServiceTiers = support();
         match check_send(
             requested,

@@ -105,6 +105,9 @@ where
             }
             name if name.starts_with("tool_upfront_") => crate::upfront::run(self, name).await,
             name if name.starts_with("service_tier_") => crate::service_tier::run(self, name).await,
+            name if name.starts_with("head_selection_") => {
+                crate::head_selection::run(self, name).await
+            }
             name if name.starts_with("retract_own_send_") => {
                 crate::delivery_order::retract_own_send(self, name).await
             }

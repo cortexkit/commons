@@ -44,6 +44,8 @@ impl LiveIdsObservation {
 pub enum Capability {
     /// Provider service levels; the kit checks omitted served metadata on unknown wires.
     ServiceTier,
+    /// Durable plan-selected model and next-run tier.
+    HeadSelection,
     /// In-place pruning of archived reasoning, with the native fixture hooks.
     ArchivePrunesReasoning,
     /// Preset-less system-text admission checked against the daemon catalog.
@@ -176,6 +178,7 @@ impl Capability {
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
         Self::ServiceTier,
+        Self::HeadSelection,
         Self::ArchivePrunesReasoning,
         Self::SystemTextDefault,
         Self::Attachments,
@@ -241,6 +244,7 @@ impl Capability {
     pub fn group(self) -> Option<&'static str> {
         Some(match self {
             Self::ServiceTier => groups::SERVICE_TIER,
+            Self::HeadSelection => groups::HEAD_SELECTION,
             Self::ArchivePrunesReasoning => groups::ARCHIVE_PRUNES_REASONING,
             Self::SystemTextDefault => groups::SYSTEM_TEXT_DEFAULT,
             Self::Attachments => groups::ATTACHMENTS,
@@ -716,6 +720,21 @@ pub trait LlmRunnerSubject: Harness {
         Ok("decision-a".into())
     }
 
+    /// Two model choices for head-selection cases: first selectable and served,
+    /// second unavailable to the host. The first route supports fast but not
+    /// ultrafast when `service_tier` is declared; otherwise omit its tier and
+    /// choose a model distinct from the initial selection. Begin at standard.
+    /// Arrange real host/model fixtures, never synthesize management answers.
+    /// None reports each affected case as `Inapplicable` with its name and
+    /// reason, never as passed.
+    async fn head_selection_models(
+        &self,
+        _session: &str,
+    ) -> Result<Option<[cortexkit_role_llm_runner::head_selection::PlanModel; 2]>, HarnessError>
+    {
+        Ok(None)
+    }
+
     /// Arrange a current route supporting fast but not ultrafast, with served
     /// unknown, and a scripted model that does not state a served tier. The
     /// refusal scenario changes the tier on another send while the first model
@@ -917,8 +936,12 @@ pub trait LlmRunnerSubject: Harness {
         Ok(false)
     }
 
-    /// Record a model switch through the host's normal switch path, without
-    /// rewriting the frozen plan, and return the selection that was recorded.
+    /// Arrange a model change the host itself records, such as a person picking
+    /// a model in the host's interface, without rewriting the frozen plan, and
+    /// return the model that was recorded. The switch changes only the model.
+    /// Keep the recorded default tier unless the new route cannot apply it;
+    /// then set the default tier to standard as part of recording the switch.
+    /// session.head shows the resulting model and tier immediately.
     /// None means the adapter cannot produce that observation.
     async fn switch_head_model(
         &self,

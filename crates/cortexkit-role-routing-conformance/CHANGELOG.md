@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0
+
+- Pin routing 0.6.0 (including its Rust answer-construction API break) and check tier-aware `route.account_for` admission,
+  ordered fallback and legacy callers without the `service_tier` group.
+- Add deliberately faulty routers rejected by each new check's name.
+- Check the decision's non-standard chosen tier on account answers with and
+  without a repeated request tier, with faulty routers for both paths.
+
 ## 0.8.1
 
 - Pin routing 0.5.7 and check opt-in account continuation: compatible offers,

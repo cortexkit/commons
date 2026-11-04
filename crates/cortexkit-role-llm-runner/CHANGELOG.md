@@ -15,6 +15,19 @@
   from the raised history_version on serves only cleaned digests, computing
   them on read until it has persisted them. Text only; no API change.
 
+## 0.8.6
+
+- Require `plans` for `head_selection`; selecting through refresh also needs
+  `session_change`. A present model's omitted tier means standard, and
+  equality treats that omission and explicit standard as the same selection.
+- Define a recorded host model switch: keep the default tier unless the new
+  route cannot apply it, in which case record standard and expose it on head.
+
+- Add opt-in `head_selection`: strict `plan.model` decoding and admission
+  checks, durable next-run model and tier selection, and optional open-string
+  `session.head.service_tier`. Refuse unsupported models or tiers before
+  accepting a refresh. Preserve running-run selection and later host switches.
+
 ## 0.8.5
 
 - Add optional `ReadMessage::created_at` and `with_created_at` to the

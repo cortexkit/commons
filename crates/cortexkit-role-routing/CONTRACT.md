@@ -568,25 +568,36 @@ This section binds a provider declaring `select_hold_control` (§4).
 ### 5.5 `service_tier`: provider service levels
 
 - [pinned] A router declares the optional `service_tier` group in
-  `role.describe.capabilities`. A caller sends `route.select.service_tier`
+  `role.describe.capabilities`. A caller sends `route.select.service_tier`,
+  `route.account_for.service_tier`
   and either tier member in report usage **only** to a router declaring
   that group. A non-declaring older router does not know the select member
   and could otherwise silently answer standard. A new decoder refuses an
-  undeclared select member by name. Report usage remains strict: 0.5.5
+  undeclared select member by name. Older account-admission parsers may
+  silently ignore the member and pin as though `standard` was requested;
+  callers must never interpret a missing `service_tier_chosen` as confirmation
+  of a requested non-standard tier. Request decoding remains lenient about
+  unknown members. Report usage remains strict: 0.5.5
   accepts the two defined members, and still refuses every other unknown
   member. The capability gate protects older strict report readers.
-- [pinned] `route.select` gains optional `service_tier`: `standard`, `fast`
+- [pinned] `route.select` and `route.account_for` accept optional `service_tier`: `standard`, `fast`
   or `ultrafast`, with absence meaning standard. Only accounts whose plans
   include the tier are eligible. Plan inclusion is the router's knowledge;
   this contract does not prescribe where plans come from. When no eligible
   account can serve at the requested level, try `ultrafast` then `fast` then
   `standard`, starting at the requested level and never upgrading it. A
-  decision records `service_tier_chosen`. An explicit tier request carries
+  decision or account admission records top-level `service_tier_chosen`. An explicit tier request carries
   that value in the answer, including a fallback to standard. Without a tier
   request, standard may be omitted to retain existing answer bytes. A runner
   receiving the decision applies the chosen level, never the original level
   that the router fell back from; account admission for the decision also
   honours that level's plan eligibility.
+  `service_tier::fallback` supplies the same descending levels for both ops.
+  A request carrying a `decision_id` continues to honour that decision's
+  recorded chosen tier instead of deciding twice (§9.1).
+  An `account_for` carrying `decision_id` returns `service_tier_chosen` equal
+  to the decision's chosen tier when that tier is non-standard, whether or
+  not the request repeats `service_tier`.
 - [pinned] Report usage gains optional `service_tier_applied` and
   `service_tier_served`. Applied is the abstract level actually requested,
   present for non-standard and omitted for standard. Served is present only
@@ -600,7 +611,7 @@ This section binds a provider declaring `select_hold_control` (§4).
   means standard. Keep unfamiliar strings rather than inventing a rate.
   Both new members are omitted when absent, preserving today's report bytes.
 
-- [pinned] Requests use routing's local `ServiceTier` enum. Unknown select
+- [pinned] Requests use routing's local `ServiceTier` enum. Unknown tier-aware select or account-for
   levels are refused `invalid_request`, detail
   `{field: "service_tier", reason: "unsupported_tier"}`, not as a generic
   decode error. All tier values in records, including `service_tier_chosen`
@@ -613,6 +624,12 @@ This section binds a provider declaring `select_hold_control` (§4).
   member names remain unchanged; accepting a new level is not accepting a new
   member. Drift tests compare request spellings and the wire API list against
   the runner contract, which is a dev-dependency only.
+  `account::parse_account_for_request_serving` validates tiers with the same
+  named-field refusal helper when `service_tier` is declared. Without it,
+  `parse_account_for_request` and the serving parser keep legacy behaviour:
+  that member is ignored. Shared `service_tier::check_chosen` validates a
+  produced chosen tier against the effective request level, while record
+  decoding preserves unfamiliar tier strings.
 
 ## 6. Decisions
 
@@ -724,6 +741,13 @@ the routing provider allocates (subscription logins).
 
 - [pinned] `provider`, `model` (required, non-empty): the call about to be
   made.
+- [pinned] `service_tier` (optional): `standard`, `fast` or `ultrafast`.
+  Sent only to a router declaring `service_tier`, with the exact plan
+  eligibility, ordered step-down and named refusal rules of §5.5. Only an
+  account whose plan includes the chosen level is pinned. With a
+  `decision_id`, the decision's already chosen level is honoured, not
+  independently replaced. Without a tier request, standard may be omitted
+  from the answer to preserve legacy bytes.
 - [pinned] `affinity_model` (optional, defaults to `model`): the model the
   conversation's account affinity is bound to.
 - [pinned] `conversation_key` (required, non-empty, at most 256
@@ -747,7 +771,8 @@ the routing provider allocates (subscription logins).
   Bodies are compared with defaults applied
   (`AccountForRequest::same_body`): a member left out and the same member
   sent with its default value are the same body.
-  `pool` and `parent_conversation_key` are part of the body.
+  `pool`, `parent_conversation_key` and `service_tier` are part of the body;
+  an absent tier and explicit `standard` compare equal.
 - [pinned] `mode`: `admit` (the default), `renew` (extend the current pin)
   or `reassign` (a different account after the current one failed).
   `renew` and `reassign` require `expected_pin {id, generation}`; without
@@ -782,12 +807,22 @@ The answer (`account::AccountForAnswer`):
   account: {provider, account_id, credential_id, method},
   pin: {id, generation, affinity_expires_at_ms, admission_valid_until_ms,
         lease_valid_until_ms, mode},
-  reason: {code, decision_id, policy_version, quota_fetched_at_ms?, quota_age_band}
+  reason: {code, decision_id, policy_version, quota_fetched_at_ms?, quota_age_band},
+  service_tier_chosen?: string
 }
 ```
 
 - [pinned] The runner renews before `lease_valid_until_ms`, and reassigns
   after the account fails.
+- [pinned] Top-level `service_tier_chosen` records the admitted tier, as an
+  open string like select's record, not an additional pin member. An explicit
+  tier request always receives it, including fallback to `standard`. A
+  caller applies the chosen tier, never the original tier when it stepped
+  down. With no tier request, absence still means standard on a declaring
+  router; absence on a non-declaring router does not confirm a tier request.
+  `AccountForAnswer` and `AccountPin` are non-exhaustive Rust types in 0.6.0;
+  construct both types with `new` instead of literals.
+  `with_service_tier_chosen` is available on `AccountForAnswer` only.
 - [pinned] `reason.decision_id` is the request's `decision_id` when it
   carried one, and otherwise the provider's own id for this allocation.
 - [pinned] `reason.code` is an open set, for logs; a reader never acts on

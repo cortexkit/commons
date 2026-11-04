@@ -1,5 +1,13 @@
 # cortexkit-role-routing-conformance
 
+The `account_for_tier_*` checks exercise direct account admission at an
+available tier, ordered fallback with the chosen tier recorded, and a caller
+that omits tiers for a non-declaring router. The cases use the existing
+`configure_service_tiers` plan fixture hook; for an unsupported fixture the
+report marks each affected case `NotApplicable` with its name and reason,
+never passed. This release pins routing 0.6.0, whose account answer
+and pin use constructors instead of exhaustive Rust struct literals.
+
 The conformance kit for the `routing/v1` role
 (`crates/cortexkit-role-routing/CONTRACT.md`). A routing provider adds it as
 a dev-dependency and runs it in its own CI against its real module over

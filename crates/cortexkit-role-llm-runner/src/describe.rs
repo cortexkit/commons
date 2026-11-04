@@ -27,6 +27,7 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const HEAD_SELECTION_WITHOUT_PLANS: &str = "head_selection_without_plans";
     pub const MEDIA_ONLY_SEND_WITHOUT_ATTACHMENTS: &str = "media_only_send_without_attachments";
     pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_RUN_CANCEL: &str =
         "run_cancel_by_interrupt_without_run_cancel";
@@ -514,6 +515,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         }
     }
     for (group, dependency, problem) in [
+        (
+            capabilities::HEAD_SELECTION,
+            capabilities::PLANS,
+            problem_names::HEAD_SELECTION_WITHOUT_PLANS,
+        ),
         (
             capabilities::MEDIA_ONLY_SEND,
             capabilities::ATTACHMENTS,

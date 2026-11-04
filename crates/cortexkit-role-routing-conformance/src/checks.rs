@@ -235,6 +235,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
     /// Run the check named `name` from a fresh provider.
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         self.fresh().await?;
+        if name.starts_with("account_for_tier_") {
+            return self.account_for_tier_check(name).await;
+        }
         if name.starts_with("continue_") {
             return self.continue_check(name).await;
         }
@@ -413,6 +416,83 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             .map_err(|e| format!("configure_catalog: {e}"))
     }
 
+    async fn account_for_tier_check(&self, name: &str) -> Result<Ending, String> {
+        use crate::wire::service_tier::ServiceTier;
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let describe: RoleDescribe =
+            answer(&runner, ops::ROLE_DESCRIBE, &json!({}), "describe").await?;
+        let undeclared = name == "account_for_tier_undeclared";
+        if describe.serves(capabilities::SERVICE_TIER) == undeclared {
+            return Ok(Ending::NotApplicable(
+                "service_tier declaration does not match this case".into(),
+            ));
+        }
+        let mut catalog = fixture::catalog();
+        catalog
+            .models
+            .retain(|model| model.provider == fixture::SUBSCRIPTION_PROVIDER);
+        self.subject.configure_catalog(&catalog).await?;
+        let mut plans = std::collections::BTreeMap::from([
+            ("account-1".into(), vec![]),
+            ("account-2".into(), vec![ServiceTier::Fast]),
+        ]);
+        if let Err(reason) = self.subject.configure_service_tiers(&plans).await {
+            return Ok(Ending::NotApplicable(format!(
+                "tier plan fixture unsupported: {reason}"
+            )));
+        }
+        let expectations: &[ServiceTier] = if undeclared {
+            &[ServiceTier::Standard]
+        } else if name == "account_for_tier_available" {
+            &[ServiceTier::Fast]
+        } else {
+            &[
+                ServiceTier::Fast,
+                ServiceTier::Standard,
+                ServiceTier::Ultrafast,
+            ]
+        };
+        for (index, expected) in expectations.iter().enumerate() {
+            let mut params = Self::account_for(
+                &format!("account-tier-{index}"),
+                &format!("tier-conversation-{index}"),
+                "model-c",
+            );
+            if !undeclared {
+                params["service_tier"] = json!(if name == "account_for_tier_available" {
+                    "fast"
+                } else {
+                    "ultrafast"
+                });
+            }
+            let got: AccountForAnswer = answer(
+                &runner,
+                ops::ROUTE_ACCOUNT_FOR,
+                &params,
+                "tier account admission",
+            )
+            .await?;
+            if got.service_tier_chosen.as_deref().unwrap_or("standard") != expected.as_str()
+                || (!undeclared && got.service_tier_chosen.is_none())
+                || (!expected.is_standard() && got.account.account_id != "account-2")
+            {
+                return Err(format!(
+                    "expected {expected:?} on an eligible account, got {got:?}"
+                ));
+            }
+            plans.insert(
+                "account-2".into(),
+                if *expected == ServiceTier::Standard {
+                    vec![ServiceTier::Ultrafast]
+                } else {
+                    vec![]
+                },
+            );
+            self.subject.configure_service_tiers(&plans).await?;
+        }
+        Ok(Ending::Passed)
+    }
+
     async fn service_tier_check(&self, name: &str) -> Result<Ending, String> {
         use crate::wire::service_tier::ServiceTier;
         let consumer = self.route_as(CONSUMER).await?;
@@ -472,6 +552,25 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                         "tier decision admitted ineligible account {}",
                         admitted.account.account_id
                     ));
+                }
+                if admitted.service_tier_chosen.as_deref() != Some("fast") {
+                    return Err(format!(
+                        "decision admission omitted or changed its chosen fast tier: {admitted:?}"
+                    ));
+                }
+                params["admission_id"] = json!("tier-admission-repeated-tier");
+                params["service_tier"] = json!("fast");
+                let repeated: AccountForAnswer = answer(
+                    &runner,
+                    ops::ROUTE_ACCOUNT_FOR,
+                    &params,
+                    "decision admission repeating the chosen tier",
+                )
+                .await?;
+                if repeated.service_tier_chosen.as_deref() != Some("fast")
+                    || repeated.account.account_id != "account-2"
+                {
+                    return Err(format!("decision admission repeating its tier did not keep fast on an eligible account: {repeated:?}"));
                 }
             }
             "service_tier_fallback_order" => {

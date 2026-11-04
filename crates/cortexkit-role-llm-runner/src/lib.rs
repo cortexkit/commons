@@ -35,6 +35,7 @@ pub mod directives;
 pub mod display;
 pub mod errors;
 pub mod finish;
+pub mod head_selection;
 pub mod history;
 pub mod live;
 pub mod output_refs;
@@ -173,6 +174,9 @@ pub const SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY: &str = "system-text-default/v
 pub mod capabilities {
     /// Provider service levels, route support and truthful served-tier usage.
     pub const SERVICE_TIER: &str = "service_tier";
+    /// Durable owner-selected model and default tier for subsequent runs.
+    /// Requires `plans`; refreshing the choice also requires `session_change`.
+    pub const HEAD_SELECTION: &str = "head_selection";
     use crate::ops;
 
     /// In-place pruning of declared reasoning kinds in archived sessions at rest.
@@ -365,6 +369,7 @@ pub mod capabilities {
     pub const GROUPS: &[(&str, &[&str])] = &[
         (TOOL_UPFRONT, &[ops::SESSION_SEND]),
         (SERVICE_TIER, &[ops::SESSION_SEND]),
+        (HEAD_SELECTION, &[ops::SESSION_SEND, ops::SESSION_HEAD]),
         (
             SESSION_RETENTION,
             &[ops::SESSION_SEND, ops::SESSION_HEAD, ops::SESSION_RELEASE],

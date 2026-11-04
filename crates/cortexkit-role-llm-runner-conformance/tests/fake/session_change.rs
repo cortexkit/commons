@@ -238,6 +238,10 @@ impl Module {
         sess: &Sess,
         request: RefreshRequest,
     ) -> Result<Reply, Killed> {
+        let selection = match self.selection(&request.plan) {
+            Ok(model) => model,
+            Err(reply) => return Ok(reply),
+        };
         if let Err(field) = request.check_sender_succession(&self.world.groups) {
             return Ok(invalid(&field));
         }
@@ -336,6 +340,7 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "refresh", "generation": request.generation,
+                    "selection": selection,
                     "policy": request.policy, "digest": digest, "tools": names,
                     "senders": request.plan.get("senders").cloned().unwrap_or_else(|| json!([])),
                     "defer_senders": defects.refreshed_senders_wait_for_next_run,

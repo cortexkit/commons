@@ -1,5 +1,16 @@
 # cortexkit-role-routing
 
+Since 0.6.0, `route.account_for` accepts optional `service_tier` only from
+callers that discovered the `service_tier` group, using select's existing plan
+eligibility and descending fallback. Its answer records top-level
+`service_tier_chosen`; legacy wire bytes are unchanged when the optional
+members are absent. `parse_account_for_request_serving` enables tier parsing
+for declared groups; the legacy parser ignores that member. Never interpret
+a non-declaring router's missing chosen tier as confirmation of a requested
+tier. Construct both non-exhaustive types, `AccountForAnswer` and `AccountPin`,
+with `new`, not Rust struct literals. Only `AccountForAnswer` has the optional
+`with_service_tier_chosen` setter.
+
 Wire types, validation, refusal codes and vectors for `routing/v1`: the role
 a routing provider plays when it decides which model a piece of model work
 runs on, and on which runner.
@@ -8,14 +19,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.5.7"
+cortexkit-role-routing = "0.6.0"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.5.7", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.6.0", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant

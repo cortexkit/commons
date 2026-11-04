@@ -3,6 +3,161 @@
 
 mod fake;
 
+const HEAD_SELECTION_CASES: &[&str] = &[
+    "head_selection_absent_preserves_choice",
+    "head_selection_plan_tier",
+    "head_selection_send_overrides",
+    "head_selection_unsupported_tier",
+    "head_selection_unsupported_model",
+    "head_selection_immediate_head",
+    "head_selection_unchanged_after_host_switch",
+];
+
+#[test]
+fn head_selection_refresh_specs_require_plans_and_session_change() {
+    for spec in CASES
+        .iter()
+        .filter(|spec| spec.name.starts_with("head_selection_"))
+    {
+        assert!(
+            spec.requires.contains(&Capability::Plans),
+            "{} needs plans",
+            spec.name
+        );
+        assert!(
+            spec.requires.contains(&Capability::SessionChange),
+            "{} needs session_change",
+            spec.name
+        );
+    }
+}
+
+#[tokio::test]
+async fn head_selection_without_session_change_is_inapplicable() {
+    let mut subject = head_selection_subject(None);
+    subject.capabilities.remove(&Capability::SessionChange);
+    let report = run(&subject).await;
+    for name in HEAD_SELECTION_CASES {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{name}: {}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn head_selection_omitted_tier_faulty_runner_fails_by_name() {
+    let report = run(&head_selection_subject(Some("keep_fast_omitted"))).await;
+    let name = "head_selection_absent_preserves_choice";
+    let reason = failed(&report, name);
+    eprintln!("FAIL {name} (keep_fast_omitted): {reason}");
+    assert_none_failed_but(&report, &[name]);
+}
+
+fn head_selection_subject(defect: Option<&'static str>) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        head_selection: defect,
+        ..Defects::default()
+    });
+    subject.capabilities.extend([
+        Capability::HeadSelection,
+        Capability::ServiceTier,
+        Capability::Plans,
+        Capability::SessionChange,
+        Capability::RunUsage,
+    ]);
+    subject
+}
+
+#[tokio::test]
+async fn head_selection_faithful_runner_passes() {
+    let report = run(&head_selection_subject(None)).await;
+    for name in HEAD_SELECTION_CASES {
+        assert_passed(&report, name);
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn head_selection_faulty_runners_fail_by_name() {
+    for (mode, name) in [
+        ("absent_clears", "head_selection_absent_preserves_choice"),
+        ("ignore_tier", "head_selection_plan_tier"),
+        ("plan_wins", "head_selection_send_overrides"),
+        ("accept_tier", "head_selection_unsupported_tier"),
+        ("accept_model", "head_selection_unsupported_model"),
+        ("late_head", "head_selection_immediate_head"),
+        (
+            "unchanged_overrides",
+            "head_selection_unchanged_after_host_switch",
+        ),
+    ] {
+        let report = run(&head_selection_subject(Some(mode))).await;
+        let reason = failed(&report, name);
+        eprintln!("FAIL {name} ({mode}): {reason}");
+        assert_none_failed_but(&report, &[name]);
+    }
+}
+
+#[tokio::test]
+async fn head_selection_missing_group_and_hooks_are_inapplicable() {
+    for subject in [
+        FakeSubject::new(Defects::default()),
+        head_selection_subject(Some("no_fixture")),
+    ] {
+        let report = run(&subject).await;
+        for name in HEAD_SELECTION_CASES {
+            assert!(
+                matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+                "{}",
+                report.render()
+            );
+        }
+    }
+    let report = run(&head_selection_subject(Some("no_switch"))).await;
+    assert!(matches!(
+        report.outcome("head_selection_unchanged_after_host_switch"),
+        Some(CaseOutcome::Inapplicable { .. })
+    ));
+    let mut subject = head_selection_subject(None);
+    subject.capabilities.remove(&Capability::RunUsage);
+    let report = run(&subject).await;
+    for name in ["head_selection_plan_tier", "head_selection_send_overrides"] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn head_selection_standard_only_runner_needs_no_service_tier_group() {
+    let mut subject = head_selection_subject(None);
+    subject.capabilities.remove(&Capability::ServiceTier);
+    let report = run(&subject).await;
+    for name in [
+        "head_selection_immediate_head",
+        "head_selection_unsupported_model",
+        "head_selection_unchanged_after_host_switch",
+    ] {
+        assert_passed(&report, name);
+    }
+    for name in [
+        "head_selection_plan_tier",
+        "head_selection_send_overrides",
+        "head_selection_unsupported_tier",
+        "head_selection_absent_preserves_choice",
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{}",
+            report.render()
+        );
+    }
+}
+
 fn frozen_plan_subject(defect: Option<&'static str>) -> FakeSubject {
     let mut subject = FakeSubject::new(Defects {
         frozen_plan_senders_accepted: defect,
@@ -971,6 +1126,12 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    if case.starts_with("head_selection_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "head_selection is not declared")
+    {
+        return;
+    }
     if SERVICE_TIER_CASES.contains(&case)
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason == "role.describe does not declare service_tier"
@@ -1462,6 +1623,15 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
                 report.outcome(spec.name),
                 Some(&CaseOutcome::Inapplicable {
                     reason: "finish_reason is not declared".into(),
+                })
+            );
+            continue;
+        }
+        if spec.name.starts_with("head_selection_") {
+            assert_eq!(
+                report.outcome(spec.name),
+                Some(&CaseOutcome::Inapplicable {
+                    reason: "head_selection is not declared".into(),
                 })
             );
             continue;

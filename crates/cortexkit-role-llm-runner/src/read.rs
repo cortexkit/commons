@@ -813,6 +813,10 @@ pub struct HeadMeta {
     /// not the frozen plan's original selection. Absent means unknown.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<HeadModel>,
+    /// The tier a send naming none would use next. Values are open on read.
+    /// Under `head_selection`, absence means standard; otherwise it is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
     /// Durable session spend, present only with the `session_usage` group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<crate::usage::SessionUsage>,
@@ -1043,6 +1047,7 @@ impl HeadMeta {
             updated_at: None,
             input: None,
             model: None,
+            service_tier: None,
             usage: None,
             sender: None,
             incarnation: incarnation.into(),
@@ -1100,6 +1105,11 @@ impl HeadMeta {
 
     pub fn with_model(mut self, model: HeadModel) -> Self {
         self.model = Some(model);
+        self
+    }
+
+    pub fn with_service_tier(mut self, service_tier: impl Into<String>) -> Self {
+        self.service_tier = Some(service_tier.into());
         self
     }
 

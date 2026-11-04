@@ -28,8 +28,8 @@ use cortexkit_role_routing_conformance::wire::service_tier::ServiceTier;
 use cortexkit_role_routing_conformance::{
     wire::{
         account::{
-            parse_account_for_request, Account, AccountForAnswer, AccountForRequest, AccountMode,
-            AccountPin, AccountReason, AccountReasonCode, Admission,
+            Account, AccountForAnswer, AccountForRequest, AccountMode, AccountPin, AccountReason,
+            AccountReasonCode, Admission,
         },
         capabilities::{
             SELECT_EXCLUDE_PROVIDERS, SELECT_HARNESS, SELECT_HOLD_CONTROL, SELECT_PREFER,
@@ -60,6 +60,11 @@ const DECISION_TTL_MS: u64 = 600_000;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub decision_tier_chosen_missing: bool,
+    pub repeated_decision_tier_wrong: bool,
+    pub account_tier_ignores: bool,
+    pub account_tier_skip_fast: bool,
+    pub account_tier_undeclared_fast: bool,
     pub continue_exhausted: bool,
     pub continue_provider: bool,
     pub continue_auth: bool,
@@ -743,19 +748,20 @@ impl FakeRoute {
         if requested.is_none() && !state.tier_plans.is_empty() && self.defects.tier_absent_is_fast {
             chosen = ServiceTier::Fast;
         }
-        while !chosen.is_standard()
-            && !state
-                .tier_plans
-                .values()
-                .any(|levels| levels.contains(&chosen))
-        {
-            chosen = match chosen {
-                ServiceTier::Ultrafast if !self.defects.tier_skips_fast_fallback => {
-                    ServiceTier::Fast
-                }
-                _ => ServiceTier::Standard,
-            };
-        }
+        chosen = cortexkit_role_routing_conformance::wire::service_tier::fallback(chosen)
+            .filter(|tier| {
+                !self.defects.tier_skips_fast_fallback
+                    || chosen != ServiceTier::Ultrafast
+                    || *tier != ServiceTier::Fast
+            })
+            .find(|tier| {
+                tier.is_standard()
+                    || state
+                        .tier_plans
+                        .values()
+                        .any(|levels| levels.contains(tier))
+            })
+            .unwrap_or_default();
         let mut plain = params.clone();
         plain.as_object_mut().unwrap().remove("service_tier");
         let mut answer = self.select_untiered(state, &plain)?;
@@ -1646,17 +1652,26 @@ impl FakeRoute {
                 "only runner modules call the account ops",
             ));
         }
-        let request = parse_account_for_request(params).map_err(|mut refusal| {
-            if defects.malformed_pool_wrong_detail
-                && refusal.detail.get("field") == Some(&Value::String("pool".into()))
-            {
-                refusal.detail.remove("field");
+        let declared = if self.service_tier_control {
+            vec![cortexkit_role_routing_conformance::wire::capabilities::SERVICE_TIER]
+        } else {
+            vec![]
+        };
+        let request =
+            cortexkit_role_routing_conformance::wire::account::parse_account_for_request_serving(
+                params, &declared,
+            )
+            .map_err(|mut refusal| {
+                if defects.malformed_pool_wrong_detail
+                    && refusal.detail.get("field") == Some(&Value::String("pool".into()))
+                {
+                    refusal.detail.remove("field");
+                    refusal
+                        .detail
+                        .insert("member".into(), Value::String("pool".into()));
+                }
                 refusal
-                    .detail
-                    .insert("member".into(), Value::String("pool".into()));
-            }
-            refusal
-        })?;
+            })?;
         let key = (self.principal().to_owned(), request.admission_id.clone());
         if let Some((first, answer)) = state.admissions.get(&key) {
             let mut compared = request.clone();
@@ -1737,20 +1752,6 @@ impl FakeRoute {
             .enumerate()
             .filter(|(_, account)| account.provider == request.provider)
             .filter(|(_, account)| {
-                let chosen = request
-                    .decision_id
-                    .as_ref()
-                    .and_then(|id| state.decision_tiers.get(id))
-                    .copied()
-                    .unwrap_or_default();
-                self.defects.tier_ineligible_account
-                    || chosen.is_standard()
-                    || state
-                        .tier_plans
-                        .get(&account.account_id)
-                        .is_some_and(|levels| levels.contains(&chosen))
-            })
-            .filter(|(_, account)| {
                 !state.ineligible.iter().any(|(credential, model)| {
                     credential == &account.credential_id
                         && model.as_ref().is_none_or(|model| model == &request.model)
@@ -1781,7 +1782,60 @@ impl FakeRoute {
             let earliest = fence_resets.into_iter().min().unwrap();
             return Err(Refusal::account_pool_exhausted(Some(earliest)));
         }
-        let usable = unfenced;
+        let fixed = request
+            .decision_id
+            .as_ref()
+            .and_then(|id| state.decision_tiers.get(id))
+            .copied();
+        let requested_tier = if defects.account_tier_ignores
+            && fixed.is_none()
+            && request.service_tier == Some(ServiceTier::Fast)
+        {
+            ServiceTier::Standard
+        } else if defects.account_tier_undeclared_fast
+            && !self.service_tier_control
+            && !state.tier_plans.is_empty()
+        {
+            ServiceTier::Fast
+        } else {
+            fixed.or(request.service_tier).unwrap_or_default()
+        };
+        let chosen_tier =
+            cortexkit_role_routing_conformance::wire::service_tier::fallback(requested_tier)
+                .filter(|tier| fixed.is_none_or(|fixed| *tier == fixed))
+                .filter(|tier| {
+                    !defects.account_tier_skip_fast
+                        || fixed.is_some()
+                        || requested_tier != ServiceTier::Ultrafast
+                        || *tier != ServiceTier::Fast
+                })
+                .find(|tier| {
+                    unfenced.iter().any(|index| {
+                        (defects.tier_ineligible_account && fixed.is_some())
+                            || tier.is_standard()
+                            || state
+                                .tier_plans
+                                .get(&catalog.accounts[*index].account_id)
+                                .is_some_and(|levels| levels.contains(tier))
+                    })
+                })
+                .ok_or_else(|| {
+                    Refusal::new(
+                        RefusalCode::AuthRequired,
+                        "no tier-eligible account is usable",
+                    )
+                })?;
+        let usable: Vec<_> = unfenced
+            .into_iter()
+            .filter(|index| {
+                (defects.tier_ineligible_account && fixed.is_some())
+                    || chosen_tier.is_standard()
+                    || state
+                        .tier_plans
+                        .get(&catalog.accounts[*index].account_id)
+                        .is_some_and(|levels| levels.contains(&chosen_tier))
+            })
+            .collect();
         if usable.is_empty() {
             return Err(Refusal::new(
                 RefusalCode::AuthRequired,
@@ -1883,33 +1937,44 @@ impl FakeRoute {
             state.decision_accounts.insert(decision_id.clone(), account);
         }
         let chosen = &catalog.accounts[account];
-        let answer = AccountForAnswer {
-            admission: Admission {
+        let mut answer = AccountForAnswer::new(
+            Admission {
                 id: request.admission_id.clone(),
                 state: "admitted".to_owned(),
             },
-            account: Account {
+            Account {
                 provider: chosen.provider.clone(),
                 account_id: chosen.account_id.clone(),
                 credential_id: chosen.credential_id.clone(),
                 method: chosen.method.clone(),
             },
-            pin: AccountPin {
-                id: pin_id,
+            AccountPin::new(
+                pin_id,
                 generation,
-                affinity_expires_at_ms: now + 3_600_000,
-                admission_valid_until_ms: now + 600_000,
-                lease_valid_until_ms: now + 300_000,
+                now + 3_600_000,
+                now + 600_000,
+                now + 300_000,
                 mode,
-            },
-            reason: AccountReason {
+            ),
+            AccountReason {
                 code,
                 decision_id,
                 policy_version: "fake-1".to_owned(),
                 quota_fetched_at_ms: None,
                 quota_age_band: "unknown".to_owned(),
             },
-        };
+        );
+        if request.service_tier.is_some() || !chosen_tier.is_standard() {
+            answer = answer.with_service_tier_chosen(chosen_tier);
+        }
+        if fixed.is_some() && !chosen_tier.is_standard() {
+            if defects.decision_tier_chosen_missing && request.service_tier.is_none() {
+                answer.service_tier_chosen = None;
+            }
+            if defects.repeated_decision_tier_wrong && request.service_tier.is_some() {
+                answer.service_tier_chosen = Some("standard".into());
+            }
+        }
         state.admissions.insert(key, (request, answer.clone()));
         to_value(answer)
     }

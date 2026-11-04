@@ -1,5 +1,22 @@
 # cortexkit-role-llm-runner-conformance
 
+The `head_selection_*` cases check inherited plan tiers, explicit send-tier
+overrides, immediate head visibility, that the head choice stays unchanged
+when an unsupported model or tier is refused, and unchanged refreshes after
+host-side switches. These refresh-based cases require both `plans` and
+`session_change`. Implement
+`head_selection_models(session)` with a selectable model and an unavailable
+one; the selectable route supports fast but not ultrafast when `service_tier`
+is declared. With a missing group or model-fixture hook, the report marks
+each affected case `Inapplicable` with its name and reason, never passed.
+The ordering case also uses `switch_head_model`, whose default is unsupported.
+
+The head-selection cases do not yet check:
+
+- which model a run actually used;
+- that a creating send's `plan.model` drives its first run;
+- that a send's own model selection overrides the recorded selection.
+
 Version **0.17.6** pins `cortexkit-role-llm-runner =0.8.5`, adding host creation
 time display-fact checks with independently seeded user and assistant times.
 The role remains
