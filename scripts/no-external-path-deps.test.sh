@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
+finished=
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "$script_dir/.." && pwd -P)"
 checker="$script_dir/no-external-path-deps.sh"
 scratch="$(mktemp -d)"
-trap 'rm -rf -- "$scratch"' EXIT
+cleanup() {
+  local status=$?
+  rm -rf -- "$scratch"
+  if [ "$status" -eq 0 ] && [ "${finished:-}" != 1 ]; then
+    echo 'no-external-path-deps.test.sh: exited before the check completed' >&2
+    exit 1
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
 
 write_package() {
   local directory="$1"
@@ -190,3 +200,4 @@ else
   fi
   exit 1
 fi
+finished=1

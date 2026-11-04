@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # Share the fast/lint entry points with CI so their checks cannot drift.
 set -euo pipefail
+finished=
 
 usage() {
     cat <<'USAGE'
 Usage: scripts/gate.sh {fast|lint|test|all}
 
   fast  Formatting, locked/offline metadata, path-dependency checks (including
-        their self-tests), repository layout, tracked ignored state, and every
-        test-vector *SHA256SUMS manifest. Stops at the first failed check.
+        their self-tests), the unbound fail-open check (and its self-tests),
+        repository layout, tracked ignored state, and every test-vector
+        *SHA256SUMS manifest. Stops at the first failure.
   lint  CI's workspace/all-targets Clippy with warnings denied, then the same
         check for x86_64-pc-windows-gnu and the mutation workflow's package-only
         Windows check. Install that Rust target first; cross compilation may
@@ -21,9 +23,10 @@ Usage: scripts/gate.sh {fast|lint|test|all}
         This includes the slow tests; it is not a substitute for other OSes.
 
 Use stable Rust with rustfmt and clippy, a populated Cargo cache for offline
-metadata, and the existing path check's python3 dependency. No tools are installed
+metadata, and python3 for the path-dependency and unbound fail-open checks and
+their self-tests. No tools are installed
 by this script. Commands run from the repository root, regardless of your cwd.
-CI sets GATE_CI_OS to its matrix OS: the path checks and the Windows cross-lint
+CI sets GATE_CI_OS to its matrix OS: those Python checks and the Windows cross-lint
 run only on ubuntu-latest there. Outside CI they always run. Formatting, the
 other fast checks, Clippy and the tests still run on each CI OS.
 
@@ -44,7 +47,7 @@ if [ "$#" -ne 1 ]; then
 fi
 stage=$1
 case "$stage" in
-    -h|--help|help) usage; exit 0 ;;
+    -h|--help|help) usage; finished=1; exit 0 ;;
     fast|lint|test|all) ;;
     *) usage >&2; exit 2 ;;
 esac
@@ -70,11 +73,18 @@ run_step() {
 
 stage_verdict() {
     local status=$?
+    # On bash 3.2 an unbound-variable abort reaches this trap with status 0, so
+    # a 0 before the stage set `finished` is a failure.
+    if [ "$status" -eq 0 ] && [ "${finished:-}" != 1 ]; then
+        echo 'gate.sh: exited before the gate stage completed' >&2
+        status=1
+    fi
     if [ "$status" -eq 0 ]; then
         printf 'gate %s: PASS (%s checks)\n' "$stage" "$steps"
     else
         printf 'gate %s: FAIL (exit %s; %s checks passed)\n' "$stage" "$status" "$steps" >&2
     fi
+    exit "$status"
 }
 
 metadata() {
@@ -109,11 +119,13 @@ fast() {
     local manifests=0
     run_step 'Format check' cargo fmt --all -- --check
     run_step 'Locked offline metadata' metadata
-    # The path checks need python3, which CI's Windows image doesn't put on
+    # These checks need python3, which CI's Windows image doesn't put on
     # Git Bash's PATH, so CI runs them on Linux only. Locally they always run.
     if [ -z "${GATE_CI_OS:-}" ] || [ "$GATE_CI_OS" = ubuntu-latest ]; then
         run_step 'No external path dependencies' bash scripts/no-external-path-deps.sh
         run_step 'Path-dependency checker self-tests' bash scripts/no-external-path-deps.test.sh
+        run_step 'No unbound fail-open hazards' bash scripts/checks/no-unbound-fail-open.sh
+        run_step 'Unbound fail-open checker self-tests' bash scripts/checks/no-unbound-fail-open.test.sh
     fi
     run_step 'Repository tooling layout' bash scripts/check-cortexkit-layout.sh
     run_step 'Tracked ignored .cortexkit files' tracked_ignored
@@ -162,6 +174,7 @@ if [ "$stage" = all ]; then
             status=1
         fi
     done
+    finished=1
     exit "$status"
 fi
 
@@ -171,3 +184,4 @@ case "$stage" in
     lint) lint ;;
     test) test_stage ;;
 esac
+finished=1

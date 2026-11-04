@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+finished=
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "$script_dir/.." && pwd -P)"
@@ -17,9 +18,18 @@ else
 fi
 
 metadata_file="$(mktemp)"
-trap 'rm -f -- "$metadata_file"' EXIT
+cleanup() {
+  local status=$?
+  rm -f -- "$metadata_file"
+  if [ "$status" -eq 0 ] && [ "${finished:-}" != 1 ]; then
+    echo 'no-external-path-deps.sh: exited before the check completed' >&2
+    exit 1
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
 
-if cargo metadata --format-version 1 --locked "${manifest_args[@]}" >"$metadata_file"; then
+if cargo metadata --format-version 1 --locked "${manifest_args[@]}" >"$metadata_file"; then # nonempty-array both branches assign two arguments
   :
 else
   metadata_status=$?
@@ -71,3 +81,4 @@ else
   echo "The check itself failed: metadata parser exited with status $parser_status." >&2
   exit 1
 fi
+finished=1
