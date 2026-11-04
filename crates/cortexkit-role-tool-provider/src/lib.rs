@@ -164,6 +164,93 @@ pub mod ops {
 /// consumer refuses a module missing any of them before routing anything.
 pub const REQUIRED_OPS: &[&str] = &[ops::ROLE_DESCRIBE, ops::TOOL_CATALOG];
 
+/// Whether a route's bind declared this role at `v1` (§1.1). Pass the role
+/// versions the daemon forwarded on the bind; `None` means the consumer
+/// declared none. A declaration is the consumer's word, not a privilege: it
+/// says which role the route speaks, nothing about what the caller may do.
+pub fn route_declares_v1(
+    role_versions: Option<&std::collections::BTreeMap<String, String>>,
+) -> bool {
+    role_versions
+        .and_then(|versions| versions.get(ROLE))
+        .is_some_and(|version| version == VERSION)
+}
+
+/// Whether the role declaration never gates `op` (§1.1): true for the
+/// read-only `role.describe`, `tool.catalog` and `tool.views`. True only means
+/// a missing declaration is no reason to refuse it; it says nothing about
+/// whether the provider serves the optional `tool.views`. This role's other
+/// requests and tool calls on an undeclared route may be refused with
+/// [`errors::tool_role_not_declared`] once every consumer that sends them
+/// declares the role. The helper only classifies the name; it doesn't track
+/// which consumers have declared.
+pub fn op_allowed_without_role(op: &str) -> bool {
+    op == ops::ROLE_DESCRIBE || op == ops::TOOL_CATALOG || op == ops::TOOL_VIEWS
+}
+
+#[cfg(test)]
+mod route_role_tests {
+    use super::{op_allowed_without_role, ops, route_declares_v1};
+    use std::collections::BTreeMap;
+
+    fn versions(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(role, version)| (role.to_string(), version.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn only_tool_provider_v1_declares_the_role() {
+        assert!(route_declares_v1(Some(&versions(&[(
+            "tool-provider",
+            "v1"
+        )]))));
+        assert!(route_declares_v1(Some(&versions(&[
+            ("other", "v3"),
+            ("tool-provider", "v1"),
+        ]))));
+        assert!(!route_declares_v1(None));
+        assert!(!route_declares_v1(Some(&versions(&[]))));
+        assert!(!route_declares_v1(Some(&versions(&[(
+            "tool-provider",
+            "v2"
+        )]))));
+        assert!(!route_declares_v1(Some(&versions(&[("other", "v1")]))));
+    }
+
+    #[test]
+    fn only_the_read_only_ops_run_without_the_role() {
+        assert!(op_allowed_without_role(ops::ROLE_DESCRIBE));
+        assert!(op_allowed_without_role(ops::TOOL_CATALOG));
+        assert!(op_allowed_without_role(ops::TOOL_VIEWS));
+        for op in [
+            ops::USER_COMMAND_INVOKE,
+            ops::TOOL_WITHDRAW,
+            ops::LATE_RESULTS,
+            ops::LATE_RESULTS_ACK,
+            "some_tool",
+        ] {
+            assert!(!op_allowed_without_role(op), "{op}");
+        }
+    }
+
+    #[test]
+    fn the_refusal_names_the_role_and_what_the_bind_declared() {
+        let refusal = crate::errors::tool_role_not_declared(Some("v2"));
+        assert_eq!(refusal.code, crate::errors::TOOL_ROLE_NOT_DECLARED);
+        assert_eq!(
+            refusal.detail,
+            Some(serde_json::json!({"role": "tool-provider", "declared": "v2"}))
+        );
+        let none = crate::errors::tool_role_not_declared(None);
+        assert_eq!(
+            none.detail,
+            Some(serde_json::json!({"role": "tool-provider", "declared": null}))
+        );
+    }
+}
+
 #[cfg(test)]
 mod consumer_capability_tests {
     use super::{consumer_reads_tool_result_v1, TOOL_RESULT_V1_CAPABILITY};

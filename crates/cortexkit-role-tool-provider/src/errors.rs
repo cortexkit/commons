@@ -76,6 +76,27 @@ pub const WITHDRAW_CARRIER_MISMATCH: &str = "withdraw_carrier_mismatch";
 /// terminal.
 pub const WITHDRAW_SCOPE_MISMATCH: &str = "withdraw_scope_mismatch";
 
+/// A tool call, or a role request other than the read-only `role.describe`,
+/// `tool.catalog` and `tool.views`, arrived on a route whose bind didn't
+/// declare `tool-provider/v1` in its role versions (§1.1). A bind that
+/// declared another version of the role, such as `v2`, gets this refusal too.
+/// Detail: `{role, declared}`, where `declared` is the version the bind
+/// declared for this role, or null when it declared none. Terminal for the
+/// request; the caller opens a route that declares the role. A provider uses
+/// it only once every consumer that sends it this role's requests declares
+/// the role.
+pub const TOOL_ROLE_NOT_DECLARED: &str = "tool_role_not_declared";
+
+/// A `tool_role_not_declared` refusal. `declared` is the bind's declared
+/// version for this role, if any.
+pub fn tool_role_not_declared(declared: Option<&str>) -> ErrorBody {
+    ErrorBody::new(
+        TOOL_ROLE_NOT_DECLARED,
+        "this route did not declare tool-provider/v1; open a route that declares it",
+    )
+    .with_detail(json!({ "role": crate::ROLE, "declared": declared }))
+}
+
 /// subc's route refusal while the target module reloads. Transient.
 pub const MODULE_RELOADING: &str = subc_protocol::error_codes::MODULE_RELOADING;
 

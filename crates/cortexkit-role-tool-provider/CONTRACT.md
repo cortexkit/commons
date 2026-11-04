@@ -24,6 +24,56 @@ to them. Nothing here names a particular implementation.
 - A consumer refuses a module whose `role.describe` lacks a required op, by
   name, before routing anything to it.
 
+### 1.1 Route identity: declared role and one bind identity per session
+
+A module can serve this role and other surfaces, such as a management API, to
+the same callers. A route's declared role tells the provider which routes the
+consumer declared for this role. Once every consumer that sends this role's
+requests to a provider declares it (see Rollout), an undeclared route is one
+that shouldn't carry them. This section governs only this role's requests and
+tool calls; the module's other surfaces keep their own rules.
+
+- [pinned] A consumer that sends tool calls, `user_command.invoke`,
+  `tool.withdraw`, `late_results` or `late_results.ack` on a route declares
+  `{"tool-provider": "v1"}` in that route's role versions when it opens the
+  route. The daemon forwards them on the provider's bind
+  (`RouteBindRequest.role_versions`). A consumer should declare it on every
+  route it uses for this role, including routes that only fetch the catalog.
+  The declaration is the consumer's word, not a privilege: it grants nothing
+  and the provider still applies every other admission rule.
+  `route_declares_v1` reads it from a bind.
+- [pinned] The declaration never gates the read-only `role.describe`,
+  `tool.catalog` and `tool.views`: a provider doesn't refuse them for lack of
+  it (`op_allowed_without_role`). That says nothing about whether a provider
+  serves the optional `tool.views` (§2.1).
+- [pinned] Any other request of this role, or a tool call, on a route whose
+  bind didn't declare `tool-provider/v1` may be refused with
+  `tool_role_not_declared` (`errors::tool_role_not_declared`), subject to the
+  rollout rule below. A bind that declares a different version of this role,
+  such as `v2`, didn't declare `v1` and gets the same refusal. The detail is
+  `{role: "tool-provider", declared}`, where `declared` is the version the
+  bind declared for this role (`"v2"` in that example), or null when it
+  declared none. The refusal is terminal for that request: the caller opens a
+  route that declares the role and sends again.
+- [pinned] Rollout: while any consumer still sends this role's requests or
+  tool calls to a provider on undeclared routes, the provider keeps accepting
+  them and doesn't use the refusal. Once every consumer that sends them
+  declares the role, the refusal becomes available to the provider; it is an
+  option, never a duty. Which consumers those are is the provider's own
+  knowledge; the helpers here don't track it. A consumer never relies on an
+  undeclared route being accepted.
+- [pinned] One bind identity per session per provider: a consumer that opens
+  more than one route to the same provider module on behalf of one session,
+  for example its tool route and a compaction or hook route, binds all of
+  them with the same `harness` and `session`, and never binds a different
+  session under that pair. A provider may therefore treat routes from one
+  consumer that bind the same pair as the same session. The pair is unique
+  only within one consumer, so a provider keys session state by the route's
+  attested principal together with the pair. Routes bound under different
+  pairs read as different sessions, so a consumer that splits one session
+  across two pairs makes it look like two. Routes to different modules may use
+  different identities.
+
 ## 2. `role.describe`
 
 - The answer is `{majors: [{version, ops, stability}], implementation_version,

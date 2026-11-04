@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.15.1
+
+- Contract §1.1: a consumer that sends tool calls, user commands,
+  withdrawals or late-result requests on a route declares
+  `{"tool-provider": "v1"}` in the route's role versions, and should declare
+  it on every route it uses for this role. The declaration never gates
+  `role.describe`, `tool.catalog` or `tool.views`. Once every consumer that
+  sends this role's requests to a provider declares the role, the provider
+  may refuse this role's other requests and tool calls on an undeclared
+  route, including a bind that declared another version, with the new
+  `tool_role_not_declared` code (`errors::TOOL_ROLE_NOT_DECLARED`,
+  `errors::tool_role_not_declared`). Until then it keeps accepting them. New
+  helpers: `route_declares_v1` and `op_allowed_without_role`; they classify a
+  bind and an operation, and don't track which consumers have declared.
+- Contract §1.1: a consumer that opens several routes to one provider on
+  behalf of one session binds them all with the same `harness` and
+  `session`, and never binds another session under that pair. A provider
+  that keys session state by the attested principal and the pair then
+  recognises those routes as one session.
+
 ## 0.15.0
 
 - New duty for every provider, hence a minor release (§4.5): a tool result's

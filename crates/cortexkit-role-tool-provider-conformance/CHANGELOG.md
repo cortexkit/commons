@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.15.1
+
+- Depend on `cortexkit-role-tool-provider` 0.15.1. The live suite doesn't
+  check route role declarations yet; no cases changed.
+
 ## 0.15.0
 
 - Depend on `cortexkit-role-tool-provider` 0.15.0. The live suite doesn't
