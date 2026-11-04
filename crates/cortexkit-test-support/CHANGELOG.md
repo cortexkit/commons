@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.13
+
+- Sibling build keys work on a source snapshot that another OS user owns, as
+  on a remote test runner. Plain Git refused to work there ("dubious
+  ownership"). Each identity query now trusts exactly that checkout, by its
+  canonical path, with `-c safe.directory=` for that invocation only.
+- Trusting the checkout lets Git read its config, which is no wider than
+  building it. The queries also turn off `core.fsmonitor`, hash raw bytes with
+  `--no-textconv`, and pass `--no-optional-locks`, so they never write its
+  index.
+- `CORTEXKIT_TEST_SIBLING_CACHE_ROOT` replaces the default cache root and
+  must be an absolute path, with one directory per sibling beneath it. Tests
+  that each get a fresh home directory can share one cache by setting it to the
+  same path.
+
 ## 0.1.12
 
 - Check the staged daemon test binary against the canonical staging temporary

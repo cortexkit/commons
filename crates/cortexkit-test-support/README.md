@@ -135,7 +135,19 @@ the four most recently used revisions are retained. `CachedSiblingBinary`
 separately exposes the published build target and the staged executable path.
 `sibling_cargo_build` always uses `--locked`, so a stale sibling lock fails
 without rewriting it. The shared cache lives in the user's
-`.cache/cortexkit-tests/sibling-target` directory.
+`.cache/cortexkit-tests/sibling-target` directory, unless
+`CORTEXKIT_TEST_SIBLING_CACHE_ROOT` names another absolute root, with one
+directory per sibling beneath it. When each test gets a fresh home directory,
+as on a remote runner, set it to the same user-owned path for every test so
+they share one cache.
+
+The Git queries that key a sibling build trust exactly that checkout, by its
+canonical path, for each invocation, so they also work on a source snapshot
+that another OS user owns. Trusting it lets Git read the checkout's config,
+which is no wider than the build that follows, since building the checkout
+runs its build scripts anyway. Pass only checkouts you would build. The
+queries turn off `core.fsmonitor`, hash raw bytes without external diff or
+text conversion, and never write the checkout's index.
 
 `sibling_checkout` resolves an adjacent repository, including from linked
 worktrees. Workspace resolution is runtime-based, not this dependency's source

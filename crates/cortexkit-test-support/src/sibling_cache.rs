@@ -4,9 +4,57 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+/// A read-only Git command on one sibling checkout.
+///
+/// A remote test runner can hand a test a source snapshot that another OS user
+/// owns, and plain Git refuses to work there ("dubious ownership"). So each
+/// command trusts exactly this checkout, by its canonical path, for this
+/// invocation only: never a wildcard and never a saved config change.
+///
+/// Trusting the checkout lets Git read its config, including drivers that run
+/// programs. That trust is no wider than the build that follows: the helper
+/// compiles this checkout, which runs its build scripts anyway, so pass only
+/// checkouts you would build. The command also turns off `core.fsmonitor`, so
+/// no file-monitor program or daemon starts in the snapshot, and never writes
+/// the checkout's index.
+fn git_command(repo: &Path) -> Command {
+    let repo = git_trust_path(repo);
+    assert!(
+        !repo.to_string_lossy().contains('*'),
+        "sibling checkout must be an exact path: {}",
+        repo.display()
+    );
+    let mut command = Command::new("git");
+    command
+        .arg("-c")
+        .arg(format!("safe.directory={}", repo.display()))
+        .args(["-c", "core.fsmonitor=false", "--no-optional-locks", "-C"])
+        .arg(&repo);
+    command
+}
+
+/// The checkout's canonical path in the form Git compares `safe.directory`
+/// with. On Windows, a drive-letter path loses the `\\?\` prefix that
+/// `canonicalize` adds; other verbatim paths, such as network shares, are kept
+/// as they are.
+fn git_trust_path(repo: &Path) -> PathBuf {
+    let canonical = repo
+        .canonicalize()
+        .unwrap_or_else(|error| panic!("resolve sibling checkout {}: {error}", repo.display()));
+    #[cfg(windows)]
+    {
+        let text = canonical.to_string_lossy();
+        if let Some(rest) = text.strip_prefix(r"\\?\") {
+            if rest.as_bytes().get(1) == Some(&b':') {
+                return PathBuf::from(rest);
+            }
+        }
+    }
+    canonical
+}
+
 fn git(repo: &Path, args: &[&str]) -> Vec<u8> {
-    let output = Command::new("git")
-        .current_dir(repo)
+    let output = git_command(repo)
         .args(args)
         .output()
         .expect("run git for sibling identity");
@@ -23,7 +71,12 @@ fn git(repo: &Path, args: &[&str]) -> Vec<u8> {
 /// non-ignored files contribute, so each local edit invalidates a cached build.
 pub fn sibling_revision(repo: &Path) -> String {
     let head = String::from_utf8(git(repo, &["rev-parse", "HEAD"])).unwrap();
-    let mut contents = git(repo, &["diff", "HEAD", "--binary", "--no-ext-diff"]);
+    // The key hashes the checkout's own bytes, so neither an external diff
+    // program nor a text conversion may stand in for them.
+    let mut contents = git(
+        repo,
+        &["diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv"],
+    );
     for name in git(repo, &["ls-files", "--others", "--exclude-standard", "-z"])
         .split(|byte| *byte == 0)
         .filter(|name| !name.is_empty())
@@ -54,16 +107,42 @@ fn hash_contents(contents: &[u8]) -> String {
     String::from_utf8(output.stdout).unwrap().trim().to_owned()
 }
 
-/// Return a user-owned directory outside the source checkouts for compiled
-/// sibling builds. Downloading or unpacking pinned source trees is the caller's
-/// responsibility; this cache stores build outputs, not those source trees.
+/// Names the shared root of the sibling build cache. Set it to the same
+/// absolute path for every test when each test gets a fresh home directory,
+/// as on a remote runner, so they share one cache.
+pub const SIBLING_CACHE_ROOT_ENV: &str = "CORTEXKIT_TEST_SIBLING_CACHE_ROOT";
+
+/// Return the root of the compiled sibling build cache, which holds one
+/// directory per sibling. Downloading or unpacking pinned source trees is the
+/// caller's responsibility; this cache stores build outputs, not those source
+/// trees.
+///
+/// By default the root is `.cache/cortexkit-tests/sibling-target` under the
+/// user's home directory. [`SIBLING_CACHE_ROOT_ENV`], when set, replaces it and
+/// must be an absolute path; only absoluteness is checked, so choose a
+/// user-owned directory outside the source checkouts.
 pub fn sibling_cache_root() -> PathBuf {
-    PathBuf::from(
-        std::env::var_os("HOME")
-            .or_else(|| std::env::var_os("USERPROFILE"))
-            .expect("user home for sibling build cache"),
+    cache_root_from(
+        std::env::var_os(SIBLING_CACHE_ROOT_ENV),
+        std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")),
     )
-    .join(".cache/cortexkit-tests/sibling-target")
+}
+
+fn cache_root_from(
+    explicit: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> PathBuf {
+    if let Some(root) = explicit {
+        let root = PathBuf::from(root);
+        assert!(
+            root.is_absolute(),
+            "{SIBLING_CACHE_ROOT_ENV} must be an absolute path, got {}",
+            root.display()
+        );
+        return root;
+    }
+    PathBuf::from(home.expect("user home for sibling build cache"))
+        .join(".cache/cortexkit-tests/sibling-target")
 }
 
 /// Resolve an immutable executable, building only on a cache miss. `revision`
@@ -314,6 +393,127 @@ mod tests {
             .status()
             .unwrap()
             .success());
+    }
+
+    /// A committed one-file checkout in `scratch`, plus an empty global Git
+    /// config, so the machine's own `safe.directory` entries can't mask the
+    /// ownership check.
+    fn snapshot_repo(scratch: &crate::ScratchDir) -> (PathBuf, PathBuf) {
+        let repo = scratch.path().join("snapshot");
+        std::fs::create_dir_all(&repo).unwrap();
+        git_ok(&repo, &["init", "-q"]);
+        std::fs::write(repo.join("file.txt"), b"one\n").unwrap();
+        git_ok(&repo, &["add", "file.txt"]);
+        git_ok(&repo, &["commit", "-q", "-m", "one"]);
+        let global = scratch.path().join("empty-gitconfig");
+        std::fs::write(&global, b"").unwrap();
+        (repo, global)
+    }
+
+    /// Git's own test switch makes it treat the checkout as owned by another
+    /// user, which is what a remote runner's source snapshot looks like.
+    fn as_foreign_owner(command: &mut Command, global: &Path) -> std::process::Output {
+        command
+            .env("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+            .env("GIT_CONFIG_GLOBAL", global)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap()
+    }
+
+    #[test]
+    fn git_queries_a_checkout_another_user_owns() {
+        let scratch = crate::ScratchDir::new("sibling-cache-foreign-owner");
+        let (repo, global) = snapshot_repo(&scratch);
+
+        let mut plain = Command::new("git");
+        plain.current_dir(&repo).args(["rev-parse", "HEAD"]);
+        let refused = as_foreign_owner(&mut plain, &global);
+        assert!(
+            !refused.status.success()
+                && String::from_utf8_lossy(&refused.stderr).contains("dubious ownership"),
+            "control: plain git must refuse the checkout, got {refused:?}"
+        );
+
+        let mut trusted = git_command(&repo);
+        trusted.args(["rev-parse", "HEAD"]);
+        let answered = as_foreign_owner(&mut trusted, &global);
+        assert!(
+            answered.status.success(),
+            "trusted query refused: {}",
+            String::from_utf8_lossy(&answered.stderr)
+        );
+    }
+
+    #[test]
+    fn git_trust_names_exactly_the_canonical_checkout() {
+        let scratch = crate::ScratchDir::new("sibling-cache-trust-path");
+        let (repo, _) = snapshot_repo(&scratch);
+        let trust = git_trust_path(&repo.join("."));
+        assert_eq!(trust, git_trust_path(&repo));
+        let canonical = repo.canonicalize().unwrap();
+        let canonical = canonical.to_string_lossy();
+        if let Some(rest) = canonical.strip_prefix(r"\\?\") {
+            if rest.as_bytes().get(1) == Some(&b':') {
+                assert_eq!(
+                    trust,
+                    PathBuf::from(rest),
+                    "drive paths drop the verbatim prefix"
+                );
+            }
+        }
+        let args: Vec<_> = git_command(&repo.join("."))
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(args.contains(&format!("safe.directory={}", trust.display())));
+        assert!(!args.iter().any(|arg| arg.contains('*')));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn trusted_checkout_fsmonitor_and_textconv_do_not_run() {
+        use std::os::unix::fs::PermissionsExt;
+        let scratch = crate::ScratchDir::new("sibling-cache-config-programs");
+        let (repo, _) = snapshot_repo(&scratch);
+        let marker = scratch.path().join("ran");
+        let program = scratch.path().join("program.sh");
+        std::fs::write(
+            &program,
+            format!("#!/bin/sh\necho \"$*\" >> '{}'\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let program = program.to_str().unwrap();
+        git_ok(&repo, &["config", "core.fsmonitor", program]);
+        git_ok(&repo, &["config", "diff.probe.textconv", program]);
+        std::fs::write(repo.join(".gitattributes"), b"*.txt diff=probe\n").unwrap();
+        std::fs::write(repo.join("file.txt"), b"two\n").unwrap();
+
+        assert!(sibling_revision(&repo).contains("-dirty-"));
+        assert!(
+            !marker.exists(),
+            "the checkout's fsmonitor or textconv program ran: {}",
+            std::fs::read_to_string(&marker).unwrap_or_default()
+        );
+    }
+
+    #[test]
+    fn cache_root_override_must_be_absolute_and_wins_over_home() {
+        let home = std::env::temp_dir().join("home");
+        let shared = std::env::temp_dir().join("shared-sibling-cache");
+        assert_eq!(
+            cache_root_from(Some(shared.clone().into()), Some(home.clone().into())),
+            shared
+        );
+        assert_eq!(
+            cache_root_from(None, Some(home.clone().into())),
+            home.join(".cache/cortexkit-tests/sibling-target")
+        );
+        let relative = std::panic::catch_unwind(|| {
+            cache_root_from(Some("relative/cache".into()), Some(home.into()))
+        });
+        assert!(relative.is_err(), "a relative override must be refused");
     }
 
     #[test]
