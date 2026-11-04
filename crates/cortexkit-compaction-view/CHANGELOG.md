@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2
+
+- 24 more `clean_reply` vectors: reply-cleaning edge cases (adjacent and
+  doubled section signs, section references, broken tag endings, tag zero,
+  oversized and lone tags, non-breaking spaces). The library's behaviour is
+  unchanged, and `PLAN_VERSION` stays 2: the pinned rendering checksum covers
+  the cases from before, and new cases are appended after them.
+
 ## 0.1.1
 
 - Requires `cortexkit-role-compaction` 0.2.1.

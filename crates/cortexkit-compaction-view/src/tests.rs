@@ -1183,6 +1183,131 @@ mod vector_file {
                 "seal_view",
                 json!({"version": 3, "edits": [drop_part(2, "a1", "k1")]}),
             ),
+            // Cases added after a version was pinned go here, at the end:
+            // the pinned checksum covers only the rendering outputs before
+            // them (`PINNED_RENDERING_CASES`). These reply-cleaning inputs are
+            // the ones Broca's earlier cleaner was compared against; they
+            // agreed on every one.
+            (
+                "reply cleaning edge case: two leading tags",
+                "clean_reply",
+                json!({"text": "§1§ §2§ Done."}),
+            ),
+            (
+                "reply cleaning edge case: a tag after the text",
+                "clean_reply",
+                json!({"text": "Done §3§."}),
+            ),
+            (
+                "reply cleaning edge case: a section reference",
+                "clean_reply",
+                json!({"text": "§5.1 applies"}),
+            ),
+            (
+                "reply cleaning edge case: two section references",
+                "clean_reply",
+                json!({"text": "§12.3 and §4"}),
+            ),
+            (
+                "reply cleaning edge case: a broken tag ending",
+                "clean_reply",
+                json!({"text": "§9\"> broken"}),
+            ),
+            (
+                "reply cleaning edge case: a broken tag ending before a tag",
+                "clean_reply",
+                json!({"text": "§9\">§10§ text"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a colon",
+                "clean_reply",
+                json!({"text": "§7: note"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before letters",
+                "clean_reply",
+                json!({"text": "§7a word"}),
+            ),
+            (
+                "reply cleaning edge case: a lone trailing section sign",
+                "clean_reply",
+                json!({"text": "trailing §"}),
+            ),
+            (
+                "reply cleaning edge case: a doubled section sign",
+                "clean_reply",
+                json!({"text": "§§ double"}),
+            ),
+            (
+                "reply cleaning edge case: a reply that is only a tag",
+                "clean_reply",
+                json!({"text": "§1§"}),
+            ),
+            (
+                "reply cleaning edge case: a padded tag",
+                "clean_reply",
+                json!({"text": "  §2§  padded  "}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a count",
+                "clean_reply",
+                json!({"text": "§99 files"}),
+            ),
+            (
+                "reply cleaning edge case: no section sign",
+                "clean_reply",
+                json!({"text": "2024 roadmap"}),
+            ),
+            (
+                "reply cleaning edge case: tags on separate lines",
+                "clean_reply",
+                json!({"text": "§1§\n\n§2§ multi"}),
+            ),
+            (
+                "reply cleaning edge case: adjacent tags inside text",
+                "clean_reply",
+                json!({"text": "a §3§§4§ b"}),
+            ),
+            (
+                "reply cleaning edge case: letters between section signs",
+                "clean_reply",
+                json!({"text": "§x§ not a tag"}),
+            ),
+            (
+                "reply cleaning edge case: tag zero",
+                "clean_reply",
+                json!({"text": "§0§ zero"}),
+            ),
+            (
+                "reply cleaning edge case: an oversized tag alone",
+                "clean_reply",
+                json!({"text": "§18446744073709551616§ big"}),
+            ),
+            (
+                "reply cleaning edge case: non-breaking spaces around a tag",
+                "clean_reply",
+                json!({"text": "\u{a0}§5§\u{a0}nbsp"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a parenthesis",
+                "clean_reply",
+                json!({"text": "§6) closer"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a bracket",
+                "clean_reply",
+                json!({"text": "§6] closer"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before a dash",
+                "clean_reply",
+                json!({"text": "§6- dash"}),
+            ),
+            (
+                "reply cleaning edge case: a section sign before an underscore",
+                "clean_reply",
+                json!({"text": "§6_ under"}),
+            ),
         ]
     }
 
@@ -1203,6 +1328,11 @@ mod vector_file {
         ),
     ];
 
+    /// How many rendering outputs, in case order, the newest pinned checksum
+    /// covers. New cases are appended after them, so adding coverage doesn't
+    /// read as a rendering change; the next `PLAN_VERSION` re-pins every case.
+    const PINNED_RENDERING_CASES: usize = 32;
+
     /// The functions whose output a runner renders, or renders from.
     const RENDERING: &[&str] = &[
         "plan",
@@ -1219,6 +1349,7 @@ mod vector_file {
             vectors
                 .iter()
                 .filter(|vector| RENDERING.contains(&vector.function.as_str()))
+                .take(PINNED_RENDERING_CASES)
                 .map(|vector| &vector.output),
         );
         let prefix = json!(crate::tags::tag_prefix(12));

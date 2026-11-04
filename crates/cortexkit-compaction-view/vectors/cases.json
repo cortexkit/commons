@@ -5364,5 +5364,317 @@
         "version": 3
       }
     }
+  },
+  {
+    "name": "reply cleaning edge case: two leading tags",
+    "function": "clean_reply",
+    "input": {
+      "text": "§1§ §2§ Done."
+    },
+    "output": {
+      "ok": {
+        "model_tag": 1,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a tag after the text",
+    "function": "clean_reply",
+    "input": {
+      "text": "Done §3§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "Done ."
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a section reference",
+    "function": "clean_reply",
+    "input": {
+      "text": "§5.1 applies"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "5.1 applies"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: two section references",
+    "function": "clean_reply",
+    "input": {
+      "text": "§12.3 and §4"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "12.3 and"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a broken tag ending",
+    "function": "clean_reply",
+    "input": {
+      "text": "§9\"> broken"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "broken"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a broken tag ending before a tag",
+    "function": "clean_reply",
+    "input": {
+      "text": "§9\">§10§ text"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "text"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a section sign before a colon",
+    "function": "clean_reply",
+    "input": {
+      "text": "§7: note"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "note"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a section sign before letters",
+    "function": "clean_reply",
+    "input": {
+      "text": "§7a word"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a word"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a lone trailing section sign",
+    "function": "clean_reply",
+    "input": {
+      "text": "trailing §"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "trailing"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a doubled section sign",
+    "function": "clean_reply",
+    "input": {
+      "text": "§§ double"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "double"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a reply that is only a tag",
+    "function": "clean_reply",
+    "input": {
+      "text": "§1§"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 1,
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a padded tag",
+    "function": "clean_reply",
+    "input": {
+      "text": "  §2§  padded  "
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "padded"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a section sign before a count",
+    "function": "clean_reply",
+    "input": {
+      "text": "§99 files"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "files"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: no section sign",
+    "function": "clean_reply",
+    "input": {
+      "text": "2024 roadmap"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "2024 roadmap"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: tags on separate lines",
+    "function": "clean_reply",
+    "input": {
+      "text": "§1§\n\n§2§ multi"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 1,
+        "text": "multi"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: adjacent tags inside text",
+    "function": "clean_reply",
+    "input": {
+      "text": "a §3§§4§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a  b"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: letters between section signs",
+    "function": "clean_reply",
+    "input": {
+      "text": "§x§ not a tag"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "x not a tag"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: tag zero",
+    "function": "clean_reply",
+    "input": {
+      "text": "§0§ zero"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 0,
+        "text": "zero"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: an oversized tag alone",
+    "function": "clean_reply",
+    "input": {
+      "text": "§18446744073709551616§ big"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "big"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: non-breaking spaces around a tag",
+    "function": "clean_reply",
+    "input": {
+      "text": " §5§ nbsp"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "nbsp"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a section sign before a parenthesis",
+    "function": "clean_reply",
+    "input": {
+      "text": "§6) closer"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "closer"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a section sign before a bracket",
+    "function": "clean_reply",
+    "input": {
+      "text": "§6] closer"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "closer"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a section sign before a dash",
+    "function": "clean_reply",
+    "input": {
+      "text": "§6- dash"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "dash"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning edge case: a section sign before an underscore",
+    "function": "clean_reply",
+    "input": {
+      "text": "§6_ under"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "_ under"
+      }
+    }
   }
 ]
