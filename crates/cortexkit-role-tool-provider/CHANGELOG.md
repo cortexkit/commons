@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Contract text only (§3): `model` joins the conventional `tool.catalog`
+  param names. `params.model` is exactly `{provider, model}`: the model a
+  plan item's catalog is built for. A provider whose tool set varies by
+  model documents it; a consumer sends it only to a provider that documents
+  it, filling it from the session's next-run model selection. A provider
+  advertising the catalog capability filter can't take it in this revision.
+
 ## 0.15.1
 
 - Contract §1.1: a consumer that sends tool calls, user commands,

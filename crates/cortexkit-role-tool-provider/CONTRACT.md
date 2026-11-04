@@ -229,9 +229,26 @@ idempotency and join requirements are in
     a provider accepts only the keys it documents, and refuses any other key
     or value, never guessing. A consumer sends a provider only the params of
     that provider's own plan item, never another provider's. `behavior`,
-    `scope`, `tool_descs` and `exclude` are conventional names a provider
-    reuses when it supports that axis, so the same idea is spelled the same
-    way across providers; none is required of every provider.
+    `scope`, `tool_descs`, `exclude` and `model` are conventional names a
+    provider reuses when it supports that axis, so the same idea is spelled
+    the same way across providers; none is required of every provider.
+    - `params.model` is exactly `{provider, model}`, two non-empty strings
+      spelled as in a routing route reference, without its `variant`. It
+      names the model this plan item's catalog is built for. A provider
+      whose tool set varies by model documents it and serves the set for
+      that model, for example a different edit tool for one model family;
+      how it treats a model it doesn't recognise is its own documented rule.
+      A consumer sends it only to a provider that documents it, since any
+      other provider refuses it as `invalid_request {field: "params.model"}`.
+    - A plan composer that sends `params.model` fills it from the session's
+      next-run model selection (`plan.model` in the runner contract) and
+      updates it whenever that selection changes. The item's params then
+      change, and a runner fetches the item again at its next refresh.
+      Under the runner contract a plan's tools are frozen per run, so a
+      send that names a different model for one run keeps the plan's tools.
+    - A provider advertising `tool-catalog-capability-filter/v1` accepts
+      only `capabilities` in `params` (below), so in this revision it can't
+      also take `params.model`.
     - An advertising provider that supports `tool-catalog-capability-filter/v1`
       accepts only `capabilities` in `params`. It must refuse any other key as
       `invalid_request` with `detail.field: "params.<key>"`.
