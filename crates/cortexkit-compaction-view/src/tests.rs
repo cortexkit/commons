@@ -750,8 +750,26 @@ fn a_replace_of_delivered_keeps_only_the_named_sends() {
     }
 }
 
+/// The rides a plan lists for one tool part, as (index, text).
+fn planned_rides(plan: &crate::render::RenderPlan, part_id: &str) -> Vec<(u64, String)> {
+    plan.items
+        .iter()
+        .filter_map(|item| match item {
+            crate::render::PlanItem::Entry { parts, .. } => {
+                parts.iter().find(|part| part.id == part_id)
+            }
+            _ => None,
+        })
+        .flat_map(|part| {
+            part.rides
+                .iter()
+                .map(|ride| (ride.index, ride.delivered.text.clone().unwrap_or_default()))
+        })
+        .collect()
+}
+
 #[test]
-fn replacing_a_result_drops_the_sends_that_rode_it() {
+fn the_plan_lists_a_results_rides_and_a_replaced_output_takes_them_with_it() {
     let mut entries = transcript();
     let mut body = tool_body("k1", ToolStatus::Completed);
     body.delivered = vec![
@@ -759,57 +777,42 @@ fn replacing_a_result_drops_the_sends_that_rode_it() {
         Delivered::new("provider-b", "second"),
     ];
     entries[1].parts[2] = mk("k1", Some(3), Seal::None, PartBody::Tool(body));
-    let placeholder = replace(1, &entries, "a1", "k1", "output", json!("[dropped §3§]"));
+    let both = vec![(0, "first".to_owned()), (1, "second".to_owned())];
 
-    // The plan says so, so a runner renders no ride after the placeholder.
-    let plan = crate::render::plan(&entries, std::slice::from_ref(&placeholder)).unwrap();
-    let fields: Vec<(&str, &serde_json::Value)> = plan
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            crate::render::PlanItem::Entry { parts, .. } => {
-                parts.iter().find(|part| part.id == "k1")
-            }
-            _ => None,
-        })
-        .flat_map(|part| {
-            part.replace
-                .iter()
-                .map(|edit| (edit.field.as_str(), &edit.value))
-        })
-        .collect();
+    // Untouched, the result keeps both rides, in delivery order.
     assert_eq!(
-        fields,
-        vec![
-            ("output", &json!("[dropped §3§]")),
-            ("delivered", &json!([]))
-        ]
+        planned_rides(&crate::render::plan(&entries, &[]).unwrap(), "k1"),
+        both
     );
-    let rendered = apply_edits(&entries, std::slice::from_ref(&placeholder)).unwrap();
+
+    // A placeholder takes them with it, in the plan and in what the model sees.
+    let placeholder = replace(1, &entries, "a1", "k1", "output", json!("[dropped §3§]"));
+    let edits = std::slice::from_ref(&placeholder);
+    assert!(planned_rides(&crate::render::plan(&entries, edits).unwrap(), "k1").is_empty());
+    let rendered = apply_edits(&entries, edits).unwrap();
     let PartBody::Tool(tool) = &rendered[1].parts[2].body else {
         panic!("the tool part stays a tool part");
     };
     assert!(tool.delivered.is_empty());
 
+    // Version 2 kept them after a replaced output, as runners rendered then.
+    let at_two = crate::render::plan_at(2, &entries, edits).unwrap().unwrap();
+    assert_eq!(planned_rides(&at_two, "k1"), both);
+    assert!(crate::render::plan_at(1, &entries, edits).is_none());
+
     // A view that names `delivered` itself keeps its choice.
     let keep_second = replace(2, &entries, "a1", "k1", "delivered", json!([1]));
-    let rendered = apply_edits(&entries, &[placeholder, keep_second]).unwrap();
+    let edits = [placeholder, keep_second];
+    assert_eq!(
+        planned_rides(&crate::render::plan(&entries, &edits).unwrap(), "k1"),
+        vec![(1, "second".to_owned())]
+    );
+    let rendered = apply_edits(&entries, &edits).unwrap();
     let PartBody::Tool(tool) = &rendered[1].parts[2].body else {
         panic!("the tool part stays a tool part");
     };
     assert_eq!(tool.delivered.len(), 1);
     assert_eq!(tool.delivered[0].text.as_deref(), Some("second"));
-
-    // A result nothing rode gets no `delivered` instruction.
-    let entries = transcript();
-    let placeholder = replace(1, &entries, "a1", "k1", "output", json!("[dropped §3§]"));
-    let plan = crate::render::plan(&entries, &[placeholder]).unwrap();
-    assert!(plan.items.iter().all(|item| match item {
-        crate::render::PlanItem::Entry { parts, .. } => parts
-            .iter()
-            .all(|part| part.replace.iter().all(|edit| edit.field != "delivered")),
-        _ => true,
-    }));
 }
 
 #[test]
@@ -1008,6 +1011,7 @@ mod vector_file {
         )];
         ridden[1].parts[2] = mk("k1", Some(3), Seal::None, PartBody::Tool(ridden_body));
         let ridden_output = replace(1, &ridden, "a1", "k1", "output", json!("[dropped §3§]"));
+        let keep_ride = replace(2, &ridden, "a1", "k1", "delivered", json!([0]));
         vec![
             (
                 "the version of what this library renders",
@@ -1377,7 +1381,13 @@ mod vector_file {
                 "clean_reply",
                 json!({"text": "§6_ under"}),
             ),
-            // Version 3: a replaced result drops the sends that rode it.
+            // Version 3: the plan lists a result's rides, and a replaced
+            // output takes them with it.
+            (
+                "the plan lists the sends that ride a tool result",
+                "plan",
+                json!({"entries": ridden.clone(), "edits": []}),
+            ),
             (
                 "replacing a result drops the sends that rode it",
                 "plan",
@@ -1386,7 +1396,17 @@ mod vector_file {
             (
                 "a replaced result renders without the sends that rode it",
                 "apply",
-                json!({"entries": ridden, "view": View::seal(1, vec![ridden_output])}),
+                json!({"entries": ridden.clone(), "view": View::seal(1, vec![ridden_output.clone()])}),
+            ),
+            (
+                "version 2 keeps the rides after a replaced output",
+                "plan_at",
+                json!({"version": 2, "entries": ridden.clone(), "edits": [ridden_output.clone()]}),
+            ),
+            (
+                "a view that names delivered keeps the rides it lists",
+                "plan",
+                json!({"entries": ridden.clone(), "edits": [ridden_output, keep_ride]}),
             ),
         ]
     }
@@ -1429,7 +1449,8 @@ mod vector_file {
             ],
         ),
         // Version 3 renders version 2's 56 cases byte for byte (same prefix
-        // checksum); only a result with rides rendered differently.
+        // checksum). Plans now list a tool result's rides, and a replaced
+        // output takes them with it.
         (
             3,
             &[
@@ -1438,8 +1459,8 @@ mod vector_file {
                     "fa9f74315c5e6d76c949b1a337f29de1982a41ee3a88ea08eb0dc4d1b8715bd6",
                 ),
                 (
-                    58,
-                    "9d21b24b039808d726d3b97852bbda9f8c31c8ecc6f44f84ae4017e0f5d4a8b3",
+                    61,
+                    "30c74f6d261961ee66ca86fcf801166d76911a01e3dda2d12a01c6f5a632f530",
                 ),
             ],
         ),
@@ -1448,6 +1469,7 @@ mod vector_file {
     /// The functions whose output a runner renders, or renders from.
     const RENDERING: &[&str] = &[
         "plan",
+        "plan_at",
         "apply",
         "edits_for_transcript",
         "assign_tags",

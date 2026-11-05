@@ -11,6 +11,6 @@ license.workspace = true
 name = "cortexkit_compaction_view"
 
 [dependencies]
-cortexkit-role-compaction = { version = "0.2.1", path = "../cortexkit-role-compaction" }
+cortexkit-role-compaction = { version = "0.2.6", path = "../cortexkit-role-compaction" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

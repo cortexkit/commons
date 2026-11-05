@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.3
+
+- Plans list the sends that ride a tool result: each tool part's `rides`
+  (`index` into its `delivered` list plus the `Delivered` record), in delivery
+  order, left out when empty. Runners render them only from the plan, after
+  the output through `cortexkit_role_compaction::rides`, or as a turn-scoped
+  system message where the send's `forms` allow. The plan doesn't choose the
+  form.
+- `PLAN_VERSION` 3: a ride renders only while its carrying output does, so a
+  view that replaces the output drops the result's rides unless it names
+  `delivered` itself. Version 2's 56 rendering cases render byte for byte
+  the same.
+- `plan_at(version, …)` and `RideRule` render an applied view at the version
+  a runner first served it under: version 2 keeps rides after a replaced
+  output. The dispatcher serves it as `plan_at`.
+- `apply` shows the same rides as the plan on each tool part.
+- Requires `cortexkit-role-compaction` 0.2.6.
+
 ## 0.1.2
 
 - 24 more `clean_reply` vectors: reply-cleaning edge cases (adjacent and
