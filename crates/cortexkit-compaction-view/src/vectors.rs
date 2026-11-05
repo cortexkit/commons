@@ -35,6 +35,10 @@ pub struct Vector {
 pub const FUNCTIONS: &[(&str, &str)] = &[
     ("plan", "{entries, edits}: the render plan, or the refusal"),
     (
+        "plan_at",
+        "{version, entries, edits}: the render plan at an earlier plan version, or the refusal",
+    ),
+    (
         "apply",
         "{entries, view}: the rendered messages, or the refusal (checksum included)",
     ),
@@ -99,6 +103,13 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
         "plan" => {
             let input: EntriesEdits = parse(input)?;
             refusable(render::plan(&input.entries, &input.edits))
+        }
+        "plan_at" => {
+            let input: VersionedEdits = parse(input)?;
+            match render::plan_at(input.version, &input.entries, &input.edits) {
+                Some(result) => refusable(result),
+                None => return Err(format!("unsupported plan version {}", input.version)),
+            }
         }
         "apply" => {
             let input: EntriesView = parse(input)?;
@@ -173,6 +184,13 @@ fn refusable<T: Serialize, E: Serialize>(result: Result<T, E>) -> Outcome {
 
 #[derive(Deserialize)]
 struct EntriesEdits {
+    entries: Vec<Entry>,
+    edits: Vec<Edit>,
+}
+
+#[derive(Deserialize)]
+struct VersionedEdits {
+    version: u32,
     entries: Vec<Entry>,
     edits: Vec<Edit>,
 }

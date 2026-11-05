@@ -15,7 +15,9 @@
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use cortexkit_role_compaction::part::{FileMedia, OutputFormat, Part, PartBody, ToolStatus};
+use cortexkit_role_compaction::part::{
+    Delivered, FileMedia, OutputFormat, Part, PartBody, ToolStatus,
+};
 use cortexkit_role_compaction::read::{Entry, NoticeOrigin, Role};
 use cortexkit_role_compaction::view::{
     Edit, EditOp, InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
@@ -152,6 +154,48 @@ pub struct PlanPart {
     /// call's error text for `output`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replace: Vec<FieldReplace>,
+    /// For a tool part: the sends that ride its result, in delivery order.
+    /// Left out when none render.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rides: Vec<PlanRide>,
+}
+
+/// A send that rides a tool result, from the part's `delivered` list. The
+/// plan doesn't choose its form: the runner renders it after the result's
+/// output with the contract's `rides` helper, or as a turn-scoped system
+/// message where the send's `forms` and the session's recorded form allow.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlanRide {
+    /// Its position in the part's stored `delivered` list.
+    pub index: u64,
+    #[serde(flatten)]
+    pub delivered: Delivered,
+}
+
+/// What happens to a tool result's rides when a view replaces its output.
+/// Each plan version renders with one rule ([`RideRule::for_version`]), so a
+/// runner can keep rendering an applied view under the version it was first
+/// served with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RideRule {
+    /// Plan version 2: the rides still render after the replaced output.
+    KeepAfterReplacedOutput,
+    /// Plan version 3: a ride renders only while its carrying output does,
+    /// so replacing the output drops its rides unless the view names
+    /// `delivered` itself.
+    FollowOutput,
+}
+
+impl RideRule {
+    /// The rule a plan version renders with, or `None` for a version this
+    /// library doesn't render.
+    pub fn for_version(version: u32) -> Option<Self> {
+        match version {
+            2 => Some(RideRule::KeepAfterReplacedOutput),
+            3 => Some(RideRule::FollowOutput),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -162,9 +206,29 @@ pub struct FieldReplace {
 
 /// Validate edit structure, targets, running-tool restrictions, replacement
 /// restrictions, conflicts, and tag-prefix restrictions, then produce a render
-/// plan. This does not validate the view checksum, version, `since` provenance,
-/// or provider-rule compliance. Check those separately before accepting a view.
+/// plan at the current [`crate::PLAN_VERSION`]. This does not validate the
+/// view checksum, version, `since` provenance, or provider-rule compliance.
+/// Check those separately before accepting a view.
 pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal> {
+    plan_with(RideRule::FollowOutput, entries, edits)
+}
+
+/// [`plan`] at an earlier plan version, for a view a runner first rendered
+/// under it. `None` when this library doesn't render that version.
+pub fn plan_at(
+    version: u32,
+    entries: &[Entry],
+    edits: &[Edit],
+) -> Option<Result<RenderPlan, ViewRefusal>> {
+    RideRule::for_version(version).map(|rule| plan_with(rule, entries, edits))
+}
+
+/// [`plan`] with an explicit ride rule.
+pub fn plan_with(
+    rule: RideRule,
+    entries: &[Entry],
+    edits: &[Edit],
+) -> Result<RenderPlan, ViewRefusal> {
     let by_mid: HashMap<&str, &Entry> = entries
         .iter()
         .map(|entry| (entry.mid.as_str(), entry))
@@ -326,6 +390,7 @@ pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal
                         .collect()
                 })
                 .unwrap_or_default();
+            let rides = rides_for(part, &replace, rule);
             let text_is_final = writes_final_text(&replace);
             // The label follows the part as replaced: keeping only some of a
             // result's attachments can turn `[file]` into `[image]`, as the
@@ -342,6 +407,7 @@ pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal
                 prefix: part.tag.is_some() && !text_is_final,
                 empty_result_label,
                 replace,
+                rides,
             });
         }
         // A message left with no parts is not rendered at all.
@@ -355,6 +421,66 @@ pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal
         });
     }
     Ok(RenderPlan { items })
+}
+
+/// The sends still riding a tool part after its replaces: the ones a
+/// `delivered` replace names, else all of them. Under
+/// [`RideRule::FollowOutput`] a replaced output takes them with it, so a
+/// placeholder such as `[dropped §12§]` is never followed by a spent
+/// reminder; a view that names `delivered` itself keeps its own choice.
+fn rides_for(part: &Part, replace: &[FieldReplace], rule: RideRule) -> Vec<PlanRide> {
+    let PartBody::Tool(tool) = &part.body else {
+        return Vec::new();
+    };
+    let named: Option<HashSet<u64>> =
+        replace
+            .iter()
+            .find(|edit| edit.field == "delivered")
+            .map(|edit| {
+                edit.value
+                    .as_array()
+                    .map(|indexes| indexes.iter().filter_map(Value::as_u64).collect())
+                    .unwrap_or_default()
+            });
+    let output_replaced = replace.iter().any(|edit| edit.field == "output");
+    if named.is_none() && output_replaced && rule == RideRule::FollowOutput {
+        return Vec::new();
+    }
+    tool.delivered
+        .iter()
+        .enumerate()
+        .map(|(index, delivered)| (index as u64, delivered))
+        .filter(|(index, _)| named.as_ref().is_none_or(|named| named.contains(index)))
+        .map(|(index, delivered)| PlanRide {
+            index,
+            delivered: delivered.clone(),
+        })
+        .collect()
+}
+
+/// A planned part as the model sees it: its replaces applied and, for a tool
+/// part, only the rides the plan lists.
+fn rendered_part(part: &Part, planned: &PlanPart) -> Part {
+    let mut fields = planned.replace.clone();
+    if let PartBody::Tool(tool) = &part.body {
+        let names_delivered = fields.iter().any(|edit| edit.field == "delivered");
+        if !names_delivered && planned.rides.len() != tool.delivered.len() {
+            fields.push(FieldReplace {
+                field: "delivered".to_owned(),
+                value: Value::Array(
+                    planned
+                        .rides
+                        .iter()
+                        .map(|ride| Value::from(ride.index))
+                        .collect(),
+                ),
+            });
+        }
+    }
+    if fields.is_empty() {
+        return part.clone();
+    }
+    replaced(part, &fields)
 }
 
 /// Whether a part's replaces write its text (a text part's text or a tool
@@ -399,13 +525,10 @@ pub fn apply_edits(entries: &[Entry], edits: &[Edit]) -> Result<Vec<RenderedMess
                             .iter()
                             .find(|part| part.id == planned.id)
                             .expect("a plan lists only parts of its entry");
-                        if planned.replace.is_empty() {
-                            return part.clone();
-                        }
                         if writes_final_text(&planned.replace) {
                             final_text.insert(part.id.clone());
                         }
-                        replaced(part, &planned.replace)
+                        rendered_part(part, planned)
                     })
                     .collect();
                 RenderedMessage {
