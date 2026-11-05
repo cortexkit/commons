@@ -2,6 +2,121 @@
   "profile": "opencode-v2",
   "rows": [
     {
+      "name": "provider-run completed and errored tools mark both display parts",
+      "body": {
+        "id": "msg_provider_tools",
+        "type": "assistant",
+        "agent": "build",
+        "model": {
+          "id": "probe",
+          "providerID": "probe",
+          "variant": "default"
+        },
+        "time": {
+          "created": 1790000000000,
+          "streamed": 1790000000001,
+          "completed": 1790000000004
+        },
+        "content": [
+          {
+            "type": "tool",
+            "id": "call_search",
+            "name": "web_search",
+            "executed": true,
+            "state": {
+              "status": "completed",
+              "input": {
+                "query": "rust"
+              },
+              "content": [
+                {
+                  "type": "text",
+                  "text": "{\"action\":{\"type\":\"search\",\"query\":\"rust\"},\"sources\":[]}"
+                }
+              ],
+              "metadata": {}
+            },
+            "time": {
+              "created": 1790000000001,
+              "ran": 1790000000002,
+              "completed": 1790000000003
+            }
+          },
+          {
+            "type": "tool",
+            "id": "call_code",
+            "name": "code_execution",
+            "executed": true,
+            "state": {
+              "status": "error",
+              "input": {
+                "code": "1 / 0"
+              },
+              "error": {
+                "type": "unknown",
+                "message": "execution failed"
+              }
+            },
+            "time": {
+              "created": 1790000000001,
+              "ran": 1790000000002,
+              "completed": 1790000000004
+            }
+          }
+        ],
+        "finish": "stop",
+        "rawFinish": "stop",
+        "cost": 0,
+        "tokens": {
+          "input": 1,
+          "output": 1,
+          "reasoning": 0,
+          "cache": {
+            "read": 0,
+            "write": 0
+          }
+        }
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "call_search",
+            "name": "web_search",
+            "arguments": "{\"query\":\"rust\"}",
+            "provider_executed": true
+          },
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "call_search",
+            "content": "{\"action\":{\"type\":\"search\",\"query\":\"rust\"},\"sources\":[]}",
+            "provider_executed": true
+          },
+          {
+            "type": "tool_call",
+            "part": "1",
+            "tool_call_id": "call_code",
+            "name": "code_execution",
+            "arguments": "{\"code\":\"1 / 0\"}",
+            "provider_executed": true
+          },
+          {
+            "type": "tool_result",
+            "part": "1",
+            "tool_call_id": "call_code",
+            "is_error": true,
+            "content": "execution failed",
+            "provider_executed": true
+          }
+        ],
+        "model": "probe/probe"
+      }
+    },
+    {
       "name": "2.0.26-seq-4",
       "body": {
         "time": {

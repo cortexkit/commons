@@ -1369,16 +1369,30 @@ display-ready row for an app's reader on a runner declaring
   are examples of producer key choices, never a recipe for readers to
   construct keys. Row part keys must match the entry's published stored keys.
   Parts are `text {text}`, `reasoning {text}`, `tool_call
-  {tool_call_id, name, arguments, arguments_truncated?, call_key?,
+  {tool_call_id, name, provider_executed?, arguments, arguments_truncated?, call_key?,
   schema_pin?, started_at?, finished_at?, unanswered?}` with `arguments`
   the call's arguments as compact JSON text (`call_key` and `schema_pin`
   only on a runner declaring `call_identity`, §9.16), `tool_result {tool_call_id,
-  is_error?, content, truncated?, files?}`, `file {media? | url, mime?,
+  provider_executed?, is_error?, content, truncated?, files?}`, `file {media? | url, mime?,
   filename?}` and `other {kind}` for a part the projection does not show.
   A reader decodes a part type it does not know as `other`. `text` joins the
   text parts as `run.result` does (§6). Media is described by the
   `media_ref` descriptors mode serves (§4.2), never inlined; a URL stays a
   URL.
+- [pinned] On `tool_call` and `tool_result`, `provider_executed: true` means
+  the model provider ran the tool itself (for example, hosted web search,
+  code execution or image generation). Its result reaches the model as a
+  provider item or not at all, never as tool-result text; the displayed
+  `content` is not evidence that the model read that text. A runner sets the
+  flag on both parts whenever its host records provider execution. Readers
+  treat absence as `false`: not provider-run, or not reported. False is
+  omitted, leaving existing serialized rows unchanged. This additive reply
+  member needs no describe group: readers ignore unknown reply members
+  (§13).
+  The shared projections read `content[].executed` on `opencode-v2` and
+  part-level `parts[].metadata.providerExecuted` on `opencode-aisdk`.
+  Anthropic server tool blocks still project as `other`, not tool calls or
+  results; Pi has no provider-run tools.
 - [pinned] A runner or reader that displays reasoning may show the readable
   summary of a `redacted_reasoning {data, provider_format}` part as a
   `reasoning` display part. `display::reasoning_summary` accepts only

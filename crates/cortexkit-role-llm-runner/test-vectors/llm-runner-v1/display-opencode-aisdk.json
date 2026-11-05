@@ -2,6 +2,122 @@
   "profile": "opencode-aisdk",
   "rows": [
     {
+      "name": "provider-run completed and errored tools mark both display parts",
+      "body": {
+        "info": {
+          "id": "msg_provider_tools",
+          "sessionID": "ses_1",
+          "role": "assistant",
+          "time": {
+            "created": 1790000000000
+          },
+          "providerID": "probe",
+          "modelID": "probe",
+          "mode": "build",
+          "path": {
+            "cwd": "/w",
+            "root": "/w"
+          },
+          "cost": 0,
+          "tokens": {
+            "input": 1,
+            "output": 1,
+            "reasoning": 0,
+            "cache": {
+              "read": 0,
+              "write": 0
+            }
+          }
+        },
+        "parts": [
+          {
+            "id": "prt_search",
+            "sessionID": "ses_1",
+            "messageID": "msg_provider_tools",
+            "type": "tool",
+            "callID": "call_search",
+            "tool": "web_search",
+            "metadata": {
+              "providerExecuted": true
+            },
+            "state": {
+              "status": "completed",
+              "input": {
+                "query": "rust"
+              },
+              "output": "{\"action\":{\"type\":\"search\",\"query\":\"rust\"},\"sources\":[]}",
+              "title": "search",
+              "metadata": {},
+              "time": {
+                "start": 1,
+                "end": 2
+              }
+            }
+          },
+          {
+            "id": "prt_code",
+            "sessionID": "ses_1",
+            "messageID": "msg_provider_tools",
+            "type": "tool",
+            "callID": "call_code",
+            "tool": "code_execution",
+            "metadata": {
+              "providerExecuted": true
+            },
+            "state": {
+              "status": "error",
+              "input": {
+                "code": "1 / 0"
+              },
+              "error": "execution failed",
+              "time": {
+                "start": 1,
+                "end": 2
+              }
+            }
+          }
+        ]
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "prt_search",
+            "tool_call_id": "call_search",
+            "name": "web_search",
+            "arguments": "{\"query\":\"rust\"}",
+            "provider_executed": true
+          },
+          {
+            "type": "tool_result",
+            "part": "prt_search",
+            "tool_call_id": "call_search",
+            "content": "{\"action\":{\"type\":\"search\",\"query\":\"rust\"},\"sources\":[]}",
+            "provider_executed": true
+          },
+          {
+            "type": "tool_call",
+            "part": "prt_code",
+            "tool_call_id": "call_code",
+            "name": "code_execution",
+            "arguments": "{\"code\":\"1 / 0\"}",
+            "provider_executed": true
+          },
+          {
+            "type": "tool_result",
+            "part": "prt_code",
+            "tool_call_id": "call_code",
+            "is_error": true,
+            "content": "execution failed",
+            "provider_executed": true
+          }
+        ],
+        "model": "probe/probe"
+      }
+    },
+    {
       "name": "a user message names its model in info.model",
       "body": {
         "info": {

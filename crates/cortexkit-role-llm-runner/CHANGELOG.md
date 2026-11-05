@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.10
+
+- Add optional `provider_executed` flags and builders to display tool calls
+  and results, distinguishing provider-run tools from tool-result text the
+  model read. Map OpenCode 2's `executed` and OpenCode AI SDK's stored
+  `metadata.providerExecuted` onto both parts. False flags remain omitted
+  from existing rows.
+
 ## 0.8.9
 
 - Tool-result rides are durable runner records, not transcript entries. Pin

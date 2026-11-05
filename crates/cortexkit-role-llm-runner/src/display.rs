@@ -285,6 +285,11 @@ pub struct ToolCallPart {
     /// unique in a session: a row is found by `mid` plus this id.
     pub tool_call_id: String,
     pub name: String,
+    /// The model provider ran this tool itself. Its result reaches the model
+    /// as a provider item or not at all, never as tool-result text. Absent
+    /// means false: not provider-run, or not reported.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub provider_executed: bool,
     pub arguments: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub arguments_truncated: bool,
@@ -323,6 +328,11 @@ pub struct ToolCallPart {
 pub struct ToolResultPart {
     pub part: String,
     pub tool_call_id: String,
+    /// The model provider ran this tool itself. Its result reaches the model
+    /// as a provider item or not at all, never as tool-result text. Absent
+    /// means false: not provider-run, or not reported.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub provider_executed: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_error: bool,
     pub content: String,
@@ -361,6 +371,12 @@ pub struct OtherPart {
 }
 
 impl ToolCallPart {
+    /// Record whether the model provider ran this tool itself.
+    pub fn with_provider_executed(mut self, provider_executed: bool) -> Self {
+        self.provider_executed = provider_executed;
+        self
+    }
+
     /// Record this call's stored dispatch time, in Unix epoch milliseconds.
     pub fn with_started_at(mut self, started_at: u64) -> Self {
         self.started_at = Some(started_at);
@@ -419,6 +435,12 @@ impl ToolCallPart {
 }
 
 impl ToolResultPart {
+    /// Record whether the model provider ran this tool itself.
+    pub fn with_provider_executed(mut self, provider_executed: bool) -> Self {
+        self.provider_executed = provider_executed;
+        self
+    }
+
     /// A result whose content is `content`, cut by `limits` (by
     /// `error_result_bytes` when `is_error`) when given.
     pub fn new(
@@ -614,6 +636,7 @@ fn arguments_part(
         part,
         tool_call_id,
         name,
+        provider_executed: false,
         arguments,
         arguments_truncated,
         call_key: None,
@@ -646,6 +669,7 @@ fn result_part(
     DisplayPart::ToolResult(ToolResultPart {
         part,
         tool_call_id,
+        provider_executed: false,
         is_error,
         content,
         truncated,
@@ -902,7 +926,8 @@ fn opencode_file(value: &Value, part: String) -> Result<FilePart, ProjectionErro
 /// call (`callID`, `tool`, `state.input`) and, once `state.status` is
 /// `completed` or `error`, its result (`state.output` with
 /// `state.attachments` as files, or `state.error` as an error); a `file`
-/// part a file. The bookkeeping parts ([`OPENCODE_BOOKKEEPING_PARTS`]) are
+/// part a file. Part-level `metadata.providerExecuted` marks both the call
+/// and result as provider-executed. The bookkeeping parts ([`OPENCODE_BOOKKEEPING_PARTS`]) are
 /// left out. A Responses `redacted_reasoning` part becomes a reasoning part when
 /// [`reasoning_summary`] returns text, and an `other` part when it returns
 /// `None`; any other part is an `other` part.
@@ -939,12 +964,16 @@ pub fn opencode_aisdk(
             "tool" => {
                 let state = &part["state"];
                 let call_id = str_of(part, "callID").to_owned();
-                parts.push(arguments_part(
-                    key.clone(),
-                    call_id.clone(),
-                    str_of(part, "tool").to_owned(),
-                    state.get("input").unwrap_or(&Value::Object(Map::new())),
-                    limits,
+                let provider_executed = part["metadata"]["providerExecuted"] == true;
+                parts.push(DisplayPart::ToolCall(
+                    ToolCallPart::new(
+                        key.clone(),
+                        call_id.clone(),
+                        str_of(part, "tool"),
+                        state.get("input").unwrap_or(&Value::Object(Map::new())),
+                        limits,
+                    )
+                    .with_provider_executed(provider_executed),
                 ));
                 match str_of(state, "status") {
                     "completed" => {
@@ -955,22 +984,28 @@ pub fn opencode_aisdk(
                             .flatten()
                             .map(|file| opencode_file(file, String::new()))
                             .collect::<Result<Vec<_>, _>>()?;
-                        parts.push(result_part(
-                            key,
-                            call_id,
-                            false,
-                            str_of(state, "output"),
-                            files,
-                            limits,
+                        parts.push(DisplayPart::ToolResult(
+                            ToolResultPart::new(
+                                key,
+                                call_id,
+                                false,
+                                str_of(state, "output"),
+                                files,
+                                limits,
+                            )
+                            .with_provider_executed(provider_executed),
                         ));
                     }
-                    "error" => parts.push(result_part(
-                        key,
-                        call_id,
-                        true,
-                        str_of(state, "error"),
-                        Vec::new(),
-                        limits,
+                    "error" => parts.push(DisplayPart::ToolResult(
+                        ToolResultPart::new(
+                            key,
+                            call_id,
+                            true,
+                            str_of(state, "error"),
+                            Vec::new(),
+                            limits,
+                        )
+                        .with_provider_executed(provider_executed),
                     )),
                     _ => {}
                 }
@@ -1051,6 +1086,7 @@ fn opencode_v2_file(file: &Value, key: String) -> Result<FilePart, ProjectionErr
 /// keep their native type rather than adopting their model-request authority.
 /// Compaction checkpoints are never served. Tool calls and outcomes share a
 /// native slot, although display uses two parts to show them separately.
+/// A tool slot's `executed` flag marks both parts as provider-executed.
 pub fn opencode_v2(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, ProjectionError> {
     let role = str_of(body, "type");
     if role == "compaction" {
@@ -1096,12 +1132,16 @@ pub fn opencode_v2(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, 
             "tool" => {
                 let state = &slot["state"];
                 let call_id = str_of(slot, "id").to_owned();
-                parts.push(arguments_part(
-                    key.clone(),
-                    call_id.clone(),
-                    str_of(slot, "name").to_owned(),
-                    &state["input"],
-                    limits,
+                let provider_executed = slot["executed"] == true;
+                parts.push(DisplayPart::ToolCall(
+                    ToolCallPart::new(
+                        key.clone(),
+                        call_id.clone(),
+                        str_of(slot, "name"),
+                        &state["input"],
+                        limits,
+                    )
+                    .with_provider_executed(provider_executed),
                 ));
                 let status = str_of(state, "status");
                 if matches!(status, "completed" | "error") {
@@ -1128,13 +1168,16 @@ pub fn opencode_v2(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, 
                                 .unwrap_or_else(|| error.to_string()),
                         );
                     }
-                    parts.push(result_part(
-                        key,
-                        call_id,
-                        status == "error",
-                        &crate::run::join_text_parts(texts),
-                        files,
-                        limits,
+                    parts.push(DisplayPart::ToolResult(
+                        ToolResultPart::new(
+                            key,
+                            call_id,
+                            status == "error",
+                            &crate::run::join_text_parts(texts),
+                            files,
+                            limits,
+                        )
+                        .with_provider_executed(provider_executed),
                     ));
                 }
             }
@@ -1828,6 +1871,68 @@ mod tests {
                 }
                 assert_eq!(&built, call);
             }
+        }
+    }
+
+    #[test]
+    fn provider_execution_flags_default_to_false_and_round_trip_on_both_parts() {
+        let call = ToolCallPart::new("0", "call_1", "web_search", &serde_json::json!({}), None);
+        let result = ToolResultPart::new("0", "call_1", false, "record", Vec::new(), None);
+        assert!(!call.provider_executed);
+        assert!(!result.provider_executed);
+        for (part, legacy) in [
+            (
+                DisplayPart::ToolCall(call),
+                serde_json::json!({
+                    "type": "tool_call", "part": "0", "tool_call_id": "call_1",
+                    "name": "web_search", "arguments": "{}"
+                }),
+            ),
+            (
+                DisplayPart::ToolResult(result),
+                serde_json::json!({
+                    "type": "tool_result", "part": "0", "tool_call_id": "call_1",
+                    "content": "record"
+                }),
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&part).unwrap(), legacy);
+            assert_eq!(
+                serde_json::from_value::<DisplayPart>(legacy.clone()).unwrap(),
+                part
+            );
+            let mut explicit_false = legacy.clone();
+            explicit_false["provider_executed"] = Value::Bool(false);
+            assert_eq!(
+                serde_json::from_value::<DisplayPart>(explicit_false).unwrap(),
+                part
+            );
+            let provider_part = match part {
+                DisplayPart::ToolCall(call) => {
+                    DisplayPart::ToolCall(call.with_provider_executed(true))
+                }
+                DisplayPart::ToolResult(result) => {
+                    DisplayPart::ToolResult(result.with_provider_executed(true))
+                }
+                _ => unreachable!(),
+            };
+            let mut expected = legacy.clone();
+            expected["provider_executed"] = Value::Bool(true);
+            assert_eq!(serde_json::to_value(&provider_part).unwrap(), expected);
+            assert_eq!(
+                serde_json::from_value::<DisplayPart>(expected).unwrap(),
+                provider_part
+            );
+            let local_part = match provider_part {
+                DisplayPart::ToolCall(call) => {
+                    DisplayPart::ToolCall(call.with_provider_executed(false))
+                }
+                DisplayPart::ToolResult(result) => {
+                    DisplayPart::ToolResult(result.with_provider_executed(false))
+                }
+                _ => unreachable!(),
+            };
+            assert_eq!(serde_json::to_value(local_part).unwrap(), legacy);
         }
     }
 

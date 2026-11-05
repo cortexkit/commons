@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.12
+
+- Pin `cortexkit-role-llm-runner =0.8.10` for provider-executed display tool flags.
+
 ## 0.17.11
 
 - Pin `cortexkit-role-llm-runner =0.8.9`. Add six `result_rides`-gated cases
