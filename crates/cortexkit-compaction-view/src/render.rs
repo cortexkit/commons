@@ -314,7 +314,7 @@ pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal
             if dropped_parts.contains(&(entry.mid.as_str(), part.id.as_str())) {
                 continue;
             }
-            let replace: Vec<FieldReplace> = replaces
+            let mut replace: Vec<FieldReplace> = replaces
                 .get(&(entry.mid.as_str(), part.id.as_str()))
                 .map(|fields| {
                     fields
@@ -326,6 +326,7 @@ pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal
                         .collect()
                 })
                 .unwrap_or_default();
+            drop_rides_with_output(part, &mut replace);
             let text_is_final = writes_final_text(&replace);
             // The label follows the part as replaced: keeping only some of a
             // result's attachments can turn `[file]` into `[image]`, as the
@@ -355,6 +356,26 @@ pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal
         });
     }
     Ok(RenderPlan { items })
+}
+
+/// A send that rode a tool result (the part's `delivered` list) renders only
+/// while that result's output does. When a view replaces the output and says
+/// nothing about `delivered`, the plan drops every ride too, so a placeholder
+/// such as `[dropped §12§]` is never followed by a spent reminder. The plan
+/// says so explicitly (`delivered: []`, after the output) so a runner only
+/// follows it; a view that does replace `delivered` keeps its own choice.
+fn drop_rides_with_output(part: &Part, replace: &mut Vec<FieldReplace>) {
+    let PartBody::Tool(tool) = &part.body else {
+        return;
+    };
+    let replaces_output = replace.iter().any(|edit| edit.field == "output");
+    let names_delivered = replace.iter().any(|edit| edit.field == "delivered");
+    if replaces_output && !names_delivered && !tool.delivered.is_empty() {
+        replace.push(FieldReplace {
+            field: "delivered".to_owned(),
+            value: Value::Array(Vec::new()),
+        });
+    }
 }
 
 /// Whether a part's replaces write its text (a text part's text or a tool

@@ -751,6 +751,68 @@ fn a_replace_of_delivered_keeps_only_the_named_sends() {
 }
 
 #[test]
+fn replacing_a_result_drops_the_sends_that_rode_it() {
+    let mut entries = transcript();
+    let mut body = tool_body("k1", ToolStatus::Completed);
+    body.delivered = vec![
+        Delivered::new("provider-a", "first"),
+        Delivered::new("provider-b", "second"),
+    ];
+    entries[1].parts[2] = mk("k1", Some(3), Seal::None, PartBody::Tool(body));
+    let placeholder = replace(1, &entries, "a1", "k1", "output", json!("[dropped §3§]"));
+
+    // The plan says so, so a runner renders no ride after the placeholder.
+    let plan = crate::render::plan(&entries, std::slice::from_ref(&placeholder)).unwrap();
+    let fields: Vec<(&str, &serde_json::Value)> = plan
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            crate::render::PlanItem::Entry { parts, .. } => {
+                parts.iter().find(|part| part.id == "k1")
+            }
+            _ => None,
+        })
+        .flat_map(|part| {
+            part.replace
+                .iter()
+                .map(|edit| (edit.field.as_str(), &edit.value))
+        })
+        .collect();
+    assert_eq!(
+        fields,
+        vec![
+            ("output", &json!("[dropped §3§]")),
+            ("delivered", &json!([]))
+        ]
+    );
+    let rendered = apply_edits(&entries, std::slice::from_ref(&placeholder)).unwrap();
+    let PartBody::Tool(tool) = &rendered[1].parts[2].body else {
+        panic!("the tool part stays a tool part");
+    };
+    assert!(tool.delivered.is_empty());
+
+    // A view that names `delivered` itself keeps its choice.
+    let keep_second = replace(2, &entries, "a1", "k1", "delivered", json!([1]));
+    let rendered = apply_edits(&entries, &[placeholder, keep_second]).unwrap();
+    let PartBody::Tool(tool) = &rendered[1].parts[2].body else {
+        panic!("the tool part stays a tool part");
+    };
+    assert_eq!(tool.delivered.len(), 1);
+    assert_eq!(tool.delivered[0].text.as_deref(), Some("second"));
+
+    // A result nothing rode gets no `delivered` instruction.
+    let entries = transcript();
+    let placeholder = replace(1, &entries, "a1", "k1", "output", json!("[dropped §3§]"));
+    let plan = crate::render::plan(&entries, &[placeholder]).unwrap();
+    assert!(plan.items.iter().all(|item| match item {
+        crate::render::PlanItem::Entry { parts, .. } => parts
+            .iter()
+            .all(|part| part.replace.iter().all(|edit| edit.field != "delivered")),
+        _ => true,
+    }));
+}
+
+#[test]
 fn a_signed_text_part_is_bound_like_signed_reasoning() {
     // Gemini signs text and tool calls, not only reasoning. A kept signed
     // text part is invalidated by a later edit before it, like reasoning.
@@ -938,6 +1000,14 @@ mod vector_file {
             ),
         ];
         let stripped_image = replace(1, &pasted, "u1", "f1", "text", json!("[image stripped]"));
+        let mut ridden = transcript([0, 0]);
+        let mut ridden_body = tool_body("k1", ToolStatus::Completed);
+        ridden_body.delivered = vec![Delivered::new(
+            "magic-context",
+            "<system-reminder>\nspent\n</system-reminder>",
+        )];
+        ridden[1].parts[2] = mk("k1", Some(3), Seal::None, PartBody::Tool(ridden_body));
+        let ridden_output = replace(1, &ridden, "a1", "k1", "output", json!("[dropped §3§]"));
         vec![
             (
                 "the version of what this library renders",
@@ -1307,6 +1377,17 @@ mod vector_file {
                 "clean_reply",
                 json!({"text": "§6_ under"}),
             ),
+            // Version 3: a replaced result drops the sends that rode it.
+            (
+                "replacing a result drops the sends that rode it",
+                "plan",
+                json!({"entries": ridden.clone(), "edits": [ridden_output.clone()]}),
+            ),
+            (
+                "a replaced result renders without the sends that rode it",
+                "apply",
+                json!({"entries": ridden, "view": View::seal(1, vec![ridden_output])}),
+            ),
         ]
     }
 
@@ -1344,6 +1425,21 @@ mod vector_file {
                 (
                     56,
                     "fa9f74315c5e6d76c949b1a337f29de1982a41ee3a88ea08eb0dc4d1b8715bd6",
+                ),
+            ],
+        ),
+        // Version 3 renders version 2's 56 cases byte for byte (same prefix
+        // checksum); only a result with rides rendered differently.
+        (
+            3,
+            &[
+                (
+                    56,
+                    "fa9f74315c5e6d76c949b1a337f29de1982a41ee3a88ea08eb0dc4d1b8715bd6",
+                ),
+                (
+                    58,
+                    "9d21b24b039808d726d3b97852bbda9f8c31c8ecc6f44f84ae4017e0f5d4a8b3",
                 ),
             ],
         ),
