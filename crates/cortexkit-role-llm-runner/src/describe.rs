@@ -27,6 +27,9 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const MESSAGE_MARKS_WITHOUT_READ_DISPLAY_FACTS: &str =
+        "message_marks_without_read_display_facts";
+    pub const MESSAGE_MARKS_WITHOUT_HISTORY_DISPLAY: &str = "message_marks_without_history_display";
     pub const NOTICES_WITHOUT_READ_DISPLAY_FACTS: &str = "notices_without_read_display_facts";
     pub const NOTICES_WITHOUT_HISTORY_DISPLAY: &str = "notices_without_history_display";
     pub const NOTICES_WITHOUT_LIVE_EVENTS: &str = "notices_without_live_events";
@@ -605,6 +608,16 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     }
     for (group, dependency, problem) in [
         (
+            capabilities::MESSAGE_MARKS,
+            capabilities::READ_DISPLAY_FACTS,
+            problem_names::MESSAGE_MARKS_WITHOUT_READ_DISPLAY_FACTS,
+        ),
+        (
+            capabilities::MESSAGE_MARKS,
+            capabilities::HISTORY_DISPLAY,
+            problem_names::MESSAGE_MARKS_WITHOUT_HISTORY_DISPLAY,
+        ),
+        (
             capabilities::NOTICES,
             capabilities::READ_DISPLAY_FACTS,
             problem_names::NOTICES_WITHOUT_READ_DISPLAY_FACTS,
@@ -983,6 +996,13 @@ mod opt_in_dependency_tests {
     #[test]
     fn opt_in_groups_require_their_dependencies() {
         for (group, dependencies) in [
+            (
+                capabilities::MESSAGE_MARKS,
+                vec![
+                    capabilities::READ_DISPLAY_FACTS,
+                    capabilities::HISTORY_DISPLAY,
+                ],
+            ),
             (
                 capabilities::MEDIA_ONLY_SEND,
                 vec![capabilities::ATTACHMENTS],

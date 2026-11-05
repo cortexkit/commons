@@ -1,5 +1,11 @@
 # cortexkit-role-llm-runner
 
+Version **0.8.12** adds opt-in `message_marks`: `speaks_for` labels an agent's
+words carried by the scope owner, while `notice: true` marks a module's own
+automatic message. Marks are served beside sender facts on opted-in reads and
+history, never in bodies or checksums. Unmarked module messages remain visible.
+See CONTRACT §9.7.2 for the reader rule.
+
 Version **0.8.11** calls the reader-facing group and facts `notices` and the
 live event `notice_delivered`. Notice facts name the carrying `call_key`
 and `delivered_as: "tool_result"`; events include the notice text. Module

@@ -265,7 +265,10 @@ impl From<WireSendRequest> for SendRequest {
 }
 
 impl From<SendRequest> for WireSendRequest {
-    fn from(request: SendRequest) -> Self {
+    fn from(mut request: SendRequest) -> Self {
+        if request.runner_params.get("notice") == Some(&Value::Bool(false)) {
+            request.runner_params.remove("notice");
+        }
         let delivery = match (request.delivery_order, request.delivery) {
             (Some(modes), _) => Some(WireDelivery::Order(modes)),
             (None, mode) => mode.map(WireDelivery::Mode),
@@ -425,6 +428,33 @@ pub struct SendRequest {
 }
 
 impl SendRequest {
+    /// Carry another agent's words. Send only with `message_marks` declared.
+    pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
+        self.runner_params.insert(
+            "speaks_for".into(),
+            serde_json::to_value(speaks_for).unwrap(),
+        );
+        self
+    }
+
+    /// Mark the module's own automatic message. False is serialized as absent.
+    pub fn with_notice(mut self, notice: bool) -> Self {
+        self.runner_params
+            .insert("notice".into(), Value::Bool(notice));
+        self
+    }
+
+    /// Validate marks before any write, using only daemon-attested identities.
+    /// Returns the field of an `invalid_params` refusal, or normalized sidecars.
+    pub fn message_marks(
+        &self,
+        advertised: bool,
+        scope_owner: Option<&str>,
+        sender: &str,
+    ) -> Result<crate::message_marks::MessageMarks, &'static str> {
+        crate::message_marks::check(&self.runner_params, advertised, scope_owner, sender)
+    }
+
     pub fn check_compaction_item(&self) -> Result<(), &'static str> {
         self.plan
             .as_ref()

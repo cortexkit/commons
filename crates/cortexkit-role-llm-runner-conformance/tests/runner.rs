@@ -506,6 +506,7 @@ async fn mode3_user_commands_are_bound_only_by_the_route() {
         .contains("FAIL user_commands_without_session_ref"));
 }
 mod finish_reason;
+mod message_marks;
 mod message_senders;
 mod notices;
 mod sender_attribution;
@@ -883,6 +884,11 @@ async fn run(subject: &FakeSubject) -> SuiteReport {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("message_marks_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "message_marks is not declared")
+    {
+        return;
+    }
     if (case.starts_with("sender_attribution_") || case.starts_with("notices_"))
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason.starts_with("missing groups:") || reason.starts_with("the subject declares every one of"))
@@ -1165,6 +1171,7 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::MessageMarks,
     Capability::Plans,
     Capability::SessionRetention,
     Capability::Attachments,
@@ -1643,6 +1650,15 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
                 report.outcome(spec.name),
                 Some(&CaseOutcome::Inapplicable {
                     reason: "head_selection is not declared".into(),
+                })
+            );
+            continue;
+        }
+        if spec.name.starts_with("message_marks_") {
+            assert_eq!(
+                report.outcome(spec.name),
+                Some(&CaseOutcome::Inapplicable {
+                    reason: "message_marks is not declared".into()
                 })
             );
             continue;

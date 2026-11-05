@@ -124,6 +124,8 @@ pub enum Capability {
     SenderAttribution,
     /// Runner-owned notices, reader facts and delivery events.
     Notices,
+    /// Positive agent/automatic-notice marks on sends and display facts.
+    MessageMarks,
     /// Opt-in client ids, tool times, assistant completion times and reasoning
     /// summaries on raw read entries.
     ReadDisplayFacts,
@@ -224,6 +226,7 @@ impl Capability {
         Self::SenderSuccession,
         Self::SenderAttribution,
         Self::Notices,
+        Self::MessageMarks,
         Self::ReadDisplayFacts,
         Self::SendStatus,
         Self::UserCommands,
@@ -294,6 +297,7 @@ impl Capability {
             Self::SenderSuccession => groups::SENDER_SUCCESSION,
             Self::SenderAttribution => groups::SENDER_ATTRIBUTION,
             Self::Notices => groups::NOTICES,
+            Self::MessageMarks => groups::MESSAGE_MARKS,
             Self::ReadDisplayFacts => groups::READ_DISPLAY_FACTS,
             Self::SendStatus => groups::SEND_STATUS,
             Self::HistoryDisplay => groups::HISTORY_DISPLAY,
@@ -1194,6 +1198,8 @@ pub trait LlmRunnerSubject: Harness {
     fn capabilities(&self) -> BTreeSet<Capability>;
 
     /// The owner identity cases use to start and manage their sessions.
+    /// With `MessageMarks`, this must be a daemon-attested scoped route whose
+    /// principal owns the scope, so the served-marks case can carry agent words.
     fn owner_stamp(&self) -> RouteStamp;
 
     /// An identity that is not the owner of any session the owner stamp
@@ -1203,7 +1209,8 @@ pub trait LlmRunnerSubject: Harness {
     /// A non-owner carrier and the scope owner, admitted by the daemon under
     /// the same plain scope (no flow id or run id). `session_route` must open
     /// real routes with these stamps. Return None when the adapter cannot
-    /// expose this fixture; its scoped-start case is then named inapplicable.
+    /// expose this fixture; its scoped-start and message-marks owner-only
+    /// cases are then named inapplicable.
     fn scoped_session_start_stamps(&self) -> Option<(RouteStamp, RouteStamp)> {
         None
     }

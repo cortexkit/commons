@@ -219,6 +219,7 @@ alias until the next breaking release.
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `sender_attribution` | `session.send`, `session.read`, `session.history`; requires `delivery_order`, `read_display_facts` and `history_display` | §9.7.1 |
 | `notices` | `session.read`, `session.history`, live subscription; requires `read_display_facts`, `history_display` and `live_events` | §9.7.2 |
+| `message_marks` | `session.send`, `session.read`, `session.history`; requires `read_display_facts` and `history_display` | §9.7.3 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `live_ids` | `session.subscribe` with opt-in provisional display ids (requires `live_events`; added in 0.7.46) | §7.1 |
 | `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started`, and raw entries with `read_display_facts` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
@@ -514,7 +515,7 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
 - [pinned] **The envelope.** A read entry is `{ordinal, mid, message, run?,
   originals?, tool_calls?, role?, written_at?, delivered_as?, digest?,
   part_digests?, part_keys?, rich_ui?, client_message_id?, tool_times?,
-  created_at?, completed_at?, reasoning_summaries?}`. Every
+  created_at?, completed_at?, reasoning_summaries?, sender?, speaks_for?, notice?}`. Every
   runner-neutral fact a consumer relies on rides in the envelope, never only
   inside `message`: the position (`ordinal`, `mid`), who spoke (`role`,
   `read::role`: `user`, `assistant`, `tool`, `system`, decoded open),
@@ -552,6 +553,10 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   nothing (§4.7). It is outside every checksum and never moves
   `history_version`. Raw `session.history` entries carry the same fact
   under those declarations; history has no display-facts request flag.
+- [pinned] With `message_marks`, `speaks_for?: {agent_id: string}` and
+  `notice?: true` carry the send's positive marks beside `sender`, with the
+  same storage-time guarantee. Raw history serves them without an opt-in flag;
+  older unmarked entries prove nothing. See §9.7.3 for admission and storage.
 - [pinned] `created_at?: u64`: the host's recorded creation timestamp for
   this message, in Unix epoch milliseconds. For an entry written by a send,
   that's when the host accepted the send; a queued send or steer keeps that
@@ -1370,7 +1375,9 @@ display-ready row for an app's reader on a runner declaring
   It follows every
   rule of §4.6, and `DisplayPage::check` checks the ones a page shows.
 - [pinned] A row (`display::DisplayRow`) is `{role, text, parts, model?,
-  client_message_id?, sender?}`. `parts` keeps the stored message's order; each part
+  client_message_id?, sender?, speaks_for?, notice?}`. The optional marks are
+  those of §9.7.3; `notice` is served only when true.
+  `parts` keeps the stored message's order; each part
   is `{type, part, ...}`, where `part` is the stored part's key (a content
   block's index for a producer choosing that key convention on
   `anthropic-messages`, or the native part id on `opencode-aisdk`). These
@@ -3959,12 +3966,14 @@ say who may send and which texts are system text.
 
 ### 9.7.2 `notices`: reader facts for notices
 
-A **notice** is a send from a module to the agent, with a sender. Riding a
-tool result is one delivery mode for a notice. Every other delivery mode
-already produces its own transcript entry carrying `delivered_as` and,
-under `message_senders`, `sender` on its display row. A reader can therefore
-show all notices the same way, whether the notice rides a result or has its
-own entry.
+A send riding a tool result is always a **notice**, regardless of its marks.
+For an entry with its own message, readers should draw a person's unmarked
+message as their own bubble; `speaks_for` as "From <agent>"; and `notice: true`
+as a quiet folded notice. A tool-result ride is also a quiet folded notice,
+labelled with its `speaks_for` agent when present. An unmarked module `sender`
+is an ordinary visible message labelled with that module, not a notice. The
+marks are positive: a sender forgetting a mark makes its message more visible,
+never less. This is the safe fallback because nothing gets hidden.
 
 - [pinned] A runner declaring `notices` also declares
   `read_display_facts`, `history_display` and `live_events`. A declaration
@@ -3973,7 +3982,7 @@ own entry.
 - [pinned] On `session.read` with `include_display_facts: true`, and on
   display rows, the message holding the carrying tool result serves
   `notices: [{part: u32, call_key: string, send_id: string, sender: string,
-  text: string, delivered_as: string}]`
+  text: string, delivered_as: string, speaks_for?: {agent_id: string}}]`
   beside its body, in delivery order. Default raw reads omit the fact.
   `part` is the zero-based stored top-level content-part index, counted as
   in `reasoning_summaries`, never a projected display index or opaque key.
@@ -3982,7 +3991,7 @@ own entry.
   later delivery mode can use the same shape. Readers place a `tool_result`
   notice under the call whose key it names.
 - [pinned] Delivery emits the live event
-  `notice_delivered {mid, part, call_key, send_id, sender, text}`, identifying the
+  `notice_delivered {mid, part, call_key, send_id, sender, text, speaks_for?}`, identifying the
   carrying message and part, not a new entry. Neither delivery nor the fact
   moves `history_version`. Neither the live event nor the read/display fact
   is covered by any checksum; this does not exempt the compaction contract's
@@ -3993,6 +4002,38 @@ own entry.
 - [pinned] Existing transcript entries written for rides under the old rule
   remain stored with their original ids and ordinals. Readers may hide them
   by `delivered_as.mode == "tool_result"`; no migration rewrites history.
+
+### 9.7.3 `message_marks`: whose words a send carries
+
+- [pinned] A runner declaring `message_marks` also declares
+  `read_display_facts` and `history_display`. Missing prerequisites refuse by
+  name: `message_marks_without_read_display_facts` and
+  `message_marks_without_history_display`.
+- [pinned] `session.send` accepts optional `speaks_for: {agent_id: string}`
+  and `notice: bool` only under this group. Callers send these fields only to
+  runners declaring the group; request decoding remains strict for runners
+  without it. `speaks_for` means the named agent's words carried by the module;
+  `notice: true` means the module's own automatic message. False is equivalent
+  to absent, is not stored, and is omitted when serialized.
+- [pinned] `speaks_for.agent_id` is 1–128 printable ASCII bytes. Invalid ids
+  refuse `invalid_params {field: "speaks_for.agent_id"}`. Combining
+  `speaks_for` with `notice: true` refuses `invalid_params {field: "notice"}`.
+  `speaks_for` requires a scoped session and the attested sender to be that
+  scope's owner, as stamped by the daemon on the route (§10.1,
+  `scope_admission`). Otherwise refuse
+  `invalid_params {field: "speaks_for"}`. `notice` has no owner restriction.
+  Every refusal happens before any write.
+- [pinned] Store the marks with the send's new entry, or with its riding record
+  for tool-result delivery. Serve them beside `sender` on opted-in
+  `session.read` entries (`include_display_facts: true`), raw `session.history`
+  entries, and display rows. For sends stored while `message_marks` is declared,
+  opted-in reads MUST retain the sent marks; absence on an older entry proves
+  nothing. The guarantee follows the sender fact. Marks never enter a stored
+  body or default read, are outside every checksum, and never move
+  `history_version`.
+- [pinned] Riding `notices` facts and `notice_delivered` events carry optional
+  `speaks_for` with the same shape. They never serve `notice`, because every
+  such fact or event is already a notice.
 
 ### 9.8 `send_status`: `session.send_status`
 

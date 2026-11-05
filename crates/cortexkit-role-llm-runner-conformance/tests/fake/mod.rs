@@ -188,6 +188,7 @@ pub struct Defects {
     pub oversized_result_truncated: bool,
     pub oversized_result_repeated: bool,
     pub declare_message_senders: bool,
+    pub message_marks: Option<&'static str>,
     pub message_senders_omit: bool,
     pub sender_read_missing: bool,
     pub message_senders_owner: bool,
@@ -813,6 +814,7 @@ struct Killed;
 
 #[derive(Clone, Debug)]
 struct Msg {
+    marks: cortexkit_role_llm_runner::message_marks::MessageMarks,
     notices: Vec<cortexkit_role_llm_runner::read::NoticeFact>,
     attribution: Option<String>,
     completed_at: Option<u64>,
@@ -1044,6 +1046,7 @@ impl Sess {
     fn push(&mut self, body: Value, run_id: &str, calls: Vec<String>) -> u64 {
         let ordinal = self.base + self.messages.len() as u64;
         self.messages.push(Msg {
+            marks: Default::default(),
             notices: Vec::new(),
             attribution: None,
             completed_at: None,
@@ -1820,12 +1823,14 @@ impl Module {
                 let client_id = queued.request["client_message_id"]
                     .as_str()
                     .map(str::to_owned);
+                let marks = serde_json::from_value(queued.request.clone()).unwrap_or_default();
                 let ordinal = sess.push(body, &text("run_id"), Vec::new());
                 let message = sess.at_mut(ordinal);
                 message.attribution = attribution;
                 message.delivered_as = Some(record["delivered_as"].clone());
                 message.sender = Some(sender);
                 message.client_message_id = client_id;
+                message.marks = marks;
                 let row = message.mid.clone();
                 if let Some(queued) = sess.ordered.get_mut(&id) {
                     queued.delivery = Some(QueuedDelivery {
@@ -1918,6 +1923,8 @@ impl Module {
                 sess.at_mut(ordinal).client_message_id =
                     record["client_message_id"].as_str().map(str::to_owned);
                 sess.at_mut(ordinal).sender = record["sender"].as_str().map(str::to_owned);
+                sess.at_mut(ordinal).marks =
+                    serde_json::from_value(record["message_marks"].clone()).unwrap_or_default();
                 if let Some(delivered) = record.get("delivered_as").filter(|d| !d.is_null()) {
                     sess.at_mut(ordinal).delivered_as = Some(delivered.clone());
                 }
@@ -3489,6 +3496,18 @@ impl Module {
                 return Ok(invalid(&field));
             }
         }
+        let marks = match request.message_marks(
+            self.world.serves(groups::MESSAGE_MARKS),
+            stamp.scope.as_ref().map(|scope| scope.owner.as_str()),
+            &stamp.principal,
+        ) {
+            Ok(marks) => marks,
+            Err("notice") if self.world.defects.message_marks == Some("both") => Default::default(),
+            Err("speaks_for") if self.world.defects.message_marks == Some("owner") => request
+                .message_marks(true, Some(&stamp.principal), &stamp.principal)
+                .unwrap(),
+            Err(field) => return Ok(invalid(field)),
+        };
         let attachment_parts = match attachments::admit_send(self, session, &request) {
             Ok(parts) => parts,
             Err(reply) => return Ok(reply),
@@ -4020,6 +4039,7 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
+                    "message_marks": marks,
                     "attribution": self.attribution_for(session, &stamp.principal),
                     "route_decision_id": request.route_decision_id,
                     "attachment_parts": attachment_parts,
@@ -4356,6 +4376,8 @@ impl Module {
             .map(|m| {
                 let mut entry = self.read_message(sess, m);
                 entry.sender = None;
+                entry.speaks_for = None;
+                entry.notice = false;
                 entry.attribution = None;
                 entry.rich_ui = self.read_stamp(sess, m, request.include_rich_ui);
                 if (request.include_display_facts
@@ -4363,6 +4385,12 @@ impl Module {
                     || self.world.defects.read_display_facts == Some("default_leak")
                 {
                     entry.client_message_id = m.client_message_id.clone();
+                    if self.world.serves(groups::MESSAGE_MARKS)
+                        && self.world.defects.message_marks != Some("drop")
+                    {
+                        entry.speaks_for = m.marks.speaks_for.clone();
+                        entry.notice = m.marks.notice;
+                    }
                     if self
                         .world
                         .groups
@@ -4530,6 +4558,12 @@ impl Module {
         let mut message = ReadMessage::new(m.ordinal, &m.mid, body)
             .with_tool_calls(tool_calls)
             .with_written_at(m.written_at);
+        if self.world.serves(groups::MESSAGE_MARKS)
+            && self.world.defects.message_marks != Some("drop")
+        {
+            message.speaks_for = m.marks.speaks_for.clone();
+            message.notice = m.marks.notice;
+        }
         if let Some(role) = m.body["role"].as_str() {
             message = message.with_role(role);
         }
@@ -6528,7 +6562,14 @@ impl LlmRunnerSubject for FakeSubject {
     fn owner_stamp(&self) -> RouteStamp {
         RouteStamp {
             principal: "reserved:owner".into(),
-            scope: None,
+            scope: self
+                .capabilities
+                .contains(&Capability::MessageMarks)
+                .then(|| cortexkit_role_harness::ScopeStamp {
+                    owner: "reserved:owner".into(),
+                    scope_ref: "marks-scope".into(),
+                    scope_epoch: 1,
+                }),
         }
     }
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.12
+
+- Add the opt-in `message_marks` group. A scope owner can carry another
+  agent's words with `speaks_for`, and a module can mark its own automatic
+  messages with `notice`. Conflicting marks and unauthorized carriers refuse
+  before writing.
+- Serve marks beside sender facts on opted-in reads, raw history and display
+  rows, outside bodies and checksums. Riding notices and their live events can
+  name the agent they speak for. Unmarked sends keep their existing wire bytes.
+- Explain the safe reader fallback: unmarked module messages stay visible;
+  only positive notice marks or tool-result rides fold away.
+
 ## 0.8.11
 
 - Rename 0.8.9's reader names `result_rides`, `rides` and `ride_delivered`

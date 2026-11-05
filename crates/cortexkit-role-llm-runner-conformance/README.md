@@ -1,5 +1,17 @@
 # cortexkit-role-llm-runner-conformance
 
+Version **0.17.14** pins `cortexkit-role-llm-runner =0.8.12` and adds
+`message_marks_served`, `message_marks_both_refused`, and
+`message_marks_speaks_for_owner_only`. All three require `message_marks`; only
+the owner-only case needs the optional non-owner carrier route hook.
+
+The served-marks case also needs `read_display_facts`, `history_display`,
+`host_history`, `queue` and `transcript_reads`; both refusal cases need `queue`
+and `transcript_reads`. A subject declaring `message_marks` supplies an
+`owner_stamp()` on a real scoped route owned by that principal. The owner-only
+case uses `send_fields_with_plan` to grant the carrier an `idle_start` send when
+`delivery_order` is declared; that hook is already required by `delivery_order`.
+
 Version **0.17.13** pins `cortexkit-role-llm-runner =0.8.11`. The six
 `notices_*` cases are inapplicable without `notices`; they check
 entry-free delivery, unchanged host output, exact reader/display facts and
@@ -127,7 +139,8 @@ structured output, tool identity and crash guarantees remain in the registry.
 `scoped_session_start_stamps()` optionally supplies carrier and owner stamps
 under the same daemon-admitted plain scope, with no flow or run id. The adapter
 must open real routes with those stamps. Without the hook, the scoped-start
-case reports `Inapplicable` by name. Flow and run scope creation is optional
+case and `message_marks_speaks_for_owner_only` report `Inapplicable` by name;
+the other message-mark cases still run. Flow and run scope creation is optional
 under the contract, so no case requires admission there without a fixture.
 `flow_session_start_stamps()` optionally supplies a real flow-scope opener and
 owner. The `frozen_plan_senders_send_refused` and

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.14
+
+- Pin `cortexkit-role-llm-runner =0.8.12`.
+- Check that message marks survive reads and both history views, that conflicting
+  marks refuse before writing, and that only the scope owner can speak for an
+  agent. The non-owner check uses the existing optional carrier route hook.
+- Exercise each new check against a deliberately faulty runner and report the
+  failing case by name.
+
 ## 0.17.13
 
 - Pin `cortexkit-role-llm-runner =0.8.11`. Rename `result_rides_*` cases to

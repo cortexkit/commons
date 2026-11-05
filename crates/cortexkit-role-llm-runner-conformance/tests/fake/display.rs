@@ -152,16 +152,16 @@ pub(super) fn live_events(
                         .iter()
                         .filter(|ride| ride.send_id == queued.send_id)
                     {
-                        out.push(event(LiveEvent::NoticeDelivered(
-                            live::NoticeDelivered::new(
-                                &message.mid,
-                                ride.part,
-                                message.body["call_key"].as_str().unwrap(),
-                                &ride.send_id,
-                                &ride.sender,
-                            )
-                            .with_text(&ride.text),
-                        )));
+                        let mut delivered = live::NoticeDelivered::new(
+                            &message.mid,
+                            ride.part,
+                            message.body["call_key"].as_str().unwrap(),
+                            &ride.send_id,
+                            &ride.sender,
+                        )
+                        .with_text(&ride.text);
+                        delivered.speaks_for = ride.speaks_for.clone();
+                        out.push(event(LiveEvent::NoticeDelivered(delivered)));
                     }
                 }
             }
@@ -455,6 +455,10 @@ impl Module {
             }
         }
         output_refs::decorate(sess, &entry.mid, &mut row);
+        if self.world.serves(groups::MESSAGE_MARKS) && defects.message_marks != Some("drop") {
+            row.speaks_for = entry.speaks_for.clone();
+            row.notice = entry.notice;
+        }
         self.stamp_row(sess, &entry.mid, &mut row);
         if self.world.serves(groups::CALL_IDENTITY) {
             if let Some(message) = sess.messages.iter().find(|m| m.mid == entry.mid) {

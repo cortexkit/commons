@@ -445,6 +445,12 @@ pub struct HistoryEntry {
     /// outside all checksums and does not move `history_version`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<String>,
+    /// Agent whose words this module carries; outside bodies and checksums.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaks_for: Option<crate::message_marks::SpeaksFor>,
+    /// Positive automatic-message mark; false is absent on the wire.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notice: bool,
     /// Verified stored relay frame when `sender_attribution` is declared.
     /// Raw history has no display-facts request flag; message bytes stay whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -452,6 +458,16 @@ pub struct HistoryEntry {
 }
 
 impl HistoryEntry {
+    pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
+        self.speaks_for = Some(speaks_for);
+        self
+    }
+
+    pub fn with_notice(mut self, notice: bool) -> Self {
+        self.notice = notice;
+        self
+    }
+
     pub fn with_sender(mut self, sender: impl Into<String>) -> Self {
         self.sender = Some(sender.into());
         self
@@ -478,6 +494,8 @@ impl HistoryEntry {
             role: None,
             delivered_as: None,
             sender: None,
+            speaks_for: None,
+            notice: false,
             attribution: None,
         }
     }
@@ -500,6 +518,8 @@ impl HistoryEntry {
             role: read.role,
             delivered_as: read.delivered_as,
             sender: read.sender,
+            speaks_for: read.speaks_for,
+            notice: read.notice,
             attribution: read.attribution,
         })
     }

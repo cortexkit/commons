@@ -39,6 +39,7 @@ pub mod finish;
 pub mod head_selection;
 pub mod history;
 pub mod live;
+pub mod message_marks;
 pub mod output_refs;
 pub mod points;
 pub mod read;
@@ -211,6 +212,9 @@ pub mod capabilities {
     /// Opt-in client ids, per-call times, assistant completion times and
     /// reasoning summaries beside `session.read` message bodies.
     pub const READ_DISPLAY_FACTS: &str = "read_display_facts";
+    /// Positive agent/notice marks on sends and their display facts.
+    /// Requires [`READ_DISPLAY_FACTS`] and [`HISTORY_DISPLAY`].
+    pub const MESSAGE_MARKS: &str = "message_marks";
     /// Opt-in trusted relay headers and verified, header-free display facts.
     pub const SENDER_ATTRIBUTION: &str = "sender_attribution";
     /// Notice display facts and live delivery events, without transcript entries.
@@ -412,6 +416,10 @@ pub mod capabilities {
         (HOST_HISTORY, &[ops::SESSION_HISTORY]),
         (HISTORY_DISPLAY, &[ops::SESSION_HISTORY]),
         (READ_DISPLAY_FACTS, &[ops::SESSION_READ]),
+        (
+            MESSAGE_MARKS,
+            &[ops::SESSION_SEND, ops::SESSION_READ, ops::SESSION_HISTORY],
+        ),
         (
             NOTICES,
             &[

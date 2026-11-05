@@ -448,6 +448,12 @@ pub struct ReadMessage {
     /// move `history_version`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<String>,
+    /// Agent whose words this module carries; outside bodies and checksums.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaks_for: Option<crate::message_marks::SpeaksFor>,
+    /// Positive automatic-message mark; false is absent on the wire.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notice: bool,
     /// The host's recorded creation timestamp for this message, in Unix epoch
     /// milliseconds, exactly as recorded, on any role. A send's entry carries
     /// the host's acceptance time, kept for queued sends and steers; an
@@ -490,6 +496,9 @@ pub struct ReadMessage {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct NoticeFact {
+    /// Optional agent label; every riding fact is already a notice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaks_for: Option<crate::message_marks::SpeaksFor>,
     /// Zero-based stored top-level part index, as in [`ReasoningSummary`].
     pub part: u32,
     /// The carrying call's key. Readers place a `tool_result` notice under it.
@@ -502,6 +511,10 @@ pub struct NoticeFact {
 }
 
 impl NoticeFact {
+    pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
+        self.speaks_for = Some(speaks_for);
+        self
+    }
     /// Construct a tool-result notice. Set its carrying key with
     /// [`Self::with_call_key`] before serving it.
     pub fn new(
@@ -517,6 +530,7 @@ impl NoticeFact {
             sender: sender.into(),
             text: text.into(),
             delivered_as: crate::delivery_order::modes::TOOL_RESULT.into(),
+            speaks_for: None,
         }
     }
 
@@ -630,6 +644,16 @@ pub mod role {
 }
 
 impl ReadMessage {
+    pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
+        self.speaks_for = Some(speaks_for);
+        self
+    }
+
+    pub fn with_notice(mut self, notice: bool) -> Self {
+        self.notice = notice;
+        self
+    }
+
     pub fn with_part_keys(mut self, keys: Vec<String>) -> Self {
         self.part_keys = Some(keys);
         self
@@ -697,6 +721,8 @@ impl ReadMessage {
             rich_ui: None,
             client_message_id: None,
             sender: None,
+            speaks_for: None,
+            notice: false,
             created_at: None,
             completed_at: None,
             reasoning_summaries: Vec::new(),

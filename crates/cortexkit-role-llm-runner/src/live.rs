@@ -587,6 +587,9 @@ impl LiveEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct NoticeDelivered {
+    /// Optional agent label; every delivery event is already a notice.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaks_for: Option<crate::message_marks::SpeaksFor>,
     pub mid: String,
     pub part: u32,
     pub call_key: String,
@@ -596,6 +599,10 @@ pub struct NoticeDelivered {
 }
 
 impl NoticeDelivered {
+    pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
+        self.speaks_for = Some(speaks_for);
+        self
+    }
     /// Construct a delivery event. Set the notice text with [`Self::with_text`]
     /// before serving it.
     pub fn new(
@@ -612,6 +619,7 @@ impl NoticeDelivered {
             send_id: send_id.into(),
             sender: sender.into(),
             text: String::new(),
+            speaks_for: None,
         }
     }
 

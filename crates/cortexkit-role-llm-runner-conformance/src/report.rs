@@ -136,6 +136,9 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("message_marks_served", &[Capability::MessageMarks, Capability::ReadDisplayFacts, Capability::HistoryDisplay, Capability::HostHistory, Queue, TranscriptReads], "notice and scope-owner agent marks survive opted-in reads, raw history and display; unmarked sends have neither"),
+    case("message_marks_both_refused", &[Capability::MessageMarks, Queue, TranscriptReads], "conflicting marks refuse invalid_params naming notice before any write"),
+    case("message_marks_speaks_for_owner_only", &[Capability::MessageMarks, Queue, TranscriptReads], "a non-owner carrier cannot speak for an agent; refusal names speaks_for before any write"),
     case("notices_no_transcript_entry", NOTICES, "a tool_result ride writes no transcript entry or history rewrite"),
     case("notices_stored_output_unchanged", NOTICES, "the host's stored tool-result output remains the tool's original bytes"),
     case("notices_display_fact", NOTICES, "opted-in reads and display rows carry the exact part, call_key, send_id, sender, text and tool_result delivered_as"),

@@ -18,9 +18,14 @@ pub(super) fn apply(sess: &mut Sess, record: &Value, world: &World) -> bool {
         .iter_mut()
         .find(|message| message.body["call_key"] == key)
         .unwrap();
-    message
-        .notices
-        .push(NoticeFact::new(0, &queued.send_id, &queued.sender, &queued.text).with_call_key(key));
+    let mut fact =
+        NoticeFact::new(0, &queued.send_id, &queued.sender, &queued.text).with_call_key(key);
+    if world.serves(groups::MESSAGE_MARKS) && world.defects.message_marks != Some("drop") {
+        let marks: cortexkit_role_llm_runner::message_marks::MessageMarks =
+            serde_json::from_value(queued.request.clone()).unwrap_or_default();
+        fact.speaks_for = marks.speaks_for;
+    }
+    message.notices.push(fact);
     let row = message.mid.clone();
     if world.defects.notices == Some("stored") {
         message.host_body["content"] = json!(format!(

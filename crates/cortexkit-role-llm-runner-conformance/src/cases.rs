@@ -93,6 +93,9 @@ where
                 crate::attribution::run(self, name).await
             }
             name if name.starts_with("notices_") => crate::notices::run(self, name).await,
+            name if name.starts_with("message_marks_") => {
+                crate::message_marks::run(self, name).await
+            }
             "tool_result_too_large_is_error" | "tool_result_too_large_not_repeated" => {
                 crate::tool_result_limit::run(self, name).await
             }

@@ -39,6 +39,7 @@ mod last_run_error;
 mod live;
 mod live_ids;
 mod media;
+mod message_marks;
 mod message_senders;
 mod notices;
 mod output_refs;

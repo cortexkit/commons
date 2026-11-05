@@ -126,6 +126,12 @@ pub struct DisplayRow {
     /// An absent sender never proves who wrote the message.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<String>,
+    /// Agent whose words this module carries; outside bodies and checksums.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaks_for: Option<crate::message_marks::SpeaksFor>,
+    /// Positive automatic-message mark; false is absent on the wire.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub notice: bool,
     /// For an assistant message a run wrote, on a runner declaring
     /// `rich_ui_stamp`: the rich UI stamp that run's frozen plan carries,
     /// copied verbatim (CONTRACT §9.17). Absent on an assistant row of a
@@ -138,6 +144,16 @@ pub struct DisplayRow {
 }
 
 impl DisplayRow {
+    pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
+        self.speaks_for = Some(speaks_for);
+        self
+    }
+
+    pub fn with_notice(mut self, notice: bool) -> Self {
+        self.notice = notice;
+        self
+    }
+
     pub fn with_output_refs(mut self, descriptor: crate::output_refs::Descriptor) -> Self {
         self.output_refs = Some(descriptor);
         self
@@ -158,6 +174,8 @@ impl DisplayRow {
             model: None,
             client_message_id: None,
             sender: None,
+            speaks_for: None,
+            notice: false,
             rich_ui: None,
         }
     }
