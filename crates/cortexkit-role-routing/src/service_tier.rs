@@ -74,15 +74,18 @@ pub fn fallback(requested: ServiceTier) -> impl Iterator<Item = ServiceTier> {
 }
 
 /// Producer-side tier check used by `select::check_answer` and available to
-/// account-answer producers. It checks only that the chosen tier is present
-/// when one was requested and does not exceed the request, so it allows a
-/// step-down. A decision-bound `route.account_for` answer must instead return
+/// account-answer producers. A chosen tier must be a recognised level. A
+/// requested tier caps it: the chosen tier must be present and must not exceed
+/// the request, so a step-down is allowed. Without a requested tier there is no
+/// cap, because the router's service-tier settings for the consumer may choose
+/// any level. A decision-bound `route.account_for` answer must instead return
 /// exactly the decision's chosen non-standard tier (§5.5): pass that tier as
 /// the effective request here and also require equality.
 pub fn check_chosen(requested: Option<ServiceTier>, chosen: Option<&str>) -> bool {
     !(requested.is_some() && chosen.is_none())
         && chosen.is_none_or(|tier| {
-            ServiceTier::parse(tier).is_some_and(|tier| tier <= requested.unwrap_or_default())
+            ServiceTier::parse(tier)
+                .is_some_and(|tier| requested.is_none_or(|requested| tier <= requested))
         })
 }
 

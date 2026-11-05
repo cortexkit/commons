@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use crate::billing::Billing;
 use crate::errors::Refusal;
 use crate::members::Members;
 
@@ -36,6 +37,11 @@ pub struct HeadChoice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_variant: Option<String>,
     pub service_tiers: Vec<String>,
+    /// Absent means false: the router may choose this model itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_only: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub billing: Option<Billing>,
 }
 
 impl HeadChoice {
@@ -46,7 +52,19 @@ impl HeadChoice {
             variants: Vec::new(),
             default_variant: None,
             service_tiers: Vec::new(),
+            pin_only: None,
+            billing: None,
         }
+    }
+
+    pub fn with_pin_only(mut self, pin_only: bool) -> Self {
+        self.pin_only = Some(pin_only);
+        self
+    }
+
+    pub fn with_billing(mut self, billing: Billing) -> Self {
+        self.billing = Some(billing);
+        self
     }
 }
 
@@ -111,7 +129,8 @@ impl std::fmt::Display for HeadChoicesProblem {
 }
 
 /// Check echoes, strict bytewise ordering (which also forbids duplicates), and
-/// default membership. Runner reachability and catalog admission need router
+/// default membership. Billing's closed set is enforced when decoding the answer.
+/// Runner reachability and catalog admission need router
 /// state and cannot be inferred from the answer alone.
 pub fn check_head_choices(
     request: &HeadChoicesRequest,
@@ -288,5 +307,26 @@ mod tests {
             serde_json::from_str::<HeadChoicesAnswer>(&bytes).unwrap(),
             answer
         );
+    }
+
+    #[test]
+    fn head_choices_billing_and_pin_only_are_optional_and_closed() {
+        let model = HeadChoice::new("p", "m")
+            .with_pin_only(true)
+            .with_billing(Billing::Subscription);
+        let mut value = serde_json::to_value(&model).unwrap();
+        assert_eq!(value["pin_only"], true);
+        assert_eq!(value["billing"], "subscription");
+        assert_eq!(
+            serde_json::from_value::<HeadChoice>(value.clone()).unwrap(),
+            model
+        );
+        value["billing"] = serde_json::json!("free");
+        assert!(serde_json::from_value::<HeadChoice>(value).is_err());
+        let mut value = serde_json::to_value(HeadChoice::new("p", "m")).unwrap();
+        value["future"] = serde_json::json!(true);
+        let decoded: HeadChoice = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.pin_only, None);
+        assert_eq!(decoded.billing, None);
     }
 }

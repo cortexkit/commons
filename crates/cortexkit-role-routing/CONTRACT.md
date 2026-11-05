@@ -332,6 +332,7 @@ a module plays.
   - `explain`: `route.explain` (§11.3).
   - `account_status`: `route.account_status` (§11.4).
   - `head_choices`: `route.head_choices` (§11.5).
+  - `consumer_models`: `route.consumer_models` (§11.6).
   - `select_pin_slot`: operator-policy slot pins (§5.6).
   - `select_available_routes`: caller-reachable route restriction (§5.6).
   - `select_prefer_prompt_cache`: prompt-cache tie-breaking (§5.6).
@@ -339,7 +340,8 @@ a module plays.
   - `observe_backoff`: account-local backoff, three observation members and
     decision-owner authorization (§9.2).
   - `report_outcomes`: additional report outcomes and their effects (§8).
-- [pinned] Each of the five new op groups is declared exactly when its op is
+  - `report_usage_run_id`: run-attributed report usage (§8).
+- [pinned] Each of the six optional op groups is declared exactly when its op is
   in `ops` (`capabilities::OP_GROUPS`). `describe::check_describe` refuses
   either mismatch as `DescribeProblem::OpGroupMismatch {group}`. The five
   `REQUIRED_OPS` are unchanged; a 0.6.0 describe answer still passes. A caller
@@ -620,11 +622,17 @@ This section binds a provider declaring `select_hold_control` (§4).
   accepts the two defined members, and still refuses every other unknown
   member. The capability gate protects older strict report readers.
 - [pinned] `route.select` and `route.account_for` accept optional `service_tier`: `standard`, `fast`
-  or `ultrafast`, with absence meaning standard. Only accounts whose plans
+  or `ultrafast`. On `route.select` and `route.select_panel`, absence means
+  the request sets no level: the router's service-tier settings for the
+  consumer (§5.6) may choose one, and without such a setting the level is
+  standard. A requested level always caps the answer. On `route.account_for`,
+  absence means standard, or the decision's chosen tier when the request
+  carries a `decision_id`. Only accounts whose plans
   include the tier are eligible. Plan inclusion is the router's knowledge;
   this contract does not prescribe where plans come from. When no eligible
-  account can serve at the requested level, try `ultrafast` then `fast` then
-  `standard`, starting at the requested level and never upgrading it. A
+  account can serve at the requested or settings-chosen level, try
+  `ultrafast` then `fast` then `standard`, starting at that level and never
+  upgrading it. A
   decision or account admission records top-level `service_tier_chosen`. An explicit tier request carries
   that value in the answer, including a fallback to standard. Without a tier
   request, standard may be omitted to retain existing answer bytes. A runner
@@ -667,8 +675,11 @@ This section binds a provider declaring `select_hold_control` (§4).
   named-field refusal helper when `service_tier` is declared. Without it,
   `parse_account_for_request` and the serving parser keep legacy behaviour:
   that member is ignored. Shared `service_tier::check_chosen` validates a
-  produced chosen tier against the effective request level, while record
-  decoding preserves unfamiliar tier strings.
+  produced chosen tier: it must be a recognised level, a requested level caps
+  it, and without a requested level any recognised level passes, because tier
+  settings may choose it. An `account_for` producer passes standard, or the
+  decision's chosen tier, as the effective request. Record decoding preserves
+  unfamiliar tier strings.
 
 ### 5.6 Independently gated select members
 
@@ -798,7 +809,7 @@ pool?, eligibility?, request_input_tokens?, refusal_class?}`.
 - [pinned] `request_input_tokens`: non-negative integer, the request's
   input size in tokens. A size-shaped refusal fences only that request-size
   class, not smaller requests that can pass.
-- [pinned] `usage`: `{input_tokens?, cached_input_tokens?,
+- [pinned] `usage`: `{run_id?, input_tokens?, cached_input_tokens?,
   cache_write_tokens?, output_tokens?, reasoning_tokens?, duration_ms?,
   first_token_ms?, cost_usd?}` (`report::Usage`). The token field names and their meaning
   match `cortexkit-role-llm-runner`'s usage: `input_tokens` never includes
@@ -812,13 +823,31 @@ pool?, eligibility?, request_input_tokens?, refusal_class?}`.
   non-negative finite JSON number. The provider may ignore it, since it prices usage
   from its own catalog. An unknown member is refused as
   `invalid_request {field: "usage"}`. `usage` is part of the report body for
-  idempotency: a repeat with different usage is a different report.
+  idempotency: without `run_id`, a repeat with different usage is a different
+  report and conflicts with the first, as specified below.
+- [pinned] `usage.run_id`, with group `report_usage_run_id`, is an opaque id:
+  1–128 characters, with no control characters. Without the group, a report
+  carrying the member is `invalid_request {field: "usage.run_id"}`, never
+  silently ignored. With the group, an invalid id is refused by that same
+  field path. Absent means the existing per-decision reporting rule below.
+  For routers that keep usage per run, different run ids on one decision each
+  count, including when one decision carries several runs. A repeated
+  `(decision_id, run_id)` counts once: the first report stands; later reports
+  for that pair are accepted and ignored, even if their body differs. Among
+  a decision's reports that carry `usage`, either all carry `usage.run_id` or
+  none do: once one of each kind would exist, the later one is
+  `report_conflict`. A report without `usage`, such as an outcome-only
+  `cancelled` after runs that reported usage, takes no part in that rule and
+  never conflicts with run-attributed reports. Reports without `usage` keep
+  the per-decision idempotency rule below among themselves.
 - [pinned] Where a router's usage comes from. A decision owner's report
   `usage`, when it sends one, is the only per-decision token and timing total
   this contract gives a router. Statistics meant to cover every run, such as
   per-task or per-workload token profiles, are built from it. A decision with
   no report, or a report without `usage`, is unrecorded, never zero. This
-  contract doesn't oblige a decision owner to report usage.
+  contract doesn't oblige a decision owner to report usage. With `run_id`, the
+  totals are attributed per run as above instead of treating the decision as
+  a single run.
 - [pinned] Token totals never establish that an account is exhausted or when
   it resets. That evidence comes from account observations (§9.2), the
   router's own provider readings, and this section's report members: an
@@ -843,8 +872,8 @@ pool?, eligibility?, request_input_tokens?, refusal_class?}`.
 - [pinned] The answer (`report::ReportAnswer`) is
   `{decision_id, report_id, outcome}`: the provider's id for the recorded
   report and the outcome recorded.
-- [pinned] A report is idempotent on `decision_id`: the same body again
-  returns exactly the first answer; a different body after the first is
+- [pinned] Without `usage.run_id`, a report is idempotent on `decision_id`:
+  the same body again returns exactly the first answer; a different body after the first is
   `report_conflict`. Bodies are compared as decoded, so key order, and a
   member sent as `null` instead of left out, never make bodies differ.
   `pool`, `eligibility`, `request_input_tokens` and `usage` are part of the body.
@@ -1397,7 +1426,7 @@ Replacement params and answer:
 | Body | Members |
 |---|---|
 | Request (`HeadChoicesRequest`) | `{runner_module}` |
-| Answer (`HeadChoicesAnswer`) | `{catalog_version, runner_module, models: [{provider, model, variants, default_variant?, service_tiers}]}` |
+| Answer (`HeadChoicesAnswer`) | `{catalog_version, runner_module, models: [{provider, model, variants, default_variant?, service_tiers, pin_only?, billing?}]}` |
 
 - [pinned] Any caller may ask. Malformed params are `invalid_request {field}`;
   unknown runners and runners declaring `starts_sessions: false` get empty
@@ -1411,6 +1440,42 @@ Replacement params and answer:
   are the router's admitted subset at that version. Limits and prices still
   come from the catalog. `check_head_choices(request, answer)` checks the
   runner echo, sorting, uniqueness and default-variant membership.
+- [pinned] `pin_only` absent means false. True means the router uses the model
+  only when a caller pins it explicitly, never by its own choice.
+- [pinned] `billing` is the closed set `subscription` or `per_token`
+  (`billing::Billing`); absent means unknown, not a refusal. An answer with
+  another value is malformed. Billing is checked when decoding the answer
+  before `check_head_choices`; unknown answer members remain tolerated.
+  Both optional members are omitted when not set; no new group is required.
+
+### 11.6 `route.consumer_models` — group `consumer_models`
+
+| Body | Members |
+|---|---|
+| Request (`ConsumerModelsRequest`) | `{consumer}` |
+| Answer (`ConsumerModelsAnswer`) | `{catalog_version, consumer, models: [{provider, model, elo?, eq?, excluded, billing?}]}` |
+
+- [pinned] The request refuses unknown members as `invalid_request {field}`;
+  `consumer` has the non-empty string grammar of §5.1. Admission is exactly
+  select's §1.1 rule: a declared consumer is admitted from its declaring module
+  or under a scope owned by that module. A name only in operator configuration
+  is usable by any caller unless configuration names an owner. Other callers
+  get `consumer_not_owned {consumer}`; unknown consumers get
+  `unknown_consumer {consumer}`. Callers send this operation only to routers
+  declaring its group; like the other whole optional operations, it has no
+  undeclared-group refusal case (§4).
+- [pinned] The answer echoes `consumer`; `catalog_version` identifies the
+  catalog used. Models are bytewise sorted by `(provider, model)`, each pair
+  unique. An empty list is valid. `elo` and `eq` are optional finite `f64`
+  numbers, the router's own stored scores for this consumer; absent means no
+  score, not zero. `excluded` is true when operator configuration excludes the
+  model for this consumer. `billing` has §11.5's closed set and absence rules;
+  any other value makes the answer malformed. Unknown answer members are
+  tolerated. `check_consumer_models(request, answer)` checks the echo, sorting,
+  uniqueness and finite scores; decoding enforces the billing set.
+- [pinned] This read carries the router's own judgments only. Prices, context
+  windows, modalities and model lifecycle come from the model catalog, and a
+  caller reads them there.
 
 ## 12. Vectors and conformance
 
@@ -1425,6 +1490,10 @@ Replacement params and answer:
   without the group, and `route-select-exclude-providers.json` the
   `select_exclude_providers` members. `route-select-task-ref.json` holds
   task references and field-named refusals with and without `select_task_ref`.
+  `route-report-usage-run-id.json` holds run-attributed usage and group/field
+  refusals. `route-consumer-models.json` holds stored judgments, consumer
+  admission refusals and malformed answers. Its non-finite cases name the typed
+  score to inject because JSON has no non-finite numeric literal.
   `route-account-continue.json` holds opt-in continuation requests, all three
   outcomes, an identical-offer retry, refusal reasons and malformed or
   undeclared requests (§9.1.1). `SHA256SUMS` pins every file.

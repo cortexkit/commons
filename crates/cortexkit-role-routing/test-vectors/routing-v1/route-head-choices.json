@@ -184,6 +184,22 @@
   ],
   "answers": [
     {
+      "name": "pin_only_subscription",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "runner_module": "runner-one",
+        "models": [{"provider": "example-provider", "model": "model-a", "variants": [], "service_tiers": [], "pin_only": true, "billing": "subscription"}]
+      }
+    },
+    {
+      "name": "explicit_false_per_token",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "runner_module": "runner-one",
+        "models": [{"provider": "example-provider", "model": "model-a", "variants": [], "service_tiers": [], "pin_only": false, "billing": "per_token"}]
+      }
+    },
+    {
       "name": "listed",
       "answer": {
         "catalog_version": "catalog-1",
@@ -210,6 +226,16 @@
         "catalog_version": "catalog-1",
         "runner_module": "runner-one",
         "models": []
+      }
+    }
+  ],
+  "invalid_answers": [
+    {
+      "name": "invalid_billing",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "runner_module": "runner-one",
+        "models": [{"provider": "example-provider", "model": "model-a", "variants": [], "service_tiers": [], "billing": "free"}]
       }
     }
   ],

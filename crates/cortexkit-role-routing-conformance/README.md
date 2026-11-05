@@ -105,7 +105,7 @@ addition to an exhaustive fixture type; adapters must supply it.
 
 ## Checks
 
-### Routing 0.7.0 additions
+### Routing 0.7.0 and 0.7.1 additions
 
 Each serving check below is not applicable without its group. Each
 `undeclared_*` refusal check is not applicable **with** its group; whole-op
@@ -117,7 +117,9 @@ groups have no undeclared-op refusal case.
 | `budget_quote` | `budget_quote_matches_helper`, `budget_quote_foreign_unknown` | none |
 | `explain` | `explain_matches_selection`, `explain_foreign_unknown` | none |
 | `account_status` | `account_status_blocked_limited`, `account_status_unknown` | none |
-| `head_choices` | `head_choices_valid`, `head_choices_runner_routes`, `head_choices_non_starting_empty` | none |
+| `head_choices` | `head_choices_valid`, `head_choices_runner_routes`, `head_choices_non_starting_empty`, `head_choices_billing_valid` | none |
+| `consumer_models` | `consumer_models_valid`, `consumer_models_unknown_consumer` | none |
+| `report_usage_run_id` | `report_usage_run_id_repeat_accepted`, `report_usage_run_id_overlong_refused` | none |
 | `select_pin_slot` | `pin_slot_configured_pinned`, `pin_slot_unknown_unavailable` | `undeclared_pin_slot_refused` |
 | `select_available_routes` | `available_routes_honoured`, `available_routes_empty_refused` | `undeclared_available_routes_refused` |
 | `select_prefer_prompt_cache` | `prefer_prompt_cache_accepted` | `undeclared_prefer_prompt_cache_refused` |
@@ -136,6 +138,17 @@ members. Budget checks compare the complete answer to `budget::quote` over
 the selected decisions' answered capacities. Head choices accept either
 provider-listing policy and never require completeness of the list.
 
+Consumer-model answers pass `check_consumer_models`, including finite scores,
+echoes and sorted unique pairs; decoding rejects an invalid billing value.
+An unknown consumer must receive `unknown_consumer` naming it. Head-choice
+decoding likewise rejects billing outside `subscription` and `per_token`.
+Run-attributed reports exercise two run ids on one decision, then retry the
+first pair with changed usage, requiring acceptance rather than a conflict.
+The kit cannot observe internal usage counts through its current hooks, so it
+does not assert deduplicated totals. A 129-character id must be refused naming
+`usage.run_id`. Each new check has a faulty-router test and is not applicable
+without its group.
+
 The exported `NARROWINGS` coverage-limit notes state what the kit's hooks
 can't observe: the availability and affinity effects of the four outcomes
 `report_outcomes` adds, the fence a `transient_backoff` observation sets, and
@@ -148,7 +161,8 @@ panel modalities are not visible in an answer.
 
 The new faulty-router matrix requires every named check to reject its faulty
 implementation, while legacy checks remain unaffected. Several panel checks
-share validation helpers, so a panel fault can also fail another panel check.
+share validation helpers, so a panel fault can also fail another panel check;
+head-choice checks similarly share decoding and validation.
 
 ### Existing checks
 
@@ -288,7 +302,10 @@ A router declaring `service_tier` is checked by
 The plan-fixture hook `configure_service_tiers` supplies test-only account plan
 inclusions; it does not prescribe a production plan source. The eligibility
 case follows a decision through account admission, and fallback records its
-chosen level. Report cases send applied-only, served-only and both members.
+chosen level. `service_tier_absent_is_standard` expects standard for a select
+without `service_tier`, so run it with no service-tier settings configured for
+the kit's consumer: a router's tier settings may choose another level then.
+Report cases send applied-only, served-only and both members.
 Non-declaring routers are not applicable by name, and deliberately faulty
 routers prove each check rejects its named violation.
 

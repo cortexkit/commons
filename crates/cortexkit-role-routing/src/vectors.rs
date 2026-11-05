@@ -80,6 +80,12 @@ pub const ROUTE_EXPLAIN_JSON: &str = include_str!("../test-vectors/routing-v1/ro
 /// The `head_choices` optional group.
 pub const ROUTE_HEAD_CHOICES_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-head-choices.json");
+/// Consumer-specific scores, exclusions, admission refusals and invalid answers.
+pub const ROUTE_CONSUMER_MODELS_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-consumer-models.json");
+/// Run-attributed usage and field-path validation with and without discovery.
+pub const ROUTE_REPORT_USAGE_RUN_ID_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-report-usage-run-id.json");
 /// The `observe_backoff` optional group.
 pub const ROUTE_OBSERVE_BACKOFF_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-observe-backoff.json");
@@ -122,11 +128,16 @@ pub const FILES: &[(&str, &str)] = &[
     ("route-account-observe.json", ROUTE_ACCOUNT_OBSERVE_JSON),
     ("route-account-status.json", ROUTE_ACCOUNT_STATUS_JSON),
     ("route-budget-quote.json", ROUTE_BUDGET_QUOTE_JSON),
+    ("route-consumer-models.json", ROUTE_CONSUMER_MODELS_JSON),
     ("route-explain.json", ROUTE_EXPLAIN_JSON),
     ("route-head-choices.json", ROUTE_HEAD_CHOICES_JSON),
     ("route-observe-backoff.json", ROUTE_OBSERVE_BACKOFF_JSON),
     ("route-report-optional.json", ROUTE_REPORT_OPTIONAL_JSON),
     ("route-report-outcomes.json", ROUTE_REPORT_OUTCOMES_JSON),
+    (
+        "route-report-usage-run-id.json",
+        ROUTE_REPORT_USAGE_RUN_ID_JSON,
+    ),
     ("route-report.json", ROUTE_REPORT_JSON),
     (
         "route-select-available-routes.json",

@@ -31,6 +31,11 @@ pub const CHECKS: &[CheckSpec] = &[
     check("head_choices_valid", "head_choices: check_head_choices validates sorting, uniqueness and default_variant without prescribing provider listing policy"),
     check("head_choices_runner_routes", "head_choices: every listed pair belongs to the named runner's route_keys"),
     check("head_choices_non_starting_empty", "head_choices: starts_sessions false answers empty models"),
+    check("head_choices_billing_valid", "head_choices: decoding rejects billing outside subscription/per_token as malformed"),
+    check("consumer_models_valid", "consumer_models: check_consumer_models validates echo, ordering, uniqueness and finite scores; decoding checks billing"),
+    check("consumer_models_unknown_consumer", "consumer_models: an unknown consumer gets unknown_consumer naming consumer"),
+    check("report_usage_run_id_repeat_accepted", "report_usage_run_id: different runs and a repeated decision/run pair with changed usage are accepted"),
+    check("report_usage_run_id_overlong_refused", "report_usage_run_id: a 129-character id is invalid_request naming usage.run_id"),
     check("pin_slot_configured_pinned", "select_pin_slot: a configured slot answers pinned on its configured route"),
     check("pin_slot_unknown_unavailable", "select_pin_slot: an unknown slot is pin_unavailable naming the slot with unknown_slot"),
     check("undeclared_pin_slot_refused", "without select_pin_slot: pin_slot is refused by name"),
@@ -61,7 +66,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("continue_undeclared_group_refuses_mode", "without account_continue: continue is invalid_request naming mode"),
     check("service_tier_eligible_account", "service_tier: decision admission uses an eligible account and records its non-standard tier with or without a repeated request tier"),
     check("service_tier_fallback_order", "service_tier: ultrafast falls back to fast then standard, recording service_tier_chosen"),
-    check("service_tier_absent_is_standard", "service_tier: an absent tier means standard"),
+    check("service_tier_absent_is_standard", "service_tier: an absent tier, with no tier settings for the consumer, means standard"),
     check("service_tier_report_members_accepted", "service_tier: a declaring router accepts both tier members in report usage"),
     check("parent_account_preference", "an eligible account other than the parent's is preferred"),
     check("parent_account_fallback", "the parent's account is used when it is the only eligible one"),
@@ -258,6 +263,8 @@ pub const CHECKS: &[CheckSpec] = &[
 /// Where the kit checks less than the contract says, and why. Every report
 /// prints these.
 pub const NARROWINGS: &[&str] = &[
+    "report_usage_run_id: the hooks expose no usage counts, so the kit checks acceptance of distinct runs and repeated pairs with changed usage, not deduplicated totals",
+    "consumer_models: the kit checks answer shape and unknown consumers, not stored score/exclusion policy or ownership admission; head_choices billing is checked by decoding, not billing policy or pin_only selection",
     "report_outcomes: the availability and affinity effects of the four added outcomes are unobservable; covered by contract vectors and Outcome::effect unit tests",
     "observe_backoff: the fence a transient_backoff observation sets and the decision-owner authorization arm are unobservable with these hooks",
     "select_prefer_prompt_cache: acceptance is checked, not internal tie-breaking",

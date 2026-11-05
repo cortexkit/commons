@@ -93,12 +93,22 @@ fn service_tier_select_requires_discovery_and_records_fallback() {
             json!(chosen)
         );
     }
-    let standard = SelectRequest::new("summary", Requirements::iq(50));
+    // A requested standard tier caps the answer, so fast is an upgrade.
+    let standard = SelectRequest::new("summary", Requirements::iq(50))
+        .with_service_tier(ServiceTier::Standard);
     assert!(check_answer(
         &standard,
-        &answer.with_service_tier_chosen(ServiceTier::Fast)
+        &answer.clone().with_service_tier_chosen(ServiceTier::Fast)
     )
     .is_err());
+    // Without a requested tier there is no cap: the router's tier settings may
+    // choose fast.
+    let untiered = SelectRequest::new("summary", Requirements::iq(50));
+    assert!(check_answer(
+        &untiered,
+        &answer.with_service_tier_chosen(ServiceTier::Fast)
+    )
+    .is_ok());
 }
 
 #[test]

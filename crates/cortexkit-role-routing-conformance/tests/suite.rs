@@ -28,6 +28,11 @@ const ROUTING_070_CASES: &[&str] = &[
     "head_choices_valid",
     "head_choices_runner_routes",
     "head_choices_non_starting_empty",
+    "head_choices_billing_valid",
+    "consumer_models_valid",
+    "consumer_models_unknown_consumer",
+    "report_usage_run_id_repeat_accepted",
+    "report_usage_run_id_overlong_refused",
     "pin_slot_configured_pinned",
     "pin_slot_unknown_unavailable",
     "undeclared_pin_slot_refused",
@@ -389,7 +394,7 @@ async fn service_tier_faulty_routers_fail_each_case_by_name() {
                 ..Defects::default()
             },
             SERVICE_TIER_CHECKS[2],
-            "service_tier_chosen",
+            "did not mean standard",
         ),
         (
             Defects {

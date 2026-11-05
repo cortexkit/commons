@@ -69,6 +69,12 @@ fn account_for_tier_idempotency_compares_default_and_changed_levels() {
         Some(ServiceTier::Fast),
         Some("future")
     ));
+    // Without a requested tier there is no cap: tier settings may choose any
+    // recognised level, but an unknown level is still refused.
+    assert!(service_tier::check_chosen(None, Some("fast")));
+    assert!(service_tier::check_chosen(None, Some("ultrafast")));
+    assert!(service_tier::check_chosen(None, None));
+    assert!(!service_tier::check_chosen(None, Some("future")));
 }
 
 #[test]

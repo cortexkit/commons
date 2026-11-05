@@ -290,7 +290,7 @@ struct State {
     decisions: HashMap<String, Decision>,
     /// (principal, consumer, affinity key) to its last decision.
     affinity: HashMap<(String, String, String), AffinityEntry>,
-    reports: HashMap<String, (ReportRequest, ReportAnswer)>,
+    reports: HashMap<(String, Option<String>), (ReportRequest, ReportAnswer)>,
     /// (runner, admission id) to its first body and answer.
     admissions: HashMap<(String, String), (AccountForRequest, AccountForAnswer)>,
     conversations: HashMap<String, ConversationPin>,
@@ -662,7 +662,8 @@ impl RoutingRoute for FakeRoute {
             ops::ROUTE_BUDGET_QUOTE
             | ops::ROUTE_EXPLAIN
             | ops::ROUTE_ACCOUNT_STATUS
-            | ops::ROUTE_HEAD_CHOICES => self.extension_op(&mut state, method, params),
+            | ops::ROUTE_HEAD_CHOICES
+            | ops::ROUTE_CONSUMER_MODELS => self.extension_op(&mut state, method, params),
             ops::ROUTE_REPORT => self.report(&mut state, params),
             ops::ROUTE_ACCOUNT_FOR if params.get("mode") == Some(&json!("continue")) => {
                 self.account_continue(&mut state, params)
@@ -1547,20 +1548,34 @@ impl FakeRoute {
             return Err(Refusal::invalid_request("usage", "unknown usage member"));
         }
         let defects = self.defects;
-        let request = match parse_report_request(params) {
-            Ok(request) => request,
-            Err(refusal)
-                if defects.accepts_bad_usage
-                    && refusal.detail.get("field") == Some(&Value::String("usage".into())) =>
-            {
-                let mut stripped = params.clone();
-                stripped
-                    .as_object_mut()
-                    .map(|object| object.remove("usage"));
-                parse_report_request(&stripped)?
-            }
-            Err(refusal) => return Err(refusal),
-        };
+        let mut params = params.clone();
+        if self.fault("report_usage_run_id_overlong_refused")
+            && params.pointer("/usage/run_id").is_some()
+        {
+            params["usage"]["run_id"] = json!("accepted");
+        }
+        let request =
+            match cortexkit_role_routing_conformance::wire::report::parse_report_request_serving(
+                &params,
+                if self.extensions {
+                    extensions::GROUPS
+                } else {
+                    &[]
+                },
+            ) {
+                Ok(request) => request,
+                Err(refusal)
+                    if defects.accepts_bad_usage
+                        && refusal.detail.get("field") == Some(&Value::String("usage".into())) =>
+                {
+                    let mut stripped = params.clone();
+                    stripped
+                        .as_object_mut()
+                        .map(|object| object.remove("usage"));
+                    parse_report_request(&stripped)?
+                }
+                Err(refusal) => return Err(refusal),
+            };
         let decision_route = {
             let Some(decision) = state.decisions.get(&request.decision_id) else {
                 return Err(Refusal::unknown_decision());
@@ -1571,7 +1586,17 @@ impl FakeRoute {
             }
             decision.route.clone()
         };
-        if let Some((first, answer)) = state.reports.get(&request.decision_id) {
+        let report_key = (
+            request.decision_id.clone(),
+            request
+                .usage
+                .as_ref()
+                .and_then(|usage| usage.run_id.clone()),
+        );
+        if let Some((first, answer)) = state.reports.get(&report_key) {
+            if report_key.1.is_some() && !self.fault("report_usage_run_id_repeat_accepted") {
+                return to_value(answer);
+            }
             let mut compared = request.clone();
             if defects.ignores_report_members {
                 compared.pool.clone_from(&first.pool);
@@ -1692,9 +1717,7 @@ impl FakeRoute {
                 }
             }
         }
-        state
-            .reports
-            .insert(request.decision_id.clone(), (request, answer.clone()));
+        state.reports.insert(report_key, (request, answer.clone()));
         to_value(answer)
     }
 

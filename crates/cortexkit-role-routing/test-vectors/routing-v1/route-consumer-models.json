@@ -1,0 +1,390 @@
+{
+  "group": "consumer_models",
+  "unknown": [],
+  "describes": [
+    {
+      "name": "legacy",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      }
+    },
+    {
+      "name": "declared",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.consumer_models"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "consumer_models"
+        ]
+      }
+    },
+    {
+      "name": "op_without_group",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.consumer_models"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "consumer_models"
+      }
+    },
+    {
+      "name": "group_without_op",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "consumer_models"
+        ]
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "consumer_models"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "name": "consumer",
+      "params": {
+        "consumer": "flow"
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "stored_judgments",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "consumer": "flow",
+        "models": [
+          {
+            "provider": "a",
+            "model": "model-a",
+            "elo": 1200.5,
+            "eq": -0.25,
+            "excluded": false,
+            "billing": "subscription"
+          },
+          {
+            "provider": "a",
+            "model": "model-b",
+            "excluded": true,
+            "billing": "per_token"
+          },
+          {
+            "provider": "b",
+            "model": "model-a",
+            "excluded": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "consumer": "flow",
+        "models": []
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "unknown_member",
+      "params": {
+        "consumer": "flow",
+        "extra": true
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "extra"
+        },
+        "message": "Invalid request member"
+      }
+    },
+    {
+      "name": "empty_consumer",
+      "params": {
+        "consumer": ""
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "consumer"
+        },
+        "message": "Invalid request member"
+      }
+    }
+  ],
+  "admission_refusals": [
+    {
+      "name": "unknown_consumer",
+      "params": {
+        "consumer": "missing"
+      },
+      "refusal": {
+        "code": "unknown_consumer",
+        "detail": {
+          "consumer": "missing"
+        },
+        "message": "The consumer is unknown"
+      }
+    },
+    {
+      "name": "consumer_not_owned",
+      "params": {
+        "consumer": "flow"
+      },
+      "caller_module": "other",
+      "owner_module": "owner",
+      "refusal": {
+        "code": "consumer_not_owned",
+        "detail": {
+          "consumer": "flow"
+        },
+        "message": "The caller does not own this consumer"
+      }
+    }
+  ],
+  "invalid_answers": [
+    {
+      "name": "unsorted",
+      "problem": "ModelsOrder",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "consumer": "flow",
+        "models": [
+          {
+            "provider": "b",
+            "model": "m",
+            "excluded": false
+          },
+          {
+            "provider": "a",
+            "model": "m",
+            "excluded": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "duplicate",
+      "problem": "ModelsOrder",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "consumer": "flow",
+        "models": [
+          {
+            "provider": "a",
+            "model": "m",
+            "excluded": false
+          },
+          {
+            "provider": "a",
+            "model": "m",
+            "excluded": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "wrong_echo",
+      "problem": "Consumer",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "consumer": "other",
+        "models": []
+      }
+    },
+    {
+      "name": "invalid_billing",
+      "decode_error": true,
+      "answer": {
+        "catalog_version": "catalog-1",
+        "consumer": "flow",
+        "models": [
+          {
+            "provider": "a",
+            "model": "m",
+            "excluded": false,
+            "billing": "free"
+          }
+        ]
+      }
+    },
+    {
+      "name": "non_finite_elo",
+      "non_finite": {
+        "index": 0,
+        "field": "elo",
+        "value": "Infinity"
+      },
+      "problem": "Elo",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "consumer": "flow",
+        "models": [
+          {
+            "provider": "a",
+            "model": "m",
+            "excluded": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "non_finite_eq",
+      "non_finite": {
+        "index": 0,
+        "field": "eq",
+        "value": "NaN"
+      },
+      "problem": "Eq",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "consumer": "flow",
+        "models": [
+          {
+            "provider": "a",
+            "model": "m",
+            "excluded": false
+          }
+        ]
+      }
+    }
+  ]
+}

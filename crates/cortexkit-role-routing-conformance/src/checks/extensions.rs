@@ -2,6 +2,7 @@ use super::*;
 use crate::wire::{
     account_status::{check_account_status, AccountStatusAnswer, AccountStatusRequest},
     budget::{check_budget_quote, BudgetQuote, BudgetSeat},
+    consumer_models::{check_consumer_models, ConsumerModelsAnswer, ConsumerModelsRequest},
     explain::{check_explain, ExplainAnswer, ExplainRequest},
     head_choices::{check_head_choices, HeadChoicesAnswer, HeadChoicesRequest},
     panel::{
@@ -29,6 +30,19 @@ pub(super) const CASES: &[(&str, &str, bool)] = &[
     ("head_choices_valid", "head_choices", false),
     ("head_choices_runner_routes", "head_choices", false),
     ("head_choices_non_starting_empty", "head_choices", false),
+    ("head_choices_billing_valid", "head_choices", false),
+    ("consumer_models_valid", "consumer_models", false),
+    ("consumer_models_unknown_consumer", "consumer_models", false),
+    (
+        "report_usage_run_id_repeat_accepted",
+        "report_usage_run_id",
+        false,
+    ),
+    (
+        "report_usage_run_id_overlong_refused",
+        "report_usage_run_id",
+        false,
+    ),
     ("pin_slot_configured_pinned", "select_pin_slot", false),
     ("pin_slot_unknown_unavailable", "select_pin_slot", false),
     ("undeclared_pin_slot_refused", "select_pin_slot", true),
@@ -190,6 +204,47 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 || status.reset_at_ms != if blocked { Some(reset) } else { None }
             {
                 return Err(format!("unexpected account status: {status:?}"));
+            }
+        } else if name.starts_with("consumer_models_") {
+            if name == "consumer_models_unknown_consumer" {
+                let refusal = refused(
+                    &route,
+                    ops::ROUTE_CONSUMER_MODELS,
+                    &json!({"consumer":fixture::UNCONFIGURED}),
+                    RefusalCode::UnknownConsumer,
+                    "unknown consumer models",
+                )
+                .await?;
+                if refusal.detail.get("consumer") != Some(&json!(fixture::UNCONFIGURED)) {
+                    return Err("unknown_consumer must echo consumer".into());
+                }
+            } else {
+                let request = ConsumerModelsRequest::new(SUMMARY);
+                let models: ConsumerModelsAnswer = answer(
+                    &route,
+                    ops::ROUTE_CONSUMER_MODELS,
+                    &serde_json::to_value(&request).unwrap(),
+                    "consumer models",
+                )
+                .await?;
+                check_consumer_models(&request, &models).map_err(|e| e.to_string())?;
+            }
+        } else if name.starts_with("report_usage_run_id_") {
+            let selected = select(&route, &base(), "usage decision").await?;
+            let mut params = json!({"decision_id":selected.decision_id,"outcome":"completed","usage":{"run_id":"run-1","input_tokens":10}});
+            if name == "report_usage_run_id_overlong_refused" {
+                params["usage"]["run_id"] = json!("x".repeat(129));
+                Self::invalid_field(&route, ops::ROUTE_REPORT, &params, "usage.run_id").await?;
+            } else {
+                let _: ReportAnswer =
+                    answer(&route, ops::ROUTE_REPORT, &params, "first run usage").await?;
+                params["usage"]["run_id"] = json!("run-2");
+                let _: ReportAnswer =
+                    answer(&route, ops::ROUTE_REPORT, &params, "second run usage").await?;
+                params["usage"]["run_id"] = json!("run-1");
+                params["usage"]["input_tokens"] = json!(999);
+                let _: ReportAnswer =
+                    answer(&route, ops::ROUTE_REPORT, &params, "repeated run usage").await?;
             }
         } else if name.starts_with("head_choices_") {
             self.head_check(name, &route).await?;

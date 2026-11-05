@@ -62,7 +62,7 @@ What the crate holds:
 - `wire`: the `{"result": <answer>}` reply envelope (`reply_body`,
   `read_reply`).
 
-## Optional operations and checks in 0.7.0
+## Optional operations and checks in 0.7.1
 
 Each new operation is listed in `ops` exactly when its same-named group
 (without `route.`) is declared. `check_describe` names a mismatch as
@@ -76,9 +76,10 @@ their group.
 | `budget` / `route.budget_quote` | `quote`, `check_budget_quote`; retained capacities, saturating ceilings and deterministic limiting ties |
 | `explain` / `route.explain` | `check_explain`; decision, route, runner and serving-provider consistency |
 | `account_status` / `route.account_status` | `check_account_status`; echoed account identity and reset applicability |
-| `head_choices` / `route.head_choices` | `check_head_choices`; runner echo, sorted unique choices and valid default variants |
+| `head_choices` / `route.head_choices` | `check_head_choices`; runner echo, sorted unique choices and valid default variants; optional `pin_only` and closed `billing::Billing` metadata |
+| `consumer_models` / `route.consumer_models` | `check_consumer_models`; consumer echo, sorted unique pairs, finite `f64` scores and closed billing; select's consumer admission |
 | `select` additions | `check_answer` now checks `available_routes`, slot-pin outcomes and `project_settings` presence; `SelectSettings::check_project_stamp` rejects mismatched trusted project stamps |
-| `report` additions | `parse_report_request_serving`, `Outcome::effect`; four group-gated outcomes with no availability penalty and affinity kept |
+| `report` additions | `parse_report_request_serving`, `Outcome::effect`; four group-gated outcomes with no availability penalty and the prior route preference (affinity) kept; optional `usage.run_id` with `report_usage_run_id` |
 | `observe` additions | `parse_account_observe_request_serving`, `check_observe_authorization` and `ObserveArm`; account-local backoff and admission-bound decision-owner wall observations |
 
 New parsers take declared groups; legacy report/observe parsers supply none.
@@ -88,6 +89,16 @@ members are refused by name and `transient_backoff` remains advisory. Select's
 `pin_slot`, `available_routes`, `prefer_prompt_cache` and `settings` each have
 their own group and undeclared-member refusal. Unknown open-set values are kept,
 and absent optional fields preserve old bytes.
+
+`usage.run_id` is an opaque 1–128-character id without controls, refused by
+`usage.run_id` when invalid or undeclared. Distinct run ids on one decision can
+each contribute usage; repeated decision/run pairs are accepted and ignored
+after the first. Without it, reports retain decision-level idempotency and
+different bodies conflict. Consumer models carry only the router's own stored
+scores and exclusions: prices, context windows, modalities and lifecycle still
+come from the model catalog. Billing is a closed enum (`subscription` or
+`per_token`); unknown wire values are malformed answers, while absence means
+unknown. Pin-only models are chosen only when explicitly pinned.
 
 `settings` selects only project and service-tier settings, never route scope;
 an unresolved project still selects without settings. Panels use router-owned

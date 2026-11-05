@@ -16,9 +16,9 @@
 //! - [`report`]: the `route.report` request, its validator, and its answer;
 //! - [`account`]: the `route.account_for` request, validator and answer;
 //! - [`observe`]: the `route.account_observe` request, validator and answer;
-//! - [`panel`], [`budget`], [`explain`], [`account_status`] and
-//!   [`head_choices`]: the optional panel selection and replacement, budget
-//!   quote, decision explanation, account status and head-choice operations,
+//! - [`panel`], [`budget`], [`explain`], [`account_status`], [`head_choices`]
+//!   and [`consumer_models`]: the optional panel selection and replacement,
+//!   budget quote, decision explanation, account status and model-choice operations,
 //!   each with its request, validator and answer;
 //! - [`declarations`]: consumer defaults and runner matching inputs from the catalog;
 //! - [`errors`]: refusal codes, the refusal body and each code's detail;
@@ -31,7 +31,8 @@
 //! reason codes) is an open set: an unknown value decodes and is kept as the
 //! string it was sent as. Optional members are omitted when absent, and a
 //! member sent as `null` decodes the same as one left out.
-//! Continuation answers are instead a closed tagged union of three outcomes.
+//! Continuation answers are instead a closed tagged union of three outcomes;
+//! model-choice [`billing::Billing`] values are also closed.
 
 #![forbid(unsafe_code)]
 
@@ -43,7 +44,9 @@ mod members;
 pub mod account;
 pub mod account_continue;
 pub mod account_status;
+pub mod billing;
 pub mod budget;
+pub mod consumer_models;
 pub mod declarations;
 pub mod describe;
 pub mod errors;
@@ -97,6 +100,8 @@ pub mod ops {
     pub const ROUTE_ACCOUNT_STATUS: &str = "route.account_status";
     /// List the router's admitted model choices for a runner.
     pub const ROUTE_HEAD_CHOICES: &str = "route.head_choices";
+    /// Read the router's stored judgments for a consumer's models.
+    pub const ROUTE_CONSUMER_MODELS: &str = "route.consumer_models";
     /// Tell the provider how running on a decision went.
     pub const ROUTE_REPORT: &str = "route.report";
     /// A runner asks which account to use for a model call.
@@ -153,6 +158,8 @@ pub mod capabilities {
     pub const ACCOUNT_STATUS: &str = "account_status";
     /// Admitted model choices for a runner.
     pub const HEAD_CHOICES: &str = "head_choices";
+    /// Stored scores and exclusions for a consumer's models.
+    pub const CONSUMER_MODELS: &str = "consumer_models";
     /// Operator-policy slot pins in selection.
     pub const SELECT_PIN_SLOT: &str = "select_pin_slot";
     /// Selection restricted to caller-reachable routes.
@@ -165,6 +172,8 @@ pub mod capabilities {
     pub const OBSERVE_BACKOFF: &str = "observe_backoff";
     /// Report outcomes that distinguish failures before a provider send.
     pub const REPORT_OUTCOMES: &str = "report_outcomes";
+    /// Attribute report usage to individual runs of a decision.
+    pub const REPORT_USAGE_RUN_ID: &str = "report_usage_run_id";
 
     /// Optional operations and their groups. Each pair must be declared together.
     pub const OP_GROUPS: &[(&str, &str)] = &[
@@ -173,6 +182,7 @@ pub mod capabilities {
         (super::ops::ROUTE_EXPLAIN, EXPLAIN),
         (super::ops::ROUTE_ACCOUNT_STATUS, ACCOUNT_STATUS),
         (super::ops::ROUTE_HEAD_CHOICES, HEAD_CHOICES),
+        (super::ops::ROUTE_CONSUMER_MODELS, CONSUMER_MODELS),
     ];
 
     /// Every group this version defines.
@@ -189,12 +199,14 @@ pub mod capabilities {
         EXPLAIN,
         ACCOUNT_STATUS,
         HEAD_CHOICES,
+        CONSUMER_MODELS,
         SELECT_PIN_SLOT,
         SELECT_AVAILABLE_ROUTES,
         SELECT_PREFER_PROMPT_CACHE,
         SELECT_SETTINGS,
         OBSERVE_BACKOFF,
         REPORT_OUTCOMES,
+        REPORT_USAGE_RUN_ID,
     ];
 }
 

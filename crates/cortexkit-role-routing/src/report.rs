@@ -98,6 +98,10 @@ pub const MAX_USAGE_COUNT: u64 = (1 << 53) - 1;
 #[non_exhaustive]
 #[serde(deny_unknown_fields)]
 pub struct Usage {
+    /// Opaque run attribution, 1–128 characters without controls. Send only to
+    /// routers declaring `report_usage_run_id`; absent preserves legacy totals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
     /// Applied request level; omitted for standard. Send only to a router
     /// declaring `service_tier`; older strict usage readers refuse this field.
     /// Producers use ServiceTier::as_str; readers keep unknown level strings.
@@ -139,6 +143,11 @@ pub struct Usage {
 }
 
 impl Usage {
+    pub fn with_run_id(mut self, run_id: impl Into<String>) -> Self {
+        self.run_id = Some(run_id.into());
+        self
+    }
+
     /// Producer check only; report readers retain unfamiliar applied levels.
     pub fn check_service_tier(&self) -> Result<(), &'static str> {
         crate::service_tier::check_applied(self.service_tier_applied.as_deref())
@@ -402,6 +411,28 @@ pub fn parse_report_request_serving<C: AsRef<str>>(
     {
         outcome = Outcome::Other(outcome.as_str().to_owned());
     }
+    if let Some(run_id) = members
+        .object
+        .get("usage")
+        .and_then(|usage| usage.get("run_id"))
+    {
+        if !capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::REPORT_USAGE_RUN_ID)
+        {
+            return Err(members.refuse("usage.run_id", "usage.run_id requires report_usage_run_id"));
+        }
+        if !run_id.is_null()
+            && !run_id.as_str().is_some_and(|id| {
+                (1..=128).contains(&id.chars().count()) && !id.chars().any(char::is_control)
+            })
+        {
+            return Err(members.refuse(
+                "usage.run_id",
+                "usage.run_id must be 1–128 characters without controls",
+            ));
+        }
+    }
     let usage: Option<Usage> = members.optional("usage")?;
     if let Some(usage) = &usage {
         for (name, value) in [
@@ -616,5 +647,56 @@ mod tests {
     fn a_missing_decision_is_invalid_request() {
         let refusal = parse_report_request(&json!({"outcome": "failed"})).unwrap_err();
         assert_eq!(refusal.detail["field"], "decision_id");
+    }
+
+    #[test]
+    fn usage_run_id_is_group_gated_and_validated_by_path() {
+        use crate::capabilities::REPORT_USAGE_RUN_ID;
+        use serde_json::json;
+        for id in [
+            json!(""),
+            json!("a".repeat(129)),
+            json!("a\nb"),
+            json!("a\u{007f}"),
+            json!(1),
+            json!(true),
+        ] {
+            let body = json!({"decision_id":"d", "outcome":"ok", "usage":{"run_id":id}});
+            let refusal = parse_report_request_serving(&body, &[REPORT_USAGE_RUN_ID]).unwrap_err();
+            assert_eq!(refusal.code.as_str(), "invalid_request");
+            assert_eq!(refusal.detail["field"], "usage.run_id");
+        }
+        for id in ["a".to_owned(), "é".repeat(128)] {
+            let body = json!({"decision_id":"d", "outcome":"ok", "usage":{"run_id":id}});
+            assert_eq!(
+                parse_report_request(&body).unwrap_err().detail["field"],
+                "usage.run_id"
+            );
+            let report = parse_report_request_serving(&body, &[REPORT_USAGE_RUN_ID]).unwrap();
+            assert_eq!(report.usage.unwrap().run_id.as_deref(), Some(id.as_str()));
+        }
+        let body = json!({"decision_id":"d", "outcome":"ok", "usage":{"run_id":null}});
+        assert_eq!(
+            parse_report_request(&body).unwrap_err().detail["field"],
+            "usage.run_id"
+        );
+        assert_eq!(
+            parse_report_request_serving(&body, &[REPORT_USAGE_RUN_ID])
+                .unwrap()
+                .usage
+                .unwrap()
+                .run_id,
+            None
+        );
+        assert!(parse_report_request_serving(
+            &json!({"decision_id":"d", "outcome":"ok", "usage":{"unknown":1}}),
+            &[REPORT_USAGE_RUN_ID]
+        )
+        .is_err());
+        assert_eq!(serde_json::to_value(Usage::new()).unwrap(), json!({}));
+        assert_eq!(
+            serde_json::to_value(Usage::new().with_run_id("run-1")).unwrap(),
+            json!({"run_id":"run-1"})
+        );
     }
 }

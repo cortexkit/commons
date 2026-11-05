@@ -1,6 +1,7 @@
 use super::*;
 use cortexkit_role_routing::{
-    account_status, budget, describe, explain, head_choices, observe, panel, report, select,
+    account_status, budget, consumer_models, describe, explain, head_choices, observe, panel,
+    report, select,
 };
 
 const GROUP_FILES: &[&str] = &[
@@ -9,6 +10,8 @@ const GROUP_FILES: &[&str] = &[
     "route-explain.json",
     "route-account-status.json",
     "route-head-choices.json",
+    "route-consumer-models.json",
+    "route-report-usage-run-id.json",
     "route-select-pin-slot.json",
     "route-select-available-routes.json",
     "route-select-prefer-prompt-cache.json",
@@ -45,7 +48,7 @@ fn new_group_vectors_describe_pairs() {
             }
         }
     }
-    assert_eq!(GROUP_FILES.len(), 11);
+    assert_eq!(GROUP_FILES.len(), 13);
 }
 
 fn check_refusal(case: &Value, refusal: Refusal) {
@@ -201,6 +204,88 @@ fn new_group_vectors_inspection() {
     for case in cases(&file, "answers") {
         let answer = serde_json::from_value(case["answer"].clone()).unwrap();
         assert_eq!(head_choices::check_head_choices(&request, &answer), Ok(()));
+    }
+    for case in cases(&file, "invalid_answers") {
+        assert!(
+            serde_json::from_value::<head_choices::HeadChoicesAnswer>(case["answer"].clone())
+                .is_err(),
+            "{}",
+            name(case)
+        );
+    }
+}
+
+#[test]
+fn new_group_vectors_consumer_models() {
+    use consumer_models::*;
+    let file = load("route-consumer-models.json");
+    let request = parse_consumer_models_request(&file["requests"][0]["params"]).unwrap();
+    for case in cases(&file, "answers") {
+        let answer: ConsumerModelsAnswer = round_trip(name(case), &case["answer"], &case["answer"]);
+        assert_eq!(check_consumer_models(&request, &answer), Ok(()));
+    }
+    for case in cases(&file, "refused") {
+        check_refusal(
+            case,
+            parse_consumer_models_request(&case["params"]).unwrap_err(),
+        );
+    }
+    for case in cases(&file, "admission_refusals") {
+        let _: Refusal = round_trip(name(case), &case["refusal"], &case["refusal"]);
+        assert!(parse_consumer_models_request(&case["params"]).is_ok());
+    }
+    for case in cases(&file, "invalid_answers") {
+        let decoded = serde_json::from_value::<ConsumerModelsAnswer>(case["answer"].clone());
+        if case["decode_error"] == true {
+            assert!(decoded.is_err(), "{}", name(case));
+            continue;
+        }
+        let mut answer = decoded.unwrap();
+        let expected = match case["problem"].as_str().unwrap() {
+            "Consumer" => ConsumerModelsProblem::Consumer,
+            "ModelsOrder" => ConsumerModelsProblem::ModelsOrder,
+            field @ ("Elo" | "Eq") => {
+                // JSON has no non-finite literals; the vector names the typed value.
+                let index = case["non_finite"]["index"].as_u64().unwrap() as usize;
+                let value = match case["non_finite"]["value"].as_str().unwrap() {
+                    "Infinity" => f64::INFINITY,
+                    "NaN" => f64::NAN,
+                    value => panic!("unexpected non-finite value {value}"),
+                };
+                if field == "Elo" {
+                    answer.models[index].elo = Some(value);
+                    ConsumerModelsProblem::Elo { index }
+                } else {
+                    answer.models[index].eq = Some(value);
+                    ConsumerModelsProblem::Eq { index }
+                }
+            }
+            problem => panic!("unexpected problem {problem}"),
+        };
+        assert_eq!(
+            check_consumer_models(&request, &answer),
+            Err(expected),
+            "{}",
+            name(case)
+        );
+    }
+}
+
+#[test]
+fn new_group_vectors_report_usage_run_id() {
+    let file = load("route-report-usage-run-id.json");
+    let parse = |params: &Value| {
+        report::parse_report_request_serving(params, &[capabilities::REPORT_USAGE_RUN_ID])
+    };
+    for case in cases(&file, "requests") {
+        let request = parse(&case["params"]).unwrap();
+        assert_eq!(json!(request), case["params"]);
+    }
+    for case in cases(&file, "refused") {
+        check_refusal(case, parse(&case["params"]).unwrap_err());
+    }
+    for case in cases(&file, "refused_without_group") {
+        check_refusal(case, parse_report_request(&case["params"]).unwrap_err());
     }
 }
 

@@ -20,6 +20,8 @@ pub(super) const GROUPS: &[&str] = &[
     "select_settings",
     "observe_backoff",
     "report_outcomes",
+    "report_usage_run_id",
+    "consumer_models",
 ];
 pub(super) const OPS: &[&str] = &[
     ops::ROUTE_SELECT_PANEL,
@@ -27,10 +29,11 @@ pub(super) const OPS: &[&str] = &[
     ops::ROUTE_EXPLAIN,
     ops::ROUTE_ACCOUNT_STATUS,
     ops::ROUTE_HEAD_CHOICES,
+    ops::ROUTE_CONSUMER_MODELS,
 ];
 
 impl FakeRoute {
-    fn fault(&self, check: &str) -> bool {
+    pub(super) fn fault(&self, check: &str) -> bool {
         self.defects.extension == Some(check)
     }
 
@@ -350,9 +353,40 @@ impl FakeRoute {
                         models.push(first);
                     }
                 }
+                if self.fault("head_choices_billing_valid") && !models.is_empty() {
+                    models[0]["billing"] = json!("free");
+                }
                 Ok(
                     json!({"runner_module":params["runner_module"],"catalog_version":"fixture-v1","models":models}),
                 )
+            }
+            ops::ROUTE_CONSUMER_MODELS => {
+                let request = cortexkit_role_routing_conformance::wire::consumer_models::parse_consumer_models_request(params)?;
+                if let Some((owner, _)) = state.declarations.get(&request.consumer) {
+                    let scope_owner = self.stamp.scope.as_ref().map(|scope| scope.owner.as_str());
+                    if !owner.as_deref().is_some_and(|owner| {
+                        self.principal() == owner || scope_owner == Some(owner)
+                    }) {
+                        return Err(Refusal::consumer_not_owned(request.consumer));
+                    }
+                } else if !state.consumers.iter().any(|c| c.id == request.consumer)
+                    && !self.fault("consumer_models_unknown_consumer")
+                {
+                    return Err(Refusal::unknown_consumer(request.consumer));
+                }
+                let mut models = Self::catalog(state).models.iter().map(|m| json!({"provider":m.provider,"model":m.model,"elo":1200.5,"eq":0.25,"excluded":false,"billing":"per_token"})).collect::<Vec<_>>();
+                models.sort_by_key(|m| {
+                    (
+                        m["provider"].as_str().unwrap().to_owned(),
+                        m["model"].as_str().unwrap().to_owned(),
+                    )
+                });
+                let consumer = if self.fault("consumer_models_valid") {
+                    "wrong-consumer"
+                } else {
+                    &request.consumer
+                };
+                Ok(json!({"catalog_version":"fixture-v1","consumer":consumer,"models":models}))
             }
             ops::ROUTE_BUDGET_QUOTE | ops::ROUTE_EXPLAIN => {
                 let foreign_fault = (self.fault("budget_quote_foreign_unknown")

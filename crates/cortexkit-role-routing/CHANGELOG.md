@@ -1,6 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.7.1
+
+- Add optional run-attributed report usage with `report_usage_run_id`, preserving
+  the first report for each decision/run pair without changing legacy reports.
+  Among a decision's reports that carry usage, either all carry a run id or
+  none do; mixing them is `report_conflict`. Outcome-only reports without
+  usage never conflict with run-attributed ones.
+- Add optional pin-only and billing metadata to head choices.
+- Add the `consumer_models` read for consumer-specific stored scores, exclusions
+  and billing, with strict requests, answer checks and shipped vectors.
+- Fix: a select without `service_tier` sets no cap, so a tier chosen by the
+  router's tier settings passes `select::check_answer` and the panel checks.
+  0.7.0 treated the absence as standard and refused a settings-chosen `fast`.
+  A requested tier still caps the answer, unknown tiers stay refused, and
+  `route.account_for` without a tier still means standard.
 
 - Contract text only (§8): a decision owner's report `usage`, when sent, is
   the only per-decision token and timing total, so token profiles are built

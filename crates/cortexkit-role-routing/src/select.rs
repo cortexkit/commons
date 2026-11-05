@@ -1103,8 +1103,9 @@ impl std::fmt::Display for AnswerProblem {
 /// caller listed, the route is not one it excluded nor from a provider it
 /// excluded, the explanation is within its bound, and a pinned request is
 /// answered with a `pin_outcome` (with `pin_reason` in `detail` on
-/// `fell_back`). A chosen tier must be recognised and may not upgrade the
-/// request. This is stricter than record decoding, which retains unknown tiers.
+/// `fell_back`). A chosen tier must be recognised and may not exceed a
+/// requested tier; without one, the router's tier settings may choose any
+/// level. This is stricter than record decoding, which retains unknown tiers.
 /// The route must also be in `available_routes` when sent, and
 /// `project_settings` must be present exactly when `settings.project_id` was sent.
 /// Pin rules apply to `pin_slot` just as to `pin`.

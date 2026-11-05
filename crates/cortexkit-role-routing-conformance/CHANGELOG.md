@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.1
+
+- Pin routing 0.7.1 and check run-attributed report acceptance and validation,
+  consumer-model answers and unknown consumers, and head-choice billing.
+- Pair the new group-gated checks with deliberately faulty routers and document
+  the limits of observing usage deduplication through the public protocol.
+
 ## 0.10.0
 
 - Pin routing 0.7.0 and check optional panels, budget quotes, explanations,
