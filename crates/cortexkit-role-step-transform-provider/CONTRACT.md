@@ -35,6 +35,14 @@ codes come from that role's crate so their spellings cannot drift.
   Every hook concerns only that route's session. The daemon attests the
   caller module; the project comes from its scope stamp (`workdir`, and
   `project_id` when present). No request body carries caller identity.
+- [pinned] A consumer that opens another route to the same module for the
+  same session, such as a tool route or a compaction route, binds it with
+  the same `(harness, session)` as the hook route, so the module sees one
+  session (the tool-provider contract's one-bind-identity rule, §1.1). The
+  pair is unique only within one consumer, so a provider keys session state
+  by the route's attested principal together with the pair. A module-level or
+  pre-session route, such as one used for `transform.declare` before the
+  session exists, binds no session and isn't covered.
 - [pinned] `role.describe` and `transform.declare` are answerable on **any
   route of this role**, including module-level routes and scoped routes
   opened before the session exists. Session binding is not a bind-time

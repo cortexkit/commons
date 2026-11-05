@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Contract text only (§1.1): the one-bind-identity rule says explicitly
+  that it covers every route a consumer opens to the module for a session,
+  whatever role each route declares, not only tool-provider routes.
 - Contract text only (§3): `model` joins the conventional `tool.catalog`
   param names. `params.model` is exactly `{provider, model}`: the model a
   plan item's catalog is built for. A provider whose tool set varies by

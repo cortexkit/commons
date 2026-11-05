@@ -31,7 +31,9 @@ the same callers. A route's declared role tells the provider which routes the
 consumer declared for this role. Once every consumer that sends this role's
 requests to a provider declares it (see Rollout), an undeclared route is one
 that shouldn't carry them. This section governs only this role's requests and
-tool calls; the module's other surfaces keep their own rules.
+tool calls, and the module's other surfaces keep their own rules. The one
+exception is the bind-identity rule below, which also covers the consumer's
+other session-bound routes to the same module.
 
 - [pinned] A consumer that sends tool calls, `user_command.invoke`,
   `tool.withdraw`, `late_results` or `late_results.ack` on a route declares
@@ -65,7 +67,11 @@ tool calls; the module's other surfaces keep their own rules.
 - [pinned] One bind identity per session per provider: a consumer that opens
   more than one route to the same provider module on behalf of one session,
   for example its tool route and a compaction or hook route, binds all of
-  them with the same `harness` and `session`, and never binds a different
+  them with the same `harness` and `session`, whatever role each route
+  declares. This binds the consumer of this role, for a session it serves
+  through this role: its other session-bound routes to the same module follow
+  the same pair, and each of those roles' contracts says the same from its
+  side. It never binds a different
   session under that pair. A provider may therefore treat routes from one
   consumer that bind the same pair as the same session. The pair is unique
   only within one consumer, so a provider keys session state by the route's

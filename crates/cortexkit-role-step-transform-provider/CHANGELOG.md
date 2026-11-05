@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Contract text only (§1): a consumer's other routes to the same module for
+  a session, such as tool or compaction routes, use the hook route's
+  `(harness, session)`, so the module sees one session.
+
 ## 0.5.0
 
 - Breaking: publish `step-transform-provider/v2`. Hooks use one scoped route
