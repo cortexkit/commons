@@ -61,6 +61,16 @@ const SESSION_USAGE: &[Capability] = &[
     TranscriptReads,
 ];
 const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
+const RESULT_RIDES: &[Capability] = &[
+    Capability::ResultRides,
+    Capability::DeliveryOrder,
+    Capability::ReadDisplayFacts,
+    Capability::HistoryDisplay,
+    Capability::LiveEvents,
+    HoldToolCalls,
+    Queue,
+    TranscriptReads,
+];
 const ATTRIBUTION: &[Capability] = &[
     Capability::SenderAttribution,
     Capability::DeliveryOrder,
@@ -126,6 +136,12 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("result_rides_no_transcript_entry", RESULT_RIDES, "a tool_result ride writes no transcript entry or history rewrite"),
+    case("result_rides_stored_output_unchanged", RESULT_RIDES, "the host's stored tool-result output remains the tool's original bytes"),
+    case("result_rides_display_fact", RESULT_RIDES, "opted-in reads and display rows carry the exact part, send_id, sender and text"),
+    case("result_rides_live_event", RESULT_RIDES, "ride_delivered names the carrying mid, part, call_key, send_id and sender"),
+    case("result_rides_append_bytes", RESULT_RIDES, "the scripted provider receives the exact append-form bytes"),
+    case("result_rides_tool_result_only_never_system", RESULT_RIDES, "a tool_result-only send never appears at system authority"),
     case("sender_attribution_stored_header", ATTRIBUTION, "the first stored text part starts with the exact trusted relay header; retries compare the received payload"),
     case("sender_attribution_fact", ATTRIBUTION, "opted-in reads and raw history carry the verified part, byte count and attested module; default reads omit the fact"),
     case("sender_attribution_photo_only", ATTRIBUTION, "a photo-only send stores a header-only text part first; inapplicable without media_only_send and an upload fixture"),

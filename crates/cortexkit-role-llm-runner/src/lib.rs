@@ -44,6 +44,7 @@ pub mod points;
 pub mod read;
 pub mod retract;
 pub mod rich_ui;
+pub mod rides;
 pub mod run;
 pub mod scope_admission;
 pub mod send;
@@ -212,6 +213,9 @@ pub mod capabilities {
     pub const READ_DISPLAY_FACTS: &str = "read_display_facts";
     /// Opt-in trusted relay headers and verified, header-free display facts.
     pub const SENDER_ATTRIBUTION: &str = "sender_attribution";
+    /// Ride display facts and live delivery events, without transcript entries.
+    /// Requires [`READ_DISPLAY_FACTS`], [`HISTORY_DISPLAY`] and [`LIVE_EVENTS`].
+    pub const RESULT_RIDES: &str = "result_rides";
     /// The pinned live events on `session.subscribe` (`live::LiveEvent`):
     /// durable message, tool and run lifecycle events, display deltas with
     /// `part` and `mid` (or a provisional `live_id` under the separate
@@ -406,6 +410,14 @@ pub mod capabilities {
         (HOST_HISTORY, &[ops::SESSION_HISTORY]),
         (HISTORY_DISPLAY, &[ops::SESSION_HISTORY]),
         (READ_DISPLAY_FACTS, &[ops::SESSION_READ]),
+        (
+            RESULT_RIDES,
+            &[
+                ops::SESSION_READ,
+                ops::SESSION_HISTORY,
+                ops::SESSION_SUBSCRIBE,
+            ],
+        ),
         (
             SENDER_ATTRIBUTION,
             &[ops::SESSION_SEND, ops::SESSION_READ, ops::SESSION_HISTORY],

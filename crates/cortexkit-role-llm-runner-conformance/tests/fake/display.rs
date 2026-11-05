@@ -144,6 +144,25 @@ pub(super) fn live_events(
     let mut out: Vec<Value> = Vec::new();
     let event = |e: LiveEvent| serde_json::to_value(e).expect("events serialize");
     match kind {
+        "order_delivered" if defects.result_rides != Some("event") => {
+            if let Some(queued) = record["id"].as_str().and_then(|id| sess.ordered.get(id)) {
+                for message in &sess.messages {
+                    for ride in message
+                        .rides
+                        .iter()
+                        .filter(|ride| ride.send_id == queued.send_id)
+                    {
+                        out.push(event(LiveEvent::RideDelivered(live::RideDelivered::new(
+                            &message.mid,
+                            ride.part,
+                            message.body["call_key"].as_str().unwrap(),
+                            &ride.send_id,
+                            &ride.sender,
+                        ))));
+                    }
+                }
+            }
+        }
         "send" if record["no_run"] != json!(true) => {
             if let Some(run_id) = record["run_id"].as_str().filter(|id| !id.is_empty()) {
                 // A run a send started names that send; a host turn has none.
@@ -341,6 +360,13 @@ impl Module {
             }
         };
         let mut row = project(limits);
+        if let Some(message) = sess
+            .messages
+            .iter()
+            .find(|message| message.mid == entry.mid)
+        {
+            row.rides = super::result_rides::facts(message, defects);
+        }
         if defects.display_pi_wrong_role && row.role == "toolResult" {
             row.role = "user".into();
         }

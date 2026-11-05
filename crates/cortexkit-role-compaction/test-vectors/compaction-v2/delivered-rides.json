@@ -1,0 +1,93 @@
+{
+  "counted": {
+    "digest": "21f36f0bd98e35ef2be5bf1332e110fb4fa29dcb211dc8d2d6eebcf1db480283",
+    "mid": "ride-message",
+    "ordinal": 1,
+    "parts": [
+      {
+        "call_id": "ride-call",
+        "delivered": [
+          {
+            "forms": [
+              "turn_system",
+              "tool_result"
+            ],
+            "send_id": "send-a",
+            "sender": "example-notifier",
+            "text": "An invented reminder.",
+            "text_bytes": 21,
+            "tokens": {
+              "count": 5
+            }
+          }
+        ],
+        "digest": "c1e9273b0dbc0ce8950825f5e3f3ab5e10d647f633c6078cddb89a01cc132928",
+        "id": "ride-part",
+        "input": {},
+        "kind": "tool",
+        "name": "example-tool",
+        "output": "An invented result.",
+        "status": "completed"
+      }
+    ],
+    "role": "assistant",
+    "written_at": 1000
+  },
+  "current": {
+    "digest": "21f36f0bd98e35ef2be5bf1332e110fb4fa29dcb211dc8d2d6eebcf1db480283",
+    "mid": "ride-message",
+    "ordinal": 1,
+    "parts": [
+      {
+        "call_id": "ride-call",
+        "delivered": [
+          {
+            "forms": [
+              "turn_system",
+              "tool_result"
+            ],
+            "send_id": "send-a",
+            "sender": "example-notifier",
+            "text": "An invented reminder.",
+            "text_bytes": 21
+          }
+        ],
+        "digest": "c1e9273b0dbc0ce8950825f5e3f3ab5e10d647f633c6078cddb89a01cc132928",
+        "id": "ride-part",
+        "input": {},
+        "kind": "tool",
+        "name": "example-tool",
+        "output": "An invented result.",
+        "status": "completed"
+      }
+    ],
+    "role": "assistant",
+    "written_at": 1000
+  },
+  "legacy": {
+    "digest": "b4a949c9206787ee66659e6e6e28dfa63bf7c5ceb2b571a6c64551184c04d613",
+    "mid": "ride-message",
+    "ordinal": 1,
+    "parts": [
+      {
+        "call_id": "ride-call",
+        "delivered": [
+          {
+            "sender": "example-notifier",
+            "text": "An invented reminder.",
+            "text_bytes": 21
+          }
+        ],
+        "digest": "d06780b6322e1bc43212429547b282091fbe4d28500c09c260c3a2fedb8183a0",
+        "id": "ride-part",
+        "input": {},
+        "kind": "tool",
+        "name": "example-tool",
+        "output": "An invented result.",
+        "status": "completed"
+      }
+    ],
+    "role": "assistant",
+    "written_at": 1000
+  }
+}

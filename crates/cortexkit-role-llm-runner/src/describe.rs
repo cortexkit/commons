@@ -27,6 +27,10 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const RESULT_RIDES_WITHOUT_READ_DISPLAY_FACTS: &str =
+        "result_rides_without_read_display_facts";
+    pub const RESULT_RIDES_WITHOUT_HISTORY_DISPLAY: &str = "result_rides_without_history_display";
+    pub const RESULT_RIDES_WITHOUT_LIVE_EVENTS: &str = "result_rides_without_live_events";
     pub const SENDER_ATTRIBUTION_WITHOUT_DELIVERY_ORDER: &str =
         "sender_attribution_without_delivery_order";
     pub const SENDER_ATTRIBUTION_WITHOUT_READ_DISPLAY_FACTS: &str =
@@ -593,6 +597,21 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     }
     for (group, dependency, problem) in [
         (
+            capabilities::RESULT_RIDES,
+            capabilities::READ_DISPLAY_FACTS,
+            problem_names::RESULT_RIDES_WITHOUT_READ_DISPLAY_FACTS,
+        ),
+        (
+            capabilities::RESULT_RIDES,
+            capabilities::HISTORY_DISPLAY,
+            problem_names::RESULT_RIDES_WITHOUT_HISTORY_DISPLAY,
+        ),
+        (
+            capabilities::RESULT_RIDES,
+            capabilities::LIVE_EVENTS,
+            problem_names::RESULT_RIDES_WITHOUT_LIVE_EVENTS,
+        ),
+        (
             capabilities::HEAD_SELECTION,
             capabilities::PLANS,
             problem_names::HEAD_SELECTION_WITHOUT_PLANS,
@@ -961,6 +980,14 @@ mod opt_in_dependency_tests {
                 vec![capabilities::ATTACHMENTS],
             ),
             (capabilities::RETRACT_OWN_SEND, vec![capabilities::RETRACT]),
+            (
+                capabilities::RESULT_RIDES,
+                vec![
+                    capabilities::READ_DISPLAY_FACTS,
+                    capabilities::HISTORY_DISPLAY,
+                    capabilities::LIVE_EVENTS,
+                ],
+            ),
             (
                 capabilities::RUN_CANCEL_BY_INTERRUPT,
                 vec![capabilities::RUN_CANCEL, capabilities::DELIVERY_ORDER],

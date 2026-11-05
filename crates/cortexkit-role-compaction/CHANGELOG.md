@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.6
+
+- Add optional `Delivered.send_id`, ordered rendering `forms` and ride-text
+  `tokens`, with builders and compatibility vectors. Absent members preserve
+  existing bytes; unknown forms fall back safely. Counts follow the existing
+  tokenizer-family rules and never enter part or entry checksums.
+- Pin rides following their output through views and the runner's 24-hour
+  post-cut retention condition. Eligible discarded rides leave the read
+  projection with refreshed digests, no history rewrite and no notice;
+  readers recognize that narrow exception. Served items never gain send ids
+  or forms. Re-export llm-runner's dependency-free `rides` rendering helpers
+  for shared string and content-list placement.
+
 ## 0.2.5
 
 - `cache_expired` now means proven expiry only: the runner's own clock shows

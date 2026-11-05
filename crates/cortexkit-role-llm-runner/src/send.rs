@@ -81,6 +81,9 @@ pub struct Delivered {
     /// Required when `as` is `step`, including on a runner without `run_ops`.
     #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
     pub r#ref: Option<String>,
+    /// For a tool-result ride, the carrying result's runner call identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_key: Option<String>,
 }
 
 impl Delivered {
@@ -88,11 +91,17 @@ impl Delivered {
         Self {
             r#as: r#as.into(),
             r#ref: None,
+            call_key: None,
         }
     }
 
     pub fn with_ref(mut self, r#ref: impl Into<String>) -> Self {
         self.r#ref = Some(r#ref.into());
+        self
+    }
+
+    pub fn with_call_key(mut self, call_key: impl Into<String>) -> Self {
+        self.call_key = Some(call_key.into());
         self
     }
 

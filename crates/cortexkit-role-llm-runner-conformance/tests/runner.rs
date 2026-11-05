@@ -507,6 +507,7 @@ async fn mode3_user_commands_are_bound_only_by_the_route() {
 }
 mod finish_reason;
 mod message_senders;
+mod result_rides;
 mod sender_attribution;
 
 fn head_error_subject(defects: fake::Defects) -> fake::FakeSubject {
@@ -881,7 +882,7 @@ async fn run(subject: &FakeSubject) -> SuiteReport {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
-    if case.starts_with("sender_attribution_")
+    if (case.starts_with("sender_attribution_") || case.starts_with("result_rides_"))
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason.starts_with("missing groups:") || reason.starts_with("the subject declares every one of"))
     {
@@ -1665,6 +1666,7 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
         }
         if spec.name == "media_only_send"
             || spec.name.starts_with("sender_attribution_")
+            || spec.name.starts_with("result_rides_")
             || spec.name.starts_with("sender_succession_")
             || spec.name.starts_with("live_ids_")
             || spec.name.starts_with("message_senders_")

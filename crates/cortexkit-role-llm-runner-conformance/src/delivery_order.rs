@@ -2,9 +2,9 @@
 //! `delivery_order`: ordered delivery modes on `session.send`, plan-named
 //! senders and plan templates.
 //!
-//! Every case reads what was delivered from `session.read` entries
-//! (`delivered_as`) and from the markers a send's text carries, never from a
-//! message body's schema.
+//! Entry deliveries are checked through `delivered_as` and text markers,
+//! never through a message body's schema. On `result_rides` runners, ride
+//! receipts name the carrying call instead of an entry containing the send.
 
 use cortexkit_role_llm_runner::{
     capabilities as groups,
@@ -710,6 +710,26 @@ where
         case.subject.pause().await;
     }
     let (_, messages) = read_all(&session.route).await?;
+    if case.declared.contains(&Capability::ResultRides) {
+        let reply: SendReply = decode(
+            "ride receipt",
+            expect_ok(
+                "ride retry",
+                ordered(case, &session, &session.route, &rides, &send_id, &order).await?,
+            )?,
+        )?;
+        return if holding(&messages, &rides).is_empty()
+            && reply
+                .delivered
+                .as_ref()
+                .and_then(|d| d.call_key.as_ref())
+                .is_some()
+        {
+            Ok(())
+        } else {
+            Err("tool_result must be a ride with a carrying call_key, not an entry".into())
+        };
+    }
     match holding(&messages, &rides).as_slice() {
         [entry] => match &entry.delivered_as {
             Some(d) if d.mode == modes::TOOL_RESULT && d.call_key.is_some() => Ok(()),
@@ -1905,6 +1925,30 @@ where
         .find(|c| c.tool_call_id == second.tool_call_id)
         .and_then(|c| c.call_key.as_deref())
         .ok_or("second call has no attribution")?;
+    if case.declared.contains(&Capability::ResultRides) {
+        let reply: SendReply = decode(
+            "staged ride receipt",
+            expect_ok(
+                "staged ride retry",
+                ordered(
+                    case,
+                    &session,
+                    &session.route,
+                    &marker,
+                    &send_id,
+                    &DeliveryOrder::new(vec![Mode::ToolResult]),
+                )
+                .await?,
+            )?,
+        )?;
+        return if holding(&messages, &marker).is_empty()
+            && reply.delivered.as_ref().and_then(|d| d.call_key.as_deref()) == Some(key)
+        {
+            Ok(Ending::Passed)
+        } else {
+            Err("ride did not name the next result after staging".into())
+        };
+    }
     match holding(&messages, &marker).as_slice() {
         [entry]
             if entry.delivered_as.as_ref().is_some_and(|d| {

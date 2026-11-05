@@ -75,6 +75,7 @@ pub mod event_types {
     pub const MESSAGE_FINISHED: &str = "message_finished";
     pub const TOOL_STARTED: &str = "tool_started";
     pub const TOOL_FINISHED: &str = "tool_finished";
+    pub const RIDE_DELIVERED: &str = "ride_delivered";
     pub const RUN_STARTED: &str = "run_started";
     pub const RUN_FINISHED: &str = "run_finished";
     pub const RUN_PAUSED: &str = "run_paused";
@@ -487,6 +488,7 @@ pub enum LiveEvent {
     MessageFinished(MessageEvent),
     ToolStarted(ToolStarted),
     ToolFinished(ToolFinished),
+    RideDelivered(RideDelivered),
     RunStarted(RunStarted),
     RunFinished(RunEnded),
     RunPaused(RunEnded),
@@ -543,6 +545,7 @@ impl LiveEvent {
             t::MESSAGE_FINISHED => Self::MessageFinished(typed(kind, value)?),
             t::TOOL_STARTED => Self::ToolStarted(typed(kind, value)?),
             t::TOOL_FINISHED => Self::ToolFinished(typed(kind, value)?),
+            t::RIDE_DELIVERED => Self::RideDelivered(typed(kind, value)?),
             t::RUN_STARTED => Self::RunStarted(typed(kind, value)?),
             t::RUN_FINISHED => Self::RunFinished(typed(kind, value)?),
             t::RUN_PAUSED => Self::RunPaused(typed(kind, value)?),
@@ -564,6 +567,7 @@ impl LiveEvent {
             Self::MessageFinished(_) => t::MESSAGE_FINISHED,
             Self::ToolStarted(_) => t::TOOL_STARTED,
             Self::ToolFinished(_) => t::TOOL_FINISHED,
+            Self::RideDelivered(_) => t::RIDE_DELIVERED,
             Self::RunStarted(_) => t::RUN_STARTED,
             Self::RunFinished(_) => t::RUN_FINISHED,
             Self::RunPaused(_) => t::RUN_PAUSED,
@@ -572,6 +576,36 @@ impl LiveEvent {
             Self::ToolInputDelta(_) => t::TOOL_INPUT_DELTA,
             Self::DisplayGap(_) => t::DISPLAY_GAP,
             Self::DisplayReset => t::DISPLAY_RESET,
+        }
+    }
+}
+
+/// A ride became durable beside an existing tool-result part. This event
+/// creates no transcript entry and does not change `history_version`.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RideDelivered {
+    pub mid: String,
+    pub part: u32,
+    pub call_key: String,
+    pub send_id: String,
+    pub sender: String,
+}
+
+impl RideDelivered {
+    pub fn new(
+        mid: impl Into<String>,
+        part: u32,
+        call_key: impl Into<String>,
+        send_id: impl Into<String>,
+        sender: impl Into<String>,
+    ) -> Self {
+        Self {
+            mid: mid.into(),
+            part,
+            call_key: call_key.into(),
+            send_id: send_id.into(),
+            sender: sender.into(),
         }
     }
 }

@@ -1,5 +1,9 @@
 # Compaction wire examples
 
+`delivered-rides.json` shows legacy and new ride entries with optional
+`send_id` and ordered `forms`, plus a later ride-text `tokens` count that
+leaves part and entry digests unchanged.
+
 These invented requests, answers and checksum examples round-trip through the
 crate's wire types. `entries-token-counts.json` and
 `notice-token-counts-request.json` include optional counts in one token family,

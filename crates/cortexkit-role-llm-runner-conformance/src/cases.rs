@@ -92,6 +92,7 @@ where
             name if name.starts_with("sender_attribution_") => {
                 crate::attribution::run(self, name).await
             }
+            name if name.starts_with("result_rides_") => crate::result_rides::run(self, name).await,
             "tool_result_too_large_is_error" | "tool_result_too_large_not_repeated" => {
                 crate::tool_result_limit::run(self, name).await
             }

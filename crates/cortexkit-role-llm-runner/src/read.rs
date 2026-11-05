@@ -424,9 +424,9 @@ pub struct ReadMessage {
     /// when the runner does not know it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub written_at: Option<u64>,
-    /// On the entry a `delivery_order` send wrote when it was delivered: the
-    /// mode it went out in and, for `tool_result`, the tool result it went
-    /// out with, so readers and a resumed run render exactly what was sent.
+    /// On an entry a `delivery_order` send wrote: its delivery mode.
+    /// Legacy `tool_result` entries remain readable, but new rides are
+    /// runner records and create no entry (CONTRACT §9.7).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered_as: Option<crate::delivery_order::EntryDelivery>,
     /// Only when the request set `include_rich_ui`, on a runner declaring
@@ -467,6 +467,10 @@ pub struct ReadMessage {
     /// parts and is excluded from message and part content-digest inputs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasoning_summaries: Vec<ReasoningSummary>,
+    /// Rides on this message's tool results, only with `include_display_facts`
+    /// and `result_rides`. Outside all checksums and history identity.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rides: Vec<RideFact>,
     /// Verified stored relay header, only with `include_display_facts`.
     /// The message bytes remain whole; display rows hide the verified prefix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -474,6 +478,33 @@ pub struct ReadMessage {
     /// One item per tool call, in call order, only with `include_display_facts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_times: Vec<ToolTime>,
+}
+
+/// A ride beside its carrying message, not a stored content part.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RideFact {
+    /// Zero-based stored top-level part index, as in [`ReasoningSummary`].
+    pub part: u32,
+    pub send_id: String,
+    pub sender: String,
+    pub text: String,
+}
+
+impl RideFact {
+    pub fn new(
+        part: u32,
+        send_id: impl Into<String>,
+        sender: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Self {
+        Self {
+            part,
+            send_id: send_id.into(),
+            sender: sender.into(),
+            text: text.into(),
+        }
+    }
 }
 
 /// A readable summary of one stored Responses reasoning part, not an extra
@@ -641,6 +672,7 @@ impl ReadMessage {
             created_at: None,
             completed_at: None,
             reasoning_summaries: Vec::new(),
+            rides: Vec::new(),
             attribution: None,
             tool_times: Vec::new(),
         }

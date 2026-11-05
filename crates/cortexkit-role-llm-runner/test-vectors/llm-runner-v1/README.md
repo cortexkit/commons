@@ -1,4 +1,9 @@
-# llm-runner/v1 vectors for runner 0.8.3
+# llm-runner/v1 vectors for runner 0.8.9
+
+`result-rides.json` pins `rides::append` and `rides::append_to_content`:
+exact two-newline separators, untrimmed UTF-8 text, multiple rides, and text
+placement in one-text, image/text, trailing-image and empty content lists.
+System-form rides use the existing `turn-system-rendering.json` vectors.
 
 The role capability remains `llm-runner/v1`; 0.8.0 is a breaking contract
 release. `src/vectors.rs::FILES` is the exact ordered inventory and

@@ -218,6 +218,7 @@ alias until the next breaking release.
 | `host_history` | `session.history` | §4.6 |
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `sender_attribution` | `session.send`, `session.read`, `session.history`; requires `delivery_order`, `read_display_facts` and `history_display` | §9.7.1 |
+| `result_rides` | `session.read`, `session.history`, live subscription; requires `read_display_facts`, `history_display` and `live_events` | §9.7.2 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `live_ids` | `session.subscribe` with opt-in provisional display ids (requires `live_events`; added in 0.7.46) | §7.1 |
 | `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
@@ -1244,6 +1245,9 @@ that a model meant as content; it does not tell decoration from content.
   that rewrites written messages, renumbering, or a re-hosted session id.
   Switching a live session to the new entry count is a rewrite. It never
   rises on a cut or append and never decreases, including after restore.
+  Ride records and their display facts (§9.7.2) do not change entries or
+  `history_version`. The 64 KiB tool-result limit (§11.3.1) measures only the
+  tool's own output, never rides rendered alongside it.
 - [pinned] Every head and every raw or display page carries `incarnation`,
   an opaque string of 1–128 UTF-8 bytes, minted when the runner's session
   record is created, and new whenever that record is discarded and the
@@ -2600,11 +2604,13 @@ Model-view reads and replacement-entry pages are not part of this contract.
   reply may carry `pause_reason`; it is not renamed to `reason`.
 - [pinned] A send behind a paused run MAY be queued, answering `pending`,
   or refused `run_paused`. Both conform.
-- [pinned] `delivered` (`Delivered`) is optional: `{as, ref?}`:
+- [pinned] `delivered` (`Delivered`) is optional: `{as, ref?, call_key?}`:
   - `as` is one of `step | turn | pending | unknown`, decoded open: an
     unknown string survives as itself and does not fail the decode;
   - `ref` is an opaque string: a stored row id, or the run id when `as` is
     `turn`;
+  - for a tool-result ride (§9.7), `call_key` names the carrying result and
+    `ref` names its stored row, not a new send entry;
   - it is set on a re-send of the same `send_id` once the steer is delivered
     or known `unknown`, and may be set on the first reply; on a `guaranteed`
     runner it may be absent until the steer is rendered;
@@ -2635,7 +2641,7 @@ Model-view reads and replacement-entry pages are not part of this contract.
 - [pinned] A re-send's `delivered` moves forward only: from absent or
   `pending` to `step`, `turn` or `unknown`. Those three are final: once one
   first appears, every later answer to the same `send_id` carries it
-  unchanged, `ref` included. Absent to `pending` is not a move on a
+  unchanged, `ref` and `call_key` included. Absent to `pending` is not a move on a
   `confirm` runner, where absent already means `pending`; a `guaranteed`
   runner never answers `pending` at all.
 - [pinned] Following a queued send. A send answered `pending` with a
@@ -3542,16 +3548,83 @@ say who may send and which texts are system text.
 
 **What is written.**
 
-- [pinned] A delivered send is a transcript entry of its own, carrying
-  `delivered_as: {mode, call_key?}` (`delivery_order::EntryDelivery`) in its
-  envelope (§4.2): the mode it went out in, and for `tool_result` the
-  `call_key` of the tool result it went out with. Readers and a resumed run
-  render from that entry. Once delivered, the stored entry's bytes, role and
+- [pinned] A send delivered in `tool_result` mode, a **ride**, is not a
+  transcript entry. The runner keeps a record of `{send_id, sender,
+  call_key, text}`, where `call_key` identifies the carrying tool result.
+  The record is durable before the first model request carrying it is
+  released. A runner owning its store may write it in the same durable
+  batch as the carrying result. The host's stored tool result never changes.
+  The send's receipt (`session.send_status`, §9.8) still names the carrying
+  `call_key`.
+  The runner also retains the send's ordered ride `forms` so later requests
+  and model switches can render from the durable record.
+- [pinned] At delivery, the runner picks a carrying result among results
+  about to be sent to the model for the first time and records its
+  `call_key`. It may skip a result it cannot extend with text, such as a
+  structured-only JSON result or a denied call. If all results are skipped,
+  the send stays queued. A runner may distribute rides among several
+  eligible results in one batch or put them all on the last eligible
+  result: that choice is made and recorded at delivery. Rendering never
+  chooses a carrier again; it reads the recorded `call_key`.
+- [pinned] Every other delivery (`steer`, `idle_start`, `interrupt`, a
+  standalone `turn_system`, and `queue`) remains a transcript entry of its
+  own, carrying `delivered_as: {mode, call_key?}`
+  (`delivery_order::EntryDelivery`) in its envelope (§4.2). Readers and a
+  resumed run render from that entry. Once delivered, its bytes, role and
   `delivered_as` never change. Provider rendering may change on a later
   route as the `turn_system` authority fall-through below specifies.
-- [pinned] `tool_result` never changes the stored tool result. The runner
-  records that send S was delivered with result R, and renders R followed
-  by S's text from that record, so a resume renders the same bytes.
+- [pinned] A ride's `forms` are the send's `delivery` list restricted to
+  `tool_result` and `turn_system`, in list order. Old rides without `forms`
+  use `[tool_result]`. At rendering, the first supported form wins:
+  `tool_result` is the append form, always supported; `turn_system` is a
+  turn-scoped system message right after the user turn carrying the tool
+  results, only under the existing provider-route, position and authority
+  rules below. Unsupported system form falls back to append. Admission
+  already restricts `turn_system` to templates passing the authority rule;
+  free-form filled-in text can never reach system authority. A ride whose
+  send did not list `turn_system` never renders as system text. This does
+  not change boundary delivery selection (`delivery_order::choose`).
+- [pinned] Per session and model, the runner decides once whether the route
+  supports system form and durably records that decision. Each ride takes
+  the first form in its own `forms` that this recorded decision and the
+  position rules allow. Thus mixed rides may use different forms, but each
+  ride renders the same bytes on every request while the session stays on
+  that model. For this decision, the provider route is part of the model's
+  identity: a route switch counts as a model switch and rebuilds the prompt.
+  A different route has its own prompt cache, so deciding forms again there
+  adds no extra rebuild. Standalone `turn_system` entries keep their separate
+  authority fall-through rules below unchanged.
+  Only a model switch, which already rebuilds the prompt, may
+  change the decision; every ride then re-renders under the new model's
+  decision. Old rides without `forms` always append. For rides recorded
+  under 0.8.9, append rendering and placement happen only through
+  `rides::append`: the carrying output, then for each ride in delivery order
+  exactly `"\n\n"` followed by its text. Runners never join ride text in
+  their own code. System form uses only the existing per-provider
+  `turn_system` rendering rules and `turn-system-rendering.json` vectors,
+  not a second wire shape.
+  For content lists, `rides::append_to_content` appends the joined bytes to
+  the last item if it is text; otherwise it pushes a new text item beginning
+  with `"\n\n"`. A single text value or error string is the one-text-item
+  case. Non-text items remain opaque and unchanged.
+  Adopting 0.8.9 never changes the bytes of a ride a model has already been
+  sent: a ride recorded before the runner adopted 0.8.9 keeps rendering
+  exactly as it did.
+- [pinned] Rides follow their carrying output. A ride renders only while
+  that tool-result part's output renders. If an applied compaction view
+  replaces or drops the output without naming the part's `delivered` list,
+  none of its rides render. If the view names `delivered`, its choice stands.
+- [pinned] A runner may discard a part's ride records only when the
+  session's applied compaction cut has passed the carrying part for at
+  least 24 hours and the applied view has no edit naming that part, not
+  merely no edit of its `delivered` list. Sessions without compaction never
+  discard ride records.
+  A discarded ride is no longer rendered or served.
+  Its `rides` display fact goes away too. Compaction W4.9 defines the narrow
+  read-projection/digest exception for such discarded records.
+- [pinned] Entries stored under the previous ride rule stay stored and are
+  never renumbered. Readers may hide those entries by
+  `delivered_as.mode == "tool_result"`.
 
 **Text and authority.**
 
@@ -3594,8 +3667,9 @@ say who may send and which texts are system text.
   answers `expired`. The sender recomposes on its next pass. Once a
   template send is delivered, its rendered text is stored byte for byte;
   later provider rendering follows the authority rules below.
-- [pinned] `tool_result`, `steer` and `idle_start` deliver at user
-  authority. `turn_system` is possible only for a rendered template, and
+- [pinned] `tool_result` append form, `steer` and `idle_start` deliver at user
+  authority. A ride's system form follows the same authority restrictions
+  as `turn_system`. `turn_system` is possible only for a rendered template, and
   only where the provider route and position support it under the rules
   below and the runner owns the request. Where it is not, the runner falls
   through to the next mode in the list, carrying the same rendered text at
@@ -3796,7 +3870,10 @@ say who may send and which texts are system text.
   complete prefix, including both trailing newline bytes, is counted by
   `header_bytes`; module ids are short ASCII so the count fits `u32`.
 - [pinned] On a non-template `session.send` whose sender entry requests the
-  header, decide at intake and record that decision durably. At storage time,
+  header, decide at intake and record that decision durably. The header
+  applies only to entry-producing delivery: a `tool_result` ride has no
+  stored message to prefix. Its record and read/display fact text stay
+  verbatim, with the attested sender carried separately. At storage time,
   prepend the header to the stored message's **first text part**, preserving
   its original text and every other part byte for byte. If no text part exists
   (such as a photo-only send), insert a text part containing only the header
@@ -3835,6 +3912,31 @@ say who may send and which texts are system text.
   the new fact still sees header-free display text. The apps that understand
   it show “via chat” rather than the trusted frame; they never cut raw text
   using an unverified byte count.
+
+### 9.7.2 `result_rides`: reader facts for rides
+
+- [pinned] A runner declaring `result_rides` also declares
+  `read_display_facts`, `history_display` and `live_events`. A declaration
+  missing one is refused by name: `result_rides_without_read_display_facts`,
+  `result_rides_without_history_display` or `result_rides_without_live_events`.
+- [pinned] On `session.read` with `include_display_facts: true`, and on
+  display rows, the message holding the carrying tool result serves
+  `rides: [{part: u32, send_id: string, sender: string, text: string}]`
+  beside its body, in delivery order. Default raw reads omit the fact.
+  `part` is the zero-based stored top-level content-part index, counted as
+  in `reasoning_summaries`, never a projected display index or opaque key.
+- [pinned] Delivery emits the live event
+  `ride_delivered {mid, part, call_key, send_id, sender}`, identifying the
+  carrying message and part, not a new entry. Neither delivery nor the fact
+  moves `history_version`. Neither the live event nor the read/display fact
+  is covered by any checksum; this does not exempt the compaction contract's
+  separate `Delivered` projection from W7. A fact may
+  first appear on a message a reader already holds; readers merge it without
+  replacing or renumbering that message. Discarded ride records (§9.7) are
+  no longer served.
+- [pinned] Existing transcript entries written for rides under the old rule
+  remain stored with their original ids and ordinals. Readers may hide them
+  by `delivered_as.mode == "tool_result"`; no migration rewrites history.
 
 ### 9.8 `send_status`: `session.send_status`
 
@@ -5224,6 +5326,8 @@ prefixes, with tool-provider 0.15.0's shared 64 KiB model-visible measure
 (`result::model_visible_bytes`, `legacy_model_visible_bytes`). The inclusive
 limit is 65,536 bytes. Select the measure by negotiated format, not JSON
 appearance; refusals count their message and late replies count their payload.
+Only the tool's own output is measured: rides (§9.7) never count toward this
+limit, whether rendered as appended text or as system messages.
 An oversized completed result becomes an error result (`tool_result_too_large`)
 carrying its measured `bytes` and `limit: 65536`. Its model-visible text says
 the tool ran, its output was discarded, and the call must not be repeated just

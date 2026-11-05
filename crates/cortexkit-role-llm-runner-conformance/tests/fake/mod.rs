@@ -73,6 +73,7 @@ mod live_ids;
 mod media;
 mod message_senders;
 mod output_refs;
+mod result_rides;
 mod rich_ui;
 mod service_tier;
 mod session_change;
@@ -170,6 +171,7 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub result_rides: Option<&'static str>,
     pub attribution: Option<&'static str>,
     pub routed_accounts_no_call: Option<&'static str>,
     pub head_selection: Option<&'static str>,
@@ -808,6 +810,7 @@ struct Killed;
 
 #[derive(Clone, Debug)]
 struct Msg {
+    rides: Vec<cortexkit_role_llm_runner::read::RideFact>,
     attribution: Option<String>,
     completed_at: Option<u64>,
     ordinal: u64,
@@ -1038,6 +1041,7 @@ impl Sess {
     fn push(&mut self, body: Value, run_id: &str, calls: Vec<String>) -> u64 {
         let ordinal = self.base + self.messages.len() as u64;
         self.messages.push(Msg {
+            rides: Vec::new(),
             attribution: None,
             completed_at: None,
             ordinal,
@@ -1793,6 +1797,7 @@ impl Module {
                     }
                 }
             }
+            "order_delivered" if result_rides::apply(sess, record, &self.world) => {}
             "order_delivered" => {
                 let id = text("id");
                 let Some(queued) = sess.ordered.get_mut(&id) else {
@@ -2453,6 +2458,7 @@ impl Module {
                 };
                 let mut observation =
                     observe_request(tools, frozen.as_ref()).with_rendered(rendered_texts(&sess));
+                result_rides::observe(&mut observation, &sess, &self.world.defects);
                 observation.max_output_tokens = output_cap;
                 self.tier_model_ingress(session, &mut observation);
                 self.world
@@ -4353,6 +4359,7 @@ impl Module {
                     || self.world.defects.read_display_facts == Some("default_leak")
                 {
                     entry.client_message_id = m.client_message_id.clone();
+                    entry.rides = result_rides::facts(m, &self.world.defects);
                     entry.attribution = attribution::fact(m, &self.world.defects);
                     entry.created_at = match self.world.defects.read_display_facts {
                         Some("creation_missing") => None,
@@ -5311,7 +5318,16 @@ fn ordered_reply(defects: &Defects, run_ops: bool, sess: &Sess, queued: &Queued)
             } else {
                 reply.with_run_id(&delivery.run_id)
             };
-            respond(reply.with_delivered(Delivered::new(delivery.r#as).with_ref(&delivery.r#ref)))
+            let mut delivered = Delivered::new(delivery.r#as).with_ref(&delivery.r#ref);
+            if let Some(message) = sess.messages.iter().find(|message| {
+                message
+                    .rides
+                    .iter()
+                    .any(|ride| ride.send_id == queued.send_id && ride.sender == queued.sender)
+            }) {
+                delivered.call_key = message.body["call_key"].as_str().map(str::to_owned);
+            }
+            respond(reply.with_delivered(delivered))
         }
         ("delivered", None) => respond(SendReply::new("finished")),
         (other, _) => respond(SendReply::new(other)),
@@ -6572,6 +6588,33 @@ impl LlmRunnerSubject for FakeSubject {
             .get(session)
             .cloned()
             .unwrap_or_default())
+    }
+
+    async fn result_rides_stored_output(
+        &self,
+        handle: &Self::Handle,
+        session: &str,
+        arguments: &Value,
+    ) -> Result<(String, u32, String, String), HarnessError> {
+        let sessions = handle.0.sessions.lock().unwrap();
+        let sess = &sessions[session];
+        let key = sess
+            .calls
+            .iter()
+            .find(|(_, call)| &call.arguments == arguments)
+            .map(|(key, _)| key)
+            .ok_or_else(|| HarnessError::new("native call missing"))?;
+        let message = sess
+            .messages
+            .iter()
+            .find(|message| message.host_body["call_key"] == *key)
+            .ok_or_else(|| HarnessError::new("native result missing"))?;
+        Ok((
+            message.mid.clone(),
+            0,
+            key.clone(),
+            result_text(&message.host_body["content"]),
+        ))
     }
 
     fn send_fields_with_plan(

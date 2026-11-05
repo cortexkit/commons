@@ -6,8 +6,14 @@ and view libraries share this contract without depending on an implementation.
 
 ```toml
 [dependencies]
-cortexkit-role-compaction = "0.2.4"
+cortexkit-role-compaction = "0.2.6"
 ```
+
+`Delivered` adds optional `send_id`, ordered `forms` and ride-text `tokens`
+without changing older omitted-field bytes. Counts follow the existing
+tokenizer-family rules and remain outside checksums. Shared ride rendering
+is available through `cortexkit_role_compaction::rides`; views suppress rides
+when replacing output unless they explicitly choose `delivered` (CONTRACT W6).
 
 See [CONTRACT.md](CONTRACT.md) for the protocol rules and
 [`test-vectors/compaction-v2`](test-vectors/compaction-v2) for wire examples.

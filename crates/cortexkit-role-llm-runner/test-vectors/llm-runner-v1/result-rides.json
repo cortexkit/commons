@@ -1,0 +1,16 @@
+{
+  "strings": [
+    {"name": "no rides", "output": "unchanged\n", "rides": [], "expected": "unchanged\n"},
+    {"name": "one ride", "output": "output", "rides": ["note"], "expected": "output\n\nnote"},
+    {"name": "two rides preserve bytes", "output": "output\n", "rides": [" first\n", "second ☃"], "expected": "output\n\n\n first\n\n\nsecond ☃"},
+    {"name": "empty ride still has separator", "output": "", "rides": [""], "expected": "\n\n"}
+  ],
+  "content": [
+    {"name": "one text item", "input": [{"text": "output"}], "rides": ["note"], "expected": [{"text": "output\n\nnote"}]},
+    {"name": "last text after image", "input": [{"image": "opaque-image"}, {"text": "caption"}], "rides": ["note"], "expected": [{"image": "opaque-image"}, {"text": "caption\n\nnote"}]},
+    {"name": "last image adds text item", "input": [{"text": "output"}, {"image": "opaque-image"}], "rides": ["note"], "expected": [{"text": "output"}, {"image": "opaque-image"}, {"text": "\n\nnote"}]},
+    {"name": "empty content adds text item", "input": [], "rides": ["note"], "expected": [{"text": "\n\nnote"}]},
+    {"name": "two rides one result", "input": [{"text": "output"}], "rides": ["first", "second"], "expected": [{"text": "output\n\nfirst\n\nsecond"}]},
+    {"name": "no rides adds nothing", "input": [], "rides": [], "expected": []}
+  ]
+}

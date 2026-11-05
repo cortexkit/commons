@@ -2,8 +2,8 @@ use cortexkit_role_compaction::{
     notice::{Conditions, Event, NoticeAnswer, NoticeRequest},
     ops,
     part::{
-        Attachment, AttachmentItem, Delivered, FileMedia, Opaque, Part, PartBody, Seal, ToolPart,
-        ToolStatus,
+        Attachment, AttachmentItem, Delivered, FileMedia, Opaque, Part, PartBody, RideForm, Seal,
+        ToolPart, ToolStatus,
     },
     read::{
         Cursor, Detail, Entry, Head, NoticeOrigin, ReadPage, ReadRequest, Role, Select, StepUsage,
@@ -501,6 +501,37 @@ fn samples() -> Vec<(&'static str, Value)> {
         "notice-token-counts-request.json",
         request(ops::COMPACTION_NOTICE, support::counted_notice()),
     ));
+    let delivered = Delivered::new("example-notifier", "An invented reminder.");
+    let ride_entry = |delivered| {
+        Entry::new(
+            1,
+            "ride-message",
+            Role::Assistant,
+            1000,
+            vec![Part::new(
+                "ride-part",
+                PartBody::Tool(
+                    ToolPart::new(
+                        "ride-call",
+                        "example-tool",
+                        json!({}),
+                        ToolStatus::Completed,
+                    )
+                    .with_output("An invented result.")
+                    .with_delivered(vec![delivered]),
+                ),
+            )],
+        )
+    };
+    let current = delivered
+        .clone()
+        .with_send_id("send-a")
+        .with_forms(vec![RideForm::TurnSystem, RideForm::ToolResult]);
+    samples.push(("delivered-rides.json", json!({
+        "legacy": ride_entry(delivered),
+        "current": ride_entry(current.clone()),
+        "counted": ride_entry(current.with_tokens(cortexkit_role_compaction::tokens::TokenCount::new(5))),
+    })));
     samples
 }
 
@@ -520,7 +551,27 @@ fn request_round_trip<T: DeserializeOwned + Serialize>(
 }
 
 fn check(name: &str, json: Value) {
-    if name.starts_with("image-") {
+    if name == "delivered-rides.json" {
+        for form in ["legacy", "current", "counted"] {
+            round_trip::<Entry>(json[form].clone());
+            let entry: Entry = serde_json::from_value(json[form].clone()).unwrap();
+            assert_eq!(
+                entry.digest,
+                cortexkit_role_compaction::read::entry_digest(
+                    entry.role,
+                    entry.notice.as_ref(),
+                    &entry.parts
+                )
+            );
+        }
+        assert!(json["legacy"]["parts"][0]["delivered"][0]
+            .get("send_id")
+            .is_none());
+        assert!(json["legacy"]["parts"][0]["delivered"][0]
+            .get("forms")
+            .is_none());
+        assert_eq!(json["current"]["digest"], json["counted"]["digest"]);
+    } else if name.starts_with("image-") {
         // These pairs specify the runner's refusal, not a wire decoding error:
         // edit validation is performed by the view library.
         let (method, params) =

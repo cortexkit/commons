@@ -1,5 +1,16 @@
 # cortexkit-role-llm-runner-conformance
 
+Version **0.17.11** pins `cortexkit-role-llm-runner =0.8.9`. The six
+`result_rides_*` cases are inapplicable without `result_rides`; they check
+entry-free delivery, unchanged host output, exact reader/display facts and
+live events, provider append bytes and the tool-result-only authority rule.
+Adapters implement `result_rides_stored_output` by reading native storage
+independently of runner reads, returning `(mid, part, call_key, output)`.
+They record actual provider texts in `ModelRequestObservation.rendered`
+and all system/developer texts in `system_text: Some(...)`. An unobserved
+authority list (`None`) cannot pass the authority check. These checks use
+held scripted tool calls, never inferred delivery or provider configuration.
+
 The `head_selection_*` cases check inherited plan tiers, explicit send-tier
 overrides, immediate head visibility, that the head choice stays unchanged
 when an unsupported model or tier is refused, and unchanged refreshes after

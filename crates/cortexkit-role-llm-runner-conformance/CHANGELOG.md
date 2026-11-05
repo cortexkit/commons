@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.11
+
+- Pin `cortexkit-role-llm-runner =0.8.9`. Add six `result_rides`-gated cases
+  for entry-free delivery, unchanged native stored output, reader/display
+  facts, live delivery events, exact provider append bytes and no system
+  authority for tool-result-only sends. Each has a faulty-runner control.
+- Add native-store ride inspection and provider system-text observations.
+  Existing delivery-order checks use ride receipts on runners declaring the
+  new group, while retaining legacy entry checks for older declarations.
+
 ## 0.17.10
 
 - Pin `cortexkit-role-llm-runner =0.8.8` and cover opt-in sender attribution:

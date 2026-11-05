@@ -267,13 +267,56 @@ pub struct Approval {
     pub reason: Option<String>,
 }
 
-/// Text a module sent with delivery `tool_result`, rendered after the tool
-/// result it rode on.
+/// A supported rendering form for a send delivered with a tool result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RideForm {
+    ToolResult,
+    TurnSystem,
+}
+
+fn ride_forms<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Vec<RideForm>>, D::Error> {
+    let forms = Option::<Vec<String>>::deserialize(deserializer)?;
+    Ok(forms.map(|forms| {
+        let mut known: Vec<_> = forms
+            .iter()
+            .filter_map(|form| match form.as_str() {
+                "tool_result" => Some(RideForm::ToolResult),
+                "turn_system" => Some(RideForm::TurnSystem),
+                _ => None,
+            })
+            .collect();
+        if known.is_empty() {
+            known.push(RideForm::ToolResult);
+        }
+        known
+    }))
+}
+
+/// Text a module sent with delivery `tool_result`, rendered alongside the
+/// tool result it rode on, never as its own transcript entry.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Delivered {
     /// The module that sent it.
     pub sender: String,
+    /// The send's id. Never backfilled on an entry already served.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_id: Option<String>,
+    /// The send's delivery list restricted to ride forms, in list order.
+    /// Absent means append only; unknown forms are skipped on decode.
+    #[serde(
+        default,
+        deserialize_with = "ride_forms",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub forms: Option<Vec<RideForm>>,
+    /// Ride-text count in the page or notice's tokenizer family (W4.11).
+    /// May arrive later; excluded from all checksums, as part counts are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<crate::tokens::TokenCount>,
     /// The plan template it was rendered from, when it was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template: Option<String>,
@@ -289,6 +332,9 @@ impl Delivered {
         let text = text.into();
         Self {
             sender: sender.into(),
+            send_id: None,
+            forms: None,
+            tokens: None,
             template: None,
             text_bytes: text.len() as u64,
             text: Some(text),
@@ -298,6 +344,33 @@ impl Delivered {
     pub fn with_template(mut self, template: impl Into<String>) -> Self {
         self.template = Some(template.into());
         self
+    }
+
+    pub fn with_send_id(mut self, send_id: impl Into<String>) -> Self {
+        self.send_id = Some(send_id.into());
+        self
+    }
+
+    pub fn with_tokens(mut self, tokens: crate::tokens::TokenCount) -> Self {
+        self.tokens = Some(tokens);
+        self
+    }
+
+    pub fn with_forms(mut self, forms: Vec<RideForm>) -> Self {
+        self.forms = Some(if forms.is_empty() {
+            vec![RideForm::ToolResult]
+        } else {
+            forms
+        });
+        self
+    }
+
+    /// Known forms in delivery order, with the safe append-only default.
+    pub fn forms(&self) -> &[RideForm] {
+        self.forms
+            .as_deref()
+            .filter(|forms| !forms.is_empty())
+            .unwrap_or(&[RideForm::ToolResult])
     }
 }
 
@@ -405,9 +478,9 @@ pub struct Opaque {
     pub size: Option<u64>,
 }
 
-/// Checksum of a part without its `id`, `tag`, `digest` and `tokens`: its seal (left
-/// out when `none`), kind and kind fields. Pass the full body: a compact body
-/// hashes to a different value.
+/// Checksum of a part without its `id`, `tag`, `digest`, part `tokens` or
+/// delivered-item `tokens`: its seal (left out when `none`), kind and kind
+/// fields. Pass the full body: a compact body hashes to a different value.
 pub fn body_digest(seal: Seal, body: &PartBody) -> String {
     #[derive(Serialize)]
     struct Digested<'a> {
@@ -416,7 +489,24 @@ pub fn body_digest(seal: Seal, body: &PartBody) -> String {
         #[serde(flatten)]
         body: &'a PartBody,
     }
-    crate::digest::checksum(&Digested { seal, body })
+    let mut value =
+        serde_json::to_value(Digested { seal, body }).expect("contract types always serialize");
+    strip_delivered_tokens(&mut value);
+    crate::digest::content_digest(&value)
+}
+
+/// Strip only known tool ride-count metadata, never opaque same-named fields.
+pub(crate) fn strip_delivered_tokens(part: &mut Value) {
+    if part["kind"] == "tool" {
+        for delivered in part
+            .get_mut("delivered")
+            .and_then(Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            delivered.as_object_mut().unwrap().remove("tokens");
+        }
+    }
 }
 
 impl ToolPart {

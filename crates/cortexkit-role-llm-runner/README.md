@@ -1,5 +1,13 @@
 # cortexkit-role-llm-runner
 
+Version **0.8.9** makes tool-result rides durable runner records, not
+transcript entries. `rides::append` and `rides::append_to_content` pin the
+exact shared append bytes and content-list placement. System-form rides use
+the existing template-authority and provider-position rules, with route
+support recorded per session/model. The opt-in `result_rides` group adds
+reader/display facts and `ride_delivered` events without changing history
+identity or checksums. See CONTRACT §9.7 for rendering, views and retention.
+
 The opt-in `head_selection` group accepts a strict `plan.model` selection for
 later runs (or the creating send's first run). `head_selection::check_plan`
 validates it using discovery plus a side-effect-free host route resolver;

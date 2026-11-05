@@ -246,7 +246,8 @@ pub struct Head {
 /// Checksum of an entry's role, notice origin (left out when absent) and
 /// parts, each part with its `id`, `tag` and `digest`, as [`Entry::digest`]
 /// carries it. The ordinal, `mid`, `written_at`, `completed_at`, usage and
-/// `generated_under`, reasoning counts and part `tokens` are not hashed.
+/// `generated_under`, reasoning counts, part `tokens` and delivered-item
+/// `tokens` are not hashed.
 /// Pass full parts: compact parts hash to a
 /// different value.
 pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -> String {
@@ -267,6 +268,7 @@ pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -
     // or other opaque content.
     for part in value["parts"].as_array_mut().unwrap() {
         part.as_object_mut().unwrap().remove("tokens");
+        crate::part::strip_delivered_tokens(part);
     }
     crate::digest::content_digest(&value)
 }

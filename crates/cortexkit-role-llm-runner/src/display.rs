@@ -90,6 +90,9 @@ pub struct DisplayRow {
     /// Verified relay header hidden from this row's text, for a "via chat" label.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution: Option<crate::attribution::Attribution>,
+    /// Rides on this row's tool results, in delivery order, outside checksums.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rides: Vec<crate::read::RideFact>,
     /// References captured when this message was stored, never added to its body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_refs: Option<crate::output_refs::Descriptor>,
@@ -147,6 +150,7 @@ impl DisplayRow {
         }));
         Self {
             attribution: None,
+            rides: Vec::new(),
             role: role.into(),
             output_refs: None,
             text,

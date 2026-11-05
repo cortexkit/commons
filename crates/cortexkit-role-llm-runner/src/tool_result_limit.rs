@@ -3,6 +3,8 @@
 //! use the same measure on their payload, not their late-result envelope.
 //! Tool-provider has no runner dependency, so importing its measure shares
 //! accounting without introducing a dependency cycle.
+//! The 64 KiB limit measures only the tool's own output, before ride rendering;
+//! ride text is never included in any of these size helpers.
 
 use cortexkit_role_tool_provider::result::{self, ContentPart, ToolResult};
 use serde::{Deserialize, Serialize};

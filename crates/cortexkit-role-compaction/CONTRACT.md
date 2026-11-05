@@ -204,6 +204,7 @@ Codes and what the caller does next:
 | `seal` | provider and runner | A sealed part: it may be dropped, never replaced (PR5). |
 | Tool `status` | provider and runner | `running`: never dropped, replaced or cut. |
 | Output format | provider and runner | `output` is never replaced; the whole part may still be dropped. |
+| `delivered.forms` item | provider and runner | Skip the unknown value; if no known form remains, use `tool_result`. |
 | Attachment item or file transport | provider and runner | Never interpreted or rewritten. An `attachments` edit keeps it by naming its id, or removes it by leaving the id out, as for a drop. |
 | Edit `op`, insert `at` or inserted message `role` | runner | The view is refused `unsupported_edit` (W6.5). |
 | `compaction_not_permitted` `detail.reason` | provider | The same as every defined reason: the provider suspends work for that session until a new Setup (W2.5). |
@@ -380,7 +381,7 @@ The field is absent while the entry is unfinished, including while a tool part i
 | `output_bytes` | integer, optional | The size of `output` in bytes, in both forms. Absent while running. |
 | `attachments` | array of `Attachment` | Files and opaque items the result carries besides its text; may be left out when empty. |
 | `approval` | object, optional | A provider-executed call's approval answer: `approved` (boolean) and `reason` (string, optional). |
-| `delivered` | array of `Delivered` | Text sent with delivery `tool_result` (A11) and rendered after this result, in delivery order; may be left out when empty. Each: `sender` (module id), `template` (string, optional), `text` (string; absent in compact form), `text_bytes` (integer). |
+| `delivered` | array of `Delivered` | Rides delivered with `tool_result`, in delivery order; may be left out when empty. Each: `sender` (module id), `template` (string, optional), `text` (string; absent in compact form), `text_bytes` (integer), `send_id` (string, optional), `forms` (array of `tool_result` and `turn_system`, optional), `tokens` (`{count}`, optional; W4.11). |
 | `tokens` | `{input, output}`, optional | Present only once the result exists; running tools omit it. Separate counts let the provider estimate the saving from replacing the tool's output, keeping the call/result structure (W4.11). |
 
 An `Attachment` is `id` (stable within its tool part) plus the fields of a `file` or an `opaque` item (W4.5), told apart by `kind`.
@@ -418,6 +419,33 @@ The prefix is the number between two section signs followed by one space: `§12�
 
 **W4.9 What may change.** A stored entry changes only when a tool part in it goes from `running` to a final status with its result (also when the host stores that result in a later message), or when a send is delivered with one of its results. The runner then sends the changed entry again in its next notice. Any other change to a stored entry is a transcript change (W5.2 `transcript_changed`).
 
+For rides delivered after adopting 0.2.6, the runner sets `send_id` and
+`forms`: the send's `delivery` list restricted to `tool_result` and
+`turn_system`, in list order. Both are omitted when absent, preserving older
+bytes and checksums. The runner never adds them to a delivered item it has
+already served: that would be a transcript change. Absent `forms` means
+`[tool_result]`. Each ride takes the first form its model route supports at
+that position, under llm-runner §9.7's recorded per-session/model route
+decision and existing template-authority and provider-position rules.
+Unsupported system form falls back to append; old rides always append.
+Rendering uses llm-runner's shared `rides` module, also re-exported by this
+crate. A ride's optional `tokens` follows W4.11's per-part count and family
+rules, including later arrival without a transcript change, and enters no
+checksum (W7).
+
+**Discarded rides: narrow content exception.** Only for tool parts in entries
+behind the session's applied cut, once that cut has passed the carrying part
+for at least 24 hours, and only when the applied view has no edit naming that
+part, the runner may discard ride records (W6.2). On later reads
+it omits the discarded `Delivered` items and recomputes the part's and its
+entry's digests. `history_version` does not move and no notice is sent. The
+part's `rides` display fact goes away too. A reader MUST NOT treat a digest
+change confined to such parts, in entries behind the applied cut, as
+`transcript_changed`. This is the only exception for removing served content
+under W4.9; every other content change remains a transcript change except
+the result/delivery updates already allowed above. Count and timing metadata
+keep their existing rules below.
+
 A stored entry may also gain a previously absent `completed_at`. That alone is not a transcript change: `completed_at` enters none of the W7 checksums, and adding it alone needs no notice. When the same update also changes a tool result or delivers a send, the rules above still apply and the notice carries the entry with its `completed_at`. A `completed_at` once served does not change.
 
 Count metadata updates alone (W4.11) are not entry changes, never divergence, and require no notice; they enter none of the W7 checksums. A changed count under the same family is an update, not a transcript change. If the same update includes a notice trigger, the runner sends the notice normally.
@@ -442,7 +470,7 @@ Count metadata updates alone (W4.11) are not entry changes, never divergence, an
 
 Provider options a host keeps on a part (cache control, citations) are the runner's: it renders them with the part as it is, and decides which stay valid for a replaced field.
 
-**W4.11 Optional token counts.** These additive fields require no new capability. A runner may send part `tokens` and assistant-entry `reasoning_tokens` in `session.entries` pages and notices, including compact parts. Reasoning parts have no per-part count. An absent count means the provider keeps its own estimate, never zero.
+**W4.11 Optional token counts.** These additive fields require no new capability. A runner may send part `tokens`, each `delivered` item's `tokens`, and assistant-entry `reasoning_tokens` in `session.entries` pages and notices, including compact parts. Reasoning parts have no per-part count. An absent count means the provider keeps its own estimate, never zero.
 
 **Coverage.** Part counts cover full content as the runner renders it to the model provider, without message framing, using that family's counter. They describe full content, not a view's rendering.
 
@@ -451,6 +479,7 @@ Provider options a host keeps on a part (cache control, citations) are the runne
 | Text `tokens.count` | Text including its tag prefix when the runner renders one. |
 | Tool `tokens.input` | Tool name plus arguments as rendered. |
 | Tool `tokens.output` | Everything in the result as rendered: text (including any tag prefix), delivered text and images by the reading model's image rule. |
+| Delivered `tokens.count` | The ride's `text`, using the same family and stability rules as per-part counts below. |
 | File `tokens.count` | The reading model's image rule; other media (audio, video, PDF) omit `tokens` unless the runner has a rule. |
 
 **Families.** Every page or notice carrying any of these counts MUST carry `token_family`. A session has one family at a time. The reader adopts the family named by each response in receipt order and MUST discard held counts of any other family. All counts added by this section in that response use its family. The family is a runner-assigned id for counting rules, not a model-name format (for example `claude-v5/1`); compare the whole string by equality only. It changes whenever the same input would count differently; the runner then recounts everything, for example on a model switch.
@@ -605,6 +634,20 @@ Used as llm-runner publishes them; this contract adds nothing. What a provider s
 | `insert` | `at`, `message` | Render a message the transcript does not hold, such as the history head. `at`: `"start"` (before the first rendered message) or `{"before": mid}` (immediately before that entry, even if it is dropped). `message`: `id` (unique in the view, kept the same while the message is unchanged), `role`, `texts` (array of strings), `images` (array of images; may be left out when empty). Each image has `media_type` (string, currently only `image/png`) and `data` (string, standard padded base64 of the bytes). Only a `user`-role inserted message may carry images, and a provider inserts them only when `accepts_images` is `true`. Inserted messages are never numbered. |
 | `cut` | `through` (mid) | Leave out every entry up to and including `through`: the entries the history head replaces. At most one per view. |
 
+Rides follow their carrying output. Replacing a tool part's `output` without
+an edit naming its `delivered` list suppresses all that part's rides; dropping
+the output suppresses them too. If the view names `delivered`, its choice
+stands. A ride otherwise renders only while its carrying output renders.
+
+The runner may discard a part's ride records only once the session's applied
+compaction cut has passed the carrying part for at least 24 hours and the
+applied view has no edit naming that part. Any surviving replace, including
+an output replace, retains its `expect` digest and therefore prevents
+discarding that part's rides. A session without
+compaction never discards ride records. A discarded ride is no longer
+rendered or served; providers can rely on records being retained until both
+conditions hold.
+
 **W6.3 The render plan.** The view library turns a view and the transcript into a render plan, and every runner renders from it (V9): for each entry, keep or leave out; for each kept part, keep, leave out, or replace a field with given bytes; the inserted messages and where each goes; and each kept part's number, with whether its prefix is rendered. Rules: inserts at the start come first, in edit order; each entry follows in transcript order, preceded by the inserts anchored before it; a dropped or cut entry is left out; dropped parts are left out; an entry left with no parts is not rendered; numbered text gets its prefix (W4.7), except text a `replace` wrote, which is final. The runner applies the plan to its host messages, so everything the plan keeps goes out byte-identical. The plan is available from the Rust library, from its WebAssembly build, and as JSON test vectors.
 
 **W6.4 Numbers and views.** No edit changes a number. The runner counts from the transcript (A3), not from what it renders: inserted messages are not entries and are never counted, a dropped part keeps its number unused (a gap, unless a `replace` writes a placeholder showing it instead), a replaced part keeps its number, and a cut only hides the oldest numbers. What the model sees may therefore have gaps and start above 1. If a view leaves out the newest number (for example by dropping the newest result to fit the usable window) and the model then writes a lower number, the runner replaces it with the assigned number (T7).
@@ -652,7 +695,7 @@ Every checksum is the lowercase hex SHA-256 of the value's RFC 8785 (JCS) serial
 | View `checksum` | `{"version", "edits"}`, including inserted images and their base64 data. Empty `images` arrays hash as absent (W1.6). |
 
 Entry timing metadata (`written_at` and `completed_at`) enters none of these checksums.
-Count metadata (`tokens`, assistant-entry `reasoning_tokens`, condition `system_tokens` and `tools_tokens`), `token_family` and `token_family_exact` also enter none of these checksums. `tokens` is reserved in the Part envelope even for unknown kinds; the remaining unknown-kind payload is preserved under W1.5. Opaque payload fields with the same names are content, not count metadata, and remain in checksums.
+Count metadata (`tokens`, including each `delivered` item's count, assistant-entry `reasoning_tokens`, condition `system_tokens` and `tools_tokens`), `token_family` and `token_family_exact` also enter none of these checksums. `tokens` is reserved in the Part envelope even for unknown kinds; the remaining unknown-kind payload is preserved under W1.5. Opaque payload fields with the same names are content, not count metadata, and remain in checksums.
 
 # Open points
 

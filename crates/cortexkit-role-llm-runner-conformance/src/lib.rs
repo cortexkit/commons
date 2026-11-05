@@ -45,6 +45,7 @@ pub mod progress;
 mod read_contract;
 mod read_display_facts;
 mod report;
+mod result_rides;
 mod retention;
 pub mod rich_ui_stamp;
 mod route;

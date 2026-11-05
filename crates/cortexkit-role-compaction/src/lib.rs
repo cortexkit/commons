@@ -34,6 +34,8 @@
 
 #![forbid(unsafe_code)]
 
+pub use cortexkit_role_llm_runner::rides;
+
 #[macro_use]
 mod open;
 

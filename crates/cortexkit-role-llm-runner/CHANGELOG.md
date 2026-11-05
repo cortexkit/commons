@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.9
+
+- Tool-result rides are durable runner records, not transcript entries. Pin
+  exact append bytes, list placement, per-model route-support decisions,
+  template-only system authority, output-following views and safe pruning.
+  Existing ride entries remain stored; tool-result size limits exclude rides.
+- Add the dependency-free `rides` helpers and byte vectors, plus the optional
+  `result_rides` group with named prerequisites, `rides` reader/display facts
+  and `ride_delivered` live events. Facts and events never rewrite history or
+  enter checksums. Ride receipts name the carrying `call_key`.
+
 ## Unreleased
 
 - Contract §4.2.2: an assistant reply whose producing request carried a
