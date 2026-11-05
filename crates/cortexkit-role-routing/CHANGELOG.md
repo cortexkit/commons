@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Contract text only (§8): a decision owner's report `usage`, when sent, is
+  the only per-decision token and timing total, so token profiles are built
+  from it, and a decision without it is unrecorded, not zero. Token totals
+  never establish exhaustion or resets. Runners' live step hints may feed a
+  router's own statistics where a missed hint only lowers precision, but
+  never replace report usage.
+
 ## 0.7.0
 
 - Breaking: `route.account_observe`'s `upstream_origin` and

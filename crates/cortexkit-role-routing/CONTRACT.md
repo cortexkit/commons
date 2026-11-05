@@ -813,6 +813,25 @@ pool?, eligibility?, request_input_tokens?, refusal_class?}`.
   from its own catalog. An unknown member is refused as
   `invalid_request {field: "usage"}`. `usage` is part of the report body for
   idempotency: a repeat with different usage is a different report.
+- [pinned] Where a router's usage comes from. A decision owner's report
+  `usage`, when it sends one, is the only per-decision token and timing total
+  this contract gives a router. Statistics meant to cover every run, such as
+  per-task or per-workload token profiles, are built from it. A decision with
+  no report, or a report without `usage`, is unrecorded, never zero. This
+  contract doesn't oblige a decision owner to report usage.
+- [pinned] Token totals never establish that an account is exhausted or when
+  it resets. That evidence comes from account observations (§9.2), the
+  router's own provider readings, and this section's report members: an
+  exhaustion `runner_code`, `refusal_class`, and `reset_at_ms`.
+- [pinned] A router may also read the live step hints of runners that
+  declare `step_events` (`cortexkit-role-llm-runner` §14.3). A hint may carry
+  `route_decision_id` and the model call's content timings, each only when
+  the runner knows it. Hints aren't stored or replayed on the bus, so a router
+  that isn't listening never receives the ones it missed, and this contract
+  gives it no other read of them. A router therefore uses hints only for its
+  own statistics where missing some hints lowers precision without making a
+  result wrong, such as a speed estimate, and never in place of report usage.
+  This contract defines no speed estimate and no use of one in selection.
 - [pinned] A report with `outcome: failed` and a future `reset_at_ms` fences
   only that decision's route on that decision's account until the reset:
   never the whole provider, never other accounts, never other routes. A
