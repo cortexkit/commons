@@ -1,0 +1,265 @@
+{
+  "group": "observe_backoff",
+  "requests": [
+    {
+      "name": "backoff",
+      "params": {
+        "event_id": "event-1",
+        "kind": "transient_backoff",
+        "admission_id": "admission-1",
+        "decision_id": "decision-1",
+        "retry_at_ms": 1767225900000,
+        "provider_code": "busy"
+      }
+    },
+    {
+      "name": "wall_retry",
+      "params": {
+        "event_id": "event-1",
+        "kind": "account_limit_exhausted",
+        "admission_id": "admission-1",
+        "decision_id": "decision-1",
+        "retry_at_ms": 1767225900000,
+        "provider_code": "busy"
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "retry_required",
+      "params": {
+        "event_id": "event-1",
+        "kind": "transient_backoff",
+        "admission_id": "admission-1"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "retry_at_ms"
+        }
+      }
+    },
+    {
+      "name": "account_required",
+      "params": {
+        "event_id": "event-1",
+        "kind": "transient_backoff",
+        "retry_at_ms": 1
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "admission_id"
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "accepted",
+      "answer": {
+        "observation": {
+          "id": "observation-1",
+          "duplicate": false,
+          "bound": true,
+          "effects": []
+        }
+      }
+    }
+  ],
+  "requests_without_group": [
+    {
+      "name": "legacy",
+      "params": {
+        "event_id": "event-1",
+        "kind": "attempt"
+      }
+    }
+  ],
+  "answers_without_group": [
+    {
+      "name": "legacy",
+      "answer": {
+        "observation": {
+          "id": "observation-1",
+          "duplicate": false,
+          "bound": true,
+          "effects": []
+        }
+      }
+    }
+  ],
+  "refused_without_group": [
+    {
+      "name": "undeclared_decision_id",
+      "params": {
+        "event_id": "event-1",
+        "kind": "attempt",
+        "decision_id": "decision-1"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "decision_id"
+        }
+      }
+    },
+    {
+      "name": "undeclared_retry_at_ms",
+      "params": {
+        "event_id": "event-1",
+        "kind": "attempt",
+        "retry_at_ms": 1767225900000
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "retry_at_ms"
+        }
+      }
+    },
+    {
+      "name": "undeclared_provider_code",
+      "params": {
+        "event_id": "event-1",
+        "kind": "attempt",
+        "provider_code": "busy"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "provider_code"
+        }
+      }
+    }
+  ],
+  "unknown": [
+    {
+      "name": "future_kind",
+      "type": "ObserveKind",
+      "value": "future_kind"
+    }
+  ],
+  "without_group": [
+    {
+      "name": "new_kind_is_advisory",
+      "params": {
+        "event_id": "event-1",
+        "kind": "transient_backoff"
+      }
+    }
+  ],
+  "authorization": [
+    {
+      "name": "owner_wall",
+      "arm": "owner",
+      "params": {
+        "event_id": "event-1",
+        "kind": "transient_backoff",
+        "admission_id": "admission-1",
+        "decision_id": "decision-1",
+        "retry_at_ms": 1767225900000,
+        "provider_code": "busy"
+      },
+      "allowed": true,
+      "decision_id": "decision-1",
+      "admission_id": "admission-1",
+      "carried": "decision-1"
+    },
+    {
+      "name": "owner_cannot_release",
+      "arm": "owner",
+      "params": {
+        "event_id": "event-1",
+        "kind": "run_finished",
+        "admission_id": "admission-1",
+        "decision_id": "decision-1",
+        "provider_code": "busy"
+      },
+      "allowed": false,
+      "decision_id": "decision-1",
+      "admission_id": "admission-1",
+      "carried": "decision-1"
+    },
+    {
+      "name": "wrong_carried",
+      "arm": "owner",
+      "params": {
+        "event_id": "event-1",
+        "kind": "transient_backoff",
+        "admission_id": "admission-1",
+        "decision_id": "decision-1",
+        "retry_at_ms": 1767225900000,
+        "provider_code": "busy"
+      },
+      "allowed": false,
+      "decision_id": "decision-1",
+      "admission_id": "admission-1",
+      "carried": "other"
+    },
+    {
+      "name": "wrong_admission",
+      "arm": "owner",
+      "params": {
+        "event_id": "event-1",
+        "kind": "transient_backoff",
+        "admission_id": "other",
+        "decision_id": "decision-1",
+        "retry_at_ms": 1767225900000,
+        "provider_code": "busy"
+      },
+      "allowed": false,
+      "decision_id": "decision-1",
+      "admission_id": "admission-1",
+      "carried": "decision-1"
+    },
+    {
+      "name": "foreign_nonrunner",
+      "arm": "other",
+      "params": {
+        "event_id": "event-1",
+        "kind": "transient_backoff",
+        "admission_id": "admission-1",
+        "decision_id": "decision-1",
+        "retry_at_ms": 1767225900000,
+        "provider_code": "busy"
+      },
+      "allowed": false
+    },
+    {
+      "name": "runner_foreign_decision",
+      "arm": "runner",
+      "params": {
+        "event_id": "event-1",
+        "kind": "transient_backoff",
+        "admission_id": "admission-1",
+        "decision_id": "foreign",
+        "retry_at_ms": 1767225900000,
+        "provider_code": "busy"
+      },
+      "allowed": true
+    },
+    {
+      "name": "runner_continue_release",
+      "arm": "runner",
+      "params": {
+        "event_id": "event-1",
+        "kind": "run_finished",
+        "admission_id": "admission-1",
+        "decision_id": "offer-1",
+        "provider_code": "busy"
+      },
+      "allowed": true
+    }
+  ],
+  "refusals": [
+    {
+      "name": "not_authorized",
+      "body": {
+        "code": "account_not_authorized",
+        "message": "The request cannot be served.",
+        "detail": {}
+      }
+    }
+  ]
+}

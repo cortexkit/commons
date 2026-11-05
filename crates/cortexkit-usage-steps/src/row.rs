@@ -40,6 +40,9 @@ pub struct StepRow {
     /// Runner steps only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    /// The run's routing decision, absent when the run had none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_decision_id: Option<String>,
     /// Unix milliseconds. Steps without a time are not in the feed.
     pub occurred_at_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,6 +94,16 @@ pub struct StepRow {
     /// Request body length in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_body_len: Option<u64>,
+    /// Milliseconds from sending the model request to its last content.
+    /// Zero is measured; absent means unknown. The send belongs to the recorded
+    /// attempt, or the last attempt when the row covers a completed step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_to_last_content_ms: Option<u64>,
+    /// Milliseconds from the first to the last content of the same model call.
+    /// Zero is measured; absent means unknown. When both times are present,
+    /// this cannot exceed `sent_to_last_content_ms` (see [`Self::check_counts`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_to_last_content_ms: Option<u64>,
     /// Input plus cache read plus cache write.
     pub prompt: u64,
     /// This step's cache read divided by the expected cache read: a
@@ -106,8 +119,8 @@ pub struct StepRow {
     pub request_size: Option<RequestSize>,
 }
 
-/// A row whose counts break a contract rule. Readers still decode such a row;
-/// this is for the provider's own tests.
+/// A row whose counts or timings break a contract rule. Readers still decode
+/// such a row; this is for the provider's own tests.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum BadCounts {
@@ -117,6 +130,14 @@ pub enum BadCounts {
         step_ref: String,
         reasoning: u64,
         output: u64,
+    },
+    /// First-to-last content exceeds send-to-last content, which cannot happen
+    /// within one model call: the first content comes after the request is sent.
+    FirstToLastContentExceedsSentToLastContent {
+        harness: String,
+        step_ref: String,
+        first_to_last_content_ms: u64,
+        sent_to_last_content_ms: u64,
     },
 }
 
@@ -131,6 +152,15 @@ impl std::fmt::Display for BadCounts {
             } => write!(
                 f,
                 "row {harness} {step_ref}: reasoning {reasoning} exceeds output {output}"
+            ),
+            Self::FirstToLastContentExceedsSentToLastContent {
+                harness,
+                step_ref,
+                first_to_last_content_ms,
+                sent_to_last_content_ms,
+            } => write!(
+                f,
+                "row {harness} {step_ref}: first_to_last_content_ms {first_to_last_content_ms} exceeds sent_to_last_content_ms {sent_to_last_content_ms}"
             ),
         }
     }
@@ -250,6 +280,7 @@ impl StepRow {
     /// Members omitted when unknown.
     pub const OPTIONAL_MEMBERS: &'static [&'static str] = &[
         "run_id",
+        "route_decision_id",
         "provider",
         "model",
         "service_tier_applied",
@@ -264,6 +295,8 @@ impl StepRow {
         "finish",
         "context_limit",
         "request_body_len",
+        "sent_to_last_content_ms",
+        "first_to_last_content_ms",
         "retention",
         "request_size",
     ];
@@ -288,6 +321,7 @@ impl StepRow {
             step_ref: step_ref.into(),
             session: session.into(),
             run_id: None,
+            route_decision_id: None,
             occurred_at_ms,
             provider: None,
             model: None,
@@ -303,6 +337,8 @@ impl StepRow {
             finish: None,
             context_limit: None,
             request_body_len: None,
+            sent_to_last_content_ms: None,
+            first_to_last_content_ms: None,
             prompt,
             retention: None,
             verdict,
@@ -338,18 +374,32 @@ impl StepRow {
         Ok(())
     }
 
-    /// Reports a row whose `reasoning` exceeds its `output`, naming it by
-    /// identity. `reasoning` is a breakdown inside `output`, so a row with
-    /// both must have `reasoning <= output`. For the provider's own tests,
-    /// like [`StepRow::check_closed`]; readers still decode such a row.
+    /// Reports a row whose reasoning or content duration exceeds its enclosing
+    /// total, naming it by identity. When both members are present,
+    /// `reasoning <= output` and
+    /// `first_to_last_content_ms <= sent_to_last_content_ms` must hold.
+    /// For the provider's own tests, like [`StepRow::check_closed`]; readers
+    /// still decode such a row.
     pub fn check_counts(&self) -> Result<(), BadCounts> {
-        match (self.reasoning, self.output) {
-            (Some(reasoning), Some(output)) if reasoning > output => {
-                Err(BadCounts::ReasoningExceedsOutput {
+        if let (Some(reasoning), Some(output)) = (self.reasoning, self.output) {
+            if reasoning > output {
+                return Err(BadCounts::ReasoningExceedsOutput {
                     harness: self.harness.clone(),
                     step_ref: self.step_ref.clone(),
                     reasoning,
                     output,
+                });
+            }
+        }
+        match (self.first_to_last_content_ms, self.sent_to_last_content_ms) {
+            (Some(first_to_last_content_ms), Some(sent_to_last_content_ms))
+                if first_to_last_content_ms > sent_to_last_content_ms =>
+            {
+                Err(BadCounts::FirstToLastContentExceedsSentToLastContent {
+                    harness: self.harness.clone(),
+                    step_ref: self.step_ref.clone(),
+                    first_to_last_content_ms,
+                    sent_to_last_content_ms,
                 })
             }
             _ => Ok(()),

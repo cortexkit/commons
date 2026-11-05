@@ -143,6 +143,16 @@ pub struct StepFinished {
     pub context_limit: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finish_reason: Option<String>,
+    /// Milliseconds from the recorded attempt's send to its last content, or
+    /// from the last attempt's send under per-completed-step granularity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sent_to_last_content_ms: Option<u64>,
+    /// Milliseconds from first to last content. Absent is unknown, not zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_to_last_content_ms: Option<u64>,
+    /// The run's routing decision (§9.3.3), absent when the run had none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_decision_id: Option<String>,
     pub started_at_ms: u64,
     pub finished_at_ms: u64,
 }
@@ -194,6 +204,9 @@ impl StepFinished {
             request_body_bytes: None,
             context_limit: None,
             finish_reason: None,
+            sent_to_last_content_ms: None,
+            first_to_last_content_ms: None,
+            route_decision_id: None,
         }
     }
 
@@ -226,9 +239,11 @@ impl StepFinished {
         self
     }
 
-    /// Check producer-side identity requirements before publication. Uniqueness
-    /// and equality with the durable record must be enforced by the runner.
-    pub fn check(&self) -> Result<(), &'static str> {
+    /// Check only the identity rules, which a reader applies when decoding.
+    /// A reader doesn't apply the timing rule: it keeps an event whose
+    /// timings break the producer's ordering rule, so a measurement fault
+    /// never drops the step's usage.
+    fn check_identity(&self) -> Result<(), &'static str> {
         if self
             .attempt_id
             .as_deref()
@@ -236,6 +251,22 @@ impl StepFinished {
             || (self.attempt_id.is_none() && self.harness_step_ref.is_none())
         {
             return Err("attempt_id");
+        }
+        Ok(())
+    }
+
+    /// Check the producer-side identity rules and timing containment before
+    /// publication: `first_to_last_content_ms` must not exceed
+    /// `sent_to_last_content_ms` when both are present. Uniqueness and
+    /// equality with the durable record are the runner's to enforce.
+    pub fn check(&self) -> Result<(), &'static str> {
+        self.check_identity()?;
+        if let (Some(sent), Some(first)) =
+            (self.sent_to_last_content_ms, self.first_to_last_content_ms)
+        {
+            if first > sent {
+                return Err("first_to_last_content_ms");
+            }
         }
         Ok(())
     }
@@ -269,6 +300,18 @@ impl StepFinished {
     }
     pub fn with_finish_reason(mut self, value: impl Into<String>) -> Self {
         self.finish_reason = Some(value.into());
+        self
+    }
+    pub fn with_sent_to_last_content_ms(mut self, value: u64) -> Self {
+        self.sent_to_last_content_ms = Some(value);
+        self
+    }
+    pub fn with_first_to_last_content_ms(mut self, value: u64) -> Self {
+        self.first_to_last_content_ms = Some(value);
+        self
+    }
+    pub fn with_route_decision_id(mut self, value: impl Into<String>) -> Self {
+        self.route_decision_id = Some(value.into());
         self
     }
 }
@@ -340,7 +383,9 @@ pub fn decode_step_finished(
         _ => return Err(StepEventDecodeError::InvalidSubject),
     };
     let event: StepFinished = serde_json::from_slice(body).map_err(StepEventDecodeError::Body)?;
-    event.check().map_err(StepEventDecodeError::InvalidField)?;
+    event
+        .check_identity()
+        .map_err(StepEventDecodeError::InvalidField)?;
     if event.runner != publisher {
         return Err(StepEventDecodeError::PublisherMismatch {
             publisher: publisher.into(),

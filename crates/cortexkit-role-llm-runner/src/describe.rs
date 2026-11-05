@@ -61,6 +61,13 @@ pub mod problem_names {
     pub const STEP_EVENTS_MISSING: &str = "step_events_missing";
     pub const STEP_EVENTS_UNDECLARED: &str = "step_events_undeclared";
     pub const INVALID_STEP_EVENTS: &str = "invalid_step_events";
+    pub const ROUTED_ACCOUNTS_MISSING: &str = "routed_accounts_missing";
+    pub const ROUTED_ACCOUNTS_UNDECLARED: &str = "routed_accounts_undeclared";
+    pub const INVALID_ROUTED_ACCOUNTS: &str = "invalid_routed_accounts";
+    pub const ROUTED_ACCOUNTS_EMPTY: &str = "routed_accounts_empty";
+    pub const ROUTED_ACCOUNTS_TOO_MANY: &str = "routed_accounts_too_many";
+    pub const ROUTED_ACCOUNTS_INVALID_AUTH_METHOD: &str = "routed_accounts_invalid_auth_method";
+    pub const ROUTED_ACCOUNTS_DUPLICATE: &str = "routed_accounts_duplicate";
     /// The answer declares `call_identity` with neither `history_display` nor
     /// `live_events`, the two surfaces whose tool-call entries it extends.
     pub const CALL_IDENTITY_WITHOUT_DISPLAY: &str = "call_identity_without_display";
@@ -128,6 +135,10 @@ pub struct RoleDescribe {
     /// Publication granularity and durable-history join for `step_events`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step_events: Option<crate::step_events::StepEvents>,
+    /// Sign-in methods whose accounts the runner routes itself. Required with
+    /// the `routed_accounts` capability; checked by [`check_routed_accounts`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routed_accounts: Option<Vec<String>>,
     /// Kinds this runner may prune in archived sessions at rest.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive_prunes_reasoning: Option<crate::archive_prunes_reasoning::ArchivePrunesReasoning>,
@@ -356,6 +367,12 @@ impl RoleDescribe {
         self
     }
 
+    /// List routed sign-in methods (the capability must also be listed).
+    pub fn with_routed_accounts(mut self, methods: Vec<String>) -> Self {
+        self.routed_accounts = Some(methods);
+        self
+    }
+
     /// Say where session-level capabilities come from.
     pub fn with_session_capabilities_from(mut self, source: impl Into<String>) -> Self {
         self.session_capabilities_from = Some(source.into());
@@ -432,6 +449,36 @@ impl Major {
     }
 }
 
+/// Validate 1–64 distinct routing auth-method tokens without a routing dependency.
+/// Tokens use `^[a-z][a-z0-9._-]{0,63}$`. This checks shape only: a
+/// token-shaped spelling missing from routing's `auth_method` table passes
+/// here, but routing uses no method until its table names it.
+pub fn check_routed_accounts(methods: &[String]) -> Result<(), &'static str> {
+    if methods.is_empty() {
+        return Err(problem_names::ROUTED_ACCOUNTS_EMPTY);
+    }
+    if methods.len() > 64 {
+        return Err(problem_names::ROUTED_ACCOUNTS_TOO_MANY);
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for method in methods {
+        if !(1..=64).contains(&method.len())
+            || !method.as_bytes()[0].is_ascii_lowercase()
+            || !method.bytes().all(|byte| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || matches!(byte, b'.' | b'_' | b'-')
+            })
+        {
+            return Err(problem_names::ROUTED_ACCOUNTS_INVALID_AUTH_METHOD);
+        }
+        if !seen.insert(method.as_str()) {
+            return Err(problem_names::ROUTED_ACCOUNTS_DUPLICATE);
+        }
+    }
+    Ok(())
+}
+
 /// Why a `role.describe` answer does not describe a usable `llm-runner/v1`
 /// module.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -491,11 +538,35 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             )]);
         }
     }
+    if let Some(methods) = raw.get("routed_accounts").filter(|value| !value.is_null()) {
+        if serde_json::from_value::<Vec<String>>(methods.clone()).is_err() {
+            return Err(vec![DescribeProblem::Undecodable(
+                problem_names::INVALID_ROUTED_ACCOUNTS.into(),
+            )]);
+        }
+    }
     let describe: RoleDescribe = match serde_json::from_value(raw.clone()) {
         Ok(describe) => describe,
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    match (
+        describe.declares(capabilities::ROUTED_ACCOUNTS),
+        &describe.routed_accounts,
+    ) {
+        (true, None) => problems.push(DescribeProblem::Undecodable(
+            problem_names::ROUTED_ACCOUNTS_MISSING.into(),
+        )),
+        (false, Some(_)) => problems.push(DescribeProblem::Undecodable(
+            problem_names::ROUTED_ACCOUNTS_UNDECLARED.into(),
+        )),
+        (_, Some(methods)) => {
+            if let Err(reason) = check_routed_accounts(methods) {
+                problems.push(DescribeProblem::Undecodable(reason.into()));
+            }
+        }
+        _ => {}
+    }
     if describe.declares(capabilities::SERVICE_TIER) && describe.service_tiers.is_none() {
         problems.push(DescribeProblem::Undecodable("service_tiers_missing".into()));
     }

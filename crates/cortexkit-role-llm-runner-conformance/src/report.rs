@@ -129,6 +129,8 @@ pub const CASES: &[CaseSpec] = &[
     case("incarnation_on_every_page", READS, "head and every read/history page carry the required record identity"),
     case("read_below_host_marker", READS, "native markers hide nothing from full-path reads; inapplicable without a native marker hook"),
     case("route_decision_id_fixed_per_run", &[Queue, Steer, TranscriptReads], "a joining send cannot change route_decision_id and is refused by name"),
+    case("routed_accounts_follows_account_choice", &[Capability::RoutedAccounts], "a runner listing routed sign-in methods declares follows_account_choice: true in its routing runner slot"),
+    case("routed_accounts_account_for", &[Capability::RoutedAccounts, Queue, TranscriptReads], "each listed sign-in method admits an account through route.account_for for a completed scripted run"),
     case("send_status_both_names", &[Capability::SendStatus], "session.send_status and the send.status alias both answer unknown_send rather than unknown_method"),
     case("finish_reason_last_model_step", &[Capability::FinishReason, Queue, RunOps], "result and ended status report the normalized reason of the last model step, not an earlier tool step"),
     case("finish_reason_output_cap", &[Capability::FinishReason, Capability::MaxOutputTokens, Capability::RunUsage, Queue, RunOps], "a response actually cut at the received max_output_tokens reports length, never stop"),
@@ -858,6 +860,7 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
+    "routed_accounts checks follows_account_choice and an account_for admission for every listed method; automatic renewal, release timing, auth.pool/credential forwarding and which secret reached the provider are not checked by the live cases",
     "Compaction protocol, tag numbering and fork detection are outside this kit; retained template/output-reference fixtures consume the adapter's captured part-number mapping",
     "per_step_cost_scales_with_new_messages measures wall time over the real route, which includes writing the model request; the two sessions keep the same window, so that part is equal on both sides. Memory is not measured",
     "the display cases read rows of a session whose tool results are not errors, because a scripted tool result cannot be made an error result; error_result_bytes is checked against each profile's vectors, and live only as a bound that cuts nothing",

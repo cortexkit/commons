@@ -215,11 +215,14 @@ fn published_member_lists_match_what_the_row_encodes() {
     let full: StepRow = serde_json::from_str(&read("read/row-every-member.json")).unwrap();
     // Keep the published legacy-byte fixture unchanged while exercising every
     // current optional member in the schema completeness check.
-    let full = full
+    let mut full = full
         .with_service_tier_applied(
             cortexkit_role_llm_runner::service_tier::ServiceTier::Fast.as_str(),
         )
         .with_service_tier_served("fast");
+    full.route_decision_id = Some("decision_ex".to_owned());
+    full.sent_to_last_content_ms = Some(500);
+    full.first_to_last_content_ms = Some(400);
     assert_eq!(keys(&serde_json::to_value(&full).unwrap()), every);
 
     let mut required: Vec<String> = StepRow::REQUIRED_MEMBERS

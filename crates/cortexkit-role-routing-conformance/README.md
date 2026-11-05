@@ -5,7 +5,7 @@ available tier, ordered fallback with the chosen tier recorded, and a caller
 that omits tiers for a non-declaring router. The cases use the existing
 `configure_service_tiers` plan fixture hook; for an unsupported fixture the
 report marks each affected case `NotApplicable` with its name and reason,
-never passed. This release pins routing 0.6.0, whose account answer
+never passed. This release pins routing 0.7.0 exactly, whose account answer
 and pin use constructors instead of exhaustive Rust struct literals.
 
 The conformance kit for the `routing/v1` role
@@ -16,7 +16,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.8.1"
+cortexkit-role-routing-conformance = "0.10.0"
 ```
 
 ```rust,ignore
@@ -44,7 +44,7 @@ assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
   - `configure_consumers(consumers)`: exactly these consumer ids, each with
     its `priced_only` and operator `requirements` (`OperatorRequirements`
     includes optional `iq` and the other demand fields in `defaults`);
-  - `configure_catalog(catalog)`: exactly these models (with their ability,
+  - `configure_catalog(catalog)`: exactly these models (with their family, ability,
     limits, tool calls, modalities, structured output and pricing), runners
     (the route keys each runs, the tool providers it reaches with the
      tool capability tags each serves, and the runner's declared `harnesses`,
@@ -63,9 +63,9 @@ assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
 
 A provider that declares `select_hold_control` in `role.describe` also
 supplies these hooks for the hold checks. `block_account` is additionally
-required by `account_continue`, even without `select_hold_control`.
+required by `account_continue` and `account_status`, even without `select_hold_control`.
 The default hooks return an unsupported error, which fails the checks that
-need them; providers declaring neither group are never asked for these hooks.
+need them; providers declaring none of those groups are never asked for these hooks.
 
   - `configure_consumer_mode(consumer, mode)`: route the consumer by
     `ConsumerMode::Demand` or by `ConsumerMode::Ladder { entries }`, route
@@ -95,7 +95,62 @@ which `iq` 100 is always met. Every fixture model has the same `iq`, and every
 of them under either reading; a check that needs a request nothing meets
 raises a `context_window` or `max_output_tokens` floor instead.
 
+Routers declaring `select_panel` implement
+`configure_panel_class(class, size, top, extra)`. Configure the class's quality
+floor so every panel-fixture model meets it, independently of the router's
+quality scale. Routers declaring `select_pin_slot` implement
+`configure_pin_slot(slot, route_key)`. Both hooks default to errors naming the
+missing hook. `CatalogModel.family: Option<String>` is a breaking Rust minor
+addition to an exhaustive fixture type; adapters must supply it.
+
 ## Checks
+
+### Routing 0.7.0 additions
+
+Each serving check below is not applicable without its group. Each
+`undeclared_*` refusal check is not applicable **with** its group; whole-op
+groups have no undeclared-op refusal case.
+
+| Group | Serving checks | Undeclared-member checks |
+|---|---|---|
+| `select_panel` | `panel_full`, `panel_shortfall`, `panel_family_and_route_unique`, `panel_temperatures_by_slot`, `panel_same_seed`, `panel_replacement_preserves_slot`, `panel_foreign_replacement_unknown`, `panel_replacement_invalid_slot` | none |
+| `budget_quote` | `budget_quote_matches_helper`, `budget_quote_foreign_unknown` | none |
+| `explain` | `explain_matches_selection`, `explain_foreign_unknown` | none |
+| `account_status` | `account_status_blocked_limited`, `account_status_unknown` | none |
+| `head_choices` | `head_choices_valid`, `head_choices_runner_routes`, `head_choices_non_starting_empty` | none |
+| `select_pin_slot` | `pin_slot_configured_pinned`, `pin_slot_unknown_unavailable` | `undeclared_pin_slot_refused` |
+| `select_available_routes` | `available_routes_honoured`, `available_routes_empty_refused` | `undeclared_available_routes_refused` |
+| `select_prefer_prompt_cache` | `prefer_prompt_cache_accepted` | `undeclared_prefer_prompt_cache_refused` |
+| `select_settings` | `settings_unresolved_selects`, `settings_unknown_member_refused` | `undeclared_settings_refused` |
+| `observe_backoff` | `backoff_with_admission_accepted`, `backoff_missing_retry_refused` | `undeclared_observe_decision_id_refused`, `undeclared_observe_retry_at_ms_refused`, `undeclared_observe_provider_code_refused` |
+| `report_outcomes` | none | none |
+
+The panel fixture has repeated known families and two models with unknown
+family; both family and route uniqueness are checked with `check_panel_answer`.
+Replacements use `check_panel_replacement`. Same-seed selection resets and
+reconfigures the subject between calls. It compares policy `size`, `top`,
+`extra`, the shortfall code, and each seat's `slot`, `phase`, route,
+`runner.module`, `family` and `temperature`. It ignores opaque `panel_id`,
+`decision_id`, `expires_at_ms`, `explanation`, `detail` and informative policy
+members. Budget checks compare the complete answer to `budget::quote` over
+the selected decisions' answered capacities. Head choices accept either
+provider-listing policy and never require completeness of the list.
+
+The exported `NARROWINGS` coverage-limit notes state what the kit's hooks
+can't observe: the availability and affinity effects of the four outcomes
+`report_outcomes` adds, the fence a `transient_backoff` observation sets, and
+the decision-owner authorization arm. Contract vectors and unit tests cover
+those outcome effects, and the kit does check affinity after an ordinary
+`failed` report and the account fence a report's future reset sets.
+Prompt-cache tie-breaking is not inspected. Fixture models have no variants,
+so head-choice variant rules are covered by `check_head_choices` unit tests;
+panel modalities are not visible in an answer.
+
+The new faulty-router matrix requires every named check to reject its faulty
+implementation, while legacy checks remain unaffected. Several panel checks
+share validation helpers, so a panel fault can also fail another panel check.
+
+### Existing checks
 
 The kit runs the checks listed below, including six declaration checks, eight optional-member
 checks, four additional program checks, nine hold checks, eight checks

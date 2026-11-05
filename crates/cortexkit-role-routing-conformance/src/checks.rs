@@ -2,6 +2,7 @@
 //! from a freshly reset and configured provider.
 
 mod continuation;
+mod extensions;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -235,6 +236,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
     /// Run the check named `name` from a fresh provider.
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         self.fresh().await?;
+        if extensions::CASES.iter().any(|(case, _, _)| *case == name) {
+            return self.extension_check(name).await;
+        }
         if name.starts_with("account_for_tier_") {
             return self.account_for_tier_check(name).await;
         }

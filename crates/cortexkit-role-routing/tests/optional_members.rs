@@ -414,14 +414,19 @@ fn pool_results(pool: Value) -> [Option<String>; 3] {
 }
 
 #[test]
-fn eligibility_scope_is_open() {
+fn eligibility_scope_is_closed() {
+    for scope in [EligibilityScope::Model, EligibilityScope::Account] {
+        let text = serde_json::to_value(scope).unwrap();
+        let body = json!({"decision_id": "d", "outcome": "refused", "eligibility": {"scope": text, "code": "provider_code"}});
+        let request = parse_report_request(&body).unwrap();
+        assert_eq!(request.eligibility.as_ref().unwrap().scope, scope);
+        assert_eq!(serde_json::to_value(request).unwrap(), body);
+    }
+    // A scope the contract doesn't name is refused, never read as model.
     let body = json!({"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "future", "code": "provider_code"}});
-    let request = parse_report_request(&body).unwrap();
-    assert_eq!(
-        request.eligibility.as_ref().unwrap().scope,
-        EligibilityScope::Other("future".into())
-    );
-    assert_eq!(serde_json::to_value(request).unwrap(), body);
+    let refusal = parse_report_request(&body).unwrap_err();
+    assert_eq!(refusal.code, RefusalCode::InvalidRequest);
+    assert_eq!(refusal.detail["field"], "eligibility");
 }
 
 #[test]

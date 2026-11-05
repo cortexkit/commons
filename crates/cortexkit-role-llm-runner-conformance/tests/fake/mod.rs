@@ -169,6 +169,7 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub routed_accounts_no_call: Option<&'static str>,
     pub head_selection: Option<&'static str>,
     pub compaction_preset_missing_accepted: bool,
     pub marker_hides_reads: bool,
@@ -624,6 +625,9 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    routing_peers:
+        Mutex<BTreeMap<String, cortexkit_role_llm_runner_conformance::RecordingRoutingPeer>>,
+    routed_methods: Vec<String>,
     host_created_at: Mutex<BTreeMap<(String, String), u64>>,
     read_tool_times: Mutex<BTreeMap<String, Vec<cortexkit_role_llm_runner::read::ToolTime>>>,
     step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents,
@@ -2409,6 +2413,26 @@ impl Module {
                 .filter(|_| !self.world.defects.max_output_tokens_ignored)
                 .map(|cap| cap.min(32));
             if received {
+                if turn_index == 0 {
+                    if let Some(peer) = self.world.routing_peers.lock().unwrap().get(session) {
+                        if self.world.defects.routed_accounts_no_call != Some(peer.method()) {
+                            let answer = peer
+                                .request(
+                                    "fake-runner",
+                                    "route.account_for",
+                                    json!({
+                                        "provider": FAKE_PROVIDER, "model": FAKE_MODEL,
+                                        "conversation_key": session, "admission_id": run_id
+                                    }),
+                                )
+                                .unwrap();
+                            assert_eq!(
+                                answer["result"]["account"]["credential_id"],
+                                "fixture-credential"
+                            );
+                        }
+                    }
+                }
                 self.capture_command_model_input(session, &sess);
                 let tools = if run.no_tools && !self.world.defects.no_tools_ignored {
                     &[][..]
@@ -3177,6 +3201,9 @@ impl Module {
         }
         if self.world.serves(groups::STEP_EVENTS) {
             describe = describe.with_step_events(self.world.step_event_policy.clone());
+        }
+        if self.world.serves(groups::ROUTED_ACCOUNTS) {
+            describe = describe.with_routed_accounts(self.world.routed_methods.clone());
         }
         if self.world.serves(groups::SERVICE_TIER) {
             describe = describe.with_service_tiers(service_tier::support());
@@ -5362,6 +5389,9 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub routed_methods: Vec<String>,
+    pub follows_account_choice: Option<bool>,
+    pub missing_routing_hook: Option<&'static str>,
     pub route_decision_fixture_calls: AtomicUsize,
     pub finish_reason_fixture: bool,
     pub model_failure_fixture: bool,
@@ -5497,6 +5527,9 @@ pub const KILL_POINTS: &[&str] = &[
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            routed_methods: vec!["apikey".into(), "oauth".into()],
+            follows_account_choice: Some(true),
+            missing_routing_hook: None,
             route_decision_fixture_calls: AtomicUsize::new(0),
             step_event_policy: cortexkit_role_llm_runner::step_events::StepEvents::new(
                 "per_attempt",
@@ -5564,6 +5597,8 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    routing_peers: Mutex::new(BTreeMap::new()),
+                    routed_methods: self.routed_methods.clone(),
                     host_created_at: Mutex::new(BTreeMap::new()),
                     read_tool_times: Mutex::new(BTreeMap::new()),
                     step_event_policy: self.step_event_policy.clone(),
@@ -5855,6 +5890,46 @@ impl LlmRunnerSubject for FakeSubject {
         self.route_decision_fixture_calls
             .fetch_add(1, Ordering::SeqCst);
         Ok("seeded-decision".into())
+    }
+
+    async fn routing_runner_declaration(&self) -> Result<Value, HarnessError> {
+        if self.missing_routing_hook == Some("routing_runner_declaration") {
+            return Err(HarnessError::new(
+                "routing_runner_declaration is not implemented",
+            ));
+        }
+        let mut slot = json!({"pairs":[{"wire_api":"scripted", "auth_method":"apikey"}]});
+        if let Some(follows) = self.follows_account_choice {
+            slot["follows_account_choice"] = json!(follows);
+        }
+        Ok(slot)
+    }
+
+    async fn routed_account_fixture(&self, _method: &str) -> Result<Value, HarnessError> {
+        if self.missing_routing_hook == Some("routed_account_fixture") {
+            return Err(HarnessError::new(
+                "routed_account_fixture is not implemented",
+            ));
+        }
+        Ok(
+            json!({"provider":FAKE_PROVIDER, "account_id":"fixture-account", "credential_id":"fixture-credential"}),
+        )
+    }
+
+    async fn install_routing_peer(
+        &self,
+        session: &str,
+        peer: cortexkit_role_llm_runner_conformance::RecordingRoutingPeer,
+    ) -> Result<(), HarnessError> {
+        if self.missing_routing_hook == Some("install_routing_peer") {
+            return Err(HarnessError::new("install_routing_peer is not implemented"));
+        }
+        self.world()
+            .routing_peers
+            .lock()
+            .unwrap()
+            .insert(session.into(), peer);
+        Ok(())
     }
 
     async fn head_selection_models(

@@ -1182,20 +1182,22 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::ClientMessageId,
     Capability::RunCause,
     Capability::StepEvents,
+    Capability::RoutedAccounts,
 ];
 
 // The in-process fake does not declare session_retention or exercise a real
 // process kill at ReleasePending. A separate subprocess fixture covers those
 // cases. Head-error cases also need run_status, which some fixtures omit.
+// Routed-account cases use a separate opt-in credential and peer fixture.
 // All other cases must pass.
 fn assert_only_session_retention_skipped(report: &SuiteReport) {
     assert!(
         matches!(&report.verdict,
             SuiteVerdict::ConformingForDeclaredCapabilities { declared, skipped }
             if skipped == &if declared.contains(&Capability::RunStatus) {
-                vec![Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
+                vec![Capability::SessionRetention, Capability::RoutedAccounts, Capability::KillAt(points::RELEASE_PENDING)]
             } else {
-                vec![Capability::RunStatus, Capability::SessionRetention, Capability::KillAt(points::RELEASE_PENDING)]
+                vec![Capability::RunStatus, Capability::SessionRetention, Capability::RoutedAccounts, Capability::KillAt(points::RELEASE_PENDING)]
             }
         ),
         "{}",
@@ -1742,6 +1744,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::ClientMessageId,
                     Capability::RunCause,
                     Capability::StepEvents,
+                    Capability::RoutedAccounts,
                     Capability::RetentionClock,
                     Capability::HoldToolCalls,
                     Capability::KillAt(points::RELEASE_PENDING)
@@ -2115,6 +2118,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::ClientMessageId,
                     Capability::RunCause,
                     Capability::StepEvents,
+                    Capability::RoutedAccounts,
                     Capability::RetentionClock,
                     Capability::KillAt(points::RELEASE_PENDING)
                 ],
@@ -8157,4 +8161,88 @@ async fn read_display_facts_missing_metadata_hook_is_inapplicable_by_name() {
             report.render()
         );
     }
+}
+
+fn routed_accounts_subject(defects: Defects) -> FakeSubject {
+    let mut subject = FakeSubject::new(defects);
+    subject.capabilities.insert(Capability::RoutedAccounts);
+    subject
+}
+
+#[tokio::test]
+async fn routed_accounts_each_listed_method_admits() {
+    let report = run(&routed_accounts_subject(Defects::default())).await;
+    for name in cases_of(&["routed_accounts_"]) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn routed_accounts_missing_account_for_fails_by_name() {
+    for method in ["apikey", "oauth"] {
+        let report = run(&routed_accounts_subject(Defects {
+            routed_accounts_no_call: Some(method),
+            ..Defects::default()
+        }))
+        .await;
+        let name = "routed_accounts_account_for";
+        let reason = failed(&report, name);
+        println!("{name}: {reason}");
+        assert!(
+            reason.contains(&format!("listed method {method} sent no route.account_for")),
+            "{reason}"
+        );
+        assert_none_failed_but(&report, &[name]);
+    }
+}
+
+#[tokio::test]
+async fn routed_accounts_missing_follows_account_choice_fails_by_name() {
+    for declaration in [None, Some(false)] {
+        let mut subject = routed_accounts_subject(Defects::default());
+        subject.follows_account_choice = declaration;
+        let report = run(&subject).await;
+        let name = "routed_accounts_follows_account_choice";
+        let reason = failed(&report, name);
+        println!("{name}: {reason}");
+        assert!(reason.contains("follows_account_choice: true"), "{reason}");
+        assert_none_failed_but(&report, &[name]);
+    }
+}
+
+#[tokio::test]
+async fn routed_accounts_required_hooks_fail_by_name() {
+    for (hook, case) in [
+        (
+            "routing_runner_declaration",
+            "routed_accounts_follows_account_choice",
+        ),
+        ("routed_account_fixture", "routed_accounts_account_for"),
+        ("install_routing_peer", "routed_accounts_account_for"),
+    ] {
+        let mut subject = routed_accounts_subject(Defects::default());
+        subject.missing_routing_hook = Some(hook);
+        let report = run(&subject).await;
+        assert!(failed(&report, case).contains(hook));
+        assert_none_failed_but(&report, &[case]);
+    }
+}
+
+#[tokio::test]
+async fn routed_accounts_undeclared_skips_cases_by_name() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in cases_of(&["routed_accounts_"]) {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::RoutedAccounts)),
+            "{name}: {:?}",
+            report.outcome(name)
+        );
+    }
+    assert_none_failed_but(&report, &[]);
 }

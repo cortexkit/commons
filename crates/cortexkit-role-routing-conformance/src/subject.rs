@@ -97,6 +97,10 @@ pub struct CatalogModule {
 pub struct CatalogModel {
     pub provider: String,
     pub model: String,
+    /// Models in the same family cannot occupy different seats of a panel.
+    /// `None` means the family is unknown, and all such models count as one
+    /// family.
+    pub family: Option<String>,
     /// The model's ability on the provider's own 0-100 scale; a request's
     /// `iq` at or below it is met.
     pub iq: u8,
@@ -236,6 +240,24 @@ pub trait RoutingSubject: Send + Sync {
     /// principal is not.
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String>;
 
+    /// Configure a panel class's counts. Its quality floor must be met by
+    /// every model in the panel fixture. Required only with `select_panel`.
+    async fn configure_panel_class(
+        &self,
+        _class: &str,
+        _size: u8,
+        _top: u8,
+        _extra: u8,
+    ) -> Result<(), String> {
+        Err("configure_panel_class is not supported by this subject".into())
+    }
+
+    /// Map an operator-policy slot to a route key. Required only with
+    /// `select_pin_slot`.
+    async fn configure_pin_slot(&self, _slot: &str, _route_key: &str) -> Result<(), String> {
+        Err("configure_pin_slot is not supported by this subject".into())
+    }
+
     /// Install these credentials and their exact model eligibility, preserving
     /// existing admissions and decisions, with selection and failover enabled.
     /// Called only for `account_continue`; a declaring router must implement it.
@@ -310,8 +332,8 @@ pub trait RoutingSubject: Send + Sync {
     /// Block the catalog account `account_id` by a window that ends at
     /// `reset_at_ms` (Unix milliseconds), or at an unknown time when
     /// `None`. A later call replaces the account's block. Used only against
-    /// a provider declaring `select_hold_control` or `account_continue`; the default fails those
-    /// checks.
+    /// a provider declaring `select_hold_control`, `account_continue` or
+    /// `account_status`; the default fails those checks.
     async fn block_account(
         &self,
         account_id: &str,
@@ -323,4 +345,57 @@ pub trait RoutingSubject: Send + Sync {
 
     /// Open a route to the provider under `stamp`.
     async fn route(&self, stamp: &RouteStamp) -> Result<Self::Route, String>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Reply, RouteFailure};
+
+    struct LegacySubject;
+    struct UnusedRoute;
+
+    #[async_trait]
+    impl RoutingRoute for UnusedRoute {
+        async fn request(&self, _: &str, _: &Value) -> Result<Reply, RouteFailure> {
+            unreachable!("default-hook tests never open a route")
+        }
+    }
+
+    #[async_trait]
+    impl RoutingSubject for LegacySubject {
+        type Route = UnusedRoute;
+        async fn reset(&self) -> Result<(), String> {
+            unreachable!()
+        }
+        async fn configure_consumers(&self, _: &[ConsumerConfig]) -> Result<(), String> {
+            unreachable!()
+        }
+        async fn configure_catalog(&self, _: &Catalog) -> Result<(), String> {
+            unreachable!()
+        }
+        async fn pin_for_project(&self, _: &str, _: &str, _: &str) -> Result<(), String> {
+            unreachable!()
+        }
+        async fn cool_down(&self, _: &str, _: u64) -> Result<(), String> {
+            unreachable!()
+        }
+        async fn route(&self, _: &RouteStamp) -> Result<UnusedRoute, String> {
+            unreachable!()
+        }
+    }
+
+    #[tokio::test]
+    async fn routing_070_new_hooks_default_to_named_errors() {
+        assert!(LegacySubject
+            .configure_panel_class("audit", 3, 2, 1)
+            .await
+            .unwrap_err()
+            .contains("configure_panel_class"));
+        assert!(LegacySubject
+            .configure_pin_slot("review", "provider/model")
+            .await
+            .unwrap_err()
+            .contains("configure_pin_slot"));
+    }
 }

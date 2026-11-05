@@ -10,7 +10,10 @@ use cortexkit_role_routing::{
         SELECT_TASK_REF,
     },
     errors::Refusal,
-    observe::{parse_account_observe_request, AccountObserveRequest, ObserveKind},
+    observe::{
+        parse_account_observe_request, AccountObserveRequest, ObserveKind, ResetsAtSource,
+        UpstreamOrigin,
+    },
     report::{parse_report_request, Eligibility, EligibilityScope, Outcome, ReportRequest, Usage},
     select::{
         parse_select_request_serving, ConcurrencySlot, PinFallback, Requirements, RouteRef,
@@ -167,14 +170,14 @@ fn requests_build_and_round_trip_from_outside_the_crate() {
         .with_credential_id("credential-1")
         .with_view_digest("view-1")
         .with_observed_at_ms(1000)
-        .with_upstream_origin("https://provider.example")
+        .with_upstream_origin(UpstreamOrigin::Direct)
         .with_headers(BTreeMap::from([(
             "x-ratelimit-remaining".into(),
             "4".into(),
         )]))
         .with_limit_window("short")
         .with_resets_at_ms(2000)
-        .with_resets_at_source("headers")
+        .with_resets_at_source(ResetsAtSource::Header)
         .with_pool("model.pool_1-x");
     round_trip(
         observation,
@@ -183,9 +186,9 @@ fn requests_build_and_round_trip_from_outside_the_crate() {
             "admission_id": "admission-1", "run_id": "run-1",
             "served_account_id": "account-1", "credential_id": "credential-1",
             "view_digest": "view-1", "observed_at_ms": 1000,
-            "upstream_origin": "https://provider.example",
+            "upstream_origin": "direct",
             "headers": {"x-ratelimit-remaining": "4"}, "limit_window": "short",
-            "resets_at_ms": 2000, "resets_at_source": "headers", "pool": "model.pool_1-x"
+            "resets_at_ms": 2000, "resets_at_source": "header", "pool": "model.pool_1-x"
         }),
         parse_account_observe_request,
     );

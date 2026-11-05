@@ -1,0 +1,274 @@
+{
+  "group": "explain",
+  "describes": [
+    {
+      "name": "legacy",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      }
+    },
+    {
+      "name": "declared",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.explain"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "explain"
+        ]
+      }
+    },
+    {
+      "name": "op_without_group",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.explain"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "explain"
+      }
+    },
+    {
+      "name": "group_without_op",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "explain"
+        ]
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "explain"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "name": "retained_decision",
+      "params": {
+        "decision_id": "decision-1"
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "bound_account",
+      "answer": {
+        "decision_id": "decision-1",
+        "route": {
+          "provider": "example-provider",
+          "model": "model-a"
+        },
+        "runner": {
+          "module": "runner-one",
+          "model": {
+            "provider": "example-provider",
+            "model": "model-a"
+          }
+        },
+        "serving": {
+          "provider": "example-provider",
+          "account_id": "account-1",
+          "credential_id": "credential-1"
+        },
+        "policy_version": "policy-1",
+        "reason_code": "ranked"
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "missing_id",
+      "params": {},
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "decision_id"
+        }
+      }
+    }
+  ],
+  "unknown": [
+    {
+      "name": "reason",
+      "type": "ReasonCode",
+      "value": "future_reason"
+    }
+  ],
+  "select_answer": {
+    "decision_id": "decision-1",
+    "route": {
+      "provider": "example-provider",
+      "model": "model-a"
+    },
+    "runner": {
+      "module": "runner-one",
+      "model": {
+        "provider": "example-provider",
+        "model": "model-a"
+      }
+    },
+    "context_window": 200000,
+    "max_output_tokens": 32000,
+    "expires_at_ms": 1767225900000,
+    "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach."
+  },
+  "refusals": [
+    {
+      "name": "foreign_decision",
+      "body": {
+        "code": "unknown_decision",
+        "message": "The request cannot be served.",
+        "detail": {}
+      }
+    },
+    {
+      "name": "allocation_reason_decision",
+      "body": {
+        "code": "unknown_decision",
+        "message": "The request cannot be served.",
+        "detail": {}
+      }
+    },
+    {
+      "name": "continue_offer_decision",
+      "body": {
+        "code": "unknown_decision",
+        "message": "The request cannot be served.",
+        "detail": {}
+      }
+    }
+  ]
+}

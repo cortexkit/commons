@@ -88,10 +88,12 @@ open_set! {
 pub const CONSUMER_CODES: &[&str] = &["routing_unavailable", "routing_ambiguous"];
 
 open_set! {
-    /// Why a `pin` cannot be served (`pin_unavailable`'s `detail.reason`).
+    /// Why a `pin` or `pin_slot` cannot be served (`pin_unavailable`'s `detail.reason`).
     pub enum PinUnavailableReason {
         /// The pin is not `provider/model[:variant]`.
         Invalid => "invalid",
+        /// The operator policy has no slot with the requested `pin_slot` token.
+        UnknownSlot => "unknown_slot",
         UnknownProvider => "unknown_provider",
         UnknownModel => "unknown_model",
         InvalidVariant => "invalid_variant",

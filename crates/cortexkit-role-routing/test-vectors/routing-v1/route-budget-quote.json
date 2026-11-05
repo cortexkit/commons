@@ -1,0 +1,336 @@
+{
+  "group": "budget_quote",
+  "describes": [
+    {
+      "name": "legacy",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      }
+    },
+    {
+      "name": "declared",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.budget_quote"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "budget_quote"
+        ]
+      }
+    },
+    {
+      "name": "op_without_group",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.budget_quote"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "budget_quote"
+      }
+    },
+    {
+      "name": "group_without_op",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "budget_quote"
+        ]
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "budget_quote"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "name": "with_prompt",
+      "params": {
+        "decisions": [
+          "decision-1"
+        ],
+        "prompt_tokens": 90000
+      }
+    },
+    {
+      "name": "without_prompt",
+      "params": {
+        "decisions": [
+          "decision-1"
+        ]
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "with_prompt",
+      "answer": {
+        "package": {
+          "tokens": 76000,
+          "limiting": {
+            "decision_id": "decision-1",
+            "route_key": "example-provider/model-a"
+          },
+          "context_window": 200000,
+          "context_window_known": true
+        },
+        "seats": [
+          {
+            "decision_id": "decision-1",
+            "route_key": "example-provider/model-a",
+            "package_tokens": 76000,
+            "output_limit": {
+              "status": "send",
+              "tokens": 32000,
+              "catalog": 32000,
+              "suspect": false
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "without_prompt",
+      "answer": {
+        "package": {
+          "tokens": 76000,
+          "limiting": {
+            "decision_id": "decision-1",
+            "route_key": "example-provider/model-a"
+          },
+          "context_window": 200000,
+          "context_window_known": true
+        },
+        "seats": [
+          {
+            "decision_id": "decision-1",
+            "route_key": "example-provider/model-a",
+            "package_tokens": 76000
+          }
+        ]
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "empty_decisions",
+      "params": {
+        "decisions": []
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "decisions"
+        }
+      }
+    },
+    {
+      "name": "duplicate_decisions",
+      "params": {
+        "decisions": [
+          "d",
+          "d"
+        ]
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "decisions"
+        }
+      }
+    },
+    {
+      "name": "negative_prompt",
+      "params": {
+        "decisions": [
+          "d"
+        ],
+        "prompt_tokens": -1
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "prompt_tokens"
+        }
+      }
+    }
+  ],
+  "unknown": [
+    {
+      "name": "status",
+      "type": "OutputLimitStatus",
+      "value": "future_status"
+    },
+    {
+      "name": "reason",
+      "type": "OutputLimitReason",
+      "value": "future_reason"
+    }
+  ],
+  "capacities": [
+    {
+      "decision_id": "decision-1",
+      "route_key": "example-provider/model-a",
+      "context_window": 200000,
+      "max_output_tokens": 32000
+    }
+  ],
+  "refusals": [
+    {
+      "name": "foreign_decision",
+      "body": {
+        "code": "unknown_decision",
+        "message": "The request cannot be served.",
+        "detail": {}
+      }
+    },
+    {
+      "name": "allocation_reason_decision",
+      "body": {
+        "code": "unknown_decision",
+        "message": "The request cannot be served.",
+        "detail": {}
+      }
+    },
+    {
+      "name": "continue_offer_decision",
+      "body": {
+        "code": "unknown_decision",
+        "message": "The request cannot be served.",
+        "detail": {}
+      }
+    }
+  ]
+}

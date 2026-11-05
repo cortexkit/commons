@@ -88,6 +88,10 @@ pub enum DescribeProblem {
     MissingOp(&'static str),
     MissingRequirementField(&'static str),
     DuplicateConsumer(String),
+    /// An optional operation and its capability group were not declared together.
+    OpGroupMismatch {
+        group: &'static str,
+    },
 }
 
 impl std::fmt::Display for DescribeProblem {
@@ -102,6 +106,12 @@ impl std::fmt::Display for DescribeProblem {
                 write!(f, "requirement_fields does not list {field}")
             }
             Self::DuplicateConsumer(id) => write!(f, "consumer {id:?} is listed twice"),
+            Self::OpGroupMismatch { group } => {
+                write!(
+                    f,
+                    "operation and capability group {group:?} must be declared together"
+                )
+            }
         }
     }
 }
@@ -129,6 +139,11 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
             return Err(DescribeProblem::MissingRequirementField(field));
         }
     }
+    for &(op, group) in crate::capabilities::OP_GROUPS {
+        if describe.ops.iter().any(|listed| listed == op) != describe.serves(group) {
+            return Err(DescribeProblem::OpGroupMismatch { group });
+        }
+    }
     let mut seen = std::collections::BTreeSet::new();
     for entry in &describe.consumers {
         if !seen.insert(entry.id.as_str()) {
@@ -141,6 +156,33 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_operations_require_exactly_their_group() {
+        for &(op, group) in crate::capabilities::OP_GROUPS {
+            let mut describe = RoleDescribe::new(vec![], false);
+            describe.ops.push(op.into());
+            assert_eq!(
+                check_describe(&describe),
+                Err(DescribeProblem::OpGroupMismatch { group })
+            );
+            describe.capabilities.push(group.into());
+            assert_eq!(check_describe(&describe), Ok(()));
+            describe.ops.retain(|listed| listed != op);
+            assert_eq!(
+                check_describe(&describe),
+                Err(DescribeProblem::OpGroupMismatch { group })
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_060_describe_passes_and_round_trips_byte_for_byte() {
+        let wire = r#"{"role":"routing","version":1,"ops":["role.describe","route.select","route.report","route.account_for","route.account_observe"],"consumers":[],"requirement_fields":["iq","eq","context_window","max_output_tokens","tools","tool_capabilities","modalities","structured_output"],"detail_supported":false}"#;
+        let describe: RoleDescribe = serde_json::from_str(wire).unwrap();
+        assert_eq!(check_describe(&describe), Ok(()));
+        assert_eq!(serde_json::to_string(&describe).unwrap(), wire);
+    }
 
     #[test]
     fn new_passes_its_own_check() {

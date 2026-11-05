@@ -19,16 +19,61 @@ open_set! {
         Failed => "failed",
         TimedOut => "timed_out",
         Cancelled => "cancelled",
+        /// A caller request field was invalid, including a pre-send refusal.
+        ContractError => "contract_error",
+        SessionError => "session_error",
+        Interrupted => "interrupted",
+        /// The run never reached the provider for a reason other than an
+        /// invalid caller request. A provider refusal at launch is `failed`
+        /// with its `runner_code`, not `launch_failed`.
+        LaunchFailed => "launch_failed",
+    }
+}
+
+/// Whether a report keeps or ends the decision's affinity preference.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AffinityEffect {
+    Kept,
+    Ended,
+}
+
+/// The availability and affinity consequences of a report outcome.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct OutcomeEffect {
+    pub availability_penalty: bool,
+    pub affinity: AffinityEffect,
+}
+
+impl OutcomeEffect {
+    pub const fn new(availability_penalty: bool, affinity: AffinityEffect) -> Self {
+        Self {
+            availability_penalty,
+            affinity,
+        }
     }
 }
 
 impl Outcome {
-    /// Whether the outcome is a failure of the route, which ends the
-    /// decision's affinity preference. `completed` and `cancelled` are not;
-    /// an outcome this crate does not name is, so a provider never keeps
-    /// preferring a route on a report it cannot read.
+    /// The effects applied by a router declaring `report_outcomes`.
+    /// Caller-side failures that never reached the provider do not penalize
+    /// candidate routes. Unknown outcomes retain the legacy failure rule.
+    pub fn effect(&self) -> OutcomeEffect {
+        match self {
+            Self::Completed
+            | Self::Cancelled
+            | Self::ContractError
+            | Self::SessionError
+            | Self::Interrupted
+            | Self::LaunchFailed => OutcomeEffect::new(false, AffinityEffect::Kept),
+            _ => OutcomeEffect::new(true, AffinityEffect::Ended),
+        }
+    }
+
+    /// Whether the outcome penalizes the route's availability.
     pub fn is_failure(&self) -> bool {
-        !matches!(self, Self::Completed | Self::Cancelled)
+        self.effect().availability_penalty
     }
 }
 
@@ -162,12 +207,35 @@ impl Usage {
     }
 }
 
-open_set! {
-    /// Whether the account cannot serve this model or cannot serve at all.
-    pub enum EligibilityScope {
-        Model => "model",
-        Account => "account",
-    }
+/// Whether the account cannot serve this model or cannot serve at all. A
+/// closed set: a router refuses a scope it doesn't name, as
+/// `invalid_request {field: "eligibility"}`, rather than guessing one. A new
+/// scope needs a describe group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum EligibilityScope {
+    /// The account can't serve this model.
+    Model,
+    /// The account can't serve at all.
+    Account,
+}
+
+/// What kind of refusal a report carries, mapped by the runner from its
+/// provider's own wording, so the router never has to read vendor text. A
+/// closed set, sent only to a router declaring `report_outcomes`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum RefusalClass {
+    /// The provider refused this credential for any use: an entitlement or
+    /// attestation refusal, or billing, credit or quota exhausted on the
+    /// account. The router blocks the credential.
+    CredentialRefused,
+    /// The request was over a size limit. Requires `request_input_tokens`;
+    /// the router records a refusal for that request size, not for the
+    /// account.
+    RequestTooLarge,
 }
 
 /// Ineligibility reported by the model provider, never exhaustion or a hold.
@@ -214,6 +282,11 @@ pub struct ReportRequest {
     /// Input size of the request, so a refusal can fence only its size class.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_input_tokens: Option<u64>,
+    /// The refusal's kind, with `refused` or `failed` only. Requires
+    /// `report_outcomes`. When present, the router acts on it and on nothing
+    /// it might infer from `runner_code`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_class: Option<RefusalClass>,
 }
 
 impl ReportRequest {
@@ -228,6 +301,7 @@ impl ReportRequest {
             pool: None,
             eligibility: None,
             request_input_tokens: None,
+            refusal_class: None,
         }
     }
 
@@ -272,6 +346,13 @@ impl ReportRequest {
         self.request_input_tokens = Some(request_input_tokens);
         self
     }
+
+    /// Set the refusal's kind. Send it only to a router declaring
+    /// `report_outcomes`.
+    pub fn with_refusal_class(mut self, refusal_class: RefusalClass) -> Self {
+        self.refusal_class = Some(refusal_class);
+        self
+    }
 }
 
 /// The `route.report` answer. A repeated report returns this answer exactly
@@ -294,7 +375,33 @@ pub const RESET_FENCE_CAP_MS: u64 = 24 * 60 * 60 * 1000;
 /// `invalid_request` naming it. An outcome this crate does not name is
 /// accepted and kept.
 pub fn parse_report_request(params: &Value) -> Result<ReportRequest, Refusal> {
+    parse_report_request_serving::<&str>(params, &[])
+}
+
+/// Validate and decode reports for the router's declared capability groups.
+/// Without `report_outcomes`, the four added outcomes remain unknown strings
+/// and retain the legacy failure effect. Callers send `cancelled` instead to
+/// routers without the group when a run failed before reaching the provider.
+pub fn parse_report_request_serving<C: AsRef<str>>(
+    params: &Value,
+    capabilities: &[C],
+) -> Result<ReportRequest, Refusal> {
     let members = Members::of(params)?;
+    let mut outcome: Outcome = members.required("outcome")?;
+    let report_outcomes = capabilities
+        .iter()
+        .any(|cap| cap.as_ref() == "report_outcomes");
+    if !report_outcomes
+        && matches!(
+            outcome,
+            Outcome::ContractError
+                | Outcome::SessionError
+                | Outcome::Interrupted
+                | Outcome::LaunchFailed
+        )
+    {
+        outcome = Outcome::Other(outcome.as_str().to_owned());
+    }
     let usage: Option<Usage> = members.optional("usage")?;
     if let Some(usage) = &usage {
         for (name, value) in [
@@ -324,7 +431,7 @@ pub fn parse_report_request(params: &Value) -> Result<ReportRequest, Refusal> {
     }
     let request = ReportRequest {
         decision_id: members.text("decision_id", None)?,
-        outcome: members.required("outcome")?,
+        outcome,
         runner_code: members.optional_text("runner_code", None)?,
         credential_id: members.optional_text("credential_id", None)?,
         reset_at_ms: members.optional("reset_at_ms")?,
@@ -332,7 +439,34 @@ pub fn parse_report_request(params: &Value) -> Result<ReportRequest, Refusal> {
         pool: members.pool()?,
         eligibility: members.optional("eligibility")?,
         request_input_tokens: members.optional("request_input_tokens")?,
+        refusal_class: members.optional("refusal_class")?,
     };
+    if let Some(class) = request.refusal_class {
+        if !report_outcomes {
+            return Err(members.refuse(
+                "refusal_class",
+                "refusal_class requires the report_outcomes group",
+            ));
+        }
+        if !matches!(request.outcome, Outcome::Refused | Outcome::Failed) {
+            return Err(members.refuse(
+                "refusal_class",
+                "refusal_class goes only with outcome refused or failed",
+            ));
+        }
+        if request.eligibility.is_some() {
+            return Err(members.refuse(
+                "refusal_class",
+                "refusal_class and eligibility are alternatives",
+            ));
+        }
+        if class == RefusalClass::RequestTooLarge && request.request_input_tokens.is_none() {
+            return Err(members.refuse(
+                "request_input_tokens",
+                "request_too_large requires request_input_tokens",
+            ));
+        }
+    }
     if request.eligibility.is_some()
         && (request.reset_at_ms.is_some()
             || request
@@ -352,6 +486,110 @@ pub fn parse_report_request(params: &Value) -> Result<ReportRequest, Refusal> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn outcome_effect_matrix() {
+        for (outcome, availability_penalty, affinity) in [
+            (Outcome::Completed, false, AffinityEffect::Kept),
+            (Outcome::Cancelled, false, AffinityEffect::Kept),
+            (Outcome::Refused, true, AffinityEffect::Ended),
+            (Outcome::Failed, true, AffinityEffect::Ended),
+            (Outcome::TimedOut, true, AffinityEffect::Ended),
+            (Outcome::ContractError, false, AffinityEffect::Kept),
+            (Outcome::SessionError, false, AffinityEffect::Kept),
+            (Outcome::Interrupted, false, AffinityEffect::Kept),
+            (Outcome::LaunchFailed, false, AffinityEffect::Kept),
+            (
+                Outcome::Other("future_outcome".into()),
+                true,
+                AffinityEffect::Ended,
+            ),
+            (
+                Outcome::Other("contract_error".into()),
+                true,
+                AffinityEffect::Ended,
+            ),
+        ] {
+            let effect = outcome.effect();
+            assert_eq!(
+                effect.availability_penalty, availability_penalty,
+                "{outcome}"
+            );
+            assert_eq!(effect.affinity, affinity, "{outcome}");
+            assert_eq!(
+                outcome.is_failure(),
+                effect.availability_penalty,
+                "{outcome}"
+            );
+        }
+    }
+
+    #[test]
+    fn new_outcomes_require_report_outcomes_for_named_decoding() {
+        for (wire, named) in [
+            ("contract_error", Outcome::ContractError),
+            ("session_error", Outcome::SessionError),
+            ("interrupted", Outcome::Interrupted),
+            ("launch_failed", Outcome::LaunchFailed),
+        ] {
+            let params = json!({"decision_id": "d", "outcome": wire});
+            for groups in [&[][..], &["unrelated"][..]] {
+                let request = parse_report_request_serving(&params, groups).unwrap();
+                assert_eq!(request.outcome, Outcome::Other(wire.into()));
+                assert!(request.outcome.is_failure());
+                assert_eq!(serde_json::to_value(&request).unwrap()["outcome"], wire);
+            }
+            let request =
+                parse_report_request_serving(&params, &["report_outcomes".to_owned()]).unwrap();
+            assert_eq!(request.outcome, named);
+            assert!(!request.outcome.is_failure());
+            assert_eq!(serde_json::to_value(&request).unwrap()["outcome"], wire);
+        }
+        let unknown = parse_report_request_serving(
+            &json!({"decision_id": "d", "outcome": "future_outcome"}),
+            &["report_outcomes"],
+        )
+        .unwrap();
+        assert_eq!(unknown.outcome, Outcome::Other("future_outcome".into()));
+        assert!(unknown.outcome.is_failure());
+    }
+
+    #[test]
+    fn legacy_report_parser_is_serving_without_groups() {
+        for params in [
+            json!({"decision_id": "d", "outcome": "completed"}),
+            json!({"decision_id": "d", "outcome": "contract_error"}),
+            json!({"decision_id": "d", "outcome": "future_outcome"}),
+            json!({"decision_id": "d", "outcome": 4}),
+            json!({"outcome": "failed"}),
+            Value::Null,
+        ] {
+            assert_eq!(
+                parse_report_request(&params),
+                parse_report_request_serving::<&str>(&params, &[])
+            );
+        }
+    }
+
+    #[test]
+    fn report_0_6_0_bytes_round_trip() {
+        for body in [
+            r#"{"decision_id":"d","outcome":"completed"}"#,
+            r#"{"decision_id":"d","outcome":"failed","runner_code":"quota_exhausted","credential_id":"cred","reset_at_ms":42,"pool":"default","request_input_tokens":12}"#,
+        ] {
+            let params: Value = serde_json::from_str(body).unwrap();
+            let request = parse_report_request(&params).unwrap();
+            assert_eq!(serde_json::to_string(&request).unwrap(), body);
+            assert_eq!(
+                parse_report_request_serving(&params, &["report_outcomes"]).unwrap(),
+                request
+            );
+        }
+        assert_eq!(
+            serde_json::to_string(&ReportRequest::new("d", Outcome::Completed)).unwrap(),
+            r#"{"decision_id":"d","outcome":"completed"}"#
+        );
+    }
 
     #[test]
     fn an_unknown_outcome_is_kept_and_counts_as_failure() {

@@ -68,6 +68,16 @@ impl ExhaustedAccount {
     }
 }
 
+/// The `mode` of a continue request: a closed set with one value, so any
+/// other mode is `invalid_request {field: "mode"}`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ContinueMode {
+    /// Ask for another account after the run's account was exhausted.
+    Continue,
+}
+
 /// A fresh `selection_id` asks for a fresh eligibility check. Transport retries
 /// keep the id; asking again after a hold uses a new one.
 /// Provider, auth method, model and owner scope come only from the previous
@@ -75,7 +85,7 @@ impl ExhaustedAccount {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ContinueRequest {
-    pub mode: String,
+    pub mode: ContinueMode,
     pub run_id: String,
     pub admission_id: String,
     pub conversation_key: String,
@@ -94,7 +104,7 @@ impl ContinueRequest {
         selection_id: impl Into<String>,
     ) -> Self {
         Self {
-            mode: "continue".into(),
+            mode: ContinueMode::Continue,
             run_id: run_id.into(),
             admission_id: admission_id.into(),
             conversation_key: conversation_key.into(),
@@ -222,10 +232,7 @@ pub fn parse_continue_request(
     if !describe.serves(capabilities::ACCOUNT_CONTINUE) {
         return Err(members.refuse("mode", "continue is not a declared mode"));
     }
-    let mode = members.text("mode", None)?;
-    if mode != "continue" {
-        return Err(members.refuse("mode", "expected continue"));
-    }
+    let mode: ContinueMode = members.required("mode")?;
     let exhausted_value: Value = members.required("exhausted")?;
     let exhausted = parse_exhausted(&exhausted_value).map_err(|mut refusal| {
         if let Some(field) = refusal.detail.get_mut("field") {

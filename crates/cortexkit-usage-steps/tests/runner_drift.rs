@@ -128,13 +128,16 @@ fn shared_member_names_match_the_runner_step_event() {
         "../test-vectors/usage-steps-v1/read/row-every-member.json"
     ))
     .unwrap();
-    // Tier fields are row-only until a readers-first change to the closed bus
-    // event. Preserve the legacy fixture and fill the newer members here.
-    let full_row = full_row
+    // Preserve the legacy fixture's bytes and fill newer optional row members
+    // here so the completeness check still covers the current schema.
+    let mut full_row = full_row
         .with_service_tier_applied(
             cortexkit_role_llm_runner::service_tier::ServiceTier::Fast.as_str(),
         )
         .with_service_tier_served("fast");
+    full_row.route_decision_id = Some("decision_ex".to_owned());
+    full_row.sent_to_last_content_ms = Some(500);
+    full_row.first_to_last_content_ms = Some(400);
     assert_eq!(member_names(serde_json::to_value(full_row).unwrap()), row);
 
     let shared: BTreeSet<String> = event.intersection(&row).cloned().collect();

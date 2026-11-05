@@ -16,6 +16,10 @@
 //! - [`report`]: the `route.report` request, its validator, and its answer;
 //! - [`account`]: the `route.account_for` request, validator and answer;
 //! - [`observe`]: the `route.account_observe` request, validator and answer;
+//! - [`panel`], [`budget`], [`explain`], [`account_status`] and
+//!   [`head_choices`]: the optional panel selection and replacement, budget
+//!   quote, decision explanation, account status and head-choice operations,
+//!   each with its request, validator and answer;
 //! - [`declarations`]: consumer defaults and runner matching inputs from the catalog;
 //! - [`errors`]: refusal codes, the refusal body and each code's detail;
 //! - [`wire`]: the `{"result": <answer>}` reply envelope;
@@ -38,10 +42,15 @@ mod members;
 
 pub mod account;
 pub mod account_continue;
+pub mod account_status;
+pub mod budget;
 pub mod declarations;
 pub mod describe;
 pub mod errors;
+pub mod explain;
+pub mod head_choices;
 pub mod observe;
+pub mod panel;
 pub mod report;
 pub mod select;
 pub mod service_tier;
@@ -78,6 +87,16 @@ pub mod ops {
     pub const ROLE_DESCRIBE: &str = "role.describe";
     /// Choose a model and a runner for one piece of work.
     pub const ROUTE_SELECT: &str = "route.select";
+    /// Choose a multi-model panel or replace one of its seats.
+    pub const ROUTE_SELECT_PANEL: &str = "route.select_panel";
+    /// Quote package and output limits from retained decision capacities.
+    pub const ROUTE_BUDGET_QUOTE: &str = "route.budget_quote";
+    /// Explain a retained selection owned by the caller.
+    pub const ROUTE_EXPLAIN: &str = "route.explain";
+    /// Read an account's public limit state.
+    pub const ROUTE_ACCOUNT_STATUS: &str = "route.account_status";
+    /// List the router's admitted model choices for a runner.
+    pub const ROUTE_HEAD_CHOICES: &str = "route.head_choices";
     /// Tell the provider how running on a decision went.
     pub const ROUTE_REPORT: &str = "route.report";
     /// A runner asks which account to use for a model call.
@@ -124,6 +143,38 @@ pub mod capabilities {
     /// `route.select` reads `task_ref` for attribution, never selection.
     pub const SELECT_TASK_REF: &str = "select_task_ref";
 
+    /// Multi-model panels and seat replacements.
+    pub const SELECT_PANEL: &str = "select_panel";
+    /// Package and output-limit quotes for retained selections.
+    pub const BUDGET_QUOTE: &str = "budget_quote";
+    /// Explanations of retained selections.
+    pub const EXPLAIN: &str = "explain";
+    /// Public account limit state.
+    pub const ACCOUNT_STATUS: &str = "account_status";
+    /// Admitted model choices for a runner.
+    pub const HEAD_CHOICES: &str = "head_choices";
+    /// Operator-policy slot pins in selection.
+    pub const SELECT_PIN_SLOT: &str = "select_pin_slot";
+    /// Selection restricted to caller-reachable routes.
+    pub const SELECT_AVAILABLE_ROUTES: &str = "select_available_routes";
+    /// Prompt-cache preference among adequate routes.
+    pub const SELECT_PREFER_PROMPT_CACHE: &str = "select_prefer_prompt_cache";
+    /// Project and service-tier settings lookup in selection.
+    pub const SELECT_SETTINGS: &str = "select_settings";
+    /// Account-local backoff observations and decision-owner authorization.
+    pub const OBSERVE_BACKOFF: &str = "observe_backoff";
+    /// Report outcomes that distinguish failures before a provider send.
+    pub const REPORT_OUTCOMES: &str = "report_outcomes";
+
+    /// Optional operations and their groups. Each pair must be declared together.
+    pub const OP_GROUPS: &[(&str, &str)] = &[
+        (super::ops::ROUTE_SELECT_PANEL, SELECT_PANEL),
+        (super::ops::ROUTE_BUDGET_QUOTE, BUDGET_QUOTE),
+        (super::ops::ROUTE_EXPLAIN, EXPLAIN),
+        (super::ops::ROUTE_ACCOUNT_STATUS, ACCOUNT_STATUS),
+        (super::ops::ROUTE_HEAD_CHOICES, HEAD_CHOICES),
+    ];
+
     /// Every group this version defines.
     pub const KNOWN: &[&str] = &[
         ACCOUNT_CONTINUE,
@@ -133,6 +184,17 @@ pub mod capabilities {
         SELECT_PREFER,
         SELECT_EXCLUDE_PROVIDERS,
         SELECT_TASK_REF,
+        SELECT_PANEL,
+        BUDGET_QUOTE,
+        EXPLAIN,
+        ACCOUNT_STATUS,
+        HEAD_CHOICES,
+        SELECT_PIN_SLOT,
+        SELECT_AVAILABLE_ROUTES,
+        SELECT_PREFER_PROMPT_CACHE,
+        SELECT_SETTINGS,
+        OBSERVE_BACKOFF,
+        REPORT_OUTCOMES,
     ];
 }
 

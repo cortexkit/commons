@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.4
+
+- Add optional `sent_to_last_content_ms`, `first_to_last_content_ms` and
+  `route_decision_id` to step rows. Zero is a measured duration; unknown values
+  remain absent, and rows without the new members keep their existing bytes.
+- Extend `StepRow::check_counts` to name a row whose first-to-last content
+  duration exceeds its send-to-last content duration when both are present.
+
 ## 0.2.3
 
 - Add optional applied and provider-confirmed served service tiers to step rows.

@@ -173,6 +173,7 @@ Optional members, omitted when unknown and never zero for unknown:
 | Member | Type | Meaning |
 |---|---|---|
 | `run_id` | string | Runner steps only. |
+| `route_decision_id` | string | The run's routing decision id, absent when the run had none. |
 | `provider` | string | |
 | `model` | string | |
 | `input` | integer | Input tokens neither read from nor written to the prompt cache. |
@@ -185,6 +186,8 @@ Optional members, omitted when unknown and never zero for unknown:
 | `finish` | string | The producer's finish or stop reason. |
 | `context_limit` | integer | The model's context limit, where the producer reports it. |
 | `request_body_len` | integer | Request body length, where the producer reports it. |
+| `sent_to_last_content_ms` | unsigned integer, ms | From sending the model request to its last content. |
+| `first_to_last_content_ms` | unsigned integer, ms | From the first to the last content of the same model call. |
 | `retention` | number | Non-negative; never rounded or clamped. See [Verdict](#verdict). |
 | `request_size` | string | `smaller` or `not_smaller`; see [Verdict](#verdict). |
 
@@ -210,9 +213,18 @@ runner contract pins for `reasoning_tokens` and `output_tokens`.
 
 `cache_write` is the sum of every cache lifetime.
 
-Readers still decode a row whose `reasoning` exceeds its `output`; such a row
-breaks this rule on the provider's side. `StepRow::check_counts` names it, for
-the provider's own tests.
+Both content times are unsigned integer milliseconds. Zero is a measured
+value; absence means unknown, never zero. When both times are present,
+`first_to_last_content_ms <= sent_to_last_content_ms`. Under `per_attempt`
+granularity the send is the recorded attempt's send; under
+`per_completed_step` it is the step's last attempt's send. Tool time falls
+outside a model call and has no row member.
+
+Readers still decode a row whose `reasoning` exceeds its `output` or whose
+`first_to_last_content_ms` exceeds its `sent_to_last_content_ms`; such a row
+breaks a rule on the provider's side. `StepRow::check_counts` names it, for
+the provider's own tests. Readers ignore unknown row members, so the optional
+timing and routing members need no special rollout.
 
 ### Provider service tiers
 

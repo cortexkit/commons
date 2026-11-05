@@ -19,14 +19,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.6.0"
+cortexkit-role-routing = "0.7.0"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.6.0", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.7.0", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -45,7 +45,10 @@ What the crate holds:
 - `capabilities`: the optional groups this version defines
   (`select_hold_control`, `select_harness`, `select_prefer`,
   `select_exclude_providers`, `select_task_ref`, `service_tier`,
-  `account_continue`);
+  `account_continue`, `select_panel`, `budget_quote`, `explain`,
+  `account_status`, `head_choices`, `select_pin_slot`, `select_available_routes`,
+  `select_prefer_prompt_cache`, `select_settings`, `observe_backoff`,
+  `report_outcomes`);
 - `select`: the `route.select` request, `parse_select_request` and
   `parse_select_request_serving` (which reads the members of the groups a
   provider declares), the answer and `check_answer`;
@@ -58,6 +61,54 @@ What the crate holds:
 - `errors`: the refusal body, every refusal code, and each code's detail;
 - `wire`: the `{"result": <answer>}` reply envelope (`reply_body`,
   `read_reply`).
+
+## Optional operations and checks in 0.7.0
+
+Each new operation is listed in `ops` exactly when its same-named group
+(without `route.`) is declared. `check_describe` names a mismatch as
+`DescribeProblem::OpGroupMismatch { group }`; `REQUIRED_OPS` is unchanged, so
+0.6.0-shaped routers remain valid. Call new operations only after discovering
+their group.
+
+| Module / operation | Pure checks and caller helpers |
+|---|---|
+| `panel` / `route.select_panel` | `check_panel_answer`, `check_panel_replacement`, `SelectPanelRequest::seat_request`, `PanelState::new` and `apply`; slot policy, temperature, diversity, window/package floors and historical route/decision freshness |
+| `budget` / `route.budget_quote` | `quote`, `check_budget_quote`; retained capacities, saturating ceilings and deterministic limiting ties |
+| `explain` / `route.explain` | `check_explain`; decision, route, runner and serving-provider consistency |
+| `account_status` / `route.account_status` | `check_account_status`; echoed account identity and reset applicability |
+| `head_choices` / `route.head_choices` | `check_head_choices`; runner echo, sorted unique choices and valid default variants |
+| `select` additions | `check_answer` now checks `available_routes`, slot-pin outcomes and `project_settings` presence; `SelectSettings::check_project_stamp` rejects mismatched trusted project stamps |
+| `report` additions | `parse_report_request_serving`, `Outcome::effect`; four group-gated outcomes with no availability penalty and affinity kept |
+| `observe` additions | `parse_account_observe_request_serving`, `check_observe_authorization` and `ObserveArm`; account-local backoff and admission-bound decision-owner wall observations |
+
+New parsers take declared groups; legacy report/observe parsers supply none.
+Without `report_outcomes`, the four new outcome strings remain unknown failures;
+send `cancelled` instead to those routers. Without `observe_backoff`, new observe
+members are refused by name and `transient_backoff` remains advisory. Select's
+`pin_slot`, `available_routes`, `prefer_prompt_cache` and `settings` each have
+their own group and undeclared-member refusal. Unknown open-set values are kept,
+and absent optional fields preserve old bytes.
+
+`settings` selects only project and service-tier settings, never route scope;
+an unresolved project still selects without settings. Panels use router-owned
+class policies and can replace seats without returning to a previously seated
+route or decision. Quote and explain accept only select/panel decisions, not
+account-allocation or continuation-offer ids. A decision may still be quoted,
+explained, or replaced through its panel after it expires, while it remains
+retained by the router.
+
+Pooled API keys use the existing account lease: the runner acquires/renews via
+`account_for` and releases with `account_observe` `run_finished`. The runner's
+`routed_accounts` declaration chooses which sign-in methods it handles itself;
+listed methods require `follows_account_choice: true` and use the credential
+named by account admission rather than a select hint. See CONTRACT §§5.2, 9.3
+and 11 for ownership, rollout, request/answer tables and refusal rules.
+
+The vector directory has one file per new group, including both op/group
+mismatches, member refusals without declaration and unknown open-set strings.
+Conformance checks and adapter hooks are documented by the
+[routing conformance kit](../cortexkit-role-routing-conformance/README.md), not
+implemented in this pure wire crate.
 
 Declarations may default `eq`, `context_window`, `max_output_tokens`, `tools`,
 `tool_capabilities`, `modalities` and `structured_output`, but cannot set `iq`.

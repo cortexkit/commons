@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.0
+
+- Pin routing 0.7.0 and check optional panels, budget quotes, explanations,
+  account status, head choices, select additions and backoff observations.
+- Add `CatalogModel.family` (a breaking Rust minor change),
+  `configure_panel_class` and `configure_pin_slot` fixture hooks.
+- Pair every new check with a deliberately faulty router and document the
+  observable coverage limits.
+
 ## 0.9.0
 
 - Pin routing 0.6.0 (including its Rust answer-construction API break) and check tier-aware `route.account_for` admission,

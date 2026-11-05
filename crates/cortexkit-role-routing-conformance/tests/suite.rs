@@ -5,8 +5,106 @@
 //! only that check: each test pins exactly which checks a break turns red,
 //! so a check that starts passing a break, or a break that starts leaking
 //! into unrelated checks, shows up.
+//! Panel checks share caller-side validation; their faulty-router matrix
+//! requires the named check to fail even when another panel check also detects it.
 
 mod fake;
+
+const ROUTING_070_CASES: &[&str] = &[
+    "panel_full",
+    "panel_shortfall",
+    "panel_family_and_route_unique",
+    "panel_temperatures_by_slot",
+    "panel_same_seed",
+    "panel_replacement_preserves_slot",
+    "panel_foreign_replacement_unknown",
+    "panel_replacement_invalid_slot",
+    "budget_quote_matches_helper",
+    "budget_quote_foreign_unknown",
+    "explain_matches_selection",
+    "explain_foreign_unknown",
+    "account_status_blocked_limited",
+    "account_status_unknown",
+    "head_choices_valid",
+    "head_choices_runner_routes",
+    "head_choices_non_starting_empty",
+    "pin_slot_configured_pinned",
+    "pin_slot_unknown_unavailable",
+    "undeclared_pin_slot_refused",
+    "available_routes_honoured",
+    "available_routes_empty_refused",
+    "undeclared_available_routes_refused",
+    "prefer_prompt_cache_accepted",
+    "undeclared_prefer_prompt_cache_refused",
+    "settings_unresolved_selects",
+    "settings_unknown_member_refused",
+    "undeclared_settings_refused",
+    "backoff_with_admission_accepted",
+    "backoff_missing_retry_refused",
+    "undeclared_observe_decision_id_refused",
+    "undeclared_observe_retry_at_ms_refused",
+    "undeclared_observe_provider_code_refused",
+];
+
+#[tokio::test]
+async fn routing_070_cases_and_not_applicable_split() {
+    for declared in [true, false] {
+        let subject = if declared {
+            FakeSubject::new(Defects::default())
+        } else {
+            FakeSubject::without_extensions(Defects::default())
+        };
+        let report = run_suite(&subject).await;
+        assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+        for name in ROUTING_070_CASES {
+            let not_applicable = declared == name.starts_with("undeclared_");
+            assert!(
+                CHECKS.iter().any(|c| c.name == *name),
+                "missing check {name}"
+            );
+            match report.outcome(name) {
+                Some(CheckOutcome::Passed) if !not_applicable => {}
+                Some(CheckOutcome::NotApplicable { reason }) if not_applicable => {
+                    assert!(!reason.is_empty())
+                }
+                other => panic!(
+                    "{name} with declared={declared}: {other:?}\n{}",
+                    report.render()
+                ),
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn routing_070_faulty_routers_fail_each_case_by_name() {
+    for name in ROUTING_070_CASES {
+        let defects = Defects {
+            extension: Some(name),
+            ..Defects::default()
+        };
+        let subject = if name.starts_with("undeclared_") {
+            FakeSubject::without_extensions(defects)
+        } else {
+            FakeSubject::new(defects)
+        };
+        let report = run_suite(&subject).await;
+        assert!(
+            matches!(report.outcome(name), Some(CheckOutcome::Failed { .. })),
+            "faulty router must fail {name}: {}",
+            report.render()
+        );
+        assert!(
+            report
+                .failing()
+                .iter()
+                .all(|failed| ROUTING_070_CASES.contains(failed)),
+            "new faulty router must not break unrelated legacy checks: {}",
+            report.render()
+        );
+        println!("faulty router rejected by {name}");
+    }
+}
 
 #[tokio::test]
 async fn continue_faulty_exhausted_account_fails_by_name() {
@@ -363,6 +461,13 @@ const HOLD_CHECKS: &[&str] = &[
 async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_passes() {
     let report = run_suite(&FakeSubject::without_hold_control(Defects::default())).await;
     let mut not_applicable = vec![
+        "undeclared_pin_slot_refused",
+        "undeclared_available_routes_refused",
+        "undeclared_prefer_prompt_cache_refused",
+        "undeclared_settings_refused",
+        "undeclared_observe_decision_id_refused",
+        "undeclared_observe_retry_at_ms_refused",
+        "undeclared_observe_provider_code_refused",
         "account_for_tier_undeclared",
         "continue_undeclared_group_refuses_mode",
         "undeclared_harness_group_refuses_member",
@@ -551,6 +656,13 @@ async fn without_harness_group_requests_are_refused() {
     assert_eq!(
         report.not_applicable(),
         [
+            "undeclared_pin_slot_refused",
+            "undeclared_available_routes_refused",
+            "undeclared_prefer_prompt_cache_refused",
+            "undeclared_settings_refused",
+            "undeclared_observe_decision_id_refused",
+            "undeclared_observe_retry_at_ms_refused",
+            "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
             "continue_undeclared_group_refuses_mode",
             "requested_harness_is_hosted_and_echoed",
@@ -738,6 +850,13 @@ async fn passes_every_check(subject: &FakeSubject) {
     assert_eq!(report.checks.len(), CHECKS.len());
     for check in &report.checks {
         if [
+            "undeclared_pin_slot_refused",
+            "undeclared_available_routes_refused",
+            "undeclared_prefer_prompt_cache_refused",
+            "undeclared_settings_refused",
+            "undeclared_observe_decision_id_refused",
+            "undeclared_observe_retry_at_ms_refused",
+            "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
@@ -1377,6 +1496,13 @@ async fn without_exclude_providers_group_its_checks_are_not_applicable() {
     assert_eq!(
         report.not_applicable(),
         [
+            "undeclared_pin_slot_refused",
+            "undeclared_available_routes_refused",
+            "undeclared_prefer_prompt_cache_refused",
+            "undeclared_settings_refused",
+            "undeclared_observe_decision_id_refused",
+            "undeclared_observe_retry_at_ms_refused",
+            "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
             "continue_undeclared_group_refuses_mode",
             "undeclared_harness_group_refuses_member",

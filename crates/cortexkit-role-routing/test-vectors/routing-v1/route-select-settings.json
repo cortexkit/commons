@@ -1,0 +1,124 @@
+{
+  "group": "select_settings",
+  "requests": [
+    {
+      "name": "with_group",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "settings": {
+          "project_id": "project-1",
+          "tier_consumer": "review"
+        }
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "unknown_setting",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "settings": {
+          "folder": "ignored"
+        }
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "settings.folder"
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "with_group",
+      "answer": {
+        "decision_id": "decision-1",
+        "route": {
+          "provider": "example-provider",
+          "model": "model-a"
+        },
+        "runner": {
+          "module": "runner-one",
+          "model": {
+            "provider": "example-provider",
+            "model": "model-a"
+          }
+        },
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach.",
+        "project_settings": "unresolved"
+      }
+    }
+  ],
+  "requests_without_group": [
+    {
+      "name": "legacy",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        }
+      }
+    }
+  ],
+  "answers_without_group": [
+    {
+      "name": "legacy",
+      "answer": {
+        "decision_id": "decision-1",
+        "route": {
+          "provider": "example-provider",
+          "model": "model-a"
+        },
+        "runner": {
+          "module": "runner-one",
+          "model": {
+            "provider": "example-provider",
+            "model": "model-a"
+          }
+        },
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach."
+      }
+    }
+  ],
+  "refused_without_group": [
+    {
+      "name": "undeclared_settings",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "settings": {
+          "project_id": "project-1",
+          "tier_consumer": "review"
+        }
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "settings"
+        }
+      }
+    }
+  ],
+  "unknown": [
+    {
+      "name": "unknown_project_settings",
+      "type": "ProjectSettings",
+      "value": "future_result"
+    }
+  ]
+}

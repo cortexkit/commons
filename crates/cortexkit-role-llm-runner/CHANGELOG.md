@@ -15,6 +15,20 @@
   from the raised history_version on serves only cleaned digests, computing
   them on read until it has persisted them. Text only; no API change.
 
+## 0.8.7
+
+- Add optional `sent_to_last_content_ms`, `first_to_last_content_ms` and
+  `route_decision_id` to `step.finished.v1`, omitting unknown values. Check
+  that first-to-last content time does not exceed send-to-last content time
+  when both are known. Preserve 0.8.6 bodies byte for byte when absent and
+  require every event reader to use 0.8.7 or later decoders before emission.
+- Add the `routed_accounts` discovery group and sign-in method list, with
+  `describe::check_routed_accounts` validating token shape, non-empty lists,
+  uniqueness and the 64-entry limit without a routing dependency. Require
+  `follows_account_choice: true` in the routing runner declaration, define
+  pool and credential-id forwarding, and exempt listed methods from routing
+  §5.2's key-pool send-without-auth refusal. Other methods remain unchanged.
+
 ## 0.8.6
 
 - Require `plans` for `head_selection`; selecting through refresh also needs

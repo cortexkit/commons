@@ -1,5 +1,61 @@
 # Changelog
 
+## 0.7.0
+
+- Breaking: `route.account_observe`'s `upstream_origin` and
+  `resets_at_source` are now closed enums, `observe::UpstreamOrigin` and
+  `observe::ResetsAtSource`, and the parser refuses a value outside the enum as
+  `invalid_request` naming the member. Before 0.7.0 this crate decoded any
+  string there while routers acted on a fixed set of values the contract
+  never listed, and the published samples sent a URL as the origin. The contract now gives each value's meaning and how a router
+  uses it, and the samples use real values. New helpers:
+  `UpstreamOrigin::is_genuine` and `ResetsAtSource::is_stated_reset`.
+- Breaking: a report's `eligibility.scope` is now a closed enum. A scope the
+  contract doesn't name is `invalid_request {field: "eligibility"}`, where
+  0.6.0 kept it as a string the contract gave no meaning.
+- With `report_outcomes`, a report may carry `refusal_class`
+  (`report::RefusalClass`): `credential_refused` or `request_too_large`,
+  mapped by the runner from its provider's wording, so routers act on a
+  typed member instead of matching vendor text in `runner_code`.
+- Breaking: `ContinueRequest.mode` is now `account_continue::ContinueMode`, a
+  one-value closed enum. The wire is unchanged: any mode other than
+  `continue` was already refused as `invalid_request {field: "mode"}`.
+- The contract no longer mentions a "used-account report": an observation's
+  `pool` names the pool it is about, and no observation kind of that name
+  exists.
+- Register the five optional operations and all eleven new groups. Reject
+  operation/group mismatches with a named `DescribeProblem` while retaining the
+  required-operation baseline and 0.6.0 describe compatibility.
+- Publish operation tables, settings and runner-owned pooled-account rules,
+  and one vector file per new group with compiled-in bytes and checksums.
+
+- Add panel selection and replacement wire types, strict request parsers,
+  per-seat request derivation and caller-held replacement history. Pure panel
+  checks enforce slot policy, temperatures, diversity, fresh routes and decision
+  ids, window floors and package ceilings using `budget::quote`.
+- Add budget-quote, explain, account-status and head-choices wire types and
+  pure answer checks. Share saturating package/output-limit arithmetic in
+  `budget::quote`, using retained selection capacities and deterministic
+  limiting-seat ties. Preserve unknown budget statuses/reasons, explanation
+  reason codes and account-limit states as strings.
+- Add group-gated select members `pin_slot`, `available_routes`,
+  `prefer_prompt_cache` and `settings`, plus a `project_settings` answer result
+  that retains unknown strings. Enforce route-list membership, project-settings
+  presence and pin outcomes for slots while preserving legacy bytes when
+  additions are absent.
+- Add `SelectSettings::check_project_stamp` for routers to reject a settings
+  project id different from the route's trusted project stamp.
+- Add `report_outcomes` decoding for `contract_error`, `session_error`,
+  `interrupted` and `launch_failed`, with a shared availability/affinity effect
+  matrix. Without the group, these outcomes keep their legacy failure effect.
+- Add `observe_backoff` parsing for account-local `transient_backoff` evidence
+  and optional `decision_id`, `retry_at_ms` and verbatim `provider_code`.
+  Undeclared members are refused by name; absent members preserve old bytes.
+- Add `ObserveArm` and `check_observe_authorization`: decision owners may send
+  `account_limit_exhausted` or `transient_backoff` only on an admission carrying
+  their decision. Authorized runners may still release the account pin when
+  `account_continue` switches reporting to an offer's decision id.
+
 ## 0.6.0
 
 - Rust API break: `AccountForAnswer` and `AccountPin` are now

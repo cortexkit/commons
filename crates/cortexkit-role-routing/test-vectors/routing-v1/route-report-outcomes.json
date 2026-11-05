@@ -1,0 +1,237 @@
+{
+  "group": "report_outcomes",
+  "requests": [
+    {
+      "name": "contract_error",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "contract_error"
+      }
+    },
+    {
+      "name": "session_error",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "session_error"
+      }
+    },
+    {
+      "name": "interrupted",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "interrupted"
+      }
+    },
+    {
+      "name": "launch_failed",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "launch_failed"
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "contract_error",
+      "answer": {
+        "decision_id": "decision-1",
+        "report_id": "report-1",
+        "outcome": "contract_error"
+      }
+    },
+    {
+      "name": "session_error",
+      "answer": {
+        "decision_id": "decision-1",
+        "report_id": "report-1",
+        "outcome": "session_error"
+      }
+    },
+    {
+      "name": "interrupted",
+      "answer": {
+        "decision_id": "decision-1",
+        "report_id": "report-1",
+        "outcome": "interrupted"
+      }
+    },
+    {
+      "name": "launch_failed",
+      "answer": {
+        "decision_id": "decision-1",
+        "report_id": "report-1",
+        "outcome": "launch_failed"
+      }
+    }
+  ],
+  "refusal_classes": [
+    {
+      "name": "credential_refused",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "refused",
+        "runner_code": "provider_entitlement_error",
+        "refusal_class": "credential_refused"
+      },
+      "refusal_class": "credential_refused"
+    },
+    {
+      "name": "request_too_large",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "refused",
+        "runner_code": "provider_request_too_large",
+        "request_input_tokens": 250000,
+        "refusal_class": "request_too_large"
+      },
+      "refusal_class": "request_too_large"
+    },
+    {
+      "name": "failed_credential_refused",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "failed",
+        "refusal_class": "credential_refused"
+      },
+      "refusal_class": "credential_refused"
+    }
+  ],
+  "requests_without_group": [
+    {
+      "name": "legacy",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "completed"
+      }
+    }
+  ],
+  "answers_without_group": [
+    {
+      "name": "legacy",
+      "answer": {
+        "decision_id": "decision-1",
+        "report_id": "report-1",
+        "outcome": "completed"
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "refusal_class_unknown",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "refused",
+        "refusal_class": "rate_limited"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "refusal_class"
+        }
+      }
+    },
+    {
+      "name": "refusal_class_with_completed",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "completed",
+        "refusal_class": "credential_refused"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "refusal_class"
+        }
+      }
+    },
+    {
+      "name": "refusal_class_with_eligibility",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "refused",
+        "eligibility": {
+          "scope": "account",
+          "code": "account_disabled"
+        },
+        "refusal_class": "credential_refused"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "refusal_class"
+        }
+      }
+    },
+    {
+      "name": "request_too_large_without_input_tokens",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "refused",
+        "refusal_class": "request_too_large"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "request_input_tokens"
+        }
+      }
+    }
+  ],
+  "refused_without_group": [
+    {
+      "name": "refusal_class_needs_group",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "refused",
+        "refusal_class": "credential_refused"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "refusal_class"
+        }
+      }
+    }
+  ],
+  "unknown": [
+    {
+      "name": "future_outcome",
+      "type": "Outcome",
+      "value": "future_outcome"
+    }
+  ],
+  "without_group": [
+    {
+      "name": "contract_error",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "contract_error"
+      },
+      "availability_penalty": true
+    },
+    {
+      "name": "session_error",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "session_error"
+      },
+      "availability_penalty": true
+    },
+    {
+      "name": "interrupted",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "interrupted"
+      },
+      "availability_penalty": true
+    },
+    {
+      "name": "launch_failed",
+      "params": {
+        "decision_id": "decision-1",
+        "outcome": "launch_failed"
+      },
+      "availability_penalty": true
+    }
+  ]
+}

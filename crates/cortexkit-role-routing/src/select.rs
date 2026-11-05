@@ -78,6 +78,67 @@ open_set! {
     }
 }
 
+open_set! {
+    /// How the router resolved the request's `settings.project_id`.
+    pub enum ProjectSettings {
+        /// The project's settings were applied.
+        Applied => "applied",
+        /// The project has no settings.
+        None => "none",
+        /// The project could not be found; selection proceeds without its settings.
+        Unresolved => "unresolved",
+    }
+}
+
+/// Settings lookup overrides, sent only with the `select_settings` group.
+/// These are never scope: pins, cost attribution and consumer ownership still
+/// follow the route's stamp. No member names a folder.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct SelectSettings {
+    /// Identity-service project id. A router must refuse a value different
+    /// from a project stamp on the route as `settings.project_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Consumer whose service-tier settings apply, 1 to 128 bytes. Changes
+    /// only that lookup, not the request's consumer or ownership.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tier_consumer: Option<String>,
+}
+
+impl SelectSettings {
+    /// Use the route's ordinary settings lookups.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_project_id(mut self, project_id: impl Into<String>) -> Self {
+        self.project_id = Some(project_id.into());
+        self
+    }
+
+    pub fn with_tier_consumer(mut self, tier_consumer: impl Into<String>) -> Self {
+        self.tier_consumer = Some(tier_consumer.into());
+        self
+    }
+
+    /// Check the project id against the route's trusted daemon scope stamp.
+    /// The router must call this on every scoped route, passing the project id
+    /// from its bind's stamp, never from the request. It is not called on
+    /// unscoped routes. Project ids are compared as exact strings, not normalized.
+    pub fn check_project_stamp(&self, stamp_project_id: Option<&str>) -> Result<(), Refusal> {
+        if let (Some(project_id), Some(stamp_project_id)) = (&self.project_id, stamp_project_id) {
+            if project_id != stamp_project_id {
+                return Err(Refusal::invalid_request(
+                    "settings.project_id",
+                    "settings.project_id differs from the route's project stamp",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// What the work demands of a route.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Requirements {
@@ -204,13 +265,31 @@ pub struct SelectRequest {
     /// [`crate::capabilities::SELECT_PREFER`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prefer: Option<Vec<String>>,
-    /// `pin_fallback: "route"` beside a pin: when the pin cannot be served,
+    /// `pin_fallback: "route"` beside `pin` or `pin_slot`: when the pin cannot be served,
     /// route normally instead of refusing `pin_unavailable`. Without it the
     /// pin still refuses and a second select for the same work stays
     /// forbidden. Any other value is `invalid_request` naming the field, and
-    /// a `pin_fallback` without a pin is too.
+    /// a `pin_fallback` without either pin member is too.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin_fallback: Option<PinFallback>,
+    /// Operator-policy slot, a token sent only with `select_pin_slot`.
+    /// Mutually exclusive with `pin`. An unknown slot is `pin_unavailable`
+    /// naming the slot with reason `unknown_slot`; a known slot's unavailable
+    /// route has the same reason as a `pin` of that route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_slot: Option<String>,
+    /// Non-empty route-key list (`provider/model`, no variants) the caller's
+    /// runners can reach. Narrows independently of `runners` and `exclude`;
+    /// repeated entries are allowed. Send only with `select_available_routes`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_routes: Option<Vec<String>>,
+    /// Prompt-cache preference, sent only with `select_prefer_prompt_cache`.
+    /// Breaks ties among adequate routes, never admits a route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefer_prompt_cache: Option<bool>,
+    /// Settings lookups, sent only with `select_settings`; never scope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<SelectSettings>,
 }
 
 impl SelectRequest {
@@ -234,6 +313,10 @@ impl SelectRequest {
             harness: None,
             prefer: None,
             pin_fallback: None,
+            pin_slot: None,
+            available_routes: None,
+            prefer_prompt_cache: None,
+            settings: None,
         }
     }
 
@@ -250,6 +333,26 @@ impl SelectRequest {
     /// Set the pin, `provider/model[:variant]`.
     pub fn with_pin(mut self, pin: impl Into<String>) -> Self {
         self.pin = Some(pin.into());
+        self
+    }
+
+    pub fn with_pin_slot(mut self, pin_slot: impl Into<String>) -> Self {
+        self.pin_slot = Some(pin_slot.into());
+        self
+    }
+
+    pub fn with_available_routes(mut self, available_routes: Vec<String>) -> Self {
+        self.available_routes = Some(available_routes);
+        self
+    }
+
+    pub fn with_prefer_prompt_cache(mut self, prefer_prompt_cache: bool) -> Self {
+        self.prefer_prompt_cache = Some(prefer_prompt_cache);
+        self
+    }
+
+    pub fn with_settings(mut self, settings: SelectSettings) -> Self {
+        self.settings = Some(settings);
         self
     }
 
@@ -395,6 +498,17 @@ pub fn is_route_key(key: &str) -> bool {
     matches!(key.split_once('/'), Some((provider, model)) if is_provider_id(provider) && !model.is_empty())
 }
 
+/// Whether `key` is a route key without a variant: [`is_route_key`], with no
+/// `:` in its model part. A pin reads a variant after the last `:` past the
+/// first `/` ([`RouteRef::parse_pin`]), so only the model part is checked; a
+/// provider id may contain `:`.
+pub fn is_plain_route_key(key: &str) -> bool {
+    is_route_key(key)
+        && key
+            .split_once('/')
+            .is_some_and(|(_, model)| !model.contains(':'))
+}
+
 /// Whether `id` has the shape of a route key's provider part: non-empty and
 /// without a `/`, since a route key's provider is everything before its
 /// first `/`.
@@ -484,6 +598,10 @@ pub struct SelectAnswer {
     /// pinned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin_outcome: Option<PinOutcome>,
+    /// Present exactly when the request sent `settings.project_id`. An
+    /// unresolved project never refuses selection; it has no project settings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_settings: Option<ProjectSettings>,
 }
 
 impl SelectAnswer {
@@ -508,6 +626,7 @@ impl SelectAnswer {
             explanation: explanation.into(),
             detail: None,
             pin_outcome: None,
+            project_settings: None,
         }
     }
 
@@ -525,6 +644,11 @@ impl SelectAnswer {
     /// Set how a pinned select was answered.
     pub fn with_pin_outcome(mut self, pin_outcome: PinOutcome) -> Self {
         self.pin_outcome = Some(pin_outcome);
+        self
+    }
+
+    pub fn with_project_settings(mut self, project_settings: ProjectSettings) -> Self {
+        self.project_settings = Some(project_settings);
         self
     }
 }
@@ -549,6 +673,9 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
 /// and `exclude_providers` unless it declares
 /// [`crate::capabilities::SELECT_EXCLUDE_PROVIDERS`]. `task_ref` is refused
 /// by name unless the provider declares [`crate::capabilities::SELECT_TASK_REF`].
+/// `pin_slot`, `available_routes`, `prefer_prompt_cache` and `settings` require
+/// `select_pin_slot`, `select_available_routes`, `select_prefer_prompt_cache`
+/// and `select_settings`, respectively.
 /// Whether the consumer is known and owned, and
 /// whether anything can serve, is the provider's to answer after this.
 pub fn parse_select_request_serving<C: AsRef<str>>(
@@ -556,6 +683,23 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
     capabilities: &[C],
 ) -> Result<SelectRequest, Refusal> {
     let members = Members::of(params)?;
+    for (field, group) in [
+        ("pin_slot", "select_pin_slot"),
+        ("available_routes", "select_available_routes"),
+        ("prefer_prompt_cache", "select_prefer_prompt_cache"),
+        ("settings", "select_settings"),
+    ] {
+        if members
+            .object
+            .get(field)
+            .is_some_and(|value| !value.is_null())
+            && !capabilities
+                .iter()
+                .any(|capability| capability.as_ref() == group)
+        {
+            return Err(members.refuse(field, format!("{field} requires the {group} group")));
+        }
+    }
     let consumer = members.text("consumer", None)?;
     let service_tier = crate::service_tier::parse_member(members.object.get("service_tier"))?;
     if service_tier.is_some()
@@ -570,6 +714,15 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
     }
     let requirements = parse_requirements(members.object.get("requirements"))?;
     let pin = members.optional_text("pin", None)?;
+    let pin_slot = members.optional_text("pin_slot", None)?;
+    if let Some(slot) = &pin_slot {
+        if pin.is_some() {
+            return Err(members.refuse("pin_slot", "pin_slot and pin are mutually exclusive"));
+        }
+        if !crate::declarations::is_runner_token(slot) {
+            return Err(members.refuse("pin_slot", "pin_slot must be a token"));
+        }
+    }
     if let Some(pin) = &pin {
         if RouteRef::parse_pin(pin).is_none() {
             return Err(Refusal::pin_unavailable(
@@ -579,9 +732,20 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
             ));
         }
     }
+    let available_routes: Option<Vec<String>> = members.optional("available_routes")?;
+    if let Some(routes) = &available_routes {
+        if routes.is_empty() || routes.iter().any(|key| !is_plain_route_key(key)) {
+            return Err(members.refuse(
+                "available_routes",
+                "available_routes must be a non-empty list of route keys provider/model",
+            ));
+        }
+    }
+    let prefer_prompt_cache = members.optional("prefer_prompt_cache")?;
+    let settings = parse_settings(members.object.get("settings"))?;
     let exclude: Option<Vec<String>> = members.optional("exclude")?;
     if let Some(exclude) = &exclude {
-        if let Some(bad) = exclude.iter().find(|key| !is_route_key(key)) {
+        if let Some(bad) = exclude.iter().find(|key| !is_plain_route_key(key)) {
             return Err(members.refuse(
                 "exclude",
                 format!("{bad:?} is not a route key provider/model"),
@@ -686,8 +850,8 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
                 format!("{fallback} is not a pin fallback this provider reads"),
             ));
         }
-        if pin.is_none() {
-            return Err(members.refuse("pin_fallback", "pin_fallback without a pin is invalid"));
+        if pin.is_none() && pin_slot.is_none() {
+            return Err(members.refuse("pin_fallback", "pin_fallback needs pin or pin_slot"));
         }
     }
     let prefer: Option<Vec<String>> = members.optional("prefer")?;
@@ -717,7 +881,7 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
                     members.refuse("prefer", format!("{entry:?} is listed twice in prefer"))
                 );
             }
-            if entry.contains(':') || !is_route_key(entry) {
+            if !is_plain_route_key(entry) {
                 return Err(members.refuse(
                     "prefer",
                     format!("{entry:?} is not a route key provider/model"),
@@ -743,7 +907,45 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         harness,
         prefer,
         pin_fallback,
+        pin_slot,
+        available_routes,
+        prefer_prompt_cache,
+        settings,
     })
+}
+
+pub(crate) fn parse_settings(value: Option<&Value>) -> Result<Option<SelectSettings>, Refusal> {
+    let object = match value {
+        None | Some(Value::Null) => return Ok(None),
+        Some(Value::Object(object)) => object,
+        _ => {
+            return Err(Refusal::invalid_request(
+                "settings",
+                "settings must be an object",
+            ))
+        }
+    };
+    let members = Members {
+        object,
+        refuse: |field, message| Refusal::invalid_request(format!("settings.{field}"), message),
+    };
+    for field in object.keys() {
+        if !matches!(field.as_str(), "project_id" | "tier_consumer") {
+            return Err(members.refuse(field, "unknown settings member"));
+        }
+    }
+    let project_id = members.optional_text("project_id", None)?;
+    let tier_consumer = members.optional_text("tier_consumer", None)?;
+    if tier_consumer
+        .as_ref()
+        .is_some_and(|consumer| consumer.len() > 128)
+    {
+        return Err(members.refuse("tier_consumer", "tier_consumer must be 1 to 128 bytes"));
+    }
+    Ok(Some(SelectSettings {
+        project_id,
+        tier_consumer,
+    }))
 }
 
 pub(crate) fn parse_requirements(value: Option<&Value>) -> Result<Requirements, Refusal> {
@@ -819,6 +1021,8 @@ pub enum AnswerProblem {
     ServiceTier,
     /// The answer's runner is not one of the request's `runners`.
     RunnerNotListed(String),
+    /// The answer's route key is not in the request's `available_routes`.
+    RouteNotAvailable(String),
     /// The answer's route key is in the request's `exclude`.
     Excluded(String),
     /// The answer's route key (held here) is from a provider the request's
@@ -833,6 +1037,10 @@ pub enum AnswerProblem {
     /// The request pinned and fell back but the answer's `detail` carries no
     /// `pin_reason`.
     MissingPinReason,
+    /// The request sent `settings.project_id` but the answer carries no result.
+    MissingProjectSettings,
+    /// No `settings.project_id` was sent but the answer carries a result.
+    UnexpectedProjectSettings,
 }
 
 impl std::fmt::Display for AnswerProblem {
@@ -844,6 +1052,9 @@ impl std::fmt::Display for AnswerProblem {
             ),
             Self::RunnerNotListed(runner) => {
                 write!(f, "runner {runner:?} is not one of the request's runners")
+            }
+            Self::RouteNotAvailable(key) => {
+                write!(f, "route {key:?} is not in the request's available_routes")
             }
             Self::Excluded(key) => write!(f, "route {key:?} is in the request's exclude"),
             Self::ExcludedProvider(key) => write!(
@@ -872,6 +1083,18 @@ impl std::fmt::Display for AnswerProblem {
                     "the answer fell back but its detail carries no pin_reason"
                 )
             }
+            Self::MissingProjectSettings => {
+                write!(
+                    f,
+                    "settings.project_id was sent but project_settings is missing"
+                )
+            }
+            Self::UnexpectedProjectSettings => {
+                write!(
+                    f,
+                    "project_settings was answered without settings.project_id"
+                )
+            }
         }
     }
 }
@@ -882,6 +1105,9 @@ impl std::fmt::Display for AnswerProblem {
 /// answered with a `pin_outcome` (with `pin_reason` in `detail` on
 /// `fell_back`). A chosen tier must be recognised and may not upgrade the
 /// request. This is stricter than record decoding, which retains unknown tiers.
+/// The route must also be in `available_routes` when sent, and
+/// `project_settings` must be present exactly when `settings.project_id` was sent.
+/// Pin rules apply to `pin_slot` just as to `pin`.
 pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<(), AnswerProblem> {
     if !crate::service_tier::check_chosen(
         request.service_tier,
@@ -896,6 +1122,13 @@ pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<()
     }
     let key = answer.route.route_key();
     if request
+        .available_routes
+        .as_ref()
+        .is_some_and(|routes| !routes.contains(&key))
+    {
+        return Err(AnswerProblem::RouteNotAvailable(key));
+    }
+    if request
         .exclude
         .as_ref()
         .is_some_and(|exclude| exclude.contains(&key))
@@ -909,10 +1142,13 @@ pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<()
     if chars > EXPLANATION_MAX_CHARS {
         return Err(AnswerProblem::ExplanationTooLong(chars));
     }
-    match (&request.pin, &answer.pin_outcome) {
-        (Some(_), None) => return Err(AnswerProblem::MissingPinOutcome),
-        (None, Some(_)) => return Err(AnswerProblem::UnexpectedPinOutcome),
-        (Some(_), Some(outcome)) if *outcome == PinOutcome::FellBack => {
+    match (
+        request.pin.is_some() || request.pin_slot.is_some(),
+        &answer.pin_outcome,
+    ) {
+        (true, None) => return Err(AnswerProblem::MissingPinOutcome),
+        (false, Some(_)) => return Err(AnswerProblem::UnexpectedPinOutcome),
+        (true, Some(outcome)) if *outcome == PinOutcome::FellBack => {
             let reason = answer
                 .detail
                 .as_ref()
@@ -923,6 +1159,15 @@ pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<()
                 return Err(AnswerProblem::MissingPinReason);
             }
         }
+        _ => {}
+    }
+    let project_sent = request
+        .settings
+        .as_ref()
+        .is_some_and(|settings| settings.project_id.is_some());
+    match (project_sent, answer.project_settings.is_some()) {
+        (true, false) => return Err(AnswerProblem::MissingProjectSettings),
+        (false, true) => return Err(AnswerProblem::UnexpectedProjectSettings),
         _ => {}
     }
     Ok(())
@@ -1106,5 +1351,496 @@ mod tests {
         .unwrap_err();
         assert_eq!(refusal.code, RefusalCode::InvalidRequest);
         assert_eq!(field(&refusal), "task_ref");
+    }
+
+    fn select_with(additions: Value) -> Value {
+        let mut params = json!({"consumer": "flow", "requirements": {"iq": 50}});
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(additions.as_object().unwrap().clone());
+        params
+    }
+
+    fn answer() -> SelectAnswer {
+        let route = RouteRef::new("example-provider", "model-a");
+        SelectAnswer::new(
+            "decision-1",
+            route.clone(),
+            RunnerRef::new("runner-one", route),
+            128_000,
+            8_000,
+            1000,
+            "Selected an adequate route.",
+        )
+    }
+
+    fn invalid_addition(additions: Value, groups: &[&str], expected: &str) {
+        let refusal =
+            parse_select_request_serving(&select_with(additions.clone()), groups).unwrap_err();
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest, "{additions}");
+        assert_eq!(field(&refusal), expected, "{additions}");
+    }
+
+    #[test]
+    fn select_additions_require_their_own_groups_and_null_means_absent() {
+        for (name, value, group) in [
+            ("pin_slot", json!("primary"), "select_pin_slot"),
+            (
+                "available_routes",
+                json!(["example-provider/model-a"]),
+                "select_available_routes",
+            ),
+            (
+                "prefer_prompt_cache",
+                json!(false),
+                "select_prefer_prompt_cache",
+            ),
+            ("settings", json!({}), "select_settings"),
+        ] {
+            let additions = json!({name: value});
+            invalid_addition(additions.clone(), &[], name);
+            invalid_addition(additions.clone(), &["another_group"], name);
+            let params = select_with(additions);
+            let legacy = parse_select_request(&params).unwrap_err();
+            assert_eq!(
+                legacy,
+                parse_select_request_serving::<&str>(&params, &[]).unwrap_err()
+            );
+            let request = parse_select_request_serving(&params, &[group]).unwrap();
+            assert_eq!(serde_json::to_value(request).unwrap(), params);
+            assert_eq!(
+                parse_select_request(&select_with(json!({name: null}))).unwrap(),
+                SelectRequest::new("flow", Requirements::iq(50))
+            );
+        }
+    }
+
+    #[test]
+    fn pin_slot_uses_the_token_grammar_and_cannot_accompany_pin() {
+        for slot in [
+            "a".to_owned(),
+            "primary.model-1_slot".to_owned(),
+            "a".repeat(64),
+        ] {
+            let request = parse_select_request_serving(
+                &select_with(json!({"pin_slot": slot})),
+                &["select_pin_slot"],
+            )
+            .unwrap();
+            assert_eq!(request.pin_slot.as_deref(), Some(slot.as_str()));
+        }
+        for slot in [
+            json!(""),
+            json!("a".repeat(65)),
+            json!("Primary"),
+            json!("1slot"),
+            json!("with space"),
+            json!("p/m"),
+            json!("p:m"),
+            json!("é"),
+            json!(1),
+            json!([]),
+        ] {
+            invalid_addition(json!({"pin_slot": slot}), &["select_pin_slot"], "pin_slot");
+        }
+        invalid_addition(
+            json!({"pin": "example-provider/model-a", "pin_slot": "primary"}),
+            &["select_pin_slot"],
+            "pin_slot",
+        );
+        assert!(parse_select_request_serving(
+            &select_with(json!({"pin": null, "pin_slot": "primary"})),
+            &["select_pin_slot"]
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn pin_fallback_needs_either_pin_member_and_only_accepts_route() {
+        for absent in [json!({}), json!({"pin": null, "pin_slot": null})] {
+            let mut additions = absent;
+            additions["pin_fallback"] = json!("route");
+            invalid_addition(additions, &["select_pin_slot"], "pin_fallback");
+        }
+        for (name, pin) in [("pin", "example-provider/model-a"), ("pin_slot", "primary")] {
+            let request = parse_select_request_serving(
+                &select_with(json!({name: pin, "pin_fallback": "route"})),
+                &["select_pin_slot"],
+            )
+            .unwrap();
+            assert_eq!(request.pin_fallback, Some(PinFallback::Route));
+            for invalid in [json!("other"), json!(false)] {
+                invalid_addition(
+                    json!({name: pin, "pin_fallback": invalid}),
+                    &["select_pin_slot"],
+                    "pin_fallback",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pin_slot_refusal_names_the_slot_and_preserves_route_reasons() {
+        for reason in [
+            PinUnavailableReason::UnknownSlot,
+            PinUnavailableReason::UnknownModel,
+            PinUnavailableReason::Excluded,
+            PinUnavailableReason::Backoff,
+        ] {
+            let refusal = Refusal::pin_unavailable("primary", reason.clone(), None);
+            assert_eq!(refusal.code, RefusalCode::PinUnavailable);
+            assert_eq!(refusal.detail["pin"], "primary");
+            assert_eq!(refusal.detail["reason"], reason.as_str());
+        }
+        assert_eq!(
+            PinUnavailableReason::parse("unknown_slot"),
+            PinUnavailableReason::UnknownSlot
+        );
+    }
+
+    #[test]
+    fn answer_pin_rules_apply_equally_to_pins_and_slots() {
+        let plain = SelectRequest::new("flow", Requirements::iq(50));
+        assert_eq!(check_answer(&plain, &answer()), Ok(()));
+        for request in [
+            plain.clone().with_pin("example-provider/model-a"),
+            plain.clone().with_pin_slot("primary"),
+        ] {
+            assert_eq!(
+                check_answer(&request, &answer()),
+                Err(AnswerProblem::MissingPinOutcome)
+            );
+            for outcome in [PinOutcome::Pinned, PinOutcome::Other("future".into())] {
+                assert_eq!(
+                    check_answer(&request, &answer().with_pin_outcome(outcome)),
+                    Ok(())
+                );
+            }
+            let fallback = answer().with_pin_outcome(PinOutcome::FellBack);
+            assert_eq!(
+                check_answer(&request, &fallback),
+                Err(AnswerProblem::MissingPinReason)
+            );
+            for detail in [
+                json!(null),
+                json!({}),
+                json!({"pin_reason": ""}),
+                json!({"pin_reason": 1}),
+            ] {
+                assert_eq!(
+                    check_answer(&request, &fallback.clone().with_detail(detail)),
+                    Err(AnswerProblem::MissingPinReason)
+                );
+            }
+            assert_eq!(
+                check_answer(
+                    &request,
+                    &fallback.with_detail(json!({"pin_reason": "unknown_slot"}))
+                ),
+                Ok(())
+            );
+        }
+        for outcome in [
+            PinOutcome::Pinned,
+            PinOutcome::FellBack,
+            PinOutcome::Other("future".into()),
+        ] {
+            assert_eq!(
+                check_answer(&plain, &answer().with_pin_outcome(outcome)),
+                Err(AnswerProblem::UnexpectedPinOutcome)
+            );
+        }
+    }
+
+    #[test]
+    fn available_routes_is_nonempty_route_keys_with_duplicates_allowed() {
+        let group = ["select_available_routes"];
+        for routes in [
+            json!([]),
+            json!([""]),
+            json!(["model-a"]),
+            json!(["/model-a"]),
+            json!(["p/"]),
+            json!(["p/m:variant"]),
+            json!(["p/m", 7]),
+            json!("p/m"),
+        ] {
+            invalid_addition(
+                json!({"available_routes": routes}),
+                &group,
+                "available_routes",
+            );
+        }
+        for routes in [
+            vec!["p/m".to_owned(), "p/m".to_owned()],
+            (0..40).map(|n| format!("p/m{n}")).collect(),
+        ] {
+            let request = parse_select_request_serving(
+                &select_with(json!({"available_routes": routes})),
+                &group,
+            )
+            .unwrap();
+            assert_eq!(request.available_routes, Some(routes));
+        }
+    }
+
+    #[test]
+    fn answer_available_routes_is_independent_of_runner_and_exclude() {
+        let request = SelectRequest::new("flow", Requirements::iq(50))
+            .with_available_routes(vec!["example-provider/model-a".into()])
+            .with_runners(vec!["runner-one".into()]);
+        let mut selected = answer();
+        selected.route.variant = Some("fast".into());
+        assert_eq!(check_answer(&request, &selected), Ok(()));
+        selected.route.model = "model-b".into();
+        assert_eq!(
+            check_answer(&request, &selected),
+            Err(AnswerProblem::RouteNotAvailable(
+                "example-provider/model-b".into()
+            ))
+        );
+        let mut selected = answer();
+        selected.runner.module = "runner-two".into();
+        assert_eq!(
+            check_answer(&request, &selected),
+            Err(AnswerProblem::RunnerNotListed("runner-two".into()))
+        );
+        assert_eq!(
+            check_answer(
+                &request
+                    .clone()
+                    .with_exclude(vec!["example-provider/model-a".into()]),
+                &answer()
+            ),
+            Err(AnswerProblem::Excluded("example-provider/model-a".into()))
+        );
+        assert_eq!(
+            check_answer(
+                &request.with_exclude_providers(vec!["example-provider".into()]),
+                &answer()
+            ),
+            Err(AnswerProblem::ExcludedProvider(
+                "example-provider/model-a".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn prefer_prompt_cache_is_a_bool_and_does_not_change_answer_checks() {
+        for value in [true, false] {
+            let request = parse_select_request_serving(
+                &select_with(json!({"prefer_prompt_cache": value})),
+                &["select_prefer_prompt_cache"],
+            )
+            .unwrap();
+            assert_eq!(request.prefer_prompt_cache, Some(value));
+            assert_eq!(check_answer(&request, &answer()), Ok(()));
+        }
+        for value in [json!(1), json!("true"), json!({})] {
+            invalid_addition(
+                json!({"prefer_prompt_cache": value}),
+                &["select_prefer_prompt_cache"],
+                "prefer_prompt_cache",
+            );
+        }
+    }
+
+    #[test]
+    fn settings_reject_unknown_members_and_name_invalid_nested_fields() {
+        for (settings, expected) in [
+            (json!(1), "settings"),
+            (json!([]), "settings"),
+            (json!({"folder": "/project"}), "settings.folder"),
+            (json!({"future": null}), "settings.future"),
+            (json!({"project_id": 3}), "settings.project_id"),
+            (json!({"project_id": ""}), "settings.project_id"),
+            (json!({"tier_consumer": false}), "settings.tier_consumer"),
+            (json!({"tier_consumer": ""}), "settings.tier_consumer"),
+            (
+                json!({"tier_consumer": "a".repeat(129)}),
+                "settings.tier_consumer",
+            ),
+            (
+                json!({"tier_consumer": "é".repeat(65)}),
+                "settings.tier_consumer",
+            ),
+        ] {
+            invalid_addition(
+                json!({"settings": settings}),
+                &["select_settings"],
+                expected,
+            );
+        }
+        for tier_consumer in ["a".into(), "a".repeat(128), "é".repeat(64)] {
+            let request = parse_select_request_serving(&select_with(json!({"settings": {"project_id": "project-1", "tier_consumer": tier_consumer}})), &["select_settings"]).unwrap();
+            assert_eq!(request.consumer, "flow");
+            assert_eq!(
+                request.settings,
+                Some(
+                    SelectSettings::new()
+                        .with_project_id("project-1")
+                        .with_tier_consumer(tier_consumer)
+                )
+            );
+        }
+        let request = parse_select_request_serving(
+            &select_with(json!({"settings": {"project_id": null, "tier_consumer": null}})),
+            &["select_settings"],
+        )
+        .unwrap();
+        assert_eq!(request.settings, Some(SelectSettings::new()));
+        assert_eq!(
+            serde_json::to_value(request).unwrap()["settings"],
+            json!({})
+        );
+    }
+
+    #[test]
+    fn answer_project_settings_is_present_exactly_for_a_project_lookup() {
+        let plain = SelectRequest::new("flow", Requirements::iq(50));
+        let project = plain
+            .clone()
+            .with_settings(SelectSettings::new().with_project_id("project-1"));
+        assert_eq!(
+            check_answer(&project, &answer()),
+            Err(AnswerProblem::MissingProjectSettings)
+        );
+        let without_project = [
+            plain.clone(),
+            plain.clone().with_settings(SelectSettings::new()),
+            plain.with_settings(SelectSettings::new().with_tier_consumer("another-consumer")),
+        ];
+        for request in &without_project {
+            assert_eq!(check_answer(request, &answer()), Ok(()));
+        }
+        for (text, status) in [
+            ("applied", ProjectSettings::Applied),
+            ("none", ProjectSettings::None),
+            ("unresolved", ProjectSettings::Unresolved),
+            ("future", ProjectSettings::Other("future".into())),
+        ] {
+            let selected = answer().with_project_settings(status.clone());
+            assert_eq!(check_answer(&project, &selected), Ok(()));
+            assert_eq!(
+                serde_json::to_value(&selected).unwrap()["project_settings"],
+                text
+            );
+            assert_eq!(
+                serde_json::from_value::<ProjectSettings>(json!(text)).unwrap(),
+                status
+            );
+            for request in &without_project {
+                assert_eq!(
+                    check_answer(request, &selected),
+                    Err(AnswerProblem::UnexpectedProjectSettings)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn settings_project_check_allows_no_stamp_project() {
+        assert_eq!(
+            SelectSettings::new()
+                .with_project_id("project-1")
+                .check_project_stamp(None),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn settings_project_check_allows_no_requested_project() {
+        assert_eq!(
+            SelectSettings::new()
+                .with_tier_consumer("another-consumer")
+                .check_project_stamp(Some("project-1")),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn settings_project_check_allows_exactly_matching_ids() {
+        let settings = SelectSettings::new().with_project_id("opaque project / id");
+        assert_eq!(
+            settings.check_project_stamp(Some("opaque project / id")),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn settings_project_check_refuses_a_different_stamp_by_field_path() {
+        let settings = SelectSettings::new().with_project_id("project-1");
+        for stamp in ["project-2", "PROJECT-1", "project-1 "] {
+            let refusal = settings.check_project_stamp(Some(stamp)).unwrap_err();
+            assert_eq!(refusal.code, RefusalCode::InvalidRequest);
+            assert_eq!(field(&refusal), "settings.project_id");
+        }
+    }
+
+    #[test]
+    fn select_addition_builders_round_trip_with_their_groups() {
+        let request = SelectRequest::new("flow", Requirements::iq(50))
+            .with_pin_slot("primary")
+            .with_pin_fallback(PinFallback::Route)
+            .with_available_routes(vec!["example-provider/model-a".into()])
+            .with_prefer_prompt_cache(true)
+            .with_settings(
+                SelectSettings::new()
+                    .with_project_id("project-1")
+                    .with_tier_consumer("another-consumer"),
+            );
+        let params = serde_json::to_value(&request).unwrap();
+        assert_eq!(
+            parse_select_request_serving(
+                &params,
+                &[
+                    "select_pin_slot",
+                    "select_available_routes",
+                    "select_prefer_prompt_cache",
+                    "select_settings"
+                ]
+            )
+            .unwrap(),
+            request
+        );
+        let selected = answer()
+            .with_pin_outcome(PinOutcome::Pinned)
+            .with_project_settings(ProjectSettings::Unresolved);
+        assert_eq!(check_answer(&request, &selected), Ok(()));
+        assert_eq!(
+            serde_json::from_value::<SelectAnswer>(serde_json::to_value(&selected).unwrap())
+                .unwrap(),
+            selected
+        );
+    }
+
+    #[test]
+    fn legacy_select_bodies_round_trip_byte_for_byte_without_additions() {
+        for body in [
+            r#"{"consumer":"flow","requirements":{"iq":50}}"#,
+            r#"{"service_tier":"fast","consumer":"flow","requirements":{"iq":50,"eq":30,"context_window":128000,"max_output_tokens":8000,"tools":"required","tool_capabilities":["code.read/v1"],"modalities":["image","pdf"],"structured_output":true},"pin":"example-provider/model-a:fast","exclude":["example-provider/model-b"],"exclude_providers":["other-provider"],"runners":["runner-one"],"affinity":"conversation-1","correlation_id":"work-1","task_ref":"task-1","concurrency_slots":[{"key":"runner-one","running":0,"limit":8,"queued":1}],"detail":true,"hold_ok":false,"hold_wait_max_s":0,"harness":"direct","prefer":["example-provider/model-a"],"pin_fallback":"route"}"#,
+        ] {
+            let request: SelectRequest = serde_json::from_str(body).unwrap();
+            assert_eq!(
+                serde_json::to_string(&request).unwrap().as_bytes(),
+                body.as_bytes()
+            );
+            assert!(request.pin_slot.is_none());
+            assert!(request.available_routes.is_none());
+            assert!(request.prefer_prompt_cache.is_none());
+            assert!(request.settings.is_none());
+        }
+        for body in [
+            r#"{"decision_id":"decision-1","route":{"provider":"example-provider","model":"model-a"},"runner":{"module":"runner-one","model":{"provider":"example-provider","model":"model-a"}},"context_window":128000,"max_output_tokens":8000,"expires_at_ms":1000,"explanation":"Selected an adequate route."}"#,
+            r#"{"service_tier_chosen":"fast","decision_id":"decision-1","route":{"provider":"example-provider","model":"model-a","variant":"fast"},"runner":{"module":"runner-one","model":{"provider":"example-provider","model":"model-a","variant":"fast"},"auth":{"pool":"example-pool","credential_id":"credential-1"},"harness":"direct"},"context_window":128000,"max_output_tokens":8000,"expires_at_ms":1000,"explanation":"Selected an adequate route.","detail":{"pin_reason":"cooldown"},"pin_outcome":"fell_back"}"#,
+        ] {
+            let selected: SelectAnswer = serde_json::from_str(body).unwrap();
+            assert_eq!(
+                serde_json::to_string(&selected).unwrap().as_bytes(),
+                body.as_bytes()
+            );
+            assert!(selected.project_settings.is_none());
+        }
     }
 }

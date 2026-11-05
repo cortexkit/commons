@@ -62,12 +62,45 @@ pub const ROUTE_SELECT_TASK_REF_JSON: &str =
 /// Optional account-allocation members added after the original v1 vectors.
 pub const ROUTE_ACCOUNT_FOR_OPTIONAL_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-account-for-optional.json");
-/// Optional pool members on readings and used-account reports.
+/// Optional pool members on observations.
 pub const ROUTE_ACCOUNT_OBSERVE_OPTIONAL_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-account-observe-optional.json");
 /// Optional report members, conflicts and unknown eligibility scope.
 pub const ROUTE_REPORT_OPTIONAL_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-report-optional.json");
+
+/// The `account_status` optional group.
+pub const ROUTE_ACCOUNT_STATUS_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-account-status.json");
+/// The `budget_quote` optional group.
+pub const ROUTE_BUDGET_QUOTE_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-budget-quote.json");
+/// The `explain` optional group.
+pub const ROUTE_EXPLAIN_JSON: &str = include_str!("../test-vectors/routing-v1/route-explain.json");
+/// The `head_choices` optional group.
+pub const ROUTE_HEAD_CHOICES_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-head-choices.json");
+/// The `observe_backoff` optional group.
+pub const ROUTE_OBSERVE_BACKOFF_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-observe-backoff.json");
+/// The `report_outcomes` optional group.
+pub const ROUTE_REPORT_OUTCOMES_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-report-outcomes.json");
+/// The `select_available_routes` optional group.
+pub const ROUTE_SELECT_AVAILABLE_ROUTES_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-available-routes.json");
+/// The `select_panel` optional group.
+pub const ROUTE_SELECT_PANEL_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-panel.json");
+/// The `select_pin_slot` optional group.
+pub const ROUTE_SELECT_PIN_SLOT_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-pin-slot.json");
+/// The `select_prefer_prompt_cache` optional group.
+pub const ROUTE_SELECT_PREFER_PROMPT_CACHE_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-prefer-prompt-cache.json");
+/// The `select_settings` optional group.
+pub const ROUTE_SELECT_SETTINGS_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-settings.json");
 
 /// Every vector file as `(file name, contents)`, in `SHA256SUMS` order.
 pub const FILES: &[(&str, &str)] = &[
@@ -87,8 +120,18 @@ pub const FILES: &[(&str, &str)] = &[
         ROUTE_ACCOUNT_OBSERVE_OPTIONAL_JSON,
     ),
     ("route-account-observe.json", ROUTE_ACCOUNT_OBSERVE_JSON),
+    ("route-account-status.json", ROUTE_ACCOUNT_STATUS_JSON),
+    ("route-budget-quote.json", ROUTE_BUDGET_QUOTE_JSON),
+    ("route-explain.json", ROUTE_EXPLAIN_JSON),
+    ("route-head-choices.json", ROUTE_HEAD_CHOICES_JSON),
+    ("route-observe-backoff.json", ROUTE_OBSERVE_BACKOFF_JSON),
     ("route-report-optional.json", ROUTE_REPORT_OPTIONAL_JSON),
+    ("route-report-outcomes.json", ROUTE_REPORT_OUTCOMES_JSON),
     ("route-report.json", ROUTE_REPORT_JSON),
+    (
+        "route-select-available-routes.json",
+        ROUTE_SELECT_AVAILABLE_ROUTES_JSON,
+    ),
     (
         "route-select-exclude-providers.json",
         ROUTE_SELECT_EXCLUDE_PROVIDERS_JSON,
@@ -98,7 +141,14 @@ pub const FILES: &[(&str, &str)] = &[
         "route-select-hold-control.json",
         ROUTE_SELECT_HOLD_CONTROL_JSON,
     ),
+    ("route-select-panel.json", ROUTE_SELECT_PANEL_JSON),
+    ("route-select-pin-slot.json", ROUTE_SELECT_PIN_SLOT_JSON),
+    (
+        "route-select-prefer-prompt-cache.json",
+        ROUTE_SELECT_PREFER_PROMPT_CACHE_JSON,
+    ),
     ("route-select-prefer.json", ROUTE_SELECT_PREFER_JSON),
+    ("route-select-settings.json", ROUTE_SELECT_SETTINGS_JSON),
     ("route-select-task-ref.json", ROUTE_SELECT_TASK_REF_JSON),
     ("route-select.json", ROUTE_SELECT_JSON),
     ("runner-declarations.json", RUNNER_DECLARATIONS_JSON),

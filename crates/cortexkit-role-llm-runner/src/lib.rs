@@ -235,6 +235,9 @@ pub mod capabilities {
 
     /// Content-free, non-stored `step.finished.v1` hints after durable recording.
     pub const STEP_EVENTS: &str = "step_events";
+    /// Sign-in methods whose accounts the runner admits, renews and releases
+    /// through routing, listed in `role.describe.routed_accounts`.
+    pub const ROUTED_ACCOUNTS: &str = "routed_accounts";
     /// `call_key` and `schema_pin` on display tool calls (`display::ToolCallPart`)
     /// and on the live `tool_started` and `tool_finished` events: the call's
     /// key once prepared or dispatched, and the pin of the tool definition it
@@ -409,6 +412,7 @@ pub mod capabilities {
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
         (STEP_EVENTS, &[]),
+        (ROUTED_ACCOUNTS, &[]),
         (ARCHIVE_PRUNES_REASONING, &[ops::SESSION_READ]),
         // Extends whichever display surface the runner serves; `check_describe`
         // requires at least one of them by name.

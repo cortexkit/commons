@@ -19,7 +19,7 @@
         "credential_id": "credential-1",
         "view_digest": "view-9",
         "observed_at_ms": 1767225650000,
-        "upstream_origin": "https://api.example.invalid",
+        "upstream_origin": "upstream",
         "headers": {
           "retry-after": "3600",
           "x-example-ratelimit-remaining": "0",
@@ -64,6 +64,35 @@
         "code": "invalid_request",
         "detail": {
           "field": "headers"
+        }
+      }
+    },
+    {
+      "name": "upstream_origin_not_a_named_origin",
+      "params": {
+        "event_id": "runner-log-3:122",
+        "kind": "attempt",
+        "upstream_origin": "https://api.example.invalid"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "upstream_origin"
+        }
+      }
+    },
+    {
+      "name": "resets_at_source_not_a_named_source",
+      "params": {
+        "event_id": "runner-log-3:123",
+        "kind": "account_limit_exhausted",
+        "resets_at_ms": 1767229200000,
+        "resets_at_source": "headers"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "resets_at_source"
         }
       }
     }

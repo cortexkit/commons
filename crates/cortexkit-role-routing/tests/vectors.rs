@@ -29,6 +29,9 @@ use cortexkit_role_routing::{
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 
+#[path = "vectors/registration.rs"]
+mod registration;
+
 /// Every vector file this test reads. A test checks this list against
 /// `vectors::FILES`, which `tests/vectors_feature.rs` checks against the
 /// directory, so a new file cannot land without a test reading it.
@@ -43,12 +46,23 @@ const FILES: &[&str] = &[
     "route-account-for.json",
     "route-account-observe-optional.json",
     "route-account-observe.json",
+    "route-account-status.json",
+    "route-budget-quote.json",
+    "route-explain.json",
+    "route-head-choices.json",
+    "route-observe-backoff.json",
     "route-report-optional.json",
+    "route-report-outcomes.json",
     "route-report.json",
+    "route-select-available-routes.json",
     "route-select-exclude-providers.json",
     "route-select-harness.json",
     "route-select-hold-control.json",
+    "route-select-panel.json",
+    "route-select-pin-slot.json",
+    "route-select-prefer-prompt-cache.json",
     "route-select-prefer.json",
+    "route-select-settings.json",
     "route-select-task-ref.json",
     "route-select.json",
     "runner-declarations.json",
@@ -520,7 +534,7 @@ fn optional_members() {
 #[test]
 fn legacy_requests_keep_their_bytes() {
     let account = r#"{"provider":"p","model":"m","affinity_model":"m","conversation_key":"c","admission_id":"a","mode":"admit","expected_pin":{"id":"pin","generation":1},"initial_input_bytes":12,"initial_input_estimated":true,"candidates":{"view_digest":"v","accounts":[{"account_id":"a","credential_id":"c"}]},"requested_account":{"account_id":"a","credential_id":"c"},"hold_wait_max_s":9,"decision_id":"d"}"#;
-    let observe = r#"{"event_id":"e","kind":"attempt","admission_id":"a","run_id":"r","served_account_id":"a","credential_id":"c","view_digest":"v","observed_at_ms":1,"upstream_origin":"u","headers":{"x-remaining":"4"},"limit_window":"w","resets_at_ms":2,"resets_at_source":"s"}"#;
+    let observe = r#"{"event_id":"e","kind":"attempt","admission_id":"a","run_id":"r","served_account_id":"a","credential_id":"c","view_digest":"v","observed_at_ms":1,"upstream_origin":"upstream","headers":{"x-remaining":"4"},"limit_window":"w","resets_at_ms":2,"resets_at_source":"retry_after"}"#;
     let report = r#"{"decision_id":"d","outcome":"completed","runner_code":"ok","credential_id":"c","reset_at_ms":1,"usage":{"input_tokens":12,"output_tokens":3}}"#;
     let select = r#"{"consumer":"c","requirements":{"iq":50,"eq":3},"pin":"p/m","exclude":["p/x"],"runners":["r"],"affinity":"a","correlation_id":"w","concurrency_slots":[{"key":"k","running":1,"limit":2}],"detail":true}"#;
     let answer = r#"{"decision_id":"d","route":{"provider":"p","model":"m"},"runner":{"module":"r","model":{"provider":"p","model":"m"},"auth":{"pool":"k"}},"context_window":1,"max_output_tokens":2,"expires_at_ms":3,"explanation":"e"}"#;

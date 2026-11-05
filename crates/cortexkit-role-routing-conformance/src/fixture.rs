@@ -100,6 +100,7 @@ fn model(
     CatalogModel {
         provider: provider.to_owned(),
         model: model.to_owned(),
+        family: Some(model.to_owned()),
         iq: 80,
         context_window,
         max_output_tokens,
@@ -108,6 +109,41 @@ fn model(
         structured_output: true,
         priced_per_token,
     }
+}
+
+/// A panel catalog with repeated families and two models of unknown family,
+/// so diversity requires more than taking the first models in catalog order.
+pub fn panel_catalog() -> Catalog {
+    let mut catalog = catalog();
+    catalog.models = [
+        Some("shared"),
+        Some("shared"),
+        None,
+        None,
+        Some("third"),
+        Some("fourth"),
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, family)| {
+        let mut entry = model(
+            PRICED_PROVIDER,
+            &format!("panel-{index}"),
+            200_000,
+            32_000,
+            true,
+        );
+        entry.family = family.map(str::to_owned);
+        entry
+    })
+    .collect();
+    let keys = catalog
+        .models
+        .iter()
+        .map(CatalogModel::route_key)
+        .collect::<Vec<_>>();
+    catalog.runners = runners(&keys);
+    catalog
 }
 
 /// The configured catalog: two priced models, two subscription models, two

@@ -146,6 +146,8 @@ pub enum Capability {
     RunCause,
     /// Non-stored step-finished hints joined to native durable history.
     StepEvents,
+    /// Sign-in methods whose accounts the runner admits through routing.
+    RoutedAccounts,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -221,6 +223,7 @@ impl Capability {
         Self::ClientMessageId,
         Self::RunCause,
         Self::StepEvents,
+        Self::RoutedAccounts,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -287,6 +290,7 @@ impl Capability {
             Self::ClientMessageId => groups::CLIENT_MESSAGE_ID,
             Self::RunCause => groups::RUN_CAUSE,
             Self::StepEvents => groups::STEP_EVENTS,
+            Self::RoutedAccounts => groups::ROUTED_ACCOUNTS,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
             | Self::HostMetadataChange
@@ -718,6 +722,37 @@ pub trait LlmRunnerSubject: Harness {
     /// session's provider and model, valid when the next send starts its run.
     async fn route_decision_id_fixture(&self, _session: &str) -> Result<String, HarnessError> {
         Ok("decision-a".into())
+    }
+
+    /// The routing declaration's raw `runner` slot. Required with
+    /// `routed_accounts`; it must declare `follows_account_choice: true`.
+    async fn routing_runner_declaration(&self) -> Result<Value, HarnessError> {
+        Err(HarnessError::new(
+            "routing_runner_declaration is not implemented",
+        ))
+    }
+
+    /// Public ids `{provider, account_id, credential_id}` for the listed
+    /// sign-in `method`. Provision the credential in the runner's own store
+    /// and arrange for the scripted model to accept it; never return a secret.
+    /// Required with `routed_accounts`.
+    async fn routed_account_fixture(&self, _method: &str) -> Result<Value, HarnessError> {
+        Err(HarnessError::new(
+            "routed_account_fixture is not implemented",
+        ))
+    }
+
+    /// Direct this session's real routing calls to `peer`, preserving the
+    /// authenticated calling runner's identity. Configure its plan/model for
+    /// `peer.method()` and `peer.fixture()` before the first send. Forward the
+    /// actual request bodies, not reconstructions. Required with
+    /// `routed_accounts`; clones of the peer share the recorded calls.
+    async fn install_routing_peer(
+        &self,
+        _session: &str,
+        _peer: crate::RecordingRoutingPeer,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("install_routing_peer is not implemented"))
     }
 
     /// Two model choices for head-selection cases: first selectable and served,

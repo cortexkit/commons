@@ -17,8 +17,8 @@ The head-selection cases do not yet check:
 - that a creating send's `plan.model` drives its first run;
 - that a send's own model selection overrides the recorded selection.
 
-Version **0.17.6** pins `cortexkit-role-llm-runner =0.8.5`, adding host creation
-time display-fact checks with independently seeded user and assistant times.
+Version **0.17.9** pins `cortexkit-role-llm-runner =0.8.7`, adding routed-account
+declaration and live admission checks without a routing crate dependency.
 The role remains
 `llm-runner/v1` after the breaking 0.8 release. The runner's
 [CONTRACT.md](../cortexkit-role-llm-runner/CONTRACT.md) is normative; the public
@@ -146,6 +146,44 @@ The run-fixed routing-decision case uses `route_decision_id_fixture(session)`.
 Its default literal suits runners without routing accounts. A routing-backed
 adapter overrides it with a valid decision seeded in routing for the session's
 provider and model; the test does not synthesize routing replies.
+
+### Runner-owned routed accounts
+
+Declare `Capability::RoutedAccounts` when the runner advertises the
+`routed_accounts` group. Live discovery validates its 1–64 distinct auth-method
+tokens with the runner contract's helper. Two cases require three new hooks;
+each hook's default is an error naming the missing hook, not a pass or skip:
+
+- `routing_runner_declaration()` returns the raw routing `runner` slot.
+  `routed_accounts_follows_account_choice` requires its
+  `follows_account_choice` member to be the JSON boolean `true`.
+- `routed_account_fixture(method)` returns public ids
+  `{provider, account_id, credential_id}`. Provision a credential of that
+  method in the runner's own store that the scripted model accepts. Never
+  return credential secrets.
+- `install_routing_peer(session, peer)` directs that session's actual
+  `route.account_for` and `route.account_observe` requests to a cloneable
+  `RecordingRoutingPeer`. Configure the session's plan/model for
+  `peer.method()` and `peer.fixture()` before its first send. Call
+  `peer.request(authenticated_runner, operation, body)` with actual incoming
+  bodies and the calling runner's identity from the route; return the peer's
+  JSON RESPONSE body (`{result: ...}`) to the runner. Do not synthesize calls
+  from management requests or model observations.
+
+`routed_accounts_account_for` starts a fresh scripted run for **each** listed
+method and requires an `account_for` admission naming the fixture provider and
+a model invocation. The recording peer answers admit/renew with the fixture's
+account ids and records all received bodies. Observation replay is per calling
+runner: the first `event_id` receives a fresh observation id, `duplicate: false`,
+`bound: true` and empty `effects`; repeats return that first id with
+`duplicate: true` and empty `effects`, even if the retried body differs.
+
+Without the capability the two cases are skipped by name. `NARROWINGS` records
+that the live cases do not exercise automatic renewal, release timing,
+`auth.pool`/credential forwarding, or independently inspect which secret reached
+the provider. The peer's unit tests cover admit/renew replies and observation
+replay; deliberately faulty runners missing `account_for` or the declaration
+flag are rejected by the corresponding case's name.
 
 ## Part numbers without the removed tags group
 

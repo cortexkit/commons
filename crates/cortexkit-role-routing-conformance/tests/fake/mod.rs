@@ -16,6 +16,7 @@
 //! Each field of [`Defects`] breaks exactly one of those rules.
 
 mod continuation;
+mod extensions;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -60,6 +61,8 @@ const DECISION_TTL_MS: u64 = 600_000;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    /// The new check whose contract rule this fake deliberately violates.
+    pub extension: Option<&'static str>,
     pub decision_tier_chosen_missing: bool,
     pub repeated_decision_tier_wrong: bool,
     pub account_tier_ignores: bool,
@@ -255,6 +258,16 @@ struct ConversationPin {
 
 #[derive(Default)]
 struct State {
+    extension_answers: HashMap<String, Value>,
+    panels: HashMap<
+        String,
+        (
+            String,
+            cortexkit_role_routing_conformance::wire::panel::PanelState,
+        ),
+    >,
+    panel_policy: Option<(u8, u8, u8)>,
+    pin_slots: HashMap<String, String>,
     continue_credentials: Vec<cortexkit_role_routing_conformance::ContinueCredential>,
     continue_answers: HashMap<
         (String, String),
@@ -346,6 +359,8 @@ impl State {
 }
 
 pub struct FakeSubject {
+    extensions: bool,
+    panel_calls: Arc<std::sync::atomic::AtomicUsize>,
     continue_control: bool,
     service_tier_control: bool,
     state: Arc<Mutex<State>>,
@@ -377,6 +392,8 @@ impl FakeSubject {
     }
     pub fn new(defects: Defects) -> Self {
         Self {
+            extensions: true,
+            panel_calls: Arc::default(),
             continue_control: true,
             state: Arc::new(Mutex::new(State::default())),
             service_tier_control: true,
@@ -387,6 +404,13 @@ impl FakeSubject {
             exclude_providers_control: true,
             task_ref_control: true,
             relative_iq: false,
+        }
+    }
+
+    pub fn without_extensions(defects: Defects) -> Self {
+        Self {
+            extensions: false,
+            ..Self::new(defects)
         }
     }
 
@@ -453,6 +477,26 @@ impl RoutingSubject for FakeSubject {
 
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String> {
         self.state.lock().unwrap().catalog = Some(catalog.clone());
+        Ok(())
+    }
+
+    async fn configure_panel_class(
+        &self,
+        _class: &str,
+        size: u8,
+        top: u8,
+        extra: u8,
+    ) -> Result<(), String> {
+        self.state.lock().unwrap().panel_policy = Some((size, top, extra));
+        Ok(())
+    }
+
+    async fn configure_pin_slot(&self, slot: &str, route_key: &str) -> Result<(), String> {
+        self.state
+            .lock()
+            .unwrap()
+            .pin_slots
+            .insert(slot.into(), route_key.into());
         Ok(())
     }
 
@@ -573,6 +617,8 @@ impl RoutingSubject for FakeSubject {
 
     async fn route(&self, stamp: &RouteStamp) -> Result<FakeRoute, String> {
         Ok(FakeRoute {
+            extensions: self.extensions,
+            panel_calls: Arc::clone(&self.panel_calls),
             continue_control: self.continue_control,
             service_tier_control: self.service_tier_control,
             state: Arc::clone(&self.state),
@@ -590,6 +636,8 @@ impl RoutingSubject for FakeSubject {
 
 /// A route to the fake, carrying the caller and scope it was opened under.
 pub struct FakeRoute {
+    extensions: bool,
+    panel_calls: Arc<std::sync::atomic::AtomicUsize>,
     continue_control: bool,
     service_tier_control: bool,
     state: Arc<Mutex<State>>,
@@ -609,13 +657,18 @@ impl RoutingRoute for FakeRoute {
         let mut state = self.state.lock().unwrap();
         let answered = match method {
             ops::ROLE_DESCRIBE => self.describe(&state),
-            ops::ROUTE_SELECT => self.select(&mut state, params),
+            ops::ROUTE_SELECT => self.select_extensions(&mut state, params),
+            ops::ROUTE_SELECT_PANEL => self.panel(&mut state, params),
+            ops::ROUTE_BUDGET_QUOTE
+            | ops::ROUTE_EXPLAIN
+            | ops::ROUTE_ACCOUNT_STATUS
+            | ops::ROUTE_HEAD_CHOICES => self.extension_op(&mut state, method, params),
             ops::ROUTE_REPORT => self.report(&mut state, params),
             ops::ROUTE_ACCOUNT_FOR if params.get("mode") == Some(&json!("continue")) => {
                 self.account_continue(&mut state, params)
             }
             ops::ROUTE_ACCOUNT_FOR => self.account_for(&mut state, params),
-            ops::ROUTE_ACCOUNT_OBSERVE => self.observe(&mut state, params),
+            ops::ROUTE_ACCOUNT_OBSERVE => self.observe_extensions(&mut state, params),
             other => Err(Refusal::invalid_request("method", format!("no op {other}"))),
         };
         Ok(match answered {
@@ -692,6 +745,14 @@ impl FakeRoute {
             }
         }
         let mut describe = RoleDescribe::new(consumers, true);
+        if self.extensions {
+            for group in extensions::GROUPS {
+                describe = describe.with_capability(*group);
+            }
+            describe
+                .ops
+                .extend(extensions::OPS.iter().map(|op| (*op).to_owned()));
+        }
         if self.continue_control {
             describe = describe.with_capability("account_continue");
         }

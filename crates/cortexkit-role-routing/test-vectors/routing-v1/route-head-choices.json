@@ -1,0 +1,241 @@
+{
+  "group": "head_choices",
+  "describes": [
+    {
+      "name": "legacy",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      }
+    },
+    {
+      "name": "declared",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.head_choices"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "head_choices"
+        ]
+      }
+    },
+    {
+      "name": "op_without_group",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.head_choices"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "head_choices"
+      }
+    },
+    {
+      "name": "group_without_op",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "head_choices"
+        ]
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "head_choices"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "name": "runner",
+      "params": {
+        "runner_module": "runner-one"
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "listed",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "runner_module": "runner-one",
+        "models": [
+          {
+            "provider": "example-provider",
+            "model": "model-a",
+            "variants": [
+              "fast"
+            ],
+            "default_variant": "fast",
+            "service_tiers": [
+              "fast",
+              "standard"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "unknown_or_nonstarting_runner",
+      "answer": {
+        "catalog_version": "catalog-1",
+        "runner_module": "runner-one",
+        "models": []
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "missing_runner",
+      "params": {},
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "runner_module"
+        }
+      }
+    }
+  ],
+  "unknown": [],
+  "refusals": [
+    {
+      "name": "malformed_runner",
+      "body": {
+        "code": "invalid_request",
+        "message": "The request cannot be served.",
+        "detail": {
+          "field": "runner_module"
+        }
+      }
+    }
+  ]
+}

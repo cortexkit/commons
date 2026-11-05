@@ -1,10 +1,9 @@
 {
-  "about": "Optional quota pool, eligibility, request input size and usage; eligibility conflicts name detail.field eligibility.",
+  "about": "Optional quota pool, eligibility, request input size and usage; an unknown eligibility scope and eligibility conflicts name detail.field eligibility.",
   "requests": [
     {"name": "pool", "params": {"decision_id": "d", "outcome": "completed", "pool": "model.pool_1-x"}},
     {"name": "model_eligibility", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "model", "code": "model_not_included"}}},
     {"name": "account_eligibility", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "account", "code": "account_disabled"}}},
-    {"name": "unknown_scope_kept", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "future_scope", "code": "future_code"}}},
     {"name": "zero_input", "params": {"decision_id": "d", "outcome": "completed", "request_input_tokens": 0}},
     {"name": "large_input", "params": {"decision_id": "d", "outcome": "refused", "request_input_tokens": 1000000}},
     {"name": "usage_every_count", "params": {"decision_id": "d", "outcome": "completed", "usage": {"input_tokens": 1200, "cached_input_tokens": 400, "cache_write_tokens": 800, "output_tokens": 300, "reasoning_tokens": 60, "duration_ms": 1500, "first_token_ms": 300, "cost_usd": 0.0042}}},
@@ -18,6 +17,7 @@
     {"name": "negative_input", "params": {"decision_id": "d", "outcome": "refused", "request_input_tokens": -1}, "refusal": {"code": "invalid_request", "detail": {"field": "request_input_tokens"}}},
     {"name": "fractional_input", "params": {"decision_id": "d", "outcome": "refused", "request_input_tokens": 1.5}, "refusal": {"code": "invalid_request", "detail": {"field": "request_input_tokens"}}},
     {"name": "string_input", "params": {"decision_id": "d", "outcome": "refused", "request_input_tokens": "100"}, "refusal": {"code": "invalid_request", "detail": {"field": "request_input_tokens"}}},
+    {"name": "eligibility_unknown_scope", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "future_scope", "code": "future_code"}}, "refusal": {"code": "invalid_request", "detail": {"field": "eligibility"}}},
     {"name": "eligibility_missing_scope", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"code": "not_included"}}, "refusal": {"code": "invalid_request", "detail": {"field": "eligibility"}}},
     {"name": "eligibility_missing_code", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": "model"}}, "refusal": {"code": "invalid_request", "detail": {"field": "eligibility"}}},
     {"name": "eligibility_non_string_scope", "params": {"decision_id": "d", "outcome": "refused", "eligibility": {"scope": 1, "code": "not_included"}}, "refusal": {"code": "invalid_request", "detail": {"field": "eligibility"}}},

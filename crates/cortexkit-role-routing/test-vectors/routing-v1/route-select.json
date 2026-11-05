@@ -222,6 +222,24 @@
       }
     },
     {
+      "name": "exclude_entry_is_a_variant_pin",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "exclude": [
+          "provider-a/model-b:fast"
+        ]
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "exclude"
+        }
+      }
+    },
+    {
       "name": "exclude_entry_not_a_route_key",
       "params": {
         "consumer": "example_summary",

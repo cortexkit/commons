@@ -1,0 +1,109 @@
+{
+  "group": "select_prefer_prompt_cache",
+  "requests": [
+    {
+      "name": "with_group",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "prefer_prompt_cache": true
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "not_boolean",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "prefer_prompt_cache": "yes"
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "prefer_prompt_cache"
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "with_group",
+      "answer": {
+        "decision_id": "decision-1",
+        "route": {
+          "provider": "example-provider",
+          "model": "model-a"
+        },
+        "runner": {
+          "module": "runner-one",
+          "model": {
+            "provider": "example-provider",
+            "model": "model-a"
+          }
+        },
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach."
+      }
+    }
+  ],
+  "requests_without_group": [
+    {
+      "name": "legacy",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        }
+      }
+    }
+  ],
+  "answers_without_group": [
+    {
+      "name": "legacy",
+      "answer": {
+        "decision_id": "decision-1",
+        "route": {
+          "provider": "example-provider",
+          "model": "model-a"
+        },
+        "runner": {
+          "module": "runner-one",
+          "model": {
+            "provider": "example-provider",
+            "model": "model-a"
+          }
+        },
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach."
+      }
+    }
+  ],
+  "refused_without_group": [
+    {
+      "name": "undeclared_prefer_prompt_cache",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "prefer_prompt_cache": true
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "prefer_prompt_cache"
+        }
+      }
+    }
+  ],
+  "unknown": []
+}

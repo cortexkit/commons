@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.17.9
+
+- Pin `cortexkit-role-llm-runner =0.8.7`. Add `routed_accounts` capability
+  coverage for `follows_account_choice: true` and an `account_for` admission
+  for every listed sign-in method, with deliberately faulty runners rejected
+  by each check's name.
+- Add required-with-group hooks `routing_runner_declaration`,
+  `routed_account_fixture` and `install_routing_peer`, defaulting to named
+  errors. `RecordingRoutingPeer` records raw JSON bodies without a routing
+  dependency, answers fixture-account admit/renew calls, and replays observation
+  ids per calling runner with `duplicate: true` and empty effects.
+- Document live-coverage limits for renewal, release, forwarding and secret use.
+
 ## 0.17.8
 
 - Pin `cortexkit-role-llm-runner =0.8.6` and check opt-in head selection:

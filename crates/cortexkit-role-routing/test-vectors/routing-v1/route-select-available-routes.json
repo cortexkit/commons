@@ -1,0 +1,113 @@
+{
+  "group": "select_available_routes",
+  "requests": [
+    {
+      "name": "with_group",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "available_routes": [
+          "example-provider/model-a"
+        ]
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "empty_routes",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "available_routes": []
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "available_routes"
+        }
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "with_group",
+      "answer": {
+        "decision_id": "decision-1",
+        "route": {
+          "provider": "example-provider",
+          "model": "model-a"
+        },
+        "runner": {
+          "module": "runner-one",
+          "model": {
+            "provider": "example-provider",
+            "model": "model-a"
+          }
+        },
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach."
+      }
+    }
+  ],
+  "requests_without_group": [
+    {
+      "name": "legacy",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        }
+      }
+    }
+  ],
+  "answers_without_group": [
+    {
+      "name": "legacy",
+      "answer": {
+        "decision_id": "decision-1",
+        "route": {
+          "provider": "example-provider",
+          "model": "model-a"
+        },
+        "runner": {
+          "module": "runner-one",
+          "model": {
+            "provider": "example-provider",
+            "model": "model-a"
+          }
+        },
+        "context_window": 200000,
+        "max_output_tokens": 32000,
+        "expires_at_ms": 1767225900000,
+        "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach."
+      }
+    }
+  ],
+  "refused_without_group": [
+    {
+      "name": "undeclared_available_routes",
+      "params": {
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        },
+        "available_routes": [
+          "example-provider/model-a"
+        ]
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "available_routes"
+        }
+      }
+    }
+  ],
+  "unknown": []
+}

@@ -128,11 +128,27 @@ alias until the next breaking release.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?, archive_prunes_reasoning?, step_hooks?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?, routed_accounts?, archive_prunes_reasoning?, step_hooks?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
   for every session.
+- [pinned] With `routed_accounts` (added in 0.8.7), the answer includes
+  `routed_accounts: [<auth_method>]`: the sign-in methods for which the runner
+  itself admits, renews and releases accounts through routing (§9.3.3).
+  The list has 1–64 distinct entries, each matching
+  `^[a-z][a-z0-9._-]{0,63}$`, using the routing contract §1.2's `auth_method`
+  spellings. The shape check accepts a token-shaped spelling routing's table
+  doesn't name yet, but routing uses no method until its table names it.
+  `describe::check_routed_accounts` checks the list without depending on the
+  routing crate. `check_describe` applies it and refuses missing metadata as
+  `routed_accounts_missing`, metadata without the group as
+  `routed_accounts_undeclared`, a wrong wire type as `invalid_routed_accounts`,
+  an empty list as `routed_accounts_empty`, more than 64 entries as
+  `routed_accounts_too_many`, a malformed token as
+  `routed_accounts_invalid_auth_method`, and duplicates as
+  `routed_accounts_duplicate`. Without the group, the member is omitted and
+  account handling is unchanged.
 - [pinned] `step_hooks`, when present, is an array of distinct hook names
   from the `step-transform-provider/v1` role (`describe::step_hooks`:
   `pre_user`, `pre_tool`, `post_tool`, `post_assistant`), naming the §11.2
@@ -205,6 +221,7 @@ alias until the next breaking release.
 | `live_ids` | `session.subscribe` with opt-in provisional display ids (requires `live_events`; added in 0.7.46) | §7.1 |
 | `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
+| `routed_accounts` | No added op; sign-in methods whose accounts the runner routes itself | §2, §9.3.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `head_selection` | `session.send`, `session.head`; requires `plans`; selection through `session.refresh` additionally requires `session_change` | §9.3.4 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
@@ -2980,6 +2997,25 @@ A runner that declares `retract` serves `session.retract`.
 - [pinned] A run started under a caller's decision never `route.report`s that
   decision. The caller is its one reporter.
 
+- [pinned] A runner declaring `routed_accounts` lists in
+  `role.describe.routed_accounts` the sign-in methods for which it admits and
+  renews its own account with `route.account_for` and releases it with
+  `route.account_observe` `run_finished`. It declares
+  `follows_account_choice: true` in its routing `RunnerDeclaration` (`runner`
+  slot). Without `routed_accounts`, `follows_account_choice` retains the
+  routing contract §1.2 promise: when true the runner calls `route.account_for`
+  and uses its answer; absent or false makes no such promise. That flag alone
+  does not opt a method into the `routed_accounts` rules.
+- [pinned] For a listed method, the runner passes the select answer's
+  `auth.pool` as `account_for.pool`, or no `pool` when there is none. It passes
+  any `auth.credential_id` only as `requested_account.credential_id`. The
+  runner loads the key named by the `account_for` answer's public id and sends
+  with that key. The routing contract §5.2 requirement to refuse a key-pool
+  send without `auth` does not apply to a listed method: account admission is
+  the runner's responsibility. For an unlisted method, or a runner without
+  the group, the caller keeps naming the account as the runner accepts it
+  today, and routing §5.2 applies unchanged.
+
 ### 9.3.4 `head_selection`: durable next-run model and tier
 
 - [pinned] A runner declares this opt-in group only when it can accept an
@@ -5557,8 +5593,24 @@ to the session's whole length.
   | `cache_write_5m_tokens?`, `cache_write_1h_tokens?` | Optional unsigned 64-bit cache-write counters split by TTL; absent is not zero and a partial split need not add up to the total |
   | `reasoning_included_in_output?` | Optional boolean stating whether reasoning tokens are included in output tokens; absence does not imply either convention |
   | `request_body_bytes?`, `context_limit?`, `finish_reason?` | Optional unsigned 64-bit request-byte count and context-token limit, and optional open finish-reason string |
+  | `sent_to_last_content_ms?`, `first_to_last_content_ms?` | Optional unsigned 64-bit milliseconds from sending the model request to its last content, and from its first to last content |
+  | `route_decision_id?` | Optional string: the run's routing decision (§9.3.3), absent when the run had none |
   | `started_at_ms`, `finished_at_ms` | Required unsigned 64-bit Unix epoch millisecond timestamps |
 
+- [pinned] Both content times measure a model call, not tool time. The send
+  measured is the recorded attempt's send under `per_attempt`, and the step's
+  last attempt's send under `per_completed_step`. Zero is a measured value;
+  absence means unknown, never zero. When both times are present,
+  `first_to_last_content_ms` must not exceed `sent_to_last_content_ms`.
+  `StepFinished::check` names a violation as `first_to_last_content_ms`, for
+  producers before publishing. `decode_step_finished` applies only the
+  identity rules and keeps such an event, so a reader never drops a step's
+  usage over a measurement fault, as usage-steps rows are kept.
+- [pinned] **Readers first for 0.8.7:** producers must not emit
+  `sent_to_last_content_ms`, `first_to_last_content_ms` or `route_decision_id`
+  until every reader of `step.finished.v1` uses runner contract 0.8.7 or later
+  decoders. The event body is closed: older decoders refuse these members.
+  When the new members are absent, 0.8.6 bodies encode byte for byte unchanged.
 - [pinned] `attempt_id` is 1–128 characters of `[A-Za-z0-9_-]`, unique per
   provider attempt and never reused, including after a session restore. It
   is the exact value the runner writes in its own durable step record.

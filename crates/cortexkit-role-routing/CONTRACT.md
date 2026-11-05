@@ -227,13 +227,18 @@ a module plays.
 - [pinned] Refusal codes are an open set (`RefusalCode`, non-exhaustive). A
   reader keeps an unknown code and treats it as a refusal that is not
   timed, whatever its detail carries.
-- [pinned] Except for `ContinueAnswer.kind` (§9.1.1), which is a closed set
-  of `offer`, `hold` and `refuse`, every other enumeration a reader decodes
-  is an open set too: a
-  report's `outcome`, `pin_unavailable`'s and `no_route`'s `reason`, an
-  observation's `kind`, a report's `eligibility.scope`, and an account
-  answer's `reason.code`. An unknown
-  value decodes and is kept as the string it was sent as.
+- [pinned] Most enumerations a reader decodes are open sets: a report's
+  `outcome`, `pin_unavailable`'s and `no_route`'s `reason`, an observation's
+  `kind`, and an account answer's `reason.code`. An unknown value decodes and
+  is kept as the string it was sent as.
+- [pinned] A few are closed, because a router acts on their value and a
+  guess would be a wrong fact: `ContinueAnswer.kind` (§9.1.1), a report's
+  `eligibility.scope` and `refusal_class` (§8), and an observation's
+  `upstream_origin` and `resets_at_source` (§9.2). In a request, a value a
+  closed set doesn't name is `invalid_request` naming the member. In an
+  answer (`ContinueAnswer.kind`), a caller that meets a value it doesn't name
+  treats the whole answer as malformed. Adding a value needs a describe
+  group, because a reader that doesn't know it refuses it.
 - [pinned] An optional member is left out when it has no value. A member
   sent as `null` reads exactly as one left out.
 - [pinned] Quota `pool` names in §§8–9 are opaque, 1 to 64 characters of
@@ -266,6 +271,11 @@ a module plays.
   route, so they follow the work, not the module that asked.
 - [pinned] The caller of every op is the route's principal, never a body
   member.
+- [pinned] The one settings-lookup exception is `settings` (§5.6), also on
+  `route.select_panel`. Its `project_id` and `tier_consumer` choose settings,
+  never scope. Pins, cost attribution and consumer ownership still follow the
+  route's stamp. A stamped project different from `settings.project_id` is
+  `invalid_request {field: "settings.project_id"}`.
 
 ## 4. `role.describe`
 
@@ -288,7 +298,7 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines seven
+  does not know is kept and means nothing to it. This version defines eighteen
   groups:
   - `service_tier`: tier-aware selection and tier metadata in report usage
     (§5.5). A caller sends these members only to a declaring provider.
@@ -317,6 +327,25 @@ a module plays.
   - `select_task_ref`: `route.select` reads `task_ref` (§5.1) for attribution,
     never selection. A caller sends it only to a provider declaring the group;
     a provider without the group refuses the member by name (§2).
+  - `select_panel`: `route.select_panel`, including seat replacements (§11.1).
+  - `budget_quote`: `route.budget_quote` (§11.2).
+  - `explain`: `route.explain` (§11.3).
+  - `account_status`: `route.account_status` (§11.4).
+  - `head_choices`: `route.head_choices` (§11.5).
+  - `select_pin_slot`: operator-policy slot pins (§5.6).
+  - `select_available_routes`: caller-reachable route restriction (§5.6).
+  - `select_prefer_prompt_cache`: prompt-cache tie-breaking (§5.6).
+  - `select_settings`: project and service-tier settings lookup (§5.6).
+  - `observe_backoff`: account-local backoff, three observation members and
+    decision-owner authorization (§9.2).
+  - `report_outcomes`: additional report outcomes and their effects (§8).
+- [pinned] Each of the five new op groups is declared exactly when its op is
+  in `ops` (`capabilities::OP_GROUPS`). `describe::check_describe` refuses
+  either mismatch as `DescribeProblem::OpGroupMismatch {group}`. The five
+  `REQUIRED_OPS` are unchanged; a 0.6.0 describe answer still passes. A caller
+  calls a new op only on a declaring router. Whole ops have no undeclared-group
+  refusal case. The `cortexkit-role-routing-conformance` cases that send a new
+  operation are not applicable without its group.
 - [pinned] A consumer checks the answer with `describe::check_describe`
   before routing anything to the provider.
 
@@ -369,7 +398,9 @@ a module plays.
 - [pinned] `exclude`: route keys the caller will not take. A route key is
   `provider/model`; the variant and the runner are separate from it.
   Excluding a route key excludes every variant of it. An entry that is not
-  a route key is `invalid_request {field: "exclude"}`.
+  a route key, including a pin with a variant (`provider/model:fast`), is
+  `invalid_request {field: "exclude"}`. The variant is read after the last
+  `:` in the model part, so a provider id may itself contain `:`.
 - [pinned] `exclude_providers`: provider ids the caller will not take (group
   `select_exclude_providers`). It is a member of its own beside `exclude`,
   whose meaning it does not change. A provider id is the provider part of a
@@ -460,7 +491,8 @@ a module plays.
   explanation,                         // one sentence, at most 200 characters
   detail?,                             // the explanation object, when asked for and supported;
                                        // on `fell_back` it carries `pin_reason`
-  pin_outcome?                         // `"pinned" | "fell_back"`, exactly when the request pinned
+  pin_outcome?,                        // `"pinned" | "fell_back"`, exactly when the request pinned
+  project_settings?                    // exactly when settings.project_id was sent (§5.6)
 }
 ```
 
@@ -471,7 +503,13 @@ a module plays.
 - [pinned] `auth` is present only when the provider's policy names a key
   pool. It names the key by public id only, never secret material. The
   runner sends with that key, still under its own admission check, and a
-  runner refuses a key-pool send without it.
+  runner refuses a key-pool send without it, except for a sign-in method the
+  runner lists in `routed_accounts` (§9.3). For a listed method, the runner
+  admits the account itself; it passes `auth.pool` as `account_for.pool` (or
+  omits the pool), and `auth.credential_id` only as
+  `requested_account.credential_id`. The account admission answer, not the
+  select hint, names the credential used. Unlisted methods and runners without
+  the group keep the original rule unchanged.
 - [pinned] `runner.harness` is the exact program the answered runner hosts
   the session in. With a requested `harness`, the runner must list it in its
   declaration and the answer echoes that requested value. Without one, the
@@ -501,7 +539,8 @@ a module plays.
 - [pinned] `pin_unavailable {pin, reason, reset_at_ms?}`. `reason` is an
   open set: `invalid`, `unknown_provider`, `unknown_model`,
   `invalid_variant`, `excluded`, `not_available`, `credential_unentitled`,
-  `credential_billing_exhausted`, `cooldown`, `quota_exhausted`, `backoff`.
+  `credential_billing_exhausted`, `cooldown`, `quota_exhausted`, `backoff`,
+  `unknown_slot` (§5.6).
 - [pinned] `no_route {reason, reset_at_ms?}`. `reason` is an open set:
   `no_available_model`, `missing_capability`, `context_too_small`,
   `quota_or_cooldown`, `all_inadequate`, `accounts_blocked` (§5.4),
@@ -631,6 +670,41 @@ This section binds a provider declaring `select_hold_control` (§4).
   produced chosen tier against the effective request level, while record
   decoding preserves unfamiliar tier strings.
 
+### 5.6 Independently gated select members
+
+- [pinned] Each member below is sent only with its named group. A 0.7.0
+  serving parser without the group refuses `invalid_request {field}` naming
+  that member; null means absent. `select::parse_select_request_serving`
+  takes the declared groups; the legacy parser supplies none.
+
+| Member | Group | Meaning and validation |
+|---|---|---|
+| `pin_slot` | `select_pin_slot` | A §1.2 token naming an operator-policy slot. Sending both `pin` and `pin_slot` is `invalid_request {field: "pin_slot"}`. |
+| `available_routes` | `select_available_routes` | Non-empty list of `provider/model` route keys reachable by the caller's runners. Malformed entries or an empty list are `invalid_request {field: "available_routes"}`; repeated entries are allowed. |
+| `prefer_prompt_cache` | `select_prefer_prompt_cache` | Boolean; breaks ties among adequate routes only, never admits a route. |
+| `settings` | `select_settings` | `{project_id?, tier_consumer?}`; any other member is `invalid_request {field: "settings.<member>"}`. |
+
+- [pinned] `pin_fallback` requires `pin` or `pin_slot`, otherwise it is
+  `invalid_request {field: "pin_fallback"}`. `pin_fallback: "route"` and
+  `pin_outcome` apply equally to both pin forms. `pin_outcome` is present
+  exactly when either was sent, and `fell_back` carries `detail.pin_reason`.
+  A `pin_unavailable` refusal names the slot as `pin`; its reason is
+  `unknown_slot` for an unknown slot, otherwise the reason pinning the slot's
+  route would get.
+- [pinned] `available_routes` narrows routes independently of `runners` and
+  `exclude`. The answered route key must be in the list.
+- [pinned] `settings.project_id` is an identity-service project id, not a
+  folder. The router finds the project's settings itself. A different project
+  stamp is refused as §3 says. `tier_consumer` is 1–128 bytes and changes only
+  whose service-tier settings are looked up, not the selecting consumer.
+- [pinned] `SelectAnswer.project_settings` is present exactly when the request
+  sent `settings.project_id`. It is an open set: `applied`, `none` (no project
+  settings), `unresolved` (the project could not be found). An unresolved project
+  never refuses selection: select as if it had no settings.
+- [pinned] `select::check_answer` holds the reachable-route, pin and
+  `project_settings` presence rules. Prompt-cache tie-breaking is router policy
+  and cannot be checked from an answer.
+
 ## 6. Decisions
 
 - [pinned] A decision is bound to the selecting `(principal, consumer)`.
@@ -658,23 +732,64 @@ This section binds a provider declaring `select_hold_control` (§4).
 
 `report::ReportRequest`, validated by `report::parse_report_request`:
 `{decision_id, outcome, runner_code?, credential_id?, reset_at_ms?, usage?,
-pool?, eligibility?, request_input_tokens?}`.
+pool?, eligibility?, request_input_tokens?, refusal_class?}`.
 
 - [pinned] `outcome` is an open set: `completed`, `refused`, `failed`,
   `timed_out`, `cancelled`. `refused`, `failed` and `timed_out` are
   failures; `completed` and `cancelled` are not. An unknown outcome is kept
   and counts as a failure, so a provider never keeps preferring a route on
   a report it cannot read (`Outcome::is_failure`).
+- [pinned] With `report_outcomes`, four additional values are named:
+  `contract_error` (a pre-send refusal naming an invalid caller field),
+  `session_error`, `interrupted`, and `launch_failed` (the run never reached
+  the provider for another reason, such as runner admission or setup failure).
+  A provider's refusal at launch is `failed` with its `runner_code`, not
+  `launch_failed`. Failures before a provider send must not burn candidates.
+  `Outcome::effect()` pins this matrix; `is_failure()` equals its availability
+  penalty:
+
+  | Outcome | Availability penalty | Affinity (§7) |
+  |---|---|---|
+  | `completed`, `cancelled` | no | kept |
+  | `refused`, `failed`, `timed_out` | yes | ended |
+  | `contract_error`, `session_error`, `interrupted`, `launch_failed` | no | kept |
+  | unknown string | yes | ended |
+
+- [pinned] `report::parse_report_request_serving(params, capabilities)` decodes
+  those four strings as named variants only with `report_outcomes`; without
+  it they remain `Outcome::Other` and failures as in 0.6.0. The legacy parser
+  supplies no groups. Callers send `cancelled` instead of these four values
+  to non-declaring routers. Declaring routers apply the effect matrix for
+  availability and affinity; unknown strings retain the old failure effect.
 - [pinned] `runner_code`: the runner's typed refusal or error code,
   verbatim, so the provider can tell "this route cannot serve this" from
-  "this attempt failed".
+  "this attempt failed". It is a record, not a vocabulary a router must
+  parse: a refusal the router must act on travels as `refusal_class`.
+- [pinned] `refusal_class` (`report::RefusalClass`), with `report_outcomes`:
+  what kind of refusal this is, mapped by the runner from its provider's own
+  wording. A closed set:
+
+  | Value | Meaning | Router use |
+  |---|---|---|
+  | `credential_refused` | The provider refused this credential for any use: an entitlement or attestation refusal, or billing, credit or quota exhausted on the account. | Blocks the credential. |
+  | `request_too_large` | The request was over the provider's size limit. Requires `request_input_tokens`. | Records a refusal for that request size, not for the account. |
+
+  It goes only with outcome `refused` or `failed`, and never with
+  `eligibility`; either combination is `invalid_request {field:
+  "refusal_class"}`. `request_too_large` without `request_input_tokens` is
+  `invalid_request {field: "request_input_tokens"}`. Without the group it is
+  `invalid_request {field: "refusal_class"}`. When `refusal_class` is
+  present, the router acts on it and on nothing it might infer from
+  `runner_code`. When it is absent, anything a router infers from
+  `runner_code` is its own policy, outside this contract.
 - [pinned] `credential_id` and `reset_at_ms`: when the runner reported them.
 - [pinned] `pool`: the pool the refused or served model drew from (§2).
 - [pinned] `eligibility`: `{scope: "model" | "account", code: string}`,
   sent instead of exhaustion when the model provider says the account
   cannot serve this model (`model`) or cannot serve at all (`account`).
-  `scope` is open on decode (§2). Routing never treats eligibility as
-  exhaustion and never holds on it.
+  `scope` is a closed set (§2): any other value is
+  `invalid_request {field: "eligibility"}`, never read as `model`. Routing
+  never treats eligibility as exhaustion and never holds on it.
 - [pinned] Eligibility with an exhaustion `runner_code` or with
   `reset_at_ms` is `invalid_request {field: "eligibility"}`. Exhaustion
   codes are `account_limit_exhausted` (§9.2), `account_pool_exhausted`
@@ -720,11 +835,13 @@ pool?, eligibility?, request_input_tokens?}`.
 ## 9. Runner ops
 
 - [pinned] `route.account_for` and `route.account_observe` are called only
-  by attested runner modules. A caller is an attested runner module when its
+  by attested runner modules, except the declaring-router observation wall arm
+  in §9.2. A caller is an attested runner module when its
   route carries a principal the daemon verified itself (`reserved:<module>`,
   proven by the launch secret the daemon handed that module), and the
-  provider knows that module as a runner. Any other caller, a `direct` client
-  included, is refused `account_not_authorized`. They are separate from select, with
+  provider knows that module as a runner. Outside the §9.2 exception, any other
+  caller, a `direct` client included, is refused `account_not_authorized`.
+  They are separate from select, with
   their own refusals, so a consumer that only selects never depends on
   them.
 - [pinned] The calling runner comes from the route; neither op carries a
@@ -946,8 +1063,8 @@ What a runner saw on an account, so the provider's headroom stays current.
 `observe::parse_account_observe_request`:
 
 - [pinned] `event_id` (required, non-empty): the idempotency key, per
-  calling runner. A runner uses a stable id for each event, such as a
-  position in its own log.
+  calling principal (per runner without `observe_backoff`). A runner uses a
+  stable id for each event, such as a position in its own log.
 - [pinned] `kind` (required): an open set, `admission_started`,
   `run_finished`, `attempt`, `scoped_not_found`, `account_limit_exhausted`.
   An unknown kind is kept as advisory.
@@ -955,8 +1072,41 @@ What a runner saw on an account, so the provider's headroom stays current.
   `credential_id`, `view_digest`, `observed_at_ms` (the original
   observation time, never a forwarding time), `upstream_origin`,
   `limit_window`, `resets_at_ms`, `resets_at_source`.
-- [pinned] `pool` (optional): the quota pool for the reading or used-account
-  report (§2). Both use this flat observation shape.
+- [pinned] `upstream_origin` (`observe::UpstreamOrigin`) is a closed set
+  naming where the observation's headers came from. The router uses it for
+  one decision: whether a header reading counts as evidence that the account
+  is exhausted.
+
+  | Value | Meaning | Evidence |
+  |---|---|---|
+  | `upstream` | The provider's own response headers, as the runner received them, whatever the transport. Send it when the runner can't say more. | yes |
+  | `direct` | The provider's response, received straight from its HTTP API. | yes |
+  | `http_relay_upstream` | The provider's response, passed through unchanged by an HTTP relay or proxy in front of the provider. | yes |
+  | `ws_response_start` | The headers on a WebSocket stream's response-start frame. | yes |
+  | `optimistic_wrapper` | Headers a relay or wrapper made up itself, such as a placeholder sent before the real response. | never |
+
+  For a genuine origin, a utilization reading of 1.0 or more can confirm the
+  window is exhausted. Without `upstream_origin`, header readings are
+  recorded but can't confirm anything. The value names a kind of source,
+  never a URL or host.
+- [pinned] `resets_at_source` (`observe::ResetsAtSource`) is a closed set
+  naming where `resets_at_ms` came from.
+
+  | Value | Meaning | Router use |
+  |---|---|---|
+  | `header` | The provider stated the window's reset time in a response header. | The reset that ends the block. |
+  | `body` | The provider stated an absolute reset time in a refusal body. | The reset that ends the block, like `header`. |
+  | `retry_after` | Worked out from a relative delay, such as a Retry-After value or a body's seconds-until-reset. | Only a hint for when to try again. It never starts a short hold or ends a block. |
+
+  Without a source, the router reads `resets_at_ms` like `retry_after`.
+- [pinned] Both sets are closed: a value the set doesn't name is
+  `invalid_request` naming `upstream_origin` or `resets_at_source`, so a
+  runner learns at once. A runner building the request with this crate's
+  types can't send one. Adding a value needs a describe group, because a
+  router that doesn't know it refuses it.
+- [pinned] `pool` (optional): the quota pool the observation is about (§2):
+  for a reading, the pool its headers describe; for
+  `account_limit_exhausted`, the pool that ran out.
 - [pinned] `headers`: the upstream provider's rate-limit headers, names
   lowercased, values raw, unknown names included. Absent means none were
   received. A name that is not lowercase is
@@ -970,22 +1120,86 @@ What a runner saw on an account, so the provider's headroom stays current.
   the observation matched an admission; `effects` lists, in the provider's
   own words, the changes it applied: an account it stopped allocating for
   now, or a change to an account's remaining headroom.
-- [pinned] The same `event_id` from the same runner again applies nothing
-  and answers the first observation's `id` with `duplicate: true` and
+- [pinned] The same `event_id` from the same calling principal again applies
+  nothing and answers the first observation's `id` with `duplicate: true` and
   empty `effects`.
 - [pinned] Refusals: `invalid_request {field}`, `account_not_authorized`.
+
+- [pinned] `observe_backoff` adds `kind: "transient_backoff"` and optional
+  `decision_id`, `retry_at_ms` (Unix ms), and `provider_code` (1–128 characters,
+  verbatim). `retry_at_ms` is required for `transient_backoff`, allowed for
+  `account_limit_exhausted`, and refused for every other kind, by that field.
+  `observe::parse_account_observe_request_serving(params, capabilities)`
+  refuses each new member by name without the group, keeps the new kind as
+  advisory `ObserveKind::Other`, and applies no retry rule. The legacy parser
+  supplies no groups. A 0.6.0 parser ignores unknown observe members instead;
+  callers send none of these members or the new kind to either non-declaring
+  router.
+- [pinned] `transient_backoff` fences the admission's account when an
+  `admission_id` is sent, otherwise `served_account_id`. With neither, refuse
+  `invalid_request {field: "admission_id"}`. New admissions on that account
+  stop for every runner until `retry_at_ms`. Past times are recorded with no
+  fence; times over 24 hours out are capped at 24 hours (`RESET_FENCE_CAP_MS`).
+  The current pin stays; only `run_finished` releases it.
+- [pinned] On a declaring router, resolve `ObserveArm` from trusted state and
+  call `observe::check_observe_authorization(arm, request)`:
+  - `Runner`: the caller holds the admission or is otherwise authorized by
+    §9's runner rule. All kinds are allowed. `decision_id` is informative and
+    never refused: it may belong to another consumer or be an `account_continue`
+    offer the admission never carried. Authorization follows the admission,
+    not decision ownership, so `run_finished` can still release the pin.
+  - `DecisionOwner {decision_id: D, admission_id, carried}`: the caller owns
+    a select or panel decision D. Only wall kinds (`account_limit_exhausted`,
+    `transient_backoff`) are allowed, only naming D and that admission, and only
+    if the admission's `account_for` carried D. A decision owner cannot release
+    or reshape a runner's pin.
+  - `Other`: neither arm, including foreign or non-select decisions from a
+    non-runner; refused.
+  Every authorization refusal is `account_not_authorized`, never
+  `unknown_decision`. Non-declaring routers retain runner-only authorization.
+  The key is the calling principal and `event_id`, never the role. So a
+  runner and a decision owner that are different principals don't collide
+  on the same `event_id`, but one principal acting in both roles must use a
+  different `event_id` for each observation, or the second is a duplicate.
+
+### 9.3 Pooled API keys and runner-owned account routing
+
+- [pinned] Pooled API keys need no second lease mechanism. The select answer's
+  `runner.auth` (`select::RunnerAuth`) carries pool and credential hints, never
+  an account lease pin. The runner admits, renews (including keeping prompt-cache
+  affinity), and releases its own account through the existing operations:
+
+  | Account action | Routing request |
+  |---|---|
+  | acquire | `route.account_for`, `mode: "admit"`, with `pool` |
+  | renew | `route.account_for`, `mode: "renew"`, with `expected_pin` |
+  | release | `route.account_observe`, `kind: "run_finished"` |
+  | wall | `route.account_observe`, `account_limit_exhausted` or, with its group, `transient_backoff` |
+
+- [pinned] A runner declaring `routed_accounts` in its runner-role describe
+  lists the sign-in methods it admits, renews and releases itself. Entries
+  use §1.2's `auth_method` spelling and token grammar. The list is non-empty,
+  unique, and at most 64 entries (`check_routed_accounts` in the runner
+  contract). Any listed method requires `follows_account_choice: true` in the
+  routing runner declaration. That flag without the group keeps its 0.6.0
+  meaning.
+- [pinned] For listed methods the runner forwards the select pool and
+  credential hint as §5.2 specifies, loads the public-id credential answered by
+  `account_for`, and sends with it. For unlisted methods, or without the group,
+  the caller keeps naming the account as the runner accepts it today and §5.2's
+  original key-pool requirement applies. No credential secret travels here.
 
 ## 10. Refusal codes
 
 | Code | Answered by | Detail | Timed |
 |---|---|---|---|
 | `invalid_request` | every op except `role.describe` | `{field}` | no |
-| `invalid_requirements` | `route.select` (§5.1) | `{field}` | no |
-| `unknown_consumer` | `route.select` (§5.1) | `{consumer}` | no |
-| `consumer_not_owned` | `route.select` (§1.1) | `{consumer}` | no (terminal) |
+| `invalid_requirements` | `route.select` (§5.1), `route.select_panel` (§11.1) | `{field}` | no |
+| `unknown_consumer` | `route.select`, `route.select_panel` | `{consumer}` | no |
+| `consumer_not_owned` | `route.select`, `route.select_panel` (§1.1) | `{consumer}` | no (terminal) |
 | `pin_unavailable` | `route.select` (§5.3) | `{pin, reason, reset_at_ms?}` | when `reset_at_ms` is present |
 | `no_route` | `route.select` (§5.3) | `{reason, reset_at_ms?}` | when `reset_at_ms` is present |
-| `unknown_decision` | `route.report` (§6), `route.account_for` (§9.1) | `{}` | no |
+| `unknown_decision` | `route.report` (§6), `route.account_for` (§9.1), panel replacement (§11.1), `route.budget_quote`, `route.explain` (§11) | `{}` | no |
 | `report_conflict` | `route.report` (§8) | `{}` | no |
 | `account_not_authorized` | `route.account_for`, `route.account_observe` (§9) | `{}` | no |
 | `auth_required` | `route.account_for` (§9.1) | `{}` | no |
@@ -1005,11 +1219,179 @@ What a runner saw on an account, so the provider's headroom stays current.
 - [pinned] `test-vectors/routing-v1/refusals.json` holds one body for every
   code in this table.
 
-## 11. Not in v1
+## 11. Optional selection and inspection operations
 
-- [informative] Panels (selecting several routes at once) are not part of
-  v1. A provider may keep serving an older panel op beside v1; a v1 op is
-  added only when more than one consumer needs one.
+- [pinned] Each operation below requires its own §4 group. New wire records
+  are non-exhaustive with constructors; open sets keep unknown strings.
+- [pinned] `route.budget_quote` and `route.explain` accept only decision ids
+  minted by `route.select` or `route.select_panel`, replacement seats included.
+  An `account_for` allocation's own `reason.decision_id` without a caller
+  decision, and an `account_continue` offer's `decision_id` even after switching,
+  are `unknown_decision`. This changes no id accepted by a 0.6.0 operation.
+- [pinned] Ownership follows §6's selecting `(principal, consumer)`. Unknown,
+  foreign and past-retention decisions are answered alike as `unknown_decision`.
+  Retention is independent of `expires_at_ms`: expired but retained decisions
+  can still be explained, quoted, and replaced through their panel. Displaced
+  seat decisions are retained like any other decision.
+
+### 11.1 `route.select_panel` — group `select_panel`
+
+New-panel params (`panel::SelectPanelRequest`):
+
+| Member | Meaning |
+|---|---|
+| `class` | Required open string naming the kind of review, mapped to router policy. Named values: `audit`, `design_review`, `evaluate`, `diagnose`, `explain`, `spec`, `lab`; they fix the spelling, and each router's own policy says what a class selects. `role.describe` doesn't list the classes a router serves: one it has no policy for is `invalid_request {field: "class"}`. |
+| `consumer`, `runners?`, `available_routes?`, `exclude?`, `harness?`, `service_tier?`, `correlation_id?`, `task_ref?`, `settings?` | As on select, under the same groups, applying to every seat. |
+| `requirements?` | `PanelRequirements {context_window?, modalities?}`: each seat has a known window at least the floor and accepts every modality. No `iq`; class policy owns quality. |
+| `temperatures?` | At most 8 finite numbers in `0..=2`, indexed by slot; otherwise `invalid_request {field: "temperatures"}`. |
+| `package_tokens?` | Unsigned evidence-package size; every seated route's package ceiling (§11.2) must cover it. Absent means unconstrained. |
+| `seed?` | String of at most 256 bytes. Random draws depend only on seed and candidates, so identical seed and candidates give the same panel. |
+
+- [pinned] Other members, including select's `pin`, `pin_slot`, `prefer`,
+  `prefer_prompt_cache` and `affinity`, are `invalid_request {field}` naming
+  them. Unknown requirements, including `iq`, are `invalid_request
+  {field: "requirements.<member>"}`. A non-unsigned window or undefined
+  modality is `invalid_requirements {field}` naming it, as on select.
+- [pinned] Router policy owns size (1–8), ranking, extra draws and quality
+  floor. Never seat the same `provider/model` twice, nor two models of one
+  family; models without a known family count as one family.
+
+Answer (`SelectPanelAnswer`):
+
+| Member | Meaning |
+|---|---|
+| `panel_id` | Router-minted id used for replacement; only the panel's caller may replace. |
+| `policy` | `{size, top, extra}`, size in 1–8, `top + extra = size`; policy counts, not seated counts. Slots below `top` have phase `top`, others phase `extra`. Optional `ranking`, `extra_ranking`, `floor`, `seed` are arbitrary informative JSON, never parsed for decisions. |
+| `seats` | `[{slot, phase, answer, family?, temperature?}]`, ascending distinct slots below size, gaps allowed. `phase` is open (`top`, `extra`). `answer` is a full `SelectAnswer` with its own decision and report. Temperature equals `temperatures[slot]`, absent beyond that list. |
+| `shortfall?` | `{code, detail?}`, present exactly when fewer than size seats were seated, including zero seats (an answer, not a refusal). Open code: `package_unmeetable`, `floor_unmeetable`, `diversity_unmeetable`, otherwise `size_reduced`. |
+
+Replacement params and answer:
+
+| Body | Shape |
+|---|---|
+| Request (`PanelReplacementRequest`) | `{replace: {panel_id, slot}, exclude?}`, where `exclude` holds route keys as in `route.select`'s `exclude` (§5.1), never with a variant; any other member is `invalid_request {field}`. |
+| Answer (`PanelReplacement`) | `{panel_id, slot, seat?, cause?}`, exactly one of seat or cause. Seat is the same shape as above with a decision id never answered by this panel. Cause is open: `no_candidate`, `package_unmeetable`. |
+
+- [pinned] Unknown, foreign and past-retention panels all get `unknown_decision`.
+  `replace.slot >= policy.size` is `invalid_request {field: "replace.slot"}`.
+  Any lower slot may be replaced, even if never seated or last answered a cause.
+- [pinned] A replacement has the slot's original phase and temperature. It
+  uses a route the panel never seated before, excludes the original plus new
+  exclusions, shares no family with standing seats in other slots, is available
+  now, has a runner, and covers `package_tokens`. Original `runners`,
+  `available_routes`, `requirements`, `harness`, `service_tier`, `settings`,
+  class and package size still apply. A displaced route is never seated again.
+  Keep the panel replaceable at least as long as its decisions remain explainable.
+- [pinned] New-panel refusals are `invalid_request`, `invalid_requirements`,
+  `unknown_consumer`, `consumer_not_owned`; replacement adds `unknown_decision`.
+  Insufficient candidates produce a shortfall or cause, not `no_route`.
+- [pinned] Caller helpers are not wire members:
+  `SelectPanelRequest::seat_request(extra_exclude)` copies the common select
+  constraints, merges exclusions, uses `Requirements::iq(0)` plus the panel
+  window/modalities, and sends no pin or preference. The inert IQ is not checked
+  by `select::check_answer`. `PanelState::new(request, answer)` records the
+  original request, standing slots, and every seated route and decision id;
+  `apply(&PanelReplacement)` installs a checked seat and extends both histories.
+  A cause changes nothing. Validate before constructing or applying state.
+- [pinned] `check_panel_answer(request, answer)` checks policy bounds, slot
+  order/phase, temperature, unique decisions/routes/families (at most one unknown
+  family), exact shortfall presence, all seat answers against `seat_request([])`,
+  equal project-settings results, and package ceilings. When a window floor
+  was sent, both panel helpers require non-zero seat windows at least that
+  floor; modalities cannot be checked from answers.
+- [pinned] `check_panel_replacement(state, replace, answer)` checks the echoed
+  panel and slot, exclusive seat/cause, phase/temperature, combined exclusions,
+  no historically seated route or decision id, family diversity with other
+  standing slots, and the seat answer against `seat_request(replace.exclude)`,
+  window floor and package ceiling.
+
+### 11.2 `route.budget_quote` — group `budget_quote`
+
+| Body | Members |
+|---|---|
+| Request (`BudgetQuoteRequest`) | `{decisions, prompt_tokens?}`. 1–16 distinct decisions; empty, repeated or longer lists are `invalid_request {field: "decisions"}`. Prompt tokens must be unsigned, otherwise `invalid_request {field: "prompt_tokens"}`. |
+| Answer (`BudgetQuote`) | `{package: {tokens, limiting: {decision_id, route_key}, context_window, context_window_known}, seats: [{decision_id, route_key, package_tokens, output_limit?}]}`; seats in request order. |
+| `output_limit` | `{status: "send", tokens, catalog, suspect}` or `{status: "unknown", reason}`, present exactly when prompt tokens were sent. Status and reason are open sets. |
+
+- [pinned] Refusals: `invalid_request {field}`, `unknown_decision` for the
+  entire request if any decision is unknown, foreign or past retention (§11).
+  Only the decisions' selecting owner may quote them.
+- [pinned] Use capacities recorded in each select answer, not a fresh catalog
+  read. `context_window` and `max_output_tokens` are required u64 fields; 0
+  means unknown. `budget::quote(seats, prompt_tokens)` is the pure shared
+  arithmetic helper, taking `{decision_id, route_key, context_window,
+  max_output_tokens}` in request order. It also validates the decision list.
+- [pinned] With saturating arithmetic, window is the known context window or
+  128,000. Output reserve is min(max output or 32,000 when unknown, 64,000).
+  Seat package ceiling is floor((window − output reserve − 16,000) / 2).
+  Panel ceiling is the smallest seat ceiling. A limiting tie takes the
+  bytewise-smaller route key, then earlier decision in request order. Package
+  context window and known flag are that limiting seat's window and whether
+  its capacity was known.
+- [pinned] When prompt tokens are present, room is window − prompt tokens −
+  4,096, saturating at zero. The first matching unknown-output reason wins:
+  `no_output_limit` (unknown max output), `no_context_window` (unknown window),
+  `placeholder` (max output at least the window), `no_room` (room zero).
+  The caller sends no limit and the runner applies its own. Otherwise send
+  min(max output, room), record max output as `catalog`, and always include
+  `suspect`, true exactly when max output exceeds 131,072. A suspect limit
+  is still sent. Package ceilings do not depend on prompt tokens.
+- [pinned] `check_budget_quote` requires exact equality with `budget::quote`
+  over the capacities the caller received for those decisions.
+
+### 11.3 `route.explain` — group `explain`
+
+| Body | Members |
+|---|---|
+| Request (`ExplainRequest`) | `{decision_id}` |
+| Answer (`ExplainAnswer`) | `{decision_id, route, runner, serving: {provider, account_id?, credential_id?}, policy_version, reason_code, note?}` |
+
+- [pinned] Only the selecting owner may explain (§11); refusals are
+  `invalid_request {field}` and `unknown_decision`.
+- [pinned] `serving.provider` is the route provider. Account and credential
+  bindings come from the latest `account_for` admission carrying this decision,
+  otherwise select's auth; unbound members are absent. An `account_continue`
+  switch does not move the binding: it carries `previous_decision_id`, not
+  this decision, and its offer is not explainable. Serving stays as admitted.
+- [pinned] `policy_version` is a string; `reason_code` is open (`pinned`,
+  `fell_back`, `affinity`, `ranked`), for logs only. `note` is informative,
+  never parsed. `check_explain(select_answer, request, answer)` checks the
+  decision echo, route and runner equality, and serving provider equality.
+
+### 11.4 `route.account_status` — group `account_status`
+
+| Body | Members |
+|---|---|
+| Request (`AccountStatusRequest`) | `{provider, account_id}` |
+| Answer (`AccountStatusAnswer`) | `{provider, account_id, limit_state, reset_at_ms?}` |
+
+- [pinned] Any caller may ask; the answer contains only public ids and times.
+  Unknown accounts get `limit_state: "unknown"`, never an existence refusal.
+  Malformed params get `invalid_request {field}`.
+- [pinned] `limit_state` is open: `available`, `limited`, `unknown`. Reset is
+  Unix ms, only with `limited`, absent there when unknown.
+  `check_account_status(request, answer)` checks both id echoes and that reset
+  rule, preserving unknown states as strings.
+
+### 11.5 `route.head_choices` — group `head_choices`
+
+| Body | Members |
+|---|---|
+| Request (`HeadChoicesRequest`) | `{runner_module}` |
+| Answer (`HeadChoicesAnswer`) | `{catalog_version, runner_module, models: [{provider, model, variants, default_variant?, service_tiers}]}` |
+
+- [pinned] Any caller may ask. Malformed params are `invalid_request {field}`;
+  unknown runners and runners declaring `starts_sessions: false` get empty
+  models, not a refusal. The answer is unranked; empty models is valid.
+- [pinned] Models are bytewise sorted by `(provider, model)`, each pair unique.
+  Variants and tiers are bytewise sorted and unique; a default variant must be
+  in variants. Every pair is a route the named runner runs. Listing once under
+  a preferred provider or once per provider is router policy; callers assume
+  neither.
+- [pinned] `catalog_version` identifies the catalog used. Variants and tiers
+  are the router's admitted subset at that version. Limits and prices still
+  come from the catalog. `check_head_choices(request, answer)` checks the
+  runner echo, sorting, uniqueness and default-variant membership.
 
 ## 12. Vectors and conformance
 

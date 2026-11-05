@@ -47,6 +47,7 @@ mod report;
 mod retention;
 pub mod rich_ui_stamp;
 mod route;
+pub mod routed_accounts;
 mod run_parameters;
 mod run_usage;
 mod runner;
@@ -71,6 +72,7 @@ pub use cortexkit_role_llm_runner as wire;
 pub use progress::{SuiteOptions, SuiteProgress};
 pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, CASES, NARROWINGS};
 pub use route::{envelope, Reply, RouteFailure, RunnerRoute, SubscribeOutcome};
+pub use routed_accounts::RecordingRoutingPeer;
 pub use runner::{run_suite, run_suite_with, SetupError};
 pub use subject::{
     ArchivePruningPart, AttributionFixture, Capability, LiveIdsObservation, LlmRunnerSubject,

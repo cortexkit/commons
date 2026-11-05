@@ -1,0 +1,404 @@
+{
+  "group": "select_panel",
+  "describes": [
+    {
+      "name": "legacy",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      }
+    },
+    {
+      "name": "declared",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.select_panel"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "select_panel"
+        ]
+      }
+    },
+    {
+      "name": "op_without_group",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe",
+          "route.select_panel"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "select_panel"
+      }
+    },
+    {
+      "name": "group_without_op",
+      "answer": {
+        "role": "routing",
+        "version": 1,
+        "ops": [
+          "role.describe",
+          "route.select",
+          "route.report",
+          "route.account_for",
+          "route.account_observe"
+        ],
+        "consumers": [
+          {
+            "id": "codemode",
+            "priced_only": true
+          },
+          {
+            "id": "flow",
+            "priced_only": true
+          },
+          {
+            "id": "example_summary",
+            "priced_only": false
+          }
+        ],
+        "requirement_fields": [
+          "iq",
+          "eq",
+          "context_window",
+          "max_output_tokens",
+          "tools",
+          "tool_capabilities",
+          "modalities",
+          "structured_output"
+        ],
+        "detail_supported": true,
+        "capabilities": [
+          "select_panel"
+        ]
+      },
+      "problem": {
+        "kind": "OpGroupMismatch",
+        "group": "select_panel"
+      }
+    }
+  ],
+  "requests": [
+    {
+      "name": "new_panel",
+      "params": {
+        "class": "audit",
+        "consumer": "example_summary",
+        "requirements": {
+          "context_window": 50000
+        },
+        "temperatures": [
+          0.4
+        ],
+        "package_tokens": 10000,
+        "seed": "repeatable"
+      }
+    },
+    {
+      "name": "unknown_class",
+      "params": {
+        "class": "future_class",
+        "consumer": "example_summary"
+      }
+    }
+  ],
+  "answers": [
+    {
+      "name": "full",
+      "answer": {
+        "panel_id": "panel-1",
+        "policy": {
+          "size": 1,
+          "top": 1,
+          "extra": 0
+        },
+        "seats": [
+          {
+            "slot": 0,
+            "phase": "top",
+            "answer": {
+              "decision_id": "decision-1",
+              "route": {
+                "provider": "example-provider",
+                "model": "model-a"
+              },
+              "runner": {
+                "module": "runner-one",
+                "model": {
+                  "provider": "example-provider",
+                  "model": "model-a"
+                }
+              },
+              "context_window": 200000,
+              "max_output_tokens": 32000,
+              "expires_at_ms": 1767225900000,
+              "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach."
+            },
+            "family": "family-a",
+            "temperature": 0.4
+          }
+        ]
+      }
+    },
+    {
+      "name": "shortfall",
+      "answer": {
+        "panel_id": "panel-2",
+        "policy": {
+          "size": 1,
+          "top": 1,
+          "extra": 0
+        },
+        "seats": [],
+        "shortfall": {
+          "code": "package_unmeetable"
+        }
+      }
+    }
+  ],
+  "refused": [
+    {
+      "name": "no_iq",
+      "params": {
+        "class": "audit",
+        "consumer": "example_summary",
+        "requirements": {
+          "iq": 50
+        }
+      },
+      "refusal": {
+        "code": "invalid_request",
+        "detail": {
+          "field": "requirements.iq"
+        }
+      }
+    },
+    {
+      "name": "bad_window",
+      "params": {
+        "class": "audit",
+        "consumer": "example_summary",
+        "requirements": {
+          "context_window": -1
+        }
+      },
+      "refusal": {
+        "code": "invalid_requirements",
+        "detail": {
+          "field": "context_window"
+        }
+      }
+    }
+  ],
+  "unknown": [
+    {
+      "name": "class",
+      "type": "PanelClass",
+      "value": "future_class"
+    },
+    {
+      "name": "phase",
+      "type": "PanelPhase",
+      "value": "future_phase"
+    },
+    {
+      "name": "shortfall",
+      "type": "ShortfallCode",
+      "value": "future_shortfall"
+    },
+    {
+      "name": "cause",
+      "type": "ReplacementCause",
+      "value": "future_cause"
+    }
+  ],
+  "replacements": [
+    {
+      "name": "new_route",
+      "params": {
+        "replace": {
+          "panel_id": "panel-1",
+          "slot": 0
+        }
+      },
+      "answer": {
+        "panel_id": "panel-1",
+        "slot": 0,
+        "seat": {
+          "slot": 0,
+          "phase": "top",
+          "answer": {
+            "decision_id": "decision-2",
+            "route": {
+              "provider": "example-provider",
+              "model": "model-b"
+            },
+            "runner": {
+              "module": "runner-one",
+              "model": {
+                "provider": "example-provider",
+                "model": "model-b"
+              }
+            },
+            "context_window": 200000,
+            "max_output_tokens": 32000,
+            "expires_at_ms": 1767225900000,
+            "explanation": "model-a meets iq 50 at the lowest price on a runner the caller can reach."
+          },
+          "family": "family-b",
+          "temperature": 0.4
+        }
+      }
+    },
+    {
+      "name": "unseated",
+      "params": {
+        "replace": {
+          "panel_id": "panel-1",
+          "slot": 0
+        }
+      },
+      "answer": {
+        "panel_id": "panel-1",
+        "slot": 0,
+        "cause": "no_candidate"
+      }
+    }
+  ],
+  "refusals": [
+    {
+      "name": "foreign_panel",
+      "body": {
+        "code": "unknown_decision",
+        "message": "The request cannot be served.",
+        "detail": {}
+      }
+    },
+    {
+      "name": "bad_slot",
+      "body": {
+        "code": "invalid_request",
+        "message": "The request cannot be served.",
+        "detail": {
+          "field": "replace.slot"
+        }
+      }
+    },
+    {
+      "name": "consumer_missing",
+      "body": {
+        "code": "unknown_consumer",
+        "message": "The request cannot be served.",
+        "detail": {
+          "consumer": "missing"
+        }
+      }
+    },
+    {
+      "name": "consumer_foreign",
+      "body": {
+        "code": "consumer_not_owned",
+        "message": "The request cannot be served.",
+        "detail": {
+          "consumer": "foreign"
+        }
+      }
+    }
+  ]
+}
