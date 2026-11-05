@@ -358,12 +358,13 @@ pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal
     Ok(RenderPlan { items })
 }
 
-/// A send that rode a tool result (the part's `delivered` list) renders only
-/// while that result's output does. When a view replaces the output and says
-/// nothing about `delivered`, the plan drops every ride too, so a placeholder
-/// such as `[dropped §12§]` is never followed by a spent reminder. The plan
-/// says so explicitly (`delivered: []`, after the output) so a runner only
-/// follows it; a view that does replace `delivered` keeps its own choice.
+/// A send that rode a tool result (the part's `delivered` list, such as a
+/// provider's reminder) renders only while that result's output does. When a
+/// view replaces the output and says nothing about `delivered`, the plan drops
+/// every ride too, so a placeholder such as `[dropped §12§]` is not followed by
+/// a send from the `delivered` list. The plan says so explicitly
+/// (`delivered: []`, after the output) so a runner only follows it; a view
+/// that does replace `delivered` keeps its own choice.
 fn drop_rides_with_output(part: &Part, replace: &mut Vec<FieldReplace>) {
     let PartBody::Tool(tool) = &part.body else {
         return;
