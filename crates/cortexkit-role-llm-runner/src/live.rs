@@ -75,7 +75,9 @@ pub mod event_types {
     pub const MESSAGE_FINISHED: &str = "message_finished";
     pub const TOOL_STARTED: &str = "tool_started";
     pub const TOOL_FINISHED: &str = "tool_finished";
-    pub const RIDE_DELIVERED: &str = "ride_delivered";
+    pub const NOTICE_DELIVERED: &str = "notice_delivered";
+    #[deprecated(since = "0.8.11", note = "renamed to NOTICE_DELIVERED")]
+    pub const RIDE_DELIVERED: &str = NOTICE_DELIVERED;
     pub const RUN_STARTED: &str = "run_started";
     pub const RUN_FINISHED: &str = "run_finished";
     pub const RUN_PAUSED: &str = "run_paused";
@@ -488,7 +490,7 @@ pub enum LiveEvent {
     MessageFinished(MessageEvent),
     ToolStarted(ToolStarted),
     ToolFinished(ToolFinished),
-    RideDelivered(RideDelivered),
+    NoticeDelivered(NoticeDelivered),
     RunStarted(RunStarted),
     RunFinished(RunEnded),
     RunPaused(RunEnded),
@@ -545,7 +547,7 @@ impl LiveEvent {
             t::MESSAGE_FINISHED => Self::MessageFinished(typed(kind, value)?),
             t::TOOL_STARTED => Self::ToolStarted(typed(kind, value)?),
             t::TOOL_FINISHED => Self::ToolFinished(typed(kind, value)?),
-            t::RIDE_DELIVERED => Self::RideDelivered(typed(kind, value)?),
+            t::NOTICE_DELIVERED => Self::NoticeDelivered(typed(kind, value)?),
             t::RUN_STARTED => Self::RunStarted(typed(kind, value)?),
             t::RUN_FINISHED => Self::RunFinished(typed(kind, value)?),
             t::RUN_PAUSED => Self::RunPaused(typed(kind, value)?),
@@ -567,7 +569,7 @@ impl LiveEvent {
             Self::MessageFinished(_) => t::MESSAGE_FINISHED,
             Self::ToolStarted(_) => t::TOOL_STARTED,
             Self::ToolFinished(_) => t::TOOL_FINISHED,
-            Self::RideDelivered(_) => t::RIDE_DELIVERED,
+            Self::NoticeDelivered(_) => t::NOTICE_DELIVERED,
             Self::RunStarted(_) => t::RUN_STARTED,
             Self::RunFinished(_) => t::RUN_FINISHED,
             Self::RunPaused(_) => t::RUN_PAUSED,
@@ -580,19 +582,22 @@ impl LiveEvent {
     }
 }
 
-/// A ride became durable beside an existing tool-result part. This event
+/// A notice became durable beside an existing tool-result part. This event
 /// creates no transcript entry and does not change `history_version`.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
-pub struct RideDelivered {
+pub struct NoticeDelivered {
     pub mid: String,
     pub part: u32,
     pub call_key: String,
     pub send_id: String,
     pub sender: String,
+    pub text: String,
 }
 
-impl RideDelivered {
+impl NoticeDelivered {
+    /// Construct a delivery event. Set the notice text with [`Self::with_text`]
+    /// before serving it.
     pub fn new(
         mid: impl Into<String>,
         part: u32,
@@ -606,9 +611,18 @@ impl RideDelivered {
             call_key: call_key.into(),
             send_id: send_id.into(),
             sender: sender.into(),
+            text: String::new(),
         }
     }
+
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text = text.into();
+        self
+    }
 }
+
+#[deprecated(since = "0.8.11", note = "renamed to NoticeDelivered")]
+pub type RideDelivered = NoticeDelivered;
 
 /// Owner-only durable control notice; `session.baseline.pending_failure`
 /// remains the recovery record when the owner misses the live notice.

@@ -152,6 +152,12 @@ pub const UNKNOWN_MID: &str = "unknown_mid";
 /// another session. Never answered with an empty page instead. Terminal:
 /// the reader pages again from the newest page or from a `mid` it holds. A
 /// cursor that does not parse is `invalid_params` naming `cursor` instead.
+///
+/// Also a well-formed `session.subscribe` cursor the runner no longer holds:
+/// before a store restore, past the high-water, expired by retention, or
+/// from another session. On subscribe, discard the cursor, reopen with `live`
+/// and read `session.head`; recover the same way from `invalid_params` naming
+/// `from`, as older runners use that refusal for an expired resume cursor.
 pub const CURSOR_EXPIRED: &str = "cursor_expired";
 
 /// A `session.history` `from_ordinal` or `before_ordinal` names an ordinal

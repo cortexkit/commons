@@ -1,11 +1,17 @@
 # cortexkit-role-llm-runner
 
-Version **0.8.9** makes tool-result rides durable runner records, not
+Version **0.8.11** calls the reader-facing group and facts `notices` and the
+live event `notice_delivered`. Notice facts name the carrying `call_key`
+and `delivered_as: "tool_result"`; events include the notice text. Module
+senders also appear on opted-in raw read entries and raw history entries
+under `message_senders` and `read_display_facts`. Subscribe resumes distinguish
+malformed and expired cursors, and reject every cursor from before a store
+restore. Tool-result rides remain durable runner records, not
 transcript entries. `rides::append` and `rides::append_to_content` pin the
 exact shared append bytes and content-list placement. System-form rides use
 the existing template-authority and provider-position rules, with route
-support recorded per session/model. The opt-in `result_rides` group adds
-reader/display facts and `ride_delivered` events without changing history
+support recorded per session/model. The opt-in `notices` group adds
+reader/display facts and `notice_delivered` events without changing history
 identity or checksums. See CONTRACT §9.7 for rendering, views and retention.
 
 The opt-in `head_selection` group accepts a strict `plan.model` selection for

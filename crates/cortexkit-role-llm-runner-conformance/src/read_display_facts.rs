@@ -113,6 +113,7 @@ where
     if name == "read_display_facts_default_absent" {
         if entries.iter().any(|entry| {
             entry.get("client_message_id").is_some()
+                || entry.get("sender").is_some()
                 || entry.get("tool_times").is_some()
                 || entry.get("completed_at").is_some()
                 || entry.get("created_at").is_some()
@@ -166,6 +167,7 @@ where
             .ok_or("read entry is not an object")?
             .remove("client_message_id");
         stripped.as_object_mut().unwrap().remove("tool_times");
+        stripped.as_object_mut().unwrap().remove("sender");
         stripped.as_object_mut().unwrap().remove("completed_at");
         stripped.as_object_mut().unwrap().remove("created_at");
         stripped

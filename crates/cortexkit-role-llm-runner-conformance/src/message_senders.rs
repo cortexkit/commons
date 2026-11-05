@@ -7,6 +7,7 @@ use cortexkit_role_llm_runner::{
     history::{HistoryForm, HistoryRequest},
     live::LiveEvent,
     ops,
+    read::ReadRequest,
     send::SendReply,
     subscribe::SubscribeFrom,
 };
@@ -14,7 +15,7 @@ use serde_json::{json, Map, Value};
 
 use crate::{
     cases::{Case, Ending},
-    drive::{call, decode, expect_ok, wait_run_end},
+    drive::{call, decode, expect_ok, read, wait_run_end},
     live::stream,
     route::{Reply, RouteFailure, RunnerRoute},
     send_helpers::send_and_wait,
@@ -215,7 +216,8 @@ where
             unavailable.push("message_senders_join: adapter cannot hold a steerable run open; checked start only".into());
         }
         wait_run_end(case.subject, &session.route, case.declared, None, &started).await?;
-        check_rows(&session.route, &wanted, &observed, &b.module, &answer_marker).await
+        check_rows(&session.route, &wanted, &observed, &b.module, &answer_marker,
+            describe.declares(groups::READ_DISPLAY_FACTS)).await
     }.await;
     if held && !released {
         let released = case
@@ -241,6 +243,7 @@ async fn check_rows<R: RunnerRoute>(
     observed: &[(Value, Reply)],
     sender: &str,
     model_reply: &str,
+    read_display_facts: bool,
 ) -> Result<(), String> {
     let mut found = std::collections::BTreeSet::new();
     let mut found_model_reply = false;
@@ -278,6 +281,26 @@ async fn check_rows<R: RunnerRoute>(
                 return Err("sender's message is not a user row".into());
             }
             names_sender(&display, sender, client_id)?;
+            if read_display_facts {
+                let page = read(
+                    route,
+                    &ReadRequest::range(0)
+                        .with_limit(100)
+                        .with_include_display_facts(true),
+                )
+                .await?;
+                let entry = page
+                    .messages
+                    .iter()
+                    .find(|entry| entry.mid == message.mid)
+                    .ok_or("sender's message missing from opted-in read")?;
+                if entry.sender.as_deref() != Some(sender) {
+                    return Err(format!(
+                        "read entry sender is {:?}, expected {sender}",
+                        entry.sender
+                    ));
+                }
+            }
             if !found.insert(prompt.clone()) {
                 return Err("duplicate message_started for sender message".into());
             }

@@ -144,21 +144,24 @@ pub(super) fn live_events(
     let mut out: Vec<Value> = Vec::new();
     let event = |e: LiveEvent| serde_json::to_value(e).expect("events serialize");
     match kind {
-        "order_delivered" if defects.result_rides != Some("event") => {
+        "order_delivered" if defects.notices != Some("event") => {
             if let Some(queued) = record["id"].as_str().and_then(|id| sess.ordered.get(id)) {
                 for message in &sess.messages {
                     for ride in message
-                        .rides
+                        .notices
                         .iter()
                         .filter(|ride| ride.send_id == queued.send_id)
                     {
-                        out.push(event(LiveEvent::RideDelivered(live::RideDelivered::new(
-                            &message.mid,
-                            ride.part,
-                            message.body["call_key"].as_str().unwrap(),
-                            &ride.send_id,
-                            &ride.sender,
-                        ))));
+                        out.push(event(LiveEvent::NoticeDelivered(
+                            live::NoticeDelivered::new(
+                                &message.mid,
+                                ride.part,
+                                message.body["call_key"].as_str().unwrap(),
+                                &ride.send_id,
+                                &ride.sender,
+                            )
+                            .with_text(&ride.text),
+                        )));
                     }
                 }
             }
@@ -365,7 +368,7 @@ impl Module {
             .iter()
             .find(|message| message.mid == entry.mid)
         {
-            row.rides = super::result_rides::facts(message, defects);
+            row.notices = super::notices::facts(message, defects);
         }
         if defects.display_pi_wrong_role && row.role == "toolResult" {
             row.role = "user".into();
@@ -529,13 +532,23 @@ impl Module {
         let after = match request.attach_point() {
             SubscribeFrom::Start => (0, u64::MAX),
             SubscribeFrom::Live => (events.len() as u64, u64::MAX),
-            SubscribeFrom::After(position) => (
-                position.get("seq").and_then(Value::as_u64).unwrap_or(0),
-                position
-                    .get("sub")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(u64::MAX),
-            ),
+            SubscribeFrom::After(position) => {
+                if let Err(error) = check_subscribe_cursor(
+                    &position,
+                    session,
+                    events.len(),
+                    self.world.defects.subscribe_foreign_cursor_invalid_params,
+                ) {
+                    return SubscribeOutcome::Refused(error);
+                }
+                (
+                    position["seq"].as_u64().unwrap(),
+                    position
+                        .get("sub")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(u64::MAX),
+                )
+            }
         };
         let mut frames: Vec<SubscribeEvent> = Vec::new();
         for (index, kind) in events.iter().enumerate() {
@@ -550,7 +563,7 @@ impl Module {
             if mapped.is_empty() {
                 if (seq, u64::MAX) > after {
                     let mut frame = SubscribeEvent::new(kinds::CONTROL);
-                    frame.cursor = Some(cursor(index + 1));
+                    frame.cursor = Some(cursor(session, index + 1));
                     frame.body = unit;
                     if let Some(body) = sessions
                         .get(session)
@@ -598,7 +611,7 @@ impl Module {
                         event["schema_pin"] = json!(pin);
                     }
                 }
-                let mut position = cursor(index + 1);
+                let mut position = cursor(session, index + 1);
                 position.insert("sub".into(), json!(sub));
                 let mut frame = SubscribeEvent::new(kinds::CONTROL);
                 frame.cursor = Some(position);

@@ -4,7 +4,7 @@ fn subject(defect: Option<&'static str>, enabled: bool) -> FakeSubject {
     let mut subject = declaring(
         Capability::DeliveryOrder,
         Defects {
-            result_rides: defect,
+            notices: defect,
             ..Defects::default()
         },
     );
@@ -15,15 +15,15 @@ fn subject(defect: Option<&'static str>, enabled: bool) -> FakeSubject {
         Capability::LiveEvents,
     ]);
     if enabled {
-        subject.capabilities.insert(Capability::ResultRides);
+        subject.capabilities.insert(Capability::Notices);
     }
     subject
 }
 
 #[tokio::test]
-async fn result_rides_faithful_runner_passes() {
+async fn notices_faithful_runner_passes() {
     let report = run(&subject(None, true)).await;
-    for name in cases_of(&["result_rides_"]) {
+    for name in cases_of(&["notices_"]) {
         assert_eq!(
             report.outcome(name),
             Some(&CaseOutcome::Passed),
@@ -35,9 +35,9 @@ async fn result_rides_faithful_runner_passes() {
 }
 
 #[tokio::test]
-async fn result_rides_undeclared_is_inapplicable() {
+async fn notices_undeclared_is_inapplicable() {
     let report = run(&subject(None, false)).await;
-    for name in cases_of(&["result_rides_"]) {
+    for name in cases_of(&["notices_"]) {
         assert!(
             matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
             "{name}: {}",
@@ -50,7 +50,7 @@ async fn rejects(defect: &'static str, name: &str, reason: &str) {
     let report = run(&subject(Some(defect), true)).await;
     let failure = failed(&report, name);
     assert!(failure.contains(reason), "{name}: {failure}");
-    for other in cases_of(&["result_rides_"]) {
+    for other in cases_of(&["notices_"]) {
         if other != name {
             assert_eq!(
                 report.outcome(other),
@@ -64,45 +64,55 @@ async fn rejects(defect: &'static str, name: &str, reason: &str) {
 }
 
 #[tokio::test]
-async fn result_rides_rejects_transcript_entry() {
+async fn notices_rejects_transcript_entry() {
     rejects(
         "entry",
-        "result_rides_no_transcript_entry",
+        "notices_no_transcript_entry",
         "created a transcript entry",
     )
     .await;
 }
 
 #[tokio::test]
-async fn result_rides_rejects_stored_output_mutation() {
+async fn notices_rejects_stored_output_mutation() {
     rejects(
         "stored",
-        "result_rides_stored_output_unchanged",
+        "notices_stored_output_unchanged",
         "host stored tool output changed",
     )
     .await;
 }
 
 #[tokio::test]
-async fn result_rides_rejects_wrong_fact() {
-    rejects("fact", "result_rides_display_fact", "wrong rides fact").await;
+async fn notices_rejects_missing_fact_call_key() {
+    rejects(
+        "missing_call_key",
+        "notices_display_fact",
+        "missing field `call_key`",
+    )
+    .await;
 }
 
 #[tokio::test]
-async fn result_rides_rejects_missing_live_event() {
-    rejects("event", "result_rides_live_event", "ride_delivered event").await;
+async fn notices_rejects_wrong_fact() {
+    rejects("fact", "notices_display_fact", "wrong notices fact").await;
 }
 
 #[tokio::test]
-async fn result_rides_rejects_wrong_append_bytes() {
-    rejects("bytes", "result_rides_append_bytes", "exact append bytes").await;
+async fn notices_rejects_missing_live_event() {
+    rejects("event", "notices_live_event", "notice_delivered event").await;
 }
 
 #[tokio::test]
-async fn result_rides_rejects_system_authority() {
+async fn notices_rejects_wrong_append_bytes() {
+    rejects("bytes", "notices_append_bytes", "exact append bytes").await;
+}
+
+#[tokio::test]
+async fn notices_rejects_system_authority() {
     rejects(
         "system",
-        "result_rides_tool_result_only_never_system",
+        "notices_tool_result_only_never_system",
         "reached system authority",
     )
     .await;

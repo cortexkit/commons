@@ -218,16 +218,16 @@ alias until the next breaking release.
 | `host_history` | `session.history` | §4.6 |
 | `history_display` | `session.history` with `form: "display"` | §4.7 |
 | `sender_attribution` | `session.send`, `session.read`, `session.history`; requires `delivery_order`, `read_display_facts` and `history_display` | §9.7.1 |
-| `result_rides` | `session.read`, `session.history`, live subscription; requires `read_display_facts`, `history_display` and `live_events` | §9.7.2 |
+| `notices` | `session.read`, `session.history`, live subscription; requires `read_display_facts`, `history_display` and `live_events` | §9.7.2 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `live_ids` | `session.subscribe` with opt-in provisional display ids (requires `live_events`; added in 0.7.46) | §7.1 |
-| `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
+| `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started`, and raw entries with `read_display_facts` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `routed_accounts` | No added op; sign-in methods whose accounts the runner routes itself | §2, §9.3.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `head_selection` | `session.send`, `session.head`; requires `plans`; selection through `session.refresh` additionally requires `session_change` | §9.3.4 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
-| `read_display_facts` | `session.read` (`include_display_facts`, entry client ids, creation times, tool times, assistant completion times and reasoning summaries) | §4.2, §4.7.1 |
+| `read_display_facts` | `session.read` (`include_display_facts`, entry client ids, module senders, creation times, tool times, assistant completion times and reasoning summaries) | §4.2, §4.7.1 |
 | `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `session.send_status` where served | §9.7 |
 | `rich_ui_stamp` | `session.read` (the `include_rich_ui` opt-in), `session.head` (`last_run_rich_ui`); also the rich UI stamp on assistant display rows and `run_started` where those are served | §9.17 |
 | `client_message_id` | `session.send` with `client_message_id` | §9.11 |
@@ -338,7 +338,8 @@ alias until the next breaking release.
   dependency by name (`message_senders_without_history_display`,
   `message_senders_without_live_events`) and checks for `session.history`
   and `session.subscribe`. The group strengthens the existing display-row
-  sender binding (§4.7); it adds no fields or discovery metadata.
+  sender binding (§4.7); with `read_display_facts`, it also guarantees the
+  raw-entry `sender` fact (§4.2). It adds no discovery metadata.
 - [pinned] `call_identity` is a group of its own (added in 0.7.2, §9.16),
   declared only beside `history_display` or `live_events`, whose tool-call
   entries it extends: `check_describe` refuses it by name when neither is declared
@@ -544,6 +545,13 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
 - [pinned] `client_message_id?: string` is present on an entry written by a
   send carrying that id, with exactly the value on its display row (§9.11).
   A host-typed entry or a send without that id carries none.
+- [pinned] `sender?: string` is the sending module's attested id, as on its
+  display row. For an entry stored from a module's send while the runner
+  declares both `message_senders` and `read_display_facts`, an opted-in
+  read MUST carry it. The guarantee is positive only: absence proves
+  nothing (§4.7). It is outside every checksum and never moves
+  `history_version`. Raw `session.history` entries carry the same fact
+  under those declarations; history has no display-facts request flag.
 - [pinned] `created_at?: u64`: the host's recorded creation timestamp for
   this message, in Unix epoch milliseconds. For an entry written by a send,
   that's when the host accepted the send; a queued send or steer keeps that
@@ -1463,6 +1471,12 @@ display-ready row for an app's reader on a runner declaring
   starts a run, one that joins a run in progress (each stored as its own
   message with its own `message_started`), and a queued send stored after
   a runner restart.
+- [pinned] With `read_display_facts` also declared, every module-sent entry
+  covered by this guarantee carries the same `sender` beside `mid` on
+  `session.read` with `include_display_facts: true`, and on raw
+  `session.history` entries. Absence proves nothing, just as on display
+  rows. The fact is outside every checksum and never moves
+  `history_version`; it never enters a stored body or a default read.
 - [pinned] The sender guarantee is positive only. An absent `sender`
   claims nothing: the message may not come from a send (a model turn, a
   runner-written notice, or a person typing in an adopted host's own UI,
@@ -2272,8 +2286,23 @@ permits inferring an unreported reason.
 - [pinned] A page and its `head` come from one snapshot. A subscription from
   that `head` continues strictly after it, with no gap and no duplicate.
 - [pinned] The request is `{from?}` (`SubscribeRequest`, strict): `"start"`,
-  `"live"` (the meaning of an absent `from`) or a `head` object passed back
-  verbatim. An unknown attach point is refused naming `from`.
+  `"live"` (also the meaning of an absent or null `from`) or a cursor object exactly
+  as the runner issued it, including a page's `head`. A malformed `from`,
+  not one of these shapes, is refused `invalid_params {field: "from"}`.
+- [pinned] A well-formed cursor the runner no longer holds is refused
+  `cursor_expired`: a cursor from before a restore of the runner's store,
+  past its high-water, expired by retention, or issued for another session.
+  A runner never resumes a cursor issued before its store was restored
+  from an older copy. After a restore it refuses every earlier cursor, so
+  a reused event position can never replay or skip events. One way to meet
+  this rule is a cursor epoch that changes on restore.
+- [pinned] A subscriber receiving either refusal on a resume drops its
+  stored cursor, reopens with `"live"`, and reads `session.head` for the
+  session's state. Runners before 0.8.11 answer `invalid_params` naming
+  `from` here, so subscribers treat that refusal and `cursor_expired` the
+  same way. A runner may deliver either refusal by refusing the subscribe,
+  or by accepting it and then ending the stream with that error before any
+  event. A subscriber treats both the same way.
 - [pinned] Each event is `{kind, cursor?, ...}` (`SubscribeEvent`): `kind`
   is an open string; `control` events are durable and carry the `cursor` a
   later subscription may attach after; `display` events are best-effort and
@@ -3634,7 +3663,8 @@ say who may send and which texts are system text.
   merely no edit of its `delivered` list. Sessions without compaction never
   discard ride records.
   A discarded ride is no longer rendered or served.
-  Its `rides` display fact goes away too. Compaction W4.9 defines the narrow
+  Its `notices` display fact goes away too. The compaction contract
+  (`cortexkit-role-compaction/CONTRACT.md`, W4.9) defines the narrow
   read-projection/digest exception for such discarded records.
 - [pinned] Entries stored under the previous ride rule stay stored and are
   never renumbered. Readers may hide those entries by
@@ -3927,20 +3957,32 @@ say who may send and which texts are system text.
   it show “via chat” rather than the trusted frame; they never cut raw text
   using an unverified byte count.
 
-### 9.7.2 `result_rides`: reader facts for rides
+### 9.7.2 `notices`: reader facts for notices
 
-- [pinned] A runner declaring `result_rides` also declares
+A **notice** is a send from a module to the agent, with a sender. Riding a
+tool result is one delivery mode for a notice. Every other delivery mode
+already produces its own transcript entry carrying `delivered_as` and,
+under `message_senders`, `sender` on its display row. A reader can therefore
+show all notices the same way, whether the notice rides a result or has its
+own entry.
+
+- [pinned] A runner declaring `notices` also declares
   `read_display_facts`, `history_display` and `live_events`. A declaration
-  missing one is refused by name: `result_rides_without_read_display_facts`,
-  `result_rides_without_history_display` or `result_rides_without_live_events`.
+  missing one is refused by name: `notices_without_read_display_facts`,
+  `notices_without_history_display` or `notices_without_live_events`.
 - [pinned] On `session.read` with `include_display_facts: true`, and on
   display rows, the message holding the carrying tool result serves
-  `rides: [{part: u32, send_id: string, sender: string, text: string}]`
+  `notices: [{part: u32, call_key: string, send_id: string, sender: string,
+  text: string, delivered_as: string}]`
   beside its body, in delivery order. Default raw reads omit the fact.
   `part` is the zero-based stored top-level content-part index, counted as
   in `reasoning_summaries`, never a projected display index or opaque key.
+  `call_key` is the carrying call's recorded key. `delivered_as` is an open
+  string, currently `"tool_result"` for every entry this fact serves; a
+  later delivery mode can use the same shape. Readers place a `tool_result`
+  notice under the call whose key it names.
 - [pinned] Delivery emits the live event
-  `ride_delivered {mid, part, call_key, send_id, sender}`, identifying the
+  `notice_delivered {mid, part, call_key, send_id, sender, text}`, identifying the
   carrying message and part, not a new entry. Neither delivery nor the fact
   moves `history_version`. Neither the live event nor the read/display fact
   is covered by any checksum; this does not exempt the compaction contract's
@@ -5388,12 +5430,12 @@ treats it as a terminal refusal of that one request.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
-| `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a compaction_item without a string preset (field plan.compaction_item.preset); a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
+| `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a compaction_item without a string preset (field plan.compaction_item.preset); a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.subscribe` request with malformed `from` (field `from`, §7); a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
 | `history_changed` | a read cursor names another history_version | — | no: read a fresh page |
 | `served_bytes_changed` | a read would serve a message whose body, rebuilt from the host's store, differs from the digest it was first served with (§4.2.1); or a `run.tool_calls` page rebuilds `args` from a requesting message under the same whole-message digest check (`served_bytes::served_body` and `check_served`), and that rebuild differs or its host row is gone (§6.3). The whole page is refused, never a partial page or a call with absent or different `args` | `{mid}` (`errors::ServedBytesChangedDetail`), the first such message in page order; no content or digest | no. For a read: the changed message is served again only under a raised history_version, so re-read from the tail. For `run.tool_calls`: don't retry that page; the requesting message can't be reproduced, and reading the current transcript doesn't recover the original run's arguments |
 | `unknown_mid` | `after_mid` names no message in the session record; a `session.history` `from_mid` or `before_mid` names no message of the session's history (§4.6) | — | no |
 | `unknown_ordinal` | a `session.history` `from_ordinal` or `before_ordinal` names an ordinal the runner never assigned, or one a revert removed (§4.6) | — | no |
-| `cursor_expired` | a `session.history` cursor whose entry, or an entry older than it, a revert or rewrite removed or changed, or one minted for another session (§4.6) | — | no: page again from the newest page or a held `mid` |
+| `cursor_expired` | a `session.history` cursor whose entry, or an entry older than it, a revert or rewrite removed or changed, or one minted for another session (§4.6); a well-formed `session.subscribe` cursor the runner no longer holds, including one from before a store restore, past the high-water, expired by retention, or issued for another session (§7) | — | no: for history, page again from the newest page or a held `mid`; for subscribe, drop the cursor, reopen with `"live"` and read `session.head` (also on `invalid_params {field: "from"}`) |
 | `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit (`TRANSPORT_FRAME_LIMIT`), including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message or call |
 | `unknown_run` | `run.result` or `run.tool_calls` names no run of the session | — | no |
 | `template_part_gone` | a template send whose `part_tag` slot names a part the request that would carry it does not show (§9.7); a queued send meeting it later ends in the send state of the same name instead | `{slot}` (`errors::TemplatePartGoneDetail`) | no |

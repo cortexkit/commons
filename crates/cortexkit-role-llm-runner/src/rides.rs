@@ -95,7 +95,7 @@ mod tests {
     }
 
     #[test]
-    fn result_rides_append_bytes_vectors() {
+    fn rides_append_bytes_vectors() {
         let vectors: Value = serde_json::from_str(include_str!(
             "../test-vectors/llm-runner-v1/result-rides.json"
         ))
@@ -116,19 +116,58 @@ mod tests {
     }
 
     #[test]
-    fn result_rides_reader_fact_and_live_event_round_trip() {
+    fn notices_reader_fact_and_live_event_round_trip() {
         let fact = serde_json::json!({
-            "part": 2, "send_id": "send-1", "sender": "example-notifier", "text": "note"
+            "part": 2, "call_key": "call-1", "send_id": "send-1", "sender": "example-notifier",
+            "text": "note", "delivered_as": "tool_result"
         });
-        let decoded: crate::read::RideFact = serde_json::from_value(fact.clone()).unwrap();
+        let decoded: crate::read::NoticeFact = serde_json::from_value(fact.clone()).unwrap();
         assert_eq!(decoded.part, 2);
+        assert_eq!(
+            decoded,
+            crate::read::NoticeFact::new(2, "send-1", "example-notifier", "note")
+                .with_call_key("call-1")
+        );
         assert_eq!(serde_json::to_value(decoded).unwrap(), fact);
         let event = serde_json::json!({
-            "type": "ride_delivered", "mid": "message-1", "part": 2,
-            "call_key": "call-1", "send_id": "send-1", "sender": "example-notifier"
+            "type": "notice_delivered", "mid": "message-1", "part": 2,
+            "call_key": "call-1", "send_id": "send-1", "sender": "example-notifier", "text": "note"
         });
         let decoded = crate::live::LiveEvent::decode_strict(&event).unwrap();
-        assert_eq!(decoded.type_name(), "ride_delivered");
+        assert_eq!(decoded.type_name(), "notice_delivered");
+        assert_eq!(
+            decoded,
+            crate::live::LiveEvent::NoticeDelivered(
+                crate::live::NoticeDelivered::new(
+                    "message-1",
+                    2,
+                    "call-1",
+                    "send-1",
+                    "example-notifier"
+                )
+                .with_text("note")
+            )
+        );
         assert_eq!(serde_json::to_value(decoded).unwrap(), event);
+    }
+
+    #[test]
+    fn notices_require_new_fields_but_delivery_mode_is_open() {
+        let mut fact = serde_json::json!({"part":0,"call_key":"call-1","send_id":"send-1",
+            "sender":"example-notifier","text":"note","delivered_as":"future_mode"});
+        let decoded: crate::read::NoticeFact = serde_json::from_value(fact.clone()).unwrap();
+        assert_eq!(decoded.delivered_as, "future_mode");
+        for field in ["call_key", "delivered_as"] {
+            let mut missing = fact.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(serde_json::from_value::<crate::read::NoticeFact>(missing).is_err());
+        }
+        fact["type"] = "notice_delivered".into();
+        fact["mid"] = "message-1".into();
+        fact.as_object_mut().unwrap().remove("text");
+        assert!(crate::live::LiveEvent::decode_strict(&fact).is_err());
+        fact["text"] = "note".into();
+        fact["type"] = "ride_delivered".into();
+        assert!(crate::live::LiveEvent::decode_strict(&fact).is_err());
     }
 }

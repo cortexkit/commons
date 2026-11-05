@@ -440,6 +440,11 @@ pub struct HistoryEntry {
     pub role: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered_as: Option<crate::delivery_order::EntryDelivery>,
+    /// Sending module id, with the same positive-only guarantee as
+    /// [`ReadMessage::sender`]. Raw history has no display-facts request flag;
+    /// outside all checksums and does not move `history_version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
     /// Verified stored relay frame when `sender_attribution` is declared.
     /// Raw history has no display-facts request flag; message bytes stay whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -447,6 +452,11 @@ pub struct HistoryEntry {
 }
 
 impl HistoryEntry {
+    pub fn with_sender(mut self, sender: impl Into<String>) -> Self {
+        self.sender = Some(sender.into());
+        self
+    }
+
     pub fn with_part_keys(mut self, keys: Vec<String>) -> Self {
         self.part_keys = Some(keys);
         self
@@ -467,6 +477,7 @@ impl HistoryEntry {
             tool_calls: Vec::new(),
             role: None,
             delivered_as: None,
+            sender: None,
             attribution: None,
         }
     }
@@ -488,6 +499,7 @@ impl HistoryEntry {
             tool_calls: read.tool_calls,
             role: read.role,
             delivered_as: read.delivered_as,
+            sender: read.sender,
             attribution: read.attribution,
         })
     }

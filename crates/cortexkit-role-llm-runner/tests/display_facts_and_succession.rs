@@ -6,6 +6,47 @@ use cortexkit_role_llm_runner::{
 use serde_json::json;
 
 #[test]
+fn sender_is_an_optional_read_and_history_fact_not_message_content() {
+    use cortexkit_role_llm_runner::history::HistoryEntry;
+    let body = json!({"role":"user","content":"A module's notice"});
+    let plain = ReadMessage::new(1, "m1", body.clone()).with_written_at(42);
+    assert!(serde_json::to_value(&plain)
+        .unwrap()
+        .get("sender")
+        .is_none());
+    let decorated = plain.clone().with_sender("example-notifier");
+    let wire = serde_json::to_value(&decorated).unwrap();
+    assert_eq!(wire["sender"], "example-notifier");
+    assert_eq!(wire["message"], body);
+    let decoded: ReadMessage = serde_json::from_value(wire).unwrap();
+    assert_eq!(decoded.sender.as_deref(), Some("example-notifier"));
+    let history = HistoryEntry::from_read(decoded).unwrap();
+    let wire = serde_json::to_value(&history).unwrap();
+    assert_eq!(wire["sender"], "example-notifier");
+    assert_eq!(wire["message"], body);
+    assert_eq!(
+        serde_json::from_value::<HistoryEntry>(wire)
+            .unwrap()
+            .sender
+            .as_deref(),
+        Some("example-notifier")
+    );
+    assert!(
+        serde_json::to_value(HistoryEntry::from_read(plain).unwrap())
+            .unwrap()
+            .get("sender")
+            .is_none()
+    );
+    assert_eq!(
+        HistoryEntry::new(1, "m1", 42, body)
+            .with_sender("example-notifier")
+            .sender
+            .as_deref(),
+        Some("example-notifier")
+    );
+}
+
+#[test]
 fn default_read_request_and_entry_keep_exact_bytes() {
     assert_eq!(serde_json::to_string(&ReadRequest::tail()).unwrap(), "{}");
     assert_eq!(

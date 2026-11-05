@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.8.11
+
+- Rename 0.8.9's reader names `result_rides`, `rides` and `ride_delivered`
+  to `notices`, `notices` and `notice_delivered`: no runner or reader had
+  adopted them. Old wire names are not retained. Old Rust type and constant
+  names remain deprecated aliases for this release; the public
+  `ReadMessage::rides` and `DisplayRow::rides` fields become `notices`, and
+  `LiveEvent::RideDelivered` becomes `NoticeDelivered` without field or
+  variant aliases. The runner-facing `rides` rendering module is unchanged.
+- Add `call_key` and open-string `delivered_as` (currently `"tool_result"`)
+  to notice facts, and `text` to the delivery event. Readers place a riding
+  notice under its carrying call. Constructor arities remain compatible;
+  set the added values with `NoticeFact::with_call_key` and
+  `NoticeDelivered::with_text` before serving.
+- Serve optional module `sender` beside `mid` in opted-in read entries and
+  raw history entries. With both `message_senders` and `read_display_facts`,
+  module sends stored under those declarations carry it. Absence proves
+  nothing; the fact is outside every checksum and never moves `history_version`.
+- Distinguish malformed subscribe `from` (`invalid_params` naming `from`)
+  from well-formed cursors no longer held (`cursor_expired`). A store restore
+  invalidates every earlier cursor, even when event positions are reused.
+  Subscribers recover from either refusal by dropping the cursor, opening
+  `"live"` and reading `session.head`.
+
 ## 0.8.10
 
 - Add optional `provider_executed` flags and builders to display tool calls

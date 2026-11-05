@@ -72,8 +72,8 @@ mod history;
 mod live_ids;
 mod media;
 mod message_senders;
+mod notices;
 mod output_refs;
-mod result_rides;
 mod rich_ui;
 mod service_tier;
 mod session_change;
@@ -171,7 +171,7 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
-    pub result_rides: Option<&'static str>,
+    pub notices: Option<&'static str>,
     pub attribution: Option<&'static str>,
     pub routed_accounts_no_call: Option<&'static str>,
     pub head_selection: Option<&'static str>,
@@ -179,6 +179,8 @@ pub struct Defects {
     pub marker_hides_reads: bool,
     pub missing_history_version: bool,
     pub stale_cursor_accepted: bool,
+    pub subscribe_foreign_cursor_invalid_params: bool,
+    pub subscribe_malformed_from_accepted: bool,
     pub zero_skips_first: bool,
     pub missing_incarnation: bool,
     pub decision_change_accepted: bool,
@@ -187,6 +189,7 @@ pub struct Defects {
     pub oversized_result_repeated: bool,
     pub declare_message_senders: bool,
     pub message_senders_omit: bool,
+    pub sender_read_missing: bool,
     pub message_senders_owner: bool,
     pub message_senders_late: bool,
     pub message_senders_no_observer: bool,
@@ -810,7 +813,7 @@ struct Killed;
 
 #[derive(Clone, Debug)]
 struct Msg {
-    rides: Vec<cortexkit_role_llm_runner::read::RideFact>,
+    notices: Vec<cortexkit_role_llm_runner::read::NoticeFact>,
     attribution: Option<String>,
     completed_at: Option<u64>,
     ordinal: u64,
@@ -1041,7 +1044,7 @@ impl Sess {
     fn push(&mut self, body: Value, run_id: &str, calls: Vec<String>) -> u64 {
         let ordinal = self.base + self.messages.len() as u64;
         self.messages.push(Msg {
-            rides: Vec::new(),
+            notices: Vec::new(),
             attribution: None,
             completed_at: None,
             ordinal,
@@ -1797,7 +1800,7 @@ impl Module {
                     }
                 }
             }
-            "order_delivered" if result_rides::apply(sess, record, &self.world) => {}
+            "order_delivered" if notices::apply(sess, record, &self.world) => {}
             "order_delivered" => {
                 let id = text("id");
                 let Some(queued) = sess.ordered.get_mut(&id) else {
@@ -2458,7 +2461,7 @@ impl Module {
                 };
                 let mut observation =
                     observe_request(tools, frozen.as_ref()).with_rendered(rendered_texts(&sess));
-                result_rides::observe(&mut observation, &sess, &self.world.defects);
+                notices::observe(&mut observation, &sess, &self.world.defects);
                 observation.max_output_tokens = output_cap;
                 self.tier_model_ingress(session, &mut observation);
                 self.world
@@ -4352,6 +4355,7 @@ impl Module {
             .iter()
             .map(|m| {
                 let mut entry = self.read_message(sess, m);
+                entry.sender = None;
                 entry.attribution = None;
                 entry.rich_ui = self.read_stamp(sess, m, request.include_rich_ui);
                 if (request.include_display_facts
@@ -4359,7 +4363,16 @@ impl Module {
                     || self.world.defects.read_display_facts == Some("default_leak")
                 {
                     entry.client_message_id = m.client_message_id.clone();
-                    entry.rides = result_rides::facts(m, &self.world.defects);
+                    if self
+                        .world
+                        .groups
+                        .iter()
+                        .any(|g| g == groups::MESSAGE_SENDERS)
+                        && !self.world.defects.sender_read_missing
+                    {
+                        entry.sender = m.sender.clone();
+                    }
+                    entry.notices = notices::facts(m, &self.world.defects);
                     entry.attribution = attribution::fact(m, &self.world.defects);
                     entry.created_at = match self.world.defects.read_display_facts {
                         Some("creation_missing") => None,
@@ -4414,12 +4427,22 @@ impl Module {
             sess.incarnation.clone().unwrap_or_else(|| "log-1".into()),
             messages,
         )
-        .with_head(cursor(sess.events.len()));
+        .with_head(cursor(session, sess.events.len()));
         if end < all.len() {
             page = page.with_next_from_ordinal(all[end].ordinal);
         }
         let mut reply = media::page(page, request.media, cap, &self.world.defects);
         if let Reply::Response(body) = &mut reply {
+            if self.world.defects.notices == Some("missing_call_key") {
+                for message in body["messages"].as_array_mut().unwrap() {
+                    if let Some(notices) = message.get_mut("notices").and_then(Value::as_array_mut)
+                    {
+                        for notice in notices {
+                            notice.as_object_mut().unwrap().remove("call_key");
+                        }
+                    }
+                }
+            }
             if self.world.defects.missing_history_version {
                 body.as_object_mut().unwrap().remove("history_version");
             }
@@ -4510,6 +4533,20 @@ impl Module {
         if let Some(role) = m.body["role"].as_str() {
             message = message.with_role(role);
         }
+        if self
+            .world
+            .groups
+            .iter()
+            .any(|g| g == groups::MESSAGE_SENDERS)
+            && self
+                .world
+                .groups
+                .iter()
+                .any(|g| g == groups::READ_DISPLAY_FACTS)
+            && !self.world.defects.sender_read_missing
+        {
+            message.sender = m.sender.clone();
+        }
         if let Some(delivered) = &m.delivered_as {
             message = message.with_delivered_as(serde_json::from_value(delivered.clone()).unwrap());
         }
@@ -4594,7 +4631,7 @@ impl Module {
             sess.first_ordinal,
             sess.last_activity,
         )
-        .with_head(cursor(sess.events.len()))
+        .with_head(cursor(session, sess.events.len()))
         .with_history_version(sess.history_version);
         if let Some(incarnation) = &sess.incarnation {
             head = head.with_incarnation(incarnation);
@@ -5160,6 +5197,13 @@ impl Module {
     }
 
     fn subscribe(&self, session: &str, params: Value) -> SubscribeOutcome {
+        if self.world.defects.subscribe_malformed_from_accepted
+            && params
+                .get("from")
+                .is_some_and(|from| !from.is_object() && from != "start" && from != "live")
+        {
+            return SubscribeOutcome::Events(Vec::new());
+        }
         if self.world.serves(groups::LIVE_EVENTS) {
             return self.live_subscribe(session, params);
         }
@@ -5181,7 +5225,15 @@ impl Module {
             SubscribeFrom::Start => 0,
             SubscribeFrom::Live => events.len(),
             SubscribeFrom::After(position) => {
-                position.get("seq").and_then(Value::as_u64).unwrap_or(0) as usize
+                if let Err(error) = check_subscribe_cursor(
+                    &position,
+                    session,
+                    events.len(),
+                    self.world.defects.subscribe_foreign_cursor_invalid_params,
+                ) {
+                    return SubscribeOutcome::Refused(error);
+                }
+                position["seq"].as_u64().unwrap() as usize
             }
         };
         SubscribeOutcome::Events(
@@ -5191,7 +5243,7 @@ impl Module {
                 .skip(after)
                 .flat_map(|(index, kind)| {
                     let mut control =
-                        json!({ "kind": "control", "cursor": cursor(index + 1), "record": kind });
+                        json!({ "kind": "control", "cursor": cursor(session, index + 1), "record": kind });
                     if let Some(body) = sessions
                         .get(session)
                         .and_then(|s| s.held_status_events.get(&index))
@@ -5321,7 +5373,7 @@ fn ordered_reply(defects: &Defects, run_ops: bool, sess: &Sess, queued: &Queued)
             let mut delivered = Delivered::new(delivery.r#as).with_ref(&delivery.r#ref);
             if let Some(message) = sess.messages.iter().find(|message| {
                 message
-                    .rides
+                    .notices
                     .iter()
                     .any(|ride| ride.send_id == queued.send_id && ride.sender == queued.sender)
             }) {
@@ -5349,9 +5401,42 @@ fn unchecked_render(templates: &[order::Template], template: &order::TemplateUse
     text
 }
 
-fn cursor(seq: usize) -> Map<String, Value> {
+fn check_subscribe_cursor(
+    position: &Map<String, Value>,
+    session: &str,
+    high_water: usize,
+    wrong_code: bool,
+) -> Result<(), ErrorBody> {
+    let malformed = position.get("seq").and_then(Value::as_u64).is_none()
+        || position.get("session").and_then(Value::as_str).is_none()
+        || position.get("sub").is_some_and(|sub| !sub.is_u64())
+        || position
+            .keys()
+            .any(|key| !matches!(key.as_str(), "seq" | "session" | "sub"));
+    let refusal = if malformed {
+        Some(invalid("from"))
+    } else if position["session"] != session
+        || position["seq"].as_u64().unwrap() > high_water as u64
+    {
+        Some(if wrong_code {
+            invalid("from")
+        } else {
+            refuse(errors::CURSOR_EXPIRED, None)
+        })
+    } else {
+        None
+    };
+    match refusal {
+        Some(Reply::Error(error)) => Err(error),
+        None => Ok(()),
+        _ => unreachable!(),
+    }
+}
+
+fn cursor(session: &str, seq: usize) -> Map<String, Value> {
     let mut position = Map::new();
     position.insert("seq".into(), json!(seq));
+    position.insert("session".into(), json!(session));
     position
 }
 
@@ -6590,7 +6675,7 @@ impl LlmRunnerSubject for FakeSubject {
             .unwrap_or_default())
     }
 
-    async fn result_rides_stored_output(
+    async fn notices_stored_output(
         &self,
         handle: &Self::Handle,
         session: &str,

@@ -442,6 +442,12 @@ pub struct ReadMessage {
     /// Present only with `include_display_facts`, never inside `message`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_message_id: Option<String>,
+    /// Sending module id, only with `include_display_facts`. Required for
+    /// module sends stored while both `message_senders` and `read_display_facts`
+    /// are declared. Absence proves nothing; outside all checksums and does not
+    /// move `history_version`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
     /// The host's recorded creation timestamp for this message, in Unix epoch
     /// milliseconds, exactly as recorded, on any role. A send's entry carries
     /// the host's acceptance time, kept for queued sends and steers; an
@@ -467,10 +473,10 @@ pub struct ReadMessage {
     /// parts and is excluded from message and part content-digest inputs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasoning_summaries: Vec<ReasoningSummary>,
-    /// Rides on this message's tool results, only with `include_display_facts`
-    /// and `result_rides`. Outside all checksums and history identity.
+    /// Notices riding this message's tool results, only with `include_display_facts`
+    /// and `notices`. Outside all checksums and history identity.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub rides: Vec<RideFact>,
+    pub notices: Vec<NoticeFact>,
     /// Verified stored relay header, only with `include_display_facts`.
     /// The message bytes remain whole; display rows hide the verified prefix.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -480,18 +486,24 @@ pub struct ReadMessage {
     pub tool_times: Vec<ToolTime>,
 }
 
-/// A ride beside its carrying message, not a stored content part.
+/// A notice beside its carrying message, not a stored content part.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
-pub struct RideFact {
+pub struct NoticeFact {
     /// Zero-based stored top-level part index, as in [`ReasoningSummary`].
     pub part: u32,
+    /// The carrying call's key. Readers place a `tool_result` notice under it.
+    pub call_key: String,
     pub send_id: String,
     pub sender: String,
     pub text: String,
+    /// Open delivery-mode string; currently always `"tool_result"`.
+    pub delivered_as: String,
 }
 
-impl RideFact {
+impl NoticeFact {
+    /// Construct a tool-result notice. Set its carrying key with
+    /// [`Self::with_call_key`] before serving it.
     pub fn new(
         part: u32,
         send_id: impl Into<String>,
@@ -500,12 +512,22 @@ impl RideFact {
     ) -> Self {
         Self {
             part,
+            call_key: String::new(),
             send_id: send_id.into(),
             sender: sender.into(),
             text: text.into(),
+            delivered_as: crate::delivery_order::modes::TOOL_RESULT.into(),
         }
     }
+
+    pub fn with_call_key(mut self, call_key: impl Into<String>) -> Self {
+        self.call_key = call_key.into();
+        self
+    }
 }
+
+#[deprecated(since = "0.8.11", note = "renamed to NoticeFact")]
+pub type RideFact = NoticeFact;
 
 /// A readable summary of one stored Responses reasoning part, not an extra
 /// message part. `part` is the zero-based index of the stored top-level
@@ -629,6 +651,11 @@ impl ReadMessage {
         self
     }
 
+    pub fn with_sender(mut self, sender: impl Into<String>) -> Self {
+        self.sender = Some(sender.into());
+        self
+    }
+
     pub fn with_tool_times(mut self, tool_times: Vec<ToolTime>) -> Self {
         self.tool_times = tool_times;
         self
@@ -669,10 +696,11 @@ impl ReadMessage {
             delivered_as: None,
             rich_ui: None,
             client_message_id: None,
+            sender: None,
             created_at: None,
             completed_at: None,
             reasoning_summaries: Vec::new(),
-            rides: Vec::new(),
+            notices: Vec::new(),
             attribution: None,
             tool_times: Vec::new(),
         }

@@ -10,9 +10,35 @@ fn subject(mut defects: Defects) -> FakeSubject {
         Capability::HistoryDisplay,
         Capability::LiveEvents,
         Capability::ClientMessageId,
+        Capability::ReadDisplayFacts,
     ]);
     subject.head_sender_fixtures = true;
     subject
+}
+
+#[tokio::test]
+async fn message_senders_missing_read_sender_fails_by_name() {
+    let report = run(&subject(Defects {
+        sender_read_missing: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, NAME);
+    assert!(reason.contains("read entry sender is None"), "{reason}");
+    assert_none_failed_but(&report, &[NAME]);
+    println!("FAIL {NAME}: {reason}");
+}
+
+#[tokio::test]
+async fn message_senders_without_read_display_facts_still_checks_rows() {
+    let mut subject = subject(Defects {
+        sender_read_missing: true,
+        ..Defects::default()
+    });
+    subject.capabilities.remove(&Capability::ReadDisplayFacts);
+    let report = run(&subject).await;
+    assert_passed(&report, NAME);
+    assert_none_failed_but(&report, &[]);
 }
 
 #[tokio::test]

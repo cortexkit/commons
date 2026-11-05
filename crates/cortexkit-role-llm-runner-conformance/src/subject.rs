@@ -122,8 +122,8 @@ pub enum Capability {
     SenderSuccession,
     /// Trusted relay headers, verified facts and header-free display rows.
     SenderAttribution,
-    /// Runner-owned tool-result rides, reader facts and delivery events.
-    ResultRides,
+    /// Runner-owned notices, reader facts and delivery events.
+    Notices,
     /// Opt-in client ids, tool times, assistant completion times and reasoning
     /// summaries on raw read entries.
     ReadDisplayFacts,
@@ -180,6 +180,10 @@ pub enum Capability {
 }
 
 impl Capability {
+    #[allow(non_upper_case_globals)]
+    #[deprecated(since = "0.8.11", note = "renamed to Notices")]
+    pub const ResultRides: Self = Self::Notices;
+
     /// The role groups represented by this enum, in the order of
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
@@ -219,7 +223,7 @@ impl Capability {
         Self::DeliveryOrder,
         Self::SenderSuccession,
         Self::SenderAttribution,
-        Self::ResultRides,
+        Self::Notices,
         Self::ReadDisplayFacts,
         Self::SendStatus,
         Self::UserCommands,
@@ -289,7 +293,7 @@ impl Capability {
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
             Self::SenderSuccession => groups::SENDER_SUCCESSION,
             Self::SenderAttribution => groups::SENDER_ATTRIBUTION,
-            Self::ResultRides => groups::RESULT_RIDES,
+            Self::Notices => groups::NOTICES,
             Self::ReadDisplayFacts => groups::READ_DISPLAY_FACTS,
             Self::SendStatus => groups::SEND_STATUS,
             Self::HistoryDisplay => groups::HISTORY_DISPLAY,
@@ -434,7 +438,7 @@ pub struct ModelRequestObservation {
     /// declares [`Capability::RenderedModelInput`]; empty otherwise.
     pub rendered: Vec<String>,
     /// System/developer-authority texts actually received by the scripted
-    /// provider. Required for `ResultRides`, not inferred from delivery modes.
+    /// provider. Required for `Notices`, not inferred from delivery modes.
     /// `None` means not observed, distinct from an observed empty list.
     pub system_text: Option<Vec<String>>,
 }
@@ -694,18 +698,28 @@ pub enum AttributionFixture {
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
     /// Read the carrying result directly from the host's store, independently
-    /// of runner read replies. Required for `ResultRides`. The returned output
+    /// of runner read replies. Required for `Notices`. The returned output
     /// is the native tool's text payload, without wrappers or ride rendering;
     /// identify the carrying message, its stored top-level part index and key.
-    async fn result_rides_stored_output(
+    async fn notices_stored_output(
         &self,
         _handle: &Self::Handle,
         _session: &str,
         _arguments: &Value,
     ) -> Result<(String, u32, String, String), HarnessError> {
         Err(HarnessError::new(
-            "native ride result inspection is not implemented",
+            "native notice result inspection is not implemented",
         ))
+    }
+
+    #[deprecated(since = "0.8.11", note = "renamed to notices_stored_output")]
+    async fn result_rides_stored_output(
+        &self,
+        handle: &Self::Handle,
+        session: &str,
+        arguments: &Value,
+    ) -> Result<(String, u32, String, String), HarnessError> {
+        self.notices_stored_output(handle, session, arguments).await
     }
 
     /// Drive one fresh session whose host names an assistant message only

@@ -1,14 +1,11 @@
 use super::*;
 use cortexkit_role_llm_runner::{
-    read::RideFact,
+    read::NoticeFact,
     rides::{self, Ride},
 };
 
 pub(super) fn apply(sess: &mut Sess, record: &Value, world: &World) -> bool {
-    if !world
-        .groups
-        .iter()
-        .any(|group| group == groups::RESULT_RIDES)
+    if !world.groups.iter().any(|group| group == groups::NOTICES)
         || record["delivered_as"]["mode"] != "tool_result"
     {
         return false;
@@ -21,21 +18,18 @@ pub(super) fn apply(sess: &mut Sess, record: &Value, world: &World) -> bool {
         .iter_mut()
         .find(|message| message.body["call_key"] == key)
         .unwrap();
-    message.rides.push(RideFact::new(
-        0,
-        &queued.send_id,
-        &queued.sender,
-        &queued.text,
-    ));
+    message
+        .notices
+        .push(NoticeFact::new(0, &queued.send_id, &queued.sender, &queued.text).with_call_key(key));
     let row = message.mid.clone();
-    if world.defects.result_rides == Some("stored") {
+    if world.defects.notices == Some("stored") {
         message.host_body["content"] = json!(format!(
             "{}\n\n{}",
             result_text(&message.host_body["content"]),
             queued.text
         ));
     }
-    if world.defects.result_rides == Some("entry") {
+    if world.defects.notices == Some("entry") {
         let ordinal = sess.push(
             json!({"role":"user", "text":queued.text}),
             record["run_id"].as_str().unwrap(),
@@ -53,9 +47,9 @@ pub(super) fn apply(sess: &mut Sess, record: &Value, world: &World) -> bool {
     true
 }
 
-pub(super) fn facts(message: &Msg, defects: &Defects) -> Vec<RideFact> {
-    let mut facts = message.rides.clone();
-    if defects.result_rides == Some("fact") {
+pub(super) fn facts(message: &Msg, defects: &Defects) -> Vec<NoticeFact> {
+    let mut facts = message.notices.clone();
+    if defects.notices == Some("fact") {
         for fact in &mut facts {
             fact.part += 1;
         }
@@ -73,11 +67,11 @@ pub(super) fn observe(observation: &mut ModelRequestObservation, sess: &Sess, de
     for message in sess
         .messages
         .iter()
-        .filter(|message| !message.rides.is_empty())
+        .filter(|message| !message.notices.is_empty())
     {
         let output = result_text(&message.body["content"]);
         let rides: Vec<_> = message
-            .rides
+            .notices
             .iter()
             .map(|ride| {
                 Ride::new(
@@ -93,7 +87,7 @@ pub(super) fn observe(observation: &mut ModelRequestObservation, sess: &Sess, de
             .iter_mut()
             .find(|text| **text == output)
         {
-            *text = if defects.result_rides == Some("bytes") {
+            *text = if defects.notices == Some("bytes") {
                 format!(
                     "{}\n{}",
                     output,
@@ -107,8 +101,8 @@ pub(super) fn observe(observation: &mut ModelRequestObservation, sess: &Sess, de
                 rides::append(&output, &rides)
             };
         }
-        if defects.result_rides == Some("system") {
-            system_text.extend(message.rides.iter().map(|ride| ride.text.clone()));
+        if defects.notices == Some("system") {
+            system_text.extend(message.notices.iter().map(|ride| ride.text.clone()));
         }
     }
     observation.system_text = Some(system_text);

@@ -92,7 +92,7 @@ where
             name if name.starts_with("sender_attribution_") => {
                 crate::attribution::run(self, name).await
             }
-            name if name.starts_with("result_rides_") => crate::result_rides::run(self, name).await,
+            name if name.starts_with("notices_") => crate::notices::run(self, name).await,
             "tool_result_too_large_is_error" | "tool_result_too_large_not_repeated" => {
                 crate::tool_result_limit::run(self, name).await
             }
@@ -206,6 +206,7 @@ where
             "sibling_calls_distinct_call_keys" => passed(self.sibling_call_keys().await),
             "recurring_model_id_distinct_call_keys" => passed(self.recurring_call_keys().await),
             "subscribe_from_head_no_gap_no_duplicate" => passed(self.subscribe_from_head().await),
+            "subscribe_resume_refusals" => passed(self.subscribe_resume_refusals().await),
             "send_id_retry_same_answer" => self.send_id_retry().await,
             "send_id_retry_settled_same_answer" => self.send_id_retry_settled().await,
             "send_id_retry_written_once" => self.send_id_retry_written_once().await,
@@ -1429,6 +1430,49 @@ where
             );
         }
         Ok(cursors)
+    }
+
+    async fn subscribe_resume_refusals(&self) -> Check {
+        let mut first = self
+            .open("subscribe-cursor-source", Script::default())
+            .await?;
+        let prompt = self.mint.next("prompt");
+        self.run_prompt(&mut first, &prompt).await?;
+        let cursor = read(&first.route, &ReadRequest::tail())
+            .await?
+            .head
+            .ok_or("source session has no head cursor")?;
+        let mut second = self
+            .open("subscribe-cursor-target", Script::default())
+            .await?;
+        let prompt = self.mint.next("prompt");
+        self.run_prompt(&mut second, &prompt).await?;
+        for from in [json!(3), json!([]), json!("unknown")] {
+            let outcome = second
+                .route
+                .subscribe(json!({"from":from}))
+                .await
+                .map_err(|e| e.message)?;
+            if !matches!(outcome, SubscribeOutcome::Refused(ref error)
+                if error.code == errors::INVALID_PARAMS
+                    && error.detail.as_ref().is_some_and(|d| d["field"] == "from"))
+            {
+                return Err(format!(
+                    "malformed from {from} was not refused invalid_params naming from"
+                ));
+            }
+        }
+        let outcome = second
+            .route
+            .subscribe(json!({"from":cursor}))
+            .await
+            .map_err(|e| e.message)?;
+        if !matches!(outcome, SubscribeOutcome::Refused(ref error)
+            if error.code == errors::CURSOR_EXPIRED)
+        {
+            return Err("foreign-session resume cursor was not refused cursor_expired".into());
+        }
+        Ok(())
     }
 
     async fn subscribe_from_head(&self) -> Check {

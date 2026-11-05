@@ -1,10 +1,13 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.11** pins `cortexkit-role-llm-runner =0.8.9`. The six
-`result_rides_*` cases are inapplicable without `result_rides`; they check
+Version **0.17.13** pins `cortexkit-role-llm-runner =0.8.11`. The six
+`notices_*` cases are inapplicable without `notices`; they check
 entry-free delivery, unchanged host output, exact reader/display facts and
 live events, provider append bytes and the tool-result-only authority rule.
-Adapters implement `result_rides_stored_output` by reading native storage
+Facts include the carrying `call_key` and `delivered_as: "tool_result"`;
+delivery events include the notice text. The sender-binding case also checks
+raw read entries when `read_display_facts` is declared.
+Adapters implement `notices_stored_output` by reading native storage
 independently of runner reads, returning `(mid, part, call_key, output)`.
 They record actual provider texts in `ModelRequestObservation.rendered`
 and all system/developer texts in `system_text: Some(...)`. An unobserved

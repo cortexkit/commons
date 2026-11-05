@@ -213,9 +213,11 @@ pub mod capabilities {
     pub const READ_DISPLAY_FACTS: &str = "read_display_facts";
     /// Opt-in trusted relay headers and verified, header-free display facts.
     pub const SENDER_ATTRIBUTION: &str = "sender_attribution";
-    /// Ride display facts and live delivery events, without transcript entries.
+    /// Notice display facts and live delivery events, without transcript entries.
     /// Requires [`READ_DISPLAY_FACTS`], [`HISTORY_DISPLAY`] and [`LIVE_EVENTS`].
-    pub const RESULT_RIDES: &str = "result_rides";
+    pub const NOTICES: &str = "notices";
+    #[deprecated(since = "0.8.11", note = "renamed to NOTICES")]
+    pub const RESULT_RIDES: &str = NOTICES;
     /// The pinned live events on `session.subscribe` (`live::LiveEvent`):
     /// durable message, tool and run lifecycle events, display deltas with
     /// `part` and `mid` (or a provisional `live_id` under the separate
@@ -411,7 +413,7 @@ pub mod capabilities {
         (HISTORY_DISPLAY, &[ops::SESSION_HISTORY]),
         (READ_DISPLAY_FACTS, &[ops::SESSION_READ]),
         (
-            RESULT_RIDES,
+            NOTICES,
             &[
                 ops::SESSION_READ,
                 ops::SESSION_HISTORY,

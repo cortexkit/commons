@@ -3,7 +3,7 @@
 //! senders and plan templates.
 //!
 //! Entry deliveries are checked through `delivered_as` and text markers,
-//! never through a message body's schema. On `result_rides` runners, ride
+//! never through a message body's schema. On `notices` runners, ride
 //! receipts name the carrying call instead of an entry containing the send.
 
 use cortexkit_role_llm_runner::{
@@ -710,7 +710,7 @@ where
         case.subject.pause().await;
     }
     let (_, messages) = read_all(&session.route).await?;
-    if case.declared.contains(&Capability::ResultRides) {
+    if case.declared.contains(&Capability::Notices) {
         let reply: SendReply = decode(
             "ride receipt",
             expect_ok(
@@ -1925,7 +1925,7 @@ where
         .find(|c| c.tool_call_id == second.tool_call_id)
         .and_then(|c| c.call_key.as_deref())
         .ok_or("second call has no attribution")?;
-    if case.declared.contains(&Capability::ResultRides) {
+    if case.declared.contains(&Capability::Notices) {
         let reply: SendReply = decode(
             "staged ride receipt",
             expect_ok(

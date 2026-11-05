@@ -27,10 +27,18 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
-    pub const RESULT_RIDES_WITHOUT_READ_DISPLAY_FACTS: &str =
-        "result_rides_without_read_display_facts";
-    pub const RESULT_RIDES_WITHOUT_HISTORY_DISPLAY: &str = "result_rides_without_history_display";
-    pub const RESULT_RIDES_WITHOUT_LIVE_EVENTS: &str = "result_rides_without_live_events";
+    pub const NOTICES_WITHOUT_READ_DISPLAY_FACTS: &str = "notices_without_read_display_facts";
+    pub const NOTICES_WITHOUT_HISTORY_DISPLAY: &str = "notices_without_history_display";
+    pub const NOTICES_WITHOUT_LIVE_EVENTS: &str = "notices_without_live_events";
+    #[deprecated(
+        since = "0.8.11",
+        note = "renamed to NOTICES_WITHOUT_READ_DISPLAY_FACTS"
+    )]
+    pub const RESULT_RIDES_WITHOUT_READ_DISPLAY_FACTS: &str = NOTICES_WITHOUT_READ_DISPLAY_FACTS;
+    #[deprecated(since = "0.8.11", note = "renamed to NOTICES_WITHOUT_HISTORY_DISPLAY")]
+    pub const RESULT_RIDES_WITHOUT_HISTORY_DISPLAY: &str = NOTICES_WITHOUT_HISTORY_DISPLAY;
+    #[deprecated(since = "0.8.11", note = "renamed to NOTICES_WITHOUT_LIVE_EVENTS")]
+    pub const RESULT_RIDES_WITHOUT_LIVE_EVENTS: &str = NOTICES_WITHOUT_LIVE_EVENTS;
     pub const SENDER_ATTRIBUTION_WITHOUT_DELIVERY_ORDER: &str =
         "sender_attribution_without_delivery_order";
     pub const SENDER_ATTRIBUTION_WITHOUT_READ_DISPLAY_FACTS: &str =
@@ -597,19 +605,19 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     }
     for (group, dependency, problem) in [
         (
-            capabilities::RESULT_RIDES,
+            capabilities::NOTICES,
             capabilities::READ_DISPLAY_FACTS,
-            problem_names::RESULT_RIDES_WITHOUT_READ_DISPLAY_FACTS,
+            problem_names::NOTICES_WITHOUT_READ_DISPLAY_FACTS,
         ),
         (
-            capabilities::RESULT_RIDES,
+            capabilities::NOTICES,
             capabilities::HISTORY_DISPLAY,
-            problem_names::RESULT_RIDES_WITHOUT_HISTORY_DISPLAY,
+            problem_names::NOTICES_WITHOUT_HISTORY_DISPLAY,
         ),
         (
-            capabilities::RESULT_RIDES,
+            capabilities::NOTICES,
             capabilities::LIVE_EVENTS,
-            problem_names::RESULT_RIDES_WITHOUT_LIVE_EVENTS,
+            problem_names::NOTICES_WITHOUT_LIVE_EVENTS,
         ),
         (
             capabilities::HEAD_SELECTION,
@@ -981,7 +989,7 @@ mod opt_in_dependency_tests {
             ),
             (capabilities::RETRACT_OWN_SEND, vec![capabilities::RETRACT]),
             (
-                capabilities::RESULT_RIDES,
+                capabilities::NOTICES,
                 vec![
                     capabilities::READ_DISPLAY_FACTS,
                     capabilities::HISTORY_DISPLAY,

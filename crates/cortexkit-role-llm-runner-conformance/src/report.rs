@@ -61,8 +61,8 @@ const SESSION_USAGE: &[Capability] = &[
     TranscriptReads,
 ];
 const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
-const RESULT_RIDES: &[Capability] = &[
-    Capability::ResultRides,
+const NOTICES: &[Capability] = &[
+    Capability::Notices,
     Capability::DeliveryOrder,
     Capability::ReadDisplayFacts,
     Capability::HistoryDisplay,
@@ -136,12 +136,12 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
-    case("result_rides_no_transcript_entry", RESULT_RIDES, "a tool_result ride writes no transcript entry or history rewrite"),
-    case("result_rides_stored_output_unchanged", RESULT_RIDES, "the host's stored tool-result output remains the tool's original bytes"),
-    case("result_rides_display_fact", RESULT_RIDES, "opted-in reads and display rows carry the exact part, send_id, sender and text"),
-    case("result_rides_live_event", RESULT_RIDES, "ride_delivered names the carrying mid, part, call_key, send_id and sender"),
-    case("result_rides_append_bytes", RESULT_RIDES, "the scripted provider receives the exact append-form bytes"),
-    case("result_rides_tool_result_only_never_system", RESULT_RIDES, "a tool_result-only send never appears at system authority"),
+    case("notices_no_transcript_entry", NOTICES, "a tool_result ride writes no transcript entry or history rewrite"),
+    case("notices_stored_output_unchanged", NOTICES, "the host's stored tool-result output remains the tool's original bytes"),
+    case("notices_display_fact", NOTICES, "opted-in reads and display rows carry the exact part, call_key, send_id, sender, text and tool_result delivered_as"),
+    case("notices_live_event", NOTICES, "notice_delivered names the carrying mid, part, call_key, send_id, sender and text"),
+    case("notices_append_bytes", NOTICES, "the scripted provider receives the exact append-form bytes"),
+    case("notices_tool_result_only_never_system", NOTICES, "a tool_result-only send never appears at system authority"),
     case("sender_attribution_stored_header", ATTRIBUTION, "the first stored text part starts with the exact trusted relay header; retries compare the received payload"),
     case("sender_attribution_fact", ATTRIBUTION, "opted-in reads and raw history carry the verified part, byte count and attested module; default reads omit the fact"),
     case("sender_attribution_photo_only", ATTRIBUTION, "a photo-only send stores a header-only text part first; inapplicable without media_only_send and an upload fixture"),
@@ -269,7 +269,7 @@ pub const CASES: &[CaseSpec] = &[
     case("head_sender_is_callers_effective_grant", &[Queue, TranscriptReads],
          "when role.describe declares head_sender, A gets supported modes minus idle_start, B gets every supported mode and interrupt, the unnamed caller gets no grant or is refused scope_owner_mismatch, and the owner gets owner=true; with app_readers the plan lists A and B as readers, and without it a scope_owner_mismatch refusal of A or B makes the case inapplicable"),
     case("message_senders_rows_name_their_sender", &[Capability::HistoryDisplay, Capability::HostHistory, Capability::LiveEvents, Capability::DeliveryOrder, Capability::ClientMessageId, Queue, TranscriptReads],
-         "with message_senders and named-principal routes, sender B's start and join messages name B and their client ids by message_started; model replies have no sender; live timing and joins are individually inapplicable without adapter support"),
+         "with message_senders and named-principal routes, sender B's start and join messages name B and their client ids by message_started; model replies have no sender; opted-in raw reads name the sender with read_display_facts; live timing and joins are individually inapplicable without adapter support"),
     case("refresh_added_sender_admitted_at_acceptance", &[],
          "with session_change, delivery_order, queue and transcript_reads, a sender added by a durable refresh is admitted before the next run, also mid-run when held calls are available"),
     case("refresh_removed_sender_refused_at_acceptance", &[],
@@ -722,6 +722,11 @@ pub const CASES: &[CaseSpec] = &[
         "subscribe_from_head_no_gap_no_duplicate",
         &[Streaming, Queue, TranscriptReads],
         "a subscription from a page's head answers exactly the durable events a replay from the start holds after that page's snapshot, every one with a cursor",
+    ),
+    case(
+        "subscribe_resume_refusals",
+        &[Streaming, Queue, TranscriptReads],
+        "malformed from values are refused invalid_params naming from; a cursor issued for another session is refused cursor_expired",
     ),
     case(
         "send_id_retry_same_answer",

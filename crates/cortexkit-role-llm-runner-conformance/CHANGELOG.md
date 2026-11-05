@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.17.13
+
+- Pin `cortexkit-role-llm-runner =0.8.11`. Rename `result_rides_*` cases to
+  `notices_*`, checking fact `call_key` and `delivered_as: "tool_result"`
+  and delivery-event `text`. Add a faulty runner that omits the fact's
+  `call_key` and is rejected by `notices_display_fact`.
+- Rename `Capability::ResultRides` to `Notices` and the native inspection
+  hook to `notices_stored_output`, retaining deprecated Rust aliases for
+  this release. Adapters implement the new hook.
+- Extend `message_senders_rows_name_their_sender` to check the opted-in raw
+  read entry's `sender` when `read_display_facts` is declared, with an
+  omission control and coverage without that declaration.
+- Add `subscribe_resume_refusals` alongside the existing resume check:
+  malformed `from` values must name `from` in `invalid_params`, and a
+  cursor issued for another session must be refused `cursor_expired`.
+  Faulty-runner controls cover both refusal rules. Store-restore and
+  retention-expiry simulation are not provided by the existing harness.
+
 ## 0.17.12
 
 - Pin `cortexkit-role-llm-runner =0.8.10` for provider-executed display tool flags.

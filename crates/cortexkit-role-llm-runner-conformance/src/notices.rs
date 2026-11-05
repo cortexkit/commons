@@ -1,4 +1,4 @@
-//! Ride observations come from native storage and the scripted provider.
+//! Notice observations come from native storage and the scripted provider.
 
 use crate::{
     cases::{Case, Ending},
@@ -10,7 +10,7 @@ use cortexkit_role_llm_runner::{
     capabilities,
     live::LiveEvent,
     ops,
-    read::{ReadRequest, RideFact},
+    read::{NoticeFact, ReadRequest},
     send::SendReply,
     subscribe::SubscribeFrom,
 };
@@ -24,9 +24,9 @@ where
     S::Route: RunnerRoute,
 {
     let describe = case.checked_describe().await?;
-    if !describe.declares(capabilities::RESULT_RIDES) {
+    if !describe.declares(capabilities::NOTICES) {
         return Ok(Ending::Inapplicable(
-            "role.describe does not declare result_rides".into(),
+            "role.describe does not declare notices".into(),
         ));
     }
     if !cortexkit_role_llm_runner::delivery_order::Mode::ToolResult.is_declared_by(&describe) {
@@ -40,7 +40,7 @@ where
     tool.result = json!(output);
     let (session, sender_route) = crate::delivery_order::sender_session(
         case,
-        "result-rides",
+        "notices",
         vec![
             ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool.clone())]),
             ScriptedTurn::new(vec![case.mint.text("after-ride").0]),
@@ -115,14 +115,14 @@ where
     .await?;
     let (mid, part, call_key, stored_output) = case
         .subject
-        .result_rides_stored_output(case.handle.inner(), &session.name, &tool.arguments)
+        .notices_stored_output(case.handle.inner(), &session.name, &tool.arguments)
         .await
         .map_err(|e| e.to_string())?;
     let (_, messages) = read_all(&session.route).await?;
     let after = head(&session.route).await?;
-    let expected_fact = RideFact::new(part, &send_id, &sender, &text);
+    let expected_fact = NoticeFact::new(part, &send_id, &sender, &text).with_call_key(&call_key);
     match name {
-        "result_rides_no_transcript_entry" => {
+        "notices_no_transcript_entry" => {
             let receipt: SendReply = decode(
                 "ride receipt",
                 expect_ok(
@@ -167,16 +167,16 @@ where
                 return Err("ride delivery moved history_version".into());
             }
         }
-        "result_rides_stored_output_unchanged" => {
+        "notices_stored_output_unchanged" => {
             if stored_output != output {
                 return Err(format!(
                     "host stored tool output changed: {stored_output:?}, expected {output:?}"
                 ));
             }
         }
-        "result_rides_display_fact" => {
-            if messages.iter().any(|message| !message.rides.is_empty()) {
-                return Err("default read exposed rides without include_display_facts".into());
+        "notices_display_fact" => {
+            if messages.iter().any(|message| !message.notices.is_empty()) {
+                return Err("default read exposed notices without include_display_facts".into());
             }
             let page = read(
                 &session.route,
@@ -190,10 +190,10 @@ where
                 .iter()
                 .find(|message| message.mid == mid)
                 .ok_or("carrying result missing from fact read")?;
-            if message.rides != [expected_fact.clone()] {
+            if message.notices != [expected_fact.clone()] {
                 return Err(format!(
-                    "wrong rides fact: {:?}, expected {expected_fact:?}",
-                    message.rides
+                    "wrong notices fact: {:?}, expected {expected_fact:?}",
+                    message.notices
                 ));
             }
             let page = expect_ok(
@@ -211,16 +211,19 @@ where
                 .iter()
                 .find(|row| row["mid"] == mid)
                 .ok_or("carrying display row missing")?;
-            if row["row"]["rides"] != json!([expected_fact]) {
-                return Err(format!("wrong display rides fact: {}", row["row"]["rides"]));
+            if row["row"]["notices"] != json!([expected_fact]) {
+                return Err(format!(
+                    "wrong display notices fact: {}",
+                    row["row"]["notices"]
+                ));
             }
         }
-        "result_rides_live_event" => {
+        "notices_live_event" => {
             let events = crate::live::stream(&session.route, SubscribeFrom::Start).await?;
             let matching: Vec<_> = events
                 .iter()
                 .filter_map(|frame| match &frame.event {
-                    Some(LiveEvent::RideDelivered(event)) if event.send_id == send_id => {
+                    Some(LiveEvent::NoticeDelivered(event)) if event.send_id == send_id => {
                         Some(event)
                     }
                     _ => None,
@@ -231,9 +234,10 @@ where
                 || matching[0].part != part
                 || matching[0].call_key != call_key
                 || matching[0].sender != sender
+                || matching[0].text != text
             {
                 return Err(format!(
-                    "missing or incorrect ride_delivered event: {matching:?}; observed {:?}",
+                    "missing or incorrect notice_delivered event: {matching:?}; observed {:?}",
                     events
                         .iter()
                         .filter_map(|frame| frame.event.as_ref())
@@ -241,7 +245,7 @@ where
                 ));
             }
         }
-        "result_rides_append_bytes" => {
+        "notices_append_bytes" => {
             let expected = format!("{output}\n\n{text}");
             let requests = case
                 .subject
@@ -257,7 +261,7 @@ where
                 ));
             }
         }
-        "result_rides_tool_result_only_never_system" => {
+        "notices_tool_result_only_never_system" => {
             let requests = case
                 .subject
                 .model_requests(&session.name)
@@ -284,7 +288,7 @@ where
                 return Err("tool_result-only ride reached system authority".into());
             }
         }
-        _ => return Err(format!("unknown result_rides case {name}")),
+        _ => return Err(format!("unknown notices case {name}")),
     }
     Ok(Ending::Passed)
 }
