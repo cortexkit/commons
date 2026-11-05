@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2
+
+- Pin OpenAI's error-code-first mapping in CONTRACT §8: HTTP 429
+  `credit_balance_exhausted` and `insufficient_quota` are
+  `account_not_entitled`, not `rate_limited`. Require model-batch 0.3.3 for
+  the shared helper; no classifier API or wire change.
+
 ## 0.5.1
 
 - Requires subc-protocol 0.34 for development checks only; no API or wire change.

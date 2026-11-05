@@ -2,9 +2,10 @@
 //! retries are spent.
 //!
 //! [`item_code_for_status`] is the mapping by HTTP status alone, for a
-//! provider that documents no error codes. [`workers_ai_item_code`] reads
-//! Cloudflare Workers AI's error code first, and falls back to the status
-//! mapping for a code it does not list. `RULES.md` §15 states both tables.
+//! provider that documents no error codes. [`workers_ai_item_code`] and
+//! [`openai_item_code`] read Cloudflare Workers AI's and OpenAI's error
+//! codes first, and fall back to the status mapping for a code they do not
+//! list. `RULES.md` §15 states the tables.
 
 use crate::errors::{
     ACCOUNT_LIMIT_EXHAUSTED, ACCOUNT_NOT_ENTITLED, AUTH_FAILED, INVALID_ITEM, MODEL_UNAVAILABLE,
@@ -111,6 +112,41 @@ pub fn workers_ai_item_code(status: u16, code: Option<u64>) -> Option<&'static s
         Some(TIMEOUT | ABORTED) => Some(PROVIDER_ERROR),
         Some(DAILY_ALLOCATION_USED) => Some(ACCOUNT_LIMIT_EXHAUSTED),
         Some(OUT_OF_CAPACITY) => Some(RATE_LIMITED),
+        _ => item_code_for_status(status),
+    }
+}
+
+/// The OpenAI error codes this crate maps, with what each means in
+/// OpenAI's error replies.
+pub mod openai {
+    /// 429: the account's credit balance is used up.
+    pub const CREDIT_BALANCE_EXHAUSTED: &str = "credit_balance_exhausted";
+    /// 429: the account has no credits or has reached its billing hard limit.
+    pub const INSUFFICIENT_QUOTA: &str = "insufficient_quota";
+
+    /// Every code [`super::openai_item_code`] maps by code.
+    pub const ALL: &[&str] = &[CREDIT_BALANCE_EXHAUSTED, INSUFFICIENT_QUOTA];
+}
+
+/// The per-item error code for an OpenAI error: the HTTP status and
+/// the reply's `error.code` string, when it gave one.
+///
+/// A listed code decides on a 429:
+///
+/// | HTTP / code | role code |
+/// |---|---|
+/// | 429 `credit_balance_exhausted`, `insufficient_quota` | `account_not_entitled` |
+/// | any other 429 | `rate_limited` |
+/// | 401 | `auth_failed` |
+///
+/// Used-up credit or a billing hard limit needs someone to act, not a
+/// scheduled reset a caller can wait for. Any other code, or none, keeps
+/// [`item_code_for_status`]. A runner puts an unlisted code into the item
+/// error's `message`, so a caller can still read it.
+pub fn openai_item_code(status: u16, code: Option<&str>) -> Option<&'static str> {
+    use openai::*;
+    match (status, code) {
+        (429, Some(CREDIT_BALANCE_EXHAUSTED | INSUFFICIENT_QUOTA)) => Some(ACCOUNT_NOT_ENTITLED),
         _ => item_code_for_status(status),
     }
 }

@@ -351,7 +351,7 @@ Admission refusals:
 | `auth_failed` | the call's first provider call met an auth failure | `credential?` | permanent |
 | `model_unavailable` | the call's first provider call met "no such model" | `model` | permanent |
 | `account_limit_exhausted` | the call's first provider call met Workers AI 3036 | `resets_at_ms?` | transient |
-| `account_not_entitled` | the call's first provider call met Workers AI 5035, 5016 or 3023 | — | permanent |
+| `account_not_entitled` | the call's first provider call found the account can't serve the model until someone acts: paid plan, model agreement, blocked account (Workers AI 5035, 5016 or 3023), used-up credit or billing quota (OpenAI 429 `credit_balance_exhausted` or `insufficient_quota`) | — | permanent |
 | `image_unavailable` | an image reference is unknown, expired or not usable by this caller (§13.1) | `field` | permanent |
 | `image_source_unavailable` | the module that issued an image reference did not answer (§13.1) | `field`, `retry_after_ms` | transient |
 | `model_unserved` | caller found no module that lists the model | `model` | permanent (caller-raised; not a module error) |
@@ -382,7 +382,7 @@ Per-item errors:
 | `auth_failed` | provider auth failure, or not sent after one | permanent | never | yes |
 | `model_unavailable` | provider "no such model", or not sent after one | permanent | never | yes |
 | `account_limit_exhausted` | Workers AI 3036, or not sent after one | transient | never | yes |
-| `account_not_entitled` | Workers AI 5035, 5016 or 3023, or not sent after one | permanent | never | yes |
+| `account_not_entitled` | the account can't serve the model until someone acts: paid plan, model agreement, blocked account (Workers AI 5035, 5016 or 3023), used-up credit or billing quota (OpenAI 429 `credit_balance_exhausted` or `insufficient_quota`), or not sent after one | permanent | never | yes |
 
 - [pinned] A code that stops the call: no further item is sent to the
   provider in that call; items already answered stay recorded; every item
@@ -427,6 +427,21 @@ The module maps a provider's error once its own retries are spent.
 
   A code the table doesn't list keeps the status mapping, and the module
   puts the code into the item error's `message`.
+
+- [pinned] **OpenAI** replies carry an `error.code` string. On a 429, a
+  code this table lists decides before the status mapping
+  (`status::openai_item_code`):
+
+  | HTTP / code | Code |
+  |---|---|
+  | 429 `credit_balance_exhausted` used-up credit, `insufficient_quota` no credits or billing hard limit | `account_not_entitled` |
+  | any other 429 | `rate_limited`, with `retry_after_ms` if given |
+  | 401 | `auth_failed` |
+
+  Used-up credit or a billing hard limit needs someone to act, not a
+  scheduled reset a caller can wait for. A code the table doesn't list
+  keeps the status mapping, and the module puts the code into the item
+  error's `message`. Every other status keeps the status mapping too.
 
 ## 16. Vectors
 

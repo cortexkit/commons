@@ -8,7 +8,7 @@ use cortexkit_model_batch::{
     estimate::{estimate_item, Estimate, EstimateError, ItemCostInput, Tokens},
     identity::item_digest,
     image::{check_image, CanonicalImage, Image, ImageReference, REFERENCE_UNSUPPORTED},
-    status::{item_code_for_status, workers_ai_item_code},
+    status::{item_code_for_status, openai_item_code, workers_ai_item_code},
     vectors,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -17,6 +17,7 @@ use serde_json::json;
 const FILES: &[&str] = &[
     "estimates.json",
     "images.json",
+    "openai-codes.json",
     "status-mapping.json",
     "vocabulary.json",
 ];
@@ -106,6 +107,42 @@ fn the_vocabulary_states_each_class_storage_and_stop() {
         file.answer_too_large,
         ItemError::answer_too_large("fields.summary", 65536, 70000)
     );
+}
+
+#[derive(Deserialize, Serialize)]
+struct OpenAiCodes {
+    about: String,
+    openai: Vec<OpenAiRow>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct OpenAiRow {
+    status: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    code: Option<String>,
+    item_code: Option<String>,
+}
+
+#[test]
+fn openai_provider_errors_map_to_item_codes() {
+    let file: OpenAiCodes = exact("openai-codes.json");
+    for row in &file.openai {
+        assert_eq!(
+            openai_item_code(row.status, row.code.as_deref()),
+            row.item_code.as_deref(),
+            "OpenAI {} {:?}",
+            row.status,
+            row.code
+        );
+    }
+    for code in cortexkit_model_batch::status::openai::ALL {
+        assert!(
+            file.openai
+                .iter()
+                .any(|row| row.status == 429 && row.code.as_deref() == Some(*code)),
+            "OpenAI code {code} has no 429 vector"
+        );
+    }
 }
 
 #[derive(Deserialize, Serialize)]

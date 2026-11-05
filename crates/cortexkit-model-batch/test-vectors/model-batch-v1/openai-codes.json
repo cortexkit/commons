@@ -1,0 +1,52 @@
+{
+  "about": "OpenAI errors mapped to per-item codes once a runner's own retries are spent. On HTTP 429, error.code credit_balance_exhausted and insufficient_quota mean account_not_entitled: someone must restore credit or raise the billing hard limit, rather than wait for a scheduled reset. Any other code, or none, keeps the status mapping, and a runner puts the unlisted code into the item error's message. Each item code's class, storage and stop follow vocabulary.json.",
+  "openai": [
+    {
+      "status": 429,
+      "code": "credit_balance_exhausted",
+      "item_code": "account_not_entitled"
+    },
+    {
+      "status": 429,
+      "code": "insufficient_quota",
+      "item_code": "account_not_entitled"
+    },
+    {
+      "status": 429,
+      "item_code": "rate_limited"
+    },
+    {
+      "status": 429,
+      "code": "rate_limit_exceeded",
+      "item_code": "rate_limited"
+    },
+    {
+      "status": 401,
+      "item_code": "auth_failed"
+    },
+    {
+      "status": 401,
+      "code": "credit_balance_exhausted",
+      "item_code": "auth_failed"
+    },
+    {
+      "status": 503,
+      "item_code": "provider_error"
+    },
+    {
+      "status": 400,
+      "code": "insufficient_quota",
+      "item_code": "invalid_item"
+    },
+    {
+      "status": 403,
+      "code": "credit_balance_exhausted",
+      "item_code": "auth_failed"
+    },
+    {
+      "status": 200,
+      "code": "credit_balance_exhausted",
+      "item_code": null
+    }
+  ]
+}

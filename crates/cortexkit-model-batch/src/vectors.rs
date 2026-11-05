@@ -11,6 +11,9 @@ pub const DIR: &str = "model-batch-v1";
 pub const ESTIMATES_JSON: &str = include_str!("../test-vectors/model-batch-v1/estimates.json");
 /// The `images.json` vector cases.
 pub const IMAGES_JSON: &str = include_str!("../test-vectors/model-batch-v1/images.json");
+/// The `openai-codes.json` vector cases.
+pub const OPENAI_CODES_JSON: &str =
+    include_str!("../test-vectors/model-batch-v1/openai-codes.json");
 /// The `status-mapping.json` vector cases.
 pub const STATUS_MAPPING_JSON: &str =
     include_str!("../test-vectors/model-batch-v1/status-mapping.json");
@@ -21,6 +24,7 @@ pub const VOCABULARY_JSON: &str = include_str!("../test-vectors/model-batch-v1/v
 pub const FILES: &[(&str, &str)] = &[
     ("estimates.json", ESTIMATES_JSON),
     ("images.json", IMAGES_JSON),
+    ("openai-codes.json", OPENAI_CODES_JSON),
     ("status-mapping.json", STATUS_MAPPING_JSON),
     ("vocabulary.json", VOCABULARY_JSON),
 ];

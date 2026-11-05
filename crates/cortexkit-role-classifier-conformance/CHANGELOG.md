@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1
+
+- Pin classifier 0.5.2 for its OpenAI provider error mapping contract.
+  No conformance-check changes.
+
 ## 0.7.0
 
 - Requires subc-protocol 0.34; breaking because `Reply::Error` contains its

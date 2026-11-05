@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.3
+
+- Add `status::openai_item_code` and OpenAI code constants and vectors.
+  HTTP 429 `credit_balance_exhausted` and `insufficient_quota` map to
+  `account_not_entitled`, permanent, never stored and stopping the call,
+  rather than the transient `rate_limited`. Restoring credit or raising a
+  billing hard limit lets a caller re-send; no scheduled reset is assumed.
+  RULES §§14–15 pin this mapping alongside Workers AI's account codes.
+
 ## 0.3.2
 
 - Image references (`RULES.md` §13.1): a module hands out a handle only for

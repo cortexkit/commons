@@ -274,7 +274,7 @@ detail and class, and which codes are stored and stop the call are RULES
 - [pinned] Per-item errors (`ITEM_CODES`): `rate_limited`,
   `provider_error`, `provider_refused`, `invalid_item`, `cost_exceeded`,
   `auth_failed`, `model_unavailable`.
-- [pinned] The batch-level account codes clef's errors map to (§8,
+- [pinned] The batch-level account codes provider errors map to (§8,
   `BATCH_LEVEL_CODES`): `account_limit_exhausted` and
   `account_not_entitled`, as an admission refusal when the call's first
   provider call meets one, and otherwise as the per-item error of every
@@ -294,6 +294,10 @@ detail and class, and which codes are stored and stop the call are RULES
   `rate_limited`; 403 `5035`, `5016` and `3023` are `account_not_entitled`,
   not `auth_failed`; 400 `5007` is `model_unavailable`, not `invalid_item`
   (`test-vectors/classifier-v1/workers-ai-codes.json`).
+- [pinned] A classifier module calling OpenAI maps errors by OpenAI
+  `error.code` first (RULES §15, the OpenAI table;
+  `status::openai_item_code`): 429 `credit_balance_exhausted` and
+  `insufficient_quota` are `account_not_entitled`, not `rate_limited`.
 - [pinned] A stop, a stored error and an item that needs no provider call
   behave as RULES §14 states.
 
