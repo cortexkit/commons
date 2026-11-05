@@ -1,5 +1,5 @@
 {
-  "_about": "tool.catalog capability filtering. A sorted, unique params.capabilities array selects every tool carrying any requested tag; absent or empty lists select no tools. Other params, malformed lists, repeated or unsorted tags, and unserved tags are refused.",
+  "_about": "tool.catalog capability filtering. A sorted, unique params.capabilities array selects every tool carrying any requested tag; an empty list selects no tools. A missing list is an ordinary request, not a filter request. On filter requests, other params, malformed lists, repeated or unsorted tags, and unserved tags are refused.",
   "accept": [
     {
       "name": "any requested tag selects its tools",
@@ -15,13 +15,13 @@
       "selected": ["read", "edit", "search"]
     },
     {
-      "name": "missing capability list selects no tools",
+      "name": "missing capability list is not a filter request",
       "params": {},
       "tools": [
         {"name": "read", "capabilities": ["code.read/v1"]},
         {"name": "edit", "capabilities": ["code.edit/v1"]}
       ],
-      "selected": []
+      "filter_request": false
     },
     {
       "name": "empty capability list selects no tools",
@@ -36,8 +36,13 @@
   "refuse": [
     {
       "name": "unknown params key",
-      "params": {"scope": "workspace"},
+      "params": {"capabilities": ["code.read/v1"], "scope": "workspace"},
       "error": {"code": "invalid_request", "detail": {"field": "params.scope"}}
+    },
+    {
+      "name": "model is not a filter parameter",
+      "params": {"capabilities": ["code.read/v1"], "model": {"provider": "example", "model": "example-model"}},
+      "error": {"code": "invalid_request", "detail": {"field": "params.model"}}
     },
     {
       "name": "capabilities is not an array",

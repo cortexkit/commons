@@ -5,12 +5,21 @@
 - Contract text only (§1.1): the one-bind-identity rule says explicitly
   that it covers every route a consumer opens to the module for a session,
   whatever role each route declares, not only tool-provider routes.
-- Contract text only (§3): `model` joins the conventional `tool.catalog`
-  param names. `params.model` is exactly `{provider, model}`: the model a
-  plan item's catalog is built for. A provider whose tool set varies by
-  model documents it; a consumer sends it only to a provider that documents
-  it, filling it from the session's next-run model selection. A provider
-  advertising the catalog capability filter can't take it in this revision.
+
+## 0.15.2
+
+- Fix the catalog contract: only requests carrying `params.capabilities` are
+  filter requests, and only an empty list selects no tools. Ordinary plan
+  items keep the provider's documented params and preset rules, even when it
+  advertises the filter. `check_capability_params` enforces filter-only keys;
+  `select_by_capabilities` leaves supplied tools unchanged on ordinary requests.
+- Add the opt-in `tool-catalog-model/v1` role capability (`CATALOG_MODEL`).
+  Consumers send `params.model` only to advertising providers, on ordinary
+  requests. `check_model_param` validates exactly two non-empty strings,
+  `provider` and `model`, with no extra members. A provider's treatment of an
+  unrecognised model remains its own documented rule.
+- Correct the missing-list capability sample, retain the empty-list sample,
+  and add model-shape and filter-with-model samples with refreshed checksums.
 
 ## 0.15.1
 

@@ -56,25 +56,65 @@ where
     )])
 }
 
+/// Check that a capability-filter request has no other params.
+///
+/// The presence of `capabilities`, not the provider's advertised capabilities,
+/// makes a request a filter request. Ordinary requests retain the provider's
+/// own documented params and preset rules.
+pub fn check_capability_params(params: &Map<String, Value>) -> Result<(), ErrorBody> {
+    if params.contains_key("capabilities") {
+        if let Some(field) = params.keys().find(|field| field.as_str() != "capabilities") {
+            return Err(errors::invalid_request(
+                &format!("params.{field}"),
+                "unknown catalog filter parameter",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Check the optional model selector's shape on an ordinary catalog request.
+///
+/// A model selector is exactly an object with non-empty `provider` and `model`
+/// strings. Providers advertise [`crate::CATALOG_MODEL`] to accept it and apply
+/// their own documented rule to models they do not recognise. Filter requests
+/// must also pass [`check_capability_params`], which forbids `model` there.
+pub fn check_model_param(params: &Map<String, Value>) -> Result<(), ErrorBody> {
+    let Some(model) = params.get("model") else {
+        return Ok(());
+    };
+    if model.as_object().is_some_and(|model| {
+        model.len() == 2
+            && ["provider", "model"].iter().all(|key| {
+                model
+                    .get(*key)
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| !value.is_empty())
+            })
+    }) {
+        Ok(())
+    } else {
+        Err(errors::invalid_request(
+            "params.model",
+            "model must contain only non-empty provider and model strings",
+        ))
+    }
+}
+
 /// Select tools carrying any requested capability tag.
 ///
-/// Providers that advertise [`crate::CATALOG_CAPABILITY_FILTER`] use this for
-/// the `params` of `tool.catalog`. An absent or empty capability list selects
-/// no tools. Unknown params, malformed lists, unsorted or repeated tags, and
-/// tags the provider does not serve are refused as `invalid_request`.
+/// A request carrying `capabilities` is a filter request; an empty list selects
+/// no tools. Other params, malformed lists, unsorted or repeated tags, and tags
+/// the provider does not serve are refused as `invalid_request`.
+/// Without `capabilities`, this returns the supplied tools unchanged: the
+/// provider must apply its ordinary documented params and preset rules.
 pub fn select_by_capabilities<'a>(
     params: &Map<String, Value>,
     tools: &'a [CatalogTool],
 ) -> Result<Vec<&'a CatalogTool>, ErrorBody> {
-    if let Some(field) = params.keys().find(|field| field.as_str() != "capabilities") {
-        return Err(errors::invalid_request(
-            &format!("params.{field}"),
-            "unknown catalog parameter",
-        ));
-    }
-
+    check_capability_params(params)?;
     let Some(capabilities) = params.get("capabilities") else {
-        return Ok(Vec::new());
+        return Ok(tools.iter().collect());
     };
     let capabilities = capabilities.as_array().ok_or_else(|| {
         errors::invalid_request(
@@ -1155,6 +1195,15 @@ mod tests {
             let name = case["name"].as_str().unwrap();
             let params: Map<String, Value> =
                 serde_json::from_value(case["params"].clone()).unwrap();
+            if let Some(filter_request) = case.get("filter_request") {
+                assert_eq!(
+                    params.contains_key("capabilities"),
+                    filter_request.as_bool().unwrap(),
+                    "{name}"
+                );
+                assert!(check_capability_params(&params).is_ok(), "{name}");
+                continue;
+            }
             let tools: Vec<CatalogTool> = case["tools"]
                 .as_array()
                 .unwrap()
@@ -1187,6 +1236,53 @@ mod tests {
             }))
             .unwrap()
         );
+    }
+
+    #[test]
+    fn ordinary_catalog_params_are_not_capability_filters() {
+        let params = serde_json::from_value(json!({"scope": "workspace"})).unwrap();
+        let tools = [CatalogTool::new("read", "", 1, json!({}))];
+        assert!(check_capability_params(&params).is_ok());
+        assert_eq!(
+            select_by_capabilities(&params, &tools).unwrap(),
+            vec![&tools[0]]
+        );
+        assert!(check_model_param(&params).is_ok());
+    }
+
+    #[test]
+    fn catalog_model_vectors_check_the_exact_shape() {
+        let vectors = vectors::load("catalog-model.json");
+        for case in vectors["accept"].as_array().unwrap() {
+            let params = serde_json::from_value(case["params"].clone()).unwrap();
+            assert!(check_model_param(&params).is_ok(), "{}", case["name"]);
+        }
+        for case in vectors["refuse"].as_array().unwrap() {
+            let params = serde_json::from_value(case["params"].clone()).unwrap();
+            let error = check_model_param(&params).unwrap_err();
+            assert_eq!(error.code, case["error"]["code"], "{}", case["name"]);
+            assert_eq!(
+                serde_json::to_value(error).unwrap()["detail"],
+                case["error"]["detail"],
+                "{}",
+                case["name"]
+            );
+        }
+        for model in [
+            json!(null),
+            json!([]),
+            json!(17),
+            json!({"provider": "", "model": "m"}),
+            json!({"provider": "p", "model": 17}),
+            json!({"provider": "p"}),
+            json!({"provider": "p", "model": "m", "extra": true}),
+        ] {
+            let params = serde_json::from_value(json!({"model": model})).unwrap();
+            assert_eq!(
+                errors::invalid_request_field(&check_model_param(&params).unwrap_err()),
+                Some("params.model")
+            );
+        }
     }
 
     #[test]

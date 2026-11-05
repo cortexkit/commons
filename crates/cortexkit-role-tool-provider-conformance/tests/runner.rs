@@ -459,6 +459,87 @@ async fn catalog_capability_filter_is_skipped_when_role_describe_does_not_advert
     assert!(!report
         .render()
         .contains("PASS catalog_capability_filter_matches_describe"));
+    for case in [
+        "catalog_filter_preserves_plan_item",
+        "catalog_filter_model_refused",
+    ] {
+        assert_eq!(
+            report.outcome(case),
+            Some(&CaseOutcome::Skipped {
+                missing: vec![Capability::CatalogCapabilityFilter],
+            })
+        );
+    }
+    assert_passed(&report, "catalog_model_malformed_refused");
+}
+
+#[tokio::test]
+async fn ordinary_plan_item_with_documented_params_passes_the_filter_case() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    assert_passed(&report, "catalog_filter_preserves_plan_item");
+}
+
+#[tokio::test]
+async fn empty_ordinary_catalog_fails_the_plan_item_case() {
+    let report = run(&FakeSubject::new(Defects {
+        empty_ordinary_catalog: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_filter_preserves_plan_item");
+    assert!(reason.contains("non-empty catalog"), "{reason}");
+}
+
+#[tokio::test]
+async fn refusing_documented_params_fails_the_plan_item_case() {
+    let report = run(&FakeSubject::new(Defects {
+        refuse_ordinary_scope: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_filter_preserves_plan_item");
+    assert!(reason.contains("params.scope"), "{reason}");
+}
+
+#[tokio::test]
+async fn accepting_malformed_model_fails_the_model_case() {
+    let report = run(&FakeSubject::new(Defects {
+        accept_malformed_model: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_model_malformed_refused");
+    assert!(reason.contains("not an error frame"), "{reason}");
+    assert_passed(&report, "catalog_filter_preserves_plan_item");
+}
+
+#[tokio::test]
+async fn accepting_model_on_filter_fails_the_filter_model_case() {
+    let report = run(&FakeSubject::new(Defects {
+        accept_filter_model: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_filter_model_refused");
+    assert!(reason.contains("not an error frame"), "{reason}");
+    assert_passed(&report, "catalog_model_malformed_refused");
+}
+
+#[tokio::test]
+async fn catalog_model_case_is_skipped_without_the_live_token() {
+    let report = run(&FakeSubject::new(Defects {
+        omit_catalog_model: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.outcome("catalog_model_malformed_refused"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::CatalogModel],
+        })
+    );
+    assert_passed(&report, "catalog_filter_model_refused");
+    assert_passed(&report, "catalog_filter_preserves_plan_item");
 }
 
 #[tokio::test]

@@ -23,7 +23,8 @@ use cortexkit_role_tool_provider::{
     ops, points,
     result::{validate, ResultFormat, ToolResult, MAX_RESULT_BYTES},
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
-    CallMode, CATALOG_CAPABILITY_FILTER, HELD_REPLY_V1, PROVIDES, TOOL_RESULT_V1_CAPABILITY,
+    CallMode, CATALOG_CAPABILITY_FILTER, CATALOG_MODEL, HELD_REPLY_V1, PROVIDES,
+    TOOL_RESULT_V1_CAPABILITY,
 };
 use futures_util::future::join;
 use serde_json::{json, Value};
@@ -106,6 +107,7 @@ where
 
     let mut capabilities = subject.capabilities();
     capabilities.remove(&Capability::CatalogCapabilityFilter);
+    capabilities.remove(&Capability::CatalogModel);
     // A provider may serve every known mode on every tool. Without a
     // restricted probe there is no refusal to exercise, so report a skip.
     if subject.call_mode_probe().is_none() {
@@ -119,8 +121,8 @@ where
         .map_err(|e| format!("spawning the provider failed: {e}"));
 
     // The live role.describe answer, not a subject flag, decides whether the
-    // catalog-filter case is required.
-    let advertises_catalog_filter = match &main {
+    // catalog filter and model cases are required.
+    let catalog_capabilities = match &main {
         Ok(handle) => {
             let case = Case {
                 subject,
@@ -135,18 +137,25 @@ where
                     .await
                     .ok()
                     .and_then(|answer| answer["capabilities"].as_array().cloned())
-                    .is_some_and(|declared| {
-                        declared.iter().any(|capability| {
-                            capability.as_str() == Some(CATALOG_CAPABILITY_FILTER)
-                        })
-                    }),
-                Err(_) => false,
+                    .unwrap_or_default(),
+                Err(_) => Vec::new(),
             }
         }
-        Err(_) => false,
+        Err(_) => Vec::new(),
     };
-    if advertises_catalog_filter {
-        capabilities.insert(Capability::CatalogCapabilityFilter);
+    for (token, capability) in [
+        (
+            CATALOG_CAPABILITY_FILTER,
+            Capability::CatalogCapabilityFilter,
+        ),
+        (CATALOG_MODEL, Capability::CatalogModel),
+    ] {
+        if catalog_capabilities
+            .iter()
+            .any(|declared| declared.as_str() == Some(token))
+        {
+            capabilities.insert(capability);
+        }
     }
 
     // Catalog declarations, not a subject flag, decide whether result checks
@@ -359,6 +368,9 @@ where
             "catalog_capability_filter_matches_describe" => {
                 self.catalog_capability_filter_matches_describe().await
             }
+            "catalog_filter_preserves_plan_item" => self.catalog_filter_preserves_plan_item().await,
+            "catalog_model_malformed_refused" => self.catalog_model_malformed_refused().await,
+            "catalog_filter_model_refused" => self.catalog_filter_model_refused().await,
             "system_text_digests_match_text" => self.system_text_digests_match_text().await,
             "system_text_preflight_digest_stable" => {
                 self.system_text_preflight_digest_stable().await
@@ -926,6 +938,68 @@ where
         Ok(())
     }
 
+    async fn catalog_filter_preserves_plan_item(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let arguments = self.subject.catalog_arguments();
+        if arguments["params"].get("capabilities").is_some() {
+            return Err(
+                "catalog_arguments must supply an ordinary plan-item request without capabilities"
+                    .into(),
+            );
+        }
+        let catalog = self.catalog_for(&route, arguments).await?;
+        if catalog.tools.is_empty() {
+            return Err("an ordinary plan-item request must return a non-empty catalog".into());
+        }
+        Ok(())
+    }
+
+    async fn catalog_model_malformed_refused(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let vectors: Value =
+            serde_json::from_str(cortexkit_role_tool_provider::vectors::CATALOG_MODEL_JSON)
+                .map_err(|e| format!("catalog model vectors do not decode: {e}"))?;
+        for case in vectors["refuse"]
+            .as_array()
+            .ok_or("missing model refusal vectors")?
+        {
+            let mut arguments = self.subject.catalog_arguments();
+            if let Some(params) = arguments["params"].as_object_mut() {
+                params.remove("capabilities");
+            }
+            arguments["params"]["model"] = case["params"]["model"].clone();
+            let what = format!("tool.catalog with malformed model: {}", case["name"]);
+            let error = expect_error(
+                &what,
+                request(&route, op_body(ops::TOOL_CATALOG, arguments)).await?,
+            )?;
+            expect_invalid_field(&error, "params.model")
+                .map_err(|reason| format!("{what}: {reason}"))?;
+        }
+        Ok(())
+    }
+
+    async fn catalog_filter_model_refused(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let error = expect_error(
+            "tool.catalog filter carrying model",
+            request(
+                &route,
+                op_body(
+                    ops::TOOL_CATALOG,
+                    json!({
+                        "params": {
+                            "capabilities": [],
+                            "model": {"provider": "example", "model": "example-model"}
+                        }
+                    }),
+                ),
+            )
+            .await?,
+        )?;
+        expect_invalid_field(&error, "params.model")
+    }
+
     async fn catalog_capability_filter_matches_describe(&self) -> CaseResult {
         let route = self.plain_route().await?;
         let answer = self.describe(&route).await?;
@@ -975,27 +1049,22 @@ where
             return Err("the filtered catalog contains a tool with no requested capability".into());
         }
 
-        let empty = self.catalog_for(&route, json!({ "params": {} })).await?;
         let explicitly_empty = self
             .catalog_for(
                 &route,
                 json!({ "params": params_for_capabilities(std::iter::empty::<&str>()) }),
             )
             .await?;
-        if !empty.tools.is_empty() || !explicitly_empty.tools.is_empty() {
-            return Err("a missing or empty capability list must select no tools".into());
+        if !explicitly_empty.tools.is_empty() {
+            return Err("an empty capability list must select no tools".into());
         }
-        if all.generation != empty.generation
-            || all.generation != explicitly_empty.generation
-            || empty.catalog_digest != explicitly_empty.catalog_digest
-            || all.catalog_digest == empty.catalog_digest
+        if all.generation != explicitly_empty.generation
+            || all.catalog_digest == explicitly_empty.catalog_digest
         {
             return Err(format!(
-                "filtering changed generation or failed to change the filtered digest: all=({}, {}), empty=({}, {}), explicitly empty=({}, {})",
+                "filtering changed generation or failed to change the filtered digest: all=({}, {}), explicitly empty=({}, {})",
                 all.generation,
                 all.catalog_digest,
-                empty.generation,
-                empty.catalog_digest,
                 explicitly_empty.generation,
                 explicitly_empty.catalog_digest
             ));

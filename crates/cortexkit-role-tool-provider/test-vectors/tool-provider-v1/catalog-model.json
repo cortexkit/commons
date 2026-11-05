@@ -1,0 +1,37 @@
+{
+  "_about": "The optional params.model on ordinary tool.catalog requests is exactly an object with non-empty provider and model strings. Every malformed selector is refused naming params.model.",
+  "accept": [
+    {
+      "name": "valid model selector",
+      "params": {"model": {"provider": "example", "model": "example-model"}},
+      "valid": true
+    },
+    {
+      "name": "model selector is optional",
+      "params": {},
+      "valid": true
+    }
+  ],
+  "refuse": [
+    {
+      "name": "missing provider",
+      "params": {"model": {"model": "example-model"}},
+      "error": {"code": "invalid_request", "detail": {"field": "params.model"}}
+    },
+    {
+      "name": "empty model",
+      "params": {"model": {"provider": "example", "model": ""}},
+      "error": {"code": "invalid_request", "detail": {"field": "params.model"}}
+    },
+    {
+      "name": "extra variant member",
+      "params": {"model": {"provider": "example", "model": "example-model", "variant": "fast"}},
+      "error": {"code": "invalid_request", "detail": {"field": "params.model"}}
+    },
+    {
+      "name": "non-object model selector",
+      "params": {"model": "example-model"},
+      "error": {"code": "invalid_request", "detail": {"field": "params.model"}}
+    }
+  ]
+}

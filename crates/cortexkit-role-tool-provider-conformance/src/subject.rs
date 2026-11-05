@@ -65,6 +65,9 @@ pub enum Capability {
     /// The provider advertises `tool-catalog-capability-filter/v1` in
     /// `role.describe`. Inferred from the live answer, not a subject flag.
     CatalogCapabilityFilter,
+    /// The provider advertises `tool-catalog-model/v1` in `role.describe`.
+    /// Inferred from the live answer, not a subject flag.
+    CatalogModel,
     /// The provider's catalog answer to a request without a preset lists the
     /// presets it serves. Inferred from the live catalog, not a subject flag.
     Presets,
@@ -98,6 +101,7 @@ impl Capability {
             Self::LegacyReply => "legacy_reply",
             Self::HeldReplyV1 => "held-reply/v1",
             Self::CatalogCapabilityFilter => "tool-catalog-capability-filter/v1",
+            Self::CatalogModel => cortexkit_role_tool_provider::CATALOG_MODEL,
             Self::Presets => "presets",
             Self::SystemTextOptionalPreset => "system_text_optional_preset",
             Self::SystemTextDefault => cortexkit_role_tool_provider::SYSTEM_TEXT_DEFAULT,
@@ -211,7 +215,10 @@ pub trait ToolProviderSubject: Harness {
     fn scoped_principals(&self) -> Option<ScopedPrincipals>;
 
     /// The arguments of the `tool.catalog` request: the plan item's params
-    /// this provider serves and, optionally, a preset it defines. The
+    /// this provider serves and, optionally, a preset it defines. Supply an
+    /// ordinary request without `params.capabilities`, including documented
+    /// params when the provider supports them; its catalog must be non-empty.
+    /// The
     /// `catalog_unknown_preset_refused` case sends these arguments with the
     /// preset replaced by one no provider defines, and expects a refusal.
     /// The `catalog_listed_presets_served` case sends them without the

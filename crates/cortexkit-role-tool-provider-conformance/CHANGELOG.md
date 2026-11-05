@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.2
+
+- Pin the provider contract and shared vectors to `=0.15.2`.
+- Correct the capability-filter case to apply the no-tools rule only to an
+  empty list, not to ordinary requests without `capabilities`.
+- Add `catalog_filter_preserves_plan_item` and `catalog_filter_model_refused`,
+  gated on the live filter token, and `catalog_model_malformed_refused`, gated
+  on the live `tool-catalog-model/v1` token. Ordinary catalog fixtures include
+  the provider's documented params and optional preset. Deliberately faulty
+  fakes fail each new case by name; missing tokens produce named skips.
+
 ## 0.15.1
 
 - Depend on `cortexkit-role-tool-provider` 0.15.1. The live suite doesn't

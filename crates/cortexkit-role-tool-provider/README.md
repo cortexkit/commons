@@ -6,19 +6,27 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = "0.14.1"
+cortexkit-role-tool-provider = "0.15.2"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dependencies]
-cortexkit-role-tool-provider = { version = "0.14.1", features = ["test-vectors"] }
+cortexkit-role-tool-provider = { version = "0.15.2", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_tool_provider::vectors::FILES` and a
 constant for each file, including `held-reply-v1.json` and `held-update-v1.json`. The vectors ship inside
 the crate package, pinned by `SHA256SUMS`.
+
+Catalog requests carrying `params.capabilities` are filter requests; ordinary
+plan items without that member retain the provider's documented params and
+preset. `catalog::check_capability_params` rejects other keys only on filter
+requests. Providers accepting `params.model` advertise `CATALOG_MODEL`
+(`tool-catalog-model/v1`) in `role.describe`; consumers send it only to those
+providers and never on filter requests. `catalog::check_model_param` validates
+the selector's exact `{provider, model}` shape.
 
 The [contract](CONTRACT.md) is normative. See the [conformance runner](../cortexkit-role-tool-provider-conformance/README.md) and [role/conformance guide](../../docs/role-contracts.md) for implementation testing.
 

@@ -244,20 +244,29 @@ idempotency and join requirements are in
       whose tool set varies by model documents it and serves the set for
       that model, for example a different edit tool for one model family;
       how it treats a model it doesn't recognise is its own documented rule.
-      A consumer sends it only to a provider that documents it, since any
-      other provider refuses it as `invalid_request {field: "params.model"}`.
+      A provider accepts it by advertising `tool-catalog-model/v1`
+      (`CATALOG_MODEL`) in `role.describe` capabilities, alongside the optional
+      filter token. A consumer sends it only to a provider advertising that
+      token. It is allowed only on ordinary requests, never together with
+      `capabilities`. A malformed model selector is refused as `invalid_request`
+      with `detail.field: "params.model"` (`catalog::check_model_param`). Its
+      acceptance and refusal forms are pinned by
+      `test-vectors/tool-provider-v1/catalog-model.json`.
     - A plan composer that sends `params.model` fills it from the session's
       next-run model selection (`plan.model` in the runner contract) and
       updates it whenever that selection changes. The item's params then
       change, and a runner fetches the item again at its next refresh.
       Under the runner contract a plan's tools are frozen per run, so a
       send that names a different model for one run keeps the plan's tools.
-    - A provider advertising `tool-catalog-capability-filter/v1` accepts
-      only `capabilities` in `params` (below), so in this revision it can't
-      also take `params.model`.
-    - An advertising provider that supports `tool-catalog-capability-filter/v1`
-      accepts only `capabilities` in `params`. It must refuse any other key as
-      `invalid_request` with `detail.field: "params.<key>"`.
+    - There are two kinds of `tool.catalog` request, whether or not a provider
+      advertises `tool-catalog-capability-filter/v1`:
+      - A **filter request** carries `params.capabilities`. It accepts only
+        `capabilities` in `params` (`catalog::check_capability_params`). Any
+        other key, including `model`, is refused as `invalid_request` with
+        `detail.field: "params.<key>"`. Discovery sends filter requests.
+      - An **ordinary plan-item request** has no `capabilities` member. The
+        provider serves it under its own documented params and preset rules,
+        exactly as for a provider that does not advertise the filter token.
     - `params.capabilities` is an array of strings in strictly increasing
       bytewise order (therefore sorted and without repeats). A non-array is
       refused with `detail.field: "params.capabilities"`; a non-string member
@@ -266,10 +275,10 @@ idempotency and join requirements are in
       the provider does not serve is refused as `invalid_request` with
       `detail: {field: "params.capabilities[i]", capability: "<tag>"}`.
     - A valid list selects exactly the tools carrying **any** requested tag,
-      not only tools carrying every tag. An absent or empty list selects no
-      tools. A consumer sends the field only to a provider that advertised the
-      optional module capability; providers that do not advertise it retain
-      their existing params and catalog behavior. The acceptance and refusal
+      not only tools carrying every tag. An empty list selects no tools; a
+      missing list is an ordinary request, not a filter request. A consumer
+      sends the field only to a provider that advertised the optional filter
+      capability in `role.describe`. The acceptance and refusal
       forms are pinned by `test-vectors/tool-provider-v1/catalog-capabilities.json`.
   - `preset` is the plan item's named variant, defined by the provider. It
     sits beside `params`, not inside it, so it never collides with a
@@ -1238,7 +1247,8 @@ CI against its real module over a real route; never against a double.
 |---|---|
 | `role_describe_shape`, `role_describe_cacheable` | — |
 | `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_emits_events_boolean`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
-| `catalog_capability_filter_matches_describe` | `tool-catalog-capability-filter/v1` advertised in `role.describe` |
+| `catalog_capability_filter_matches_describe`, `catalog_filter_preserves_plan_item`, `catalog_filter_model_refused` | `tool-catalog-capability-filter/v1` advertised in `role.describe` |
+| `catalog_model_malformed_refused` | `tool-catalog-model/v1` advertised in `role.describe` |
 | `catalog_listed_presets_served` | `presets` listed in the live preset-less catalog answer |
 | `call_mode_matches_catalog` | `call_modes` (restricted tool probe and routes with known bind modes) |
 | `system_text_digests_match_text`, `system_text_preflight_digest_stable` | `system_text` |
@@ -1326,10 +1336,24 @@ helper's unit tests instead.
 The `catalog_capability_filter_matches_describe` case is gated by the live
 `role.describe` advertisement, never a subject flag. It requests all of the
 advertised `tool_capabilities` and checks that the returned catalog's tag union
-matches exactly. It also checks that missing and empty lists select no tools,
+matches exactly. It also checks that an empty list selects no tools,
 filtering leaves `generation` unchanged, and a changed selection changes
 `catalog_digest`. A provider that does not advertise the capability skips this
 case by name.
+
+The `catalog_filter_preserves_plan_item` case sends the subject's ordinary
+`catalog_arguments()`, including its documented params and optional preset,
+without `capabilities`. It requires a non-empty catalog, not a filter-only
+parameter refusal. The `catalog_filter_model_refused` case sends a filter
+request carrying a well-formed `model` and requires `invalid_request` naming
+`params.model`. Both cases are gated by the live filter token, independently
+of whether the provider advertises the model token.
+
+The `catalog_model_malformed_refused` case is gated by the live
+`tool-catalog-model/v1` advertisement. It sends every malformed model selector
+in `catalog-model.json` on an ordinary request and requires `invalid_request`
+naming `params.model`. Without the relevant live token, each of these cases
+is skipped by name; no subject flag can opt out of an advertisement.
 
 The `catalog_listed_presets_served` case is gated by the live catalog, never
 a subject flag: it runs when the answer to the subject's catalog request,

@@ -20,6 +20,9 @@ pub const CATALOG_ANSWERS_JSON: &str =
 /// The `catalog-capabilities.json` vector cases.
 pub const CATALOG_CAPABILITIES_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/catalog-capabilities.json");
+/// The optional model selector's valid and malformed shapes.
+pub const CATALOG_MODEL_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/catalog-model.json");
 /// The `catalog-requests.json` vector cases.
 pub const CATALOG_REQUESTS_JSON: &str =
     include_str!("../test-vectors/tool-provider-v1/catalog-requests.json");
@@ -97,6 +100,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("call-modes.json", CALL_MODES_JSON),
     ("catalog-answers.json", CATALOG_ANSWERS_JSON),
     ("catalog-capabilities.json", CATALOG_CAPABILITIES_JSON),
+    ("catalog-model.json", CATALOG_MODEL_JSON),
     ("catalog-requests.json", CATALOG_REQUESTS_JSON),
     ("catalog-schemas.json", CATALOG_SCHEMAS_JSON),
     ("composition-digest.json", COMPOSITION_DIGEST_JSON),

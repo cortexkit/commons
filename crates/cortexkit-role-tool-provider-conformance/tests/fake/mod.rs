@@ -36,7 +36,7 @@ use cortexkit_role_tool_provider_conformance::{
     wire::{
         call::{check_call, ToolCallRequest, CALL_KEY_FIELD},
         catalog::{
-            composition_digest, params_for_capabilities, schema_digest, select_by_capabilities,
+            check_model_param, composition_digest, schema_digest, select_by_capabilities,
             serves_call_mode, system_text_digest, CatalogRequest, CatalogTool,
         },
         consumer_reads_held_reply_v1, consumer_reads_tool_result_v1,
@@ -52,7 +52,7 @@ use cortexkit_role_tool_provider_conformance::{
             check_record_scope, parse_withdraw_request, resolve_carrier, CallerProblem,
             CarrierResolution, CompletedResult, StartedOutcome, WithdrawAnswer,
         },
-        CallMode, CATALOG_CAPABILITY_FILTER, REQUIRED_OPS,
+        CallMode, CATALOG_CAPABILITY_FILTER, CATALOG_MODEL, REQUIRED_OPS,
     },
     CallModeProbe, CallSpec, Capability, Exchange, ObservedFrame, RouteFailure, ScopedPrincipals,
     ToolProviderSubject, ToolRoute,
@@ -73,28 +73,8 @@ const LEAN_PRESET: &str = "lean";
 const SERVED_PRESETS: &[&str] = &[DEFAULT_PRESET, LEAN_PRESET];
 /// The preset `Defects::list_refused_preset` lists but the fake refuses.
 pub const REFUSED_LISTED_PRESET: &str = "ghost";
-const FILTER_TOOL_CAPABILITIES: &[&str] = &[
-    "code.edit/v1",
-    "code.outline/v1",
-    "code.read/v1",
-    "fake:effect/v1",
-];
-
-fn filter_tags(defects: Defects) -> Vec<&'static str> {
-    let mut tags = FILTER_TOOL_CAPABILITIES.to_vec();
-    if defects.undefined_unprefixed_tag {
-        tags.retain(|tag| *tag != "code.edit/v1");
-        tags.push("code.refactor/v1");
-    }
-    tags
-}
-
-fn filter_params(defects: Defects) -> Map<String, Value> {
-    if defects.omit_catalog_capability_filter {
-        Map::new()
-    } else {
-        params_for_capabilities(filter_tags(defects))
-    }
+fn ordinary_params() -> Map<String, Value> {
+    serde_json::from_value(json!({"scope": "workspace"})).unwrap()
 }
 /// Quotes, non-ASCII text, newlines and trailing spaces must all be hashed
 /// exactly as returned, without JSON escaping or whitespace normalization.
@@ -179,6 +159,16 @@ pub struct Defects {
     pub ignore_consumer_capabilities: bool,
     /// Do not advertise capability filtering in `role.describe`.
     pub omit_catalog_capability_filter: bool,
+    /// Do not advertise the optional catalog model selector.
+    pub omit_catalog_model: bool,
+    /// Treat an ordinary plan item as an empty filter request.
+    pub empty_ordinary_catalog: bool,
+    /// Apply filter-only parameter rules to the documented `scope` param.
+    pub refuse_ordinary_scope: bool,
+    /// Accept malformed model selectors instead of checking their shape.
+    pub accept_malformed_model: bool,
+    /// Ignore a model selector on a capability-filter request.
+    pub accept_filter_model: bool,
     /// The quick tool's `emits_events` is this JSON text instead of `false`.
     pub emits_events_override: Option<&'static str>,
     /// Send the `held` marker to content-only routes without `held-reply/v1`.
@@ -442,12 +432,14 @@ impl Module {
             }],
             "fake-0",
         );
-        let role = if self.defects.omit_catalog_capability_filter {
-            role
-        } else {
-            role.with_capabilities(vec![CATALOG_CAPABILITY_FILTER.into()])
-                .with_tool_capabilities(self.tool_capabilities())
-        };
+        let mut role = role;
+        if !self.defects.omit_catalog_capability_filter {
+            role.capabilities.push(CATALOG_CAPABILITY_FILTER.into());
+            role = role.with_tool_capabilities(self.tool_capabilities());
+        }
+        if !self.defects.omit_catalog_model {
+            role.capabilities.push(CATALOG_MODEL.into());
+        }
         serde_json::to_value(role).unwrap()
     }
 
@@ -497,8 +489,26 @@ impl Module {
     }
 
     fn catalog(&self, arguments: &Value) -> Result<Value, ErrorBody> {
-        let request: CatalogRequest = serde_json::from_value(arguments.clone())
+        let mut request: CatalogRequest = serde_json::from_value(arguments.clone())
             .map_err(|e| errors::invalid_request("arguments", e.to_string()))?;
+        let filter_request = request.params.contains_key("capabilities");
+        if filter_request && self.defects.accept_filter_model {
+            request.params.remove("model");
+        }
+        if !filter_request {
+            if !self.defects.accept_malformed_model {
+                check_model_param(&request.params)?;
+            }
+            // The fake documents scope=workspace on its ordinary plan item.
+            if self.defects.refuse_ordinary_scope
+                || request
+                    .params
+                    .get("scope")
+                    .is_some_and(|scope| scope != "workspace")
+            {
+                return Err(errors::invalid_request("params.scope", "unsupported scope"));
+            }
+        }
         // An absent preset means the default variant; any other name is
         // refused rather than mapped to the closest variant.
         if let Some(preset) = request.preset.as_deref() {
@@ -546,8 +556,8 @@ impl Module {
             })
             .collect::<Result<_, _>>()
             .map_err(|e| errors::invalid_request("catalog", e.to_string()))?;
-        let mut tools: Vec<Value> = if self.defects.omit_catalog_capability_filter {
-            self.tools()
+        let mut tools: Vec<Value> = if !filter_request && self.defects.empty_ordinary_catalog {
+            Vec::new()
         } else {
             select_by_capabilities(&request.params, &definitions)?
                 .into_iter()
@@ -1038,7 +1048,7 @@ pub struct FakeSubject {
 
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
-        let params = filter_params(defects);
+        let params = ordinary_params();
         Self {
             defects,
             capabilities: [
@@ -1207,7 +1217,7 @@ impl ToolProviderSubject for FakeSubject {
     }
 
     fn catalog_arguments(&self) -> Value {
-        json!({ "params": filter_params(self.defects), "preset": DEFAULT_PRESET })
+        json!({ "params": ordinary_params(), "preset": DEFAULT_PRESET })
     }
 
     fn system_text_catalog_arguments(&self) -> Option<Value> {

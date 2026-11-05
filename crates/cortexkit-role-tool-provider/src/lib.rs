@@ -50,6 +50,10 @@ pub const PROVIDES: &str = "tool-provider/v1";
 /// their capability tags.
 pub const CATALOG_CAPABILITY_FILTER: &str = "tool-catalog-capability-filter/v1";
 
+/// The optional `role.describe` capability for accepting `params.model` on
+/// ordinary catalog requests.
+pub const CATALOG_MODEL: &str = "tool-catalog-model/v1";
+
 /// Optional capability promising the `tool.views` operation.
 pub const TOOL_VIEWS_CAPABILITY: &str = "tool-views/v1";
 
