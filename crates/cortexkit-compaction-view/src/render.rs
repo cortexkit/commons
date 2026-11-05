@@ -393,9 +393,18 @@ pub fn plan_with(
             let rides = rides_for(part, &replace, rule);
             let text_is_final = writes_final_text(&replace);
             // The label follows the part as replaced: keeping only some of a
-            // result's attachments can turn `[file]` into `[image]`, as the
-            // neutral rendering shows it.
-            let empty_result_label = match &replaced(part, &replace).body {
+            // result's attachments can change its label from `[file]` to
+            // `[image]`. Only the body is needed, so an unedited part, most of
+            // any window, is read as it stands instead of being rebuilt and
+            // its digests computed again.
+            let edited_body;
+            let body = if replace.is_empty() {
+                &part.body
+            } else {
+                edited_body = replaced_body(&part.body, &replace);
+                &edited_body
+            };
+            let empty_result_label = match body {
                 PartBody::Tool(tool) if !text_is_final => {
                     crate::tags::empty_result_label(tool).map(str::to_owned)
                 }
@@ -722,7 +731,15 @@ fn check_replaced_tags(
 }
 
 fn replaced(part: &Part, fields: &[FieldReplace]) -> Part {
-    let mut body = part.body.clone();
+    let mut replaced =
+        Part::new(part.id.clone(), replaced_body(&part.body, fields)).with_seal(part.seal.clone());
+    replaced.tag = part.tag;
+    replaced
+}
+
+/// A part's body with `fields` written in.
+fn replaced_body(body: &PartBody, fields: &[FieldReplace]) -> PartBody {
+    let mut body = body.clone();
     for FieldReplace { field, value } in fields {
         if field == "text" && matches!(body, PartBody::File(_)) {
             body = PartBody::Text {
@@ -767,9 +784,7 @@ fn replaced(part: &Part, fields: &[FieldReplace]) -> Part {
             _ => {}
         }
     }
-    let mut replaced = Part::new(part.id.clone(), body).with_seal(part.seal.clone());
-    replaced.tag = part.tag;
-    replaced
+    body
 }
 
 fn string_of(value: &Value) -> String {

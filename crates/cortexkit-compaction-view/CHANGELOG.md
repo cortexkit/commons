@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.4
+
+- `plan` and `plan_with` no longer rebuild and reseal every kept part to work
+  out its empty-result label. An unedited part's body is read as it stands,
+  and an edited one has only its body computed. A 500-message window with no
+  edits drops from about 20 ms to well under 1 ms per call. Plans and every
+  vector are byte-identical, and `PLAN_VERSION` is unchanged.
+
 ## 0.1.3
 
 - Plans list the sends that ride a tool result: each tool part's `rides`
