@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Contract §9.3.1: on a runner declaring `no_tools`, `tools` is fixed by the
+  send that creates the session, for every session, not only one with a
+  fetch plan. A later send omits it, and the runner refuses it there
+  `invalid_params` naming `tools`, even unchanged. A caller never resends
+  `tools` on a continuation; dropping it never widens what the model is
+  offered. Text only; no API change.
+- Contract §9.7.2: where a host stores a tool result as its own entry, the
+  `notices` fact sits on that result entry, with `part` the result's index
+  there. Readers place a notice by `call_key` either way, and all notices of
+  one call are listed on one entry, in delivery order. Text only.
+
 ## 0.8.12
 
 - Add the opt-in `message_marks` group. A scope owner can carry another
@@ -54,10 +67,7 @@
   `result_rides` group with named prerequisites, `rides` reader/display facts
   and `ride_delivered` live events. Facts and events never rewrite history or
   enter checksums. Ride receipts name the carrying `call_key`.
-
-## Unreleased
-
-- Contract §4.2.2: an assistant reply whose producing request carried a
+- Contract §4.2.2 (landed as text before this release): an assistant reply whose producing request carried a
   runner-rendered part number is served with W4.6's cleaning
   (`clean_reply(text).text`) applied to its reply text payloads, listed per
   profile, on `session.read`, raw `session.history`, display rows,

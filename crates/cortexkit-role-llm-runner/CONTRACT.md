@@ -2960,10 +2960,16 @@ A runner that declares `retract` serves `session.retract`.
 - [pinned] `tools: []` means the model is offered no tools at all, including
   plan tools and host built-ins. Only the empty list has role meaning in
   `no_tools`; a non-empty list stays runner-specific. A non-list is refused
-  `invalid_params` naming `tools` on a runner declaring the group. A runner
-  that freezes tools at admission (a session with a fetch plan) refuses
-  `tools` on any later send with `invalid_params` naming `tools`, rather
-  than ignoring it, even when the value is unchanged.
+  `invalid_params` naming `tools` on a runner declaring the group.
+- [pinned] On a runner declaring `no_tools`, `tools` is fixed by the send
+  that creates the session, for the session's whole life, whether or not the
+  session has a fetch plan. A later send omits it: the runner refuses `tools`
+  on any later send with `invalid_params` naming `tools`, rather than
+  ignoring it, even when the value is unchanged. A session created with
+  `tools: []` is offered no tools on every run. One created without `tools`
+  gets its tools from its plan (plan refreshes included) or the runner's
+  default, never from a later send. So a caller never resends `tools` on a
+  continuation: dropping it never widens what the model is offered.
 - [pinned] A joining steer whose limits differ from its run's is refused
   `invalid_params`, naming the first differing field, under §9's existing
   frozen-settings rule.
@@ -3990,6 +3996,15 @@ never less. This is the safe fallback because nothing gets hidden.
   string, currently `"tool_result"` for every entry this fact serves; a
   later delivery mode can use the same shape. Readers place a `tool_result`
   notice under the call whose key it names.
+- [pinned] Where the host keeps the call and its result in one stored part,
+  the fact sits on the message holding that part, and `part` is the part's
+  index. Where the host stores the result as its own entry, apart from the
+  assistant message that made the call, the fact sits on that result entry,
+  and `part` is the result's index within it (`0` when the entry holds only
+  the result). In both cases `call_key` names the carrying call, so a reader
+  places the notice by `call_key`, not by the entry or part. All notices of
+  one carrying call are listed on one entry, in delivery order, so a reader
+  can order them from that one list.
 - [pinned] Delivery emits the live event
   `notice_delivered {mid, part, call_key, send_id, sender, text, speaks_for?}`, identifying the
   carrying message and part, not a new entry. Neither delivery nor the fact
