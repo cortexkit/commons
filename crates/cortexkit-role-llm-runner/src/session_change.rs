@@ -74,6 +74,11 @@ pub struct RelaunchRefreshRequest {
 }
 
 impl RelaunchRefreshRequest {
+    /// Validate attribution before decoding senders or storing a refresh.
+    pub fn check_sender_attribution<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
+        crate::attribution::check_plan(&self.plan, declared)
+    }
+
     /// Validate sender succession before fetching or storing a refresh.
     pub fn check_sender_succession<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         crate::sender_succession::check_plan(&self.plan, declared)
@@ -113,6 +118,11 @@ impl From<RefreshRequest> for RelaunchRefreshRequest {
 }
 
 impl RefreshRequest {
+    /// Validate attribution before decoding senders or storing a refresh.
+    pub fn check_sender_attribution<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
+        crate::attribution::check_plan(&self.plan, declared)
+    }
+
     /// Validate sender succession before fetching or storing a refresh.
     pub fn check_sender_succession<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         crate::sender_succession::check_plan(&self.plan, declared)

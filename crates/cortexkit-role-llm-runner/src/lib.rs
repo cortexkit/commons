@@ -26,6 +26,7 @@ pub mod adopt;
 pub mod app_readers;
 pub mod archive_prunes_reasoning;
 pub mod attachments;
+pub mod attribution;
 pub mod baseline;
 pub mod compaction;
 pub mod content_digest;
@@ -209,6 +210,8 @@ pub mod capabilities {
     /// Opt-in client ids, per-call times, assistant completion times and
     /// reasoning summaries beside `session.read` message bodies.
     pub const READ_DISPLAY_FACTS: &str = "read_display_facts";
+    /// Opt-in trusted relay headers and verified, header-free display facts.
+    pub const SENDER_ATTRIBUTION: &str = "sender_attribution";
     /// The pinned live events on `session.subscribe` (`live::LiveEvent`):
     /// durable message, tool and run lifecycle events, display deltas with
     /// `part` and `mid` (or a provisional `live_id` under the separate
@@ -403,6 +406,10 @@ pub mod capabilities {
         (HOST_HISTORY, &[ops::SESSION_HISTORY]),
         (HISTORY_DISPLAY, &[ops::SESSION_HISTORY]),
         (READ_DISPLAY_FACTS, &[ops::SESSION_READ]),
+        (
+            SENDER_ATTRIBUTION,
+            &[ops::SESSION_SEND, ops::SESSION_READ, ops::SESSION_HISTORY],
+        ),
         (LIVE_EVENTS, &[ops::SESSION_SUBSCRIBE]),
         (LIVE_IDS, &[ops::SESSION_SUBSCRIBE]),
         (

@@ -17,6 +17,7 @@ mod admission;
 mod adopt;
 mod archive_pruning;
 mod attachments;
+mod attribution;
 pub mod call_identity;
 mod cancel;
 mod cases;

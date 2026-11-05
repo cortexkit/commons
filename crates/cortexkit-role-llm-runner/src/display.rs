@@ -87,6 +87,9 @@ pub fn client_message_id_valid(id: &str) -> bool {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct DisplayRow {
+    /// Verified relay header hidden from this row's text, for a "via chat" label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<crate::attribution::Attribution>,
     /// References captured when this message was stored, never added to its body.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_refs: Option<crate::output_refs::Descriptor>,
@@ -143,6 +146,7 @@ impl DisplayRow {
             _ => None,
         }));
         Self {
+            attribution: None,
             role: role.into(),
             output_refs: None,
             text,
@@ -525,6 +529,68 @@ pub fn project(
             "{other} is not a serializer profile this crate projects"
         ))),
     }
+}
+
+/// Project recorded attribution without ever exposing its trusted frame to
+/// older apps. The stored body remains untouched. A mismatched prefix or byte
+/// count leaves the text whole and carries no fact.
+pub fn project_with_attribution(
+    profile: &str,
+    body: &Value,
+    limits: Option<&Limits>,
+    attribution: Option<&crate::attribution::Attribution>,
+) -> Result<DisplayRow, ProjectionError> {
+    let mut row = project(profile, body, limits)?;
+    if let Some(fact) = attribution {
+        let content = match profile {
+            ANTHROPIC_MESSAGES => Some(body["content"].clone()),
+            OPENCODE_AISDK => Some(body["parts"].clone()),
+            OPENCODE_V2 => crate::serializer_profile::opencode_v2::projected_content(body).ok(),
+            PI => crate::serializer_profile::pi::projected_content(body).ok(),
+            _ => None,
+        };
+        let stored_text = content.as_ref().and_then(|content| {
+            if fact.part == 0 && content.is_string() {
+                content.as_str()
+            } else {
+                content
+                    .as_array()?
+                    .get(fact.part as usize)?
+                    .get("text")?
+                    .as_str()
+            }
+        });
+        if !stored_text.is_some_and(|text| crate::attribution::verify(fact, text)) {
+            return Ok(row);
+        }
+        let key = if profile == OPENCODE_AISDK {
+            body.get("parts")
+                .and_then(Value::as_array)
+                .and_then(|parts| parts.get(fact.part as usize))
+                .and_then(|part| part.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| fact.part.to_string())
+        } else {
+            fact.part.to_string()
+        };
+        if let Some(DisplayPart::Text(text)) = row
+            .parts
+            .iter_mut()
+            .find(|part| matches!(part, DisplayPart::Text(text) if text.part == key))
+        {
+            if crate::attribution::verify(fact, &text.text) {
+                text.text.drain(..fact.header_bytes as usize);
+                row.attribution = Some(fact.clone());
+                row.text =
+                    crate::run::join_text_parts(row.parts.iter().filter_map(|part| match part {
+                        DisplayPart::Text(text) => Some(text.text.as_str()),
+                        _ => None,
+                    }));
+            }
+        }
+    }
+    Ok(row)
 }
 
 fn arguments_part(

@@ -15,6 +15,13 @@
   from the raised history_version on serves only cleaned digests, computing
   them on read until it has persisted them. Text only; no API change.
 
+## 0.8.8
+
+- Add opt-in `sender_attribution`: plan senders can request a trusted module
+  header stored at intake, verified attribution facts on reads and history,
+  and header-free display rows. Existing plans and messages are unchanged
+  when the option is absent.
+
 ## 0.8.7
 
 - Add optional `sent_to_last_content_ms`, `first_to_last_content_ms` and

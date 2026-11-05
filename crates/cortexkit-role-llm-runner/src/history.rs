@@ -440,6 +440,10 @@ pub struct HistoryEntry {
     pub role: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivered_as: Option<crate::delivery_order::EntryDelivery>,
+    /// Verified stored relay frame when `sender_attribution` is declared.
+    /// Raw history has no display-facts request flag; message bytes stay whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<crate::attribution::Attribution>,
 }
 
 impl HistoryEntry {
@@ -463,6 +467,7 @@ impl HistoryEntry {
             tool_calls: Vec::new(),
             role: None,
             delivered_as: None,
+            attribution: None,
         }
     }
 
@@ -483,6 +488,7 @@ impl HistoryEntry {
             tool_calls: read.tool_calls,
             role: read.role,
             delivered_as: read.delivered_as,
+            attribution: read.attribution,
         })
     }
 

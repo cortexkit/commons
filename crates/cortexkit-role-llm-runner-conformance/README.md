@@ -17,8 +17,8 @@ The head-selection cases do not yet check:
 - that a creating send's `plan.model` drives its first run;
 - that a send's own model selection overrides the recorded selection.
 
-Version **0.17.9** pins `cortexkit-role-llm-runner =0.8.7`, adding routed-account
-declaration and live admission checks without a routing crate dependency.
+Version **0.17.10** pins `cortexkit-role-llm-runner =0.8.8`, adding opt-in sender
+attribution checks and deliberately faulty relay implementations.
 The role remains
 `llm-runner/v1` after the breaking 0.8 release. The runner's
 [CONTRACT.md](../cortexkit-role-llm-runner/CONTRACT.md) is normative; the public
@@ -264,3 +264,25 @@ observations. Native marker creation and imports are optional fixture hooks;
 the kit does not claim provider-protocol conformance through them. Resident
 memory and per-host integration still need the runner owner's measurements.
 The public `NARROWINGS` inventory records boundaries of executable coverage.
+
+## Sender attribution (0.17.10)
+
+The kit pins runner `=0.8.8`. `sender_attribution` requires `delivery_order`,
+`read_display_facts` and `history_display`. The `sender_attribution_*` cases
+check exact stored header bytes, verified read/history facts, photo-only sends,
+plan-authored templates, unaffected senders, tampered prefixes and header-free
+rows. They are not applicable without the group; the complementary
+`sender_attribution_undeclared_refused` case instead runs on an undeclaring
+runner with delivery-order support. Every case rejects a deliberately faulty
+fake and reports the violated case's stable name as failed.
+
+Adapters supply their existing `plan_sender`, `send_fields_with_plan` and
+stored-order `read_parts` hooks. For `sender_attribution`, also implement
+`tamper_attribution_prefix`: change the stored first prefix byte to `!` without
+changing its recorded metadata, independently of read replies. The photo-only
+case additionally needs `media_only_send` and the upload fixture; otherwise it
+is explicitly not applicable. Default reads omit the fact, opted-in reads keep
+the full body, raw history carries the verified fact without a new request
+flag, and display rows remove only a verified prefix. The kit observes stored
+bytes through reads; it does not inspect the model's request or exercise a plan
+refresh between intake and storage.

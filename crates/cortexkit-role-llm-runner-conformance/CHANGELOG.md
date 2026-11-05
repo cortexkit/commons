@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.10
+
+- Pin `cortexkit-role-llm-runner =0.8.8` and cover opt-in sender attribution:
+  exact stored headers, verified facts, photo-only and template sends,
+  unaffected senders, capability refusals, tampered prefixes and display rows.
+  Each deliberately faulty runner is rejected with the violated case reported
+  as failed under its stable case name.
+
 ## 0.17.9
 
 - Pin `cortexkit-role-llm-runner =0.8.7`. Add `routed_accounts` capability

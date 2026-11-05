@@ -426,6 +426,9 @@ impl Template {
 pub struct PlanSender {
     /// The module, matched against the route's attested principal.
     pub module: String,
+    /// Opt-in trusted relay frame, fixed at intake. Requires `sender_attribution`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<crate::attribution::Mode>,
     /// One predecessor whose keyed sends this module may retry or inspect.
     /// Requires `sender_succession`; it grants no action on that module's behalf.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -445,6 +448,7 @@ impl PlanSender {
     pub fn new(module: impl Into<String>) -> Self {
         Self {
             module: module.into(),
+            attribution: None,
             succeeds: None,
             idle_start: false,
             interrupt: false,
@@ -453,6 +457,10 @@ impl PlanSender {
     }
     pub fn with_idle_start(mut self) -> Self {
         self.idle_start = true;
+        self
+    }
+    pub fn with_attribution_header(mut self) -> Self {
+        self.attribution = Some(crate::attribution::Mode::Header);
         self
     }
     pub fn with_succeeds(mut self, predecessor: impl Into<String>) -> Self {

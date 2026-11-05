@@ -40,7 +40,7 @@ fn check(condition: bool, message: &str) -> Check {
     }
 }
 
-fn png() -> Vec<u8> {
+pub(crate) fn png() -> Vec<u8> {
     STANDARD.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=").unwrap()
 }
 
@@ -122,7 +122,7 @@ async fn status<R: RunnerRoute>(route: &R, id: &str, state: &str, received: usiz
     )
 }
 
-async fn upload<R: RunnerRoute>(route: &R, bytes: &[u8]) -> Result<String, String> {
+pub(crate) async fn upload<R: RunnerRoute>(route: &R, bytes: &[u8]) -> Result<String, String> {
     let id = begin(route, "image/png", bytes, None, None).await?;
     for (i, chunk) in bytes.chunks(CHUNK_MAX).enumerate() {
         append(route, &id, i * CHUNK_MAX, chunk).await?;

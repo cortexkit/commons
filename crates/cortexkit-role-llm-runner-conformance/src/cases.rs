@@ -89,6 +89,9 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("sender_attribution_") => {
+                crate::attribution::run(self, name).await
+            }
             "tool_result_too_large_is_error" | "tool_result_too_large_not_repeated" => {
                 crate::tool_result_limit::run(self, name).await
             }

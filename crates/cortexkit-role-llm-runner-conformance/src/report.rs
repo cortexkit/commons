@@ -61,6 +61,15 @@ const SESSION_USAGE: &[Capability] = &[
     TranscriptReads,
 ];
 const ORDER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads];
+const ATTRIBUTION: &[Capability] = &[
+    Capability::SenderAttribution,
+    Capability::DeliveryOrder,
+    Capability::ReadDisplayFacts,
+    Capability::HistoryDisplay,
+    Capability::HostHistory,
+    Queue,
+    TranscriptReads,
+];
 const SUCCESSION: &[Capability] = &[
     Capability::SenderSuccession,
     Capability::DeliveryOrder,
@@ -117,6 +126,14 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("sender_attribution_stored_header", ATTRIBUTION, "the first stored text part starts with the exact trusted relay header; retries compare the received payload"),
+    case("sender_attribution_fact", ATTRIBUTION, "opted-in reads and raw history carry the verified part, byte count and attested module; default reads omit the fact"),
+    case("sender_attribution_photo_only", ATTRIBUTION, "a photo-only send stores a header-only text part first; inapplicable without media_only_send and an upload fixture"),
+    case("sender_attribution_template", ATTRIBUTION, "a plan-authored template send has no header or attribution fact"),
+    case("sender_attribution_other_sender", ATTRIBUTION, "an unattributed sender's plain text is unchanged and its stored bytes stay identical across an attributed send, with no fact"),
+    CaseSpec { name: "sender_attribution_undeclared_refused", requires: ORDER, requires_any: &[], requires_undeclared_any: &[Capability::SenderAttribution], checks: "attribution on an undeclaring runner is refused invalid_params naming the indexed field and writes nothing" },
+    case("sender_attribution_tampered_prefix", ATTRIBUTION, "tampering stored text makes the fact disappear from reads, raw history and display without cutting text"),
+    case("sender_attribution_display", ATTRIBUTION, "display row text and text parts omit the verified header and carry the same fact"),
     case("compaction_item_preset_required", &[Capability::Plans, Queue, TranscriptReads], "a compaction plan without its explicit role preset is refused plan.compaction_item.preset before any write"),
     case("archive_pruning_part_keys", &[Capability::ArchivePrunesReasoning, TranscriptReads], "each pruned part names a key served by its entry in part_digests or part_keys, without deriving keys"),
     case("archive_pruning_provider_blocks_pruning", &[Capability::ArchivePrunesReasoning, TranscriptReads], "a plan with a compaction provider is not eligible for reasoning pruning before that contract defines acceptance"),
@@ -860,6 +877,7 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
+    "sender_attribution observes stored prefixes through reads, not the model's request; it does not exercise a plan refresh between intake and storage, and its photo-only case is inapplicable without media_only_send and an upload fixture",
     "routed_accounts checks follows_account_choice and an account_for admission for every listed method; automatic renewal, release timing, auth.pool/credential forwarding and which secret reached the provider are not checked by the live cases",
     "Compaction protocol, tag numbering and fork detection are outside this kit; retained template/output-reference fixtures consume the adapter's captured part-number mapping",
     "per_step_cost_scales_with_new_messages measures wall time over the real route, which includes writing the model request; the two sessions keep the same window, so that part is equal on both sides. Memory is not measured",

@@ -317,7 +317,13 @@ impl Module {
         };
         let project = |limits: Option<&Limits>| {
             if profiled(session) {
-                display_rows::project(
+                let fact = sess
+                    .messages
+                    .iter()
+                    .find(|m| m.mid == entry.mid)
+                    .and_then(|m| attribution::fact(m, defects))
+                    .filter(|_| defects.attribution != Some("display_leak"));
+                display_rows::project_with_attribution(
                     if defects.display_pi_profile {
                         "pi"
                     } else if defects.display_opencode_v2_profile {
@@ -327,6 +333,7 @@ impl Module {
                     },
                     &entry.message,
                     limits,
+                    fact.as_ref(),
                 )
                 .unwrap_or_else(|_| DisplayRow::new("unknown", Vec::new()))
             } else {

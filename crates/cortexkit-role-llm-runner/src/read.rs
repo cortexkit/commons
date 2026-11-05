@@ -467,6 +467,10 @@ pub struct ReadMessage {
     /// parts and is excluded from message and part content-digest inputs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasoning_summaries: Vec<ReasoningSummary>,
+    /// Verified stored relay header, only with `include_display_facts`.
+    /// The message bytes remain whole; display rows hide the verified prefix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attribution: Option<crate::attribution::Attribution>,
     /// One item per tool call, in call order, only with `include_display_facts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_times: Vec<ToolTime>,
@@ -613,6 +617,10 @@ impl ReadMessage {
         self.reasoning_summaries = summaries;
         self
     }
+    pub fn with_attribution(mut self, fact: crate::attribution::Attribution) -> Self {
+        self.attribution = Some(fact);
+        self
+    }
 
     pub fn new(ordinal: u64, mid: impl Into<String>, message: Value) -> Self {
         Self {
@@ -633,6 +641,7 @@ impl ReadMessage {
             created_at: None,
             completed_at: None,
             reasoning_summaries: Vec::new(),
+            attribution: None,
             tool_times: Vec::new(),
         }
     }

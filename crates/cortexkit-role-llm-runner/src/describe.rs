@@ -27,6 +27,12 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const SENDER_ATTRIBUTION_WITHOUT_DELIVERY_ORDER: &str =
+        "sender_attribution_without_delivery_order";
+    pub const SENDER_ATTRIBUTION_WITHOUT_READ_DISPLAY_FACTS: &str =
+        "sender_attribution_without_read_display_facts";
+    pub const SENDER_ATTRIBUTION_WITHOUT_HISTORY_DISPLAY: &str =
+        "sender_attribution_without_history_display";
     pub const HEAD_SELECTION_WITHOUT_PLANS: &str = "head_selection_without_plans";
     pub const MEDIA_ONLY_SEND_WITHOUT_ATTACHMENTS: &str = "media_only_send_without_attachments";
     pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_RUN_CANCEL: &str =
@@ -750,6 +756,26 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             (
                 capabilities::LIVE_EVENTS,
                 problem_names::MESSAGE_SENDERS_WITHOUT_LIVE_EVENTS,
+            ),
+        ] {
+            if !describe.declares(dependency) {
+                problems.push(DescribeProblem::Undecodable(problem.into()));
+            }
+        }
+    }
+    if describe.declares(capabilities::SENDER_ATTRIBUTION) {
+        for (dependency, problem) in [
+            (
+                capabilities::DELIVERY_ORDER,
+                problem_names::SENDER_ATTRIBUTION_WITHOUT_DELIVERY_ORDER,
+            ),
+            (
+                capabilities::READ_DISPLAY_FACTS,
+                problem_names::SENDER_ATTRIBUTION_WITHOUT_READ_DISPLAY_FACTS,
+            ),
+            (
+                capabilities::HISTORY_DISPLAY,
+                problem_names::SENDER_ATTRIBUTION_WITHOUT_HISTORY_DISPLAY,
             ),
         ] {
             if !describe.declares(dependency) {

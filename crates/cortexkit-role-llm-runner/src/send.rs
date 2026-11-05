@@ -861,6 +861,12 @@ impl SendRequest {
             None => Ok(()),
         }
     }
+    /// Check attribution before decoding senders or writing admission state.
+    pub fn check_sender_attribution<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
+        self.plan.as_ref().map_or(Ok(()), |plan| {
+            crate::attribution::check_plan(plan, declared)
+        })
+    }
 
     /// The `delivery_order` send: its list (the array in `delivery`) with the
     /// members that ride beside it (`dedupe_key`, `expires_at_ms`,

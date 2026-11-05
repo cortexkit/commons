@@ -65,6 +65,7 @@ use serde_json::{json, Map, Value};
 use subc_protocol::ErrorBody;
 
 mod attachments;
+mod attribution;
 mod display;
 mod held_calls;
 mod history;
@@ -169,6 +170,7 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub attribution: Option<&'static str>,
     pub routed_accounts_no_call: Option<&'static str>,
     pub head_selection: Option<&'static str>,
     pub compaction_preset_missing_accepted: bool,
@@ -806,6 +808,7 @@ struct Killed;
 
 #[derive(Clone, Debug)]
 struct Msg {
+    attribution: Option<String>,
     completed_at: Option<u64>,
     ordinal: u64,
     mid: String,
@@ -832,6 +835,7 @@ struct Msg {
 /// accepted, queued until a boundary where one of its modes is possible.
 #[derive(Clone, Debug)]
 struct Queued {
+    attribution: Option<String>,
     send_id: String,
     sender: String,
     text: String,
@@ -1034,6 +1038,7 @@ impl Sess {
     fn push(&mut self, body: Value, run_id: &str, calls: Vec<String>) -> u64 {
         let ordinal = self.base + self.messages.len() as u64;
         self.messages.push(Msg {
+            attribution: None,
             completed_at: None,
             ordinal,
             mid: format!("{}.m{ordinal}", self.lineage),
@@ -1761,6 +1766,7 @@ impl Module {
                 sess.ordered.insert(
                     id,
                     Queued {
+                        attribution: record["attribution"].as_str().map(str::to_owned),
                         send_id: text("send_id"),
                         sender: text("sender"),
                         text: text("text"),
@@ -1801,11 +1807,14 @@ impl Module {
                 let mut body = json!({ "role": role, "text": queued.text });
                 attachments::add_parts(&mut body, record);
                 let sender = queued.sender.clone();
+                let attribution = queued.attribution.clone();
+                attribution::store(&mut body, attribution.as_deref(), &self.world.defects);
                 let client_id = queued.request["client_message_id"]
                     .as_str()
                     .map(str::to_owned);
                 let ordinal = sess.push(body, &text("run_id"), Vec::new());
                 let message = sess.at_mut(ordinal);
+                message.attribution = attribution;
                 message.delivered_as = Some(record["delivered_as"].clone());
                 message.sender = Some(sender);
                 message.client_message_id = client_id;
@@ -1894,7 +1903,10 @@ impl Module {
                     json!({ "role": "user", "text": text("prompt") })
                 };
                 attachments::add_parts(&mut body, record);
+                let attribution = record["attribution"].as_str().map(str::to_owned);
+                attribution::store(&mut body, attribution.as_deref(), &self.world.defects);
                 let ordinal = sess.push(body, &run_id, Vec::new());
+                sess.at_mut(ordinal).attribution = attribution;
                 sess.at_mut(ordinal).client_message_id =
                     record["client_message_id"].as_str().map(str::to_owned);
                 sess.at_mut(ordinal).sender = record["sender"].as_str().map(str::to_owned);
@@ -2821,6 +2833,7 @@ impl Module {
             self.commit(
                 session,
                 json!({ "kind": "send", "send_id": format!("order:{id}"), "prompt": text,
+                        "attribution": sess.ordered[&id].attribution,
                         "attachment_parts": attachments::queued_parts(self, session, &sess.ordered[&id].request),
                         "delivery": groups::QUEUE, "run_id": run_id, "admitted": false,
                         "cause": cause, "sender": sender,
@@ -3462,6 +3475,11 @@ impl Module {
                 return Ok(invalid(&field));
             }
         }
+        if self.world.defects.attribution != Some("undeclared_accepted") {
+            if let Err(field) = request.check_sender_attribution(&self.world.groups) {
+                return Ok(invalid(&field));
+            }
+        }
         let attachment_parts = match attachments::admit_send(self, session, &request) {
             Ok(parts) => parts,
             Err(reply) => return Ok(reply),
@@ -3993,6 +4011,7 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
+                    "attribution": self.attribution_for(session, &stamp.principal),
                     "route_decision_id": request.route_decision_id,
                     "attachment_parts": attachment_parts,
                     "keep_empty_text": self.world.defects.attachments == "media_only_send_empty_text",
@@ -4183,6 +4202,7 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "ordered", "id": id, "send_id": request.send_id, "sender": caller,
+                    "attribution": attribution::selected(&sess.senders, caller, system, &self.world.defects),
                     "text": text, "modes": wanted.modes, "dedupe_key": wanted.dedupe_key,
                     "expires_at_ms": wanted.expires_at_ms, "system": system,
                     "session_structured_output_jcs": session_structured_output_jcs,
@@ -4326,12 +4346,14 @@ impl Module {
             .iter()
             .map(|m| {
                 let mut entry = self.read_message(sess, m);
+                entry.attribution = None;
                 entry.rich_ui = self.read_stamp(sess, m, request.include_rich_ui);
                 if (request.include_display_facts
                     && self.world.defects.read_display_facts != Some("missing"))
                     || self.world.defects.read_display_facts == Some("default_leak")
                 {
                     entry.client_message_id = m.client_message_id.clone();
+                    entry.attribution = attribution::fact(m, &self.world.defects);
                     entry.created_at = match self.world.defects.read_display_facts {
                         Some("creation_missing") => None,
                         Some("creation_from_written") => Some(m.written_at),
@@ -4516,6 +4538,9 @@ impl Module {
                 episode: "episode-1".into(),
                 is_final: false,
             });
+        }
+        if self.world.serves(groups::SENDER_ATTRIBUTION) {
+            message.attribution = attribution::fact(m, &self.world.defects);
         }
         message
     }
@@ -6572,12 +6597,19 @@ impl LlmRunnerSubject for FakeSubject {
     }
 
     fn plan_sender(&self) -> Option<PlanSenderIdentity> {
+        let module = if self.capabilities.contains(&Capability::SenderAttribution)
+            || self.defects.attribution.is_some()
+        {
+            "fake-sender"
+        } else {
+            SENDER_MODULE
+        };
         Some(PlanSenderIdentity::new(
             RouteStamp {
-                principal: SENDER_MODULE.into(),
+                principal: module.into(),
                 scope: None,
             },
-            SENDER_MODULE,
+            module,
         ))
     }
 
@@ -6806,6 +6838,29 @@ impl LlmRunnerSubject for FakeSubject {
 
     fn reports_read_completed_at(&self) -> bool {
         self.defects.read_display_facts != Some("completion_missing_hook")
+    }
+
+    async fn tamper_attribution_prefix(
+        &self,
+        session: &str,
+        mid: &str,
+    ) -> Result<(), HarnessError> {
+        for module in self.modules.lock().unwrap().iter().rev() {
+            let mut sessions = module.sessions.lock().unwrap();
+            if let Some(message) = sessions
+                .get_mut(session)
+                .and_then(|s| s.messages.iter_mut().find(|m| m.mid == mid))
+            {
+                for body in [&mut message.body, &mut message.host_body] {
+                    let text = body["content"][0]["text"]
+                        .as_str()
+                        .ok_or_else(|| HarnessError::new("attributed text missing"))?;
+                    body["content"][0]["text"] = json!(format!("!{}", &text[1..]));
+                }
+                return Ok(());
+            }
+        }
+        Err(HarnessError::new("attributed message missing"))
     }
 
     async fn seed_host_created_at(

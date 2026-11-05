@@ -120,6 +120,8 @@ pub enum Capability {
     DeliveryOrder,
     /// One-hop retry/status lookup through a plan sender's predecessor.
     SenderSuccession,
+    /// Trusted relay headers, verified facts and header-free display rows.
+    SenderAttribution,
     /// Opt-in client ids, tool times, assistant completion times and reasoning
     /// summaries on raw read entries.
     ReadDisplayFacts,
@@ -214,6 +216,7 @@ impl Capability {
         Self::SessionUsage,
         Self::DeliveryOrder,
         Self::SenderSuccession,
+        Self::SenderAttribution,
         Self::ReadDisplayFacts,
         Self::SendStatus,
         Self::UserCommands,
@@ -282,6 +285,7 @@ impl Capability {
             Self::SessionUsage => groups::SESSION_USAGE,
             Self::DeliveryOrder => groups::DELIVERY_ORDER,
             Self::SenderSuccession => groups::SENDER_SUCCESSION,
+            Self::SenderAttribution => groups::SENDER_ATTRIBUTION,
             Self::ReadDisplayFacts => groups::READ_DISPLAY_FACTS,
             Self::SendStatus => groups::SEND_STATUS,
             Self::HistoryDisplay => groups::HISTORY_DISPLAY,
@@ -1398,6 +1402,19 @@ pub trait LlmRunnerSubject: Harness {
     /// [`Capability::DeliveryOrder`].
     fn plan_sender(&self) -> Option<PlanSenderIdentity> {
         None
+    }
+
+    /// Change only the first byte of a stored attributed text part to `!`,
+    /// preserving its recorded attribution metadata. Required with
+    /// `SenderAttribution`; mutate storage independently of read replies.
+    async fn tamper_attribution_prefix(
+        &self,
+        _session: &str,
+        _mid: &str,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "sender_attribution requires tamper_attribution_prefix",
+        ))
     }
 
     /// Whether the scripted model's route supports a turn-scoped system
