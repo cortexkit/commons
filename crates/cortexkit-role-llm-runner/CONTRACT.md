@@ -3996,6 +3996,18 @@ never less. This is the safe fallback because nothing gets hidden.
   string, currently `"tool_result"` for every entry this fact serves; a
   later delivery mode can use the same shape. Readers place a `tool_result`
   notice under the call whose key it names.
+- [pinned] `send_id` on a notice joins it to the send that the tool result
+  carried. For a send that carried its own `send_id`, it is that key. A
+  non-owner send may be unkeyed (§9). For such a send, `send_id` is the
+  runner's own id for it: the `submission_id` its `session.send` reply
+  returned. A runner whose reply returned no `submission_id` for an unkeyed
+  send serves no notice for it, because the sender could never have seen any
+  id the runner names for it. `(sender, send_id)` is unique among a session's
+  notices, and a runner that cannot keep its own ids apart from a sender's
+  keys serves no notices for unkeyed sends. For an unkeyed send the value is
+  not a key the sender chose:
+  re-sending under it, or asking `session.send_status` about it, is not
+  defined. The same applies to `notice_delivered`.
 - [pinned] Where the host keeps the call and its result in one stored part,
   the fact sits on the message holding that part, and `part` is the part's
   index. Where the host stores the result as its own entry, apart from the

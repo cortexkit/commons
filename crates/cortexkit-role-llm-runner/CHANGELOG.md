@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Contract §9.7.2: a notice's `send_id` for an unkeyed non-owner send is the
+  `submission_id` that send's reply returned. A runner whose reply returned
+  none serves no notice for that send, and `(sender, send_id)` stays unique among
+  a session's notices. For such a send the value is only a join key, not a
+  key to re-send or look up with. Text only; no API change.
 - Contract §9.3.1: on a runner declaring `no_tools`, `tools` is fixed by the
   send that creates the session, for every session, not only one with a
   fetch plan. A later send omits it, and the runner refuses it there
