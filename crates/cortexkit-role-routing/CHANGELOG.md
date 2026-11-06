@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Contract text: §3 says which scope a module selects under when it selects
+  for someone else's work. It's the scope of the session or run that will
+  spend the decision, created first when it doesn't exist yet, or a scope
+  made for that one operation where no session or run will exist. The old
+  wording, "the project's scope for work on a project", could be read as
+  asking for a scope that names only a project, which isn't a work scope.
+  No wire change.
+
 ## 0.7.2
 
 - Add `observe_credential_refused` (requires `observe_backoff`) and the

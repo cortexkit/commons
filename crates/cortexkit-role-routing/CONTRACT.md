@@ -263,8 +263,12 @@ a module plays.
   member naming a project, workdir, session or run is never read as scope,
   whether the provider ignores it or refuses it.
 - [pinned] A module that selects for work it runs on someone else's behalf
-  selects on a route bound to that work's scope: the run's scope for work
-  inside a run, the project's scope for work on a project.
+  selects on a route bound to that work's scope: the scope of the session or
+  run that will spend the decision. When that scope doesn't exist yet, the
+  module creates it first and selects under it. Where no session or run will
+  exist at all, it uses a scope made for that one operation and ended after
+  it. A scope that names only a project, with no session or run in it, isn't
+  a work scope, so this rule never asks for one.
 - [pinned] A select on an unscoped route is attributed to the calling module
   itself.
 - [pinned] Per-project pins and cost attribution follow the scope of the
