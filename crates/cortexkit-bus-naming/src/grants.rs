@@ -281,6 +281,34 @@ pub fn delivery_authority_permissions(
             subject,
         );
     }
+    for subject in account
+        .inbox_bindings()
+        .into_iter()
+        .chain(account.core_work_bindings())
+        .chain([account.delivery_dead()])
+    {
+        add(
+            &mut entries,
+            Principal::DeliveryAuthority,
+            Operation::Publish,
+            subject,
+        );
+    }
+    for stream in [&account.streams().inbox, &account.streams().core_work] {
+        for subject in [
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.{room_durable}"),
+            format!("$JS.API.CONSUMER.INFO.{stream}.{room_durable}"),
+            format!("$JS.ACK.{stream}.{room_durable}.>"),
+            format!("$JS.API.STREAM.INFO.{stream}"),
+        ] {
+            add(
+                &mut entries,
+                Principal::DeliveryAuthority,
+                Operation::Publish,
+                subject,
+            );
+        }
+    }
     Ok(entries.into_iter().collect())
 }
 
@@ -425,13 +453,17 @@ pub fn bus_permissions(
         }
     }
 
-    let dead_stream = &account.streams().effect_dead;
-    for subject in [
-        format!("$JS.ACK.{dead_stream}.c_ckbus_dead.>"),
-        format!("$JS.API.CONSUMER.MSG.NEXT.{dead_stream}.c_ckbus_dead"),
-        format!("$JS.API.CONSUMER.INFO.{dead_stream}.c_ckbus_dead"),
+    for dead_stream in [
+        &account.streams().effect_dead,
+        &account.streams().delivery_dead,
     ] {
-        add(&mut entries, Principal::Bus, Operation::Publish, subject);
+        for subject in [
+            format!("$JS.ACK.{dead_stream}.c_ckbus_dead.>"),
+            format!("$JS.API.CONSUMER.MSG.NEXT.{dead_stream}.c_ckbus_dead"),
+            format!("$JS.API.CONSUMER.INFO.{dead_stream}.c_ckbus_dead"),
+        ] {
+            add(&mut entries, Principal::Bus, Operation::Publish, subject);
+        }
     }
 
     // Agent durable lifecycle: listing the durables, and purging an agent's
@@ -924,6 +956,75 @@ pub fn generate_permission_golden(
         });
     }
 
+    for principal in [Principal::Participant, Principal::FlowEngine]
+        .into_iter()
+        .chain(
+            EVENT_CONSUMERS
+                .iter()
+                .filter(|reader| {
+                    reader.module_id != fixture.delivery_authority_module
+                        && reader.module_id != fixture.module_id
+                })
+                .map(|reader| Principal::EventConsumer(reader.module_id)),
+        )
+    {
+        for subject in account
+            .inbox_bindings()
+            .into_iter()
+            .chain(account.core_work_bindings())
+            .chain([account.delivery_dead()])
+        {
+            refused.insert(RefusedEntry {
+                principal,
+                operation: Operation::Publish,
+                subject,
+                reason: "core-delivery-publish",
+            });
+        }
+        for stream in [&account.streams().inbox, &account.streams().core_work] {
+            for subject in [
+                format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_prefrontal-core"),
+                format!("$JS.API.CONSUMER.INFO.{stream}.m_prefrontal-core"),
+                format!("$JS.ACK.{stream}.m_prefrontal-core.>"),
+            ] {
+                refused.insert(RefusedEntry {
+                    principal,
+                    operation: Operation::Publish,
+                    subject,
+                    reason: "core-delivery-durable",
+                });
+            }
+        }
+    }
+    for principal in [
+        Principal::Participant,
+        Principal::FlowEngine,
+        Principal::DeliveryAuthority,
+    ]
+    .into_iter()
+    .chain(
+        EVENT_CONSUMERS
+            .iter()
+            .filter(|reader| {
+                reader.module_id != fixture.delivery_authority_module
+                    && reader.module_id != fixture.module_id
+            })
+            .map(|reader| Principal::EventConsumer(reader.module_id)),
+    ) {
+        let stream = &account.streams().delivery_dead;
+        for subject in [
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.c_ckbus_dead"),
+            format!("$JS.API.CONSUMER.INFO.{stream}.c_ckbus_dead"),
+            format!("$JS.ACK.{stream}.c_ckbus_dead.>"),
+        ] {
+            refused.insert(RefusedEntry {
+                principal,
+                operation: Operation::Publish,
+                subject,
+                reason: "bus-diagnostic-durable",
+            });
+        }
+    }
     let document = PermissionDocument {
         fixture,
         allows: allows.into_iter().collect(),
@@ -964,7 +1065,7 @@ pub fn validate_permission_file(contents: &str, account: &AccountNames) -> Resul
                 if !seen_entries.insert(line.to_owned()) {
                     return Err(file_error(line_number, "duplicate permission entry"));
                 }
-                for stream in expected_streams {
+                for &stream in &expected_streams {
                     if subject.split('.').any(|token| token == stream) {
                         expanded_streams.insert(stream.to_owned());
                     }

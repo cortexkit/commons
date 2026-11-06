@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0
+
+- Require a suitable server for every live test when `CK_REQUIRE_NATS_SERVER=1`;
+  otherwise all live tests share one explicit skip path if no server is available.
+  Linux CI installs checksum-verified nats-server 2.15.0 and requires those tests;
+  macOS and Windows retain optional-server behavior.
+- Verify Stream cursors on WorkQueue-retained streams with unlimited server
+  delivery, including ack, delayed nak, progress, term and delivery counts.
+- Exercise family-routed cursor terminal disposal through repeated crashes
+  after persistent dead-letter publication and before term; finite WorkQueue
+  binding behavior is unchanged.
+- Verify the 120-second EFFECT_DEAD / DELIVERY_DEAD duplicate window from
+  bus-naming's `DEAD_LETTER_DUPLICATE_WINDOW`. A longer crash gap may duplicate
+  a diagnostic, not the work; unlimited delivery keeps terminalization retryable.
+  Command relays retain the server default window; durable command-id acceptance
+  records checked before work prevent duplicate execution.
+- Adopt bus-naming 0.3 and bus-trait 0.3.1. No NATS method signature changes;
+  callers sharing naming types must update their direct bus-naming dependency
+  to 0.3 (construct specs through its constructors and add wildcard match arms).
+
 ## 0.3.1
 
 - Add `NatsConnection::close(deadline)`, which requests a connection-wide

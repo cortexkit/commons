@@ -30,6 +30,7 @@ pub use register::{
 };
 pub use stream::{DurableOwner, PublishReceipt, Stream, StreamCursor, StreamDelivery};
 pub use work_queue::{
-    effect_dead_subject, terminally_dispose, ClaimOutcome, DeadLetterRecord, DeliveryToken,
-    MaxDeliveriesExceeded, WorkItem, WorkQueue, DEAD_LETTER_REASON_MAX_DELIVERIES,
+    effect_dead_subject, terminally_dispose, terminally_dispose_cursor, ClaimOutcome,
+    DeadLetterRecord, DeliveryFamily, DeliveryToken, MaxDeliveriesExceeded, WorkItem, WorkQueue,
+    DEAD_LETTER_REASON_MAX_DELIVERIES,
 };

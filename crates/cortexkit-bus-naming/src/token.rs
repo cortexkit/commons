@@ -3,6 +3,7 @@ use std::fmt;
 
 /// The identity field being interpolated into a NATS name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TokenKind {
     Account,
     AgentId,
@@ -16,6 +17,9 @@ pub enum TokenKind {
     EventName,
     /// The `v{version}` token of a module event subject.
     EventVersion,
+    DeliveryToken,
+    InboxKind,
+    CoreWorkFamily,
 }
 
 impl TokenKind {
@@ -31,6 +35,9 @@ impl TokenKind {
             Self::RootProvider => "root_provider",
             Self::EventName => "event",
             Self::EventVersion => "event_version",
+            Self::DeliveryToken => "delivery_token",
+            Self::InboxKind => "inbox_kind",
+            Self::CoreWorkFamily => "core_work_family",
         }
     }
 }
@@ -174,6 +181,14 @@ pub fn validate_token(kind: TokenKind, token: &str) -> Result<(), NamingError> {
         TokenKind::CredentialPublic => return validate_credential_public(token),
         TokenKind::EventName => return validate_event_name(token),
         TokenKind::EventVersion => return validate_event_version(token).map(|_| ()),
+        TokenKind::InboxKind if !["head", "worker"].contains(&token) => {
+            return Err(NamingError::new(kind, token, "expected head or worker"));
+        }
+        TokenKind::CoreWorkFamily
+            if !["effect", "consult", "work", "campaign", "hire", "spec"].contains(&token) =>
+        {
+            return Err(NamingError::new(kind, token, "unknown core work family"));
+        }
         _ => {}
     }
 

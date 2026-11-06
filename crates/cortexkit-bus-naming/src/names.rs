@@ -4,8 +4,9 @@ use std::num::NonZeroU32;
 
 use crate::token::{validate_account_token, validate_token, NamingError, TokenKind};
 
-/// All six stream names owned by one account.
+/// All stream names owned by one account. Construct with [`Self::new`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StreamNames {
     pub room: String,
     pub wake: String,
@@ -14,17 +15,27 @@ pub struct StreamNames {
     pub effect_dead: String,
     /// Module events (`ck.{acct}.event.>`), read by the flow engine.
     pub event: String,
+    pub inbox: String,
+    pub core_work: String,
+    pub delivery_dead: String,
 }
 
 impl StreamNames {
-    pub fn all(&self) -> [&str; 6] {
-        [
+    pub fn new(account: &str) -> Result<Self, NamingError> {
+        Ok(AccountNames::derive(account)?.streams)
+    }
+
+    pub fn all(&self) -> Vec<&str> {
+        vec![
             &self.room,
             &self.wake,
             &self.peer,
             &self.effect,
             &self.effect_dead,
             &self.event,
+            &self.inbox,
+            &self.core_work,
+            &self.delivery_dead,
         ]
     }
 
@@ -76,6 +87,9 @@ impl AccountNames {
                 effect: format!("CK_{account_upper}_EFFECT"),
                 effect_dead: format!("CK_{account_upper}_EFFECT_DEAD"),
                 event: format!("CK_{account_upper}_EVENT"),
+                inbox: format!("CK_{account_upper}_INBOX"),
+                core_work: format!("CK_{account_upper}_CORE_WORK"),
+                delivery_dead: format!("CK_{account_upper}_DELIVERY_DEAD"),
             },
             buckets: BucketNames {
                 census: format!("CK_{account_upper}_CENSUS"),
@@ -177,6 +191,39 @@ impl AccountNames {
 
     pub fn effect_dead(&self) -> String {
         format!("ck.{}.effect.dead", self.account)
+    }
+
+    /// A pending inbox transition. Identity tokens are validated, never normalized.
+    pub fn inbox_ready(&self, kind: &str, token: &str) -> Result<String, NamingError> {
+        validate_token(TokenKind::InboxKind, kind)?;
+        validate_token(TokenKind::DeliveryToken, token)?;
+        Ok(format!("ck.{}.inbox.{kind}.{token}.ready", self.account))
+    }
+
+    pub fn inbox_bindings(&self) -> Vec<String> {
+        ["head", "worker"]
+            .map(|kind| format!("ck.{}.inbox.{kind}.*.ready", self.account))
+            .into()
+    }
+
+    /// A control command with a family from the closed allowlist.
+    pub fn core_work_run(&self, family: &str, token: &str) -> Result<String, NamingError> {
+        validate_token(TokenKind::CoreWorkFamily, family)?;
+        validate_token(TokenKind::DeliveryToken, token)?;
+        Ok(format!(
+            "ck.{}.core_work.{family}.{token}.run",
+            self.account
+        ))
+    }
+
+    pub fn core_work_bindings(&self) -> Vec<String> {
+        ["effect", "consult", "work", "campaign", "hire", "spec"]
+            .map(|family| format!("ck.{}.core_work.{family}.*.run", self.account))
+            .into()
+    }
+
+    pub fn delivery_dead(&self) -> String {
+        format!("ck.{}.delivery.dead", self.account)
     }
 
     /// The subject one module publishes one event on:

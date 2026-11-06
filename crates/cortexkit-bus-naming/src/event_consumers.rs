@@ -124,6 +124,79 @@ pub struct ModuleEventConsumerSpec {
     pub max_ack_pending: i64,
 }
 
+/// Bootstrap policy for reliable command readers and bounded dead-letter diagnostics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct DeliveryConsumerSpec {
+    pub consumer: ConsumerSpec,
+    pub pull: bool,
+    pub ack_policy: AckPolicy,
+    pub deliver_policy: DeliverPolicy,
+    pub ack_wait: Duration,
+    /// -1 is unlimited: the application owns terminal disposition.
+    pub max_deliver: i64,
+    pub max_ack_pending: i64,
+}
+
+/// Core owns distinct module durables on INBOX and CORE_WORK. Diagnostics use
+/// `c_ckbus_dead` on each dead-letter stream, never an agent stream.
+pub fn delivery_consumer_specs(
+    account: &AccountNames,
+) -> Result<Vec<DeliveryConsumerSpec>, crate::LimitError> {
+    let names = account.streams();
+    let specs = [
+        (
+            names.inbox.clone(),
+            "m_prefrontal-core",
+            account.inbox_bindings(),
+            1,
+        ),
+        (
+            names.core_work.clone(),
+            "m_prefrontal-core",
+            account.core_work_bindings(),
+            1,
+        ),
+        (
+            names.effect_dead.clone(),
+            "c_ckbus_dead",
+            vec![account.effect_dead()],
+            1_000,
+        ),
+        (
+            names.delivery_dead.clone(),
+            "c_ckbus_dead",
+            vec![account.delivery_dead()],
+            1_000,
+        ),
+    ]
+    .into_iter()
+    .map(
+        |(stream, durable, filter_subjects, max_ack_pending)| DeliveryConsumerSpec {
+            consumer: ConsumerSpec {
+                stream,
+                durable: durable.into(),
+                filter_subjects,
+            },
+            pull: true,
+            ack_policy: AckPolicy::Explicit,
+            deliver_policy: DeliverPolicy::All,
+            ack_wait: Duration::from_secs(30),
+            max_deliver: -1,
+            max_ack_pending,
+        },
+    )
+    .collect::<Vec<_>>();
+    crate::validate_consumers(
+        &specs
+            .iter()
+            .map(|spec| spec.consumer.clone())
+            .collect::<Vec<_>>(),
+        &crate::shipped_streams(account),
+    )?;
+    Ok(specs)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventConsumerError {
     Naming(NamingError),

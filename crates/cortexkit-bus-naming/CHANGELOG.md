@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.3.0
+
+- Add validated INBOX and closed-family CORE_WORK command subjects, streams and
+  core-only module durable grants, plus DELIVERY_DEAD and diagnostic consumers
+  on both dead-letter streams.
+- Commands use WorkQueue retention, discard-new, no age eviction, 256 MiB and
+  a 16 KiB message cap. EFFECT keeps its retention and accepts an in-place age
+  update; ROOM, WAKE, PEER, EVENT and EFFECT_DEAD policies are unchanged.
+- Require body pins until terminal business disposition for no-age queues;
+  finite retention validation now refuses those queues. Add bootstrap consumer
+  policy and cross-consumer filter/ownership validation.
+- Make the existing server-default dead-letter duplicate window explicit at
+  120 seconds (`DEAD_LETTER_DUPLICATE_WINDOW`). `StreamSpec::duplicate_window`
+  is `Some` only for EFFECT_DEAD and DELIVERY_DEAD; `None` means omit the wire
+  property and use the server default, never send zero. Command relays use that
+  default window and require durable command-id acceptance records checked before
+  work for lifetime protection against duplicate execution.
+- Breaking: `StreamKind`, `TokenKind` and `LimitError` gain variants and become
+  non-exhaustive; add a wildcard arm to downstream matches.
+- Breaking: `StreamNames` gains fields and becomes non-exhaustive; use
+  `StreamNames::new(account)` or `AccountNames::derive(account)?.streams()`.
+  `StreamNames::all()` now returns `Vec<&str>`; consume its iterator rather than
+  assuming a six-element array.
+- Breaking: `StreamSpec` gains `max_message_size` and `duplicate_window` and becomes non-exhaustive;
+  replace struct literals with `StreamSpec::new(kind, name, subjects)` followed
+  by explicit policy fields, or use `shipped_streams` for normative policies.
+
 ## 0.2.10
 
 - Add `cerebellum` as a reader of the runners' turn events through

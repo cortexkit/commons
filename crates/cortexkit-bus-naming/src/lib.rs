@@ -7,8 +7,9 @@ mod names;
 mod token;
 
 pub use event_consumers::{
-    event_consumer_specs, flow_engine_consumer_spec, AckPolicy, DeliverPolicy, EventConsumer,
-    EventConsumerError, ModuleEventConsumerSpec, EVENT_CONSUMERS,
+    delivery_consumer_specs, event_consumer_specs, flow_engine_consumer_spec, AckPolicy,
+    DeliverPolicy, DeliveryConsumerSpec, EventConsumer, EventConsumerError,
+    ModuleEventConsumerSpec, EVENT_CONSUMERS,
 };
 pub use grants::{
     bus_permissions, delivery_authority_permissions, flow_engine_permissions,
@@ -17,8 +18,9 @@ pub use grants::{
     Principal, RefusedEntry, PINNED_GOLDEN_FIXTURE,
 };
 pub use limits::{
-    shipped_streams, validate_consumer, validate_store_retention, validate_streams, ConsumerSpec,
-    DiscardPolicy, LimitError, StreamKind, StreamSpec, GIB, HOUR, MIB,
+    shipped_streams, validate_body_retention, validate_consumer, validate_consumers,
+    validate_store_retention, validate_streams, BodyRetention, ConsumerSpec, DiscardPolicy,
+    LimitError, StreamKind, StreamSpec, DEAD_LETTER_DUPLICATE_WINDOW, GIB, HOUR, MIB,
 };
 pub use names::{
     root_credential_id, validate_tenancy_name, AccountNames, BucketNames, NamingExemption,

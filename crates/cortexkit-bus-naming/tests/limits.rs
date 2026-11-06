@@ -86,7 +86,7 @@ fn store_retention_cannot_be_shorter_than_stream_max_age() {
 }
 
 #[test]
-fn six_shipped_bindings_validate_and_include_the_event_stream() {
+fn shipped_bindings_validate_and_include_the_event_and_delivery_streams() {
     let names = AccountNames::derive("box_limits").unwrap();
     let streams = shipped_streams(&names);
     assert_eq!(
@@ -98,6 +98,9 @@ fn six_shipped_bindings_validate_and_include_the_event_stream() {
             StreamKind::Effect,
             StreamKind::EffectDead,
             StreamKind::Event,
+            StreamKind::Inbox,
+            StreamKind::CoreWork,
+            StreamKind::DeliveryDead,
         ]
     );
     validate_streams(&streams).unwrap();
@@ -107,20 +110,22 @@ fn six_shipped_bindings_validate_and_include_the_event_stream() {
 fn only_the_event_stream_caps_messages_per_subject() {
     let names = AccountNames::derive("box_limits").unwrap();
     let streams = names.streams();
-    let spec =
-        |kind, name: &str, subject: String, hours: u32, max_bytes, discard, queue| StreamSpec {
-            kind,
-            name: name.to_owned(),
-            subjects: vec![subject],
-            max_age: HOUR * hours,
-            max_bytes,
-            discard,
-            work_queue: queue,
-            max_msgs_per_subject: None,
-        };
-    // The five older streams keep exactly the values they had before the event
-    // stream existed, with no per-subject cap, so ck-bus emits the same
-    // configuration for them as before.
+    let spec = |kind, name: &str, subject: String, hours: u32, max_bytes, discard, queue| {
+        let mut spec = StreamSpec::new(kind, name.to_owned(), vec![subject]);
+        spec.max_age = HOUR * hours;
+        spec.max_bytes = max_bytes;
+        spec.discard = discard;
+        spec.work_queue = queue;
+        if kind == StreamKind::Effect {
+            spec.max_message_size = Some(16 * 1024);
+        }
+        if kind == StreamKind::EffectDead {
+            spec.duplicate_window = Some(cortexkit_bus_naming::DEAD_LETTER_DUPLICATE_WINDOW);
+        }
+        spec
+    };
+    // Only EFFECT changes among the older delivery streams: pending commands
+    // no longer age out, and their small envelopes have a message-size cap.
     let mut expected = vec![
         spec(
             StreamKind::Room,
@@ -153,7 +158,7 @@ fn only_the_event_stream_caps_messages_per_subject() {
             StreamKind::Effect,
             &streams.effect,
             names.effect_binding(),
-            24,
+            0,
             256 * MIB,
             DiscardPolicy::New,
             true,
@@ -182,7 +187,7 @@ fn only_the_event_stream_caps_messages_per_subject() {
     event.max_msgs_per_subject = Some(100_000);
     expected.push(event);
 
-    assert_eq!(shipped_streams(&names), expected);
+    assert_eq!(&shipped_streams(&names)[..6], expected);
 }
 
 #[test]

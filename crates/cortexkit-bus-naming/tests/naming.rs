@@ -284,7 +284,7 @@ fn the_event_stream_is_the_sixth_stream_and_holds_module_durables() {
     let names = AccountNames::derive("box_events").unwrap();
     let streams = names.streams();
     assert_eq!(streams.event, "CK_BOX_EVENTS_EVENT");
-    assert_eq!(streams.all().len(), 6);
+    assert_eq!(streams.all().len(), 9);
     assert_eq!(streams.all()[5], streams.event);
     assert!(!streams.agent_streams().contains(&streams.event.as_str()));
 

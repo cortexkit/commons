@@ -12,8 +12,9 @@ use cortexkit_bus_naming::{
     delivery_authority_permissions, participant_permissions, AccountNames, AllowEntry, Operation,
 };
 use cortexkit_bus_trait::{
-    terminally_dispose, BusError, ClaimOutcome, ContentDigest, DeadLetterRecord, DurableOwner,
-    Headers, Register, RegisterUpdate, RegisterWatch, Stream, StreamCursor, WatchEvent, WorkQueue,
+    terminally_dispose, terminally_dispose_cursor, BusError, ClaimOutcome, ContentDigest,
+    DeadLetterRecord, DeliveryFamily, DurableOwner, Headers, Register, RegisterUpdate,
+    RegisterWatch, Stream, StreamCursor, StreamDelivery, WatchEvent, WorkQueue,
 };
 use tempfile::TempDir;
 use tokio::net::TcpStream;
@@ -56,19 +57,29 @@ impl TestServer {
     }
 
     async fn start(config: Option<&RenderConfig<'_>>) -> Option<Self> {
+        let required = env::var("CK_REQUIRE_NATS_SERVER").as_deref() == Ok("1");
         let binary = env::var_os("CK_NATS_SERVER_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("nats-server"));
         let version = match Command::new(&binary).arg("--version").output() {
-            Ok(output) => String::from_utf8_lossy(&output.stdout).into_owned(),
-            Err(_) => {
-                eprintln!("nats-server-absent: CK_NATS_SERVER_BIN/PATH has no nats-server");
-                return None;
+            Ok(output) if output.status.success() => {
+                String::from_utf8_lossy(&output.stdout).into_owned()
+            }
+            Ok(output) => {
+                return Self::unavailable(
+                    required,
+                    &format!("{} --version exited {}", binary.display(), output.status),
+                );
+            }
+            Err(error) => {
+                return Self::unavailable(required, &format!("{}: {error}", binary.display()));
             }
         };
         if !server_at_least_2_10(&version) {
-            eprintln!("nats-server-too-old: observed {}", version.trim());
-            return None;
+            return Self::unavailable(
+                required,
+                &format!("nats-server-too-old: observed {}", version.trim()),
+            );
         }
 
         let listener = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
@@ -113,6 +124,21 @@ impl TestServer {
             url,
         })
     }
+
+    fn unavailable(required: bool, reason: &str) -> Option<Self> {
+        assert!(
+            !required,
+            "CK_REQUIRE_NATS_SERVER=1 but no suitable nats-server >= 2.10 is available: {reason}"
+        );
+        eprintln!("nats-server-absent: skipped ({reason})");
+        None
+    }
+}
+
+#[test]
+#[should_panic(expected = "CK_REQUIRE_NATS_SERVER=1")]
+fn unavailable_required_server_panics_instead_of_skipping() {
+    let _ = TestServer::unavailable(true, "server unavailable in this fixture");
 }
 
 fn permission_config(port: u16, directory: &TempDir) -> String {
@@ -229,7 +255,6 @@ fn digest(value: &str) -> ContentDigest {
 #[tokio::test]
 async fn publish_reports_jetstream_duplicates() {
     let Some(server) = TestServer::open().await else {
-        eprintln!("publish_reports_jetstream_duplicates: skipped (nats-server unavailable)");
         return;
     };
     let admin = connect(&server.url, ADMIN_PUBLIC).await;
@@ -1143,6 +1168,414 @@ async fn close_drains_and_every_clone_and_subscription_ends() {
             .await
             .expect("close again"),
         CloseOutcome::Closed
+    );
+}
+
+/// Provisions only the reliable command and diagnostic streams under test.
+async fn reliable_delivery_topology(admin: &NatsConnection) {
+    use cortexkit_bus_naming::{delivery_consumer_specs, shipped_streams, StreamKind};
+    use futures_util::StreamExt;
+    let names = AccountNames::derive("box").unwrap();
+    let mut requests = admin.subscribe("$JS.API.STREAM.CREATE.*").await.unwrap();
+    for spec in shipped_streams(&names).into_iter().filter(|spec| {
+        matches!(
+            spec.kind,
+            StreamKind::Effect
+                | StreamKind::Inbox
+                | StreamKind::CoreWork
+                | StreamKind::EffectDead
+                | StreamKind::DeliveryDead
+        )
+    }) {
+        let mut config = stream::Config {
+            name: spec.name,
+            subjects: spec.subjects,
+            retention: if spec.work_queue {
+                stream::RetentionPolicy::WorkQueue
+            } else {
+                stream::RetentionPolicy::Limits
+            },
+            discard: if spec.discard == cortexkit_bus_naming::DiscardPolicy::New {
+                stream::DiscardPolicy::New
+            } else {
+                stream::DiscardPolicy::Old
+            },
+            max_age: spec.max_age,
+            max_bytes: spec.max_bytes as i64,
+            max_message_size: spec.max_message_size.unwrap_or(-1),
+            storage: stream::StorageType::File,
+            ..Default::default()
+        };
+        if let Some(window) = spec.duplicate_window {
+            config.duplicate_window = window;
+        }
+        let mut created = admin
+            .jetstream()
+            .create_stream(config)
+            .await
+            .expect("provision reliable stream");
+        let request = tokio::time::timeout(Duration::from_secs(2), requests.next())
+            .await
+            .unwrap()
+            .expect("observed stream configuration request");
+        let json = std::str::from_utf8(&request.payload).unwrap();
+        assert_eq!(
+            json.contains("\"duplicate_window\""),
+            spec.duplicate_window.is_some(),
+            "an unset duplicate window must be omitted on the wire, not sent as zero"
+        );
+        if let Some(window) = spec.duplicate_window {
+            assert_eq!(window, Duration::from_secs(120));
+            assert_eq!(
+                created.info().await.unwrap().config.duplicate_window,
+                window
+            );
+        }
+    }
+    for spec in delivery_consumer_specs(&names).unwrap() {
+        admin
+            .jetstream()
+            .get_stream(&spec.consumer.stream)
+            .await
+            .unwrap()
+            .create_consumer(pull::Config {
+                durable_name: Some(spec.consumer.durable),
+                filter_subjects: spec.consumer.filter_subjects,
+                ack_policy: AckPolicy::Explicit,
+                ack_wait: Duration::from_millis(150),
+                max_deliver: spec.max_deliver,
+                max_ack_pending: spec.max_ack_pending,
+                ..Default::default()
+            })
+            .await
+            .expect("provision delivery durable");
+    }
+    admin
+        .jetstream()
+        .get_stream("CK_BOX_EFFECT")
+        .await
+        .unwrap()
+        .create_consumer(pull::Config {
+            durable_name: Some("c_agent".into()),
+            filter_subject: "ck.box.effect.agent.*.intent".into(),
+            ack_policy: AckPolicy::Explicit,
+            ack_wait: Duration::from_millis(150),
+            max_deliver: -1,
+            max_ack_pending: 1,
+            ..Default::default()
+        })
+        .await
+        .expect("provision unlimited effect durable");
+}
+
+async fn reliable_delivery_message_count(admin: &NatsConnection, name: &str) -> u64 {
+    admin
+        .jetstream()
+        .get_stream(name)
+        .await
+        .unwrap()
+        .info()
+        .await
+        .unwrap()
+        .state
+        .messages
+}
+
+#[tokio::test]
+async fn reliable_delivery_work_queue_cursor_acks_delayed_naks_terms_and_counts() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    reliable_delivery_topology(&admin).await;
+    let stream = admin.stream("CK_BOX_INBOX");
+    for id in ["ack", "retry"] {
+        let receipt = stream
+            .publish(
+                "ck.box.inbox.head.target.ready",
+                id,
+                digest(id),
+                Headers::new(),
+            )
+            .await
+            .unwrap();
+        assert!(!receipt.duplicate());
+    }
+    let mut cursor = stream
+        .consumer(DurableOwner::Module("prefrontal-core"))
+        .await
+        .unwrap();
+    let first = next_delivery(&mut cursor).await;
+    assert_eq!(first.message.id, "ack");
+    assert_eq!(first.delivery_count, 1);
+    assert!(
+        cursor.next().await.is_err(),
+        "one cursor cannot hold two in-flight messages"
+    );
+    cursor.ack().await.unwrap();
+    let second = next_delivery(&mut cursor).await;
+    assert_eq!(second.message.id, "retry");
+    assert_eq!(second.delivery_count, 1);
+    cursor.in_progress().await.unwrap();
+    let nacked_at = Instant::now();
+    let delay = Duration::from_millis(250);
+    cursor.nak(delay).await.unwrap();
+    let retry = next_delivery(&mut cursor).await;
+    assert!(
+        nacked_at.elapsed() >= delay,
+        "delayed nak redelivered early"
+    );
+    assert_eq!(retry.stream_seq, second.stream_seq);
+    assert_eq!(retry.delivery_count, 2);
+    cursor
+        .term(Some("terminal_business_disposition"))
+        .await
+        .unwrap();
+    assert!(cursor.next().await.unwrap().is_none());
+    assert_eq!(
+        reliable_delivery_message_count(&admin, "CK_BOX_INBOX").await,
+        0
+    );
+    let info = admin
+        .jetstream()
+        .get_consumer_from_stream::<pull::Config, _, _>("m_prefrontal-core", "CK_BOX_INBOX")
+        .await
+        .unwrap();
+    assert_eq!(info.cached_info().config.max_deliver, -1);
+    assert_eq!(info.cached_info().num_ack_pending, 0);
+}
+
+struct CrashBeforeCursorTerm(crate::NatsStreamCursor);
+
+#[async_trait::async_trait]
+impl StreamCursor for CrashBeforeCursorTerm {
+    async fn next(&mut self) -> cortexkit_bus_trait::BusResult<Option<StreamDelivery>> {
+        self.0.next().await
+    }
+    async fn ack(&mut self) -> cortexkit_bus_trait::BusResult<()> {
+        self.0.ack().await
+    }
+    async fn nak(&mut self, delay: Duration) -> cortexkit_bus_trait::BusResult<()> {
+        self.0.nak(delay).await
+    }
+    async fn in_progress(&mut self) -> cortexkit_bus_trait::BusResult<()> {
+        self.0.in_progress().await
+    }
+    async fn term(&mut self, _: Option<&str>) -> cortexkit_bus_trait::BusResult<()> {
+        Err(BusError::unavailable(
+            "simulated crash after persistent publish, before term",
+        ))
+    }
+}
+
+#[tokio::test]
+async fn reliable_delivery_repeated_disposal_crashes_never_strand_a_command() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    reliable_delivery_topology(&admin).await;
+    let inbox = admin.stream("CK_BOX_INBOX");
+    let dead = admin.stream("CK_BOX_DELIVERY_DEAD");
+    let published = inbox
+        .publish(
+            "ck.box.inbox.worker.target.ready",
+            "terminal-1",
+            digest("body"),
+            Headers::new(),
+        )
+        .await
+        .unwrap();
+    assert!(!published.duplicate());
+    // Model the caller's persisted terminal receipt, checked before work on
+    // replay. The helper has no business callback and can only publish/term.
+    let mut terminal_receipt = false;
+    let mut work_invocations = 0;
+    for expected in 1..=6 {
+        let mut cursor = inbox
+            .consumer(DurableOwner::Module("prefrontal-core"))
+            .await
+            .unwrap();
+        let delivery = next_delivery(&mut cursor).await;
+        assert_eq!(delivery.delivery_count, expected);
+        if !terminal_receipt {
+            work_invocations += 1;
+            terminal_receipt = true;
+        }
+        let mut crashing = CrashBeforeCursorTerm(cursor);
+        let error = terminally_dispose_cursor(
+            &dead,
+            &mut crashing,
+            "box",
+            DeliveryFamily::Inbox,
+            &delivery,
+            "transport_exhausted",
+            digest("terminal-record"),
+        )
+        .await
+        .expect_err("crash point must be reached");
+        assert!(error.to_string().contains("simulated crash"));
+        assert_eq!(
+            reliable_delivery_message_count(&admin, "CK_BOX_DELIVERY_DEAD").await,
+            1,
+            "the diagnostic must be persistent before term, with duplicate retries suppressed"
+        );
+        drop(crashing);
+    }
+    let mut cursor = inbox
+        .consumer(DurableOwner::Module("prefrontal-core"))
+        .await
+        .unwrap();
+    let delivery = next_delivery(&mut cursor).await;
+    assert_eq!(delivery.delivery_count, 7);
+    let receipt = terminally_dispose_cursor(
+        &dead,
+        &mut cursor,
+        "box",
+        DeliveryFamily::Inbox,
+        &delivery,
+        "transport_exhausted",
+        digest("terminal-record"),
+    )
+    .await
+    .unwrap();
+    assert!(receipt.duplicate());
+    assert_eq!(receipt.stream_sequence(), 1);
+    assert_eq!(work_invocations, 1);
+    assert!(cursor.next().await.unwrap().is_none());
+    assert_eq!(
+        reliable_delivery_message_count(&admin, "CK_BOX_INBOX").await,
+        0
+    );
+    assert_eq!(
+        reliable_delivery_message_count(&admin, "CK_BOX_DELIVERY_DEAD").await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn reliable_delivery_routes_effect_and_inbox_dead_letters_separately() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    reliable_delivery_topology(&admin).await;
+    for (source, subject, owner, family, destination, expected_subject) in [
+        (
+            "CK_BOX_EFFECT",
+            "ck.box.effect.agent.session.intent",
+            DurableOwner::Agent("agent"),
+            DeliveryFamily::Effect,
+            "CK_BOX_EFFECT_DEAD",
+            "ck.box.effect.dead",
+        ),
+        (
+            "CK_BOX_INBOX",
+            "ck.box.inbox.head.target.ready",
+            DurableOwner::Module("prefrontal-core"),
+            DeliveryFamily::Inbox,
+            "CK_BOX_DELIVERY_DEAD",
+            "ck.box.delivery.dead",
+        ),
+    ] {
+        let source = admin.stream(source);
+        let published = source
+            .publish(subject, "same-source-id", digest("body"), Headers::new())
+            .await
+            .unwrap();
+        assert!(!published.duplicate());
+        let mut cursor = source.consumer(owner).await.unwrap();
+        let delivery = next_delivery(&mut cursor).await;
+        let receipt = terminally_dispose_cursor(
+            &admin.stream(destination),
+            &mut cursor,
+            "box",
+            family,
+            &delivery,
+            "terminal",
+            digest("record"),
+        )
+        .await
+        .unwrap();
+        assert!(!receipt.duplicate());
+        let mut diagnostic = admin
+            .stream(destination)
+            .consumer(DurableOwner::Agent("ckbus_dead"))
+            .await
+            .unwrap();
+        let record = next_delivery(&mut diagnostic).await;
+        assert_eq!(record.message.subject, expected_subject);
+        assert_eq!(record.message.headers["original-subject"], subject);
+        assert_eq!(record.message.headers["message-id"], "same-source-id");
+        diagnostic.ack().await.unwrap();
+    }
+    assert_eq!(
+        reliable_delivery_message_count(&admin, "CK_BOX_EFFECT_DEAD").await,
+        1
+    );
+    assert_eq!(
+        reliable_delivery_message_count(&admin, "CK_BOX_DELIVERY_DEAD").await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn reliable_delivery_effect_max_age_is_updated_without_recreation() {
+    let Some(server) = TestServer::open().await else {
+        return;
+    };
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    let old = stream::Config {
+        name: "CK_BOX_EFFECT".into(),
+        subjects: vec!["ck.box.effect.*.*.intent".into()],
+        retention: stream::RetentionPolicy::WorkQueue,
+        discard: stream::DiscardPolicy::New,
+        max_age: Duration::from_secs(86_400),
+        max_bytes: 256 * 1024 * 1024,
+        storage: stream::StorageType::File,
+        ..Default::default()
+    };
+    admin.jetstream().create_stream(old.clone()).await.unwrap();
+    let source = admin.stream("CK_BOX_EFFECT");
+    let receipt = source
+        .publish(
+            "ck.box.effect.agent.session.intent",
+            "pending",
+            digest("body"),
+            Headers::new(),
+        )
+        .await
+        .unwrap();
+    let spec = cortexkit_bus_naming::shipped_streams(&AccountNames::derive("box").unwrap())
+        .into_iter()
+        .find(|spec| spec.kind == cortexkit_bus_naming::StreamKind::Effect)
+        .unwrap();
+    let updated = admin
+        .jetstream()
+        .update_stream(stream::Config {
+            max_age: spec.max_age,
+            max_message_size: spec.max_message_size.unwrap(),
+            ..old
+        })
+        .await
+        .unwrap();
+    assert_eq!(updated.config.retention, stream::RetentionPolicy::WorkQueue);
+    assert_eq!(updated.config.max_age, Duration::ZERO);
+    assert_eq!(updated.config.max_message_size, 16_384);
+    assert_eq!(updated.state.messages, 1);
+    assert_eq!(updated.state.first_sequence, receipt.stream_sequence());
+    let oversized = Headers::from([("body".into(), "x".repeat(16_384))]);
+    assert!(
+        source
+            .publish(
+                "ck.box.effect.agent.session.intent",
+                "oversized",
+                digest("large"),
+                oversized
+            )
+            .await
+            .is_err(),
+        "the broker enforces the command envelope cap"
     );
 }
 

@@ -70,6 +70,22 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: bash crates/cortexkit-compaction-view-wasm/build.sh
 
+      # One OS proves broker semantics; macOS and Windows keep skipping live
+      # NATS tests when no server is installed.
+      - name: Install pinned NATS server
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/nats-server-v2.15.0-linux-amd64.tar.gz"
+          curl --fail --location --retry 3 \
+            https://github.com/nats-io/nats-server/releases/download/v2.15.0/nats-server-v2.15.0-linux-amd64.tar.gz \
+            --output "$archive"
+          printf '%s  %s\n' '5d2c51caca950333aba84911df7d377f826f3a59ec36061c6539105084f65c92' "$archive" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          echo "CK_NATS_SERVER_BIN=$RUNNER_TEMP/nats-server-v2.15.0-linux-amd64/nats-server" >> "$GITHUB_ENV"
+          echo 'CK_REQUIRE_NATS_SERVER=1' >> "$GITHUB_ENV"
+
       - name: Test
         run: cargo test --workspace --all-targets --locked
 

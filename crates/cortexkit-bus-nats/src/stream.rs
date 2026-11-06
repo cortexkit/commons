@@ -67,6 +67,8 @@ impl Stream for NatsStream {
         Ok(PublishReceipt::new(ack.sequence, ack.duplicate))
     }
 
+    // Binding is independent of retention: WorkQueue streams may use this
+    // cursor with unlimited server delivery and application-owned termination.
     async fn consumer(&self, owner: DurableOwner<'_>) -> BusResult<Self::Cursor> {
         let durable = durable_name(owner)?;
         let mut events = self.connection.event_receiver();

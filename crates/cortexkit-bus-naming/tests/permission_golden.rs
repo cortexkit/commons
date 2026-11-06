@@ -193,10 +193,10 @@ fn participants_read_any_agent_durable_but_publish_no_workload() {
 }
 
 /// The delivery authority's grant is a participant's plus exactly: publish on
-/// the three agent stream bindings and the ROOM binding, and pull, ack and
-/// info on its own ROOM durable `m_{module_id}` with stream info on ROOM.
+/// the workload bindings and delivery dead letters, plus pull, ack, consumer
+/// info and stream info on its own ROOM, INBOX and CORE_WORK durables.
 #[test]
-fn the_delivery_authority_adds_the_workload_bindings_and_its_room_durable_only() {
+fn the_delivery_authority_adds_only_workload_bindings_and_its_module_durables() {
     use cortexkit_bus_naming::{delivery_authority_permissions, participant_permissions};
     use std::collections::BTreeSet;
     let account = AccountNames::derive(PINNED_GOLDEN_FIXTURE.account).unwrap();
@@ -218,8 +218,11 @@ fn the_delivery_authority_adds_the_workload_bindings_and_its_room_durable_only()
     assert!(participant.is_subset(&authority));
     let extra = authority
         .difference(&participant)
-        .map(|(operation, subject)| (operation.as_str(), subject.as_str()))
-        .collect::<Vec<_>>();
+        .map(|(operation, subject)| {
+            assert_eq!(operation.as_str(), "publish");
+            subject.clone()
+        })
+        .collect::<BTreeSet<_>>();
     let (wake, peer, effect, room) = (
         account.wake_binding(),
         account.peer_binding(),
@@ -233,19 +236,28 @@ fn the_delivery_authority_adds_the_workload_bindings_and_its_room_durable_only()
         format!("$JS.API.CONSUMER.MSG.NEXT.{room_stream}.m_ckcore"),
         format!("$JS.API.STREAM.INFO.{room_stream}"),
     );
-    assert_eq!(
-        extra,
-        vec![
-            ("publish", ack.as_str()),
-            ("publish", info.as_str()),
-            ("publish", next.as_str()),
-            ("publish", stream_info.as_str()),
-            ("publish", effect.as_str()),
-            ("publish", peer.as_str()),
-            ("publish", room.as_str()),
-            ("publish", wake.as_str()),
-        ]
-    );
+    let mut expected = BTreeSet::from([
+        ack,
+        info,
+        next,
+        stream_info,
+        effect,
+        peer,
+        room,
+        wake,
+        account.delivery_dead(),
+    ]);
+    expected.extend(account.inbox_bindings());
+    expected.extend(account.core_work_bindings());
+    for stream in [&account.streams().inbox, &account.streams().core_work] {
+        expected.extend([
+            format!("$JS.ACK.{stream}.m_ckcore.>"),
+            format!("$JS.API.CONSUMER.INFO.{stream}.m_ckcore"),
+            format!("$JS.API.CONSUMER.MSG.NEXT.{stream}.m_ckcore"),
+            format!("$JS.API.STREAM.INFO.{stream}"),
+        ]);
+    }
+    assert_eq!(extra, expected);
 }
 
 #[test]

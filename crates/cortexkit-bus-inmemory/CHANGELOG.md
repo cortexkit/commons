@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- Adopt bus-naming 0.3 and bus-trait 0.3.1 to keep workspace backend dependencies
+  aligned. No breaking public items or backend behavior changes; callers using
+  naming directly should update that dependency to 0.3 and use its constructors.
+
 ## 0.3.1
 
 - Use a bus-local simulated delivery clock in the in-progress conformance probe,
