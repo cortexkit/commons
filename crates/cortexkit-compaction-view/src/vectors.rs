@@ -52,7 +52,7 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
     ),
     (
         "first_change",
-        "{before, after}: where the second render plan first differs from the first",
+        "{before, after}: two render plans of the same transcript; where `after` first differs from `before`",
     ),
     (
         "check_rules",

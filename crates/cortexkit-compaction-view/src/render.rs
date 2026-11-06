@@ -869,9 +869,14 @@ pub fn base64_decoded_len(data: &str) -> Option<u64> {
 
 /// Where one render plan first differs from another, both planned over the
 /// same transcript: typically the plan of the view a runner applies now and
-/// the plan of a newer view. Items count in render order, so item 0 is the
-/// request's first message; whatever a provider has cached before the
-/// differing item stays valid.
+/// the plan of a newer view.
+///
+/// An item is one element of [`RenderPlan::items`]: the messages the view
+/// inserts at the start, then the transcript entries in transcript order.
+/// `item` is its zero-based index there, so item 0 is the first message of
+/// the request after the system text and tools. A provider's prompt cache
+/// for everything before the differing item still matches a request
+/// rendered from the newer plan.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "at", rename_all = "snake_case")]
 pub enum FirstChange {
@@ -879,21 +884,23 @@ pub enum FirstChange {
     Unchanged,
     /// The first differing item is a message the newer plan inserts.
     Insert { item: u64, id: String },
-    /// The first differing item is a transcript entry in the newer plan.
+    /// The first differing item is a transcript entry in the newer plan,
+    /// named by its entry number and message id.
     Entry {
         item: u64,
         ordinal: u64,
         mid: String,
     },
     /// Every item both plans have is the same, and one plan has more items
-    /// after them: entries appended, or trailing entries left out. `item` is
-    /// where the shorter plan ends.
+    /// after them: entries appended (the newer plan is longer) or trailing
+    /// entries left out (it is shorter). `item` is the index just past the
+    /// shorter plan's last item.
     End { item: u64 },
 }
 
 impl FirstChange {
-    /// The render-order position of the first difference, or `None` when
-    /// nothing differs.
+    /// The index in [`RenderPlan::items`] where the plans first differ, or
+    /// `None` when nothing differs.
     pub fn item(&self) -> Option<u64> {
         match self {
             FirstChange::Unchanged => None,
@@ -903,19 +910,21 @@ impl FirstChange {
         }
     }
 
-    /// Whether the difference starts at the request's first message. A
-    /// request rendered from the newer plan then shares no cached message
-    /// with the earlier one, so changing what comes before the messages (the
-    /// system text or the tool list) costs only those bytes themselves.
+    /// Whether the difference starts at the request's first message. Then a
+    /// request rendered from the newer plan already reuses no cached message,
+    /// so a runner may also change what comes before the messages (the system
+    /// text or the tool list) at no further cache cost: the provider rereads
+    /// only those bytes on top of the messages it rereads anyway.
     pub fn from_first_message(&self) -> bool {
         self.item() == Some(0)
     }
 }
 
 /// Compare two render plans of the same transcript item by item and return
-/// where `after` first differs from `before`. Plan items carry everything a
-/// runner renders from (inserted texts and images, kept parts, replaced
-/// fields, rides), so items that compare equal render the same bytes.
+/// where `after` first differs from `before`. A plan item holds everything a
+/// runner renders that message from: inserted texts and images, the parts
+/// it keeps, replaced fields, and the module sends that ride a tool result.
+/// So two items that compare equal render the same bytes.
 pub fn first_change(before: &RenderPlan, after: &RenderPlan) -> FirstChange {
     let shared = before.items.len().min(after.items.len());
     for (index, (old, new)) in before.items.iter().zip(&after.items).enumerate() {

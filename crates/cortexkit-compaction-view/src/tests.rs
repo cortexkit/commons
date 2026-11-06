@@ -832,7 +832,8 @@ fn a_signed_text_part_is_bound_like_signed_reasoning() {
     assert!(invalid.contains(&("u2".to_owned(), "t3".to_owned())));
 }
 
-/// Two inserted head messages, `m0` and `m1`, with the given texts.
+/// Edits inserting two user messages at the start, with ids `m0` and `m1` and
+/// the given texts, the way a compaction provider places its history.
 fn head(m0: &str, m1: &str) -> Vec<Edit> {
     [("m0", m0), ("m1", m1)]
         .into_iter()
@@ -856,7 +857,7 @@ fn first_change_names_the_first_item_a_newer_plan_renders_differently() {
 
     assert_eq!(first_change(&current, &current), FirstChange::Unchanged);
 
-    // A new m[0] changes the request's first message.
+    // Changing m0's text changes the request's first message.
     let fold = first_change(&current, &planned(head("history, folded", "recent")));
     assert_eq!(
         fold,
@@ -867,7 +868,7 @@ fn first_change_names_the_first_item_a_newer_plan_renders_differently() {
     );
     assert!(fold.from_first_message());
 
-    // A new m[1] keeps m[0].
+    // Changing m1's text keeps m0, the first message.
     let refresh = first_change(&current, &planned(head("history", "recent, newer")));
     assert_eq!(
         refresh,
@@ -878,7 +879,7 @@ fn first_change_names_the_first_item_a_newer_plan_renders_differently() {
     );
     assert!(!refresh.from_first_message());
 
-    // A drop in the conversation keeps both head messages and the entry before.
+    // Dropping part t2 from entry a1 keeps m0, m1 and u1, the entry before a1.
     let mut dropped = head("history", "recent");
     dropped.push(drop_part(1, "a1", "t2"));
     assert_eq!(
@@ -890,7 +891,8 @@ fn first_change_names_the_first_item_a_newer_plan_renders_differently() {
         }
     );
 
-    // The first view over a raw transcript changes the first message.
+    // Going from no edits to the two inserts changes the first message: the
+    // request now starts with m0.
     assert!(first_change(&planned(vec![]), &current).from_first_message());
 }
 
@@ -1481,15 +1483,15 @@ mod vector_file {
                 "plan",
                 json!({"entries": ridden.clone(), "edits": [ridden_output, keep_ride]}),
             ),
-            // Where a newer view's request first differs from the applied
-            // one's, item by item in render order.
+            // first_change: `before` is the plan of the applied view and
+            // `after` the plan of a newer one, both over the same transcript.
             (
-                "a new m[0] changes the request's first message",
+                "changing m0's text changes the request's first message",
                 "first_change",
                 json!({"before": head_plan("history", "recent"), "after": head_plan("history, folded", "recent")}),
             ),
             (
-                "a new m[1] keeps m[0]",
+                "changing m1's text keeps m0",
                 "first_change",
                 json!({"before": head_plan("history", "recent"), "after": head_plan("history", "recent, newer")}),
             ),
@@ -1501,7 +1503,8 @@ mod vector_file {
         ]
     }
 
-    /// The plan of [`transcript`] under the head messages `m0` and `m1`.
+    /// The plan of [`transcript`] with two user messages inserted at the
+    /// start, ids `m0` and `m1`, carrying these texts.
     fn head_plan(m0: &str, m1: &str) -> crate::render::RenderPlan {
         crate::render::plan(&transcript([0, 0]), &super::head(m0, m1)).unwrap()
     }

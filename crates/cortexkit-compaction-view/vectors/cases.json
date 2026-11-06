@@ -6815,7 +6815,7 @@
     }
   },
   {
-    "name": "a new m[0] changes the request's first message",
+    "name": "changing m0's text changes the request's first message",
     "function": "first_change",
     "input": {
       "after": {
@@ -6990,7 +6990,7 @@
     }
   },
   {
-    "name": "a new m[1] keeps m[0]",
+    "name": "changing m1's text keeps m0",
     "function": "first_change",
     "input": {
       "after": {

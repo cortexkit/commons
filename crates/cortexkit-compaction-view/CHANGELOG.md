@@ -4,13 +4,14 @@
 
 - `first_change(before, after)` compares two render plans of the same
   transcript and returns where the second first differs: an inserted message
-  or a transcript entry, by its position in render order, the end of the
+  or a transcript entry, by its index in the plan's items, the end of the
   shorter plan, or `Unchanged`. `FirstChange::from_first_message` says the
-  difference starts at the request's first message, so a runner can tell when
-  changing the system text or the tool list costs only those bytes. The
-  vector dispatcher, and with it the WebAssembly build, answers
-  `first_change` with `{before, after}`. Three new vectors; every earlier
-  vector, `PLAN_VERSION` and the rendering pins are unchanged.
+  difference starts at the request's first message. Then a runner can also
+  change the system text or the tool list without losing any more of the
+  provider's prompt cache. The JSON dispatcher (`vectors::call`, which the
+  WebAssembly build exposes) takes `{before, after}` for `first_change`.
+  Three new test vectors; every earlier vector, `PLAN_VERSION` and the
+  pinned rendering checksums are unchanged.
 
 ## 0.1.4
 
