@@ -51,6 +51,10 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
         "{previous?, next}: whether each edit of the new view claims an honest `since`",
     ),
     (
+        "first_change",
+        "{before, after}: two render plans of the same transcript; where `after` first differs from `before`",
+    ),
+    (
         "check_rules",
         "{entries, edits, rules}: whether every signed part the view keeps stays valid",
     ),
@@ -122,6 +126,10 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
         "check_carried" => {
             let input: Carried = parse(input)?;
             refusable(render::check_carried(input.previous.as_ref(), &input.next))
+        }
+        "first_change" => {
+            let input: Plans = parse(input)?;
+            ok(render::first_change(&input.before, &input.after))
         }
         "check_rules" => {
             let input: RulesInput = parse(input)?;
@@ -206,6 +214,12 @@ struct Carried {
     #[serde(default)]
     previous: Option<View>,
     next: View,
+}
+
+#[derive(Deserialize)]
+struct Plans {
+    before: render::RenderPlan,
+    after: render::RenderPlan,
 }
 
 #[derive(Deserialize)]

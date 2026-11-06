@@ -6813,5 +6813,528 @@
         ]
       }
     }
+  },
+  {
+    "name": "changing m0's text changes the request's first message",
+    "function": "first_change",
+    "input": {
+      "after": {
+        "items": [
+          {
+            "id": "m0",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "history, folded"
+            ]
+          },
+          {
+            "id": "m1",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "recent"
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "r1",
+                "prefix": false
+              },
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k1",
+                "prefix": true,
+                "tag": 3
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u2",
+            "ordinal": 3,
+            "parts": [
+              {
+                "id": "t4",
+                "prefix": true,
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a2",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "r2",
+                "prefix": false
+              },
+              {
+                "id": "t5",
+                "prefix": true,
+                "tag": 5
+              }
+            ]
+          }
+        ]
+      },
+      "before": {
+        "items": [
+          {
+            "id": "m0",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "history"
+            ]
+          },
+          {
+            "id": "m1",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "recent"
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "r1",
+                "prefix": false
+              },
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k1",
+                "prefix": true,
+                "tag": 3
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u2",
+            "ordinal": 3,
+            "parts": [
+              {
+                "id": "t4",
+                "prefix": true,
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a2",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "r2",
+                "prefix": false
+              },
+              {
+                "id": "t5",
+                "prefix": true,
+                "tag": 5
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "output": {
+      "ok": {
+        "at": "insert",
+        "id": "m0",
+        "item": 0
+      }
+    }
+  },
+  {
+    "name": "changing m1's text keeps m0",
+    "function": "first_change",
+    "input": {
+      "after": {
+        "items": [
+          {
+            "id": "m0",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "history"
+            ]
+          },
+          {
+            "id": "m1",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "recent, newer"
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "r1",
+                "prefix": false
+              },
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k1",
+                "prefix": true,
+                "tag": 3
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u2",
+            "ordinal": 3,
+            "parts": [
+              {
+                "id": "t4",
+                "prefix": true,
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a2",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "r2",
+                "prefix": false
+              },
+              {
+                "id": "t5",
+                "prefix": true,
+                "tag": 5
+              }
+            ]
+          }
+        ]
+      },
+      "before": {
+        "items": [
+          {
+            "id": "m0",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "history"
+            ]
+          },
+          {
+            "id": "m1",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "recent"
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "r1",
+                "prefix": false
+              },
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k1",
+                "prefix": true,
+                "tag": 3
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u2",
+            "ordinal": 3,
+            "parts": [
+              {
+                "id": "t4",
+                "prefix": true,
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a2",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "r2",
+                "prefix": false
+              },
+              {
+                "id": "t5",
+                "prefix": true,
+                "tag": 5
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "output": {
+      "ok": {
+        "at": "insert",
+        "id": "m1",
+        "item": 1
+      }
+    }
+  },
+  {
+    "name": "the same plan renders unchanged",
+    "function": "first_change",
+    "input": {
+      "after": {
+        "items": [
+          {
+            "id": "m0",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "history"
+            ]
+          },
+          {
+            "id": "m1",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "recent"
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "r1",
+                "prefix": false
+              },
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k1",
+                "prefix": true,
+                "tag": 3
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u2",
+            "ordinal": 3,
+            "parts": [
+              {
+                "id": "t4",
+                "prefix": true,
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a2",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "r2",
+                "prefix": false
+              },
+              {
+                "id": "t5",
+                "prefix": true,
+                "tag": 5
+              }
+            ]
+          }
+        ]
+      },
+      "before": {
+        "items": [
+          {
+            "id": "m0",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "history"
+            ]
+          },
+          {
+            "id": "m1",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "recent"
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "r1",
+                "prefix": false
+              },
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k1",
+                "prefix": true,
+                "tag": 3
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "u2",
+            "ordinal": 3,
+            "parts": [
+              {
+                "id": "t4",
+                "prefix": true,
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a2",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "r2",
+                "prefix": false
+              },
+              {
+                "id": "t5",
+                "prefix": true,
+                "tag": 5
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "output": {
+      "ok": {
+        "at": "unchanged"
+      }
+    }
   }
 ]

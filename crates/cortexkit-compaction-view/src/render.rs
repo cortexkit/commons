@@ -867,6 +867,92 @@ pub fn base64_decoded_len(data: &str) -> Option<u64> {
     Some((bytes.len() / 4 * 3 - padding) as u64)
 }
 
+/// Where one render plan first differs from another, both planned over the
+/// same transcript: typically the plan of the view a runner applies now and
+/// the plan of a newer view.
+///
+/// An item is one element of [`RenderPlan::items`]: the messages the view
+/// inserts at the start, then the transcript entries in transcript order.
+/// `item` is its zero-based index there, so item 0 is the first message of
+/// the request after the system text and tools. A provider's prompt cache
+/// for everything before the differing item still matches a request
+/// rendered from the newer plan.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "at", rename_all = "snake_case")]
+pub enum FirstChange {
+    /// Both plans render the same items.
+    Unchanged,
+    /// The first differing item is a message the newer plan inserts.
+    Insert { item: u64, id: String },
+    /// The first differing item is a transcript entry in the newer plan,
+    /// named by its entry number and message id.
+    Entry {
+        item: u64,
+        ordinal: u64,
+        mid: String,
+    },
+    /// Every item both plans have is the same, and one plan has more items
+    /// after them: entries appended (the newer plan is longer) or trailing
+    /// entries left out (it is shorter). `item` is the index just past the
+    /// shorter plan's last item.
+    End { item: u64 },
+}
+
+impl FirstChange {
+    /// The index in [`RenderPlan::items`] where the plans first differ, or
+    /// `None` when nothing differs.
+    pub fn item(&self) -> Option<u64> {
+        match self {
+            FirstChange::Unchanged => None,
+            FirstChange::Insert { item, .. }
+            | FirstChange::Entry { item, .. }
+            | FirstChange::End { item } => Some(*item),
+        }
+    }
+
+    /// Whether the difference starts at the request's first message. Then a
+    /// request rendered from the newer plan already reuses no cached message,
+    /// so a runner may also change what comes before the messages (the system
+    /// text or the tool list) at no further cache cost: the provider rereads
+    /// only those bytes on top of the messages it rereads anyway.
+    pub fn from_first_message(&self) -> bool {
+        self.item() == Some(0)
+    }
+}
+
+/// Compare two render plans of the same transcript item by item and return
+/// where `after` first differs from `before`. A plan item holds everything a
+/// runner renders that message from: inserted texts and images, the parts
+/// it keeps, replaced fields, and the module sends that ride a tool result.
+/// So two items that compare equal render the same bytes.
+pub fn first_change(before: &RenderPlan, after: &RenderPlan) -> FirstChange {
+    let shared = before.items.len().min(after.items.len());
+    for (index, (old, new)) in before.items.iter().zip(&after.items).enumerate() {
+        if old == new {
+            continue;
+        }
+        let item = index as u64;
+        return match new {
+            PlanItem::Insert { id, .. } => FirstChange::Insert {
+                item,
+                id: id.clone(),
+            },
+            PlanItem::Entry { ordinal, mid, .. } => FirstChange::Entry {
+                item,
+                ordinal: *ordinal,
+                mid: mid.clone(),
+            },
+        };
+    }
+    if before.items.len() == after.items.len() {
+        FirstChange::Unchanged
+    } else {
+        FirstChange::End {
+            item: shared as u64,
+        }
+    }
+}
+
 /// Check that a new view's `since` values are honest against the view the
 /// runner applies now: an edit claiming a version the runner already applied
 /// must appear, unchanged, in that view, and no edit may claim a version later

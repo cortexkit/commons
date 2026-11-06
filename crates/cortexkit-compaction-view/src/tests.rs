@@ -11,7 +11,7 @@ use cortexkit_role_compaction::view::{
 };
 use serde_json::json;
 
-use crate::render::{apply, apply_edits, check_carried, Source};
+use crate::render::{apply, apply_edits, check_carried, first_change, plan, FirstChange, Source};
 use crate::rules::{check, invalid_signed_parts};
 
 fn entry(
@@ -832,6 +832,81 @@ fn a_signed_text_part_is_bound_like_signed_reasoning() {
     assert!(invalid.contains(&("u2".to_owned(), "t3".to_owned())));
 }
 
+/// Edits inserting two user messages at the start, with ids `m0` and `m1` and
+/// the given texts, the way a compaction provider places its history.
+fn head(m0: &str, m1: &str) -> Vec<Edit> {
+    [("m0", m0), ("m1", m1)]
+        .into_iter()
+        .map(|(id, text)| {
+            Edit::new(
+                1,
+                EditOp::Insert {
+                    at: InsertAt::Start,
+                    message: InsertedMessage::new(id, Role::User, vec![text.into()]),
+                },
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn first_change_names_the_first_item_a_newer_plan_renders_differently() {
+    let entries = transcript();
+    let planned = |edits: Vec<Edit>| plan(&entries, &edits).unwrap();
+    let current = planned(head("history", "recent"));
+
+    assert_eq!(first_change(&current, &current), FirstChange::Unchanged);
+
+    // Changing m0's text changes the request's first message.
+    let fold = first_change(&current, &planned(head("history, folded", "recent")));
+    assert_eq!(
+        fold,
+        FirstChange::Insert {
+            item: 0,
+            id: "m0".into()
+        }
+    );
+    assert!(fold.from_first_message());
+
+    // Changing m1's text keeps m0, the first message.
+    let refresh = first_change(&current, &planned(head("history", "recent, newer")));
+    assert_eq!(
+        refresh,
+        FirstChange::Insert {
+            item: 1,
+            id: "m1".into()
+        }
+    );
+    assert!(!refresh.from_first_message());
+
+    // Dropping part t2 from entry a1 keeps m0, m1 and u1, the entry before a1.
+    let mut dropped = head("history", "recent");
+    dropped.push(drop_part(1, "a1", "t2"));
+    assert_eq!(
+        first_change(&current, &planned(dropped)),
+        FirstChange::Entry {
+            item: 3,
+            ordinal: 1,
+            mid: "a1".into()
+        }
+    );
+
+    // Going from no edits to the two inserts changes the first message: the
+    // request now starts with m0.
+    assert!(first_change(&planned(vec![]), &current).from_first_message());
+}
+
+#[test]
+fn first_change_reports_where_a_shorter_plan_ends() {
+    let entries = transcript();
+    let edits = head("history", "recent");
+    let full = plan(&entries, &edits).unwrap();
+    let fewer = plan(&entries[..2], &edits).unwrap();
+    assert_eq!(first_change(&fewer, &full), FirstChange::End { item: 4 });
+    assert_eq!(first_change(&full, &fewer), FirstChange::End { item: 4 });
+    assert_eq!(FirstChange::Unchanged.item(), None);
+}
+
 /// The JSON test vectors under `vectors/cases.json`, for runners that use the
 /// library through WebAssembly or implement the rules themselves. Each case
 /// is generated here and its output computed by [`crate::vectors::call`].
@@ -1408,7 +1483,30 @@ mod vector_file {
                 "plan",
                 json!({"entries": ridden.clone(), "edits": [ridden_output, keep_ride]}),
             ),
+            // first_change: `before` is the plan of the applied view and
+            // `after` the plan of a newer one, both over the same transcript.
+            (
+                "changing m0's text changes the request's first message",
+                "first_change",
+                json!({"before": head_plan("history", "recent"), "after": head_plan("history, folded", "recent")}),
+            ),
+            (
+                "changing m1's text keeps m0",
+                "first_change",
+                json!({"before": head_plan("history", "recent"), "after": head_plan("history", "recent, newer")}),
+            ),
+            (
+                "the same plan renders unchanged",
+                "first_change",
+                json!({"before": head_plan("history", "recent"), "after": head_plan("history", "recent")}),
+            ),
         ]
+    }
+
+    /// The plan of [`transcript`] with two user messages inserted at the
+    /// start, ids `m0` and `m1`, carrying these texts.
+    fn head_plan(m0: &str, m1: &str) -> crate::render::RenderPlan {
+        crate::render::plan(&transcript([0, 0]), &super::head(m0, m1)).unwrap()
     }
 
     /// Representative JSON outputs for selected rendering operations and a
