@@ -125,6 +125,7 @@ groups have no undeclared-op refusal case.
 | `select_prefer_prompt_cache` | `prefer_prompt_cache_accepted` | `undeclared_prefer_prompt_cache_refused` |
 | `select_settings` | `settings_unresolved_selects`, `settings_unknown_member_refused` | `undeclared_settings_refused` |
 | `observe_backoff` | `backoff_with_admission_accepted`, `backoff_missing_retry_refused` | `undeclared_observe_decision_id_refused`, `undeclared_observe_retry_at_ms_refused`, `undeclared_observe_provider_code_refused` |
+| `observe_credential_refused` | `observe_credential_refused_requires_backoff`, `credential_refused_blocks_credential`, `credential_refused_retry_at_ms_refused` | none |
 | `report_outcomes` | none | none |
 
 The panel fixture has repeated known families and two models with unknown

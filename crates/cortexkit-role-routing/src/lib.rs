@@ -170,6 +170,8 @@ pub mod capabilities {
     pub const SELECT_SETTINGS: &str = "select_settings";
     /// Account-local backoff observations and decision-owner authorization.
     pub const OBSERVE_BACKOFF: &str = "observe_backoff";
+    /// Credential-wide refusal observations. Requires `OBSERVE_BACKOFF`.
+    pub const OBSERVE_CREDENTIAL_REFUSED: &str = "observe_credential_refused";
     /// Report outcomes that distinguish failures before a provider send.
     pub const REPORT_OUTCOMES: &str = "report_outcomes";
     /// Attribute report usage to individual runs of a decision.
@@ -205,6 +207,7 @@ pub mod capabilities {
         SELECT_PREFER_PROMPT_CACHE,
         SELECT_SETTINGS,
         OBSERVE_BACKOFF,
+        OBSERVE_CREDENTIAL_REFUSED,
         REPORT_OUTCOMES,
         REPORT_USAGE_RUN_ID,
     ];

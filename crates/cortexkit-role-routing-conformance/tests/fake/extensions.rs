@@ -19,6 +19,7 @@ pub(super) const GROUPS: &[&str] = &[
     "select_prefer_prompt_cache",
     "select_settings",
     "observe_backoff",
+    "observe_credential_refused",
     "report_outcomes",
     "report_usage_run_id",
     "consumer_models",
@@ -283,6 +284,11 @@ impl FakeRoute {
         params: &Value,
     ) -> Result<Value, Refusal> {
         let mut params = params.clone();
+        if self.fault("credential_refused_retry_at_ms_refused")
+            && params["kind"] == "credential_refused"
+        {
+            params.as_object_mut().unwrap().remove("retry_at_ms");
+        }
         if self.fault("backoff_missing_retry_refused") && params["kind"] == "transient_backoff" {
             params["retry_at_ms"] = json!(now_ms() + 1000);
         }
@@ -306,7 +312,27 @@ impl FakeRoute {
         for field in ["decision_id", "retry_at_ms", "provider_code"] {
             params.as_object_mut().unwrap().remove(field);
         }
-        self.observe(state, &params)
+        let answer = self.observe(state, &params)?;
+        if self.extensions
+            && params["kind"] == "credential_refused"
+            && !self.fault("credential_refused_blocks_credential")
+            && answer["observation"]["duplicate"] == false
+        {
+            let credential = params["credential_id"]
+                .as_str()
+                .map(String::from)
+                .or_else(|| {
+                    let admission = params["admission_id"].as_str()?;
+                    state
+                        .admissions
+                        .get(&(self.principal().to_owned(), admission.to_owned()))
+                        .map(|(_, answer)| answer.account.credential_id.clone())
+                });
+            if let Some(credential) = credential {
+                state.ineligible.push((credential, None));
+            }
+        }
+        Ok(answer)
     }
 
     pub(super) fn extension_op(

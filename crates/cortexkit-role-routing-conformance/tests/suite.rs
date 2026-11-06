@@ -46,6 +46,9 @@ const ROUTING_070_CASES: &[&str] = &[
     "undeclared_settings_refused",
     "backoff_with_admission_accepted",
     "backoff_missing_retry_refused",
+    "observe_credential_refused_requires_backoff",
+    "credential_refused_blocks_credential",
+    "credential_refused_retry_at_ms_refused",
     "undeclared_observe_decision_id_refused",
     "undeclared_observe_retry_at_ms_refused",
     "undeclared_observe_provider_code_refused",
@@ -103,11 +106,16 @@ async fn routing_070_faulty_routers_fail_each_case_by_name() {
             report
                 .failing()
                 .iter()
-                .all(|failed| ROUTING_070_CASES.contains(failed)),
+                .all(|failed| ROUTING_070_CASES.contains(failed)
+                    || (*name == "observe_credential_refused_requires_backoff"
+                        && *failed == "describe_lists_consumers_and_fields")),
             "new faulty router must not break unrelated legacy checks: {}",
             report.render()
         );
-        println!("faulty router rejected by {name}");
+        println!(
+            "faulty router rejected by {name}: {:?}",
+            report.outcome(name)
+        );
     }
 }
 

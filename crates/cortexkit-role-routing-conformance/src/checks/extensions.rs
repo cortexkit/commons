@@ -77,6 +77,21 @@ pub(super) const CASES: &[(&str, &str, bool)] = &[
     ("backoff_with_admission_accepted", "observe_backoff", false),
     ("backoff_missing_retry_refused", "observe_backoff", false),
     (
+        "observe_credential_refused_requires_backoff",
+        "observe_credential_refused",
+        false,
+    ),
+    (
+        "credential_refused_blocks_credential",
+        "observe_credential_refused",
+        false,
+    ),
+    (
+        "credential_refused_retry_at_ms_refused",
+        "observe_credential_refused",
+        false,
+    ),
+    (
         "undeclared_observe_decision_id_refused",
         "observe_backoff",
         true,
@@ -122,7 +137,12 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 }
             )));
         }
-        if name.starts_with("panel_") {
+        if name == "observe_credential_refused_requires_backoff" {
+            cortexkit_role_routing::describe::check_describe(&describe)
+                .map_err(|problem| format!("role.describe: {problem}"))?;
+        } else if name.starts_with("credential_refused_") {
+            self.credential_refused_check(name).await?;
+        } else if name.starts_with("panel_") {
             self.panel_check(name, &route).await?;
         } else if name.starts_with("budget_quote_") || name.starts_with("explain_") {
             let selected = select(&route, &base(), "decision fixture").await?;
@@ -488,6 +508,78 @@ impl<S: RoutingSubject> Suite<'_, S> {
             return Err(
                 "an unconfigured project must select with project_settings unresolved".into(),
             );
+        }
+        Ok(())
+    }
+
+    async fn credential_refused_check(&self, name: &str) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let admitted: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &Self::account_for("credential-wall", "credential-wall", "model-c"),
+            "credential refusal admission",
+        )
+        .await?;
+        let mut params = json!({"event_id": "credential-wall-event", "kind": "credential_refused",
+            "admission_id": "credential-wall", "provider_code": "credit_exhausted"});
+        if name == "credential_refused_retry_at_ms_refused" {
+            params["retry_at_ms"] = json!(now_ms() + 30_000);
+            return Self::invalid_field(
+                &runner,
+                ops::ROUTE_ACCOUNT_OBSERVE,
+                &params,
+                "retry_at_ms",
+            )
+            .await;
+        }
+        let _: AccountObserveAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_OBSERVE,
+            &params,
+            "credential refusal",
+        )
+        .await?;
+        let _: AccountObserveAnswer = answer(&runner, ops::ROUTE_ACCOUNT_OBSERVE,
+            &json!({"event_id": "credential-wall-finished", "kind": "run_finished", "admission_id": "credential-wall"}),
+            "release refused credential admission").await?;
+        // Probe only the refused credential, on another model and runner too,
+        // so rotating keys or retaining the original pin cannot hide a missing block.
+        for (index, principal) in [fixture::RUNNER_ONE, fixture::RUNNER_TWO]
+            .iter()
+            .enumerate()
+        {
+            let next_runner = self.route_as(principal).await?;
+            let mut next = Self::account_for(
+                &format!("after-credential-wall-{index}"),
+                &format!("after-credential-wall-{index}"),
+                "model-d",
+            );
+            next["candidates"] = json!({"view_digest": "refused-credential", "accounts": [{
+                "account_id": admitted.account.account_id, "credential_id": admitted.account.credential_id
+            }]});
+            match call::<_, AccountForAnswer>(&next_runner, ops::ROUTE_ACCOUNT_FOR, &next).await? {
+                Ok(after) if after.account.credential_id == admitted.account.credential_id => {
+                    return Err(
+                        "account_for admitted the credential after credential_refused".into(),
+                    );
+                }
+                Ok(_) => {
+                    return Err("account_for answered outside the sole credential candidate".into())
+                }
+                Err(refusal)
+                    if matches!(
+                        refusal.code,
+                        RefusalCode::AuthRequired
+                            | RefusalCode::AccountPoolExhausted
+                            | RefusalCode::AccountHold
+                    ) => {}
+                Err(refusal) => {
+                    return Err(format!(
+                        "unexpected refusal after credential_refused: {refusal}"
+                    ))
+                }
+            }
         }
         Ok(())
     }

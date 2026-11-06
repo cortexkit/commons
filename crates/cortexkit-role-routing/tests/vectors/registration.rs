@@ -17,6 +17,7 @@ const GROUP_FILES: &[&str] = &[
     "route-select-prefer-prompt-cache.json",
     "route-select-settings.json",
     "route-observe-backoff.json",
+    "route-observe-credential-refused.json",
     "route-report-outcomes.json",
 ];
 
@@ -48,7 +49,7 @@ fn new_group_vectors_describe_pairs() {
             }
         }
     }
-    assert_eq!(GROUP_FILES.len(), 13);
+    assert_eq!(GROUP_FILES.len(), 14);
 }
 
 fn check_refusal(case: &Value, refusal: Refusal) {
@@ -348,12 +349,50 @@ fn new_group_vectors_observe_backoff() {
         assert!(!request.kind.is_known());
         assert_eq!(json!(request), case["params"]);
     }
-    for case in cases(&file, "authorization") {
-        let request = observe::parse_account_observe_request_serving(
-            &case["params"],
-            &[capabilities::OBSERVE_BACKOFF],
-        )
-        .unwrap();
+    observe_authorization_vectors(&file, &[capabilities::OBSERVE_BACKOFF]);
+}
+
+#[test]
+fn new_group_vectors_observe_credential_refused() {
+    let groups = [
+        capabilities::OBSERVE_BACKOFF,
+        capabilities::OBSERVE_CREDENTIAL_REFUSED,
+    ];
+    check_op::<AccountObserveRequest, AccountObserveAnswer>(
+        "route-observe-credential-refused.json",
+        |params| {
+            observe::parse_account_observe_request_serving(
+                params,
+                &[
+                    capabilities::OBSERVE_BACKOFF,
+                    capabilities::OBSERVE_CREDENTIAL_REFUSED,
+                ],
+            )
+        },
+    );
+    let file = load("route-observe-credential-refused.json");
+    for case in cases(&file, "without_group") {
+        for groups in [&[][..], &[capabilities::OBSERVE_BACKOFF][..]] {
+            let request =
+                observe::parse_account_observe_request_serving(&case["params"], groups).unwrap();
+            assert_eq!(
+                request.kind,
+                observe::ObserveKind::Other("credential_refused".into())
+            );
+            assert_eq!(json!(request), case["params"]);
+        }
+        assert_eq!(
+            parse_account_observe_request(&case["params"]).unwrap().kind,
+            observe::ObserveKind::Other("credential_refused".into())
+        );
+    }
+    observe_authorization_vectors(&file, &groups);
+}
+
+fn observe_authorization_vectors(file: &Value, groups: &[&str]) {
+    for case in cases(file, "authorization") {
+        let request =
+            observe::parse_account_observe_request_serving(&case["params"], groups).unwrap();
         let arm = match case["arm"].as_str().unwrap() {
             "runner" => observe::ObserveArm::Runner,
             "owner" => observe::ObserveArm::decision_owner(

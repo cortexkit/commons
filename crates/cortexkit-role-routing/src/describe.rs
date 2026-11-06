@@ -92,6 +92,11 @@ pub enum DescribeProblem {
     OpGroupMismatch {
         group: &'static str,
     },
+    /// A capability group was declared without its prerequisite.
+    MissingCapabilityDependency {
+        group: &'static str,
+        requires: &'static str,
+    },
 }
 
 impl std::fmt::Display for DescribeProblem {
@@ -111,6 +116,9 @@ impl std::fmt::Display for DescribeProblem {
                     f,
                     "operation and capability group {group:?} must be declared together"
                 )
+            }
+            Self::MissingCapabilityDependency { group, requires } => {
+                write!(f, "capability group {group:?} requires {requires:?}")
             }
         }
     }
@@ -144,6 +152,14 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
             return Err(DescribeProblem::OpGroupMismatch { group });
         }
     }
+    if describe.serves(crate::capabilities::OBSERVE_CREDENTIAL_REFUSED)
+        && !describe.serves(crate::capabilities::OBSERVE_BACKOFF)
+    {
+        return Err(DescribeProblem::MissingCapabilityDependency {
+            group: crate::capabilities::OBSERVE_CREDENTIAL_REFUSED,
+            requires: crate::capabilities::OBSERVE_BACKOFF,
+        });
+    }
     let mut seen = std::collections::BTreeSet::new();
     for entry in &describe.consumers {
         if !seen.insert(entry.id.as_str()) {
@@ -174,6 +190,29 @@ mod tests {
                 Err(DescribeProblem::OpGroupMismatch { group })
             );
         }
+    }
+
+    #[test]
+    fn observe_credential_refused_requires_backoff_by_name() {
+        use crate::capabilities::{OBSERVE_BACKOFF, OBSERVE_CREDENTIAL_REFUSED};
+        let describe = RoleDescribe::new(vec![], false).with_capability(OBSERVE_CREDENTIAL_REFUSED);
+        let problem = DescribeProblem::MissingCapabilityDependency {
+            group: OBSERVE_CREDENTIAL_REFUSED,
+            requires: OBSERVE_BACKOFF,
+        };
+        assert_eq!(check_describe(&describe), Err(problem.clone()));
+        assert_eq!(
+            problem.to_string(),
+            "capability group \"observe_credential_refused\" requires \"observe_backoff\""
+        );
+        assert_eq!(
+            check_describe(&describe.with_capability(OBSERVE_BACKOFF)),
+            Ok(())
+        );
+        assert_eq!(
+            check_describe(&RoleDescribe::new(vec![], false).with_capability(OBSERVE_BACKOFF)),
+            Ok(())
+        );
     }
 
     #[test]

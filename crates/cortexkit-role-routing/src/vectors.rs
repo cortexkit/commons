@@ -89,6 +89,9 @@ pub const ROUTE_REPORT_USAGE_RUN_ID_JSON: &str =
 /// The `observe_backoff` optional group.
 pub const ROUTE_OBSERVE_BACKOFF_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-observe-backoff.json");
+/// Credential-wide observations with and without their optional group.
+pub const ROUTE_OBSERVE_CREDENTIAL_REFUSED_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-observe-credential-refused.json");
 /// The `report_outcomes` optional group.
 pub const ROUTE_REPORT_OUTCOMES_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-report-outcomes.json");
@@ -132,6 +135,10 @@ pub const FILES: &[(&str, &str)] = &[
     ("route-explain.json", ROUTE_EXPLAIN_JSON),
     ("route-head-choices.json", ROUTE_HEAD_CHOICES_JSON),
     ("route-observe-backoff.json", ROUTE_OBSERVE_BACKOFF_JSON),
+    (
+        "route-observe-credential-refused.json",
+        ROUTE_OBSERVE_CREDENTIAL_REFUSED_JSON,
+    ),
     ("route-report-optional.json", ROUTE_REPORT_OPTIONAL_JSON),
     ("route-report-outcomes.json", ROUTE_REPORT_OUTCOMES_JSON),
     (

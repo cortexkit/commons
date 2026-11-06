@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.2
+
+- Pin routing 0.7.2. Check `observe_credential_refused`'s describe prerequisite,
+  credential-wide blocking across runners and models after an observation,
+  and refusal of `retry_at_ms` on the new kind. Each check is gated on the
+  group and paired with a deliberately faulty router rejected by name.
+
 ## 0.10.1
 
 - Pin routing 0.7.1 and check run-attributed report acceptance and validation,

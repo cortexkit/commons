@@ -52,6 +52,7 @@ const FILES: &[&str] = &[
     "route-explain.json",
     "route-head-choices.json",
     "route-observe-backoff.json",
+    "route-observe-credential-refused.json",
     "route-report-optional.json",
     "route-report-outcomes.json",
     "route-report-usage-run-id.json",

@@ -2,7 +2,8 @@
 //! provider's headroom stays current.
 //!
 //! Runner modules call it; with `observe_backoff`, a decision owner may also
-//! report `account_limit_exhausted` or `transient_backoff` on the admission
+//! report `account_limit_exhausted`, `transient_backoff`, or (with
+//! `observe_credential_refused`) `credential_refused` on the admission
 //! that carried its decision. It is idempotent
 //! per calling principal and `event_id`: a second observation with the same
 //! id returns the first observation's id, `duplicate: true` and empty effects.
@@ -38,6 +39,8 @@ open_set! {
         AccountLimitExhausted => "account_limit_exhausted",
         /// Account-local retry evidence distinct from quota exhaustion.
         TransientBackoff => "transient_backoff",
+        /// A credential refused for every use, not a resettable usage limit.
+        CredentialRefused => "credential_refused",
     }
 }
 
@@ -143,7 +146,8 @@ pub struct AccountObserveRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision_id: Option<String>,
     /// Unix ms; required with `transient_backoff`, allowed with
-    /// `account_limit_exhausted`, and refused with other kinds.
+    /// `account_limit_exhausted`, and refused with other kinds, including
+    /// `credential_refused`.
     /// Requires `observe_backoff`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_at_ms: Option<u64>,
@@ -312,8 +316,10 @@ impl<'a> ObserveArm<'a> {
 /// Check authorization after the router resolves the caller's arm.
 /// Runners may send any kind and any informative `decision_id`, including a
 /// foreign decision or an `account_continue` offer the admission never carried.
-/// Decision owners may send only `account_limit_exhausted` or
-/// `transient_backoff`, never release or reshape the runner's account pin.
+/// Decision owners may send only the kinds that stop the router allocating an
+/// account or credential: `account_limit_exhausted`, `transient_backoff` or
+/// `credential_refused`. They can never release or reshape the runner's
+/// account pin.
 /// Every denial is `account_not_authorized`, not `unknown_decision`.
 pub fn check_observe_authorization(
     arm: ObserveArm<'_>,
@@ -328,7 +334,9 @@ pub fn check_observe_authorization(
         } => {
             matches!(
                 request.kind,
-                ObserveKind::AccountLimitExhausted | ObserveKind::TransientBackoff
+                ObserveKind::AccountLimitExhausted
+                    | ObserveKind::TransientBackoff
+                    | ObserveKind::CredentialRefused
             ) && request.admission_id.as_deref() == Some(admission_id)
                 && request.decision_id.as_deref() == Some(decision_id)
                 && carried == Some(decision_id)
@@ -375,6 +383,7 @@ pub fn parse_account_observe_request(params: &Value) -> Result<AccountObserveReq
 /// Validate and decode observations for the router's declared groups.
 /// Without `observe_backoff`, the added members are refused by name and
 /// `transient_backoff` remains an advisory unknown kind with no retry rule.
+/// Without `observe_credential_refused`, `credential_refused` is advisory too.
 /// Null optional members are treated as absent.
 pub fn parse_account_observe_request_serving<C: AsRef<str>>(
     params: &Value,
@@ -384,6 +393,9 @@ pub fn parse_account_observe_request_serving<C: AsRef<str>>(
     let backoff = capabilities
         .iter()
         .any(|cap| cap.as_ref() == "observe_backoff");
+    let credential_refused = capabilities
+        .iter()
+        .any(|cap| cap.as_ref() == "observe_credential_refused");
     if !backoff {
         for field in ["decision_id", "retry_at_ms", "provider_code"] {
             if members
@@ -398,6 +410,9 @@ pub fn parse_account_observe_request_serving<C: AsRef<str>>(
     let mut kind: ObserveKind = members.required("kind")?;
     if !backoff && kind == ObserveKind::TransientBackoff {
         kind = ObserveKind::Other("transient_backoff".into());
+    }
+    if !credential_refused && kind == ObserveKind::CredentialRefused {
+        kind = ObserveKind::Other("credential_refused".into());
     }
     let headers: Option<BTreeMap<String, String>> = members.optional("headers")?;
     if let Some(name) = headers
@@ -426,6 +441,15 @@ pub fn parse_account_observe_request_serving<C: AsRef<str>>(
         retry_at_ms: members.optional("retry_at_ms")?,
         provider_code: members.optional_text("provider_code", Some(128))?,
     };
+    if request.kind == ObserveKind::CredentialRefused
+        && request.credential_id.is_none()
+        && request.admission_id.is_none()
+    {
+        return Err(members.refuse(
+            "admission_id",
+            "credential_refused requires a credential or admission",
+        ));
+    }
     if backoff {
         match request.kind {
             ObserveKind::TransientBackoff => {
@@ -443,7 +467,10 @@ pub fn parse_account_observe_request_serving<C: AsRef<str>>(
             }
             ObserveKind::AccountLimitExhausted => {}
             _ if request.retry_at_ms.is_some() => {
-                return Err(members.refuse("retry_at_ms", "retry_at_ms requires a wall kind"));
+                return Err(members.refuse(
+                    "retry_at_ms",
+                    "retry_at_ms requires transient_backoff or account_limit_exhausted",
+                ));
             }
             _ => {}
         }
@@ -501,6 +528,71 @@ mod tests {
         assert_eq!(unknown.kind, ObserveKind::Other("future_kind".into()));
     }
 
+    fn parse_credential_refused(params: &Value) -> Result<AccountObserveRequest, Refusal> {
+        parse_account_observe_request_serving(
+            params,
+            &["observe_backoff", "observe_credential_refused"],
+        )
+    }
+
+    #[test]
+    fn credential_refused_decodes_only_with_its_group() {
+        let params = json!({"event_id": "e", "kind": "credential_refused", "credential_id": "c"});
+        let request = parse_credential_refused(&params).unwrap();
+        assert_eq!(request.kind, ObserveKind::CredentialRefused);
+        assert_eq!(serde_json::to_value(request).unwrap(), params);
+        let advisory = json!({"event_id": "e", "kind": "credential_refused"});
+        for groups in [&[][..], &["observe_backoff"][..], &["unrelated"][..]] {
+            let request = parse_account_observe_request_serving(&advisory, groups).unwrap();
+            assert_eq!(
+                request.kind,
+                ObserveKind::Other("credential_refused".into())
+            );
+            assert_eq!(serde_json::to_value(request).unwrap(), advisory);
+        }
+        assert_eq!(
+            parse_account_observe_request(&advisory).unwrap().kind,
+            ObserveKind::Other("credential_refused".into())
+        );
+    }
+
+    #[test]
+    fn credential_refused_requires_a_credential_or_admission_and_refuses_retry_time() {
+        let mut params = json!({"event_id": "e", "kind": "credential_refused"});
+        assert_invalid(parse_credential_refused(&params), "admission_id");
+        params["served_account_id"] = json!("account");
+        assert_invalid(parse_credential_refused(&params), "admission_id");
+        for field in ["credential_id", "admission_id"] {
+            params[field] = json!("id");
+            assert!(parse_credential_refused(&params).is_ok());
+            params["retry_at_ms"] = json!(42);
+            assert_invalid(parse_credential_refused(&params), "retry_at_ms");
+            params["retry_at_ms"] = Value::Null;
+            assert!(parse_credential_refused(&params).is_ok());
+            params[field] = Value::Null;
+        }
+    }
+
+    #[test]
+    fn credential_refused_keeps_provider_code_verbatim_with_existing_bounds() {
+        let mut params =
+            json!({"event_id": "e", "kind": "credential_refused", "admission_id": "a"});
+        for code in [" Billing-Empty\n".into(), "é".repeat(128)] {
+            params["provider_code"] = json!(code);
+            assert_eq!(
+                parse_credential_refused(&params)
+                    .unwrap()
+                    .provider_code
+                    .as_deref(),
+                Some(code.as_str())
+            );
+        }
+        for code in [json!(""), json!("é".repeat(129)), json!(7)] {
+            params["provider_code"] = code;
+            assert_invalid(parse_credential_refused(&params), "provider_code");
+        }
+    }
+
     #[test]
     fn transient_backoff_requires_retry_time_and_a_fenced_account() {
         let request = parse_backoff(&backoff()).unwrap();
@@ -524,7 +616,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_time_is_unsigned_and_only_allowed_for_wall_kinds() {
+    fn retry_time_is_unsigned_and_only_allowed_for_resettable_wall_kinds() {
         for kind in ["transient_backoff", "account_limit_exhausted"] {
             for retry_at_ms in [json!(0), json!(u64::MAX)] {
                 let mut params = backoff();
@@ -611,6 +703,7 @@ mod tests {
         for kind in [
             ObserveKind::AccountLimitExhausted,
             ObserveKind::TransientBackoff,
+            ObserveKind::CredentialRefused,
         ] {
             let request = owner_wall(kind);
             let owner = ObserveArm::decision_owner("d", "a", Some("d"));
@@ -662,6 +755,7 @@ mod tests {
                 ObserveKind::RunFinished,
                 ObserveKind::TransientBackoff,
                 ObserveKind::AccountLimitExhausted,
+                ObserveKind::CredentialRefused,
             ] {
                 let request = owner_wall(kind).with_decision_id(decision_id);
                 assert_unauthorized(ObserveArm::other(), &request);
@@ -676,6 +770,7 @@ mod tests {
                 ObserveKind::RunFinished,
                 ObserveKind::TransientBackoff,
                 ObserveKind::AccountLimitExhausted,
+                ObserveKind::CredentialRefused,
                 ObserveKind::AdmissionStarted,
                 ObserveKind::Attempt,
                 ObserveKind::ScopedNotFound,
@@ -694,6 +789,7 @@ mod tests {
         for params in [
             json!({"event_id": "e", "kind": "attempt"}),
             json!({"event_id": "e", "kind": "transient_backoff"}),
+            json!({"event_id": "e", "kind": "credential_refused"}),
             backoff(),
             json!({"event_id": "e", "kind": "future_kind"}),
             json!({"event_id": "e", "kind": 7}),

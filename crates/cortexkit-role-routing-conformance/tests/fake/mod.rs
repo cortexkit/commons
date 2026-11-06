@@ -772,6 +772,11 @@ impl FakeRoute {
         if self.task_ref_control {
             describe = describe.with_capability(SELECT_TASK_REF);
         }
+        if self.fault("observe_credential_refused_requires_backoff") {
+            describe
+                .capabilities
+                .retain(|group| group != "observe_backoff");
+        }
         to_value(if self.hold_control {
             describe.with_capability(SELECT_HOLD_CONTROL)
         } else {

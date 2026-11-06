@@ -298,7 +298,7 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines eighteen
+  does not know is kept and means nothing to it. This version defines twenty-one
   groups:
   - `service_tier`: tier-aware selection and tier metadata in report usage
     (§5.5). A caller sends these members only to a declaring provider.
@@ -339,6 +339,8 @@ a module plays.
   - `select_settings`: project and service-tier settings lookup (§5.6).
   - `observe_backoff`: account-local backoff, three observation members and
     decision-owner authorization (§9.2).
+  - `observe_credential_refused`: credential-wide refusal observations (§9.2);
+    requires `observe_backoff`.
   - `report_outcomes`: additional report outcomes and their effects (§8).
   - `report_usage_run_id`: run-attributed report usage (§8).
 - [pinned] Each of the six optional op groups is declared exactly when its op is
@@ -350,6 +352,9 @@ a module plays.
   operation are not applicable without its group.
 - [pinned] A consumer checks the answer with `describe::check_describe`
   before routing anything to the provider.
+- [pinned] Declaring `observe_credential_refused` without `observe_backoff` is
+  `DescribeProblem::MissingCapabilityDependency {group: "observe_credential_refused",
+  requires: "observe_backoff"}`.
 
 ## 5. `route.select`
 
@@ -892,8 +897,8 @@ pool?, eligibility?, request_input_tokens?, refusal_class?}`.
 ## 9. Runner ops
 
 - [pinned] `route.account_for` and `route.account_observe` are called only
-  by attested runner modules, except the declaring-router observation wall arm
-  in §9.2. A caller is an attested runner module when its
+  by attested runner modules, except the decision-owner arm of §9.2's
+  observation authorization. A caller is an attested runner module when its
   route carries a principal the daemon verified itself (`reserved:<module>`,
   proven by the launch secret the daemon handed that module), and the
   provider knows that module as a runner. Outside the §9.2 exception, any other
@@ -1191,7 +1196,8 @@ What a runner saw on an account, so the provider's headroom stays current.
 - [pinned] `observe_backoff` adds `kind: "transient_backoff"` and optional
   `decision_id`, `retry_at_ms` (Unix ms), and `provider_code` (1–128 characters,
   verbatim). `retry_at_ms` is required for `transient_backoff`, allowed for
-  `account_limit_exhausted`, and refused for every other kind, by that field.
+  `account_limit_exhausted`, and refused for every other kind, including
+  `credential_refused`, by that field.
   `observe::parse_account_observe_request_serving(params, capabilities)`
   refuses each new member by name without the group, keeps the new kind as
   advisory `ObserveKind::Other`, and applies no retry rule. The legacy parser
@@ -1204,6 +1210,19 @@ What a runner saw on an account, so the provider's headroom stays current.
   stop for every runner until `retry_at_ms`. Past times are recorded with no
   fence; times over 24 hours out are capped at 24 hours (`RESET_FENCE_CAP_MS`).
   The current pin stays; only `run_finished` releases it.
+- [pinned] `observe_credential_refused` adds `kind: "credential_refused"`, with
+  the same meaning as report `refusal_class: credential_refused` (§8). It names
+  `credential_id`, or else the admission's credential through `admission_id`;
+  with neither, refuse `invalid_request {field: "admission_id"}`.
+  `provider_code` is allowed verbatim; `retry_at_ms` is refused by that field.
+  The serving parser keeps the kind as advisory `ObserveKind::Other` without
+  the group and applies nothing; the legacy parser supplies no groups.
+  It blocks that credential for every runner until an operator clears it or
+  a router-chosen, bounded re-probe horizon passes. The router documents the
+  horizon; the next selection after it may try the credential again. A later
+  `credential_refused` for the same credential extends the block and never
+  shortens it. A refusal such as an exhausted prepaid balance or a revoked key does not
+  clear by waiting, so it is never treated as a resettable limit.
 - [pinned] On a declaring router, resolve `ObserveArm` from trusted state and
   call `observe::check_observe_authorization(arm, request)`:
   - `Runner`: the caller holds the admission or is otherwise authorized by
@@ -1212,10 +1231,11 @@ What a runner saw on an account, so the provider's headroom stays current.
     offer the admission never carried. Authorization follows the admission,
     not decision ownership, so `run_finished` can still release the pin.
   - `DecisionOwner {decision_id: D, admission_id, carried}`: the caller owns
-    a select or panel decision D. Only wall kinds (`account_limit_exhausted`,
-    `transient_backoff`) are allowed, only naming D and that admission, and only
-    if the admission's `account_for` carried D. A decision owner cannot release
-    or reshape a runner's pin.
+    a select or panel decision D. Only the kinds that block allocation
+    (`account_limit_exhausted`,
+    `transient_backoff`, `credential_refused`) are allowed, only naming D and
+    that admission, and only if the admission's `account_for` carried D. A
+    decision owner cannot release or reshape a runner's pin.
   - `Other`: neither arm, including foreign or non-select decisions from a
     non-runner; refused.
   Every authorization refusal is `account_not_authorized`, never
@@ -1237,7 +1257,7 @@ What a runner saw on an account, so the provider's headroom stays current.
   | acquire | `route.account_for`, `mode: "admit"`, with `pool` |
   | renew | `route.account_for`, `mode: "renew"`, with `expected_pin` |
   | release | `route.account_observe`, `kind: "run_finished"` |
-  | wall | `route.account_observe`, `account_limit_exhausted` or, with its group, `transient_backoff` |
+  | block (stop allocating an account or credential) | `route.account_observe`, `account_limit_exhausted` or, with their groups, `transient_backoff` or `credential_refused` |
 
 - [pinned] A runner declaring `routed_accounts` in its runner-role describe
   lists the sign-in methods it admits, renews and releases itself. Entries
@@ -1246,6 +1266,17 @@ What a runner saw on an account, so the provider's headroom stays current.
   contract). Any listed method requires `follows_account_choice: true` in the
   routing runner declaration. That flag without the group keeps its 0.6.0
   meaning.
+- [pinned] A runner declaring `routed_accounts` that learns the provider refused
+  the admitted credential for any use sends `credential_refused`, naming the
+  admission, before releasing it with `run_finished`. It sends it only to a
+  router declaring `observe_credential_refused`, and only from the provider's
+  structured error (a code or type), never inferred from message text, which
+  can quote a user. Limits that reset stay `account_limit_exhausted` or
+  `transient_backoff`. For an API key, an authentication refusal that
+  persists after the runner's own retry (the key is invalid or revoked)
+  counts as refused for any use. For a sign-in method such as OAuth, the same
+  refusal means the sign-in must be renewed: the runner pauses for sign-in and
+  does not send `credential_refused`.
 - [pinned] For listed methods the runner forwards the select pool and
   credential hint as §5.2 specifies, loads the public-id credential answered by
   `account_for`, and sends with it. For unlisted methods, or without the group,

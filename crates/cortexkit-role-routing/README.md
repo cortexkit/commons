@@ -19,14 +19,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.7.0"
+cortexkit-role-routing = "0.7.2"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.7.0", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.7.2", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -48,6 +48,7 @@ What the crate holds:
   `account_continue`, `select_panel`, `budget_quote`, `explain`,
   `account_status`, `head_choices`, `select_pin_slot`, `select_available_routes`,
   `select_prefer_prompt_cache`, `select_settings`, `observe_backoff`,
+  `observe_credential_refused`,
   `report_outcomes`);
 - `select`: the `route.select` request, `parse_select_request` and
   `parse_select_request_serving` (which reads the members of the groups a
@@ -62,7 +63,7 @@ What the crate holds:
 - `wire`: the `{"result": <answer>}` reply envelope (`reply_body`,
   `read_reply`).
 
-## Optional operations and checks in 0.7.1
+## Optional operations and checks in 0.7.2
 
 Each new operation is listed in `ops` exactly when its same-named group
 (without `route.`) is declared. `check_describe` names a mismatch as
@@ -89,6 +90,13 @@ members are refused by name and `transient_backoff` remains advisory. Select's
 `pin_slot`, `available_routes`, `prefer_prompt_cache` and `settings` each have
 their own group and undeclared-member refusal. Unknown open-set values are kept,
 and absent optional fields preserve old bytes.
+
+`observe_credential_refused` requires `observe_backoff`; `check_describe` names
+the missing prerequisite with `DescribeProblem::MissingCapabilityDependency`.
+With the group, `credential_refused` blocks a credential across runners rather
+than recording a resettable limit. It names the credential or its admission,
+allows verbatim `provider_code`, and refuses `retry_at_ms`. Without the group,
+the kind remains advisory, including in the legacy parser.
 
 `usage.run_id` is an opaque 1–128-character id without controls, refused by
 `usage.run_id` when invalid or undeclared. Distinct run ids on one decision can

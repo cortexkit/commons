@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.7.2
+
+- Add `observe_credential_refused` (requires `observe_backoff`) and the
+  `credential_refused` wall kind for credential-wide provider refusals, with
+  admission or credential binding, no caller retry time, and both authorization
+  arms. Undeclared kinds stay advisory. Describe checks name a missing prerequisite
+  with `DescribeProblem::MissingCapabilityDependency { group, requires }`.
+  Pin runner reporting to structured provider errors before admission release;
+  document bounded re-probes without treating credit as a resettable limit.
 
 - Contract §5.4: `hold_when_reset_within` no longer has a 900-second default.
   Unset, a blocked entry is held whenever its known reset fits within the
