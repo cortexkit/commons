@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Contract §9: on an existing session, a route whose scope stamp carries a
+  `flow_id` or `run_id` is never admitted as the owner, even when its
+  principal matches the owner's. It keeps only what the session grants it by
+  name: plan sender or reader rights, or a frozen sender's rights over its own
+  sends. Owner operations from it are refused `scope_owner_mismatch` before
+  any write. The owner's unscoped or plain-stamped routes are unchanged. Text
+  only; no API change.
+
 ## 0.8.13
 
 - Add the opt-in `adopt_open` group, requiring `adopt` and `plans`. On a

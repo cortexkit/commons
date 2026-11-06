@@ -2621,6 +2621,25 @@ Model-view reads and replacement-entry pages are not part of this contract.
   perform plan admission, persist the freeze or select execution authority;
   the runner remains responsible for those steps. Unscoped sends do not use
   these helpers.
+- [pinned] **A flow- or run-stamped route is never the owner.** On a session
+  that already exists, a route whose scope stamp carries a `flow_id` or a
+  `run_id` is never admitted as the session's owner, even when its attested
+  principal equals the owner's or the scope owner's. Such a route gets only
+  what the session grants it by name:
+  - a plan sender or reader (§9.7, §9.19);
+  - on a flow- or run-scoped session, the frozen sender's rights: its sends,
+    and what this contract gives a sender for its own sends, such as
+    `session.send_status` (§9.8) and, on a `retract_own_send` runner,
+    `session.retract` of its own submission (§9.2).
+  An owner-only operation from such a route (for example `run.cancel`,
+  `session.refresh` or `session.adopt`) is refused `scope_owner_mismatch`
+  before any write, and a read admitted only to the owner (§9.19) is refused
+  the same way. Being
+  frozen as a session's sender transfers none of the owner's authority. The
+  owner's own routes keep their rights: a route with an unscoped or plain
+  stamp from the owner can still cancel or clean up work that a flow or run
+  started. Session creation is unchanged and follows the scoped-creation rules
+  above.
 - [pinned] **Authority stays the owner's** (stated in 0.5.2 for every
   runner). A run that a non-owner's send starts or joins (a plan-named
   sender's, §9.7, or an unkeyed non-owner send above) runs under the
