@@ -464,6 +464,13 @@ a module plays.
   `select_hold_control`): the caller's own cap on a hold. `0` means no
   hold. It is valid together with `hold_ok: false`, because the fallback
   that request can take may still hold, and the cap applies to it.
+  Waiting on a blocked account is worth it only while the session's
+  prompt cache on that account would still be warm when the account resets.
+  After that the cache is lost whichever account serves. So a runner that
+  knows when its cache expires sends at most the time left until then
+  (its last accepted response on that account plus the cache lifetime in
+  force), and sends `0` when it has no accepted response there. The provider
+  keeps no cache state; the cap is the only place this bound reaches it.
 - [pinned] `hold_ok` and `hold_wait_max_s` sent to a provider that does not
   declare `select_hold_control` are `invalid_request {field}` naming the
   member, `hold_ok` first when both are sent. `prefer` sent to a provider
@@ -579,14 +586,16 @@ This section binds a provider declaring `select_hold_control` (§4).
   blocked when every one of them is blocked by a window. Its reset is the
   time the first of those windows ends, and is unknown when no window's
   end is known.
-- [pinned] The operator sets, per provider, `max_hold` (default 900
-  seconds, the `route.account_for` default) and `hold_when_reset_within`
-  (default 900 seconds). The hold limit is the smaller of `max_hold` and
-  the request's `hold_wait_max_s`.
+- [pinned] The provider keeps, per provider, `max_hold`: a safety ceiling
+  on any hold, which the operator may set. The contract fixes no number;
+  a router documents its own default. The operator may also set
+  `hold_when_reset_within`, which has no default. The hold limit is the
+  smaller of `max_hold` and the request's `hold_wait_max_s`.
 - [pinned] For a blocked entry the provider decides, in this order:
   1. `hold_ok: false`: move.
-  2. The reset is unknown, or further away than `hold_when_reset_within`:
-     move.
+  2. The reset is unknown: move. When the operator has set
+     `hold_when_reset_within` and the reset is further away than it, move
+     too. Unset, it adds no threshold of its own.
   3. The wait until the reset exceeds the hold limit: move.
   4. Otherwise it answers the entry, and the runner holds at
      `route.account_for`.

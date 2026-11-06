@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Contract §5.4: `hold_when_reset_within` no longer has a 900-second default.
+  Unset, a blocked entry is held whenever its known reset fits within the
+  hold limit, `min(max_hold, hold_wait_max_s)`; an operator may still set it
+  to hold only nearer resets. `max_hold` is a per-provider safety ceiling
+  whose default each router documents; the contract fixes no number.
+  §5.1: a runner that knows when its prompt cache expires sends at most the
+  time left until then as `hold_wait_max_s`, and `0` with no accepted
+  response on that account. An omitted `hold_wait_max_s` on
+  `route.account_for` still defaults to 900 seconds. Text only; no API
+  change.
+
 ## 0.7.1
 
 - Add optional run-attributed report usage with `report_usage_run_id`, preserving
