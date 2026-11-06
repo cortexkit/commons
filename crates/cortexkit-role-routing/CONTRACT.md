@@ -913,8 +913,14 @@ the routing provider allocates (subscription logins).
 `account::AccountForRequest`, validated by
 `account::parse_account_for_request`:
 
-- [pinned] `provider`, `model` (required, non-empty): the call about to be
-  made.
+- [pinned] `provider`, `model` (required, non-empty): the route about to be
+  called, as routing names it (§2), never the runner's own name for the
+  vendor. A runner acting on a select answer sends exactly that answer's
+  `route.provider` and `route.model`. The route's provider owns the accounts
+  (the answer's `account.provider`), and `decision_id` binds to it below. On a
+  key-pool route that provider is routing's pool owner, which can differ from
+  `runner.model.provider`. `runner.model` names what the runner sends the
+  model call with (§5.2) and never goes in this request.
 - [pinned] `service_tier` (optional): `standard`, `fast` or `ultrafast`.
   Sent only to a router declaring `service_tier`, with the exact plan
   eligibility, ordered step-down and named refusal rules of §5.5. Only an

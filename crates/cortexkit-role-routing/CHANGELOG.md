@@ -12,6 +12,11 @@
   response on that account. An omitted `hold_wait_max_s` on
   `route.account_for` still defaults to 900 seconds. Text only; no API
   change.
+- Contract §9.1: `route.account_for`'s `provider` and `model` are the route
+  as routing names it, which for a select answer is exactly its `route`, so a
+  key-pool call names routing's pool owner, not the vendor in
+  `runner.model`. The old wording, "the call about to be made", left that
+  open. Text only; no API change.
 
 ## 0.7.1
 
