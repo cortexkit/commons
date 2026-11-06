@@ -3387,6 +3387,43 @@ without a prompt.
   MUST NOT send it unless the runner's `role.describe` declares `adopt`; a
   runner without the group is unaffected. The group adds no discovery
   metadata and is independent of `plans` and of the delivery modes.
+- [pinned] **`adopt_open`: opening a session without a message.** A session's
+  owner sometimes needs the session to exist, with its plan, before anyone
+  sends to it, for example when its first message comes from an app the plan
+  names. This optional describe group allows that. It requires `adopt` and
+  `plans`; `check_describe` refuses a missing dependency as
+  `adopt_open_without_adopt` or `adopt_open_without_plans`. It adds no request
+  or reply fields, and a caller relies on it only when the runner declares it.
+  - **When adopt opens.** On a runner declaring the group, `session.adopt`
+    opens the bound session exactly when all of these hold: the runner holds
+    no record of the session at all (no owner, applied plan, history or
+    pending send); the bind carries a plain scope (neither `flow_id` nor
+    `run_id`); and the attested caller owns that scope.
+  - **What opening does.** It is owner admission (§10.1) without a prompt.
+    The runner records the owner from the bind's attested principal and the
+    scope stamp's owner, never from a request field, freezes the scope, and
+    checks and applies `plan` with admission's checks and refusals. A refusal
+    writes nothing. Opening starts no run and writes no message or history
+    entry. The reply is the ordinary adopt reply.
+  - **Reads right after opening.** `session.baseline` answers the owner
+    `ready` with the applied plan's composition facts, as after admission.
+    `session.head` and `session.read` succeed on admitted reads, with no run
+    and an empty history; neither answers `unknown_session` while the session
+    waits for its first message. Where the runner also declares `head_sender`
+    and `delivery_order`, each sender the plan names sees its own grant in
+    `session.head.sender` over its own admitted route (§4.3). No sender list
+    or plan fields are added to head or baseline.
+  - **Everything else is unchanged.** A recorded session (host-started or
+    owned), an unscoped bind, a flow or run scope, or a caller other than the
+    plain scope's owner keeps this section's existing behaviour. Under a plain
+    scope, such a caller is still refused `scope_owner_mismatch` before any
+    write, as §9 requires, and a no-record session that isn't opened keeps
+    today's adopt answer.
+  - **Retries.** Idempotency stays keyed by the bound session and `send_id`.
+    An exact repeat after opening replays the original reply, and another plan
+    under that id is refused `send_id_reuse` with `detail.field: "plan"`.
+    Later owner sends are ordinary continuations: their plan identity is
+    compared for `plan_drift` as after admission.
 - [pinned] The request is `{send_id, plan}` (`adopt::AdoptRequest`),
   strict: an unknown field is refused `invalid_params` naming it, and a
   `plan` that is not an object is refused naming `plan`. The request names no
@@ -3427,8 +3464,9 @@ without a prompt.
   `frozen` is the identity of the plan applied at host start and `sent` the
   identity of the request's plan, identities only, never plan content.
   `frozen` is absent when the runner applied no plan to the session (the
-  host never started it, or started it without one): adopt never
-  establishes a plan, it only confirms the one applied. `plan_drift` is
+  host never started it, or started it without one): except under
+  `adopt_open`'s opening conditions above, adopt never establishes a plan,
+  it only confirms the one applied. `plan_drift` is
   terminal and not retried with the same request.
 - [pinned] Idempotency is keyed by the bound session and `send_id`, and
   compares the whole request, as owner sends do (§9). An exact repeat is
@@ -3445,7 +3483,8 @@ without a prompt.
   holds.
 - [pinned] The runner checks a request in this order, and the first
   failing check answers: the caller (`scope_owner_mismatch`), then the
-  `send_id` (a replay, or `send_id_reuse`), then the plan (`plan_drift`).
+  `send_id` (a replay, or `send_id_reuse`), then the plan (`plan_drift`, or
+  the admission checks when `adopt_open` opens the session).
   So another caller repeating the owner's request exactly is still refused
   `scope_owner_mismatch`.
 - [pinned] A refusal writes nothing, its `send_id` and caller included: a
@@ -5072,8 +5111,9 @@ froze for a run to every assistant reply the run writes.
   the effective plan when no change was accepted) and the sent plan.
   `frozen` is absent only when neither exists: a plan-less first episode
   with no change accepted since.
-  `session.adopt` refuses a plan other than the one applied at host start
-  with the same `plan_drift {frozen, sent}` (§9.5).
+  Except when `adopt_open` opens an unknown session, `session.adopt` refuses
+  a plan other than the one already applied with the same
+  `plan_drift {frozen, sent}` (§9.5).
 - [pinned] Any refusal during admission writes nothing.
 - [pinned] `plan.model` selects the next-run model and optional default tier
   under `head_selection` (§9.3.4). It is checked before accepting admission;

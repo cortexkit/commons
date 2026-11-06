@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.17.15
+
+- Pin `cortexkit-role-llm-runner =0.8.13`.
+- Check `adopt_open`: opening an unknown session, immediate empty reads,
+  named senders' grants where the runner declares `head_sender` and
+  `delivery_order`, repeat replies and plan reuse, unchanged existing-session
+  drift, and refusal, before any write, of a caller that isn't the scope's
+  owner. Only that last case needs the adapter's optional hook for opening a
+  route under a plain scope as a caller other than its owner; without the
+  hook it is not applicable.
+- Exercise the new checks against faulty runners and report their failing
+  cases by name, including a runner that hides an opened session until a message.
+
 ## 0.17.14
 
 - Pin `cortexkit-role-llm-runner =0.8.12`.

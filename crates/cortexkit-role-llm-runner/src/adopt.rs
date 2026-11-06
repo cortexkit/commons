@@ -9,6 +9,10 @@
 //! neither interrupts nor refuses a run already in progress. A runner serves
 //! it only when `role.describe` declares `adopt`
 //! ([`crate::capabilities::ADOPT`]).
+//! With [`crate::capabilities::ADOPT_OPEN`], adoption can instead open a
+//! session the runner has never recorded, when the attested caller owns its
+//! plain scope. The runner applies the plan as at owner admission, without
+//! a run or message; baseline and empty transcript reads answer immediately.
 //!
 //! The runner checks a request in this order, and the first failing check
 //! answers:
@@ -19,7 +23,8 @@
 //! 2. the `send_id`: an exact repeat replays the original reply, and the
 //!    same `send_id` with another plan is refused `send_id_reuse` naming
 //!    `plan` ([`AdoptRequest::reused_field`]);
-//! 3. the plan: its identity must equal the identity of the plan the runner
+//! 3. the plan: when opening under `adopt_open`, apply the owner-admission
+//!    checks; otherwise its identity must equal the identity of the plan the runner
 //!    applied when the host started the session ([`check_drift`]), or the
 //!    request is refused `plan_drift`.
 //!

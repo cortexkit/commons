@@ -1,6 +1,7 @@
 //! Tests of the suite itself, against the reference fake in `fake/`.
 //! Conformance of a real runner is run by that runner, never here.
 
+mod adopt_open;
 mod fake;
 
 const HEAD_SELECTION_CASES: &[&str] = &[
@@ -1127,6 +1128,7 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     // Legacy fixtures do not opt into these groups or supply their optional
     // metadata/clock hooks. Inapplicable cases are not counted as passing coverage.
     if (case.starts_with("sender_succession_")
+        || case.starts_with("adopt_open_")
         || case.starts_with("live_ids_")
         || case.starts_with("message_senders_")
         || case.starts_with("read_display_facts_")
@@ -1185,6 +1187,7 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::InterruptReason,
     Capability::StructuredOutput,
     Capability::Adopt,
+    Capability::AdoptOpen,
     Capability::RunToolCalls,
     Capability::RunUsage,
     Capability::SessionUsage,
@@ -1682,6 +1685,7 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             continue;
         }
         if spec.name == "media_only_send"
+            || spec.name.starts_with("adopt_open_")
             || spec.name.starts_with("sender_attribution_")
             || spec.name.starts_with("notices_")
             || spec.name.starts_with("sender_succession_")

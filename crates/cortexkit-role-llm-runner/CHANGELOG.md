@@ -1,7 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.8.13
 
+- Add the opt-in `adopt_open` group, requiring `adopt` and `plans`. On a
+  runner declaring it, a plain scope's owner can open a session the runner has
+  no record of through `session.adopt`, with its plan, without sending a
+  prompt, starting a run or adding history. The opened session answers
+  `session.baseline`, `session.head` and `session.read` at once, with an empty
+  history. Where the runner also declares `head_sender` and `delivery_order`,
+  each sender the plan names sees its own grant on the head before the first
+  message. Sessions that already exist, other binds, and runners without the
+  group keep today's adoption behaviour.
 - Contract §9.7.2: a notice's `send_id` for an unkeyed non-owner send is the
   `submission_id` that send's reply returned. A runner whose reply returned
   none serves no notice for that send, and `(sender, send_id)` stays unique among

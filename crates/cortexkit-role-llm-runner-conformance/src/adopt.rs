@@ -1,10 +1,11 @@
 //! `session.adopt` cases, run only when the subject declares `adopt`.
 //!
-//! Each case starts its session the way a person's app does
+//! The host-adoption cases start their sessions the way a person's app does
 //! ([`LlmRunnerSubject::start_host_session`]), so the runner applied a plan
 //! at host start and no role request has reached the session. Every case
 //! reads the transcript before and after each adoption: an adoption starts no
 //! run, writes no message, and leaves a run in progress running.
+//! The `open` submodule checks admission of unknown sessions with `adopt_open`.
 
 use cortexkit_role_harness::RouteStamp;
 use cortexkit_role_llm_runner::{
@@ -32,6 +33,8 @@ use crate::{
 };
 
 type Check = Result<(), String>;
+
+mod open;
 
 /// What the transcript holds: the head metadata and every message.
 type Transcript = (HeadMeta, Vec<ReadMessage>);
@@ -244,6 +247,9 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
+    if name.starts_with("adopt_open_") {
+        return open::run(case, name).await;
+    }
     if name == "adopt_host_turn_is_a_run" {
         return host_turn_is_a_run(case).await;
     }
@@ -536,10 +542,23 @@ where
     unchanged(&session.route, &before, "session.adopt after a refusal").await?;
 
     // A session the host never started has no applied plan to match.
-    let never = case.open("adopt-never-started", Script::default()).await?;
+    let never_name = case.mint.next("adopt-never-started");
+    case.subject
+        .install_script(&never_name, Script::default())
+        .await
+        .map_err(|e| e.to_string())?;
+    // An unscoped bind never opens through adopt_open, so the original
+    // no-applied-plan refusal remains testable on runners declaring it.
+    let mut stamp = case.subject.owner_stamp();
+    stamp.scope = None;
+    let never_route = case
+        .subject
+        .session_route(case.handle.inner(), &never_name, &stamp)
+        .await
+        .map_err(|e| e.to_string())?;
     let error = expect_error(
         "session.adopt of a session with no applied plan",
-        adopt_raw(&never.route, &case.mint.next("adopt"), &plan).await?,
+        adopt_raw(&never_route, &case.mint.next("adopt"), &plan).await?,
     )?;
     expect_code(
         "session.adopt of a session with no applied plan",

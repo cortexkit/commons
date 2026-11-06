@@ -107,6 +107,9 @@ pub enum Capability {
     /// `session.adopt`: the owner takes over a session the host started
     /// with a plan applied, without sending a prompt.
     Adopt,
+    /// Open an unknown plain-scope session through `session.adopt`, applying
+    /// its plan without a prompt. Requires `adopt` and `plans` on the runner.
+    AdoptOpen,
     /// `run.tool_calls`: a run's tool calls as a paged list.
     RunToolCalls,
     /// Per-run token usage (`usage`) on `run.result` and `run.status`.
@@ -218,6 +221,7 @@ impl Capability {
         Self::InterruptReason,
         Self::StructuredOutput,
         Self::Adopt,
+        Self::AdoptOpen,
         Self::RunToolCalls,
         Self::RunUsage,
         Self::FinishReason,
@@ -289,6 +293,7 @@ impl Capability {
             Self::InterruptReason => groups::INTERRUPT_REASON,
             Self::StructuredOutput => groups::STRUCTURED_OUTPUT,
             Self::Adopt => groups::ADOPT,
+            Self::AdoptOpen => groups::ADOPT_OPEN,
             Self::RunToolCalls => groups::RUN_TOOL_CALLS,
             Self::RunUsage => groups::RUN_USAGE,
             Self::FinishReason => groups::FINISH_REASON,
@@ -1198,8 +1203,9 @@ pub trait LlmRunnerSubject: Harness {
     fn capabilities(&self) -> BTreeSet<Capability>;
 
     /// The owner identity cases use to start and manage their sessions.
-    /// With `MessageMarks`, this must be a daemon-attested scoped route whose
-    /// principal owns the scope, so the served-marks case can carry agent words.
+    /// With `MessageMarks` or `AdoptOpen`, this must be a daemon-attested
+    /// plain-scope route whose principal owns the scope, so cases can mark
+    /// messages with `speaks_for` or open a session without a message.
     fn owner_stamp(&self) -> RouteStamp;
 
     /// An identity that is not the owner of any session the owner stamp
@@ -1209,7 +1215,7 @@ pub trait LlmRunnerSubject: Harness {
     /// A non-owner carrier and the scope owner, admitted by the daemon under
     /// the same plain scope (no flow id or run id). `session_route` must open
     /// real routes with these stamps. Return None when the adapter cannot
-    /// expose this fixture; its scoped-start and message-marks owner-only
+    /// expose this fixture; its scoped-start, adopt-open and message-marks owner-only
     /// cases are then named inapplicable.
     fn scoped_session_start_stamps(&self) -> Option<(RouteStamp, RouteStamp)> {
         None

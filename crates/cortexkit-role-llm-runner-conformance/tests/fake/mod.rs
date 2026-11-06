@@ -388,6 +388,8 @@ pub struct Defects {
     /// `session.adopt` writes a user message into the transcript, which an
     /// adoption must never do.
     pub adopt_writes_message: bool,
+    /// A deliberately incorrect implementation of opening or replaying adoption.
+    pub adopt_open: Option<&'static str>,
     /// `session.adopt` from a caller other than the recorded owner takes the
     /// session over instead of being refused `scope_owner_mismatch`.
     pub adopt_takes_over_owner: bool,
@@ -938,6 +940,7 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    opened_by_adopt: bool,
     frozen_opener: Option<String>,
     number_offset: u64,
     moved_head: Option<cortexkit_role_llm_runner::read::HeadCut>,
@@ -1585,6 +1588,7 @@ impl Module {
             sessions.insert(
                 session.clone(),
                 Sess {
+                    opened_by_adopt: record["opened_by_adopt"] == json!(true),
                     incarnation: record["incarnation"].as_str().map(str::to_owned),
                     owner: text("owner"),
                     frozen_opener: record["frozen_opener"].as_str().map(str::to_owned),
@@ -1846,6 +1850,9 @@ impl Module {
             "ceiling_view" => sess.ceiling_wait = None,
             "adopt" => {
                 sess.owner = text("owner");
+                if let Some(digest) = record["reapplied_plan"].as_str() {
+                    sess.plan_digest = Some(digest.to_owned());
+                }
                 sess.adopts.insert(
                     text("send_id"),
                     (record["request"].clone(), record["reply"].clone()),
@@ -3120,6 +3127,18 @@ impl Module {
             Err(_) => return Ok(invalid("send_id")),
         };
         let sess = self.sessions.lock().unwrap().get(session).cloned();
+        let plain_scope = stamp
+            .scope
+            .as_ref()
+            .filter(|scope| scope.scope_ref != "flow-scope" && scope.scope_ref != "run-scope");
+        let opens =
+            self.world.serves(groups::ADOPT_OPEN) && sess.is_none() && plain_scope.is_some();
+        if opens
+            && plain_scope.unwrap().owner != stamp.principal
+            && self.world.defects.adopt_open != Some("non_owner")
+        {
+            return Ok(refuse(errors::SCOPE_OWNER_MISMATCH, None));
+        }
         if let Some(sess) = &sess {
             if !sess.owner.is_empty()
                 && sess.owner != stamp.principal
@@ -3134,6 +3153,9 @@ impl Module {
                 let earlier: AdoptRequest =
                     serde_json::from_value(earlier.clone()).expect("stored adopt requests decode");
                 return Ok(match request.reused_field(&earlier) {
+                    Some(_) if self.world.defects.adopt_open == Some("reuse_plan") => {
+                        Reply::Response(reply.clone())
+                    }
                     Some(field) => refuse(errors::SEND_ID_REUSE, Some(json!({ "field": field }))),
                     None => Reply::Response(reply.clone()),
                 });
@@ -3142,12 +3164,24 @@ impl Module {
         let sent = plan_digest(&request.plan);
         let applied = sess.as_ref().and_then(|sess| sess.plan_digest.as_deref());
         if let Err(detail) = check_drift(applied, &sent) {
-            return Ok(refuse(
-                errors::PLAN_DRIFT,
-                Some(serde_json::to_value(detail).unwrap()),
-            ));
+            if !opens && self.world.defects.adopt_open != Some("reapply") {
+                return Ok(refuse(
+                    errors::PLAN_DRIFT,
+                    Some(serde_json::to_value(detail).unwrap()),
+                ));
+            }
         }
-        let mut reply = AdoptReply::new(sent);
+        if opens {
+            let ignore = self.world.defects.adopt_open == Some("ignore_plan");
+            self.commit(session, json!({
+                "kind": "start", "owner": stamp.principal,
+                "lineage": format!("lin-{session}"), "opened_by_adopt": true,
+                "plan_digest": if ignore { None } else { Some(&sent) },
+                "tools": if ignore { json!([]) } else { request.plan.get("tools").cloned().unwrap_or(json!([])) },
+                "senders": request.plan.get("senders"), "readers": request.plan.get("readers"),
+            }))?;
+        }
+        let mut reply = AdoptReply::new(sent.clone());
         if let Some(last) = sess.as_ref().and_then(|sess| sess.messages.last()) {
             reply = reply.with_last_ordinal(last.ordinal);
         }
@@ -3155,9 +3189,12 @@ impl Module {
         self.commit(
             session,
             json!({ "kind": "adopt", "owner": stamp.principal, "send_id": request.send_id,
-                    "request": request, "reply": reply }),
+                    "request": request, "reply": reply,
+                    "reapplied_plan": (self.world.defects.adopt_open == Some("reapply")).then_some(&sent) }),
         )?;
-        if self.world.defects.adopt_writes_message {
+        if self.world.defects.adopt_writes_message
+            || (opens && self.world.defects.adopt_open == Some("write_message"))
+        {
             self.commit(
                 session,
                 json!({ "kind": "unattributed", "marker": "adopted" }),
@@ -3256,6 +3293,12 @@ impl Module {
                 errors::SCOPE_OWNER_MISMATCH,
                 Some(json!({ "accepted": owner })),
             ),
+            Some(_)
+                if self.world.defects.adopt_open == Some("ignore_plan")
+                    && self.sessions.lock().unwrap()[session].opened_by_adopt =>
+            {
+                respond(BaselineReply::ready(Baseline::plan_less(vec![])))
+            }
             Some(_) => respond(BaselineReply::ready(
                 self.change_baseline(session, self.command_baseline(session)),
             )),
@@ -4309,6 +4352,12 @@ impl Module {
                 },
             );
         };
+        if sess.opened_by_adopt
+            && sess.messages.is_empty()
+            && self.world.defects.adopt_open == Some("unknown_until_message")
+        {
+            return refuse(errors::UNKNOWN_SESSION, None);
+        }
         if request.history_version.as_ref().is_some_and(|lineage| {
             *lineage != sess.history_version && !self.world.defects.stale_cursor_accepted
         }) {
@@ -4659,6 +4708,12 @@ impl Module {
         if sess.expired_at.is_some() && self.world.retention_defect == RetentionDefect::Empty {
             return respond(HeadMeta::empty(1, "log-1"));
         }
+        if sess.opened_by_adopt
+            && sess.messages.is_empty()
+            && self.world.defects.adopt_open == Some("unknown_until_message")
+        {
+            return refuse(errors::UNKNOWN_SESSION, None);
+        }
         let mut head = HeadMeta::new(
             sess.history_version,
             sess.incarnation.clone().unwrap_or_else(|| "log-1".into()),
@@ -4816,7 +4871,9 @@ impl Module {
                 }
             }
         }
-        if self.world.defects.head_sender_omitted {
+        if self.world.defects.head_sender_omitted
+            || (sess.opened_by_adopt && self.world.defects.adopt_open == Some("omit_sender_grant"))
+        {
             head.sender = None;
         }
         if self.world.defects.head_error_on_completed
@@ -6562,14 +6619,13 @@ impl LlmRunnerSubject for FakeSubject {
     fn owner_stamp(&self) -> RouteStamp {
         RouteStamp {
             principal: "reserved:owner".into(),
-            scope: self
-                .capabilities
-                .contains(&Capability::MessageMarks)
-                .then(|| cortexkit_role_harness::ScopeStamp {
-                    owner: "reserved:owner".into(),
-                    scope_ref: "marks-scope".into(),
-                    scope_epoch: 1,
-                }),
+            scope: (self.capabilities.contains(&Capability::MessageMarks)
+                || self.capabilities.contains(&Capability::AdoptOpen))
+            .then(|| cortexkit_role_harness::ScopeStamp {
+                owner: "reserved:owner".into(),
+                scope_ref: "marks-scope".into(),
+                scope_epoch: 1,
+            }),
         }
     }
 

@@ -390,6 +390,7 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
             || spec.name.starts_with("sender_attribution_")
             || spec.name.starts_with("notices_")
             || spec.name.starts_with("message_marks_")
+            || spec.name.starts_with("adopt_open_")
             || spec.name.starts_with("sender_succession_")
             || spec.name.starts_with("head_selection_")
             || spec.name.starts_with("live_ids_")

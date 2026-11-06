@@ -27,6 +27,8 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const ADOPT_OPEN_WITHOUT_ADOPT: &str = "adopt_open_without_adopt";
+    pub const ADOPT_OPEN_WITHOUT_PLANS: &str = "adopt_open_without_plans";
     pub const MESSAGE_MARKS_WITHOUT_READ_DISPLAY_FACTS: &str =
         "message_marks_without_read_display_facts";
     pub const MESSAGE_MARKS_WITHOUT_HISTORY_DISPLAY: &str = "message_marks_without_history_display";
@@ -608,6 +610,16 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     }
     for (group, dependency, problem) in [
         (
+            capabilities::ADOPT_OPEN,
+            capabilities::ADOPT,
+            problem_names::ADOPT_OPEN_WITHOUT_ADOPT,
+        ),
+        (
+            capabilities::ADOPT_OPEN,
+            capabilities::PLANS,
+            problem_names::ADOPT_OPEN_WITHOUT_PLANS,
+        ),
+        (
             capabilities::MESSAGE_MARKS,
             capabilities::READ_DISPLAY_FACTS,
             problem_names::MESSAGE_MARKS_WITHOUT_READ_DISPLAY_FACTS,
@@ -996,6 +1008,10 @@ mod opt_in_dependency_tests {
     #[test]
     fn opt_in_groups_require_their_dependencies() {
         for (group, dependencies) in [
+            (
+                capabilities::ADOPT_OPEN,
+                vec![capabilities::ADOPT, capabilities::PLANS],
+            ),
             (
                 capabilities::MESSAGE_MARKS,
                 vec![

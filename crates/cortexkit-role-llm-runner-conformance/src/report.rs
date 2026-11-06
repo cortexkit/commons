@@ -51,6 +51,7 @@ const CANCEL: &[Capability] = &[Capability::RunCancel, Queue, TranscriptReads, R
 const INPUT_CAP: &[Capability] = &[Capability::InputTokenCap, Queue, TranscriptReads, RunOps];
 const STRUCTURED: &[Capability] = &[Capability::StructuredOutput, Queue, TranscriptReads, RunOps];
 const ADOPT: &[Capability] = &[Capability::Adopt, TranscriptReads];
+const ADOPT_OPEN: &[Capability] = &[Capability::AdoptOpen, TranscriptReads];
 const TOOL_CALLS: &[Capability] = &[Capability::RunToolCalls, Queue, TranscriptReads];
 const USAGE: &[Capability] = &[Capability::RunUsage, Queue, RunOps];
 const SESSION_USAGE: &[Capability] = &[
@@ -519,6 +520,14 @@ pub const CASES: &[CaseSpec] = &[
         "send.status of a settled send answers exactly what its re-send answers; one of a send_id the session has no record of is refused unknown_send, and one carrying an unknown field is refused invalid_params naming it"),
     case("adopt_binds_owner_without_a_run", ADOPT,
         "on a session the host started, with no message and after the person's first turn, session.adopt answers owner_bound with the plan's identity and session.head's last_ordinal, starts no run and writes no message; afterwards session.baseline answers the adopting owner ready and refuses another caller scope_owner_mismatch"),
+    case("adopt_open_opens_unknown_session", ADOPT_OPEN,
+        "adopt opens an unknown plain-scope session with owner and plan, a ready owner-only baseline, no run or history, immediate head/read answers and each named sender's own head grant on admitted reads where head_sender and delivery_order are declared"),
+    case("adopt_open_repeat_replays", ADOPT_OPEN,
+        "an exact repeat after opening replays the original reply; another plan under the same send_id refuses send_id_reuse naming plan without writing"),
+    case("adopt_open_existing_session_unchanged", ADOPT_OPEN,
+        "adopting an already owned session with another plan refuses plan_drift without reapplying it"),
+    case("adopt_open_non_owner_refused", ADOPT_OPEN,
+        "a non-owner carrier cannot open an unknown plain-scope session: scope_owner_mismatch writes nothing; inapplicable only when the optional carrier route hook is unavailable"),
     case("adopt_exact_repeat_replays_reply", ADOPT,
         "an exact repeat of session.adopt is answered with the original reply and writes nothing"),
     case("adopt_send_id_reuse_names_plan", ADOPT,
@@ -953,7 +962,8 @@ pub const NARROWINGS: &[&str] = &[
 pub enum CaseOutcome {
     Passed,
     /// Every rule checked over the real route passed, but one rule was not
-    /// checked. In `run_attribution_per_message`, the adapter answered
+    /// checked. For example, `adopt_open_opens_unknown_session` cannot check
+    /// sender grants without `head_sender`. In `run_attribution_per_message`, the adapter answered
     /// `CannotHoldUnattributable`: it declares the runner never stores a
     /// message without the run that produced it, so the rule that such a
     /// message must omit `run` cannot be exercised. `reason` names the

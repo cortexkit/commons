@@ -348,6 +348,10 @@ pub mod capabilities {
     /// with a plan already applied, before or during the person's own turns,
     /// without sending a prompt.
     pub const ADOPT: &str = "adopt";
+    /// `session.adopt` can open an unknown session for its plain scope's
+    /// owner, applying the plan without a prompt or a run. Requires `adopt`
+    /// and `plans`.
+    pub const ADOPT_OPEN: &str = "adopt_open";
     /// `run.tool_calls`: a run's tool calls as a paged list, read without
     /// decoding message bodies.
     pub const RUN_TOOL_CALLS: &str = "run_tool_calls";
@@ -475,6 +479,7 @@ pub mod capabilities {
         (SUBMIT_STREAMED_SIBLINGS, &[ops::SESSION_SEND]),
         (STRUCTURED_OUTPUT_PER_SESSION, &[ops::SESSION_SEND]),
         (ADOPT, &[ops::SESSION_ADOPT]),
+        (ADOPT_OPEN, &[ops::SESSION_ADOPT]),
         (RUN_TOOL_CALLS, &[ops::RUN_TOOL_CALLS]),
         (RUN_USAGE, &[ops::RUN_RESULT]),
         (FINISH_REASON, &[ops::RUN_RESULT]),
