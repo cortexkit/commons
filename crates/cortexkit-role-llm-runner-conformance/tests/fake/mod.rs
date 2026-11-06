@@ -174,6 +174,8 @@ pub struct Defects {
     pub notices: Option<&'static str>,
     pub attribution: Option<&'static str>,
     pub routed_accounts_no_call: Option<&'static str>,
+    pub account_route_vendor_names: bool,
+    pub account_route_change_accepted: bool,
     pub head_selection: Option<&'static str>,
     pub compaction_preset_missing_accepted: bool,
     pub marker_hides_reads: bool,
@@ -887,6 +889,7 @@ struct SendRec {
 #[derive(Clone, Debug)]
 struct RunRec {
     route_decision_id: Option<String>,
+    account_route: Option<cortexkit_role_llm_runner::send::AccountRoute>,
     directives: Vec<cortexkit_role_llm_runner::directives::DirectiveName>,
     max_steps: Option<u64>,
     max_output_tokens: Option<u64>,
@@ -1955,6 +1958,10 @@ impl Module {
                     });
                     sess.runs.push(RunRec {
                         route_decision_id: record["route_decision_id"].as_str().map(str::to_owned),
+                        account_route: record
+                            .get("account_route")
+                            .filter(|value| !value.is_null())
+                            .map(|value| serde_json::from_value(value.clone()).unwrap()),
                         directives: serde_json::from_value(record["directives"].clone())
                             .unwrap_or_default(),
                         max_steps: record["max_steps"].as_u64(),
@@ -2450,16 +2457,29 @@ impl Module {
                 if turn_index == 0 {
                     if let Some(peer) = self.world.routing_peers.lock().unwrap().get(session) {
                         if self.world.defects.routed_accounts_no_call != Some(peer.method()) {
-                            let answer = peer
-                                .request(
-                                    "fake-runner",
-                                    "route.account_for",
-                                    json!({
-                                        "provider": FAKE_PROVIDER, "model": FAKE_MODEL,
-                                        "conversation_key": session, "admission_id": run_id
-                                    }),
-                                )
-                                .unwrap();
+                            let account_route = run
+                                .account_route
+                                .as_ref()
+                                .filter(|_| !self.world.defects.account_route_vendor_names);
+                            let provider = account_route
+                                .map_or(FAKE_PROVIDER, |route| route.provider.as_str());
+                            let model =
+                                account_route.map_or(FAKE_MODEL, |route| route.model.as_str());
+                            let answer = peer.request(
+                                "fake-runner",
+                                "route.account_for",
+                                json!({
+                                    "provider": provider, "model": model,
+                                    "conversation_key": session, "admission_id": run_id
+                                }),
+                            );
+                            let answer = match answer {
+                                Ok(answer) => answer,
+                                Err(error) => return self.commit(session, json!({
+                                    "kind":"terminal", "run_id":run_id, "state":"error",
+                                            "reason":"provider_error", "error":{"class":"permanent", "message":error.to_string()}
+                                })),
+                            };
                             assert_eq!(
                                 answer["result"]["account"]["credential_id"],
                                 "fixture-credential"
@@ -3526,9 +3546,15 @@ impl Module {
         let listed = params.get(DELIVERY_FIELD).is_some_and(Value::is_array);
         let mut request: SendRequest = match serde_json::from_value(params) {
             Ok(request) => request,
+            Err(error) if error.to_string().contains("account_route") => {
+                return Ok(invalid("account_route"));
+            }
             Err(_) if listed => return Ok(invalid(DELIVERY_FIELD)),
             Err(_) => return Ok(invalid("prompt")),
         };
+        if request.account_route.is_some() && !self.world.serves(groups::ACCOUNT_ROUTE) {
+            return Ok(invalid("account_route"));
+        }
         if self.world.defects.succession != Some("undeclared_accepted") {
             if let Err(field) = request.check_sender_succession(&self.world.groups) {
                 return Ok(invalid(&field));
@@ -3928,6 +3954,13 @@ impl Module {
                         return Ok(invalid(field));
                     }
                 }
+                if !self.world.defects.account_route_change_accepted {
+                    if let Err(field) =
+                        request.check_account_route(Some(run.account_route.as_ref()))
+                    {
+                        return Ok(invalid(field));
+                    }
+                }
                 if let Err(field) = request.check_directives(&run.directives) {
                     return Ok(invalid(&field));
                 }
@@ -4085,6 +4118,7 @@ impl Module {
                     "message_marks": marks,
                     "attribution": self.attribution_for(session, &stamp.principal),
                     "route_decision_id": request.route_decision_id,
+                    "account_route": request.account_route,
                     "attachment_parts": attachment_parts,
                     "keep_empty_text": self.world.defects.attachments == "media_only_send_empty_text",
                     "stored_as": stored_as,

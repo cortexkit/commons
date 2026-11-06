@@ -9,6 +9,7 @@ use std::{
 };
 
 use cortexkit_role_harness::HarnessError;
+use cortexkit_role_llm_runner::send::AccountRoute;
 use serde_json::{json, Value};
 
 use crate::{
@@ -42,6 +43,7 @@ struct State {
 pub struct RecordingRoutingPeer {
     method: String,
     fixture: Value,
+    account_route: Option<AccountRoute>,
     state: Arc<Mutex<State>>,
 }
 
@@ -55,6 +57,7 @@ impl RecordingRoutingPeer {
         Ok(Self {
             method: method.into(),
             fixture,
+            account_route: None,
             state: Arc::new(Mutex::new(State::default())),
         })
     }
@@ -67,6 +70,20 @@ impl RecordingRoutingPeer {
     /// Public account ids; the adapter configures a compatible provider/model.
     pub fn fixture(&self) -> &Value {
         &self.fixture
+    }
+
+    /// Use a separate routing namespace while keeping `fixture()` as the
+    /// vendor configuration. Replies name this route's provider but keep the
+    /// fixture's provisioned account and credential ids.
+    pub fn with_account_route(mut self, route: AccountRoute) -> Self {
+        self.account_route = Some(route);
+        self
+    }
+
+    /// The synthetic routing names a send must forward, when this peer is
+    /// exercising `account_route`. The model call still uses the vendor fixture.
+    pub fn account_route(&self) -> Option<&AccountRoute> {
+        self.account_route.as_ref()
     }
 
     /// A snapshot of every received body, including retries, in arrival order.
@@ -111,7 +128,15 @@ impl RecordingRoutingPeer {
     ) -> Result<Value, HarnessError> {
         let admission = required_string(&body, "admission_id")?;
         let conversation = required_string(&body, "conversation_key")?;
-        if body.get("provider") != self.fixture.get("provider") {
+        if let Some(route) = &self.account_route {
+            if body.get("provider") != Some(&json!(route.provider))
+                || body.get("model") != Some(&json!(route.model))
+            {
+                return Err(HarnessError::new(
+                    "route.account_for did not forward account_route provider and model",
+                ));
+            }
+        } else if body.get("provider") != self.fixture.get("provider") {
             return Err(HarnessError::new(
                 "account_for provider differs from fixture",
             ));
@@ -171,7 +196,7 @@ impl RecordingRoutingPeer {
         let mut answer = json!({"result": {
             "admission": {"id": admission, "state": "admitted"},
             "account": {
-                "provider": self.fixture["provider"], "account_id": self.fixture["account_id"],
+                "provider": body["provider"], "account_id": self.fixture["account_id"],
                 "credential_id": self.fixture["credential_id"], "method": self.method
             },
             "pin": pin,
@@ -298,6 +323,34 @@ mod tests {
             }),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn account_route_peer_keeps_vendor_fixture_and_requires_route_names() {
+        let route = AccountRoute::new("pool-owner", "pool-model");
+        let peer = peer().with_account_route(route.clone());
+        assert_eq!(peer.account_route(), Some(&route));
+        assert_eq!(peer.fixture()["provider"], "provider-a");
+        let body = json!({"provider":"pool-owner", "model":"pool-model",
+            "conversation_key":"session-a", "admission_id":"admit-a"});
+        let answer = peer
+            .request("runner-a", "route.account_for", body.clone())
+            .unwrap();
+        assert_eq!(
+            answer["result"]["account"],
+            json!({"provider":"pool-owner",
+            "account_id":"account-a", "credential_id":"key-a", "method":"apikey"})
+        );
+        for (field, vendor) in [("provider", "provider-a"), ("model", "model-a")] {
+            let mut wrong = body.clone();
+            wrong[field] = json!(vendor);
+            assert!(peer
+                .request("runner-a", "route.account_for", wrong)
+                .unwrap_err()
+                .to_string()
+                .contains("did not forward account_route"));
+        }
+        assert_eq!(peer.calls().len(), 3);
     }
 
     #[test]

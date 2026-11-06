@@ -212,6 +212,26 @@ the provider. The peer's unit tests cover admit/renew replies and observation
 replay; deliberately faulty runners missing `account_for` or the declaration
 flag are rejected by the corresponding case's name.
 
+Declare `Capability::AccountRoute` only with `RoutedAccounts` when the runner
+advertises `account_route`. The two `account_route_*` cases are inapplicable
+without it. `RecordingRoutingPeer::account_route()` exposes the kit's optional
+synthetic routing names; `fixture()` continues to describe the vendor model's
+provisioned account and credential. When route names are set, the peer accepts
+`route.account_for` only under those names and returns the route provider with
+the fixture's credential id. No new adapter hook is required.
+
+`account_route_names_the_route` proves that the runner forwards `account_route`
+verbatim rather than its vendor names; it does not prove that the runner can
+load a pooled key. The kit mints unique `kit-pool-` route names, derived from
+the vendor fixture's provider and a per-case model suffix. When `head.model`
+is present it also checks both names differ; otherwise distinctness rests on
+the minted prefix, without requiring new model metadata.
+`account_route_fixed_per_run` holds a run and checks that a
+different joining value refuses `invalid_params` naming `account_route`
+without writing a message. Both cases have deliberately faulty runners that
+fail under the violated case's name. Automatic renewal and reassignment are
+not driven by these cases.
+
 ## Part numbers without the removed tags group
 
 The retained `delivery_order_template_part_gone_refused` and numbered

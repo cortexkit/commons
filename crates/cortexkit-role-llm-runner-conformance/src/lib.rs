@@ -13,6 +13,7 @@
 
 #![forbid(unsafe_code)]
 
+mod account_route;
 mod admission;
 mod adopt;
 mod archive_pruning;

@@ -112,10 +112,19 @@ never construct part keys from array indexes or native part ids.
 `SendRequest::route_decision_id` is typed beside `service_tier` and fixed per
 run. An explicit different value on a joining send is refused by name on
 every runner. Runners using routing accounts forward it to `route.account_for`
-as `decision_id` with the run's own provider and model; an unknown or expired
+as `decision_id`; an unknown or expired
 decision ends the run before a model call under `routing_decision_refused`.
 There is no fallback allocation, and the caller alone reports that decision.
 Other runners ignore only forwarding and reporting.
+
+The opt-in `account_route` group requires `routed_accounts` and accepts
+`SendRequest::account_route`, built with `AccountRoute::new(provider, model)`
+and `with_account_route`. A caller acting on a routing select answer passes
+its route provider and model for account admission, renewal and reassignment,
+not the vendor names used for the model call. Without it, the runner uses its
+own names. The value is fixed per run like `route_decision_id`; an omitted
+joining value inherits it, and a different value refuses before writing.
+Callers never send it to a runner without the group.
 
 A runner measures every provider result before rendering using tool-provider
 0.15.0's shared 65,536-byte model-visible measure. `tool_result_limit` reuses

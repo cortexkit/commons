@@ -225,6 +225,7 @@ alias until the next breaking release.
 | `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started`, and raw entries with `read_display_facts` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `routed_accounts` | No added op; sign-in methods whose accounts the runner routes itself | §2, §9.3.3 |
+| `account_route` | `session.send` account admission names; requires `routed_accounts` | §9.3.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `head_selection` | `session.send`, `session.head`; requires `plans`; selection through `session.refresh` additionally requires `session_change` | §9.3.4 |
 | `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
@@ -3066,9 +3067,10 @@ A runner that declares `retract` serves `session.retract`.
 
 - [pinned] `session.send` accepts optional string `route_decision_id`, typed
   beside `service_tier`. A runner that obtains accounts from routing forwards
-  it as `decision_id` on `route.account_for` for that run, with the run's own
-  provider and model. Runners that do not use routing accounts ignore only
-  forwarding and reporting; they still freeze and validate joining sends.
+  it as `decision_id` on `route.account_for` for that run, with the provider
+  and model chosen by the `account_route` rules below. Runners that do not
+  use routing accounts ignore only forwarding and reporting; they still
+  freeze and validate joining sends.
 - [pinned] Routing's `unknown_decision` includes expiration (10 minutes after
   selection). On that refusal the run ends before any model call, with
   `error.provider_code: "routing_decision_refused"`, `reason: "unknown_decision"`.
@@ -3097,6 +3099,30 @@ A runner that declares `retract` serves `session.retract`.
   the runner's responsibility. For an unlisted method, or a runner without
   the group, the caller keeps naming the account as the runner accepts it
   today, and routing §5.2 applies unchanged.
+
+- [pinned] The opt-in `account_route` group requires `routed_accounts`;
+  `check_describe` refuses a declaration without it as
+  `account_route_without_routed_accounts`. A caller sends the optional typed
+  `session.send` member `account_route: {provider: string, model: string}` only
+  to a runner declaring `account_route` that lists the send's sign-in method
+  in `routed_accounts`, and only when acting on a routing select answer. Its
+  value is exactly that answer's `route.provider` and `route.model`. Both
+  strings are required and non-empty, as in routing's `route.account_for`;
+  unknown members or malformed values refuse `invalid_params` with
+  `{field: "account_route"}`, without writing anything. Absence is omitted
+  from the wire. A caller never sends the member to a runner without the
+  group: such a runner may refuse it as an unknown member, or read it as one
+  of its own send parameters (`runner_params`).
+- [pinned] Such a runner sends exactly `account_route.provider` and
+  `account_route.model` as `route.account_for`'s `provider` and `model` on every
+  admission request for the run: admit, renew and reassign. `account_route.model`
+  also supplies `affinity_model`'s default: the model the conversation's account
+  affinity is bound to. It keeps its own model naming for the
+  model call itself. With no `account_route`, it sends its own names, as today.
+- [pinned] Like `route_decision_id`, the setting is fixed per run. Omission
+  on a joining send inherits; an explicit different value is `invalid_params`
+  naming `account_route`, without writing the send. It cannot replace the
+  active run's value.
 
 ### 9.3.4 `head_selection`: durable next-run model and tier
 

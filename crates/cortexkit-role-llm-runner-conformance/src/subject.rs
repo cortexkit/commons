@@ -157,6 +157,8 @@ pub enum Capability {
     StepEvents,
     /// Sign-in methods whose accounts the runner admits through routing.
     RoutedAccounts,
+    /// Routing's provider and model names for runner-owned account admission.
+    AccountRoute,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -241,6 +243,7 @@ impl Capability {
         Self::RunCause,
         Self::StepEvents,
         Self::RoutedAccounts,
+        Self::AccountRoute,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -312,6 +315,7 @@ impl Capability {
             Self::RunCause => groups::RUN_CAUSE,
             Self::StepEvents => groups::STEP_EVENTS,
             Self::RoutedAccounts => groups::ROUTED_ACCOUNTS,
+            Self::AccountRoute => groups::ACCOUNT_ROUTE,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
             | Self::HostMetadataChange

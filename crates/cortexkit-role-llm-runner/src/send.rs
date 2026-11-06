@@ -199,6 +199,59 @@ where
         .map_err(|_| refused(&value))
 }
 
+/// Routing's account namespace, not the vendor names used for a model call.
+/// Names follow routing's non-empty string rule, without further restrictions.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "WireAccountRoute")]
+#[non_exhaustive]
+pub struct AccountRoute {
+    pub provider: String,
+    pub model: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WireAccountRoute {
+    provider: String,
+    model: String,
+}
+
+impl AccountRoute {
+    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            model: model.into(),
+        }
+    }
+
+    /// Validate before accepting or writing a send, including constructed values.
+    pub fn check(&self) -> Result<(), &'static str> {
+        if self.provider.is_empty() || self.model.is_empty() {
+            return Err("account_route");
+        }
+        Ok(())
+    }
+}
+
+impl TryFrom<WireAccountRoute> for AccountRoute {
+    type Error = &'static str;
+
+    fn try_from(wire: WireAccountRoute) -> Result<Self, Self::Error> {
+        let route = Self::new(wire.provider, wire.model);
+        route.check()?;
+        Ok(route)
+    }
+}
+
+fn deserialize_account_route<'de, D>(deserializer: D) -> Result<Option<AccountRoute>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    AccountRoute::deserialize(deserializer)
+        .map(Some)
+        .map_err(|error| serde::de::Error::custom(format!("account_route: {error}")))
+}
+
 /// The wire shape of a `session.send` request, which [`SendRequest`] is
 /// decoded from and encoded to, so `delivery` takes either form in one
 /// field.
@@ -237,6 +290,12 @@ struct WireSendRequest {
     service_tier: Option<crate::service_tier::ServiceTier>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     route_decision_id: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_account_route"
+    )]
+    account_route: Option<AccountRoute>,
     #[serde(flatten)]
     runner_params: Map<String, Value>,
 }
@@ -259,6 +318,7 @@ impl From<WireSendRequest> for SendRequest {
             retention_policy: wire.retention_policy,
             service_tier: wire.service_tier,
             route_decision_id: wire.route_decision_id,
+            account_route: wire.account_route,
             runner_params: wire.runner_params,
         }
     }
@@ -283,6 +343,7 @@ impl From<SendRequest> for WireSendRequest {
             retention_policy: request.retention_policy,
             service_tier: request.service_tier,
             route_decision_id: request.route_decision_id,
+            account_route: request.account_route,
             runner_params: request.runner_params,
         }
     }
@@ -420,9 +481,13 @@ pub struct SendRequest {
     pub service_tier: Option<crate::service_tier::ServiceTier>,
     /// A caller's routing decision, fixed for the run. Runners obtaining
     /// accounts from routing forward it as `route.account_for.decision_id`
-    /// with this run's provider and model. Other runners ignore forwarding
+    /// with the account route's names, or this run's own names when absent.
+    /// Other runners ignore forwarding
     /// and reporting, but still freeze the setting for joining sends.
     pub route_decision_id: Option<String>,
+    /// Routing's provider and model for account admission, fixed for the run.
+    /// Send only with `account_route` for a method listed in `routed_accounts`.
+    pub account_route: Option<AccountRoute>,
     /// The runner's own send parameters, kept as received.
     pub runner_params: Map<String, Value>,
 }
@@ -463,6 +528,29 @@ impl SendRequest {
     pub fn with_route_decision_id(mut self, decision_id: impl Into<String>) -> Self {
         self.route_decision_id = Some(decision_id.into());
         self
+    }
+
+    pub fn with_account_route(mut self, route: AccountRoute) -> Self {
+        self.account_route = Some(route);
+        self
+    }
+
+    /// Validate names and the active run's frozen account route. `None` means
+    /// no active run; `Some(None)` means a run started without an account route.
+    /// An omitted value inherits; an explicit different value cannot replace it.
+    pub fn check_account_route(
+        &self,
+        running: Option<Option<&AccountRoute>>,
+    ) -> Result<(), &'static str> {
+        if let Some(requested) = &self.account_route {
+            requested.check()?;
+            if let Some(frozen) = running {
+                if Some(requested) != frozen {
+                    return Err("account_route");
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Validate against the active run's frozen setting. `None` means no active
@@ -527,6 +615,7 @@ impl SendRequest {
             retention_policy: None,
             service_tier: None,
             route_decision_id: None,
+            account_route: None,
             runner_params: Map::new(),
         }
     }

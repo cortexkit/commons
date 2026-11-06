@@ -137,6 +137,9 @@ where
             name if name.starts_with("routed_accounts_") => {
                 crate::routed_accounts::run(self, name).await
             }
+            name if name.starts_with("account_route_") => {
+                crate::account_route::run(self, name).await
+            }
             name if name.starts_with("call_identity_") => {
                 crate::call_identity::run(self, name).await
             }

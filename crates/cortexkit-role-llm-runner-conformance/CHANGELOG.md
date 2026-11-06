@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.16
+
+- Pin `cortexkit-role-llm-runner =0.8.14`.
+- Add `account_route_names_the_route` and `account_route_fixed_per_run`, gated
+  on `account_route`, with faulty runners that use vendor names for account
+  admission or accept a joining send that changes the active run's route.
+
 ## 0.17.15
 
 - Pin `cortexkit-role-llm-runner =0.8.13`.

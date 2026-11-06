@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.14
 
 - Contract §9: on an existing session, a route whose scope stamp carries a
   `flow_id` or `run_id` is never admitted as the owner, even when its
@@ -9,6 +9,12 @@
   sends. Owner operations from it are refused `scope_owner_mismatch` before
   any write. The owner's unscoped or plain-stamped routes are unchanged. Text
   only; no API change.
+- Add the opt-in `account_route` group, requiring `routed_accounts`, and the
+  typed send setting `account_route: {provider, model}`. A caller acting on a
+  routing select answer passes its route names for account admission, renewal
+  and reassignment, while the runner keeps its vendor names for model calls.
+  The setting is fixed per run; omitted joining values inherit it, and a
+  different value refuses before writing. Absent settings keep existing bytes.
 
 ## 0.8.13
 

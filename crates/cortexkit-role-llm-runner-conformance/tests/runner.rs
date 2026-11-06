@@ -1,6 +1,7 @@
 //! Tests of the suite itself, against the reference fake in `fake/`.
 //! Conformance of a real runner is run by that runner, never here.
 
+mod account_route;
 mod adopt_open;
 mod fake;
 
@@ -885,6 +886,11 @@ async fn run(subject: &FakeSubject) -> SuiteReport {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("account_route_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "account_route is not declared")
+    {
+        return;
+    }
     if case.starts_with("message_marks_")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "message_marks is not declared")
     {
@@ -1637,6 +1643,15 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
     let report = run(&subject).await;
     for spec in CASES {
         if spec.requires.is_empty() {
+            continue;
+        }
+        if spec.name.starts_with("account_route_") {
+            assert_eq!(
+                report.outcome(spec.name),
+                Some(&CaseOutcome::Inapplicable {
+                    reason: "account_route is not declared".into(),
+                })
+            );
             continue;
         }
         if spec.name.starts_with("finish_reason_") {

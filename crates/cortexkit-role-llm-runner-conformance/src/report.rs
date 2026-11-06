@@ -168,6 +168,8 @@ pub const CASES: &[CaseSpec] = &[
     case("route_decision_id_fixed_per_run", &[Queue, Steer, TranscriptReads], "a joining send cannot change route_decision_id and is refused by name"),
     case("routed_accounts_follows_account_choice", &[Capability::RoutedAccounts], "a runner listing routed sign-in methods declares follows_account_choice: true in its routing runner slot"),
     case("routed_accounts_account_for", &[Capability::RoutedAccounts, Queue, TranscriptReads], "each listed sign-in method admits an account through route.account_for for a completed scripted run"),
+    case("account_route_names_the_route", &[Capability::AccountRoute, Queue, TranscriptReads], "account admission forwards account_route verbatim, not pooled-key loading; when head.model is absent, distinctness rests on unique kit-pool- names"),
+    case("account_route_fixed_per_run", &[Capability::AccountRoute, Queue, Steer, TranscriptReads], "a joining send cannot change account_route and refuses by field name without writing"),
     case("send_status_both_names", &[Capability::SendStatus], "session.send_status and the send.status alias both answer unknown_send rather than unknown_method"),
     case("finish_reason_last_model_step", &[Capability::FinishReason, Queue, RunOps], "result and ended status report the normalized reason of the last model step, not an earlier tool step"),
     case("finish_reason_output_cap", &[Capability::FinishReason, Capability::MaxOutputTokens, Capability::RunUsage, Queue, RunOps], "a response actually cut at the received max_output_tokens reports length, never stop"),
@@ -910,6 +912,7 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
+    "account_route checks verbatim admission names and run-fixed joining refusal without writing; pooled-key loading, automatic renewal and reassignment are not driven, and absent head.model leaves name distinctness to the unique kit-pool- prefix",
     "sender_attribution observes stored prefixes through reads, not the model's request; it does not exercise a plan refresh between intake and storage, and its photo-only case is inapplicable without media_only_send and an upload fixture",
     "routed_accounts checks follows_account_choice and an account_for admission for every listed method; automatic renewal, release timing, auth.pool/credential forwarding and which secret reached the provider are not checked by the live cases",
     "Compaction protocol, tag numbering and fork detection are outside this kit; retained template/output-reference fixtures consume the adapter's captured part-number mapping",

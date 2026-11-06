@@ -27,6 +27,7 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const ACCOUNT_ROUTE_WITHOUT_ROUTED_ACCOUNTS: &str = "account_route_without_routed_accounts";
     pub const ADOPT_OPEN_WITHOUT_ADOPT: &str = "adopt_open_without_adopt";
     pub const ADOPT_OPEN_WITHOUT_PLANS: &str = "adopt_open_without_plans";
     pub const MESSAGE_MARKS_WITHOUT_READ_DISPLAY_FACTS: &str =
@@ -609,6 +610,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         }
     }
     for (group, dependency, problem) in [
+        (
+            capabilities::ACCOUNT_ROUTE,
+            capabilities::ROUTED_ACCOUNTS,
+            problem_names::ACCOUNT_ROUTE_WITHOUT_ROUTED_ACCOUNTS,
+        ),
         (
             capabilities::ADOPT_OPEN,
             capabilities::ADOPT,

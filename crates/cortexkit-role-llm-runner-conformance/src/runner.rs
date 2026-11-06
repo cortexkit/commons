@@ -341,6 +341,11 @@ mod submit_variant_verdict_tests {
 /// The outcome of a case that cannot run against this subject: skipped
 /// with what it lacks, or inapplicable. `None` when the case can run.
 fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome> {
+    if spec.name.starts_with("account_route_") && !declared.contains(&Capability::AccountRoute) {
+        return Some(CaseOutcome::Inapplicable {
+            reason: "account_route is not declared".into(),
+        });
+    }
     if spec.name.starts_with("message_marks_") && !declared.contains(&Capability::MessageMarks) {
         return Some(CaseOutcome::Inapplicable {
             reason: "message_marks is not declared".into(),
