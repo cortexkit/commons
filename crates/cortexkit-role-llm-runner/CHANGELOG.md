@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Contract §7.1: on one session's stream, a run's `run_finished` or
+  `run_paused` comes before the `run_started` of any later run, even when the
+  runner learns of both at once. A reader keys run ends by `run_id`, and an
+  end naming a run other than the one it last saw start never marks the
+  session idle. Text only; no API change.
+
 ## 0.8.15
 
 - Add independent opt-in `history_intake`, with an additive open-string head

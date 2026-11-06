@@ -2411,6 +2411,14 @@ new members.
     `context_ceiling`, ...), and `run_paused {run_id, reason}` for a run
     that stopped and can resume under the same `run_id`. A runner that never
     pauses never sends `run_paused`; a reader never requires it.
+  - [pinned] Run order: on one session's stream, a run's ending event
+    (`run_finished`, or `run_paused` for a run that stops) is sent before
+    the `run_started` of any later run of that session. This holds even
+    when the runner learns of both at once, for example when a held send is
+    released just as the previous run ends.
+  - [pinned] A reader keys `run_finished` and `run_paused` by `run_id`. One
+    that names a run other than the run the reader last saw start still
+    does that run's end work, but never marks the session idle.
   - `run_started` may carry `send_id`, the send that started the run
     (`live::RunStarted::send_id`). On a runner declaring `run_cause` (added
     in 0.5.2, §3):
