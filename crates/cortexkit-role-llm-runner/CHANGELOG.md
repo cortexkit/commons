@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Contract §11.3: a runner's `call_key` is never reused across any of the
+  sessions it serves, not only within one session, as `tool-provider/v1` §4
+  now states. Text only.
 - Contract §7.1: on one session's stream, a run's `run_finished` or
   `run_paused` comes before the `run_started` of any later run, even when the
   runner learns of both at once. A reader keys run ends by `run_id`, and an

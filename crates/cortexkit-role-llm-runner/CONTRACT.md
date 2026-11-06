@@ -5688,7 +5688,10 @@ on the rides and usable-window ceiling defined by that contract (§6).
 - [pinned] Every record shared between parties keys a call on `(carrier
   principal, call_key)`. A runner mints a `call_key` per call: opaque,
   bounded as `tool-provider/v1` bounds it (1 to 256 bytes, each 0x21–0x7E),
-  never reused, and stable across the runner's restarts.
+  never reused, and stable across the runner's restarts. "Never reused" is
+  across every session the runner serves, not only within one session:
+  shared records carry no session, so `tool-provider/v1` §4 requires a key
+  that is unique across the carrier's sessions.
 - [pinned] Two sibling calls from one assistant step get distinct keys, and a
   model id that recurs across steps (`call_0`) gets a distinct key each time.
 - [pinned] The key is minted from the durable record that first holds the

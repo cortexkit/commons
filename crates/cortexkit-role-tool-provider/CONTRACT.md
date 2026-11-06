@@ -609,6 +609,12 @@ idempotency and join requirements are in
   construction; nothing is added to its reply.
 - Every record shared between parties keys on `(carrier principal,
   call_key)`. The model's `tool_call_id` is display-only.
+- Because records carry no session, a carrier never sends the same
+  `call_key` for two different calls, in the same session or in different
+  sessions, for as long as any party may still hold a record of the first
+  call. A key that is unique only within one session (for example a
+  per-session entry id joined with the model's call id) does not meet this
+  rule; the carrier adds something unique across its sessions.
 - `schema_pin` (subc-protocol 0.27.0, top-level, omitted when `None`) has the
   same byte bound as `call_key`. Its content is this role's: the tool name,
   the tool's `schema_digest` and its `semantics`, as the runner froze them.

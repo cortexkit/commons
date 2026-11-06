@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Contract text only (§4): a carrier never sends the same `call_key` for two
+  different calls, in one session or across sessions, while any party may
+  still hold a record of the first. Shared records key on `(carrier,
+  call_key)` with no session, so a key unique only within one session can
+  merge two calls' records.
 - Contract text only (§1.1): the one-bind-identity rule says explicitly
   that it covers every route a consumer opens to the module for a session,
   whatever role each route declares, not only tool-provider routes.
