@@ -5441,6 +5441,15 @@ every request, answer and refusal.
   form on its own transport before enabling it. A system-role form is
   allowed for a system-text change because it is the plan owner's own
   text. A sent note is never edited; a correction is a new note.
+- [pinned] **No confirmed form.** A system-text change is never rendered in
+  a form that carries the person's authority, such as text appended to the
+  user turn or merged into a user message. When the session's current route
+  has no confirmed system-role turn form, a pending change that includes
+  system text is applied in full at that run's first request, and the runner
+  records the reason `no_note_form`. A pending change of tools only stays
+  pending to a listed reconcile point: a removed tool is still refused at the
+  gate with the removal string, and an addition waits for the full apply as
+  below.
 - [pinned] Delivery is in the first request of the next run, after the user
   turn starting it, never mid-run. A plan note never uses `tool_result`
   form and never rides a tool result: a view replacing a tool output can

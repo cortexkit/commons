@@ -7,6 +7,11 @@
   runner learns of both at once. A reader keys run ends by `run_id`, and an
   end naming a run other than the one it last saw start never marks the
   session idle. Text only; no API change.
+- Contract §10.2 `plan_notes`: when the current route has no confirmed
+  system-role turn form, a pending change that includes system text is
+  applied in full at that run's first request, with reason `no_note_form`. It
+  is never rendered as text with the person's authority. A tools-only change
+  stays pending to a reconcile point. Text only; no API change.
 
 ## 0.8.15
 
