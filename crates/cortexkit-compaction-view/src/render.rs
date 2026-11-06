@@ -867,6 +867,83 @@ pub fn base64_decoded_len(data: &str) -> Option<u64> {
     Some((bytes.len() / 4 * 3 - padding) as u64)
 }
 
+/// Where one render plan first differs from another, both planned over the
+/// same transcript: typically the plan of the view a runner applies now and
+/// the plan of a newer view. Items count in render order, so item 0 is the
+/// request's first message; whatever a provider has cached before the
+/// differing item stays valid.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "at", rename_all = "snake_case")]
+pub enum FirstChange {
+    /// Both plans render the same items.
+    Unchanged,
+    /// The first differing item is a message the newer plan inserts.
+    Insert { item: u64, id: String },
+    /// The first differing item is a transcript entry in the newer plan.
+    Entry {
+        item: u64,
+        ordinal: u64,
+        mid: String,
+    },
+    /// Every item both plans have is the same, and one plan has more items
+    /// after them: entries appended, or trailing entries left out. `item` is
+    /// where the shorter plan ends.
+    End { item: u64 },
+}
+
+impl FirstChange {
+    /// The render-order position of the first difference, or `None` when
+    /// nothing differs.
+    pub fn item(&self) -> Option<u64> {
+        match self {
+            FirstChange::Unchanged => None,
+            FirstChange::Insert { item, .. }
+            | FirstChange::Entry { item, .. }
+            | FirstChange::End { item } => Some(*item),
+        }
+    }
+
+    /// Whether the difference starts at the request's first message. A
+    /// request rendered from the newer plan then shares no cached message
+    /// with the earlier one, so changing what comes before the messages (the
+    /// system text or the tool list) costs only those bytes themselves.
+    pub fn from_first_message(&self) -> bool {
+        self.item() == Some(0)
+    }
+}
+
+/// Compare two render plans of the same transcript item by item and return
+/// where `after` first differs from `before`. Plan items carry everything a
+/// runner renders from (inserted texts and images, kept parts, replaced
+/// fields, rides), so items that compare equal render the same bytes.
+pub fn first_change(before: &RenderPlan, after: &RenderPlan) -> FirstChange {
+    let shared = before.items.len().min(after.items.len());
+    for (index, (old, new)) in before.items.iter().zip(&after.items).enumerate() {
+        if old == new {
+            continue;
+        }
+        let item = index as u64;
+        return match new {
+            PlanItem::Insert { id, .. } => FirstChange::Insert {
+                item,
+                id: id.clone(),
+            },
+            PlanItem::Entry { ordinal, mid, .. } => FirstChange::Entry {
+                item,
+                ordinal: *ordinal,
+                mid: mid.clone(),
+            },
+        };
+    }
+    if before.items.len() == after.items.len() {
+        FirstChange::Unchanged
+    } else {
+        FirstChange::End {
+            item: shared as u64,
+        }
+    }
+}
+
 /// Check that a new view's `since` values are honest against the view the
 /// runner applies now: an edit claiming a version the runner already applied
 /// must appear, unchanged, in that view, and no edit may claim a version later
