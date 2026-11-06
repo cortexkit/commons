@@ -1,5 +1,19 @@
 # cortexkit-role-llm-runner
 
+Version **0.8.15** adds independent opt-in `media_refs`, `plan_notes` and
+`history_intake`.
+`media_refs` preserves inline text, arguments, reasoning and paging while
+replacing byte-backed media with refs readable through `session.media_read`.
+Send the mode only to declaring runners; older runners refuse it.
+`plan_notes` delivers short plan-change notes without rewriting the applied
+surface until a reconcile point. Use `plan_notes::PlanNotesRefreshRequest`
+for the same refresh operation, with `notes_until_rebuild` and a short
+owner-written `system_note` exactly when system text changes. The exhaustive
+legacy `RefreshRequest` remains source-compatible. See CONTRACT §4.2 and §10.2.
+`history_intake` marks a growing initial import of host history on the head.
+Readers wait for its absence before seeding a new-message boundary; accepted
+sends wait for the complete imported history before their runs start (§4.3).
+
 Version **0.8.12** adds opt-in `message_marks`: `speaks_for` labels an agent's
 words carried by the scope owner, while `notice: true` marks a module's own
 automatic message. Marks are served beside sender facts on opted-in reads and

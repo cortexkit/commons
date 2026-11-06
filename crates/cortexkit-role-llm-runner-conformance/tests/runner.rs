@@ -885,7 +885,196 @@ async fn run(subject: &FakeSubject) -> SuiteReport {
     run_suite(subject, dir.path()).await.unwrap()
 }
 
+const PLAN_NOTE_CASES: &[&str] = &[
+    "plan_notes_requires_session_change",
+    "plan_notes_pending_until_reconcile",
+    "plan_notes_not_stored_entries",
+    "plan_notes_removed_tool_refused",
+    "plan_notes_system_note_not_full_text",
+];
+
+fn intake_subject(defect: Option<&'static str>) -> FakeSubject {
+    let mut subject = FakeSubject::new(Defects {
+        history_intake_fixture: true,
+        history_intake: defect,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::HistoryIntake);
+    subject.capabilities.insert(Capability::HostHistory);
+    subject
+}
+
+#[tokio::test]
+async fn history_intake_reference_and_absent_hooks() {
+    let names = [
+        "history_intake_growing_prefix",
+        "history_intake_send_waits_for_history",
+    ];
+    let report = run(&intake_subject(None)).await;
+    for name in names {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+    let mut no_hook = intake_subject(None);
+    no_hook.defects.history_intake_fixture = false;
+    let report = run(&no_hook).await;
+    for name in names {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn history_intake_faulty_fakes_fail_by_name() {
+    for (defect, name) in [
+        ("early_marker", "history_intake_growing_prefix"),
+        ("version", "history_intake_growing_prefix"),
+        ("send_refused", "history_intake_send_waits_for_history"),
+        ("run_early", "history_intake_send_waits_for_history"),
+    ] {
+        let report = run(&intake_subject(Some(defect))).await;
+        println!("{defect}: {name}: {}", failed(&report, name));
+    }
+}
+
+fn note_subject(defect: Option<&'static str>) -> FakeSubject {
+    let mut subject = changing(Defects {
+        plan_notes_fixture: true,
+        plan_notes: defect,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::PlanNotes);
+    subject.capabilities.insert(Capability::HostHistory);
+    subject
+}
+
+#[tokio::test]
+async fn plan_notes_reference_and_optional_hooks() {
+    let report = run(&note_subject(None)).await;
+    for name in PLAN_NOTE_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+    let mut no_hook = note_subject(None);
+    no_hook.defects.plan_notes_fixture = false;
+    let report = run(&no_hook).await;
+    for name in &PLAN_NOTE_CASES[1..] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn plan_notes_faulty_fakes_fail_each_case_by_name() {
+    for (defect, expected) in [
+        ("early_apply", "plan_notes_pending_until_reconcile"),
+        ("stored_entry", "plan_notes_not_stored_entries"),
+        ("removed_dispatched", "plan_notes_removed_tool_refused"),
+        ("removal_message", "plan_notes_removed_tool_refused"),
+        ("full_system_text", "plan_notes_system_note_not_full_text"),
+    ] {
+        let report = run(&note_subject(Some(defect))).await;
+        println!("{defect}: {expected}: {}", failed(&report, expected));
+    }
+    let mut missing_dependency = note_subject(None);
+    missing_dependency
+        .capabilities
+        .remove(&Capability::SessionChange);
+    let report = run(&missing_dependency).await;
+    assert!(failed(&report, "plan_notes_requires_session_change")
+        .contains("plan_notes_without_session_change"));
+}
+
+#[tokio::test]
+async fn plan_notes_undeclared_policy_fault_is_detected_by_name() {
+    for defect in [None, Some("undeclared_policy")] {
+        let mut subject = note_subject(defect);
+        subject.capabilities.remove(&Capability::PlanNotes);
+        let report = run(&subject).await;
+        let name = "plan_notes_undeclared_policy_refused";
+        if defect.is_none() {
+            assert_eq!(
+                report.outcome(name),
+                Some(&CaseOutcome::Passed),
+                "{}",
+                report.render()
+            );
+        } else {
+            println!("{}", failed(&report, name));
+        }
+    }
+}
+
+fn media_reference_subject(defect: Option<&'static str>) -> FakeSubject {
+    let mut subject = attachment_subject("");
+    subject.capabilities.insert(Capability::MediaRefs);
+    subject.capabilities.insert(Capability::HostHistory);
+    subject.descriptor_fixtures = true;
+    subject.defects.media = defect;
+    subject
+}
+
+#[tokio::test]
+async fn media_refs_reference_and_faulty_fakes() {
+    let names = [
+        "media_refs_media_are_refs",
+        "media_refs_large_payloads_inline",
+        "media_refs_descriptor_digests",
+    ];
+    let report = run(&media_reference_subject(None)).await;
+    for name in names {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+    for (defect, expected) in [
+        ("refs_bytes", names[0]),
+        ("refs_large_text", names[1]),
+        ("refs_digest", names[2]),
+    ] {
+        let report = run(&media_reference_subject(Some(defect))).await;
+        println!("{defect}: {expected}: {}", failed(&report, expected));
+    }
+    let mut no_hook = media_reference_subject(None);
+    no_hook.descriptor_fixtures = false;
+    let report = run(&no_hook).await;
+    for name in names {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { .. })),
+            "{}",
+            report.render()
+        );
+    }
+}
+
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("history_intake_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { .. }))
+    {
+        return;
+    }
+    if (case.starts_with("plan_notes_") || case.starts_with("media_refs_"))
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { .. }))
+    {
+        return;
+    }
     if case.starts_with("account_route_")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "account_route is not declared")
     {
@@ -1134,6 +1323,9 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     // Legacy fixtures do not opt into these groups or supply their optional
     // metadata/clock hooks. Inapplicable cases are not counted as passing coverage.
     if (case.starts_with("sender_succession_")
+        || case.starts_with("history_intake_")
+        || case.starts_with("plan_notes_")
+        || case.starts_with("media_refs_")
         || case.starts_with("adopt_open_")
         || case.starts_with("live_ids_")
         || case.starts_with("message_senders_")
@@ -1179,6 +1371,9 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::HistoryIntake,
+    Capability::PlanNotes,
+    Capability::MediaRefs,
     Capability::MessageMarks,
     Capability::Plans,
     Capability::SessionRetention,
@@ -1373,7 +1568,8 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
                 && reason.contains("structured_output_sibling_never_dispatched")
     ));
     for spec in CASES.iter().filter(|case| {
-        case.name.starts_with("media_")
+        case.name.starts_with("media_descriptors_")
+            || case.name == "media_only_send"
             || case.name.starts_with("attachments_")
             || case.name.starts_with("call_identity_")
             || case.name.starts_with("rich_ui_stamp_")
@@ -1700,6 +1896,8 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             continue;
         }
         if spec.name == "media_only_send"
+            || spec.name.starts_with("media_refs_")
+            || spec.name.starts_with("plan_notes_")
             || spec.name.starts_with("adopt_open_")
             || spec.name.starts_with("sender_attribution_")
             || spec.name.starts_with("notices_")

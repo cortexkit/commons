@@ -214,6 +214,12 @@ impl HistoryRequest {
         self
     }
 
+    /// Check opt-in media modes against the runner's declared groups.
+    /// Display-form requests still reject every explicit media mode in `mode`.
+    pub fn check_media<S: AsRef<str>>(&self, groups: &[S]) -> Result<(), &'static str> {
+        self.media.unwrap_or_default().check_declared(groups)
+    }
+
     pub fn with_include_originals(mut self, include_originals: bool) -> Self {
         self.include_originals = include_originals;
         self

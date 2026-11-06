@@ -89,6 +89,10 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("history_intake_") => {
+                crate::history_intake::run(self, name).await
+            }
+            name if name.starts_with("plan_notes_") => crate::plan_notes::run(self, name).await,
             name if name.starts_with("sender_attribution_") => {
                 crate::attribution::run(self, name).await
             }

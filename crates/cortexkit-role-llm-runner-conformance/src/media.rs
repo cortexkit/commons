@@ -146,6 +146,7 @@ fn fixture(name: &str) -> Fixture {
     Fixture {
         image,
         assistant: match name {
+            name if name.starts_with("media_refs_") => Some(vec!["t".repeat(PART_INLINE_MAX + 1)]),
             "media_descriptors_stable_across_pages" => {
                 Some(vec!["x".repeat(STABLE_PART_BYTES); STABLE_PARTS])
             }
@@ -155,7 +156,9 @@ fn fixture(name: &str) -> Fixture {
         // Two sibling calls in one step instead of one over-frame argument:
         // each call's request to the tool provider fits the daemon frame,
         // while the assistant message holding both does not.
-        oversize: if frame {
+        oversize: if name.starts_with("media_refs_") {
+            vec![json!("a".repeat(PART_INLINE_MAX + 1))]
+        } else if frame {
             vec![json!("x".repeat(FRAME_ARGUMENT_BYTES)); 2]
         } else if pairing {
             vec![json!("x".repeat(PAIRING_ARGUMENT_BYTES))]
@@ -324,7 +327,7 @@ where
     // Fallback selection is per message, so keep the below-threshold payloads
     // together as model text, not as an oversized provider result that §11.3.1
     // would replace with tool_result_too_large (or a host would join into one part).
-    let answer = match fixture.assistant {
+    let mut answer = match fixture.assistant {
         Some(texts) => texts.into_iter().map(ScriptedPart::Text).collect(),
         None => vec![ScriptedPart::Text(if head {
             text.clone()
@@ -332,6 +335,9 @@ where
             marker.clone()
         })],
     };
+    if name.starts_with("media_refs_") {
+        answer.push(ScriptedPart::Reasoning("r".repeat(PART_INLINE_MAX + 1)));
+    }
     let turns = vec![ScriptedTurn::new(calls), ScriptedTurn::new(answer)];
     let provider_rows = name == "media_descriptors_provider_rows";
     let mut session = case
@@ -375,6 +381,9 @@ where
     let mut found = Vec::new();
     for message in &described {
         refs(&message.message, &mut found);
+    }
+    if name.starts_with("media_refs_") {
+        return check_media_refs(case, &session.route, name, &described).await;
     }
     match name {
         "media_descriptors_provider_rows" => {
@@ -550,6 +559,112 @@ where
             }
         }
         _ => return Err(format!("unknown media case {name}")),
+    }
+    Ok(Ending::Passed)
+}
+
+async fn check_media_refs<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    route: &S::Route,
+    name: &str,
+    described: &[ReadMessage],
+) -> Result<Ending, String>
+where
+    S::Route: RunnerRoute,
+{
+    let referenced = pages(case, route, MediaMode::MediaRefs, None).await?;
+    let inline = pages(case, route, MediaMode::Inline, None).await?;
+    let mut actual = Vec::new();
+    let mut expected = Vec::new();
+    for message in &referenced {
+        refs(&message.message, &mut actual);
+    }
+    for message in described {
+        refs(&message.message, &mut expected);
+    }
+    expected.retain(|value| value["type"] == "media_ref");
+    match name {
+        "media_refs_media_are_refs" => {
+            if expected.is_empty()
+                || actual.iter().filter(|v| v["type"] == "media_ref").count() != expected.len()
+            {
+                return Err("media_refs returned bytes or markers instead of media_ref".into());
+            }
+        }
+        "media_refs_large_payloads_inline" => {
+            if actual.iter().any(|v| v["type"] != "media_ref") {
+                return Err("media_refs described a non-media payload".into());
+            }
+            let normal = serde_json::to_string(&inline).unwrap();
+            for ch in ['t', 'a', 'r'] {
+                let payload = ch.to_string().repeat(PART_INLINE_MAX + 1);
+                if !normal.contains(&payload) {
+                    return Err(format!(
+                        "inline fixture did not expose the full {ch} payload"
+                    ));
+                }
+            }
+            fn check_payloads(inline: &Value, served: Option<&Value>) -> Result<(), String> {
+                match inline {
+                    Value::String(text) if text.len() > PART_INLINE_MAX => {
+                        if served != Some(inline) {
+                            return Err("media_refs changed a large inline payload at its original location".into());
+                        }
+                    }
+                    Value::Object(object) => {
+                        for (key, child) in object {
+                            check_payloads(child, served.and_then(|value| value.get(key)))?;
+                        }
+                    }
+                    Value::Array(array) => {
+                        for (index, child) in array.iter().enumerate() {
+                            check_payloads(child, served.and_then(|value| value.get(index)))?;
+                        }
+                    }
+                    _ => {}
+                }
+                Ok(())
+            }
+            for message in &inline {
+                let served = referenced
+                    .iter()
+                    .find(|served| served.mid == message.mid)
+                    .ok_or("media_refs omitted an inline message")?;
+                check_payloads(&message.message, Some(&served.message))?;
+            }
+        }
+        "media_refs_descriptor_digests" => {
+            if actual != expected {
+                return Err("media_refs metadata/digests differ from descriptors".into());
+            }
+            for message in &referenced {
+                let descriptor = described
+                    .iter()
+                    .find(|m| m.mid == message.mid)
+                    .ok_or("media_refs lost message identity")?;
+                if message.digest.is_some() && message.digest != descriptor.digest
+                    || message.part_digests.is_some()
+                        && message.part_digests != descriptor.part_digests
+                {
+                    return Err("media_refs changed stored content digests".into());
+                }
+            }
+        }
+        _ => return Err(format!("unknown media_refs case {name}")),
+    }
+    if case.declared.contains(&crate::Capability::HostHistory) {
+        for message in &referenced {
+            let history: cortexkit_role_llm_runner::history::HistoryPage = decode(
+                "media_refs history", expect_ok("media_refs history", call(route, ops::SESSION_HISTORY,
+                json!({"from_ordinal":message.ordinal,"limit":1,"max_bytes":1024,"media":"media_refs"})).await?)?)?;
+            let entry = history
+                .messages
+                .first()
+                .ok_or("media_refs history omitted an entry")?;
+            if entry.message != message.message || entry.mid != message.mid {
+                return Err("media_refs raw history differs from session.read".into());
+            }
+        }
     }
     Ok(Ending::Passed)
 }

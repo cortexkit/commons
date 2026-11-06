@@ -196,6 +196,11 @@ impl ReadRequest {
         self
     }
 
+    /// Check opt-in media modes against the runner's declared groups.
+    pub fn check_media<S: AsRef<str>>(&self, groups: &[S]) -> Result<(), &'static str> {
+        self.media.unwrap_or_default().check_declared(groups)
+    }
+
     pub fn with_view(mut self, view: ReadView) -> Self {
         self.view = Some(view);
         self
@@ -857,6 +862,12 @@ pub struct HeadRequest {}
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeadMeta {
+    /// Initial host-history intake is in progress. Only a runner declaring
+    /// `history_intake` promises that absence makes `last_ordinal` final for
+    /// that intake. Unknown values mean running; readers must not seed a
+    /// "new from here" position while this member is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history_intake: Option<String>,
     /// The newest message's ordinal. Absent on an empty transcript.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_ordinal: Option<u64>,
@@ -1131,6 +1142,7 @@ impl HeadMeta {
     /// A never-written session still has a cache identity.
     pub fn empty(history_version: u64, incarnation: impl Into<String>) -> Self {
         Self {
+            history_intake: None,
             last_ordinal: None,
             first_ordinal: None,
             cut: None,
@@ -1156,6 +1168,22 @@ impl HeadMeta {
     pub fn with_last_ordinal(mut self, last_ordinal: u64) -> Self {
         self.last_ordinal = Some(last_ordinal);
         self
+    }
+
+    pub fn with_history_intake_running(mut self) -> Self {
+        self.history_intake = Some("running".into());
+        self
+    }
+
+    /// Unknown intake states are conservatively running, not completed.
+    pub fn history_intake_running(&self) -> bool {
+        self.history_intake.is_some()
+    }
+
+    /// Whether discovery guarantees the initial host-history intake is done.
+    /// Without the group, absence promises nothing about a safe seed position.
+    pub fn can_seed_new_from_here(&self, describe: &crate::describe::RoleDescribe) -> bool {
+        describe.declares(crate::capabilities::HISTORY_INTAKE) && !self.history_intake_running()
     }
 
     pub fn with_head(mut self, head: Map<String, Value>) -> Self {

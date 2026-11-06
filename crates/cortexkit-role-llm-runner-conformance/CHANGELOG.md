@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.19
+
+- Add defaulted history-intake control hooks and cases for the running head
+  marker, append-only reads with a steady version, and accepted sends whose
+  runs wait for the imported history. Faulty fakes cover early completion,
+  version changes, refused sends and early runs.
+
+- Pin `cortexkit-role-llm-runner =0.8.15`.
+- Add opt-in media-reference and plan-note cases with defaulted adapter
+  fixtures, named inapplicability when absent, and deliberately faulty
+  implementations exercising every new case.
+
 ## 0.17.16
 
 - Pin `cortexkit-role-llm-runner =0.8.14`.

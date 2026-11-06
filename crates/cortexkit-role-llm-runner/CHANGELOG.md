@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.15
+
+- Add independent opt-in `history_intake`, with an additive open-string head
+  member for a growing host-history prefix. Reads keep history_version steady;
+  sends are accepted while their runs wait for the complete intake. Readers
+  cannot seed a new-message boundary until the member is absent on a declaring runner.
+
+- Add opt-in `media_refs`, requiring `attachments` and `transcript_reads`:
+  inline reads and raw history with only byte-backed media replaced by refs.
+  Add `MediaMode::MediaRefs`, declaration checks and the media-only renderer.
+- Add opt-in `plan_notes`, requiring `session_change`, with separate refresh
+  policy `notes_until_rebuild`, fixed tool note strings, owner-written short
+  system notes, run-boundary delivery, per-call removal gates, and the
+  reconcile, restart, anchor and cut rules in contract §10.2.
+- Add non-exhaustive `plan_notes::PlanNotesRefreshRequest` and optional
+  `system_note` on `RelaunchRefreshRequest`, with declaration-aware checks.
+  `RefreshRequest` is an exhaustive public struct; adding a field there would
+  break existing struct literals in a patch release. The additive view of the
+  same wire body preserves those callers and absent-member bytes.
+
 ## 0.8.14
 
 - Contract §9: on an existing session, a route whose scope stamp carries a

@@ -137,6 +137,17 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("history_intake_growing_prefix", &[], "a running intake marker lasts through append-only prefix growth with a steady history_version"),
+    case("history_intake_send_waits_for_history", &[], "a send is accepted during intake but its run starts only after the complete imported history is stored"),
+    case("plan_notes_requires_session_change", &[], "a plan_notes declaration without session_change is refused by name"),
+    case("plan_notes_undeclared_policy_refused", &[], "notes_until_rebuild is refused without plan_notes"),
+    case("plan_notes_pending_until_reconcile", &[], "notes leave the generation pending until a full apply at a reconcile point"),
+    case("plan_notes_not_stored_entries", &[], "reads and raw history never expose plan notes as stored entries"),
+    case("plan_notes_removed_tool_refused", &[], "a removed tool is refused no later than the note-delivery run, naming its removal"),
+    case("plan_notes_system_note_not_full_text", &[], "the model receives the short owner-written system note, not the full replacement system text"),
+    case("media_refs_media_are_refs", &[Capability::MediaRefs, Capability::Attachments, TranscriptReads, Queue, RunOps], "byte-backed media becomes refs in reads and raw history"),
+    case("media_refs_large_payloads_inline", &[Capability::MediaRefs, Capability::Attachments, TranscriptReads, Queue, RunOps], "large text, arguments and reasoning stay exactly inline"),
+    case("media_refs_descriptor_digests", &[Capability::MediaRefs, Capability::Attachments, TranscriptReads, Queue, RunOps], "media references and any served content identities equal descriptors"),
     case("message_marks_served", &[Capability::MessageMarks, Capability::ReadDisplayFacts, Capability::HistoryDisplay, Capability::HostHistory, Queue, TranscriptReads], "notice and scope-owner agent marks survive opted-in reads, raw history and display; unmarked sends have neither"),
     case("message_marks_both_refused", &[Capability::MessageMarks, Queue, TranscriptReads], "conflicting marks refuse invalid_params naming notice before any write"),
     case("message_marks_speaks_for_owner_only", &[Capability::MessageMarks, Queue, TranscriptReads], "a non-owner carrier cannot speak for an agent; refusal names speaks_for before any write"),

@@ -41,6 +41,7 @@ pub mod history;
 pub mod live;
 pub mod message_marks;
 pub mod output_refs;
+pub mod plan_notes;
 pub mod points;
 pub mod read;
 pub mod retract;
@@ -196,6 +197,11 @@ pub mod capabilities {
     /// Non-template sends may omit or empty `prompt` when `content` is
     /// non-empty, storing media parts alone. Requires [`ATTACHMENTS`].
     pub const MEDIA_ONLY_SEND: &str = "media_only_send";
+    /// Inline reads with references for media only. Requires attachments and
+    /// transcript reads; large non-media payloads remain inline.
+    pub const MEDIA_REFS: &str = "media_refs";
+    /// Head metadata marks a growing initial intake of host history. No group dependencies.
+    pub const HISTORY_INTAKE: &str = "history_intake";
 
     /// Tail, range and after-message reads, head metadata and `history_version`
     /// on every page.
@@ -317,6 +323,9 @@ pub mod capabilities {
     /// Relaunch a session's private host to apply tools outside its fixed set.
     /// Requires [`SESSION_CHANGE`] and the `session.subscribe` operation.
     pub const REFRESH_RELAUNCH: &str = "refresh_relaunch";
+    /// Runner-owned plan-change notes until a full apply at a reconcile point.
+    /// Requires [`SESSION_CHANGE`].
+    pub const PLAN_NOTES: &str = "plan_notes";
     /// Caller-chosen whole-session transcript retention, with limits in
     /// `role.describe.retention`.
     pub const RETENTION: &str = "retention";
@@ -415,6 +424,8 @@ pub mod capabilities {
             ],
         ),
         (MEDIA_ONLY_SEND, &[ops::SESSION_SEND]),
+        (MEDIA_REFS, &[ops::SESSION_READ]),
+        (HISTORY_INTAKE, &[ops::SESSION_HEAD]),
         (
             USER_COMMANDS,
             &[ops::SESSION_USER_COMMAND, ops::SESSION_USER_COMMAND_STATUS],
@@ -464,6 +475,7 @@ pub mod capabilities {
         (RUN_CANCEL, &[ops::RUN_CANCEL]),
         (RUN_CANCEL_BY_INTERRUPT, &[ops::RUN_CANCEL]),
         (REFRESH_RELAUNCH, &[ops::SESSION_SUBSCRIBE]),
+        (PLAN_NOTES, &[ops::SESSION_REFRESH]),
         (RETRACT, &[ops::SESSION_RETRACT]),
         (RETRACT_OWN_SEND, &[ops::SESSION_RETRACT]),
         (DISPATCH_ATTRIBUTION, &[ops::SESSION_READ]),

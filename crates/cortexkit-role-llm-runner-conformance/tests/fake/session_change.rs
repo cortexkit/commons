@@ -92,6 +92,7 @@ pub struct PendingRec {
     digest: String,
     tools: Vec<String>,
     senders: Vec<super::order::PlanSender>,
+    system_note: Option<String>,
 }
 
 /// What a session's `session_change` records built.
@@ -131,6 +132,7 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 digest,
                 tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                 senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
+                system_note: record["system_note"].as_str().map(str::to_owned),
             });
             if record["defer_senders"] != true {
                 sess.senders =
@@ -140,6 +142,15 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 .get("readers")
                 .filter(|value| !value.is_null())
                 .map(|value| serde_json::from_value(value.clone()).unwrap());
+            if record["store_note"] == true {
+                let mut message = sess.messages.last().unwrap().clone();
+                message.ordinal += 1;
+                message.mid.push_str("-plan-note");
+                message.body =
+                    json!({"role":"system","parts":[{"type":"text","text":record["system_note"]}]});
+                message.host_body = message.body.clone();
+                sess.messages.push(message);
+            }
         }
         "refresh_policy" => {
             change.policies.insert(
@@ -192,6 +203,12 @@ impl Module {
         params: Value,
     ) -> Result<Reply, Killed> {
         let allowed: &[&str] = match method {
+            ops::SESSION_REFRESH
+                if self.world.serves(groups::PLAN_NOTES)
+                    || self.world.defects.plan_notes == Some("undeclared_policy") =>
+            {
+                &["plan", "policy", "generation", "system_note"]
+            }
             ops::SESSION_REFRESH => &["plan", "policy", "generation"],
             ops::SESSION_REFRESH_POLICY => &["generation", "policy", "send_id"],
             _ => &["send_id"],
@@ -217,8 +234,33 @@ impl Module {
             ));
         }
         match method {
+            ops::SESSION_REFRESH
+                if self.world.serves(groups::PLAN_NOTES)
+                    || self.world.defects.plan_notes == Some("undeclared_policy") =>
+            {
+                let request: cortexkit_role_llm_runner::plan_notes::PlanNotesRefreshRequest =
+                    match serde_json::from_value(params) {
+                        Ok(request) => request,
+                        Err(error) => return Ok(missing(error)),
+                    };
+                let groups = if self.world.defects.plan_notes == Some("undeclared_policy") {
+                    vec![groups::PLAN_NOTES.to_owned()]
+                } else {
+                    self.world.groups.clone()
+                };
+                if let Err(field) = request.check(&groups, request.plan.contains_key("system_text"))
+                {
+                    return Ok(invalid(field));
+                }
+                self.refresh(
+                    session,
+                    &sess,
+                    RefreshRequest::new(request.plan, request.policy, request.generation),
+                    request.system_note,
+                )
+            }
             ops::SESSION_REFRESH => match serde_json::from_value(params) {
-                Ok(request) => self.refresh(session, &sess, request),
+                Ok(request) => self.refresh(session, &sess, request, None),
                 Err(error) => Ok(missing(error)),
             },
             ops::SESSION_REFRESH_POLICY => match serde_json::from_value(params) {
@@ -237,6 +279,7 @@ impl Module {
         session: &str,
         sess: &Sess,
         request: RefreshRequest,
+        system_note: Option<String>,
     ) -> Result<Reply, Killed> {
         let selection = match self.selection(&request.plan) {
             Ok(model) => model,
@@ -264,7 +307,15 @@ impl Module {
                 return Ok(invalid(field));
             }
         }
-        if let Err(field) = request.check_policy() {
+        let notes = request.policy == cortexkit_role_llm_runner::plan_notes::NOTES_UNTIL_REBUILD;
+        if let Err(field) = if notes
+            && (self.world.serves(groups::PLAN_NOTES)
+                || self.world.defects.plan_notes == Some("undeclared_policy"))
+        {
+            Ok(())
+        } else {
+            request.check_policy()
+        } {
             return Ok(invalid(field));
         }
         let defects = &self.world.defects;
@@ -316,7 +367,7 @@ impl Module {
                 Some(json!(ToolOutsideHostSetDetail::new(outside))),
             ));
         }
-        if !FAKE_RUNGS.contains(&request.policy.as_str()) {
+        if !notes && !FAKE_RUNGS.contains(&request.policy.as_str()) {
             return Ok(refuse(
                 errors::RUNG_UNSUPPORTED,
                 Some(json!(RungUnsupportedDetail::new(
@@ -345,6 +396,8 @@ impl Module {
                     "senders": request.plan.get("senders").cloned().unwrap_or_else(|| json!([])),
                     "defer_senders": defects.refreshed_senders_wait_for_next_run,
                     "readers": request.plan.get("readers"),
+                    "system_note": system_note,
+                    "store_note": notes && defects.plan_notes == Some("stored_entry"),
                     "answer": answer }),
         )?;
         if running && request.policy == rungs::IMMEDIATELY && defects.refresh_applies_mid_run {
@@ -470,6 +523,8 @@ impl Module {
         let flush = change.flush && !defects.flush_ignored;
         let immediate = change.pending.as_ref().is_some_and(|pending| {
             pending.policy == rungs::IMMEDIATELY && !defects.immediately_waits_for_rebuild
+                || pending.policy == cortexkit_role_llm_runner::plan_notes::NOTES_UNTIL_REBUILD
+                    && defects.plan_notes == Some("early_apply")
         });
         if flush || immediate {
             let applied_by = if flush { "fold" } else { "append" };
@@ -520,6 +575,72 @@ impl Module {
         }
         baseline
     }
+}
+
+pub fn notes_fixture() -> cortexkit_role_llm_runner_conformance::PlanNotesFixture {
+    let mut plan = refresh_plan(RefreshVariant::ChangedTools).unwrap().plan;
+    plan.insert("tools".into(), json!([EXTRA_TOOL]));
+    plan.insert(
+        "system_text".into(),
+        json!("Replacement system text with detailed instructions, not a change note."),
+    );
+    cortexkit_role_llm_runner_conformance::PlanNotesFixture::new(
+        plan,
+        "Use the updated response style.",
+        "Replacement system text with detailed instructions, not a change note.",
+        SCRIPTED_TOOL,
+    )
+}
+
+pub fn observe_notes(
+    observation: &mut cortexkit_role_llm_runner_conformance::ModelRequestObservation,
+    sess: &Sess,
+    defects: &Defects,
+) {
+    let Some(pending) = sess
+        .change
+        .pending
+        .as_ref()
+        .filter(|p| p.policy == cortexkit_role_llm_runner::plan_notes::NOTES_UNTIL_REBUILD)
+    else {
+        return;
+    };
+    if let Some(note) = &pending.system_note {
+        let text = if defects.plan_notes == Some("full_system_text") {
+            notes_fixture().new_system_text
+        } else {
+            note.clone()
+        };
+        observation.rendered.push(text.clone());
+        observation
+            .system_text
+            .get_or_insert_with(Vec::new)
+            .push(text);
+    }
+}
+
+pub fn removed_tool_message(sess: &Sess, tool_call_id: &str, defects: &Defects) -> Option<String> {
+    let pending = sess
+        .change
+        .pending
+        .as_ref()
+        .filter(|p| p.policy == cortexkit_role_llm_runner::plan_notes::NOTES_UNTIL_REBUILD)?;
+    let tool = sess
+        .messages
+        .iter()
+        .flat_map(|message| message.body["parts"].as_array().into_iter().flatten())
+        .find(|part| part["id"] == tool_call_id)?["tool"]
+        .as_str()?;
+    if pending.tools.iter().any(|name| name == tool)
+        || defects.plan_notes == Some("removed_dispatched")
+    {
+        return None;
+    }
+    Some(if defects.plan_notes == Some("removal_message") {
+        "tool not selected".into()
+    } else {
+        cortexkit_role_llm_runner::plan_notes::tool_removal(tool)
+    })
 }
 
 /// The adapter's refresh plans: one adding [`EXTRA_TOOL`], one naming a

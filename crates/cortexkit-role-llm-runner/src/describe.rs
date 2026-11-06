@@ -53,6 +53,9 @@ pub mod problem_names {
         "sender_attribution_without_history_display";
     pub const HEAD_SELECTION_WITHOUT_PLANS: &str = "head_selection_without_plans";
     pub const MEDIA_ONLY_SEND_WITHOUT_ATTACHMENTS: &str = "media_only_send_without_attachments";
+    pub const MEDIA_REFS_WITHOUT_ATTACHMENTS: &str = "media_refs_without_attachments";
+    pub const MEDIA_REFS_WITHOUT_TRANSCRIPT_READS: &str = "media_refs_without_transcript_reads";
+    pub const PLAN_NOTES_WITHOUT_SESSION_CHANGE: &str = "plan_notes_without_session_change";
     pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_RUN_CANCEL: &str =
         "run_cancel_by_interrupt_without_run_cancel";
     pub const RUN_CANCEL_BY_INTERRUPT_WITHOUT_DELIVERY_ORDER: &str =
@@ -661,6 +664,21 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             problem_names::MEDIA_ONLY_SEND_WITHOUT_ATTACHMENTS,
         ),
         (
+            capabilities::MEDIA_REFS,
+            capabilities::ATTACHMENTS,
+            problem_names::MEDIA_REFS_WITHOUT_ATTACHMENTS,
+        ),
+        (
+            capabilities::MEDIA_REFS,
+            capabilities::TRANSCRIPT_READS,
+            problem_names::MEDIA_REFS_WITHOUT_TRANSCRIPT_READS,
+        ),
+        (
+            capabilities::PLAN_NOTES,
+            capabilities::SESSION_CHANGE,
+            problem_names::PLAN_NOTES_WITHOUT_SESSION_CHANGE,
+        ),
+        (
             capabilities::RETRACT_OWN_SEND,
             capabilities::RETRACT,
             problem_names::RETRACT_OWN_SEND_WITHOUT_RETRACT,
@@ -1029,6 +1047,11 @@ mod opt_in_dependency_tests {
                 capabilities::MEDIA_ONLY_SEND,
                 vec![capabilities::ATTACHMENTS],
             ),
+            (
+                capabilities::MEDIA_REFS,
+                vec![capabilities::ATTACHMENTS, capabilities::TRANSCRIPT_READS],
+            ),
+            (capabilities::PLAN_NOTES, vec![capabilities::SESSION_CHANGE]),
             (capabilities::RETRACT_OWN_SEND, vec![capabilities::RETRACT]),
             (
                 capabilities::NOTICES,
@@ -1071,6 +1094,9 @@ mod opt_in_dependency_tests {
             }
             ops.extend_from_slice(capabilities::group_ops(group).unwrap());
             raw["majors"][0]["ops"] = serde_json::json!(ops);
+            if group == capabilities::MEDIA_REFS {
+                raw["max_bytes"] = serde_json::json!({"default": 1024, "maximum": 4096});
+            }
             assert!(check_describe(&raw).is_ok(), "{:?}", check_describe(&raw));
             if group == capabilities::REFRESH_RELAUNCH {
                 let mut no_subscribe = raw.clone();

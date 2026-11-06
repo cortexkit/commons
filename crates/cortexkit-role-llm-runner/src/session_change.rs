@@ -71,6 +71,10 @@ pub struct RelaunchRefreshRequest {
     /// Absent means false: an unsuccessful relaunch may run on the old plan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required: Option<bool>,
+    /// Short owner-written system-change note; requires `plan_notes` and
+    /// policy `notes_until_rebuild`. Never the full replacement system text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_note: Option<String>,
 }
 
 impl RelaunchRefreshRequest {
@@ -97,8 +101,28 @@ impl RelaunchRefreshRequest {
         self.required.unwrap_or(false)
     }
 
+    /// Legacy policy check for a runner without `plan_notes`: reject its
+    /// extra member as well as its policy, rather than silently ignoring it.
     pub fn check_policy(&self) -> Result<(), &'static str> {
+        if self.system_note.is_some() {
+            return Err("system_note");
+        }
         check_policy(&self.policy)
+    }
+
+    /// Validate the policy and system note using declarations and the fetched
+    /// surface diff. Call this instead of `check_policy` with `plan_notes`.
+    pub fn check_plan_notes<S: AsRef<str>>(
+        &self,
+        groups: &[S],
+        system_text_changed: bool,
+    ) -> Result<(), &'static str> {
+        crate::plan_notes::check_refresh(
+            &self.policy,
+            self.system_note.as_deref(),
+            system_text_changed,
+            groups,
+        )
     }
 
     pub fn check_output_refs(&self, advertised: bool) -> Result<(), &'static str> {
@@ -113,6 +137,7 @@ impl From<RefreshRequest> for RelaunchRefreshRequest {
             policy: request.policy,
             generation: request.generation,
             required: None,
+            system_note: None,
         }
     }
 }

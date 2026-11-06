@@ -21,6 +21,25 @@ pub enum MediaMode {
     Descriptors,
     /// Opt in to stored media blocks; default reads render text markers.
     Blocks,
+    /// Inline semantics, except byte-backed media becomes `media_ref`.
+    /// Send only to a runner declaring `media_refs`.
+    MediaRefs,
+}
+
+impl MediaMode {
+    /// Refuse an opt-in mode without its declaration, naming the request field.
+    pub fn check_declared<S: AsRef<str>>(self, groups: &[S]) -> Result<(), &'static str> {
+        let required = match self {
+            Self::MediaRefs => crate::capabilities::MEDIA_REFS,
+            Self::Blocks => crate::capabilities::ATTACHMENTS,
+            _ => return Ok(()),
+        };
+        if groups.iter().any(|group| group.as_ref() == required) {
+            Ok(())
+        } else {
+            Err("media")
+        }
+    }
 }
 
 pub(crate) fn deserialize_media<'de, D: Deserializer<'de>>(
@@ -28,7 +47,7 @@ pub(crate) fn deserialize_media<'de, D: Deserializer<'de>>(
 ) -> Result<Option<MediaMode>, D::Error> {
     MediaMode::deserialize(d).map(Some).map_err(|error| {
         serde::de::Error::custom(format!(
-            "media must be inline, descriptors or blocks: {error}"
+            "media must be inline, descriptors, blocks or media_refs: {error}"
         ))
     })
 }
@@ -255,6 +274,20 @@ pub fn describe(inline: &Value, payloads: &[Payload], budget: usize) -> Result<V
     debug_assert_eq!(size, final_size);
     if final_size > budget {
         return Err("non-payload structure exceeds descriptor message budget".into());
+    }
+    Ok(answer)
+}
+
+/// Replace only byte-backed media, leaving all other payloads untouched.
+/// Adapters supply the same payload locations and references as for
+/// [`describe`]. There is no descriptor budget or size-based fallback; the
+/// caller applies inline paging and transport limits to the returned value.
+pub fn media_refs(inline: &Value, payloads: &[Payload]) -> Result<Value, String> {
+    let mut answer = inline.clone();
+    for payload in payloads {
+        if matches!(payload.reference, Reference::MediaRef { .. }) {
+            replace(&mut answer, payload)?;
+        }
     }
     Ok(answer)
 }
@@ -688,4 +721,51 @@ mod tests {
                 .contains("media"));
         }
     }
+}
+#[test]
+fn media_refs_preserves_large_non_media_and_matches_descriptor_media() {
+    let text = "z".repeat(PART_INLINE_MAX + 1);
+    let inline = serde_json::json!({"content":[
+        {"type":"image","data":"AQID"},
+        {"type":"text","text":text},
+        {"type":"tool_use","input":text},
+        {"type":"thinking","thinking":text}
+    ]});
+    let payloads = vec![
+        Payload {
+            pointer: "/content/0".into(),
+            reference: Reference::media(None, "image", "image/png", &[1, 2, 3], Some((1, 1))),
+            required: true,
+        },
+        Payload {
+            pointer: "/content/1/text".into(),
+            reference: Reference::text(None, &text),
+            required: false,
+        },
+        Payload {
+            pointer: "/content/2/input".into(),
+            reference: Reference::arguments(None, "tool", text.as_bytes()),
+            required: false,
+        },
+        Payload {
+            pointer: "/content/3/thinking".into(),
+            reference: Reference::reasoning(None, text.as_bytes()),
+            required: false,
+        },
+    ];
+    let refs = media_refs(&inline, &payloads).unwrap();
+    let descriptors = describe(&inline, &payloads, DESCRIPTOR_MESSAGE_MAX).unwrap();
+    assert_eq!(refs["content"][0], descriptors["content"][0]);
+    assert_eq!(refs["content"][0]["type"], "media_ref");
+    for index in 1..4 {
+        assert_eq!(refs["content"][index], inline["content"][index]);
+    }
+    let read = crate::read::ReadRequest::tail().with_media(MediaMode::MediaRefs);
+    assert_eq!(read.check_media::<&str>(&[]), Err("media"));
+    assert_eq!(read.check_media(&[crate::capabilities::MEDIA_REFS]), Ok(()));
+    let history = crate::history::HistoryRequest::newest().with_media(MediaMode::MediaRefs);
+    assert_eq!(history.check_media::<&str>(&[]), Err("media"));
+    let wire = serde_json::to_value(history).unwrap();
+    assert_eq!(wire["media"], "media_refs");
+    assert!(serde_json::from_value::<crate::history::HistoryRequest>(wire).is_ok());
 }

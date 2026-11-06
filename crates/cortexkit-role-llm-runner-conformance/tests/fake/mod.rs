@@ -69,6 +69,7 @@ mod attribution;
 mod display;
 mod held_calls;
 mod history;
+mod history_intake;
 mod live_ids;
 mod media;
 mod message_senders;
@@ -171,6 +172,12 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub history_intake_fixture: bool,
+    pub history_intake: Option<&'static str>,
+    /// Enable the optional stable-prefix plan-note fixture.
+    pub plan_notes_fixture: bool,
+    /// Deliberate plan-note contract violation, selected by the kit self-tests.
+    pub plan_notes: Option<&'static str>,
     pub notices: Option<&'static str>,
     pub attribution: Option<&'static str>,
     pub routed_accounts_no_call: Option<&'static str>,
@@ -637,6 +644,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    intakes: Mutex<BTreeMap<String, history_intake::Intake>>,
     routing_peers:
         Mutex<BTreeMap<String, cortexkit_role_llm_runner_conformance::RecordingRoutingPeer>>,
     routed_methods: Vec<String>,
@@ -1581,6 +1589,15 @@ impl Module {
         let session = text("session");
         let kind = text("kind");
         let mut sessions = self.sessions.lock().unwrap();
+        if kind == "intake_chunk" {
+            let sess = sessions.get_mut(&session).unwrap();
+            let ordinal = sess.push(record["body"].clone(), "", vec![]);
+            sess.at_mut(ordinal).written_at = record["at"].as_u64().unwrap_or(1);
+            if record["bump_version"] == true {
+                sess.history_version += 1;
+            }
+            return;
+        }
         if kind == "start" {
             // A session started again over an expired one keeps raising its
             // history version: it never decreases.
@@ -2337,6 +2354,15 @@ impl Module {
                     continue;
                 }
                 let mut intent = json!({ "kind": "intent", "call_key": key });
+                if let Some(message) = session_change::removed_tool_message(
+                    &sess,
+                    &call.tool_call_id,
+                    &self.world.defects,
+                ) {
+                    self.commit(session, json!({"kind":"result", "call_key":key, "denied":true,
+                        "content":{"executed":false,"error":{"code":"tool_not_selected","message":message}}}))?;
+                    continue;
+                }
                 if self.world.serves(groups::CALL_IDENTITY) {
                     // The pin of the definition the call goes out against,
                     // frozen on its intent record.
@@ -2496,6 +2522,7 @@ impl Module {
                 let mut observation =
                     observe_request(tools, frozen.as_ref()).with_rendered(rendered_texts(&sess));
                 notices::observe(&mut observation, &sess, &self.world.defects);
+                session_change::observe_notes(&mut observation, &sess, &self.world.defects);
                 observation.max_output_tokens = output_cap;
                 self.tier_model_ingress(session, &mut observation);
                 self.world
@@ -3501,6 +3528,9 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(reply) = history_intake::intercept_send(self, stamp, session, &params) {
+            return Ok(reply);
+        }
         if !self.world.defects.compaction_preset_missing_accepted {
             if let Some(plan) = params.get("plan").and_then(Value::as_object) {
                 if let Err(field) = cortexkit_role_llm_runner::compaction::check_plan(plan) {
@@ -4371,6 +4401,9 @@ impl Module {
         if let Err(field) = request.check_rich_ui(&self.world.groups) {
             return invalid(field);
         }
+        if let Err(field) = request.check_media(&self.world.groups) {
+            return invalid(field);
+        }
         let sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get(session) else {
             if request.history_version.is_some() {
@@ -4848,6 +4881,7 @@ impl Module {
         if let Some(last) = sess.messages.last() {
             head = head.with_last_ordinal(last.ordinal);
         }
+        head.history_intake = history_intake::state(&self.world, session);
         if let Some(run) = sess.runs.last() {
             head = head.with_last_run_state(LastRunState {
                 run_id: run.run_id.clone(),
@@ -5849,6 +5883,7 @@ impl FakeSubject {
             .get_or_insert_with(|| {
                 Arc::new(World {
                     routing_peers: Mutex::new(BTreeMap::new()),
+                    intakes: Mutex::new(BTreeMap::new()),
                     routed_methods: self.routed_methods.clone(),
                     host_created_at: Mutex::new(BTreeMap::new()),
                     read_tool_times: Mutex::new(BTreeMap::new()),
@@ -6538,6 +6573,14 @@ impl LlmRunnerSubject for FakeSubject {
             image
         })
     }
+
+    fn plan_notes_fixture(
+        &self,
+    ) -> Option<cortexkit_role_llm_runner_conformance::PlanNotesFixture> {
+        self.defects
+            .plan_notes_fixture
+            .then(session_change::notes_fixture)
+    }
     async fn cut_off_user_command(
         &self,
         _handle: &FakeHandle,
@@ -6553,6 +6596,22 @@ impl LlmRunnerSubject for FakeSubject {
             .unwrap()
             .cutoff = Some(after);
         Ok(())
+    }
+
+    async fn begin_history_intake(
+        &self,
+        session: &str,
+        texts: &[String],
+    ) -> Result<bool, HarnessError> {
+        history_intake::begin(self, session, texts)
+    }
+
+    async fn advance_history_intake(&self, session: &str) -> Result<bool, HarnessError> {
+        history_intake::advance(self, session, false)
+    }
+
+    async fn finish_history_intake(&self, session: &str) -> Result<bool, HarnessError> {
+        history_intake::advance(self, session, true)
     }
 
     async fn seed_session_history(

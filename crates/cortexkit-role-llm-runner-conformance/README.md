@@ -1,5 +1,24 @@
 # cortexkit-role-llm-runner-conformance
 
+The independent `history_intake` group needs only `session.head`. Its two cases
+use the defaulted `begin_history_intake`, `advance_history_intake` and
+`finish_history_intake` hooks to hold a growing native-history import. They
+require read/send/run fixture operations, check raw history where served, and
+grade absent fixtures not applicable. Provider observations establish that an
+accepted send starts only after all imported entries have been stored.
+
+Version **0.17.19** pins `cortexkit-role-llm-runner =0.8.15`. The independent
+`media_refs_*` cases use the defaulted `media_tool_result` fixture and check
+media references, unchanged large inline payloads, descriptor identities, and
+raw history where served. The `plan_notes_*` cases use the defaulted
+`plan_notes_fixture` hook: configure a stable prefix, initial plan offering the
+removed tool, and a pending plan removing that tool and changing system text.
+Observe note text at the model endpoint through `model_requests`, and calls at
+the tool provider, never reconstructed from the fixture or management replies.
+Absent optional fixtures are graded not applicable, not passed. Faulty fake
+runners exercise every new check, including replacing the short system note
+with the entire new system text.
+
 Version **0.17.14** pins `cortexkit-role-llm-runner =0.8.12` and adds
 `message_marks_served`, `message_marks_both_refused`, and
 `message_marks_speaks_for_owner_only`. All three require `message_marks`; only

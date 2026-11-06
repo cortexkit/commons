@@ -35,6 +35,14 @@ the `session_change` request, reply and refusal shapes (§10.2) are pinned.
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation.
 
+## Changes in 0.8.15
+
+- Add the independent opt-in groups `media_refs` (§4.2, §9.12) and
+  `plan_notes` (§10.2): media-only references on inline reads, and plan-change
+  notes until a full apply at a reconcile point.
+- Add independent opt-in `history_intake` (§4.3): mark a growing initial
+  host-history prefix, with sends accepted while their runs wait for intake.
+
 ## Changes from 0.7
 
 0.8.0 is a breaking release. It removes the compaction-provider/v1
@@ -236,6 +244,8 @@ alias until the next breaking release.
 | `run_cause` | `session.subscribe` with `send_id` on `run_started` (it requires `live_events`) | §7.1 |
 | `attachments` | `session.upload_begin`, `session.upload_append`, `session.upload_status`, `session.upload_commit`, `session.media_read`, `session.send`, `session.read` | §9.12 |
 | `media_only_send` | `session.send` with media content and no prompt text; requires `attachments` | §9, §9.12 |
+| `media_refs` | `session.read` and raw `session.history` where served, with `media: "media_refs"`; requires `attachments` and `transcript_reads` | §4.2, §9.12 |
+| `history_intake` | `session.head`; no group dependencies | §4.3 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
 | `held_calls` | `run.status` and run status events with held tool calls | §6.1 |
@@ -250,6 +260,7 @@ alias until the next breaking release.
 | `system_text_default` | `session.send` with preset-less `system_text` plan items | §10.1 |
 | `session_change` | `session.refresh`, `session.refresh_policy`, `session.flush_prefix` | §10.2 |
 | `refresh_relaunch` | `session.subscribe`; requires `session_change` | §10.2 |
+| `plan_notes` | `session.refresh` with `notes_until_rebuild`; requires `session_change` | §10.2 |
 | `retention` | `session.send` with `retention` | §9.1 |
 | `session_retention` | `session.send`, `session.head`, `session.release`; extends `session.adopt` where declared | §9.14 |
 | `archive_prunes_reasoning` | `session.read`; extends every served `session.read` and `session.history` page form | §9.14.1 |
@@ -277,6 +288,10 @@ alias until the next breaking release.
 
 - [pinned] A group that only adds fields to `session.read` requires
   `session.read`, not all of `transcript_reads`.
+  The `media_refs` group explicitly requires `transcript_reads` as well as
+  `attachments`. `check_describe` refuses missing dependencies by name:
+  `media_refs_without_attachments`, `media_refs_without_transcript_reads`,
+  and `plan_notes_without_session_change` for `plan_notes`.
 - [pinned] A runner declares `system_text_default` only when it accepts a
   plan whose `system_text` item has no preset and forwards that item unchanged
   to its provider. `check_describe` checks the group for `session.send`; no
@@ -464,7 +479,10 @@ include_originals?, view?, media?, include_rich_ui?, include_display_facts?}` (`
   {field: "include_display_facts"}` before read work
   (`ReadRequest::check_display_facts`), just like `include_rich_ui`.
 - [pinned] `media` is `"inline"` (the default), `"descriptors"`, or, on an
-  `attachments` runner, `"blocks"` (§9.12). Unknown values are refused
+  `attachments` runner, `"blocks"` (§9.12), or `"media_refs"` on a runner
+  declaring `media_refs`. A reader sends `"media_refs"` only to a runner
+  declaring that group: older runners refuse an unknown media mode.
+  Unknown or undeclared modes are refused
   `invalid_params {field: "media"}`. Inline preserves existing non-media
   payload bytes, whole-message paging and `reply_too_large` behavior; §9.12
   defines the text rendering of media on an `attachments` runner.
@@ -611,6 +629,17 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
 
 #### Descriptor payloads and identity
 
+- [pinned] `media: "media_refs"` is inline in every respect, including
+  non-media payloads, whole-message paging, `max_bytes` and `reply_too_large`,
+  with one difference: each byte-backed media payload becomes the
+  `media_ref` below, in place, with exactly the metadata and decoded-byte
+  SHA-256 that descriptors serves. Large text, tool arguments and reasoning
+  remain exactly as inline serves them, never `text_ref`, `args_ref` or
+  `reasoning_ref`; the descriptors threshold and fallback budget do not
+  apply. URL-only media remains inline. Message and part digests, when
+  present, still identify the full stored content, and equal descriptors'
+  identities. This mode applies to `session.read` and raw `session.history`
+  wherever served. Media bytes are obtained through `session.media_read`.
 - [pinned] In descriptors mode every byte-backed image, file, PDF or audio
   payload becomes `{type: "media_ref", part?, kind, mime, byte_size, sha256,
   width?, height?}`. Size and SHA-256 are over decoded bytes, never base64.
@@ -825,8 +854,25 @@ that a model meant as content; it does not tell decoration from content.
 
 - [pinned] Head metadata without bodies: `{last_ordinal?, first_ordinal?,
   cut?, history_version, incarnation, head?, last_run_state?, last_run_error?,
-  last_run_rich_ui?, updated_at?, input?, model?, service_tier?, usage?, sender?, reasoning_pruned?}`
+  last_run_rich_ui?, updated_at?, input?, model?, service_tier?, usage?, sender?, reasoning_pruned?, history_intake?}`
   (`HeadMeta`). The required cache identity follows §4.5.
+- [pinned] The independent opt-in `history_intake` group has no group
+  dependencies and requires only `session.head`. When a declaring runner first
+  takes in history the host already held, `session.head` carries
+  `history_intake: "running"` for the whole intake. While present,
+  `last_ordinal` is not final. Each served `session.read` and raw
+  `session.history` exposes an append-only prefix of that imported history
+  which grows as intake progresses, without changing `history_version`.
+  A served send operation accepts a send at once during intake, but its run
+  starts only after the whole imported history is stored.
+- [pinned] On a declaring runner, absent `history_intake` means
+  `last_ordinal` is final for the initial intake; later normal appends still
+  advance it. Readers must not seed a "new from here" position from
+  `last_ordinal` while the member is present. Its value is an open string:
+  unknown values are treated as `"running"`, never as completion. A runner
+  that does not declare `history_intake` promises nothing about intake or
+  seeding safety through this member. The optional member is omitted when
+  absent, preserving existing head reply bytes.
 - [pinned] `first_ordinal` is the first entry the newest host marker keeps for
   the model, or 1 without a marker. It is at most `last_ordinal + 1` when the
   cut keeps no entry. It does not bound reads.
@@ -4451,6 +4497,10 @@ its host's file storage, not a second copy of the host's media store.
   still applies (§4.2): a stored message too large for one reply, media
   bytes included, is refused `reply_too_large` in blocks mode exactly as in
   inline mode, and descriptors mode is how a reader pages such a message.
+- [pinned] The independent `media_refs` group serves the inline-with-media-
+  references mode in §4.2. A runner that stores media only by reference may
+  serve this mode exactly as it serves `blocks`. The group adds no byte
+  transport: `session.media_read` supplies the referenced bytes.
 - [pinned] Model fallback and reads share `attachments::marker` and the
   grammar above. The context selects `reason`: `not_requested` for default
   reads, `unsupported` when a model cannot take stored media. Size and hash
@@ -5232,7 +5282,8 @@ every request, answer and refusal.
   tools its run did not start with.
 - [pinned] Except for sender and reader admission and `head_selection`
   (§9.3.4), a change applies at the
-  start of the first run at or after its rung's point: `immediately` at the
+  start of the first run at or after its rung's point (or the `plan_notes`
+  reconcile point below): `immediately` at the
   next run; `on_prefix_rebuild`,
   `on_system_rebuild` and `on_history_rebuild` at the first run that starts
   with the prefix, the system text or the history rebuilt (a compaction
@@ -5274,7 +5325,8 @@ every request, answer and refusal.
 **`session.refresh {plan, policy, generation}`** (`RefreshRequest`, strict).
 
 - [pinned] `plan` is the full fetch-plan object, as `SendRequest::plan`
-  carries it (§10.1). `policy` is one rung name from `rungs::ALL`; any other
+  carries it (§10.1). `policy` is one rung name from `rungs::ALL`, or
+  `notes_until_rebuild` only with `plan_notes` as below; any other
   value is refused `invalid_params {field: "policy"}`. `generation` is a
   u64 the owner chooses, strictly increasing per session.
 - [pinned] The runner fetches the new plan's items under one deadline,
@@ -5343,6 +5395,108 @@ every request, answer and refusal.
   cannot restore and verify the recorded surface, the next run ends `error`
   with class `host_relaunch_failed` before any model request, and the session
   stays; it is never ended.
+
+**Opt-in `plan_notes`.**
+
+- [pinned] `plan_notes` requires `session_change`; a declaration without it
+  is refused by name, `plan_notes_without_session_change`. An owner sends
+  policy `notes_until_rebuild` only to a declaring runner. A non-declaring
+  runner refuses it `invalid_params {field: "policy"}`. It is a separate
+  policy, not a rung in the ordered cost list `rungs::ALL`.
+- [pinned] The runner derives the change set from the difference between
+  the applied plan's fetched surface and the pending plan's fetched surface:
+  system text changed, tool added, tool removed, or tool changed (name,
+  description or input schema). The owner supplies text only for a
+  system-text change, in optional `system_note: string` on `session.refresh`.
+  It is a short description of the change, not the full replacement system
+  text, and has the same authority as the plan owner's system text. Its
+  UTF-8 size is at most 8,192 bytes. Under `notes_until_rebuild` it is
+  required exactly when system text differs from the applied plan, and is
+  refused when system text is unchanged; absence when required, excess size,
+  or its presence under any other policy is `invalid_params {field:
+  "system_note"}`. A runner without `plan_notes` refuses the member by that
+  same name. No other note text is supplied by the owner.
+- [pinned] Wherever a text form is used, tool additions and removals have
+  exactly these strings, where `{name}` is replaced by the tool's exact name
+  as offered, without changing any other byte:
+  - addition: `Tool "{name}" is now available.`
+  - removal: `Tool "{name}" is no longer available. Do not call it.`
+  A changed definition is not permission to call the new definition through
+  the old one: it waits for the full apply unless a supported callable
+  native tool-addition form can carry the replacement definition.
+- [pinned] Plan notes are durable runner records like the §9.7 notices,
+  never transcript entries, never exposed as stored entries by reads or
+  history, and never counted as the head's steps. Their form is chosen once
+  per session and model (including route), and recorded. The notice form
+  vocabulary gains `tool_addition` and `tool_removal` for native provider
+  forms; text uses the supported turn-scoped form. The runner confirms each
+  form on its own transport before enabling it. A system-role form is
+  allowed for a system-text change because it is the plan owner's own
+  text. A sent note is never edited; a correction is a new note.
+- [pinned] Delivery is in the first request of the next run, after the user
+  turn starting it, never mid-run. A plan note never uses `tool_result`
+  form and never rides a tool result: a view replacing a tool output can
+  drop notices riding it. Notes preserve the old system text and tool list
+  rendering byte for byte until the full apply. A removed tool is refused
+  no later than the run where its note is delivered, with the removal
+  string above as the refusal message, and earlier where `refresh_relaunch`
+  already requires it. The per-call gate enforces this even while the old
+  list still renders. An added tool is callable only if its delivered form
+  makes it callable; without a native callable tool-addition form, an
+  addition waits for the full apply, rather than being announced as callable
+  in text alone.
+- [pinned] **Reconcile rule.** In a run's first request, the runner applies
+  the full pending plan when any of the following holds:
+  - the request's rendering already differs from the session's previous
+    request at or before the first history message after the system text
+    and tools: rewriting the plan adds no history-prefix rewrite that was
+    not already needed. This is a comparison of the rendered request bytes
+    without the proposed full plan apply, not of view labels or edit kinds;
+    any method giving that same answer conforms. One way to compute the
+    first-history-message condition is
+    `compaction_view::render::first_change(before: &RenderPlan, after: &RenderPlan) -> FirstChange`
+    in `cortexkit-compaction-view` 0.1.5, where `before` is the applied view's
+    plan and `after` the newer one: `FirstChange::from_first_message()` is
+    true exactly when the first difference is the request's first message
+    after the system text and tools;
+  - the runner knows first-hand that the provider cache is lost: a model or
+    route change, or a proven `cache_expired`, not a guessed cache miss;
+  - the oldest pending change is at least six hours old; replacing a pending
+    refresh does not reset that oldest outstanding change's age;
+  - the owner asks for `immediately`, the existing flush policy, or uses
+    `session.flush_prefix`.
+  The full apply never happens mid-run. From that request on, notes for the
+  applied changes stop rendering; stored history never changes.
+  Until that point `pending` remains set and `applied_generation` and
+  `effective` remain unchanged. `applies_from_next_run` describes the full
+  apply, not delivery of notes. Existing sender/reader admission and
+  `head_selection` exceptions still apply. For a plan naming a compaction
+  provider, a full surface apply sends `compaction.ride` with cause
+  `surface_change` after installation and before the first model request on
+  the new surface, as the `refresh_relaunch` ordering rule below requires.
+- [pinned] On restart the runner restores the recorded surface and delivered
+  notes, with their recorded forms, byte for byte, before applying any
+  accepted pending change at a normal run boundary. Recovery alone neither
+  refetches the plan nor changes a note's form.
+- [pinned] A note is anchored at its run's first request. If a view removes
+  that anchor before the full apply, the runner delivers a fresh note at
+  the next run's start so the change is not lost. A compaction cut through a
+  pending note's position needs nothing kept: the reconciled system text
+  carries the change. Notes never become compaction steps or stored entries.
+- [pinned] These are three Rust views of one `session.refresh` wire body:
+  a runner declaring neither extension decodes `RefreshRequest`; one
+  declaring only `refresh_relaunch` decodes `RelaunchRefreshRequest`; one
+  declaring `plan_notes` decodes `PlanNotesRefreshRequest` (or, when it also
+  declares `refresh_relaunch`, `RelaunchRefreshRequest`). The latter two use
+  declaration-aware checks. `required` still requires `refresh_relaunch`.
+  Absent optional members are omitted, preserving old refresh bytes.
+  `RefreshRequest` remains strict and refuses unknown `system_note` and
+  `required`; owners send either member only to declaring runners. An
+  identical repeat includes the same `system_note` and `required` values.
+  Changing policy through `session.refresh_policy` to `notes_until_rebuild`
+  requires the group and an already recorded system note if the pending
+  change includes system text; otherwise the owner must send a new refresh
+  with `system_note` instead.
 
 **Opt-in `refresh_relaunch`.**
 

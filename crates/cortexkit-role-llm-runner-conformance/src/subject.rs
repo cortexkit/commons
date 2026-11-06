@@ -86,6 +86,12 @@ pub enum Capability {
     /// [`LlmRunnerSubject::refresh_plan`] and
     /// [`LlmRunnerSubject::model_requests`].
     SessionChange,
+    /// Opt-in plan notes; needs the defaulted `plan_notes_fixture` hook.
+    PlanNotes,
+    /// Inline reads that reference media without describing large text.
+    MediaRefs,
+    /// Initial host-history intake state on the head; optional seeded-intake hooks.
+    HistoryIntake,
     /// Whole-session retention with limits from `role.describe.retention`.
     Retention,
     /// Per-session storage policies and owner release.
@@ -213,6 +219,9 @@ impl Capability {
         Self::Plans,
         Self::Interrupt,
         Self::SessionChange,
+        Self::PlanNotes,
+        Self::MediaRefs,
+        Self::HistoryIntake,
         Self::Retention,
         Self::SessionRetention,
         Self::InputTokenCap,
@@ -286,6 +295,9 @@ impl Capability {
             Self::Plans => groups::PLANS,
             Self::Interrupt => groups::INTERRUPT,
             Self::SessionChange => groups::SESSION_CHANGE,
+            Self::PlanNotes => groups::PLAN_NOTES,
+            Self::MediaRefs => groups::MEDIA_REFS,
+            Self::HistoryIntake => groups::HISTORY_INTAKE,
             Self::Retention => groups::RETENTION,
             Self::SessionRetention => groups::SESSION_RETENTION,
             Self::InputTokenCap => groups::INPUT_TOKEN_CAP,
@@ -679,6 +691,35 @@ pub struct RefreshPlan {
     /// model request offers once the plan applies. For the other variants,
     /// the names a `tool_outside_host_set` refusal must list.
     pub tools: Vec<String>,
+}
+
+/// A pending-plan scenario. The adapter configures its real plan provider
+/// with this plan and keeps the model/route/cache/view stable until a flush.
+/// The initial plan offers `removed_tool`; this plan removes it and changes
+/// system text. Observations still come from the model and tool endpoints.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct PlanNotesFixture {
+    pub plan: Map<String, Value>,
+    pub system_note: String,
+    pub new_system_text: String,
+    pub removed_tool: String,
+}
+
+impl PlanNotesFixture {
+    pub fn new(
+        plan: Map<String, Value>,
+        system_note: impl Into<String>,
+        new_system_text: impl Into<String>,
+        removed_tool: impl Into<String>,
+    ) -> Self {
+        Self {
+            plan,
+            system_note: system_note.into(),
+            new_system_text: new_system_text.into(),
+            removed_tool: removed_tool.into(),
+        }
+    }
 }
 
 impl RefreshPlan {
@@ -1405,6 +1446,35 @@ pub trait LlmRunnerSubject: Harness {
     /// with [`Capability::SessionChange`].
     fn refresh_plan(&self, _session: &str, _variant: RefreshVariant) -> Option<RefreshPlan> {
         None
+    }
+
+    /// Configure a stable-prefix plan-note scenario; absence grades these
+    /// optional cases not applicable. `model_requests` must observe note text
+    /// at the model endpoint, not reconstruct it from this fixture.
+    fn plan_notes_fixture(&self) -> Option<PlanNotesFixture> {
+        None
+    }
+
+    /// Start a held initial intake of native host history before any send.
+    /// Store only the first supplied text initially; `advance_history_intake`
+    /// stores the second, and `finish_history_intake` stores the rest before
+    /// releasing queued runs. Return false when this optional fixture is absent.
+    async fn begin_history_intake(
+        &self,
+        _session: &str,
+        _texts: &[String],
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
+    /// Advance a seeded intake by one prefix entry without completing it.
+    async fn advance_history_intake(&self, _session: &str) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
+    /// Complete the seeded intake, then allow accepted sends to start runs.
+    async fn finish_history_intake(&self, _session: &str) -> Result<bool, HarnessError> {
+        Ok(false)
     }
 
     /// Build first-send fields for a plan with one tool item served by

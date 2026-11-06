@@ -284,6 +284,9 @@ impl Module {
             }
             Err(_) => return invalid("view"),
         };
+        if let Err(field) = request.check_media(&self.world.groups) {
+            return invalid(field);
+        }
         let mode = match request.mode() {
             Ok(mode) => mode,
             Err(field) => return invalid(field),
@@ -292,7 +295,19 @@ impl Module {
         let Some(sess) = sessions.get(session) else {
             return respond(HistoryPage::new(1, "log-1", vec![]));
         };
-        let entries = self.history_entries(session, sess);
+        let mut entries = self.history_entries(session, sess);
+        if request.media == Some(cortexkit_role_llm_runner::read::MediaMode::MediaRefs) {
+            for entry in &mut entries {
+                let read = cortexkit_role_llm_runner::read::ReadMessage::new(
+                    entry.ordinal,
+                    &entry.mid,
+                    entry.message.clone(),
+                );
+                entry.message = super::media::media_refs_message(read, &self.world.defects)
+                    .unwrap()
+                    .message;
+            }
+        }
         let defect = self.world.defects.lineage;
         let limit = request
             .limit

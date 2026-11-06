@@ -273,6 +273,46 @@ pub fn describe_message(
     Ok(read)
 }
 
+pub fn media_refs_message(
+    mut message: ReadMessage,
+    defects: &Defects,
+) -> Result<ReadMessage, String> {
+    let stored = message.message.clone();
+    let payloads = descriptor_payloads(&stored, defects);
+    message.digest = Some(content_digest(&stored));
+    message.part_digests = Some(
+        parts(&stored)
+            .into_iter()
+            .map(|(key, value)| PartDigest::new(key, &value))
+            .collect(),
+    );
+    message.message = match defects.media {
+        Some("refs_large_text") => {
+            descriptors::describe(&stored, &payloads, descriptors::DESCRIPTOR_MESSAGE_MAX)?
+        }
+        Some("refs_bytes") => stored,
+        _ => descriptors::media_refs(&stored, &payloads)?,
+    };
+    if defects.media == Some("refs_digest") {
+        fn corrupt(value: &mut Value) {
+            if value["type"] == "media_ref" {
+                value["sha256"] = json!("f".repeat(64));
+            }
+            if let Some(object) = value.as_object_mut() {
+                for child in object.values_mut() {
+                    corrupt(child);
+                }
+            } else if let Some(array) = value.as_array_mut() {
+                for child in array {
+                    corrupt(child);
+                }
+            }
+        }
+        corrupt(&mut message.message);
+    }
+    Ok(message)
+}
+
 /// Deliberately violate fallback ordering while retaining the normal media
 /// and over-threshold rules, so the mixed-size case must observe the choice.
 fn smallest_first(inline: &Value, candidates: &[Payload], budget: usize) -> Result<Value, String> {
@@ -333,13 +373,17 @@ fn drop_pairing(value: &mut Value) {
 
 pub fn page(page: ReadPage, mode: Option<MediaMode>, budget: usize, defects: &Defects) -> Reply {
     let mut page = page;
-    if mode == Some(MediaMode::Descriptors) {
+    if matches!(mode, Some(MediaMode::Descriptors | MediaMode::MediaRefs)) {
         let messages = page
             .messages
             .into_iter()
             .map(|m| {
                 let ordinal = m.ordinal;
-                describe_message(m, budget, defects).map_err(|_| ordinal)
+                if mode == Some(MediaMode::MediaRefs) {
+                    media_refs_message(m, defects).map_err(|_| ordinal)
+                } else {
+                    describe_message(m, budget, defects).map_err(|_| ordinal)
+                }
             })
             .collect::<Result<Vec<_>, _>>();
         page.messages = match messages {
@@ -349,7 +393,7 @@ pub fn page(page: ReadPage, mode: Option<MediaMode>, budget: usize, defects: &De
             }
         };
     }
-    if mode != Some(MediaMode::Descriptors) {
+    if !matches!(mode, Some(MediaMode::Descriptors | MediaMode::MediaRefs)) {
         attachments::page(&mut page, mode, defects);
     }
     let value = serde_json::to_value(page).unwrap();

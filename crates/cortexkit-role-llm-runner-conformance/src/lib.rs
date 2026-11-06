@@ -33,6 +33,7 @@ mod follow;
 mod head_selection;
 mod head_sender;
 mod held_calls;
+mod history_intake;
 mod host_history;
 mod input_token_cap;
 mod interrupt_reason;
@@ -44,6 +45,7 @@ mod message_marks;
 mod message_senders;
 mod notices;
 mod output_refs;
+mod plan_notes;
 pub mod progress;
 mod read_contract;
 mod read_display_facts;
@@ -80,8 +82,8 @@ pub use routed_accounts::RecordingRoutingPeer;
 pub use runner::{run_suite, run_suite_with, SetupError};
 pub use subject::{
     ArchivePruningPart, AttributionFixture, Capability, LiveIdsObservation, LlmRunnerSubject,
-    ModelRequestObservation, PlanSenderIdentity, RefreshPlan, RefreshVariant, Script,
-    ScriptedLateEntry, ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage,
+    ModelRequestObservation, PlanNotesFixture, PlanSenderIdentity, RefreshPlan, RefreshVariant,
+    Script, ScriptedLateEntry, ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage,
     SystemTextDefaultObservation, ToolResultLimitObservation, ToolResultObservation,
     UserCommandFixture, UserCommandObservation,
 };

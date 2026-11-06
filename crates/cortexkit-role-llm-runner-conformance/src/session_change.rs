@@ -84,7 +84,7 @@ where
     Ok(())
 }
 
-async fn baseline<R: RunnerRoute>(route: &R) -> Result<Baseline, String> {
+pub(crate) async fn baseline<R: RunnerRoute>(route: &R) -> Result<Baseline, String> {
     let reply: BaselineReply = decode(
         "session.baseline",
         expect_ok(
