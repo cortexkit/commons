@@ -84,6 +84,13 @@ pub struct Delivered {
     /// For a tool-result ride, the carrying result's runner call identity.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_key: Option<String>,
+    /// The other runner that minted the carrying call's key, only with `call_identity`.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::call_carrier::deserialize"
+    )]
+    pub call_carrier: Option<String>,
 }
 
 impl Delivered {
@@ -92,6 +99,7 @@ impl Delivered {
             r#as: r#as.into(),
             r#ref: None,
             call_key: None,
+            call_carrier: None,
         }
     }
 
@@ -102,6 +110,12 @@ impl Delivered {
 
     pub fn with_call_key(mut self, call_key: impl Into<String>) -> Self {
         self.call_key = Some(call_key.into());
+        self
+    }
+
+    /// Name the other runner that minted the carrying call's key.
+    pub fn with_call_carrier(mut self, call_carrier: impl Into<String>) -> Self {
+        self.call_carrier = Some(call_carrier.into());
         self
     }
 
@@ -977,8 +991,16 @@ impl SendRequest {
         {
             Err("plan")
         } else {
-            Ok(())
+            self.check_fork_callers(declared)
         }
+    }
+
+    /// Validate fork admission policy before fetching or storing the plan.
+    /// Without `fork_answer`, the plan member is kept uninterpreted.
+    pub fn check_fork_callers<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        self.plan.as_ref().map_or(Ok(()), |plan| {
+            crate::fork_answer::check_plan(plan, declared)
+        })
     }
 
     /// Check succession before the other plan checks, so malformed or
@@ -1220,6 +1242,22 @@ impl SendReply {
 mod tests {
     use super::*;
     use crate::{errors, vectors};
+
+    #[test]
+    fn fork_answer_does_not_swallow_unknown_send_members() {
+        let raw = serde_json::json!({
+            "prompt": "q", "send_id": "s", "future_runner_setting": {"nested": [1, true]}
+        });
+        let request: SendRequest = serde_json::from_value(raw.clone()).unwrap();
+        assert_eq!(
+            request.runner_params["future_runner_setting"],
+            raw["future_runner_setting"]
+        );
+        assert_eq!(
+            serde_json::to_value(request).unwrap()["future_runner_setting"],
+            raw["future_runner_setting"]
+        );
+    }
 
     #[test]
     fn paused_send_bytes_preserve_pause_reason_and_open_states() {

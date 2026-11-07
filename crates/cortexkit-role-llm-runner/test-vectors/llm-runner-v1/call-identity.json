@@ -81,6 +81,30 @@
       "session_capabilities_from": "baseline"
     }
   },
+  "imported_call": {
+    "row": {
+      "role": "assistant",
+      "text": "",
+      "parts": [{
+        "type": "tool_call",
+        "part": "0",
+        "tool_call_id": "source-call-1",
+        "name": "conformance_echo",
+        "arguments": "{\"marker\":\"imported\"}",
+        "call_key": "source-run.c0",
+        "call_carrier": "example-source-runner"
+      }]
+    },
+    "notice": {
+      "part": 0,
+      "call_key": "source-run.c0",
+      "call_carrier": "example-source-runner",
+      "send_id": "notice-1",
+      "sender": "example-notifier",
+      "text": "Imported call completed.",
+      "delivered_as": "tool_result"
+    }
+  },
   "rows": [
     {
       "name": "a call dispatched to a tool provider carries both members",

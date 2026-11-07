@@ -102,6 +102,7 @@ where
     }
     if !case.declared.contains(&Capability::DispatchAttribution)
         && !case.declared.contains(&Capability::RunToolCalls)
+        && name != "call_identity_imported_call_carrier"
     {
         return Ok(Ending::Inapplicable(
             "runner declares neither dispatch_attribution nor run_tool_calls, so call_identity \
@@ -125,6 +126,7 @@ where
         }
         "call_identity_pin_frozen_at_dispatch" => pin_frozen(case, surfaces).await,
         "call_identity_denied_call_has_no_pin" => denied(case, surfaces).await,
+        "call_identity_imported_call_carrier" => imported_call_carrier(case, surfaces).await,
         other => Err(format!("unknown call_identity case {other}")),
     }
 }
@@ -147,13 +149,14 @@ impl Surfaces {
 }
 
 /// One display tool-call entry: where it was read, the call it names, and
-/// the two members this group adds.
+/// the identity members this group adds.
 #[derive(Debug)]
 struct Shown {
     surface: &'static str,
     mid: String,
     tool_call_id: String,
     call_key: Option<String>,
+    call_carrier: Option<String>,
     schema_pin: Option<String>,
 }
 
@@ -173,6 +176,7 @@ async fn shown<R: RunnerRoute>(route: &R, surfaces: Surfaces) -> Result<Vec<Show
                     mid: entry.mid.clone(),
                     tool_call_id: call.tool_call_id.clone(),
                     call_key: call.call_key.clone(),
+                    call_carrier: call.call_carrier.clone(),
                     schema_pin: call.schema_pin.clone(),
                 });
             }
@@ -186,6 +190,7 @@ async fn shown<R: RunnerRoute>(route: &R, surfaces: Surfaces) -> Result<Vec<Show
                     mid: e.mid,
                     tool_call_id: e.tool_call_id,
                     call_key: e.call_key,
+                    call_carrier: e.call_carrier,
                     schema_pin: e.schema_pin,
                 },
                 Some(LiveEvent::ToolFinished(e)) => Shown {
@@ -193,6 +198,7 @@ async fn shown<R: RunnerRoute>(route: &R, surfaces: Surfaces) -> Result<Vec<Show
                     mid: e.mid,
                     tool_call_id: e.tool_call_id,
                     call_key: e.call_key,
+                    call_carrier: e.call_carrier,
                     schema_pin: e.schema_pin,
                 },
                 _ => continue,
@@ -377,6 +383,125 @@ where
     Ok(())
 }
 
+/// Imported calls retain the original key and carrier, while calls minted by
+/// the serving runner omit the carrier even in the same session.
+async fn imported_call_carrier<S>(case: &Case<'_, S>, surfaces: Surfaces) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let own = case.mint.call("identity-own");
+    let imported = case.mint.call("identity-imported");
+    let carrier = "conformance-source-runner";
+    let key = case.mint.next("source-call-key");
+    let mut session = case
+        .open(
+            "call-identity-import",
+            Script {
+                turns: vec![
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(own.clone())]),
+                    ScriptedTurn::new(vec![case.mint.text("identity-import-closing").0]),
+                ],
+            },
+        )
+        .await?;
+    case.run_prompt(&mut session, &case.mint.next("identity-import-prompt"))
+        .await?;
+    if !case
+        .subject
+        .seed_imported_tool_call(case.handle.inner(), &session.name, &imported, carrier, &key)
+        .await
+        .map_err(|e| format!("seed_imported_tool_call: {e}"))?
+    {
+        return Ok(Ending::Inapplicable(
+            "adapter hook seed_imported_tool_call is unavailable".into(),
+        ));
+    }
+    let mut all = shown(&session.route, surfaces).await?;
+    // Attribution is another reader surface to check, not the source of the
+    // expected key and carrier supplied to the imported-call fixture.
+    if case.declared.contains(&Capability::DispatchAttribution) {
+        for ((mid, tool_call_id), call) in attribution(&session.route).await? {
+            all.push(Shown {
+                surface: "session.read tool_calls",
+                mid,
+                tool_call_id,
+                call_key: call.call_key,
+                call_carrier: call.call_carrier,
+                schema_pin: None,
+            });
+        }
+    }
+    if case.declared.contains(&Capability::ReadDisplayFacts) {
+        let mut from = 1;
+        for page_index in 0..crate::drive::MAX_PAGES {
+            let page = crate::drive::read(
+                &session.route,
+                &cortexkit_role_llm_runner::read::ReadRequest::range(from)
+                    .with_include_display_facts(true),
+            )
+            .await?;
+            for message in page.messages {
+                for time in message.tool_times {
+                    all.push(Shown {
+                        surface: "session.read tool_times",
+                        mid: message.mid.clone(),
+                        tool_call_id: time.tool_call_id,
+                        call_key: time.call_key,
+                        call_carrier: time.call_carrier,
+                        schema_pin: time.schema_pin,
+                    });
+                }
+            }
+            let Some(next) = page.next_from_ordinal else {
+                break;
+            };
+            if next <= from || page_index + 1 == crate::drive::MAX_PAGES {
+                return Err("display-facts reads did not finish with advancing pages".into());
+            }
+            from = next;
+        }
+    }
+    for (call, expected_carrier) in [(&imported, Some(carrier)), (&own, None)] {
+        let entries = entries_of(&all, call, surfaces, true)?;
+        if case.declared.contains(&Capability::DispatchAttribution)
+            && !entries
+                .iter()
+                .any(|entry| entry.surface == "session.read tool_calls")
+        {
+            return Err(format!(
+                "session.read tool_calls is missing call {}",
+                call.tool_call_id
+            ));
+        }
+        if case.declared.contains(&Capability::ReadDisplayFacts)
+            && !entries
+                .iter()
+                .any(|entry| entry.surface == "session.read tool_times")
+        {
+            return Err(format!(
+                "session.read tool_times is missing call {}",
+                call.tool_call_id
+            ));
+        }
+        for entry in entries {
+            if entry.call_carrier.as_deref() != expected_carrier {
+                return Err(format!(
+                    "{} of call {} carries call_carrier {:?}, expected {:?}",
+                    entry.surface, call.tool_call_id, entry.call_carrier, expected_carrier
+                ));
+            }
+            if expected_carrier.is_some() && entry.call_key.as_deref() != Some(key.as_str()) {
+                return Err(format!(
+                    "{} of imported call {} changed original call_key {:?} to {:?}",
+                    entry.surface, call.tool_call_id, key, entry.call_key
+                ));
+            }
+        }
+    }
+    Ok(Ending::Passed)
+}
+
 /// The pin on every display entry of a dispatched call is the one the tool
 /// provider received with it, and stays that pin after the catalog gives
 /// the tool another definition.
@@ -532,6 +657,7 @@ mod tests {
                 mid: "message".into(),
                 tool_call_id: "call".into(),
                 call_key: shown_key.map(str::to_owned),
+                call_carrier: None,
                 schema_pin: None,
             };
             let reference = KeyReference::RunToolCalls {

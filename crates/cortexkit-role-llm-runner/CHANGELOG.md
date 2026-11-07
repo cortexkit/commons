@@ -1,7 +1,19 @@
 # Changelog
 
-## Unreleased
+## 0.8.16
 
+- Add optional `call_carrier` under `call_identity` to history call facts,
+  live tool events and notice/ride identities. Preserve imported keys and
+  validate the minting runner's module id without changing absent bytes.
+- Add opt-in `fork_answer`: strict prepare, ask and end wire types, open
+  fork finishes, per-ask `RunUsage`, and pinned isolation, exact-base,
+  replay, expiry, recovery and head-credential routing rules in §9.20.
+- Add `fork_idle_s` describe metadata with named missing, undeclared and
+  invalid checks, and eight fork refusal codes; only `fork_busy` and
+  `fork_account_held` are retryable among the new codes.
+- Validate `plan.fork_callers` at admission and refresh only for runners
+  declaring the group; otherwise preserve it verbatim and uninterpreted.
+  Keep unknown `session.send` members in `runner_params`.
 - Contract §11.3: a runner's `call_key` is never reused across any of the
   sessions it serves, not only within one session, as `tool-provider/v1` §4
   now states. Text only.
@@ -10,11 +22,14 @@
   runner learns of both at once. A reader keys run ends by `run_id`, and an
   end naming a run other than the one it last saw start never marks the
   session idle. Text only; no API change.
-- Contract §10.2 `plan_notes`: when the current route has no confirmed
-  system-role turn form, a pending change that includes system text is
-  applied in full at that run's first request, with reason `no_note_form`. It
-  is never rendered as text with the person's authority. A tools-only change
-  stays pending to a reconcile point. Text only; no API change.
+- Contract §10.2 `plan_notes`: when the runner hasn't confirmed that the
+  current route accepts a system-role message in the middle of a turn (the
+  form a plan note normally takes), a pending change that includes system
+  text is applied in full at that run's first request, with reason
+  `no_note_form`. It is never rendered as text with the person's authority. A
+  tools-only change stays pending until the next point where the full plan
+  applies at no extra cache cost (§10.2's reconcile rule). Text only; no API
+  change.
 
 ## 0.8.15
 

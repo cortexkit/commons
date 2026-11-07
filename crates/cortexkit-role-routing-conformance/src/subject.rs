@@ -215,6 +215,45 @@ impl ContinueCredential {
     }
 }
 
+/// Relative catalog measurements for one media kind and provider/model pair.
+/// Larger accuracy ranks first; smaller cost ranks first. Missing measurements
+/// rank below measured engines. Values are fixture units, not billing amounts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EngineFacts {
+    pub kind: crate::wire::select_engine::Kind,
+    pub provider: String,
+    pub model: String,
+    pub accuracy: Option<u64>,
+    pub cost: Option<u64>,
+}
+
+impl EngineFacts {
+    pub fn new(
+        kind: crate::wire::select_engine::Kind,
+        provider: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind,
+            provider: provider.into(),
+            model: model.into(),
+            accuracy: None,
+            cost: None,
+        }
+    }
+
+    pub fn with_accuracy(mut self, accuracy: u64) -> Self {
+        self.accuracy = Some(accuracy);
+        self
+    }
+
+    pub fn with_cost(mut self, cost: u64) -> Self {
+        self.cost = Some(cost);
+        self
+    }
+}
+
 /// A routing provider under test.
 ///
 /// Before every check the kit calls [`reset`](Self::reset), then
@@ -291,6 +330,19 @@ pub trait RoutingSubject: Send + Sync {
         } else {
             Err("catalog declarations are not supported by this subject".into())
         }
+    }
+
+    /// Replace media accuracy and cost fixtures, including facts for caller-local
+    /// engines. Required only by the `select_engine` ranking checks.
+    async fn configure_engine_facts(&self, _facts: &[EngineFacts]) -> Result<(), String> {
+        Err("configure_engine_facts is not supported by this subject".into())
+    }
+
+    /// Advance the provider's clock by this duration and fire every timer due in
+    /// the span before returning. Preserve decisions and admission replay state.
+    /// Required only by the `select_engine` expiry checks.
+    async fn advance_clock(&self, _ms: u64) -> Result<(), String> {
+        Err("advance_clock is not supported by this subject".into())
     }
 
     /// An operator pin: within `project_id`, `consumer`'s selects that carry

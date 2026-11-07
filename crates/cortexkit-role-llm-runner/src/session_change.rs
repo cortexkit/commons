@@ -78,6 +78,11 @@ pub struct RelaunchRefreshRequest {
 }
 
 impl RelaunchRefreshRequest {
+    /// Validate fork callers before fetching or storing an accepted refresh.
+    pub fn check_fork_callers<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        crate::fork_answer::check_plan(&self.plan, declared)
+    }
+
     /// Validate attribution before decoding senders or storing a refresh.
     pub fn check_sender_attribution<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         crate::attribution::check_plan(&self.plan, declared)
@@ -143,6 +148,11 @@ impl From<RefreshRequest> for RelaunchRefreshRequest {
 }
 
 impl RefreshRequest {
+    /// Validate fork callers before fetching or storing an accepted refresh.
+    pub fn check_fork_callers<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        crate::fork_answer::check_plan(&self.plan, declared)
+    }
+
     /// Validate attribution before decoding senders or storing a refresh.
     pub fn check_sender_attribution<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         crate::attribution::check_plan(&self.plan, declared)

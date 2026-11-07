@@ -508,6 +508,14 @@ pub struct NoticeFact {
     pub part: u32,
     /// The carrying call's key. Readers place a `tool_result` notice under it.
     pub call_key: String,
+    /// The attested module id of the runner that minted this imported call's key.
+    /// Only with `call_identity`; absent for the serving runner's own calls (§9.16).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::call_carrier::deserialize"
+    )]
+    pub call_carrier: Option<String>,
     pub send_id: String,
     pub sender: String,
     pub text: String,
@@ -516,6 +524,12 @@ pub struct NoticeFact {
 }
 
 impl NoticeFact {
+    /// Name the other runner that minted the call's key; never set for local calls.
+    pub fn with_call_carrier(mut self, call_carrier: impl Into<String>) -> Self {
+        self.call_carrier = Some(call_carrier.into());
+        self
+    }
+
     pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
         self.speaks_for = Some(speaks_for);
         self
@@ -531,6 +545,7 @@ impl NoticeFact {
         Self {
             part,
             call_key: String::new(),
+            call_carrier: None,
             send_id: send_id.into(),
             sender: sender.into(),
             text: text.into(),
@@ -590,6 +605,14 @@ pub struct ToolTime {
     /// `call_identity`, and absent when the call has none stored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_key: Option<String>,
+    /// The attested module id of the runner that minted this imported call's key.
+    /// Only with `call_identity`; absent for the serving runner's own calls (§9.16).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::call_carrier::deserialize"
+    )]
+    pub call_carrier: Option<String>,
     /// The `schema_pin` stored when the call was dispatched (§9.16), only on
     /// a runner declaring `call_identity`; a call denied before dispatch has
     /// none.
@@ -598,6 +621,12 @@ pub struct ToolTime {
 }
 
 impl ToolTime {
+    /// Name the other runner that minted the call's key; never set for local calls.
+    pub fn with_call_carrier(mut self, call_carrier: impl Into<String>) -> Self {
+        self.call_carrier = Some(call_carrier.into());
+        self
+    }
+
     pub fn new(tool_call_id: impl Into<String>) -> Self {
         Self {
             tool_call_id: tool_call_id.into(),
@@ -605,6 +634,7 @@ impl ToolTime {
             finished_at: None,
             unanswered: None,
             call_key: None,
+            call_carrier: None,
             schema_pin: None,
         }
     }
@@ -812,6 +842,14 @@ pub struct ToolCallAttribution {
     /// prepared or dispatched.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_key: Option<String>,
+    /// The attested module id of the runner that minted this imported call's key.
+    /// Only with `call_identity`; absent for the serving runner's own calls (§9.16).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::call_carrier::deserialize"
+    )]
+    pub call_carrier: Option<String>,
     /// The module the call was dispatched to. Absent for a call never
     /// dispatched (denied, say).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -823,10 +861,17 @@ pub struct ToolCallAttribution {
 }
 
 impl ToolCallAttribution {
+    /// Name the other runner that minted the call's key; never set for local calls.
+    pub fn with_call_carrier(mut self, call_carrier: impl Into<String>) -> Self {
+        self.call_carrier = Some(call_carrier.into());
+        self
+    }
+
     pub fn new(tool_call_id: impl Into<String>) -> Self {
         Self {
             tool_call_id: tool_call_id.into(),
             call_key: None,
+            call_carrier: None,
             dispatched_to: None,
             indeterminate: false,
         }

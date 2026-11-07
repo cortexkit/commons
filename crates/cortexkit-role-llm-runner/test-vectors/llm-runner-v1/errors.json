@@ -1,5 +1,13 @@
 {
   "codes": [
+    {"code": "unknown_fork", "retryable": false},
+    {"code": "fork_ended", "retryable": false},
+    {"code": "fork_busy", "retryable": true},
+    {"code": "ask_id_reuse", "retryable": false},
+    {"code": "fork_base_unavailable", "retryable": false},
+    {"code": "fork_unsupported", "retryable": false},
+    {"code": "fork_account_held", "retryable": true, "detail": {"mismatch": "credential"}},
+    {"code": "fork_account_blocked", "retryable": false, "detail": {"routing_code": "account_not_authorized"}},
     {
       "code": "unknown_session",
       "retryable": false

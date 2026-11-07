@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.3
+
+- Pin routing 0.7.3 and add group-gated `select_engine` cases for atomic
+  catalog slots, every requirement, ordered filters, privacy, reachability,
+  answer location/expiry, fixture-driven ranking, reports and explanations.
+- Check media-provider slot authorization, decision/module/pair binding,
+  expiry for new admissions and unchanged replay after expiry.
+- Add default-failing `configure_engine_facts` and `advance_clock` hooks and
+  the non-exhaustive `EngineFacts` fixture with constructors and builders.
+- Ship `rule-map.json` for all pinned `select_engine` ids, with map coverage
+  and named rejection tests for every mapped case and requirement member.
+
 ## 0.10.2
 
 - Pin routing 0.7.2. Check `observe_credential_refused`'s describe prerequisite,

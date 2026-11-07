@@ -323,6 +323,40 @@ keys; otherwise `part_keys` does. Readers match the listed part to those
 keys and never synthesize one. `reasoning_pruned` remains on head/read pages,
 with a durable generation, highest touched ordinal and commit time.
 
+## Fork-answer fixtures
+
+`ForkAnswer` adapters capture each raw model request through
+`raw_model_requests`, attributing it to the head (`None`) or the issued
+`fork_id`. Record unmodified JSON bytes, not a parsed and reserialized value.
+Keep the observations outside the runner's state root across
+restarts; a reconstructed digest is not an independent observation.
+`advance_fork_clock` must complete due idle expiries before returning and
+must not complete held model calls. The default hooks fail with their names.
+The base-removal case uses `revert_session`; an adapter without that fixture
+reports the rule inapplicable by name. Compaction isolation is deliberately
+not observable in this kit. `rule-map.json` records that exception and the
+executable cases for every pinned `fork_answer` rule.
+
+The frozen request's conversation prefix, tools and settings are compared
+lexically, including whitespace and member order. Only explicit Anthropic
+content-block `cache_control` markers may relocate; the fork cannot add more
+breakpoints than its head used or exceed four. A failure names the first
+differing byte offset in the compared prefix or settings with both excerpts.
+
+`configure_fork_head_key` optionally sets a 256-character routing key before
+the first head send. Its default returns false, making only the bounded-key
+case inapplicable with the hook's name. `routing_peer_error_replies` also
+defaults to false: the wrong-account and wrong-tier checks still run, but
+scripted routing-refusal mapping is inapplicable. Adapters opting in must send
+a recording peer's `{"error": ErrorBody}` answer as an ERROR frame, not a
+RESPONSE containing an error-shaped object. `set_account_refusal` scripts
+those errors; `set_account_override` scripts a successful but wrong credential
+or service-tier choice without changing admission-id replays.
+The stepped-down-tier scenario starts the head at `fast` through the existing
+`service_tier` group and `configure_service_tier` fixture. Without that fixture,
+credential and tier mismatch checks still run, while the stepped-down scenario
+is reported as an inapplicable rule rather than a plain pass.
+
 ## Scope and verdicts
 
 The kit tests behavior through public routes and genuinely independent

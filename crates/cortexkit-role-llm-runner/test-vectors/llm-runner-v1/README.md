@@ -11,6 +11,14 @@ release. `src/vectors.rs::FILES` is the exact ordered inventory and
 wire shapes and check the literal expectations. Enable the `test-vectors`
 feature to use the same inventory from another crate.
 
+## Fork answer vectors
+
+`fork-answer.json` pins the fork prepare, ask and end wire shapes, per-ask
+usage, open finishes, ask bounds, and valid and malformed `fork_callers`
+plans. `fork_answer::tests` checks these vectors, including verbatim plan
+preservation without the group. The eight fork codes and their retry bits
+live in `errors.json`.
+
 ## Read and identity vectors
 
 `read-requests.json`, `read-pages.json`, `head.json`, `history.json`, and the

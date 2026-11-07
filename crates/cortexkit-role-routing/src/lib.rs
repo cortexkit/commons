@@ -13,6 +13,8 @@
 //! - [`describe`]: the `role.describe` answer, and [`capabilities`] for the
 //!   optional groups it declares;
 //! - [`select`]: the `route.select` request, its validator, and its answer;
+//! - [`select_engine`]: media selection requests, matching, ranking and answers;
+//! - [`engine_declarations`]: atomic media-provider catalog-slot validation;
 //! - [`report`]: the `route.report` request, its validator, and its answer;
 //! - [`account`]: the `route.account_for` request, validator and answer;
 //! - [`observe`]: the `route.account_observe` request, validator and answer;
@@ -49,6 +51,7 @@ pub mod budget;
 pub mod consumer_models;
 pub mod declarations;
 pub mod describe;
+pub mod engine_declarations;
 pub mod errors;
 pub mod explain;
 pub mod head_choices;
@@ -56,6 +59,7 @@ pub mod observe;
 pub mod panel;
 pub mod report;
 pub mod select;
+pub mod select_engine;
 pub mod service_tier;
 pub mod spellings;
 #[cfg(any(test, feature = "test-vectors"))]
@@ -65,6 +69,9 @@ pub mod wire;
 pub use declarations::{
     parse_consumer_declarations, ConsumerDeclaration, ConsumerDeclarations, DeclarationError,
     DemandDefaults, RunnerDeclaration, RunnerPair, StandingLimits,
+};
+pub use engine_declarations::{
+    parse_engine_declarations, EngineDeclarationError, EngineDeclarations,
 };
 
 /// The role name, as `role.describe` states it.
@@ -90,6 +97,8 @@ pub mod ops {
     pub const ROLE_DESCRIBE: &str = "role.describe";
     /// Choose a model and a runner for one piece of work.
     pub const ROUTE_SELECT: &str = "route.select";
+    /// Choose a media engine for one piece of work.
+    pub const ROUTE_SELECT_ENGINE: &str = "route.select_engine";
     /// Choose a multi-model panel or replace one of its seats.
     pub const ROUTE_SELECT_PANEL: &str = "route.select_panel";
     /// Quote package and output limits from retained decision capacities.
@@ -119,14 +128,16 @@ pub const REQUIRED_OPS: &[&str] = &[
     ops::ROUTE_ACCOUNT_OBSERVE,
 ];
 
-/// The ops only runner modules call. A consumer that only selects never
-/// depends on them.
+/// The account ops used by attested runner and media-provider modules.
+/// A consumer that only selects never depends on them.
 pub const RUNNER_OPS: &[&str] = &[ops::ROUTE_ACCOUNT_FOR, ops::ROUTE_ACCOUNT_OBSERVE];
 
 /// Optional groups a provider declares in `role.describe`'s `capabilities`.
 /// A caller sends a group's members only to a provider that declares the
 /// group; a provider that does not declare it refuses them as unknown.
 pub mod capabilities {
+    /// Media engine selection through `route.select_engine`.
+    pub const SELECT_ENGINE: &str = "select_engine";
     /// Switch a durably paused run to a compatible account via `route.account_for`.
     pub const ACCOUNT_CONTINUE: &str = "account_continue";
     /// Tier-aware selection and tier metadata in report usage. A caller must
@@ -179,6 +190,7 @@ pub mod capabilities {
 
     /// Optional operations and their groups. Each pair must be declared together.
     pub const OP_GROUPS: &[(&str, &str)] = &[
+        (super::ops::ROUTE_SELECT_ENGINE, SELECT_ENGINE),
         (super::ops::ROUTE_SELECT_PANEL, SELECT_PANEL),
         (super::ops::ROUTE_BUDGET_QUOTE, BUDGET_QUOTE),
         (super::ops::ROUTE_EXPLAIN, EXPLAIN),
@@ -189,6 +201,7 @@ pub mod capabilities {
 
     /// Every group this version defines.
     pub const KNOWN: &[&str] = &[
+        SELECT_ENGINE,
         ACCOUNT_CONTINUE,
         SERVICE_TIER,
         SELECT_HOLD_CONTROL,

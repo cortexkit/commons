@@ -19,14 +19,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.7.2"
+cortexkit-role-routing = "0.7.3"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.7.2", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.7.3", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -40,6 +40,12 @@ What the crate holds:
 - `declarations`: non-exhaustive `ConsumerDeclarations`, consumer demand defaults,
   optional `RunnerDeclaration` matching inputs and a typed
   validator for the catalog's `role_declarations[ROLE_DECLARATIONS_KEY]`;
+- `engine_declarations`: atomic `parse_engine_declarations` for the separate
+  `media-provider/v1` slot, using the media crate's `Engine` type;
+- `select_engine`: media request/answer types, strict request parsing,
+  `meets_requirements`, ordered filtering/ranking with `select_engine`, and
+  answer location checks; attestation, consumer admission and retained decision
+  state remain the provider's responsibility;
 - `describe`: the `role.describe` answer, its optional `capabilities`
   groups, and `check_describe`;
 - `capabilities`: the optional groups this version defines
@@ -49,7 +55,7 @@ What the crate holds:
   `account_status`, `head_choices`, `select_pin_slot`, `select_available_routes`,
   `select_prefer_prompt_cache`, `select_settings`, `observe_backoff`,
   `observe_credential_refused`,
-  `report_outcomes`);
+  `report_outcomes`, `select_engine`);
 - `select`: the `route.select` request, `parse_select_request` and
   `parse_select_request_serving` (which reads the members of the groups a
   provider declares), the answer and `check_answer`;
@@ -63,7 +69,7 @@ What the crate holds:
 - `wire`: the `{"result": <answer>}` reply envelope (`reply_body`,
   `read_reply`).
 
-## Optional operations and checks in 0.7.2
+## Optional operations and checks in 0.7.3
 
 Each new operation is listed in `ops` exactly when its same-named group
 (without `route.`) is declared. `check_describe` names a mismatch as
@@ -73,6 +79,7 @@ their group.
 
 | Module / operation | Pure checks and caller helpers |
 |---|---|
+| `select_engine` / `route.select_engine` | `parse_select_engine_request`, `meets_requirements`, `select_engine`, `check_answer`; media facts, filter order and catalog ranking; module-served answers carry `module` without `index`, while in-process caller-local answers carry `index` without `module` |
 | `panel` / `route.select_panel` | `check_panel_answer`, `check_panel_replacement`, `SelectPanelRequest::seat_request`, `PanelState::new` and `apply`; slot policy, temperature, diversity, window/package floors and historical route/decision freshness |
 | `budget` / `route.budget_quote` | `quote`, `check_budget_quote`; retained capacities, saturating ceilings and deterministic limiting ties |
 | `explain` / `route.explain` | `check_explain`; decision, route, runner and serving-provider consistency |

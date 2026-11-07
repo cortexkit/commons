@@ -1,0 +1,128 @@
+[
+  {
+    "id": "select_engine.media_admission",
+    "cases": [
+      "select_engine_media_admission"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.no_engine_code",
+    "cases": [
+      "select_engine_filters"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.opt_in",
+    "cases": [
+      "select_engine_opt_in"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.declarations",
+    "cases": [
+      "select_engine_slot_unverified"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.declarations_atomic",
+    "cases": [
+      "select_engine_slot_malformed",
+      "select_engine_slot_duplicate",
+      "select_engine_slot_empty_formats"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.request",
+    "cases": [
+      "select_engine_request"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.requirements_valid",
+    "cases": [
+      "select_engine_requirements_valid"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.caller_local",
+    "cases": [
+      "select_engine_caller_local"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.answer",
+    "cases": [
+      "select_engine_answer"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.filter_order",
+    "cases": [
+      "select_engine_filters"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.match_requirements",
+    "cases": [
+      "select_engine_match_requirements"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.privacy",
+    "cases": [
+      "select_engine_privacy"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.reachability",
+    "cases": [
+      "select_engine_reachability"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.ranking",
+    "cases": [
+      "select_engine_ranking"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.report",
+    "cases": [
+      "select_engine_report"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.decision_admission",
+    "cases": [
+      "select_engine_admission_before_expiry",
+      "select_engine_admission_expiry",
+      "select_engine_admission_foreign",
+      "select_engine_admission_pair",
+      "select_engine_admission_replay",
+      "select_engine_admission_caller_local"
+    ],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.explain",
+    "cases": [
+      "select_engine_explain"
+    ],
+    "bug_shaped": false
+  }
+]

@@ -10,10 +10,18 @@ pub struct Ride {
     pub send_id: String,
     pub sender: String,
     pub call_key: String,
+    /// The other runner that minted the carrying call's key, only with `call_identity`.
+    pub call_carrier: Option<String>,
     pub text: String,
 }
 
 impl Ride {
+    /// Name the other runner that minted the carrying call's key.
+    pub fn with_call_carrier(mut self, call_carrier: impl Into<String>) -> Self {
+        self.call_carrier = Some(call_carrier.into());
+        self
+    }
+
     pub fn new(
         send_id: impl Into<String>,
         sender: impl Into<String>,
@@ -24,6 +32,7 @@ impl Ride {
             send_id: send_id.into(),
             sender: sender.into(),
             call_key: call_key.into(),
+            call_carrier: None,
             text: text.into(),
         }
     }

@@ -127,6 +127,8 @@ fast() {
         run_step 'No unbound fail-open hazards' bash scripts/checks/no-unbound-fail-open.sh
         run_step 'Unbound fail-open checker self-tests' bash scripts/checks/no-unbound-fail-open.test.sh
     fi
+    run_step 'Vector test command lists' bash scripts/checks/vector-test-lists.sh
+    run_step 'Vector test list checker self-tests' bash scripts/checks/vector-test-lists.test.sh
     run_step 'Repository tooling layout' bash scripts/check-cortexkit-layout.sh
     run_step 'Tracked ignored .cortexkit files' tracked_ignored
 
@@ -159,7 +161,7 @@ lint() {
 test_stage() {
     # Keep these invocations intact: package selection affects feature unification.
     run_step 'Workspace tests (all targets)' cargo test --workspace --all-targets --locked
-    run_step 'Shipped vector feature tests' cargo test --locked -p cortexkit-role-agent-data -p cortexkit-role-compaction-provider -p cortexkit-role-step-transform-provider -p cortexkit-role-llm-runner@0.8 -p cortexkit-role-tool-provider -p cortexkit-anthropic-policy -p cortexkit-chatgpt-policy -p cortexkit-role-agent-inbox -p cortexkit-role-classifier -p cortexkit-role-routing -p cortexkit-model-batch -p cortexkit-role-extractor -p cortexkit-rich-ui-syntax -p cortexkit-llm-tools --features test-vectors
+    run_step 'Shipped vector feature tests' cargo test --locked -p cortexkit-role-agent-data -p cortexkit-role-compaction-provider -p cortexkit-role-step-transform-provider -p cortexkit-role-llm-runner@0.8 -p cortexkit-role-tool-provider -p cortexkit-anthropic-policy -p cortexkit-chatgpt-policy -p cortexkit-role-agent-inbox -p cortexkit-role-classifier -p cortexkit-role-routing -p cortexkit-model-batch -p cortexkit-role-extractor -p cortexkit-rich-ui-syntax -p cortexkit-llm-tools -p cortexkit-role-media --features test-vectors
     run_step 'Mutation runner positive controls (nextest required)' env CK_MUTATE_REQUIRE_NEXTEST=1 cargo test -p cortexkit-mutate --locked
 }
 

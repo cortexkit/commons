@@ -1,0 +1,14 @@
+{
+  "entries":[
+    {"valid":true,"entry":{"seq":1,"record":{"record_id":"r-1","principal":"person-a","job_id":"job-1","provider":"example","model":"speech","charge_basis":"vendor","started_at_ms":1,"finished_at_ms":2,"status":"done","selectors":{},"measurements":[]}}},
+    {"valid":true,"entry":{"seq":2,"raw":{"bytes_b64":"/w==","reason":"undecodable"}}},
+    {"valid":true,"entry":{"seq":3,"raw":{"bytes_b64":"","reason":"oversize","bytes":262145,"sha256":"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"}}},
+    {"valid":false,"entry":{"seq":4,"record":{"record_id":"r-1","principal":"person-a","job_id":"job-1","provider":"example","model":"speech","charge_basis":"vendor","started_at_ms":1,"finished_at_ms":2,"status":"done","selectors":{},"measurements":[]},"raw":{"bytes_b64":"/w==","reason":"undecodable"}}},
+    {"valid":false,"entry":{"seq":5}}
+  ],
+  "acks":[
+    {"name":"advancing","watermark":1,"highest_written":3,"request":{"through_seq":2},"answer":{"acked_through_seq":2}},
+    {"name":"no_op","watermark":2,"highest_written":3,"request":{"through_seq":1},"answer":{"acked_through_seq":2}},
+    {"name":"empty_feed_zero","watermark":0,"highest_written":0,"request":{"through_seq":0},"answer":{"acked_through_seq":0}}
+  ]
+}

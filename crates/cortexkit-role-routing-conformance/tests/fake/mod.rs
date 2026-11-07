@@ -17,6 +17,7 @@
 
 mod continuation;
 mod extensions;
+mod select_engine;
 
 use std::{
     collections::{BTreeMap, HashMap},
@@ -61,6 +62,7 @@ const DECISION_TTL_MS: u64 = 600_000;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub engine_fault: &'static str,
     /// The new check whose contract rule this fake deliberately violates.
     pub extension: Option<&'static str>,
     pub decision_tier_chosen_missing: bool,
@@ -258,6 +260,7 @@ struct ConversationPin {
 
 #[derive(Default)]
 struct State {
+    engine: select_engine::EngineState,
     extension_answers: HashMap<String, Value>,
     panels: HashMap<
         String,
@@ -525,6 +528,7 @@ impl RoutingSubject for FakeSubject {
     ) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
         state.declarations.clear();
+        state.engine.configure(modules, self.defects.engine_fault);
         for module in modules
             .iter()
             .filter(|module| module.nonce_verified || self.defects.trusts_unverified_declarations)
@@ -547,6 +551,19 @@ impl RoutingSubject for FakeSubject {
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn configure_engine_facts(
+        &self,
+        facts: &[cortexkit_role_routing_conformance::EngineFacts],
+    ) -> Result<(), String> {
+        self.state.lock().unwrap().engine.facts = facts.to_vec();
+        Ok(())
+    }
+
+    async fn advance_clock(&self, ms: u64) -> Result<(), String> {
+        self.state.lock().unwrap().engine.elapsed += ms;
         Ok(())
     }
 
@@ -655,22 +672,26 @@ pub struct FakeRoute {
 impl RoutingRoute for FakeRoute {
     async fn request(&self, method: &str, params: &Value) -> Result<Reply, RouteFailure> {
         let mut state = self.state.lock().unwrap();
-        let answered = match method {
-            ops::ROLE_DESCRIBE => self.describe(&state),
-            ops::ROUTE_SELECT => self.select_extensions(&mut state, params),
-            ops::ROUTE_SELECT_PANEL => self.panel(&mut state, params),
-            ops::ROUTE_BUDGET_QUOTE
-            | ops::ROUTE_EXPLAIN
-            | ops::ROUTE_ACCOUNT_STATUS
-            | ops::ROUTE_HEAD_CHOICES
-            | ops::ROUTE_CONSUMER_MODELS => self.extension_op(&mut state, method, params),
-            ops::ROUTE_REPORT => self.report(&mut state, params),
-            ops::ROUTE_ACCOUNT_FOR if params.get("mode") == Some(&json!("continue")) => {
-                self.account_continue(&mut state, params)
+        let answered = if let Some(result) = self.engine_op(&mut state, method, params) {
+            result
+        } else {
+            match method {
+                ops::ROLE_DESCRIBE => self.describe(&state),
+                ops::ROUTE_SELECT => self.select_extensions(&mut state, params),
+                ops::ROUTE_SELECT_PANEL => self.panel(&mut state, params),
+                ops::ROUTE_BUDGET_QUOTE
+                | ops::ROUTE_EXPLAIN
+                | ops::ROUTE_ACCOUNT_STATUS
+                | ops::ROUTE_HEAD_CHOICES
+                | ops::ROUTE_CONSUMER_MODELS => self.extension_op(&mut state, method, params),
+                ops::ROUTE_REPORT => self.report(&mut state, params),
+                ops::ROUTE_ACCOUNT_FOR if params.get("mode") == Some(&json!("continue")) => {
+                    self.account_continue(&mut state, params)
+                }
+                ops::ROUTE_ACCOUNT_FOR => self.account_for(&mut state, params),
+                ops::ROUTE_ACCOUNT_OBSERVE => self.observe_extensions(&mut state, params),
+                other => Err(Refusal::invalid_request("method", format!("no op {other}"))),
             }
-            ops::ROUTE_ACCOUNT_FOR => self.account_for(&mut state, params),
-            ops::ROUTE_ACCOUNT_OBSERVE => self.observe_extensions(&mut state, params),
-            other => Err(Refusal::invalid_request("method", format!("no op {other}"))),
         };
         Ok(match answered {
             Ok(answer) => {
@@ -747,6 +768,10 @@ impl FakeRoute {
         }
         let mut describe = RoleDescribe::new(consumers, true);
         if self.extensions {
+            describe = describe.with_capability("select_engine");
+            if self.defects.engine_fault != "select_engine_opt_in" {
+                describe.ops.push(ops::ROUTE_SELECT_ENGINE.into());
+            }
             for group in extensions::GROUPS {
                 describe = describe.with_capability(*group);
             }

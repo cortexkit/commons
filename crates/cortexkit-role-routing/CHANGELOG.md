@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.7.3
+
+- Add the opt-in `select_engine` group, media engine declarations, strict
+  selection requests and answers, and media matching helpers. Pin selection's
+  filters, ranking, decision ownership and attested media-provider admissions.
+- Add `no_engine` and its failed-filter detail and refusal vector.
 
 - Contract text: §3 says which scope a module selects under when it selects
   for someone else's work. It's the scope of the session or run that will

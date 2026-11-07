@@ -137,6 +137,19 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("fork_answer_base_matches_digest", &[Capability::ForkAnswer, Queue, RunOps], "raw fork request extends the frozen head body with identical tools and settings"),
+    case("fork_answer_refuses_mismatched_base", &[Capability::ForkAnswer, TranscriptReads, Queue, RunOps], "head advancement preserves the base; revert makes it unavailable"),
+    case("fork_answer_refuses_tool_call", &[Capability::ForkAnswer, Queue, RunOps], "a tool call ends the fork without dispatch and stores only preceding text"),
+    case("fork_answer_model_failure_finishes", &[Capability::ForkAnswer, Queue, RunOps], "model_error replays unchanged and failed question never joins the branch"),
+    case("fork_answer_ask_id_replays", &[Capability::ForkAnswer, TranscriptReads, Queue, RunOps], "lost replies replay after end, restart and base loss with unchanged usage"),
+    case("fork_answer_idle_expiry", &[Capability::ForkAnswer, Queue, RunOps], "expiry follows prepare and completion, never replay, and holds off during an ask"),
+    case("fork_answer_never_writes_head", &[Capability::ForkAnswer, TranscriptReads, Streaming, Queue, RunOps], "fork runs beside a held head without changing its transcript, usage or subscription"),
+    case("fork_answer_admits_only_fork_callers", &[Capability::ForkAnswer, Capability::SessionChange, TranscriptReads, Queue, RunOps], "only listed principals prepare; refresh revokes even replays and held replies permanently"),
+    case("fork_answer_account_for_pins_head_credential", &[Capability::ForkAnswer, Capability::RoutedAccounts, TranscriptReads, Queue, RunOps], "wrong credential or tier is released without spend; a fresh admission retries the same ask id"),
+    case("fork_answer_account_held_refusal", &[Capability::ForkAnswer, Capability::RoutedAccounts, TranscriptReads, Queue, RunOps], "held routing ERRORs become retryable fork_account_held without spend"),
+    case("fork_answer_account_blocked_refusal", &[Capability::ForkAnswer, Capability::RoutedAccounts, TranscriptReads, Queue, RunOps], "other routing ERRORs become fork_account_blocked without ending or reserving the ask"),
+    case("fork_answer_conversation_key_bounded", &[Capability::ForkAnswer, Capability::RoutedAccounts, TranscriptReads, Queue, RunOps], "a 256-character head key produces the exact bounded hashed fork routing keys"),
+    case("fork_answer_survives_restart", &[Capability::ForkAnswer, TranscriptReads, Queue, RunOps], "restart preserves branch and stores model_error for an in-flight ask, clearing busy"),
     case("history_intake_growing_prefix", &[], "a running intake marker lasts through append-only prefix growth with a steady history_version"),
     case("history_intake_send_waits_for_history", &[], "a send is accepted during intake but its run starts only after the complete imported history is stored"),
     case("plan_notes_requires_session_change", &[], "a plan_notes declaration without session_change is refused by name"),
@@ -261,6 +274,8 @@ pub const CASES: &[CaseSpec] = &[
         "the adapter observes each actual publication after its record's durability point"),
     case("call_identity_key_matches_attribution", &[],
         "when role.describe declares call_identity, every display tool-call entry and live tool event of two dispatched sibling calls carries the call_key session.read attributes to that call, or run.tool_calls exposes without dispatch_attribution"),
+    case("call_identity_imported_call_carrier", &[],
+        "with seed_imported_tool_call, imported reads retain the original call_key and the minting runner's call_carrier, while the serving runner's own calls omit call_carrier"),
     case("call_identity_pin_frozen_at_dispatch", &[],
         "when role.describe declares call_identity, a dispatched call's display entries carry the schema_pin the tool provider received with it, unchanged after the catalog changes the tool's definition"),
     case("call_identity_denied_call_has_no_pin", &[],

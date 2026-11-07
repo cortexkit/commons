@@ -165,6 +165,8 @@ pub enum Capability {
     RoutedAccounts,
     /// Routing's provider and model names for runner-owned account admission.
     AccountRoute,
+    /// Private read-only model conversations rooted in a head snapshot.
+    ForkAnswer,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -253,6 +255,7 @@ impl Capability {
         Self::StepEvents,
         Self::RoutedAccounts,
         Self::AccountRoute,
+        Self::ForkAnswer,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -328,6 +331,7 @@ impl Capability {
             Self::StepEvents => groups::STEP_EVENTS,
             Self::RoutedAccounts => groups::ROUTED_ACCOUNTS,
             Self::AccountRoute => groups::ACCOUNT_ROUTE,
+            Self::ForkAnswer => groups::FORK_ANSWER,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
             | Self::HostMetadataChange
@@ -466,6 +470,23 @@ pub struct ModelRequestObservation {
     /// provider. Required for `Notices`, not inferred from delivery modes.
     /// `None` means not observed, distinct from an observed empty list.
     pub system_text: Option<Vec<String>>,
+}
+
+/// A raw request captured by the scripted model, outside the runner's state.
+/// `fork_id: None` identifies the head; a fork request names its issued id.
+/// Preserve the JSON bytes as received, including member order and whitespace;
+/// parsing and reserializing would hide frozen-prefix changes.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct RawModelRequestObservation {
+    pub fork_id: Option<String>,
+    pub body: Vec<u8>,
+}
+
+impl RawModelRequestObservation {
+    pub fn new(fork_id: Option<String>, body: Vec<u8>) -> Self {
+        Self { fork_id, body }
+    }
 }
 
 impl ModelRequestObservation {
@@ -842,12 +863,32 @@ pub trait LlmRunnerSubject: Harness {
     /// `peer.method()` and `peer.fixture()` before the first send. Forward the
     /// actual request bodies, not reconstructions. Required with
     /// `routed_accounts`; clones of the peer share the recorded calls.
+    /// If [`Self::routing_peer_error_replies`] is true, a peer answer shaped as
+    /// `{"error": ErrorBody}` must be emitted as an ERROR frame. All other
+    /// answers remain RESPONSE bodies; do not wrap an error in a RESPONSE.
     async fn install_routing_peer(
         &self,
         _session: &str,
         _peer: crate::RecordingRoutingPeer,
     ) -> Result<(), HarnessError> {
         Err(HarnessError::new("install_routing_peer is not implemented"))
+    }
+
+    /// Opt into scripted routing ERROR replies. Older adapters keep the
+    /// refusal-mapping cases inapplicable while still running account pinning.
+    fn routing_peer_error_replies(&self) -> bool {
+        false
+    }
+
+    /// Set the next head's routing conversation key before its first send.
+    /// Return false when the adapter cannot configure this fixture; the bounded
+    /// fork-key case then reports the hook inapplicable, never passed.
+    async fn configure_fork_head_key(
+        &self,
+        _session: &str,
+        _key: &str,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
     }
 
     /// Two model choices for head-selection cases: first selectable and served,
@@ -951,6 +992,22 @@ pub trait LlmRunnerSubject: Harness {
     /// reports that rule as not checked.
     async fn change_tool_definition(&self, _session: &str) -> Result<Option<String>, HarnessError> {
         Ok(None)
+    }
+
+    /// Seed a finished historical call whose key was minted by `call_carrier`,
+    /// another runner's attested module id. Preserve `call_key` verbatim and
+    /// record its carrier beside the call, without dispatching it. The session
+    /// has a finished run and no active run. Serve the call on every declared
+    /// read surface, including live replay. Return false when unsupported.
+    async fn seed_imported_tool_call(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _call: &ScriptedToolCall,
+        _call_carrier: &str,
+        _call_key: &str,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
     }
 
     /// Make the runner refuse the scripted call whose arguments are
@@ -1382,6 +1439,16 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new(
             "model request observation is not implemented",
         ))
+    }
+
+    /// Every raw model-request body for a session, including its forks, in
+    /// receipt order across restarts. Capture at the model boundary, never
+    /// reconstruct from a plan, digest or runner reply. Required by `ForkAnswer`.
+    async fn raw_model_requests(
+        &self,
+        _session: &str,
+    ) -> Result<Vec<RawModelRequestObservation>, HarnessError> {
+        Err(HarnessError::new("raw_model_requests is not implemented"))
     }
 
     /// The part's actual model-visible number. The "Tag numbers" chapter (A3)
@@ -1925,6 +1992,16 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new(
             "controlled retention clock is not implemented",
         ))
+    }
+
+    /// Advance the fork idle clock and finish every expiry due in the span
+    /// before returning. Held model calls remain in flight during the advance.
+    async fn advance_fork_clock(
+        &self,
+        _session: &str,
+        _milliseconds: u64,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new("advance_fork_clock is not implemented"))
     }
 
     /// How many times the scripted tool provider was called with

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.20
+
+- Add `call_identity_imported_call_carrier` through the optional defaulted
+  `seed_imported_tool_call` hook, with named inapplicability when unavailable
+  and faulty fakes for re-minted keys, local carriers and dropped carriers.
+- Add opt-in fork-answer
+  conformance cases for base snapshots, tool refusal, replay, expiry, caller
+  admission, head isolation, routing credential pins and restart recovery.
+- Add raw model-request observations attributed to a head or fork and a named
+  fork-clock hook. Map every pinned fork-answer rule to executable coverage or
+  the contract's explicit not-observable exception.
+- Keep the bounded-key fixture and scripted routing ERROR replies opt-in for
+  existing adapters, reporting their unsupported cases as inapplicable.
+
 ## 0.17.19
 
 - Add defaulted history-intake control hooks and cases for the running head

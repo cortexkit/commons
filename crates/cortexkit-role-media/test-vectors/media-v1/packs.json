@@ -1,0 +1,5 @@
+[
+  {"purpose":"bias","request":{"agent_id":"agent-1","purpose":"bias"},"answer":{"version":"bias-v1","terms":[{"text":"Ada","weight":0.8}],"prompt":"Proper names","built_at_ms":1,"privacy":{"transcribe":{"media":"local_only","bias_remote":false},"synthesize":{"media":"remote_allowed","bias_remote":false},"image":{"media":"local_only","bias_remote":false},"video":{"media":"local_only","bias_remote":false},"stream_transcribe":{"media":"remote_allowed","bias_remote":true},"realtime":{"media":"remote_allowed","bias_remote":true}}}},
+  {"purpose":"front","request":{"agent_id":"agent-1","purpose":"front"},"answer":{"version":"front-v1","persona":"Be helpful","memories":[],"board":{"cards":[{"text":"An opaque card"}]},"recent":["opaque"],"built_at_ms":1,"privacy":{}}},
+  {"purpose":"bias","request":{"agent_id":"agent-1","purpose":"bias","if_version":"bias-v1"},"answer":{"unchanged":true,"version":"bias-v1"}}
+]

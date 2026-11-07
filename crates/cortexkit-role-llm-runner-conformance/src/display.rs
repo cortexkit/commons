@@ -226,6 +226,7 @@ where
                 }))
             {
                 call.call_key = served.call_key.clone();
+                call.call_carrier = served.call_carrier.clone();
                 call.schema_pin = served.schema_pin.clone();
                 call.started_at = served.started_at;
                 call.finished_at = served.finished_at;

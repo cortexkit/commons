@@ -1371,6 +1371,7 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::ForkAnswer,
     Capability::HistoryIntake,
     Capability::PlanNotes,
     Capability::MediaRefs,
@@ -1415,9 +1416,9 @@ fn assert_only_session_retention_skipped(report: &SuiteReport) {
         matches!(&report.verdict,
             SuiteVerdict::ConformingForDeclaredCapabilities { declared, skipped }
             if skipped == &if declared.contains(&Capability::RunStatus) {
-                vec![Capability::SessionRetention, Capability::RoutedAccounts, Capability::KillAt(points::RELEASE_PENDING)]
+                vec![Capability::SessionRetention, Capability::RoutedAccounts, Capability::ForkAnswer, Capability::KillAt(points::RELEASE_PENDING)]
             } else {
-                vec![Capability::RunStatus, Capability::SessionRetention, Capability::RoutedAccounts, Capability::KillAt(points::RELEASE_PENDING)]
+                vec![Capability::RunStatus, Capability::SessionRetention, Capability::RoutedAccounts, Capability::ForkAnswer, Capability::KillAt(points::RELEASE_PENDING)]
             }
         ),
         "{}",
@@ -1990,6 +1991,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::RunCause,
                     Capability::StepEvents,
                     Capability::RoutedAccounts,
+                    Capability::ForkAnswer,
                     Capability::RetentionClock,
                     Capability::HoldToolCalls,
                     Capability::KillAt(points::RELEASE_PENDING)
@@ -2364,6 +2366,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::RunCause,
                     Capability::StepEvents,
                     Capability::RoutedAccounts,
+                    Capability::ForkAnswer,
                     Capability::RetentionClock,
                     Capability::KillAt(points::RELEASE_PENDING)
                 ],
@@ -7604,6 +7607,86 @@ fn call_identity_run_tool_calls_subject(defects: Defects) -> FakeSubject {
 const CALL_KEY_CASE: &str = "call_identity_key_matches_attribution";
 const PIN_CASE: &str = "call_identity_pin_frozen_at_dispatch";
 const DENIED_CASE: &str = "call_identity_denied_call_has_no_pin";
+const IMPORTED_CASE: &str = "call_identity_imported_call_carrier";
+
+#[tokio::test]
+async fn call_identity_imported_carrier_faithful_read_surfaces_pass() {
+    for omitted in [
+        None,
+        Some(Capability::LiveEvents),
+        Some(Capability::HistoryDisplay),
+    ] {
+        let mut subject = call_identity_subject(Defects::default());
+        subject.capabilities.insert(Capability::ReadDisplayFacts);
+        if let Some(capability) = omitted {
+            subject.capabilities.remove(&capability);
+        }
+        let report = run(&subject).await;
+        assert_eq!(
+            report.outcome(IMPORTED_CASE),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+        assert_none_failed_but(&report, &[]);
+    }
+    let map: serde_json::Value = serde_json::from_str(include_str!("../rule-map.json")).unwrap();
+    assert_eq!(
+        map["call_identity.imported_call_carrier"]["case"],
+        IMPORTED_CASE
+    );
+    assert!(include_str!("../../cortexkit-role-llm-runner/CONTRACT.md")
+        .contains("- [pinned] `call_identity.imported_call_carrier`:"));
+}
+
+#[tokio::test]
+async fn call_identity_imported_carrier_without_seed_hook_is_inapplicable() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_no_import_hook: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(
+        matches!(report.outcome(IMPORTED_CASE), Some(CaseOutcome::Inapplicable { reason })
+        if reason.contains("seed_imported_tool_call")),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn call_identity_imported_carrier_reminted_key_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_import_remints_key: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, IMPORTED_CASE).contains("changed original call_key"));
+    assert_none_failed_but(&report, &[IMPORTED_CASE]);
+}
+
+#[tokio::test]
+async fn call_identity_imported_carrier_on_own_calls_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_own_carrier: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, IMPORTED_CASE).contains("expected None"));
+    assert_none_failed_but(&report, &[IMPORTED_CASE]);
+}
+
+#[tokio::test]
+async fn call_identity_imported_carrier_dropped_carrier_fails_by_name() {
+    let report = run(&call_identity_subject(Defects {
+        call_identity_drops_carrier: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, IMPORTED_CASE).contains("conformance-source-runner"));
+    assert_none_failed_but(&report, &[IMPORTED_CASE]);
+}
 
 #[tokio::test]
 async fn call_identity_faithful_runner_passes_every_case() {
@@ -7673,7 +7756,8 @@ async fn call_identity_run_tool_calls_denied_key_omitted_fails_by_name() {
     let reason = failed(&report, DENIED_CASE);
     assert!(reason.contains("run.tool_calls exposes"), "{reason}");
     assert!(failed(&report, CALL_KEY_CASE).contains("carries no call_key"));
-    assert_none_failed_but(&report, &[CALL_KEY_CASE, DENIED_CASE]);
+    assert!(failed(&report, IMPORTED_CASE).contains("changed original call_key"));
+    assert_none_failed_but(&report, &[CALL_KEY_CASE, DENIED_CASE, IMPORTED_CASE]);
 }
 
 #[tokio::test]
@@ -7726,7 +7810,8 @@ async fn call_identity_omitted_key_fails_by_name() {
     // fails there too.
     let reason = failed(&report, DENIED_CASE);
     assert!(reason.contains("session.read attributes"), "{reason}");
-    assert_none_failed_but(&report, &[CALL_KEY_CASE, DENIED_CASE]);
+    assert!(failed(&report, IMPORTED_CASE).contains("changed original call_key"));
+    assert_none_failed_but(&report, &[CALL_KEY_CASE, DENIED_CASE, IMPORTED_CASE]);
 }
 
 #[tokio::test]
@@ -7808,7 +7893,8 @@ async fn call_identity_key_omitted_on_live_events_alone_fails_by_name() {
         reason.contains("the live tool_finished") && reason.contains("session.read attributes"),
         "{reason}"
     );
-    assert_none_failed_but(&report, &[CALL_KEY_CASE, DENIED_CASE]);
+    assert!(failed(&report, IMPORTED_CASE).contains("changed original call_key"));
+    assert_none_failed_but(&report, &[CALL_KEY_CASE, DENIED_CASE, IMPORTED_CASE]);
 }
 
 /// A sibling's key on live events alone, history rows right: the key case

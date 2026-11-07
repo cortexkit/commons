@@ -12,15 +12,7 @@ pub async fn run_suite<S: RoutingSubject>(subject: &S) -> SuiteReport {
     let suite = Suite::new(subject);
     let mut checks = Vec::with_capacity(CHECKS.len());
     for spec in CHECKS {
-        let outcome = match suite.run(spec.name).await {
-            Ok(Ending::Passed) => CheckOutcome::Passed,
-            Ok(Ending::NotApplicable(reason)) => CheckOutcome::NotApplicable { reason },
-            Err(reason) => CheckOutcome::Failed { reason },
-        };
-        checks.push(CheckReport {
-            check: spec.name,
-            outcome,
-        });
+        checks.push(run_check(&suite, spec).await);
     }
     let reasons: Vec<String> = checks
         .iter()
@@ -35,4 +27,19 @@ pub async fn run_suite<S: RoutingSubject>(subject: &S) -> SuiteReport {
         SuiteVerdict::Failed { reasons }
     };
     SuiteReport { checks, verdict }
+}
+
+pub(crate) async fn run_check<S: RoutingSubject>(
+    suite: &Suite<'_, S>,
+    spec: &crate::CheckSpec,
+) -> CheckReport {
+    let outcome = match suite.run(spec.name).await {
+        Ok(Ending::Passed) => CheckOutcome::Passed,
+        Ok(Ending::NotApplicable(reason)) => CheckOutcome::NotApplicable { reason },
+        Err(reason) => CheckOutcome::Failed { reason },
+    };
+    CheckReport {
+        check: spec.name,
+        outcome,
+    }
 }

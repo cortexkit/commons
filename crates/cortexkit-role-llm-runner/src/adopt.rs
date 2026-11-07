@@ -84,6 +84,12 @@ where
 }
 
 impl AdoptRequest {
+    /// Validate `plan.fork_callers`, the principals allowed to prepare forks,
+    /// before adopting the plan. Without `fork_answer`, keep it uninterpreted.
+    pub fn check_fork_callers<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        crate::fork_answer::check_plan(&self.plan, declared)
+    }
+
     /// Check output-reference plan members before any adoption write.
     pub fn check_output_refs(&self, advertised: bool) -> Result<(), &'static str> {
         crate::output_refs::check_plan(&Value::Object(self.plan.clone()), advertised)

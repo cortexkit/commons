@@ -38,6 +38,9 @@ open_set! {
         /// `route.select`: nothing meets the request;
         /// `detail {reason, reset_at_ms?}`.
         NoRoute => "no_route",
+        /// `route.select_engine`: no engine remains after `detail.filter`.
+        /// Never timed.
+        NoEngine => "no_engine",
         /// `route.report` or `route.account_for`: no decision with that id is
         /// visible to this caller. Answered the same way whether or not the
         /// decision exists.
@@ -45,8 +48,8 @@ open_set! {
         /// `route.report`: a report with a different body was already
         /// recorded for the decision.
         ReportConflict => "report_conflict",
-        /// The runner ops: the caller is not a runner module, or may not use
-        /// the account it named.
+        /// The account ops: the caller is not an attested runner or media
+        /// provider, or may not use the account or engine pair it named.
         AccountNotAuthorized => "account_not_authorized",
         /// `route.account_for`: the provider needs a login or credential the
         /// runner does not have.
@@ -255,6 +258,15 @@ impl Refusal {
         )
     }
 
+    /// `no_engine {filter}`, never timed.
+    pub fn no_engine(filter: crate::select_engine::EngineFilter) -> Self {
+        Self::with(
+            RefusalCode::NoEngine,
+            format!("no engine remains after {filter}"),
+            &NoEngineDetail::new(filter),
+        )
+    }
+
     /// `account_hold {until_ms}`.
     pub fn account_hold(until_ms: u64) -> Self {
         Self::with(
@@ -347,6 +359,19 @@ pub struct NoRouteDetail {
     pub reason: NoRouteReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_at_ms: Option<u64>,
+}
+
+/// The filter that emptied a media selection's remaining candidates.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct NoEngineDetail {
+    pub filter: crate::select_engine::EngineFilter,
+}
+
+impl NoEngineDetail {
+    pub fn new(filter: crate::select_engine::EngineFilter) -> Self {
+        Self { filter }
+    }
 }
 
 /// The detail of `account_hold`.

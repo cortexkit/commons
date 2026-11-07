@@ -596,7 +596,13 @@ fn every_refusal_code_has_a_vector() {
             .map(|op| op.as_str().unwrap())
             .collect();
         for op in &ops {
-            assert!(REQUIRED_OPS.contains(op), "{name}: {op}");
+            assert!(
+                REQUIRED_OPS.contains(op)
+                    || cortexkit_role_routing::capabilities::OP_GROUPS
+                        .iter()
+                        .any(|(defined, _)| defined == op),
+                "{name}: {op}"
+            );
         }
         let consumer_side = CONSUMER_CODES.contains(&refusal.code.as_str());
         assert_eq!(
@@ -614,6 +620,9 @@ fn every_refusal_code_has_a_vector() {
             }
             RefusalCode::PinUnavailable => refusal.detail_as::<PinUnavailableDetail>().is_some(),
             RefusalCode::NoRoute => refusal.detail_as::<NoRouteDetail>().is_some(),
+            RefusalCode::NoEngine => refusal
+                .detail_as::<cortexkit_role_routing::errors::NoEngineDetail>()
+                .is_some(),
             RefusalCode::AccountHold => refusal.detail_as::<AccountHoldDetail>().is_some(),
             RefusalCode::RoutingAmbiguous => {
                 refusal.detail_as::<RoutingAmbiguousDetail>().is_some()

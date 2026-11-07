@@ -1,0 +1,26 @@
+{
+  "prepare": {"request": {}, "reply": {"fork_id": "fork-1"}},
+  "ask": {
+    "request": {"fork_id": "fork-1", "ask_id": "ask-1", "question": "What changed?"},
+    "reply": {"answer": "The title changed.", "finish": "end_turn", "usage": {"steps": 1, "unreported_steps": 0, "input_tokens": 120, "cached_input_tokens": 110, "output_tokens": 5, "by_model": [{"provider": "fixture-provider", "model": "fixture-model", "steps": 1, "unreported_steps": 0, "input_tokens": 120, "cached_input_tokens": 110, "output_tokens": 5}]}}
+  },
+  "end": {"request": {"fork_id": "fork-1"}, "reply": {"fork_id": "fork-1", "ended": true}},
+  "finishes": ["end_turn", "max_tokens", "tool_call_refused", "model_error", "future-finish"],
+  "refused_asks": [
+    {"request": {"fork_id": "fork-1", "ask_id": "", "question": "Why?"}, "field": "ask_id"},
+    {"request": {"fork_id": "fork-1", "ask_id": "ask-2", "question": ""}, "field": "question"}
+  ],
+  "plans": [
+    {"plan": {}, "callers": []},
+    {"plan": {"fork_callers": []}, "callers": []},
+    {"plan": {"fork_callers": ["caller-a", "caller-b"]}, "callers": ["caller-a", "caller-b"]}
+  ],
+  "invalid_plans": [
+    {"fork_callers": null},
+    {"fork_callers": "caller-a"},
+    {"fork_callers": {}},
+    {"fork_callers": ["caller-a", 1]},
+    {"fork_callers": [""]},
+    {"fork_callers": ["caller-a", "caller-a"]}
+  ]
+}

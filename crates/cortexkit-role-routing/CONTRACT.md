@@ -302,7 +302,7 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines twenty-one
+  does not know is kept and means nothing to it. This version defines twenty-two
   groups:
   - `service_tier`: tier-aware selection and tier metadata in report usage
     (§5.5). A caller sends these members only to a declaring provider.
@@ -337,6 +337,7 @@ a module plays.
   - `account_status`: `route.account_status` (§11.4).
   - `head_choices`: `route.head_choices` (§11.5).
   - `consumer_models`: `route.consumer_models` (§11.6).
+  - `select_engine`: `route.select_engine` (§13).
   - `select_pin_slot`: operator-policy slot pins (§5.6).
   - `select_available_routes`: caller-reachable route restriction (§5.6).
   - `select_prefer_prompt_cache`: prompt-cache tie-breaking (§5.6).
@@ -347,7 +348,7 @@ a module plays.
     requires `observe_backoff`.
   - `report_outcomes`: additional report outcomes and their effects (§8).
   - `report_usage_run_id`: run-attributed report usage (§8).
-- [pinned] Each of the six optional op groups is declared exactly when its op is
+- [pinned] Each of the seven optional op groups is declared exactly when its op is
   in `ops` (`capabilities::OP_GROUPS`). `describe::check_describe` refuses
   either mismatch as `DescribeProblem::OpGroupMismatch {group}`. The five
   `REQUIRED_OPS` are unchanged; a 0.6.0 describe answer still passes. A caller
@@ -901,7 +902,7 @@ pool?, eligibility?, request_input_tokens?, refusal_class?}`.
 ## 9. Runner ops
 
 - [pinned] `route.account_for` and `route.account_observe` are called only
-  by attested runner modules, except the decision-owner arm of §9.2's
+  by attested runner modules or §13's attested media providers, except the decision-owner arm of §9.2's
   observation authorization. A caller is an attested runner module when its
   route carries a principal the daemon verified itself (`reserved:<module>`,
   proven by the launch secret the daemon handed that module), and the
@@ -912,6 +913,13 @@ pool?, eligibility?, request_input_tokens?, refusal_class?}`.
   them.
 - [pinned] The calling runner comes from the route; neither op carries a
   `caller` member.
+- [pinned] `select_engine.media_admission`: An attested media provider has a
+  daemon-verified route principal and a valid, nonce-verified
+  `media-provider/v1` catalog slot. It may call `route.account_for` and
+  `route.account_observe`. Its `account_for` is limited to the `(provider, model)`
+  of a remote engine in that slot; any other pair is `account_not_authorized`,
+  checked before decision lookup. Within the slot, an admission without
+  `decision_id` is allocated by the router itself, as for a runner.
 - [pinned] Accounts and credentials are named by public id only, never
   secret material.
 
@@ -1292,11 +1300,12 @@ What a runner saw on an account, so the provider's headroom stays current.
 | Code | Answered by | Detail | Timed |
 |---|---|---|---|
 | `invalid_request` | every op except `role.describe` | `{field}` | no |
-| `invalid_requirements` | `route.select` (§5.1), `route.select_panel` (§11.1) | `{field}` | no |
-| `unknown_consumer` | `route.select`, `route.select_panel` | `{consumer}` | no |
-| `consumer_not_owned` | `route.select`, `route.select_panel` (§1.1) | `{consumer}` | no (terminal) |
+| `invalid_requirements` | `route.select` (§5.1), `route.select_panel` (§11.1), `route.select_engine` (§13) | `{field}` | no |
+| `unknown_consumer` | `route.select`, `route.select_panel`, `route.select_engine` | `{consumer}` | no |
+| `consumer_not_owned` | `route.select`, `route.select_panel` (§1.1), `route.select_engine` | `{consumer}` | no (terminal) |
 | `pin_unavailable` | `route.select` (§5.3) | `{pin, reason, reset_at_ms?}` | when `reset_at_ms` is present |
 | `no_route` | `route.select` (§5.3) | `{reason, reset_at_ms?}` | when `reset_at_ms` is present |
+| `no_engine` | `route.select_engine` (§13) | `{filter}` | no |
 | `unknown_decision` | `route.report` (§6), `route.account_for` (§9.1), panel replacement (§11.1), `route.budget_quote`, `route.explain` (§11) | `{}` | no |
 | `report_conflict` | `route.report` (§8) | `{}` | no |
 | `account_not_authorized` | `route.account_for`, `route.account_observe` (§9) | `{}` | no |
@@ -1316,6 +1325,8 @@ What a runner saw on an account, so the provider's headroom stays current.
   and `None` for every other refusal, an unknown code included.
 - [pinned] `test-vectors/routing-v1/refusals.json` holds one body for every
   code in this table.
+- [pinned] `select_engine.no_engine_code`: `no_engine` has the §10 row above
+  and a body in `test-vectors/routing-v1/refusals.json`; it is never timed.
 
 ## 11. Optional selection and inspection operations
 
@@ -1556,3 +1567,93 @@ Replacement params and answer:
   applicable when the provider does declare it. Either leaves its verdict a
   pass. Its README lists the checks and where the kit checks less than this
   contract says.
+
+## 13. `route.select_engine` — group `select_engine`
+
+- [pinned] `select_engine.opt_in`: This operation is optional and declared
+  together with `select_engine`. It does not add fields to `route.select` or
+  to the `routing/v1` declaration slot.
+- [pinned] `select_engine.declarations`: Engines are learned only from the
+  daemon catalog's `role_declarations["media-provider/v1"]` slot, whose shape
+  is `{engines: [...]}` using `cortexkit-role-media` 0.1's per-engine type.
+  Only nonce-verified entries count. The daemon relays slots unread. A valid,
+  nonce-verified slot identifies a media provider; older routers never read
+  this slot and retain that module's separate routing declaration.
+- [pinned] `select_engine.declarations_atomic`: `parse_engine_declarations`
+  rejects the whole slot on an unknown member or malformed entry, applying
+  none and reporting the problem on health. It applies the media checker's
+  per-engine checks: `duplicate_engine` for repeated `(kind, model)`,
+  `fact_too_long` for provider, model or list entries over 256 Unicode scalar
+  values, `local_realtime_engine`, `bias_limit_invalid` for a max below 1,
+  and `formats_empty`. Group-level describe checks do not apply to a slot.
+- [pinned] `select_engine.request`: Params are `{consumer, kind, requirements,
+  privacy, caller_local?}`. `consumer` follows §5.1's ownership rules:
+  `unknown_consumer` and `consumer_not_owned` apply. No consumer `priced_only`,
+  demand requirement or operator pin restricts engine selection. `kind` is the
+  open media kind (`transcribe`, `synthesize`, `image`, `video`,
+  `stream_transcribe`, `realtime`). `privacy` is closed: `local_only` or
+  `remote_allowed`. Unknown top-level members or malformed non-requirement
+  members are `invalid_request {field}`.
+- [pinned] `select_engine.requirements_valid`: `requirements` is an object
+  with optional `language`, `voice`, `format`, `duration_ms`, `input_bytes`,
+  `reference_formats`, `bias`, `size`, `resolution`, `quality`, and
+  `latency_class`. Strings, unsigned integer byte/duration counts, a MIME
+  string list and a boolean bias flag respectively are required. An unknown
+  member or malformed value, including an unknown latency class, is
+  `invalid_requirements {field}`. `format` for `realtime` is also
+  `invalid_requirements`, because realtime formats are never matched.
+- [pinned] `select_engine.caller_local`: Each `caller_local` entry has the
+  media per-engine shape, `local: true`, and passes the same per-engine checks
+  (including unique `(kind, model)` within the list). Otherwise it is
+  `invalid_request {field}` naming a dotted, indexed path such as
+  `caller_local[0].local`.
+- [pinned] `select_engine.answer`: The answer is `{decision_id, expires_at_ms,
+  engine: {provider, model, local, caller_local, module?, index?}}`.
+  `expires_at_ms` is exactly ten minutes after selection. Local means on the
+  user's hardware. A module engine has `module`, `caller_local: false`, and
+  no `index`. A caller-local engine has `caller_local: true`, `local: true`,
+  and `index`, its position in the request list, and no `module`; the caller
+  runs it in-process without a job.
+- [pinned] `select_engine.filter_order`: Filters apply to the whole remaining
+  set in order: `kind`, `requirements`, `privacy`, `reachability`. When a set
+  becomes empty, refuse `no_engine {filter}` naming that filter; use `kind`
+  when no engines are known at all. Never time this refusal.
+- [pinned] `select_engine.match_requirements`: Every stated requirement must
+  be met. MIME matching ignores type/subtype case and requires every parameter
+  the engine's entry states to be equal. Language matching ignores case and
+  accepts an engine tag equal to the requested tag or extended by it at a
+  subtag boundary (`en` serves `en-GB`, not the reverse). Voice, size,
+  resolution and quality require equal list entries. An absent fact list or
+  limit fails a stated requirement. `duration_ms <= max_duration_ms` and
+  `input_bytes <= max_input_bytes`, counted as in media: decoded audio bytes
+  (cumulative for streams), UTF-8 text bytes for synthesis, summed reference
+  bytes for image/video. Each `reference_formats` entry matches a declared
+  reference MIME. `bias: true` requires `bias_limit`; false adds no constraint.
+  Latency must be equal to or faster than requested, in order `realtime`,
+  `interactive`, `batch`; an unknown engine class meets only a request with
+  no latency requirement.
+- [pinned] `select_engine.privacy`: `local_only` keeps only local engines,
+  including caller-local and local module engines. `remote_allowed` keeps
+  both local and remote engines.
+- [pinned] `select_engine.reachability`: Caller-local and local module engines
+  are reachable. A remote module engine is reachable unless its provider/model
+  route is fenced by a cooldown, backoff, exhausted quota or recorded failure
+  under §7.
+- [pinned] `select_engine.ranking`: Rank by measured accuracy for the kind,
+  descending, with unmeasured engines below measured ones; then catalog cost,
+  ascending, with engines lacking cost facts below costed engines; then `(module, provider,
+  model)` ascending, absent strings read as empty; then index ascending.
+  Accuracy and cost are model catalog facts, supplied as fixtures by the kit.
+- [pinned] `select_engine.report`: A decision records its consumer and is bound
+  to the selecting principal. Only that principal may `route.report` it,
+  joined by `decision_id` and required `outcome`; report needs no consumer or
+  runner member. A foreign principal receives `unknown_decision`.
+- [pinned] `select_engine.decision_admission`: After §9's slot authorization,
+  `route.account_for` honours an engine decision only from `engine.module`
+  for the decision's provider/model and only for a new `admission_id` before
+  `expires_at_ms`. Another module, a new admission at or after expiry, and
+  every caller-local decision receive `unknown_decision`. A replay of an
+  admission recorded before expiry, same id and body, returns its first answer
+  even after expiry; §9.1's admission conflict rule is unchanged.
+- [pinned] `select_engine.explain`: `route.explain` returns `unknown_decision`
+  for every engine decision in this version. Scope follows §3.

@@ -534,8 +534,33 @@ pub const SESSION_RELEASED: &str = "session_released";
 /// Single-session backup is unavailable; detail carries `reason`.
 pub const BACKUP_UNSUPPORTED: &str = "backup_unsupported";
 
+/// The fork is unknown, foreign, expired or revoked.
+pub const UNKNOWN_FORK: &str = "unknown_fork";
+/// The fork has ended; stored answers remain replayable.
+pub const FORK_ENDED: &str = "fork_ended";
+/// An ask is already in flight on this fork. Retryable.
+pub const FORK_BUSY: &str = "fork_busy";
+/// A completed ask id was reused with a different question.
+pub const ASK_ID_REUSE: &str = "ask_id_reuse";
+/// No served base exists, or its exact request bytes cannot be rebuilt.
+pub const FORK_BASE_UNAVAILABLE: &str = "fork_base_unavailable";
+/// The session or storage cannot serve forks cheaply.
+pub const FORK_UNSUPPORTED: &str = "fork_unsupported";
+/// Routing cannot currently supply the frozen head credential and tier. Retryable.
+pub const FORK_ACCOUNT_HELD: &str = "fork_account_held";
+/// Routing permanently refused the fork's admission.
+pub const FORK_ACCOUNT_BLOCKED: &str = "fork_account_blocked";
+
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
+    UNKNOWN_FORK,
+    FORK_ENDED,
+    FORK_BUSY,
+    ASK_ID_REUSE,
+    FORK_BASE_UNAVAILABLE,
+    FORK_UNSUPPORTED,
+    FORK_ACCOUNT_HELD,
+    FORK_ACCOUNT_BLOCKED,
     RETENTION_REQUIRED,
     RETENTION_CONFLICT,
     SESSION_RELEASED,
@@ -602,7 +627,12 @@ pub const CODES: &[&str] = &[
 pub fn is_retryable(code: &str) -> bool {
     matches!(
         code,
-        TRANSIENT | FETCH_UNAVAILABLE | SCOPE_NOT_SYNCED | SESSION_RELEASED
+        TRANSIENT
+            | FETCH_UNAVAILABLE
+            | SCOPE_NOT_SYNCED
+            | SESSION_RELEASED
+            | FORK_BUSY
+            | FORK_ACCOUNT_HELD
     )
 }
 
@@ -1088,5 +1118,45 @@ mod retention_tests {
             detail
         );
         assert!(serde_json::from_str::<ExpiredDetail>("{}").is_err());
+    }
+}
+
+#[cfg(test)]
+mod fork_answer_tests {
+    use super::*;
+
+    #[test]
+    fn fork_answer_codes_have_vectors_contract_rows_and_retry_advice() {
+        let vectors = crate::vectors::load("errors.json");
+        let contract = include_str!("../CONTRACT.md");
+        for (code, retryable) in [
+            ("unknown_fork", false),
+            ("fork_ended", false),
+            ("fork_busy", true),
+            ("ask_id_reuse", false),
+            ("fork_base_unavailable", false),
+            ("fork_unsupported", false),
+            ("fork_account_held", true),
+            ("fork_account_blocked", false),
+        ] {
+            assert!(CODES.contains(&code), "{code}");
+            assert_eq!(is_retryable(code), retryable, "{code}");
+            let entries: Vec<_> = vectors["codes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|entry| entry["code"] == code)
+                .collect();
+            assert_eq!(entries.len(), 1, "{code}");
+            assert_eq!(entries[0]["retryable"], retryable, "{code}");
+            let row = contract
+                .lines()
+                .find(|line| line.starts_with(&format!("| `{code}` |")))
+                .expect(code);
+            assert!(
+                row.ends_with(if retryable { "| **yes** |" } else { "| no |" }),
+                "{row}"
+            );
+        }
     }
 }

@@ -14,6 +14,29 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("select_engine_opt_in", "select_engine: declare the operation with its group"),
+    check("select_engine_slot_malformed", "select_engine: reject the whole malformed slot"),
+    check("select_engine_slot_duplicate", "select_engine: reject a duplicate kind/model atomically"),
+    check("select_engine_slot_empty_formats", "select_engine: reject empty formats atomically"),
+    check("select_engine_slot_unverified", "select_engine: ignore nonce-unverified slots"),
+    check("select_engine_request", "select_engine: validate ownership and params without priced_only restricting local engines"),
+    check("select_engine_requirements_valid", "select_engine: refuse unknown or malformed requirements by path"),
+    check("select_engine_caller_local", "select_engine: refuse non-local caller engines by indexed path"),
+    check("select_engine_filters", "select_engine: name the first empty filter without a reset time"),
+    check("select_engine_match_requirements", "select_engine: match every requirement against otherwise equivalent engines and missing facts"),
+    check("select_engine_privacy", "select_engine: keep local engines and admit remote engines only when allowed"),
+    check("select_engine_reachability", "select_engine: fence remote but not local or caller-local engines"),
+    check("select_engine_answer", "select_engine: check module/index matrix and ten-minute expiry"),
+    check("select_engine_ranking", "select_engine: rank measured accuracy, cost and deterministic ties across caller and module engines"),
+    check("select_engine_report", "select_engine: join by decision_id and outcome and refuse foreign reports"),
+    check("select_engine_explain", "select_engine: refuse engine decisions as unknown_decision"),
+    check("select_engine_media_admission", "select_engine: admit attested remote slot pairs only, without requiring a decision"),
+    check("select_engine_admission_before_expiry", "select_engine: honour an engine decision from its selected module"),
+    check("select_engine_admission_expiry", "select_engine: refuse a new admission at expiry"),
+    check("select_engine_admission_foreign", "select_engine: refuse another attested module even for its authorized pair"),
+    check("select_engine_admission_pair", "select_engine: refuse another authorized provider/model pair"),
+    check("select_engine_admission_replay", "select_engine: replay the pre-expiry admission unchanged after expiry"),
+    check("select_engine_admission_caller_local", "select_engine: refuse caller-local decisions for admission"),
     check("panel_full", "select_panel: enough eligible families fill the configured policy"),
     check("panel_shortfall", "select_panel: one candidate seats one member with shortfall"),
     check("panel_family_and_route_unique", "select_panel: no repeated family or route; families match the catalog"),
@@ -266,6 +289,7 @@ pub const CHECKS: &[CheckSpec] = &[
 /// Where the kit checks less than the contract says, and why. Every report
 /// prints these.
 pub const NARROWINGS: &[&str] = &[
+    "select_engine: malformed slot health diagnostics, retained consumer attribution and scope isolation are not inspected. Remote reachability is exercised with a cooldown, not separate backoff, quota or recorded-failure fixtures. Accuracy and cost are supplied fixture units, not real billing or engine measurements.",
     "report_usage_run_id: the hooks expose no usage counts, so the kit checks acceptance of distinct runs and repeated pairs with changed usage, not deduplicated totals",
     "consumer_models: the kit checks answer shape and unknown consumers, not stored score/exclusion policy or ownership admission; head_choices billing is checked by decoding, not billing policy or pin_only selection",
     "report_outcomes: the availability and affinity effects of the four added outcomes are unobservable; covered by contract vectors and Outcome::effect unit tests",
@@ -283,7 +307,7 @@ pub const NARROWINGS: &[&str] = &[
     "Parent preference and fallback are checked on fresh admit requests; priority against an existing child pin, requested_account, renew or reassign is not checked.",
     "Pool isolation, disabled-window omission by runners, and request-size fencing policy are not exercised by the current catalog and provider hooks; vectors check the wire members only.",
     "Declaration precedence is checked with max_output_tokens only; the other demand fields are not independently checked for precedence.",
-    "The kit does not check invalid catalog declarations or provider health reports for invalid, unverified or conflicting entries.",
+    "The consumer-declaration checks do not check invalid catalog declarations or provider health reports for invalid, unverified or conflicting entries.",
     "requirements other than tool_capabilities and the declared max_output_tokens floor are not checked against the catalog beyond what every check's answer must meet.",
     "Holds are checked with whole-account blocks set through a hook, on ladders of two entries; the operator max_hold limit alone, variants as separate entries, the metered-fallback rule and pooled windows are not checked, and the hold_ok true path past every entry is checked only through hold_ok false.",
     "When account_for holds only within a decision's recorded cap, the kit checks that a wait beyond it is refused with some code other than account_hold; it does not check which.",

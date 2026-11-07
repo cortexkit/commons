@@ -107,8 +107,13 @@ async fn routing_070_faulty_routers_fail_each_case_by_name() {
                 .failing()
                 .iter()
                 .all(|failed| ROUTING_070_CASES.contains(failed)
+                    // An invalid role.describe also fails the checks that
+                    // validate role.describe before testing anything else.
                     || (*name == "observe_credential_refused_requires_backoff"
-                        && *failed == "describe_lists_consumers_and_fields")),
+                        && matches!(
+                            *failed,
+                            "describe_lists_consumers_and_fields" | "select_engine_opt_in"
+                        ))),
             "new faulty router must not break unrelated legacy checks: {}",
             report.render()
         );

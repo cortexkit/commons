@@ -2,6 +2,16 @@
   "about": "One refusal body for every refusal code, with the ops that answer it and when its cause ends (wait_until_ms, null when the refusal is not timed). A body is {code, message, detail}; detail is always an object. The last cases decode an unknown code, which a reader keeps and never treats as timed, and unknown open-set reasons.",
   "refusals": [
     {
+      "name": "no_engine",
+      "ops": ["route.select_engine"],
+      "body": {
+        "code": "no_engine",
+        "message": "no engine remains after requirements",
+        "detail": {"filter": "requirements"}
+      },
+      "wait_until_ms": null
+    },
+    {
       "name": "invalid_request",
       "ops": [
         "route.select",

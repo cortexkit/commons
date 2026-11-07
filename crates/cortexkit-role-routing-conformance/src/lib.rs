@@ -12,6 +12,9 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+extern crate self as cortexkit_role_routing_conformance;
+
 mod checks;
 pub mod fixture;
 mod report;
@@ -27,6 +30,6 @@ pub use route::{Reply, RouteFailure, RoutingRoute};
 pub use runner::run_suite;
 pub use subject::{
     Catalog, CatalogAccount, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig,
-    ConsumerMode, ContinueCredential, HoldLimits, OperatorRequirements, ReachableToolProvider,
-    RouteStamp, RoutingSubject, ScopeStamp,
+    ConsumerMode, ContinueCredential, EngineFacts, HoldLimits, OperatorRequirements,
+    ReachableToolProvider, RouteStamp, RoutingSubject, ScopeStamp,
 };

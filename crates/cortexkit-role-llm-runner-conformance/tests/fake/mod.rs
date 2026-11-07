@@ -67,6 +67,7 @@ use subc_protocol::ErrorBody;
 mod attachments;
 mod attribution;
 mod display;
+mod fork_answer;
 mod held_calls;
 mod history;
 mod history_intake;
@@ -82,6 +83,7 @@ mod step_events;
 mod system_text_default;
 mod user_commands;
 use display::{anthropic_assistant, live_events, profiled, result_text};
+pub use fork_answer::ForkDefect;
 pub use history::LineageDefect;
 pub use service_tier::ServiceTierDefect;
 
@@ -172,6 +174,7 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub fork: ForkDefect,
     pub history_intake_fixture: bool,
     pub history_intake: Option<&'static str>,
     /// Enable the optional stable-prefix plan-note fixture.
@@ -582,6 +585,14 @@ pub struct Defects {
     /// Display entries and live tool events leave out every call's
     /// `call_key`.
     pub call_identity_omits_key: bool,
+    /// Import discards the source key and mints another one.
+    pub call_identity_import_remints_key: bool,
+    /// Local calls incorrectly name the serving runner as their carrier.
+    pub call_identity_own_carrier: bool,
+    /// Imported calls omit their minting runner's carrier.
+    pub call_identity_drops_carrier: bool,
+    /// The adapter does not implement the imported-call seed hook.
+    pub call_identity_no_import_hook: bool,
     /// Display entries and live tool events carry a sibling call's
     /// `call_key` instead of their own.
     pub call_identity_swaps_keys: bool,
@@ -644,6 +655,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    fork_ingress: Mutex<fork_answer::Ingress>,
     intakes: Mutex<BTreeMap<String, history_intake::Intake>>,
     routing_peers:
         Mutex<BTreeMap<String, cortexkit_role_llm_runner_conformance::RecordingRoutingPeer>>,
@@ -928,6 +940,7 @@ struct RunRec {
 
 #[derive(Clone, Debug)]
 struct CallRec {
+    call_carrier: Option<String>,
     tool_call_id: String,
     arguments: Value,
     run_id: String,
@@ -1165,6 +1178,7 @@ fn baseline() -> Baseline {
 
 /// One running incarnation: its log on disk and what it rebuilt from it.
 pub struct Module {
+    forks: Mutex<fork_answer::Store>,
     attachments: Mutex<attachments::Store>,
     /// Store a sent upload as a `data:` URL `file` part, the way a runner
     /// that keeps media inline in its own schema does, instead of the
@@ -1329,6 +1343,7 @@ impl Module {
     fn open(root: &Path, world: Arc<World>) -> Result<Arc<Self>, HarnessError> {
         std::fs::create_dir_all(root).map_err(|e| HarnessError::new(e.to_string()))?;
         let module = Arc::new(Self {
+            forks: Mutex::new(fork_answer::Store::load(root)),
             attachments: Mutex::new(attachments::Store::open(root)),
             data_url_media: world.data_url_media,
             world,
@@ -1351,6 +1366,7 @@ impl Module {
                 module.apply(&record);
             }
         }
+        fork_answer::recover(&module);
         let _ = module.resume();
         let pending: Vec<String> = module
             .sessions
@@ -2064,6 +2080,7 @@ impl Module {
                     sess.calls.insert(
                         key,
                         CallRec {
+                            call_carrier: None,
                             tool_call_id: call["tool_call_id"].as_str().unwrap_or_default().into(),
                             arguments: call["arguments"].clone(),
                             run_id: run_id.clone(),
@@ -2275,6 +2292,7 @@ impl Module {
                 sess.calls.insert(
                     key.clone(),
                     CallRec {
+                        call_carrier: record["call_carrier"].as_str().map(str::to_owned),
                         tool_call_id: id.into(),
                         arguments: record["arguments"].clone(),
                         run_id: String::new(),
@@ -2491,14 +2509,21 @@ impl Module {
                                 .map_or(FAKE_PROVIDER, |route| route.provider.as_str());
                             let model =
                                 account_route.map_or(FAKE_MODEL, |route| route.model.as_str());
-                            let answer = peer.request(
-                                "fake-runner",
-                                "route.account_for",
-                                json!({
-                                    "provider": provider, "model": model,
-                                    "conversation_key": session, "admission_id": run_id
-                                }),
-                            );
+                            let mut request = json!({
+                                "provider": provider, "model": model,
+                                "conversation_key": self.world.fork_ingress.lock().unwrap().head_keys.get(session).map(String::as_str).unwrap_or(session), "admission_id": run_id
+                            });
+                            if let Some(tier) = self
+                                .world
+                                .fork_ingress
+                                .lock()
+                                .unwrap()
+                                .head_tiers
+                                .get(session)
+                            {
+                                request["service_tier"] = json!(tier);
+                            }
+                            let answer = peer.request("fake-runner", "route.account_for", request);
                             let answer = match answer {
                                 Ok(answer) => answer,
                                 Err(error) => return self.commit(session, json!({
@@ -2525,6 +2550,13 @@ impl Module {
                 session_change::observe_notes(&mut observation, &sess, &self.world.defects);
                 observation.max_output_tokens = output_cap;
                 self.tier_model_ingress(session, &mut observation);
+                if self.world.serves(groups::FORK_ANSWER) {
+                    fork_answer::capture_head(
+                        self,
+                        session,
+                        json!({"messages":observation.rendered,"tools":observation.tools,"model":FAKE_MODEL,"tool_choice":"auto","service_tier":observation.service_tier_applied}),
+                    );
+                }
                 self.world
                     .model_requests
                     .lock()
@@ -3317,6 +3349,9 @@ impl Module {
         }
         if self.world.serves(groups::ROUTED_ACCOUNTS) {
             describe = describe.with_routed_accounts(self.world.routed_methods.clone());
+        }
+        if self.world.serves(groups::FORK_ANSWER) {
+            describe = describe.with_fork_idle_s(2);
         }
         if self.world.serves(groups::SERVICE_TIER) {
             describe = describe.with_service_tiers(service_tier::support());
@@ -4556,6 +4591,13 @@ impl Module {
                                 })
                         })
                         .collect();
+                    if self.world.serves(groups::CALL_IDENTITY) {
+                        for (time, key) in entry.tool_times.iter_mut().zip(&m.calls) {
+                            time.call_key = Some(key.clone());
+                            time.call_carrier = display::call_carrier(&self.world, sess, key);
+                            time.schema_pin = sess.calls[key].schema_pin.clone();
+                        }
+                    }
                     if self.world.defects.read_display_facts == Some("wrong_times") {
                         entry.tool_times.reverse();
                     }
@@ -4628,6 +4670,9 @@ impl Module {
                     );
                 if call.intent {
                     entry = entry.with_dispatched_to(TOOL_MODULE);
+                }
+                if self.world.serves(groups::CALL_IDENTITY) {
+                    entry.call_carrier = display::call_carrier(&self.world, sess, key);
                 }
                 entry
             })
@@ -5645,6 +5690,25 @@ pub struct FakeRoute {
 #[async_trait]
 impl RunnerRoute for FakeRoute {
     async fn request(&self, method: &str, params: Value) -> Result<Reply, RouteFailure> {
+        if self.module.world.serves(groups::FORK_ANSWER) {
+            if method.starts_with("session.fork_") {
+                return fork_answer::request(self, method, params).await;
+            }
+            if let Some(reply) = fork_answer::validate_plan(method, &params) {
+                return Ok(reply);
+            }
+            if method == ops::SESSION_SEND {
+                if let Some(tier) = params["service_tier"].as_str() {
+                    self.module
+                        .world
+                        .fork_ingress
+                        .lock()
+                        .unwrap()
+                        .head_tiers
+                        .insert(self.session.clone(), tier.into());
+                }
+            }
+        }
         let world = &self.module.world;
         let case = *world.current_case.lock().unwrap();
         world
@@ -5652,8 +5716,14 @@ impl RunnerRoute for FakeRoute {
             .lock()
             .unwrap()
             .push((case, method.to_owned()));
-        self.module
-            .handle(&self.stamp, &self.session, method, params)
+        let result = self
+            .module
+            .handle(&self.stamp, &self.session, method, params.clone());
+        if self.module.world.serves(groups::FORK_ANSWER) && matches!(result, Ok(Reply::Response(_)))
+        {
+            fork_answer::apply_plan(self, method, &params);
+        }
+        result
     }
 
     async fn subscribe(&self, params: Value) -> Result<SubscribeOutcome, RouteFailure> {
@@ -5674,6 +5744,8 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub fork_peer_errors: bool,
+    pub fork_head_key_fixture: bool,
     pub routed_methods: Vec<String>,
     pub follows_account_choice: Option<bool>,
     pub missing_routing_hook: Option<&'static str>,
@@ -5812,6 +5884,8 @@ pub const KILL_POINTS: &[&str] = &[
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            fork_peer_errors: true,
+            fork_head_key_fixture: true,
             routed_methods: vec!["apikey".into(), "oauth".into()],
             follows_account_choice: Some(true),
             missing_routing_hook: None,
@@ -5882,6 +5956,7 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    fork_ingress: Mutex::new(fork_answer::Ingress::default()),
                     routing_peers: Mutex::new(BTreeMap::new()),
                     intakes: Mutex::new(BTreeMap::new()),
                     routed_methods: self.routed_methods.clone(),
@@ -6108,6 +6183,58 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    fn routing_peer_error_replies(&self) -> bool {
+        self.fork_peer_errors
+    }
+    async fn raw_model_requests(
+        &self,
+        session: &str,
+    ) -> Result<Vec<cortexkit_role_llm_runner_conformance::RawModelRequestObservation>, HarnessError>
+    {
+        Ok(self
+            .world()
+            .fork_ingress
+            .lock()
+            .unwrap()
+            .raw
+            .get(session)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    async fn advance_fork_clock(
+        &self,
+        session: &str,
+        milliseconds: u64,
+    ) -> Result<(), HarnessError> {
+        for module in self
+            .modules
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|m| m.alive.load(Ordering::SeqCst))
+        {
+            fork_answer::advance(module, session, milliseconds);
+        }
+        Ok(())
+    }
+
+    async fn configure_fork_head_key(
+        &self,
+        session: &str,
+        key: &str,
+    ) -> Result<bool, HarnessError> {
+        if !self.fork_head_key_fixture {
+            return Ok(false);
+        }
+        self.world()
+            .fork_ingress
+            .lock()
+            .unwrap()
+            .head_keys
+            .insert(session.into(), key.into());
+        Ok(true)
+    }
     async fn fixture_seed_historical_tool_output(
         &self,
         handle: &FakeHandle,
@@ -6672,6 +6799,36 @@ impl LlmRunnerSubject for FakeSubject {
                        "arguments": call.arguments, "content": call.result}),
             )
             .map_err(|Killed| HarnessError::new("killed seeding a call"))
+    }
+
+    async fn seed_imported_tool_call(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        call: &ScriptedToolCall,
+        call_carrier: &str,
+        call_key: &str,
+    ) -> Result<bool, HarnessError> {
+        if self.world().defects.call_identity_no_import_hook {
+            return Ok(false);
+        }
+        let key = if self.world().defects.call_identity_import_remints_key {
+            format!("reminted-{call_key}")
+        } else {
+            call_key.to_owned()
+        };
+        handle
+            .0
+            .commit(
+                session,
+                json!({
+                    "kind": "legacy_call", "call_key": key, "call_carrier": call_carrier,
+                    "tool_call_id": call.tool_call_id, "tool": call.tool,
+                    "arguments": call.arguments, "content": call.result,
+                }),
+            )
+            .map_err(|Killed| HarnessError::new("killed seeding an imported call"))?;
+        Ok(true)
     }
 
     async fn revert_session(
@@ -7334,6 +7491,9 @@ impl LlmRunnerSubject for FakeSubject {
             .remove(session)
             .ok_or_else(|| HarnessError::new("the model request is not held"))?;
         self.world().in_flight.lock().unwrap().remove(session);
+        if run_id.starts_with("fork:") {
+            return Ok(());
+        }
         for module in self.modules.lock().unwrap().clone() {
             if module.alive.load(Ordering::SeqCst) {
                 module

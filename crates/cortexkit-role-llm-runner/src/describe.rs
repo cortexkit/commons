@@ -27,6 +27,9 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const FORK_IDLE_S_MISSING: &str = "fork_idle_s_missing";
+    pub const FORK_IDLE_S_UNDECLARED: &str = "fork_idle_s_undeclared";
+    pub const FORK_IDLE_S_INVALID: &str = "fork_idle_s_invalid";
     pub const ACCOUNT_ROUTE_WITHOUT_ROUTED_ACCOUNTS: &str = "account_route_without_routed_accounts";
     pub const ADOPT_OPEN_WITHOUT_ADOPT: &str = "adopt_open_without_adopt";
     pub const ADOPT_OPEN_WITHOUT_PLANS: &str = "adopt_open_without_plans";
@@ -122,6 +125,10 @@ pub mod problem_names {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct RoleDescribe {
+    /// Wall-clock idle lifetime in seconds, positive and present exactly with
+    /// the `fork_answer` group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_idle_s: Option<u64>,
     pub majors: Vec<Major>,
     /// The module's own build identity, for display. Never a cache key.
     pub implementation_version: String,
@@ -313,6 +320,11 @@ pub enum Stability {
 }
 
 impl RoleDescribe {
+    pub fn with_fork_idle_s(mut self, seconds: u64) -> Self {
+        self.fork_idle_s = Some(seconds);
+        self
+    }
+
     /// Declare the step-transform hook call sites this runner runs for every
     /// session (see [`step_hooks`]).
     pub fn with_step_hooks<I, S>(mut self, hooks: I) -> Self
@@ -545,6 +557,14 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if !raw.is_object() {
         return Err(vec![DescribeProblem::NotAnObject]);
     }
+    if raw
+        .get("fork_idle_s")
+        .is_some_and(|value| value.as_u64().is_none_or(|seconds| seconds == 0))
+    {
+        return Err(vec![DescribeProblem::Undecodable(
+            problem_names::FORK_IDLE_S_INVALID.into(),
+        )]);
+    }
     if let Some(settings) = raw.get("archive_prunes_reasoning") {
         if serde_json::from_value::<crate::archive_prunes_reasoning::ArchivePrunesReasoning>(
             settings.clone(),
@@ -577,6 +597,18 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    match (
+        describe.declares(capabilities::FORK_ANSWER),
+        describe.fork_idle_s,
+    ) {
+        (true, None) => problems.push(DescribeProblem::Undecodable(
+            problem_names::FORK_IDLE_S_MISSING.into(),
+        )),
+        (false, Some(_)) => problems.push(DescribeProblem::Undecodable(
+            problem_names::FORK_IDLE_S_UNDECLARED.into(),
+        )),
+        _ => {}
+    }
     match (
         describe.declares(capabilities::ROUTED_ACCOUNTS),
         &describe.routed_accounts,
@@ -1884,5 +1916,96 @@ mod step_hooks_tests {
     #[test]
     fn a_non_array_step_hooks_does_not_decode() {
         assert!(check_describe(&raw(Some(json!("pre_user")))).is_err());
+    }
+}
+
+#[cfg(test)]
+mod fork_answer_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn describe() -> RoleDescribe {
+        let ops = crate::REQUIRED_OPS
+            .iter()
+            .copied()
+            .chain(
+                capabilities::group_ops(capabilities::FORK_ANSWER)
+                    .unwrap()
+                    .iter()
+                    .copied(),
+            )
+            .map(str::to_owned)
+            .collect();
+        RoleDescribe::new(vec![Major::new(crate::PROVIDES, ops, "alpha")], "test")
+            .with_capabilities(vec![capabilities::FORK_ANSWER.into()])
+            .with_session_capabilities_from("baseline")
+            .with_fork_idle_s(30)
+    }
+
+    #[test]
+    fn fork_answer_idle_fact_is_positive_and_present_exactly_with_group() {
+        let mut raw = serde_json::to_value(describe()).unwrap();
+        assert!(check_describe(&raw).is_ok());
+        raw.as_object_mut().unwrap().remove("fork_idle_s");
+        assert_eq!(
+            check_describe(&raw).unwrap_err(),
+            vec![DescribeProblem::Undecodable(
+                problem_names::FORK_IDLE_S_MISSING.into()
+            )]
+        );
+        raw["fork_idle_s"] = json!(30);
+        raw["capabilities"] = json!([]);
+        assert_eq!(
+            check_describe(&raw).unwrap_err(),
+            vec![DescribeProblem::Undecodable(
+                problem_names::FORK_IDLE_S_UNDECLARED.into()
+            )]
+        );
+        raw.as_object_mut().unwrap().remove("fork_idle_s");
+        assert!(check_describe(&raw).is_ok());
+        raw["capabilities"] = json!([capabilities::FORK_ANSWER]);
+        for invalid in [
+            json!(0),
+            json!(-1),
+            json!(1.5),
+            json!(true),
+            json!("30"),
+            json!(null),
+            json!([]),
+            json!({}),
+        ] {
+            raw["fork_idle_s"] = invalid.clone();
+            assert_eq!(
+                check_describe(&raw).unwrap_err(),
+                vec![DescribeProblem::Undecodable(
+                    problem_names::FORK_IDLE_S_INVALID.into()
+                )],
+                "{invalid}"
+            );
+        }
+        for valid in [1, u64::MAX] {
+            raw["fork_idle_s"] = json!(valid);
+            assert_eq!(check_describe(&raw).unwrap().fork_idle_s, Some(valid));
+        }
+    }
+
+    #[test]
+    fn fork_answer_requires_all_three_management_ops() {
+        let describe = describe();
+        for missing in [
+            crate::ops::SESSION_FORK_PREPARE,
+            crate::ops::SESSION_FORK_ASK,
+            crate::ops::SESSION_FORK_END,
+        ] {
+            let mut partial = describe.clone();
+            partial.majors[0].ops.retain(|op| op != missing);
+            assert_eq!(
+                check_describe(&serde_json::to_value(partial).unwrap()).unwrap_err(),
+                vec![DescribeProblem::GroupIncomplete {
+                    capability: capabilities::FORK_ANSWER,
+                    op: missing
+                }]
+            );
+        }
     }
 }

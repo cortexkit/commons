@@ -1,0 +1,17 @@
+{
+  "token_request":{"call_id":"call-1","agent_id":"agent-1","purpose":"voice_front","model":"live","decision_id":"d-1"},
+  "token_answer":{"token":"PLACEHOLDER_NOT_A_TOKEN","token_ref":"opaque-reference","expires_at_ms":1000,"provider":"example","model":"live"},
+  "call_started":{"call_id":"call-1","token_ref":"opaque-reference","vendor_session_id":"vendor-session-1"},
+  "started_answer":{"call_id":"call-1","vendor_session_id":"vendor-session-1"},
+  "call_ended":{"call_id":"call-1"},
+  "ended_answer":{"call_id":"call-1","status":"ended"},
+  "watch":{"call_id":"call-1"},
+  "event":{"type":"tool_call","call_id":"call-1","at_ms":1},
+  "stream_request":{"stream_id":"stream-1","model":"speech","decision_id":"d-1","format":"audio/L16;rate=16000;channels=1"},
+  "audio_frame":{"seq":0,"data":"YQ=="},
+  "end_frame":{"seq":1,"end":true},
+  "partial":{"type":"partial","segment":0,"text":"A"},
+  "final":{"type":"final","segment":0,"text":"Ada","words":[]},
+  "stream_answer":{"segments":[{"segment":0,"text":"Ada","words":[]}],"no_speech":false},
+  "stream_failure":{"segments":[{"segment":0,"text":"Ada","words":[]}],"failure":{"code":"engine_crashed","class":"transient","message":"Engine stopped"}}
+}

@@ -34,6 +34,8 @@ struct State {
     observations: BTreeMap<(String, String), String>,
     admissions: BTreeMap<(String, String), (Value, Value)>,
     pins: BTreeMap<(String, String), Value>,
+    account_override: Option<(String, String)>,
+    account_refusal: Option<String>,
 }
 
 /// A session's scripted routing peer. Clones share recordings and replay keys.
@@ -89,6 +91,20 @@ impl RecordingRoutingPeer {
     /// A snapshot of every received body, including retries, in arrival order.
     pub fn calls(&self) -> Vec<RoutingCall> {
         self.state.lock().unwrap().calls.clone()
+    }
+
+    /// Answer new admissions with a scripted public credential id and tier.
+    /// Existing admission-id replays retain their first answer. `None` restores
+    /// the fixture credential and the request's tier.
+    pub fn set_account_override(&self, account: Option<(String, String)>) {
+        self.state.lock().unwrap().account_override = account;
+    }
+
+    /// Refuse fresh admissions with this routing code, or restore successful
+    /// answers with `None`. Opted-in adapters send the returned `error` member
+    /// as an ERROR frame, not a RESPONSE containing an error-shaped object.
+    pub fn set_account_refusal(&self, code: Option<String>) {
+        self.state.lock().unwrap().account_refusal = code;
     }
 
     /// Record a real request and return its JSON RESPONSE body (`{result: ...}`).
@@ -165,6 +181,9 @@ impl RecordingRoutingPeer {
                 Err(HarnessError::new("admission_conflict"))
             };
         }
+        if let Some(code) = &state.account_refusal {
+            return Ok(json!({"error":{"code":code,"message":"scripted routing refusal"}}));
+        }
         let pin_key = (runner.to_owned(), conversation.to_owned());
         let previous = state.pins.get(&pin_key);
         if mode == "renew"
@@ -208,6 +227,10 @@ impl RecordingRoutingPeer {
         }});
         if let Some(tier) = body.get("service_tier").filter(|v| !v.is_null()) {
             answer["result"]["service_tier_chosen"] = tier.clone();
+        }
+        if let Some((credential, tier)) = &state.account_override {
+            answer["result"]["account"]["credential_id"] = json!(credential);
+            answer["result"]["service_tier_chosen"] = json!(tier);
         }
         state.pins.insert(pin_key, pin);
         state.admissions.insert(key, (normalized, answer.clone()));

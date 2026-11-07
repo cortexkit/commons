@@ -1,0 +1,4 @@
+[
+  {"name":"legal_inline_values_total_over_3145728_encoded_bytes","kind":"image","inline_bytes":[1200000,1200001],"field":"input.references[1].data"},
+  {"name":"synthesize_text_alone_over_3145728_encoded_bytes","kind":"synthesize","text_bytes":3145729,"field":"params"}
+]

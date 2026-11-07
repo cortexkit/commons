@@ -13,6 +13,13 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+extern crate self as cortexkit_role_llm_runner_conformance;
+#[cfg(test)]
+#[allow(dead_code, unreachable_patterns)]
+#[path = "../tests/fake/mod.rs"]
+mod fork_fake;
+
 mod account_route;
 mod admission;
 mod adopt;
@@ -30,6 +37,7 @@ mod display;
 mod drive;
 mod finish_reason;
 mod follow;
+mod fork_answer;
 mod head_selection;
 mod head_sender;
 mod held_calls;
@@ -82,10 +90,10 @@ pub use routed_accounts::RecordingRoutingPeer;
 pub use runner::{run_suite, run_suite_with, SetupError};
 pub use subject::{
     ArchivePruningPart, AttributionFixture, Capability, LiveIdsObservation, LlmRunnerSubject,
-    ModelRequestObservation, PlanNotesFixture, PlanSenderIdentity, RefreshPlan, RefreshVariant,
-    Script, ScriptedLateEntry, ScriptedPart, ScriptedToolCall, ScriptedTurn, ScriptedUsage,
-    SystemTextDefaultObservation, ToolResultLimitObservation, ToolResultObservation,
-    UserCommandFixture, UserCommandObservation,
+    ModelRequestObservation, PlanNotesFixture, PlanSenderIdentity, RawModelRequestObservation,
+    RefreshPlan, RefreshVariant, Script, ScriptedLateEntry, ScriptedPart, ScriptedToolCall,
+    ScriptedTurn, ScriptedUsage, SystemTextDefaultObservation, ToolResultLimitObservation,
+    ToolResultObservation, UserCommandFixture, UserCommandObservation,
 };
 
 /// The one tool every scripted call names. The runner adapter's scripted tool

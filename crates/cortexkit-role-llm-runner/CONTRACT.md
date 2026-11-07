@@ -35,6 +35,13 @@ the `session_change` request, reply and refusal shapes (§10.2) are pinned.
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation.
 
+## Changes in 0.8.16
+
+- Add independent opt-in `fork_answer` (§9.20): question-answering branches
+  with exact frozen bases, no tool execution or head writes, durable replay,
+  principal admission and head-pinned account routing.
+- Add `fork_idle_s`, its three describe checks and eight fork refusal codes.
+
 ## Changes in 0.8.15
 
 - Add the independent opt-in groups `media_refs` (§4.2, §9.12) and
@@ -136,7 +143,7 @@ alias until the next breaking release.
 
 - [pinned] The answer is `{majors: [{version, ops, stability}],
   implementation_version, capabilities, session_capabilities_from,
-  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?, routed_accounts?, archive_prunes_reasoning?, step_hooks?}` (`RoleDescribe`), the shape `tool-provider/v1`
+  max_bytes?, steer_receipt?, delivery_order_modes?, retention?, session_retention?, run_cancel?, step_events?, routed_accounts?, archive_prunes_reasoning?, step_hooks?, fork_idle_s?}` (`RoleDescribe`), the shape `tool-provider/v1`
   uses. `version` is spelled as in the manifest, `llm-runner/v1`.
 - [pinned] `capabilities` lists the module-level capabilities: the groups of
   §3 the runner declares, and `ordered_hook_phases` on a runner where it holds
@@ -157,6 +164,15 @@ alias until the next breaking release.
   `routed_accounts_invalid_auth_method`, and duplicates as
   `routed_accounts_duplicate`. Without the group, the member is omitted and
   account handling is unchanged.
+- [pinned] `fork_answer.describe_missing`: a runner declaring `fork_answer`
+  includes `fork_idle_s`, its idle lifetime in seconds (§9.20).
+  `check_describe` reports `fork_idle_s_missing` when the member is absent.
+- [pinned] `fork_answer.describe_undeclared`: `fork_idle_s` is present only
+  with `fork_answer`; `check_describe` reports `fork_idle_s_undeclared` for
+  the member without the group.
+- [pinned] `fork_answer.describe_invalid`: `fork_idle_s` is an integer from
+  1; `check_describe` reports `fork_idle_s_invalid` for a present value with
+  the wrong type or outside the range, including null and zero.
 - [pinned] `step_hooks`, when present, is an array of distinct hook names
   from the `step-transform-provider/v1` role (`describe::step_hooks`:
   `pre_user`, `pre_tool`, `post_tool`, `post_assistant`), naming the §11.2
@@ -220,6 +236,7 @@ alias until the next breaking release.
 
 | Group | Ops (`capabilities::GROUPS`) | Section |
 |---|---|---|
+| `fork_answer` | `session.fork_prepare`, `session.fork_ask`, `session.fork_end`; no group dependencies | §9.20 |
 | `output_refs` | `session.output_refs`, `session.output_ref_read` | §9.13 |
 | `tool_upfront` | `session.send` with per-plan-item `upfront`; no added op | §9.18 |
 | `transcript_reads` | `session.read`, `session.head` | §4 |
@@ -236,7 +253,7 @@ alias until the next breaking release.
 | `account_route` | `session.send` account admission names; requires `routed_accounts` | §9.3.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `head_selection` | `session.send`, `session.head`; requires `plans`; selection through `session.refresh` additionally requires `session_change` | §9.3.4 |
-| `call_identity` | No added op; `call_key` and `schema_pin` on display tool calls and live tool events (it requires `history_display` or `live_events`) | §9.16 |
+| `call_identity` | No added op; `call_key`, `schema_pin` and `call_carrier` on reader call facts (it requires `history_display` or `live_events`) | §9.16 |
 | `read_display_facts` | `session.read` (`include_display_facts`, entry client ids, module senders, creation times, tool times, assistant completion times and reasoning summaries) | §4.2, §4.7.1 |
 | `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `session.send_status` where served | §9.7 |
 | `rich_ui_stamp` | `session.read` (the `include_rich_ui` opt-in), `session.head` (`last_run_rich_ui`); also the rich UI stamp on assistant display rows and `run_started` where those are served | §9.17 |
@@ -613,7 +630,7 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   same text) and omits an empty list. A runner never stores or serves the
   summary as an extra message part; served message bytes do not change.
 - [pinned] `tool_times?: [{tool_call_id, started_at?, finished_at?, unanswered?,
-  call_key?, schema_pin?}]` (`read::ToolTime`) has one item per tool call,
+  call_key?, call_carrier?, schema_pin?}]` (`read::ToolTime`) has one item per tool call,
   in the message's call order. Times and outcomes follow §4.7.1: copy stored
   per-call facts, never invent a time, omit absent members, and decode
   `unanswered` as an open string. An entry with no calls omits `tool_times`.
@@ -625,7 +642,10 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   stored: a call never dispatched has no `schema_pin`, and a call denied
   before any record held it has no `call_key` either, while one prepared and
   then denied keeps its key. A runner without `call_identity` never sends
-  either member.
+  either member. The optional `call_carrier` follows §9.16 as well: it names
+  the other runner that minted an imported call's key, never this runner.
+  An imported call is a historical call moved from another runner; the
+  serving runner did not mint its key.
 
 #### Descriptor payloads and identity
 
@@ -1431,9 +1451,9 @@ display-ready row for an app's reader on a runner declaring
   are examples of producer key choices, never a recipe for readers to
   construct keys. Row part keys must match the entry's published stored keys.
   Parts are `text {text}`, `reasoning {text}`, `tool_call
-  {tool_call_id, name, provider_executed?, arguments, arguments_truncated?, call_key?,
+  {tool_call_id, name, provider_executed?, arguments, arguments_truncated?, call_key?, call_carrier?,
   schema_pin?, started_at?, finished_at?, unanswered?}` with `arguments`
-  the call's arguments as compact JSON text (`call_key` and `schema_pin`
+  the call's arguments as compact JSON text (`call_key`, `call_carrier` and `schema_pin`
   only on a runner declaring `call_identity`, §9.16), `tool_result {tool_call_id,
   provider_executed?, is_error?, content, truncated?, files?}`, `file {media? | url, mime?,
   filename?}` and `other {kind}` for a part the projection does not show.
@@ -1481,7 +1501,7 @@ display-ready row for an app's reader on a runner declaring
   (§4.2.2) and then fills what the body lacks: `model` (the recorded model that wrote
   it; an `anthropic-messages` body names none),
   `client_message_id` (§9.11) and `sender` (below), and on a runner
-  declaring `call_identity` each tool call's `call_key` and `schema_pin`
+  declaring `call_identity` each tool call's `call_key`, `call_carrier` and `schema_pin`
   (§9.16), and each tool call's stored times and unanswered outcome (§4.7.1).
   The conformance kit
   checks that a served row equals the function applied to the same entry's
@@ -1630,11 +1650,12 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   is still indeterminate: it has a durable dispatch intent and no result, so
   it may or may not have run.
 - [pinned] Each call's `call_key` (§11.3) is exposed with it.
-- [pinned] They ride as `tool_calls: [{tool_call_id, call_key?,
+- [pinned] They ride as `tool_calls: [{tool_call_id, call_key?, call_carrier?,
   dispatched_to?, indeterminate}]` (`ToolCallAttribution`) beside the
   message, one entry per tool call the message carries. `dispatched_to` is
   absent for a call never dispatched (denied, say); `call_key` is absent
-  until the call is prepared or dispatched.
+  until the call is prepared or dispatched. `call_carrier` is present only
+  with `call_identity` and only for an imported call, under §9.16.
 - [pinned] On a runner declaring `call_identity` (§9.16), every display
   tool-call entry and live tool event of a call carries this same
   `call_key`, present exactly when it is present here.
@@ -2396,11 +2417,11 @@ new members.
     `client_message_id`, as soon as `message_started` arrives. Other
     messages gain no sender from this.
   - `tool_started {mid, tool_call_id, name, arguments,
-    arguments_truncated?, started_at?, call_key?, schema_pin?}`: `mid` is the message holding the
+    arguments_truncated?, started_at?, call_key?, call_carrier?, schema_pin?}`: `mid` is the message holding the
     call, `tool_call_id` the model's id as the stored row carries it, and
     `arguments` the arguments as JSON text.
   - `tool_finished {mid, tool_call_id, outcome, output_bytes,
-    finished_at?, call_key?, schema_pin?}`: `outcome` is an open string (`live::tool_outcomes`: `ok`,
+    finished_at?, call_key?, call_carrier?, schema_pin?}`: `outcome` is an open string (`live::tool_outcomes`: `ok`,
     `error`, `cancelled` when a caller asked, `interrupted` when a restart
     cut the call and it was never sent again, `denied` when an approval or a
     hook refused it); `output_bytes` is the byte length of the result's
@@ -2440,7 +2461,8 @@ new members.
     the call's key and the pin of the definition it was dispatched against,
     on a runner declaring `call_identity` (added in 0.7.2, §9.16), with the
     same values and the same presence rules as on the call's display row. A
-    runner without the group leaves both out.
+    runner without the group leaves both out. `call_carrier` on those events
+    follows §9.16's imported-call presence rule, unchanged on replay.
   - `started_at` and `finished_at` (optional since 0.6.0; required in
     0.5.1 to 0.5.5) are the times the runner recorded when the tool call
     started and when it finished. A runner leaves a member out only when it
@@ -2728,13 +2750,15 @@ Model-view reads and replacement-entry pages are not part of this contract.
   reply may carry `pause_reason`; it is not renamed to `reason`.
 - [pinned] A send behind a paused run MAY be queued, answering `pending`,
   or refused `run_paused`. Both conform.
-- [pinned] `delivered` (`Delivered`) is optional: `{as, ref?, call_key?}`:
+- [pinned] `delivered` (`send::Delivered`) is optional: `{as, ref?, call_key?, call_carrier?}`:
   - `as` is one of `step | turn | pending | unknown`, decoded open: an
     unknown string survives as itself and does not fail the decode;
   - `ref` is an opaque string: a stored row id, or the run id when `as` is
     `turn`;
   - for a tool-result ride (§9.7), `call_key` names the carrying result and
-    `ref` names its stored row, not a new send entry;
+    `ref` names its stored row, not a new send entry; `call_carrier` names the
+    other runner that minted an imported carrying call's key, only under
+    `call_identity` (§9.16);
   - it is set on a re-send of the same `send_id` once the steer is delivered
     or known `unknown`, and may be set on the first reply; on a `guaranteed`
     runner it may be absent until the steer is rendered;
@@ -3744,7 +3768,8 @@ say who may send and which texts are system text.
 
 - [pinned] A send delivered in `tool_result` mode, a **ride**, is not a
   transcript entry. The runner keeps a record of `{send_id, sender,
-  call_key, text}`, where `call_key` identifies the carrying tool result.
+  call_key, call_carrier?, text}` (`rides::Ride`), where `call_key` identifies
+  the carrying tool result and `call_carrier` follows §9.16.
   The record is durable before the first model request carrying it is
   released. A runner owning its store may write it in the same durable
   batch as the carrying result. The host's stored tool result never changes.
@@ -3762,8 +3787,9 @@ say who may send and which texts are system text.
   chooses a carrier again; it reads the recorded `call_key`.
 - [pinned] Every other delivery (`steer`, `idle_start`, `interrupt`, a
   standalone `turn_system`, and `queue`) remains a transcript entry of its
-  own, carrying `delivered_as: {mode, call_key?}`
-  (`delivery_order::EntryDelivery`) in its envelope (§4.2). Readers and a
+  own, carrying `delivered_as: {mode, call_key?, call_carrier?}`
+  (`delivery_order::EntryDelivery`) in its envelope (§4.2), with
+  `call_carrier` following §9.16. Readers and a
   resumed run render from that entry. Once delivered, its bytes, role and
   `delivered_as` never change. Provider rendering may change on a later
   route as the `turn_system` authority fall-through below specifies.
@@ -4125,13 +4151,14 @@ never less. This is the safe fallback because nothing gets hidden.
   `notices_without_history_display` or `notices_without_live_events`.
 - [pinned] On `session.read` with `include_display_facts: true`, and on
   display rows, the message holding the carrying tool result serves
-  `notices: [{part: u32, call_key: string, send_id: string, sender: string,
+  `notices: [{part: u32, call_key: string, call_carrier?: string, send_id: string, sender: string,
   text: string, delivered_as: string, speaks_for?: {agent_id: string}}]`
   beside its body, in delivery order. Default raw reads omit the fact.
   `part` is the zero-based stored top-level content-part index, counted as
   in `reasoning_summaries`, never a projected display index or opaque key.
-  `call_key` is the carrying call's recorded key. `delivered_as` is an open
-  string, currently `"tool_result"` for every entry this fact serves; a
+  `call_key` is the carrying call's recorded key. `call_carrier` follows
+  §9.16, on both `read::NoticeFact` and display-row notice facts.
+  `delivered_as` is an open string, currently `"tool_result"` for every entry this fact serves; a
   later delivery mode can use the same shape. Readers place a `tool_result`
   notice under the call whose key it names.
 - [pinned] `send_id` on a notice joins it to the send that the tool result
@@ -4152,11 +4179,12 @@ never less. This is the safe fallback because nothing gets hidden.
   assistant message that made the call, the fact sits on that result entry,
   and `part` is the result's index within it (`0` when the entry holds only
   the result). In both cases `call_key` names the carrying call, so a reader
-  places the notice by `call_key`, not by the entry or part. All notices of
-  one carrying call are listed on one entry, in delivery order, so a reader
+  places the notice by the carrier and `call_key` (§9.16), not by the entry
+  or part. All notices of one carrying call are listed on one entry, in delivery order, so a reader
   can order them from that one list.
 - [pinned] Delivery emits the live event
-  `notice_delivered {mid, part, call_key, send_id, sender, text, speaks_for?}`, identifying the
+  `notice_delivered {mid, part, call_key, call_carrier?, send_id, sender, text, speaks_for?}`
+  (`live::NoticeDelivered`), with `call_carrier` following §9.16, identifying the
   carrying message and part, not a new entry. Neither delivery nor the fact
   moves `history_version`. Neither the live event nor the read/display fact
   is covered by any checksum; this does not exempt the compaction contract's
@@ -4593,9 +4621,10 @@ its host's file storage, not a second copy of the host's media store.
   per session by SHA-256; an existing stored part or media store may serve it
   if it lives as long as every record naming it.
 - [pinned] One message's or call's records form an immutable set with descriptor
-  `{set_id, mid, call_key?, dialect, count, digest}`, at most 4,096 encoded
-  bytes. `call_key` on the descriptor identifies the containing call, not a
-  referenced one. `digest` is lowercase SHA-256 of the RFC 8785 (JCS) encoding
+  `{set_id, mid, call_key?, call_carrier?, dialect, count, digest}`
+  (`output_refs::Descriptor`), at most 4,096 encoded bytes. `call_carrier`
+  follows §9.16. `call_key` on the descriptor identifies the containing call,
+  not a referenced one. `digest` is lowercase SHA-256 of the RFC 8785 (JCS) encoding
   of the records array in encounter order, retaining null fields and omitting
   absent `mime` and `reason`. `test-vectors/llm-runner-v1/output-refs.json`
   pins the exact canonical bytes and digest. Records survive compaction and
@@ -4919,6 +4948,9 @@ tool definition the call ran against, by which that module keys its views.
 A runner declaring `call_identity` (added in 0.7.2) puts both on every
 display tool-call entry it serves.
 
+An imported call is a historical call moved from another runner, which minted
+its key. From 0.8.16, `call_carrier` names that runner on reader call facts.
+
 - [pinned] The group adds no op. It extends the display tool-call entries
   of `history_display` (§4.7) and the live `tool_started` and
   `tool_finished` events of `live_events` (§7.1), so a runner declares it
@@ -4929,8 +4961,8 @@ display tool-call entry it serves.
   (`display::ToolCallPart`) on `session.history` with `form: "display"`,
   and every `tool_started` and `tool_finished` event (`live::ToolStarted`,
   `live::ToolFinished`), replays included. `session.read` serves no display
-  form, and its attribution already carries `call_key` (§5). Its one
-  addition is on opt-in display facts: with `include_display_facts` on a
+  form, and its attribution already carries `call_key` (§5). On opt-in
+  display facts, with `include_display_facts` on a
   runner declaring `read_display_facts`, each `tool_times` item carries
   both members under the presence rules below (§4.2).
 - [pinned] **`call_key`** is the call's key (§11.3), the same value
@@ -4950,19 +4982,57 @@ display tool-call entry it serves.
   a tool provider, and absent for a call never dispatched (denied, refused
   before dispatch, or sealed unsent) and for a runner-native tool, which has
   no provider definition.
-- [pinned] Absent means unknown, never empty: neither member is ever an
-  empty string. Both are opaque strings to readers: a reader compares them
+- [pinned] `call_identity.imported_call_carrier`: **`call_carrier`** is an
+  optional module id string: the attested module id of the runner that
+  minted the call's `call_key`, in the same
+  form as display `sender` and plan senders/readers. It is not a `Principal`
+  JSON object. It is present only when a runner other than the serving
+  runner minted the key, and never for the serving runner's own calls.
+  Absent means the serving runner is the carrier. The runner preserves both
+  the original key and carrier unchanged; it never re-mints an imported key
+  or rewrites its carrier.
+- [pinned] `call_carrier` follows `call_key` on `display::ToolCallPart`,
+  `read::ToolTime`, `read::ToolCallAttribution`, `live::ToolStarted`,
+  `live::ToolFinished`, `read::NoticeFact` (including its `RideFact` alias),
+  `live::NoticeDelivered` (including `RideDelivered`), `rides::Ride`,
+  `output_refs::Descriptor`, `delivery_order::EntryDelivery` and
+  `send::Delivered`. A notice or ride names the carrier of the call it rode,
+  not its sender. The field is gated by this existing group: a runner
+  without `call_identity` never sends it. No new group or dependency is added.
+  This does not add it to requests, `run.tool_calls` pages or
+  `output_refs::Record`.
+- [pinned] A `call_carrier` module id matches `[a-z0-9][a-z0-9_-]{0,63}`,
+  the module id bounds used by sender attribution. A malformed present
+  value fails the shared decode/check, including an empty string, `null`,
+  or a principal object; absence retains the existing serialized bytes.
+- [pinned] A reader matching a call's tool-display rows, notices or late
+  results stored by another module uses
+  `(call_carrier if present, else the serving runner's module id, call_key)`.
+  A runner is always a supervised module, so for tool-display records keyed
+  by a `Principal` JSON value the reader uses
+  `{"kind":"reserved","module_id": <that id>}` as the carrier principal.
+- [pinned] For `call_key` and `schema_pin`, absent means unknown, never
+  empty: neither is ever an empty string. Both are opaque strings to readers: a reader compares them
   whole and never parses them, the pin included.
-- [pinned] Neither member enters a stored message body or the default
-  `session.read` entry; the runner keeps them beside the stored call, as it
+- [pinned] None of `call_key`, `call_carrier` and `schema_pin` enters a
+  stored message body or the default `session.read` entry; the runner keeps
+  them beside the stored call, as it
   keeps `client_message_id` (§4.7).
-- [pinned] A runner without the group leaves both members out of every
-  entry, and a reader treats their absence there as saying nothing. A
+- [pinned] A runner without the group leaves the display `call_key` and
+  `schema_pin` facts out of every entry, and a reader treats their absence
+  there as saying nothing. A
   reader relies on the members only from a runner declaring the group.
 - [pinned] `call-identity.json` pins a call carrying both members (dispatched
   to a tool provider), `call_key` only (a runner-native tool, and a call
   prepared then denied) and neither (a call denied before it was keyed), on
   display rows and on both live events, and the discovery answers.
+- [pinned] `call-identity.json` also pins an imported display tool call and
+  a notice carrying its unchanged source key and `call_carrier`. The kit's
+  `call_identity_imported_call_carrier` case uses the optional
+  `seed_imported_tool_call` adapter hook; without it the case is inapplicable
+  with a reason naming the hook. With it, seeded reads retain the source
+  key and carrier, and the serving runner's own calls in the same session
+  omit `call_carrier`.
 
 ### 9.17 `rich_ui_stamp`: the rich UI stamp on a run's assistant replies
 
@@ -5127,6 +5197,153 @@ froze for a run to every assistant reply the run writes.
   is admission policy, not model input: both follow the single at-acceptance
   rule in §10.2, not the next-run rule. `app_readers::check_plan` validates
   the group gate and shape; `app_readers::admit` checks read admission.
+
+### 9.20 `fork_answer`: isolated questions on a frozen head
+
+- [pinned] `fork_answer.group`: this opt-in group serves
+  `session.fork_prepare`, `session.fork_ask` and `session.fork_end`. Each acts
+  on the session bound to the management route, with no session selector.
+  Callers use the operations only after discovery declares the group. New
+  request types reject unknown members (`invalid_params {field}`); this
+  changes neither `session.send`'s lenient decoding and preservation of
+  unknown members in `runner_params` nor `run.cancel`'s existing decoding.
+- [pinned] `fork_answer.prepare`: `session.fork_prepare {}` returns
+  `{fork_id}`, unique across the runner and never reused. It fixes the base
+  at the head's last served request, identified by the digest recorded over
+  its request bytes when served, plus the head's tools byte for byte, model,
+  thinking and effort, speed, service tier, tool choice and credential. A
+  runner declaring the group records that digest for every served request.
+  Without a served request prepare refuses `fork_base_unavailable`.
+- [pinned] `fork_answer.ask`: `session.fork_ask {fork_id, ask_id, question}`
+  returns `{answer, finish, usage}`. `ask_id` is 1–256 Unicode scalar values
+  and `question` is a non-empty string, otherwise `invalid_params {field}`
+  naming `ask_id` or `question`. `answer` is a string; `usage` is §6.4's
+  `RunUsage` over this ask's model calls. `finish` is open: `end_turn`,
+  `max_tokens`, `tool_call_refused`, `model_error`; unknown strings decode
+  and re-encode verbatim. The first question is appended to the base, each
+  later question after the fork's earlier questions and answers.
+- [pinned] `fork_answer.replay`: the runner decides an ask in this order:
+  (1) the caller is the fork's principal and the fork is unrevoked, otherwise
+  `unknown_fork`; (2) a stored answer for `(fork_id, ask_id)` with the same
+  question returns `answer`, `finish` and `usage` unchanged, without a model
+  call, even after end, expiry, loss of the base or restart; a different
+  question is `ask_id_reuse`; (3) any ask in flight on the fork, the same
+  `ask_id` included, makes this call `fork_busy`; (4) an expired fork is
+  `unknown_fork`, an ended one `fork_ended`; (5) check the exact base below.
+  Stored answers are kept at least 3,600 s after the fork ends or expires.
+  Refusals are never stored; retrying one is a new attempt, numbered from 1
+  per `(fork_id, ask_id)` and retained in the fork's session across restart.
+- [pinned] `fork_answer.model_failure`: after the base and account checks,
+  a model call that fails for any reason other than a tool call answers
+  `{answer: "", finish: "model_error", usage}` with its incurred usage.
+  The answer is stored like any other; neither the question nor partial text
+  joins the branch. The fork stays open for a new `ask_id`.
+- [pinned] `fork_answer.end`: `session.fork_end {fork_id}` returns
+  `{fork_id, ended: true}`, also on every repeat. An ask already in flight
+  finishes and its answer and usage are stored. An unknown, foreign or
+  revoked fork is `unknown_fork`.
+- [pinned] `fork_answer.expiry`: a fork expires `fork_idle_s` after the later
+  of prepare and its last ask's completion, on wall-clock time across
+  restart. Only an ask passing step 5 counts; replays and refusals do not
+  reset expiry. An ask in flight holds expiry off until it completes.
+- [pinned] `fork_answer.base`: on every new ask the runner rebuilds the base
+  and compares it with its digest. A mismatch or a gone base (a revert,
+  prune or new compaction view whose rebuild differs) refuses
+  `fork_base_unavailable`; the runner never sends near-identical bytes.
+  Head steps after prepare never move the base. The request an ask sends is
+  the base's bytes followed by the fork's appended messages, with one
+  exception: on a route whose wire format marks cache breakpoints explicitly
+  (such as `cache_control` on Anthropic Messages content blocks), the runner
+  may remove the head's last breakpoint marker and add one on the fork's
+  newest message. It never uses more breakpoints than the head's request did
+  or the provider allows. No other byte of the base may differ.
+- [pinned] `fork_answer.no_tools`: the per-call gate refuses every tool
+  call. A reply holding one answers with the text before it,
+  `finish: "tool_call_refused"` and its usage. That text joins the branch,
+  the answer is stored and the fork is ended; no tool runs.
+- [pinned] `fork_answer.head_isolation`: a fork never writes the head's
+  transcript, takes its lease or waits on its step; it runs while the head
+  runs. It emits no event on the head's `session.subscribe`, including
+  `run_started` and `run_finished`. A runner may refuse forks on a session
+  or storage that cannot serve them cheaply, `fork_unsupported`.
+- [pinned] `fork_answer.spend`: every fork attempt reaching a model call
+  returns its spend in the ask's `usage`, retained under the fork's own run
+  identity and `fork_id`, never the head's. An attempt refused before any
+  model call (`fork_account_held`, `fork_account_blocked`) has no spend and
+  records none.
+- [pinned] `fork_answer.routing_admission`: on a routed account each fork
+  attempt has its own admission, never the head's. It calls
+  `route.account_for` with the head's frozen `provider`, `model`,
+  `affinity_model`, `pool` and `service_tier` (§9.3.3), `requested_account`
+  naming the head's frozen account and credential, `hold_wait_max_s: 0`, no
+  `decision_id` and no `parent_conversation_key`. Every admission, a
+  mismatched one included, is released with `route.account_observe`
+  `run_finished`; ending the head never releases an admission a fork holds.
+- [pinned] `fork_answer.routing_keys`: let `head_key` be the head's
+  `route.account_for` `conversation_key`. The fork's `conversation_key` is
+  `fork:` followed by lowercase hex SHA-256 of the RFC 8785 serialization
+  of `{"fork_id": <fork_id>, "head_key": <head_key>}`: 69 characters, within
+  routing's 256-character bound even with a 256-character head key. Its
+  `admission_id` is `fork:` followed by the same hash of
+  `{"ask_id": <ask_id>, "attempt": <attempt>, "fork_id": <fork_id>}`;
+  `attempt` is a JSON integer. Each attempt gets a new admission, while a
+  transport retry of one attempt uses the same admission.
+- [pinned] `fork_answer.account_pin`: `requested_account` is only a hint,
+  so before any model call the runner compares routing's `account_id`,
+  `credential_id` and `service_tier_chosen` (absent means `standard`) with
+  the head's frozen values. It never switches account, credential or tier.
+  `account_hold`, `account_pool_exhausted`, `account_selection_unavailable`
+  and a mismatch refuse retryable
+  `fork_account_held {routing_code?, mismatch?}`, with `mismatch` one of
+  `account`, `credential`, `service_tier`. Every other routing refusal is
+  non-retryable `fork_account_blocked {routing_code}`. A mismatched
+  admission is released before any model call and records no spend.
+- [pinned] `fork_answer.restart`: the branch survives restart in its own
+  short-lived session keyed by fork id, never the head's session. An ask in
+  flight at restart is stored on recovery as `{answer: "", finish:
+  "model_error", usage}` with the usage recorded before restart, its
+  admission is released and the fork is no longer busy.
+- [pinned] `fork_answer.compaction_isolation`: a fork is never a head step
+  for the compaction provider. It sends the compaction provider no notice
+and no ride (the per-step call through which the provider's notes reach the
+head's next request, in the compaction contract), and updates none
+  of the head's prompt-size conditions (including
+  `conditions.last_prompt_tokens`) or usage.
+- [pinned] `fork_answer.callers`: plan member `fork_callers: [principal]`
+  names who may prepare. The session owner is not admitted unless listed;
+  absent or empty admits nobody. The principal is attested by the route,
+  never a request member. Admission reads `admission_plan(effective,
+  pending)` under the at-acceptance rule, as `readers` does (§9.19). A
+  non-admitted prepare refuses `scope_owner_mismatch`. A fork is bound to
+  the preparing principal; only that principal may ask or end it. Lookup is
+  by `(principal, fork_id)`: a foreign id is indistinguishable from an
+  unknown one and refuses `unknown_fork`, never revealing its existence.
+- [pinned] `fork_answer.callers_validation`: a runner declaring the group
+  refuses a `fork_callers` member that is not a list of non-empty strings
+  or contains a duplicate as `invalid_params {field: "plan.fork_callers"}`
+  at admission and refresh, writing nothing. A runner without the group
+  keeps the member uninterpreted and verbatim and serves no fork. Plan
+  members do not need stripping for non-declaring runners.
+- [pinned] `fork_answer.revocation`: an accepted refresh dropping a
+  principal revokes its forks. Every later ask, replay and end is
+  `unknown_fork`. An ask in flight finishes and its answer is stored, but
+  that call is refused `unknown_fork`, never returning the answer.
+  Re-adding a principal revives none of its revoked forks.
+
+The following rule is not kit-checked: `fork_answer.compaction_isolation`
+(`not_observable`); the conformance kit does not observe compaction calls or
+the head's prompt-size conditions.
+
+Informative, not a rule: forks are cheap only because the base is the head's
+exact last served request, which the provider has already cached. In a
+measurement in November 2026, forks of a 214,000-token head on an Anthropic
+route and a 132,000-token head on an OpenAI route read at least 99.9% of their
+input from the head's cache. The head's next step still read its whole
+prefix from the cache, and the median time to first token was about 2.9 s.
+On a route that marks cache breakpoints explicitly, a runner can let later
+questions on the same fork reuse the earlier ones by moving the head's
+last-message breakpoint onto the fork's newest message, keeping within the
+provider's breakpoint limit (four on Anthropic).
 
 ## 10. `session.baseline` and the admission reply
 
@@ -5757,6 +5974,14 @@ treats it as a terminal refusal of that one request.
 
 | Code | When | Detail | Retry |
 |---|---|---|---|
+| `unknown_fork` | unknown, foreign, expired or revoked fork (§9.20); a retained answer replays after expiry only for its unrevoked principal | — | no |
+| `fork_ended` | a new ask on an ended fork | — | no |
+| `fork_busy` | another ask is in flight on the fork, including the same ask id | — | **yes** |
+| `ask_id_reuse` | a completed ask id reused with a different question | — | no |
+| `fork_base_unavailable` | no served request at prepare, or the exact frozen base cannot be rebuilt at ask | — | no |
+| `fork_unsupported` | the session or storage cannot serve forks cheaply | — | no |
+| `fork_account_held` | routing temporarily cannot supply the head's frozen account, credential and tier | `routing_code?`, `mismatch?`: `account`, `credential` or `service_tier` | **yes** |
+| `fork_account_blocked` | another routing refusal before any model call | `routing_code` | no |
 | `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a compaction_item without a string preset (field plan.compaction_item.preset); a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.subscribe` request with malformed `from` (field `from`, §7); a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
 | `history_changed` | a read cursor names another history_version | — | no: read a fresh page |
 | `served_bytes_changed` | a read would serve a message whose body, rebuilt from the host's store, differs from the digest it was first served with (§4.2.1); or a `run.tool_calls` page rebuilds `args` from a requesting message under the same whole-message digest check (`served_bytes::served_body` and `check_served`), and that rebuild differs or its host row is gone (§6.3). The whole page is refused, never a partial page or a call with absent or different `args` | `{mid}` (`errors::ServedBytesChangedDetail`), the first such message in page order; no content or digest | no. For a read: the changed message is served again only under a raised history_version, so re-read from the tail. For `run.tool_calls`: don't retry that page; the requesting message can't be reproduced, and reading the current transcript doesn't recover the original run's arguments |
@@ -5817,6 +6042,28 @@ treats it as a terminal refusal of that one request.
 | `generation_stale` | a `session.refresh` at or below the accepted generation that is not an identical repeat (§10.2) | `{accepted}` | no |
 | `tool_outside_host_set` | without `refresh_relaunch`, a `session.refresh` plan naming a tool outside the tool set the host fixed at start, a changed definition under a kept name included (§10.2) | `{names}` | no |
 
+- [pinned] `fork_answer.code_unknown_fork`: the `unknown_fork` row above is
+  normative and the code is in `errors::CODES` and `errors.json`.
+- [pinned] `fork_answer.code_fork_ended`: the `fork_ended` row above is
+  normative and the code is in `errors::CODES` and `errors.json`.
+- [pinned] `fork_answer.code_fork_busy`: the `fork_busy` row above is
+  normative and the code is in `errors::CODES` and `errors.json`.
+- [pinned] `fork_answer.code_ask_id_reuse`: the `ask_id_reuse` row above is
+  normative and the code is in `errors::CODES` and `errors.json`.
+- [pinned] `fork_answer.code_fork_base_unavailable`: the
+  `fork_base_unavailable` row above is normative and the code is in
+  `errors::CODES` and `errors.json`.
+- [pinned] `fork_answer.code_fork_unsupported`: the `fork_unsupported` row
+  above is normative and the code is in `errors::CODES` and `errors.json`.
+- [pinned] `fork_answer.code_fork_account_held`: the `fork_account_held` row
+  above is normative and the code is in `errors::CODES` and `errors.json`.
+- [pinned] `fork_answer.code_fork_account_blocked`: the
+  `fork_account_blocked` row above is normative and the code is in
+  `errors::CODES` and `errors.json`.
+- [pinned] `fork_answer.retryable`: among the eight fork codes,
+  `errors::is_retryable` is true exactly for `fork_busy` and
+  `fork_account_held`. No old code's retry classification changes; no
+  refusal gains a `class` member.
 - [pinned] Only the codes marked retryable are retried with the same request
   (`errors::is_retryable`). A refusal is an answer: retrying it unchanged
   meets the same refusal.

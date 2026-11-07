@@ -80,6 +80,18 @@ fn call_holder(sess: &Sess, key: &str) -> (String, String) {
     (message.mid.clone(), name.to_owned())
 }
 
+/// The carrier recorded for an imported call, with the fake's identity faults.
+pub(super) fn call_carrier(world: &World, sess: &Sess, key: &str) -> Option<String> {
+    let carrier = sess.calls.get(key)?.call_carrier.clone();
+    if world.defects.call_identity_drops_carrier {
+        None
+    } else if carrier.is_none() && world.defects.call_identity_own_carrier {
+        Some("conformance-runner".into())
+    } else {
+        carrier
+    }
+}
+
 /// The `call_key` and `schema_pin` a display entry of call `key` carries on
 /// a runner declaring `call_identity`, with the fake's deliberate breaks.
 /// `live` is set for a live tool event and clear for a display history row,
@@ -234,15 +246,22 @@ pub(super) fn live_events(
                     invented,
                 )));
                 started["arguments_value"] = call.arguments.clone();
+                if call.call_carrier.is_some() {
+                    started[EVENT_CALL_KEY] = json!(key);
+                }
                 out.push(started);
                 if !defects.live_tool_finished_missing {
-                    out.push(event(LiveEvent::ToolFinished(ToolFinished::new(
+                    let mut finished = event(LiveEvent::ToolFinished(ToolFinished::new(
                         mid,
                         &call.tool_call_id,
                         live::tool_outcomes::OK,
                         result_text(&record["content"]).len() as u64,
                         invented,
-                    ))));
+                    )));
+                    if call.call_carrier.is_some() {
+                        finished[EVENT_CALL_KEY] = json!(key);
+                    }
+                    out.push(finished);
                 }
             }
         }
@@ -471,6 +490,7 @@ impl Module {
                     if let Some(key) = key {
                         let (call_key, pin) = call_identity(&self.world, session, sess, key, false);
                         call.call_key = call_key;
+                        call.call_carrier = call_carrier(&self.world, sess, key);
                         call.schema_pin = pin;
                     }
                 }
@@ -608,6 +628,9 @@ impl Module {
                     self.world.serves(groups::CALL_IDENTITY),
                 ) {
                     let (call_key, pin) = call_identity(&self.world, session, sess, &key, true);
+                    if let Some(carrier) = call_carrier(&self.world, sess, &key) {
+                        event["call_carrier"] = json!(carrier);
+                    }
                     if let Some(call_key) = call_key {
                         event["call_key"] = json!(call_key);
                     }

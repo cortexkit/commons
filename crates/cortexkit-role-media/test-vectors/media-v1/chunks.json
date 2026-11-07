@@ -1,0 +1,20 @@
+{
+  "uploads":[
+    {"name":"upload_at_2097152_decoded_bytes","byte":97,"decoded_bytes":2097152,"valid":true},
+    {"name":"upload_at_2097153_decoded_bytes","byte":97,"decoded_bytes":2097153,"valid":false}
+  ],
+  "reads":[
+    {"name":"read_at_2097152_bytes","length":2097152,"valid":true},
+    {"name":"read_at_2097153_bytes","length":2097153,"valid":false}
+  ],
+  "lifecycle":{
+    "begin":{"mime":"audio/wav","bytes":1,"sha256":"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"},
+    "begun":{"upload_id":"upload-1"},
+    "append":{"upload_id":"upload-1","offset":0,"data":"YQ=="},
+    "appended":{"received":1},
+    "status":{"state":"open","received":1},
+    "committed":{"state":"committed","mime":"audio/wav","bytes":1,"sha256":"ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"},
+    "read":{"object_id":"upload-1","offset":0,"length":1},
+    "read_answer":{"data":"YQ=="}
+  }
+}

@@ -5,7 +5,7 @@ available tier, ordered fallback with the chosen tier recorded, and a caller
 that omits tiers for a non-declaring router. The cases use the existing
 `configure_service_tiers` plan fixture hook; for an unsupported fixture the
 report marks each affected case `NotApplicable` with its name and reason,
-never passed. This release pins routing 0.7.0 exactly, whose account answer
+never passed. This release pins routing 0.7.3 exactly, whose account answer
 and pin use constructors instead of exhaustive Rust struct literals.
 
 The conformance kit for the `routing/v1` role
@@ -16,7 +16,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.10.0"
+cortexkit-role-routing-conformance = "0.10.3"
 ```
 
 ```rust,ignore
@@ -104,6 +104,69 @@ missing hook. `CatalogModel.family: Option<String>` is a breaking Rust minor
 addition to an exhaustive fixture type; adapters must supply it.
 
 ## Checks
+
+### Media engine selection (routing 0.7.3)
+
+All `select_engine_*` checks are not applicable when the router does not
+declare `select_engine`. Engine slots are installed through
+`configure_catalog_declarations` under `media-provider/v1`; the adapter
+must replace that fixture's slots without discarding decisions or admissions.
+The kit opens each media module's routes as that module, under the principal
+the daemon attests for a supervised module (`reserved:<module id>`), because
+routing learns engines only from a module whose declaration the daemon verified.
+
+Two additional hooks are required by the cases that need them:
+
+- `configure_engine_facts(facts)` replaces the accuracy and cost measurements
+  for each `(kind, provider, model)`, including caller-local engines. Each
+  `EngineFacts::new(kind, provider, model)` starts with both measurements absent;
+  `with_accuracy(n)` and `with_cost(n)` supply integer fixture units. Larger
+  accuracy is better, smaller cost is better, and absence sorts below a measured
+  value. These are relative ranking facts, not monetary amounts or a prescribed
+  production measurement scale.
+- `advance_clock(ms)` advances the provider's clock, firing every timer due in
+  the interval before returning, while retaining decisions and admission replay
+  state. The expiry cases advance ten minutes without sleeping.
+
+The defaults return errors naming the missing hook. A router declaring the group
+fails the affected check until its adapter implements the hook; it never silently
+passes or skips an unsupported fixture.
+
+`select_engine_slot_*` checks atomic rejection of malformed, duplicate and
+empty-format slots and ignores nonce-unverified slots. `select_engine_request`,
+`select_engine_requirements_valid` and `select_engine_caller_local` check
+ownership, unknown/malformed members, refusals whose `field` names the failing
+list entry by index (for example `caller_local[0].local`), and that a
+`priced_only` consumer (one answered only with routes priced per token, §4)
+still gets local and caller-local engines, because no consumer policy
+restricts engine selection (§13). `select_engine_filters`, `select_engine_privacy`,
+`select_engine_reachability` and `select_engine_match_requirements` check every
+filter and all eleven requirements, including absent optional facts and exact
+limits. `select_engine_answer` checks module/caller-local members and ten-minute
+expiry; `select_engine_ranking` uses explicit accuracy/cost fixtures and stable
+module/provider/model ties with mixed caller-local and module engines.
+
+`select_engine_report` joins a report using only `decision_id` and `outcome` and
+rejects another principal; `select_engine_explain` requires `unknown_decision`
+when `explain` is also declared. `select_engine_media_admission` checks undecided
+admission for a remote pair in an attested slot and refusal outside that slot.
+The `select_engine_admission_*` cases check selected-module and pair binding,
+caller-local refusal, pre-expiry admission, expiry for a new admission and the
+unchanged replay of an admission accepted before expiry.
+
+`rule-map.json` maps every pinned `select_engine` id, including the admission
+and `no_engine` additions outside §13 of routing's `CONTRACT.md`, to one or more
+registered cases. Every
+rule is kit-checked; there are no `not_kit_checked` entries. The meta-tests run
+each mapped case against the conforming fake and a deliberately incorrect fake,
+and assert that the runner reports failure under that case's name. Separate
+faults that ignore each requirement must also be rejected.
+
+Health diagnostics for malformed slots, internal decision-to-consumer storage,
+and route scope isolation are not observable through these media fixtures.
+Remote reachability uses a cooldown rather than separately simulating backoff,
+quota exhaustion and recorded failure. No test inspects real billing or engine
+accuracy. The exported `NARROWINGS` repeats these coverage limits.
 
 ### Routing 0.7.0 and 0.7.1 additions
 

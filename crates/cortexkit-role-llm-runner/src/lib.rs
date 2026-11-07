@@ -28,6 +28,7 @@ pub mod archive_prunes_reasoning;
 pub mod attachments;
 pub mod attribution;
 pub mod baseline;
+mod call_carrier;
 pub mod compaction;
 pub mod content_digest;
 pub mod delivery_order;
@@ -36,6 +37,7 @@ pub mod directives;
 pub mod display;
 pub mod errors;
 pub mod finish;
+pub mod fork_answer;
 pub mod head_selection;
 pub mod history;
 pub mod live;
@@ -100,6 +102,12 @@ pub const TRANSPORT_FRAME_LIMIT: usize = 4_194_304;
 
 /// Names of the ops a runner serves.
 pub mod ops {
+    /// Freeze the last served head request as a question-answering branch.
+    pub const SESSION_FORK_PREPARE: &str = "session.fork_prepare";
+    /// Ask on a prepared branch without running tools or changing the head.
+    pub const SESSION_FORK_ASK: &str = "session.fork_ask";
+    /// End a prepared branch, retaining completed answers for replay.
+    pub const SESSION_FORK_END: &str = "session.fork_end";
     pub const SESSION_RELEASE: &str = "session.release";
     pub const SESSION_OUTPUT_REFS: &str = "session.output_refs";
     pub const SESSION_OUTPUT_REF_READ: &str = "session.output_ref_read";
@@ -176,6 +184,8 @@ pub const SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY: &str = "system-text-default/v
 /// the session-level capabilities a session's admission reply or baseline
 /// declares.
 pub mod capabilities {
+    /// Questions on an isolated branch of the head's last served request.
+    pub const FORK_ANSWER: &str = "fork_answer";
     /// Provider service levels, route support and truthful served-tier usage.
     pub const SERVICE_TIER: &str = "service_tier";
     /// Durable owner-selected model and default tier for subsequent runs.
@@ -399,6 +409,14 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (
+            FORK_ANSWER,
+            &[
+                ops::SESSION_FORK_PREPARE,
+                ops::SESSION_FORK_ASK,
+                ops::SESSION_FORK_END,
+            ],
+        ),
         (TOOL_UPFRONT, &[ops::SESSION_SEND]),
         (SERVICE_TIER, &[ops::SESSION_SEND]),
         (HEAD_SELECTION, &[ops::SESSION_SEND, ops::SESSION_HEAD]),

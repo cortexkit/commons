@@ -351,13 +351,28 @@ pub struct EntryDelivery {
     /// with.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_key: Option<String>,
+    /// The attested module id of the runner that minted this imported call's key.
+    /// Only with `call_identity`; absent for the serving runner's own calls (§9.16).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::call_carrier::deserialize"
+    )]
+    pub call_carrier: Option<String>,
 }
 
 impl EntryDelivery {
+    /// Name the other runner that minted the call's key; never set for local calls.
+    pub fn with_call_carrier(mut self, call_carrier: impl Into<String>) -> Self {
+        self.call_carrier = Some(call_carrier.into());
+        self
+    }
+
     pub fn new(mode: Mode) -> Self {
         Self {
             mode: mode.as_str().to_owned(),
             call_key: None,
+            call_carrier: None,
         }
     }
 

@@ -123,6 +123,19 @@ where
                     Err(error)
                 } else if let Ok(Some(reason)) = mode_gate {
                     Ok(Ending::Inapplicable(reason))
+                } else if matches!(
+                    spec.name,
+                    "fork_answer_ask_id_replays" | "fork_answer_survives_restart"
+                ) {
+                    crate::fork_answer::restart(
+                        subject,
+                        &mut driver,
+                        work_dir,
+                        &declared,
+                        &mint,
+                        spec.name,
+                    )
+                    .await
                 } else if spec.name == "input_token_cap_restart_between_episodes" {
                     crate::input_token_cap::restart(
                         subject,
@@ -485,5 +498,35 @@ mod retention_gate_tests {
                 "{name}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod fork_answer_gate_tests {
+    use super::*;
+
+    #[test]
+    fn fork_answer_cases_require_explicit_opt_in() {
+        let mut checked = 0;
+        for spec in CASES
+            .iter()
+            .filter(|spec| spec.name.starts_with("fork_answer_"))
+        {
+            let mut declared: BTreeSet<_> = spec
+                .requires
+                .iter()
+                .copied()
+                .filter(|cap| *cap != Capability::ForkAnswer)
+                .collect();
+            assert!(
+                matches!(gate(spec,&declared),Some(CaseOutcome::Skipped { missing }) if missing==vec![Capability::ForkAnswer]),
+                "{}",
+                spec.name
+            );
+            declared.insert(Capability::ForkAnswer);
+            assert!(gate(spec, &declared).is_none(), "{}", spec.name);
+            checked += 1;
+        }
+        assert_eq!(checked, 13);
     }
 }
