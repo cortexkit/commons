@@ -172,6 +172,34 @@ pub struct CallModeProbe {
 /// the harness's real route; nothing here answers on the module's behalf.
 #[async_trait]
 pub trait ToolProviderSubject: Harness {
+    /// Seed fresh live work in two sessions. The alternate-principal route
+    /// binds the primary harness/session pair under another attested principal.
+    /// Supplied fixtures require a manifest declaring `stop-session/v1`.
+    async fn stop_session_fixture(
+        &self,
+        _handle: &Self::Handle,
+    ) -> Result<Option<crate::StopSessionFixture<Self::Route>>, HarnessError> {
+        Ok(None)
+    }
+    /// Independently inspect provider-owned work, not the stop reply.
+    async fn stop_session_work_running(
+        &self,
+        _handle: &Self::Handle,
+        _id: &str,
+    ) -> Result<bool, HarnessError> {
+        Err(HarnessError::new("no stop-session work observation"))
+    }
+    /// A waiting call for the call-yield cases, or no fixture. `tagged` selects
+    /// a tool whose catalog does or does not carry `call.yield/v1`. Supplying
+    /// either fixture promises the manifest provides `call-yield/v1`.
+    fn call_yield_call(&self, _tagged: bool) -> Option<CallSpec> {
+        None
+    }
+
+    /// Observe the real incoming call before sending `tool.yield` on its route.
+    async fn await_yield_call(&self, _call_key: &str) -> Result<(), HarnessError> {
+        Err(HarnessError::new("no call-yield provider observation hook"))
+    }
     /// Open a real session scope; codemode adds `run_id`, flow adds `flow_id`.
     /// The adapter must stamp these fields on the bind, not in the call body.
     async fn user_command_route(

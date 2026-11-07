@@ -564,6 +564,56 @@
         ],
         "session_capabilities_from": "admission"
       }
+    },
+    {
+      "name": "call_yield without plans",
+      "problem": "call_yield_without_plans",
+      "answer": {
+        "majors": [{"version":"llm-runner/v1","ops":["role.describe","session.baseline","session.send","session.read","session.history","session.subscribe"]}],
+        "implementation_version":"1",
+        "capabilities":["call_yield","delivery_order","notices","message_marks","read_display_facts","history_display","live_events"],
+        "session_capabilities_from":"admission"
+      }
+    },
+    {
+      "name": "call_yield without delivery_order",
+      "problem": "call_yield_without_delivery_order",
+      "answer": {
+        "majors": [{"version":"llm-runner/v1","ops":["role.describe","session.baseline","session.send","session.read","session.history","session.subscribe"]}],
+        "implementation_version":"1",
+        "capabilities":["call_yield","plans","notices","message_marks","read_display_facts","history_display","live_events"],
+        "session_capabilities_from":"admission"
+      }
+    },
+    {
+      "name": "call_yield without notices",
+      "problem": "call_yield_without_notices",
+      "answer": {
+        "majors": [{"version":"llm-runner/v1","ops":["role.describe","session.baseline","session.send","session.read","session.history","session.subscribe"]}],
+        "implementation_version":"1",
+        "capabilities":["call_yield","plans","delivery_order","message_marks","read_display_facts","history_display","live_events"],
+        "session_capabilities_from":"admission"
+      }
+    },
+    {
+      "name": "call_yield without message_marks",
+      "problem": "call_yield_without_message_marks",
+      "answer": {
+        "majors": [{"version":"llm-runner/v1","ops":["role.describe","session.baseline","session.send","session.read","session.history","session.subscribe"]}],
+        "implementation_version":"1",
+        "capabilities":["call_yield","plans","delivery_order","notices","read_display_facts","history_display","live_events"],
+        "session_capabilities_from":"admission"
+      }
+    },
+    {
+      "name": "stop_all without interrupt cancellation",
+      "problem": "stop_all_without_run_cancel_by_interrupt",
+      "answer": {
+        "majors": [{"version":"llm-runner/v1","ops":["role.describe","session.baseline","session.stop_all","run.cancel"]}],
+        "implementation_version":"1",
+        "capabilities":["stop_all"],
+        "session_capabilities_from":"admission"
+      }
     }
   ]
 }

@@ -22,6 +22,12 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("call_yield_") || case.starts_with("stop_session_") {
+        if let Some(CaseOutcome::Inapplicable { reason }) = report.outcome(case) {
+            assert!(reason.contains("adapter supplies no"), "{case}: {reason}");
+            return;
+        }
+    }
     assert_eq!(
         report.outcome(case),
         Some(&CaseOutcome::Passed),

@@ -45,11 +45,12 @@ fn validate_map(contract: &str, map: &Value) -> Check {
     let section = contract
         .split("### 9.20 `fork_answer`")
         .nth(1)
-        .ok_or("no fork section")?
-        .split("## 10.")
-        .next()
-        .unwrap();
-    for line in section.lines().filter(|l| l.starts_with("- [pinned]")) {
+        .ok_or("no fork section")?;
+    for line in section
+        .lines()
+        .take_while(|line| !line.starts_with("### ") && !line.starts_with("## "))
+        .filter(|line| line.starts_with("- [pinned]"))
+    {
         if !line.starts_with("- [pinned] `fork_answer.") || !line.contains("`:") {
             return Err("fork rule has no id".into());
         }

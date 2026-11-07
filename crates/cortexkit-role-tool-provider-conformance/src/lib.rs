@@ -26,9 +26,12 @@
 
 #![forbid(unsafe_code)]
 
+mod call_yield;
 mod report;
 mod route;
 mod runner;
+mod stop_session;
+pub use stop_session::StopSessionFixture;
 mod subject;
 
 pub use cortexkit_role_harness as harness;

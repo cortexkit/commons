@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.3
+
+- Add `stop-session/v1`, route-keyed session-wide stop requests, safe bounded
+  display replies, request checks and vectors. Separate principals and sessions
+  cannot stop each other's work.
+- Add opt-in `call-yield/v1`, per-tool `call.yield/v1` tags, `tool.yield`
+  requests and answers, carrier-only
+  route lookup, and the five-second hand-back promise without cancelling work.
+- Add optional `held.yielded`, capability checks and shared JSON vectors.
+
 ## Unreleased
 
 - Contract text only (§4): a carrier never sends the same `call_key` for two

@@ -1,0 +1,17 @@
+{
+  "requests": [
+    {"params":{"request_id":"stop-1"},"valid":true},
+    {"params":{"run_id":"run-1","request_id":"stop-1"},"valid":true},
+    {"params":{"request_id":""},"valid":false,"field":"request_id"},
+    {"params":{"request_id":"bad\nkey"},"valid":false,"field":"request_id"},
+    {"params":{"request_id":"stop-1","at":"step_boundary"},"valid":false,"field":"at"},
+    {"params":{"request_id":"stop-1","session":"other"},"valid":false,"field":"session"},
+    {"params":{"request_id":"stop-1","run_id":null},"valid":false,"field":"run_id"}
+  ],
+  "reply":{"providers":[
+    {"provider":"one","outcome":"answered","items":[{"kind":"future_kind","label":"Work","outcome":"future_outcome","future_member":true}],"more":3},
+    {"provider":"two","outcome":"no_answer"},
+    {"provider":"three","outcome":"not_declared"},
+    {"provider":"four","outcome":"unreachable"}
+  ],"runner":{"items":[{"kind":"consult","label":"Open question","outcome":"paused"}]}}
+}

@@ -123,7 +123,7 @@ pub fn parse_withdraw_request(request: &ToolCallRequest) -> Result<WithdrawArgum
     if request.call_key.is_some() {
         return Err(errors::invalid_request(
             CALL_KEY_FIELD,
-            "tool.withdraw names its target in arguments.call_key and carries no call_key of its own",
+            "the target is arguments.call_key; this request carries no call_key of its own",
         ));
     }
     let arguments: WithdrawArguments = serde_json::from_value(request.arguments.clone())

@@ -27,6 +27,12 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const STOP_ALL_WITHOUT_RUN_CANCEL_BY_INTERRUPT: &str =
+        "stop_all_without_run_cancel_by_interrupt";
+    pub const CALL_YIELD_WITHOUT_PLANS: &str = "call_yield_without_plans";
+    pub const CALL_YIELD_WITHOUT_DELIVERY_ORDER: &str = "call_yield_without_delivery_order";
+    pub const CALL_YIELD_WITHOUT_NOTICES: &str = "call_yield_without_notices";
+    pub const CALL_YIELD_WITHOUT_MESSAGE_MARKS: &str = "call_yield_without_message_marks";
     pub const FORK_IDLE_S_MISSING: &str = "fork_idle_s_missing";
     pub const FORK_IDLE_S_UNDECLARED: &str = "fork_idle_s_undeclared";
     pub const FORK_IDLE_S_INVALID: &str = "fork_idle_s_invalid";
@@ -686,6 +692,31 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             problem_names::NOTICES_WITHOUT_LIVE_EVENTS,
         ),
         (
+            capabilities::CALL_YIELD,
+            capabilities::PLANS,
+            problem_names::CALL_YIELD_WITHOUT_PLANS,
+        ),
+        (
+            capabilities::CALL_YIELD,
+            capabilities::DELIVERY_ORDER,
+            problem_names::CALL_YIELD_WITHOUT_DELIVERY_ORDER,
+        ),
+        (
+            capabilities::CALL_YIELD,
+            capabilities::NOTICES,
+            problem_names::CALL_YIELD_WITHOUT_NOTICES,
+        ),
+        (
+            capabilities::CALL_YIELD,
+            capabilities::MESSAGE_MARKS,
+            problem_names::CALL_YIELD_WITHOUT_MESSAGE_MARKS,
+        ),
+        (
+            capabilities::STOP_ALL,
+            capabilities::RUN_CANCEL_BY_INTERRUPT,
+            problem_names::STOP_ALL_WITHOUT_RUN_CANCEL_BY_INTERRUPT,
+        ),
+        (
             capabilities::HEAD_SELECTION,
             capabilities::PLANS,
             problem_names::HEAD_SELECTION_WITHOUT_PLANS,
@@ -1299,6 +1330,19 @@ mod tests {
         match problem {
             DescribeProblem::NotAnObject => "not_an_object",
             DescribeProblem::Undecodable(name) => match name.as_str() {
+                problem_names::CALL_YIELD_WITHOUT_PLANS => problem_names::CALL_YIELD_WITHOUT_PLANS,
+                problem_names::CALL_YIELD_WITHOUT_DELIVERY_ORDER => {
+                    problem_names::CALL_YIELD_WITHOUT_DELIVERY_ORDER
+                }
+                problem_names::CALL_YIELD_WITHOUT_NOTICES => {
+                    problem_names::CALL_YIELD_WITHOUT_NOTICES
+                }
+                problem_names::CALL_YIELD_WITHOUT_MESSAGE_MARKS => {
+                    problem_names::CALL_YIELD_WITHOUT_MESSAGE_MARKS
+                }
+                problem_names::STOP_ALL_WITHOUT_RUN_CANCEL_BY_INTERRUPT => {
+                    problem_names::STOP_ALL_WITHOUT_RUN_CANCEL_BY_INTERRUPT
+                }
                 problem_names::RUN_CANCEL_UNDECLARED => problem_names::RUN_CANCEL_UNDECLARED,
                 problem_names::EMPTY_RUN_CANCEL_AT => problem_names::EMPTY_RUN_CANCEL_AT,
                 problem_names::MISSING_RUN_CANCEL_NOW => problem_names::MISSING_RUN_CANCEL_NOW,

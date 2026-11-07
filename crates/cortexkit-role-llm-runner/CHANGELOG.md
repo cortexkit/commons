@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.17
+
+- Add `stop_all` and `session.stop_all`: durable turn termination followed by
+  parallel session-wide cleanup, a 15-second total budget, interrupt-grant
+  admission, frozen/applied plan union and durable request-id replay.
+- Add the `call_yield` describe group and gated `PlanSender.person` mark.
+- Define person-steer hand-back, parallel yield dispatch, durable steer storage,
+  yielded held replies without pausing, and durable late-result notices across
+  Stop and restart. Add shared helpers and vectors.
+
 ## 0.8.16
 
 - Add optional `call_carrier` under `call_identity` to history call facts,

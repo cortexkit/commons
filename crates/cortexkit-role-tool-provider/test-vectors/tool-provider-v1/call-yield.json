@@ -1,0 +1,16 @@
+{
+  "opt_in": {
+    "provided_capabilities": ["tool-provider/v1", "call-yield/v1"],
+    "tool_capabilities": ["call.yield/v1"],
+    "consumer_capabilities": ["tool-result/v1", "held-reply/v1", "call-yield/v1"]
+  },
+  "requests": [
+    {"request":{"name":"tool.yield","arguments":{"call_key":"call-1","reason":"person_message"}},"valid":true},
+    {"request":{"name":"tool.yield","arguments":{"call_key":"call-1","reason":"future_reason"}},"valid":true},
+    {"request":{"name":"tool.yield","arguments":{"call_key":"bad key","reason":"person_message"}},"valid":false,"field":"arguments.call_key"},
+    {"request":{"name":"tool.yield","call_key":"own-key","arguments":{"call_key":"call-1","reason":"person_message"}},"valid":false,"field":"call_key"},
+    {"request":{"name":"tool.yield","arguments":{"call_key":"call-1","reason":"Not snake"}},"valid":false,"field":"arguments.reason"}
+  ],
+  "answers": [{"answer":"accepted"},{"answer":"not_yieldable"},{"answer":"not_yieldable","reason":"busy"},{"answer":"unknown_call"}],
+  "held": {"content":[{"type":"text","text":"Work continues; its result will arrive later."}],"held":{"reason":"running","yielded":true}}
+}

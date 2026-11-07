@@ -1,0 +1,16 @@
+{
+  "requests": [
+    {"request":{"name":"tool.stop_session","arguments":{"request_id":"stop-1"}},"bound":true,"valid":true},
+    {"request":{"name":"tool.stop_session","arguments":{"request_id":"stop-1"}},"bound":false,"valid":false,"field":"route"},
+    {"request":{"name":"tool.stop_session","arguments":{"request_id":"stop-1","session":"other"}},"bound":true,"valid":false,"field":"arguments.session"},
+    {"request":{"name":"tool.stop_session","arguments":{"request_id":"stop-1","runner":"other"}},"bound":true,"valid":false,"field":"arguments.runner"},
+    {"request":{"name":"tool.stop_session","arguments":{"request_id":""}},"bound":true,"valid":false,"field":"arguments.request_id"},
+    {"request":{"name":"tool.stop_session","arguments":{"request_id":"bad\nkey"}},"bound":true,"valid":false,"field":"arguments.request_id"}
+  ],
+  "reply": {"items":[
+    {"kind":"shell","id":"task-1","label":"Waiting shell task","outcome":"stopped"},
+    {"kind":"worker","label":"Background worker","outcome":"paused"},
+    {"kind":"remote_build","label":"Remote build","outcome":"could_not_stop","reason":"Build service is unavailable"},
+    {"kind":"future_kind","label":"Finished work","outcome":"future_outcome"}
+  ],"more":2}
+}

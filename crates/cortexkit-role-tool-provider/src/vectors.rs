@@ -7,6 +7,12 @@
 /// The vectors' directory name, inside `test-vectors/`.
 pub const DIR: &str = "tool-provider-v1";
 
+/// Opt-in yield requests, answers and a yielded held reply.
+pub const CALL_YIELD_JSON: &str = include_str!("../test-vectors/tool-provider-v1/call-yield.json");
+/// Bound session stops, body-address refusals, and bounded open reply items.
+pub const STOP_SESSION_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/stop-session.json");
+
 /// The `call-key.json` vector cases.
 pub const CALL_KEY_JSON: &str = include_str!("../test-vectors/tool-provider-v1/call-key.json");
 /// The `call-keepalive.json` body, recognition and deadline cases.
@@ -91,6 +97,8 @@ pub const README: &str = include_str!("../test-vectors/tool-provider-v1/README.m
 
 /// Every vector file as `(file name, contents)`, in `SHA256SUMS` order.
 pub const FILES: &[(&str, &str)] = &[
+    ("stop-session.json", STOP_SESSION_JSON),
+    ("call-yield.json", CALL_YIELD_JSON),
     (
         "reference-slots.json",
         include_str!("../test-vectors/tool-provider-v1/reference-slots.json"),

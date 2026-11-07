@@ -1,0 +1,14 @@
+{
+  "senders": [{"module":"app-gateway","person":true},{"module":"peer"}],
+  "triggers": [
+    {"sender":"app-gateway","delivery":"steer","expected":true},
+    {"sender":"app-gateway","delivery":["steer","idle_start"],"expected":true},
+    {"sender":"app-gateway","delivery":"queue","expected":false},
+    {"sender":"app-gateway","delivery":["idle_start","steer"],"expected":false},
+    {"sender":"app-gateway","delivery":"steer","notice":true,"expected":false},
+    {"sender":"app-gateway","delivery":"steer","speaks_for":{"agent_id":"agent"},"expected":false},
+    {"sender":"peer","delivery":"steer","expected":false},
+    {"sender":"unknown","delivery":"steer","expected":false}
+  ],
+  "yielded": {"carrier":"runner","call_key":"call-1"}
+}

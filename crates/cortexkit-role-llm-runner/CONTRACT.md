@@ -266,6 +266,8 @@ alias until the next breaking release.
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
 | `held_calls` | `run.status` and run status events with held tool calls | §6.1 |
+| `call_yield` | Person-steer hand-back of waiting calls and late-result notices; requires `plans`, `delivery_order`, `notices`, `message_marks` | §9.21 |
+| `stop_all` | `session.stop_all`; requires `run_cancel_by_interrupt` | §9.22 |
 | `run_cancel` | `run.cancel` | §6.2 |
 | `run_cancel_by_interrupt` | no additional op; requires `run_cancel` and `delivery_order` | §6.2 |
 | `dispatch_attribution` | `session.read` (per-call fields) | §5 |
@@ -1900,7 +1902,9 @@ state, polled without reading the transcript.
   `login_handoff`, `login_capture`). `running` and unknown reasons display
   as waiting, never as requiring a person to act.
 - [pinned] The held first reply is interim content, not the tool's final
-  answer. The runner pulls the provider's `late_results` (tool-provider §7),
+  answer, except for a yielded held reply under `call_yield` (§9.21), which
+  closes the call immediately without adding it to `held_calls` or pausing.
+  For other held replies, the runner pulls the provider's `late_results` (tool-provider §7),
   correlated by `(carrier, call_key)`, and drops the call from `held_calls`
   when it applies that entry. A `result` entry becomes the tool result;
   `not_started` becomes a tool result saying the call never ran, and
@@ -4136,6 +4140,9 @@ say who may send and which texts are system text.
 
 ### 9.7.2 `notices`: reader facts for notices
 
+Terminal late results for yielded calls are delivered through these notice
+rules under `call_yield` (§9.21), including after Stop or restart.
+
 A send riding a tool result is always a **notice**, regardless of its marks.
 For an entry with its own message, readers should draw a person's unmarked
 message as their own bubble; `speaks_for` as "From <agent>"; and `notice: true`
@@ -5344,6 +5351,122 @@ On a route that marks cache breakpoints explicitly, a runner can let later
 questions on the same fork reuse the earlier ones by moving the head's
 last-message breakpoint onto the fork's newest message, keeping within the
 provider's breakpoint limit (four on Anthropic).
+
+### 9.21 `call_yield`: hand back a waiting tool on the person's steer
+
+- [pinned] A runner declares `call_yield` only with `plans`, `delivery_order`,
+  `notices` and `message_marks`. Missing prerequisites are refused by name:
+  `call_yield_without_plans`, `call_yield_without_delivery_order`,
+  `call_yield_without_notices`, `call_yield_without_message_marks`.
+- [pinned] `PlanSender` adds optional `person: true`. The plan composer sets
+  it on the sender module carrying the person's own messages, such as the app
+  gateway, only for a runner declaring `call_yield`. Absence means false and
+  is omitted when serialized. Sender decoding remains `deny_unknown_fields`.
+  A runner without the group refuses any supplied `person` member by name
+  (`plan.senders[i].person`), even false, before storing or fetching the plan.
+  The shared `call_yield::check_plan`, `SendRequest::check_call_yield` and
+  refresh request helpers perform this group-only member check.
+- [pinned] A send triggers hand-back only when its attested sender is a plan
+  sender with `person: true`, it has neither `notice: true` nor `speaks_for`,
+  and its delivery is legacy `"steer"` or an ordered list whose first mode is
+  `"steer"`. A queued message keeps its after-this-turn meaning. Peer messages,
+  notices and words carried for an agent never trigger hand-back. A message the
+  person types into the host's own interface, delivered into the active run,
+  counts the same. A false notice mark is equivalent to absent (§9.7.3).
+- [pinned] Hand-back requires an active run whose current step waits on tool
+  calls. Each eligible call has the `call.yield/v1` tool tag on its run's
+  **frozen** catalog entry; its route declares the distinct `call-yield/v1`
+  consumer capability. The provider also advertises `call-yield/v1`, meaning
+  it serves `tool.yield`, the call has a `call_key`, the provider declares
+  `late_results`, and the bind declares `tool-result/v1` and `held-reply/v1`
+  (tool-provider §4.6). Refreshing the catalog cannot change eligibility for
+  an existing run.
+- [pinned] The runner sends `tool.yield {call_key, reason: "person_message"}`
+  to each eligible call in parallel, never delaying the durable store of the
+  steer behind the yields. A second steer never re-yields a call already
+  yielded. It waits at most five seconds per call for the call's final frame:
+  - A held reply with `held.reason: "running", held.yielded: true` closes the
+    call now, using its interim content as the tool result. The runner never
+    puts this call in `held_calls` (§6.1) and never pauses the run for it.
+  - A real result or an ordinary final result handing work to the provider's
+    own background mechanism is used as usual.
+  - `not_yieldable`, `unknown_call`, or five seconds without a final frame
+    leaves the call waiting under today's ordinary limits. The yield timeout
+    does not cancel, withdraw or redispatch the call.
+  The steer lands at the next step boundary once each yielded call has a
+  final frame or its five seconds has passed. Untagged calls in the same step
+  are still awaited; the deadline alone does not invent their results or end
+  ordinary waiting calls.
+- [pinned] For each call closed by a yielded held reply, the runner durably
+  records `(carrier, call_key)` with the call (`call_yield::YieldedCall`), so
+  late-result recognition survives a restart. When a terminal `late_results`
+  entry for that call arrives, deliver it to the session as a **notice** naming
+  the call. The notice sender is the provider's module id. Under §9.7.2–9.7.3,
+  it rides the next tool result if a call is open; otherwise it arrives as a
+  steer entry marked `notice: true`. The tool-result size limit (§11.3.1)
+  applies. Acknowledge the entry only after the notice is durably stored;
+  ordinary late-result deduplication and incarnation handling still apply.
+- [pinned] Stop ends the turn only. Yielded calls are neither withdrawn nor
+  cancelled; their terminal late results still arrive as notices. There is
+  no `tool.cancel` operation in this release. A yield sent without an answer
+  at restart follows the existing in-flight call restart rules. Only the
+  yielded-call identity above is stored, not a separate pending-yield state.
+
+### 9.22 `stop_all`: stop the session's work
+
+- [pinned] `stop_all` serves `session.stop_all` and requires
+  `run_cancel_by_interrupt` (and thus `run_cancel` and `delivery_order`).
+  Missing the prerequisite is refused by name as
+  `stop_all_without_run_cancel_by_interrupt`. This is separate from ordinary
+  Stop (`run.cancel`, §6.2), which still ends only a turn.
+- [pinned] The request is `{request_id, run_id?}` on the session-bound
+  management route. The ID is 1–128 printable ASCII characters. There is no
+  body session address. `stop_all` is never deferred: there is no `at`, and
+  unknown members are refused as terminal `invalid_params` naming the field.
+  The request types and checks are in `stop_all`.
+- [pinned] Admission is the same as immediate Stop: recorded owners and
+  current plan senders with the `interrupt` grant are admitted, matching
+  the route's attested principal, not body identity. A sender without that
+  grant is refused terminal `scope_owner_mismatch` before any write or work.
+  Admission is checked on every call, including a replay after revocation.
+- [pinned] With `run_id`, an active run in this session ends exactly as
+  `run.cancel` with `at: "now"` does. An already-ended run in this session
+  needs no cancellation, but still fans out. A `run_id` outside this session
+  receives terminal `invalid_params {field: "run_id"}`, writing nothing,
+  including no stored reply under `request_id`. Without `run_id`, end the
+  session's active run if there is one; otherwise just fan out. A cancelled
+  turn ends `cancelled`, not `interrupted`, under §6's single-terminal rule.
+- [pinned] Only once the turn's end is durable, dispatch
+  `tool.stop_session {request_id}` in parallel on the session's own bound
+  routes. Use the union of (a) the addressed run's frozen plan, or without
+  `run_id` the active run's, or with none active the most recent run's, and
+  (b) the session's currently applied plan. Deduplicate by provider. A
+  provider that was removed before the most recent run and is not in the
+  applied plan is not called. No prior run and no applied plan means an
+  empty set. Never call a provider in neither set. Only providers declaring
+  `stop-session/v1` receive the op; include the others as `not_declared`.
+  Session identity and authority come from the existing provider bind's
+  `(attested principal, harness, session)` key, never the body.
+- [pinned] The runner also ends its own open session work, such as open
+  fork answers. Durable turn termination, provider fan-out and runner-owned
+  cleanup share one total budget of 15 seconds (`stop_all::BUDGET_MS`), not
+  15 seconds per provider. One provider failure never aborts the others or
+  the aggregate reply.
+- [pinned] The reply is
+  `{providers: [{provider, outcome, items?, more?}], runner: {items}}`.
+  Provider outcomes are `answered`, `no_answer` (no reply within the budget),
+  `not_declared`, or `unreachable` (no route). Provider `items` and `more`
+  pass through unchanged, including unknown kinds, outcomes and members.
+  Runner-owned items follow the provider stop-item display shape: open
+  snake_case `kind`, optional `id`, safe `label` of at most 120 characters,
+  open `outcome` (`stopped`, `paused`, `already_finished`, `could_not_stop`),
+  and `reason` for `could_not_stop`. Labels never contain a full command line
+  or a secret. Paused work is resumable.
+- [pinned] Durably store the complete first reply under the session and
+  `request_id` before answering. A repeat returns that first reply unchanged
+  without another fan-out or stopping work that began afterward. Ordinary
+  Stop's treatment of yielded calls and late notices (§9.21) is unchanged;
+  only `session.stop_all` asks providers to stop their work.
 
 ## 10. `session.baseline` and the admission reply
 

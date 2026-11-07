@@ -1011,6 +1011,12 @@ impl SendRequest {
             None => Ok(()),
         }
     }
+    /// Validate the group-only person mark before decoding senders or storing a plan.
+    pub fn check_call_yield<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
+        self.plan
+            .as_ref()
+            .map_or(Ok(()), |plan| crate::call_yield::check_plan(plan, declared))
+    }
     /// Check attribution before decoding senders or writing admission state.
     pub fn check_sender_attribution<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         self.plan.as_ref().map_or(Ok(()), |plan| {

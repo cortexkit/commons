@@ -29,6 +29,7 @@ pub mod attachments;
 pub mod attribution;
 pub mod baseline;
 mod call_carrier;
+pub mod call_yield;
 pub mod compaction;
 pub mod content_digest;
 pub mod delivery_order;
@@ -61,6 +62,7 @@ pub mod session_change;
 pub mod session_ref;
 pub mod session_retention;
 pub mod step_events;
+pub mod stop_all;
 pub mod structured_output;
 pub mod subscribe;
 pub mod tool_calls;
@@ -141,6 +143,8 @@ pub mod ops {
     pub const RUN_STATUS: &str = "run.status";
     /// Stop an active or paused run. In `run_cancel`.
     pub const RUN_CANCEL: &str = "run.cancel";
+    /// End the turn and stop the session's provider and runner work. In `stop_all`.
+    pub const SESSION_STOP_ALL: &str = "session.stop_all";
     /// Withdraw a submission that has not started. In `retract`.
     pub const SESSION_RETRACT: &str = "session.retract";
     /// The session's event stream, attachable at a page's `head`. In
@@ -184,6 +188,10 @@ pub const SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY: &str = "system-text-default/v
 /// the session-level capabilities a session's admission reply or baseline
 /// declares.
 pub mod capabilities {
+    /// Person-steer hand-back of waiting tools, with durable late-result notices.
+    pub const CALL_YIELD: &str = "call_yield";
+    /// Session-wide work stop, admitted like interrupt-granted cancellation.
+    pub const STOP_ALL: &str = "stop_all";
     /// Questions on an isolated branch of the head's last served request.
     pub const FORK_ANSWER: &str = "fork_answer";
     /// Provider service levels, route support and truthful served-tier usage.
@@ -409,6 +417,8 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (CALL_YIELD, &[ops::SESSION_SEND]),
+        (STOP_ALL, &[ops::SESSION_STOP_ALL]),
         (
             FORK_ANSWER,
             &[

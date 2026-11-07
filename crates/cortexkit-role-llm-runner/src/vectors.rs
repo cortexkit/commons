@@ -10,9 +10,16 @@
 /// The vectors' directory name, inside `test-vectors/`.
 pub const DIR: &str = "llm-runner-v1";
 
+/// Person-steer triggers, gated sender declarations and durable yielded identity.
+pub const CALL_YIELD_JSON: &str = include_str!("../test-vectors/llm-runner-v1/call-yield.json");
+/// Session-wide stop addressing and durable replay reply shape.
+pub const STOP_ALL_JSON: &str = include_str!("../test-vectors/llm-runner-v1/stop-all.json");
+
 /// Every vector file as `(file name, contents)`, in the order
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
+    ("stop-all.json", STOP_ALL_JSON),
+    ("call-yield.json", CALL_YIELD_JSON),
     (
         "fork-answer.json",
         include_str!("../test-vectors/llm-runner-v1/fork-answer.json"),

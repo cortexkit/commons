@@ -89,6 +89,15 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            "call_yield_without_plans"
+            | "call_yield_without_delivery_order"
+            | "call_yield_without_notices"
+            | "call_yield_without_message_marks"
+            | "stop_all_without_run_cancel_by_interrupt" => {
+                crate::call_control_dependencies::run(self, name).await
+            }
+            name if name.starts_with("stop_all_") => crate::stop_all::run(self, name).await,
+            name if name.starts_with("call_yield_") => crate::call_yield::run(self, name).await,
             name if name.starts_with("fork_answer_") => crate::fork_answer::run(self, name).await,
             name if name.starts_with("history_intake_") => {
                 crate::history_intake::run(self, name).await

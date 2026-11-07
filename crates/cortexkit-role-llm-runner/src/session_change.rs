@@ -78,6 +78,10 @@ pub struct RelaunchRefreshRequest {
 }
 
 impl RelaunchRefreshRequest {
+    /// Validate the group-only person mark before storing a refresh.
+    pub fn check_call_yield<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
+        crate::call_yield::check_plan(&self.plan, declared)
+    }
     /// Validate fork callers before fetching or storing an accepted refresh.
     pub fn check_fork_callers<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
         crate::fork_answer::check_plan(&self.plan, declared)
@@ -148,6 +152,10 @@ impl From<RefreshRequest> for RelaunchRefreshRequest {
 }
 
 impl RefreshRequest {
+    /// Validate the group-only person mark before storing a refresh.
+    pub fn check_call_yield<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
+        crate::call_yield::check_plan(&self.plan, declared)
+    }
     /// Validate fork callers before fetching or storing an accepted refresh.
     pub fn check_fork_callers<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
         crate::fork_answer::check_plan(&self.plan, declared)

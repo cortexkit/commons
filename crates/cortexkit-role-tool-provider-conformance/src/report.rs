@@ -37,6 +37,15 @@ const CRASH: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    CaseSpec { name: "stop_session_other_principal_isolated", requires: &[], checks: "the same harness/session pair under another principal cannot stop the runner's work" },
+    CaseSpec { name: "stop_session_body_address_refused", requires: &[], checks: "body session addressing is refused without stopping work" },
+    CaseSpec { name: "stop_session_label_bounded", requires: &[], checks: "stop labels contain at most 120 characters" },
+    CaseSpec { name: "stop_session_items_bounded", requires: &[], checks: "at most 64 stop items are returned, with more counting omitted items" },
+    CaseSpec { name: "stop_session_other_session_isolated", requires: &[], checks: "stopping one session never stops another session's work" },
+    CaseSpec { name: "call_yield_accepted_final_deadline", requires: &[], checks: "an accepted yield sends the call's final frame within five seconds" },
+    CaseSpec { name: "call_yield_untagged_not_yieldable", requires: &[], checks: "a tool without the call.yield/v1 tag is not yielded" },
+    CaseSpec { name: "call_yield_repeat_unknown_call", requires: &[], checks: "a repeated yield answers unknown_call" },
+    CaseSpec { name: "call_yield_non_carrier_unknown_call", requires: &[], checks: "a different carrier cannot yield the call" },
     CaseSpec {
         name: "system_text_default_served",
         requires: &[Capability::SystemTextDefault],

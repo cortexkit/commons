@@ -263,12 +263,27 @@ where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
+    sender_session_with_person(case, label, turns, grant, interrupt, false).await
+}
+
+pub(crate) async fn sender_session_with_person<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    label: &str,
+    turns: Vec<ScriptedTurn>,
+    grant: bool,
+    interrupt: bool,
+    person: bool,
+) -> Result<(Session<S::Route>, S::Route), String>
+where
+    S::Route: RunnerRoute,
+{
     let mut all = vec![ScriptedTurn::new(vec![case.mint.text("opening-answer").0])];
     all.extend(turns);
     let mut session = case.open(label, Script { turns: all }).await?;
     require_declared(&session.route, groups::DELIVERY_ORDER, "delivery_order").await?;
     let identity = sender(case)?;
     let mut entry = PlanSender::new(&identity.module).with_templates(vec![template()]);
+    entry.person = person;
     if grant {
         entry = entry.with_idle_start();
     }

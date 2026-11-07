@@ -116,6 +116,9 @@ impl ToolResult {
 #[non_exhaustive]
 pub struct HeldReply {
     pub reason: String,
+    /// Present only on a bind declaring `call-yield/v1`; true answers a yield.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yielded: Option<bool>,
     /// Provider-owned opaque JSON object. Validate after decoding to reject
     /// non-object values without interpreting the object's members.
     #[serde(
@@ -130,6 +133,7 @@ impl HeldReply {
     pub fn new(reason: impl Into<String>) -> Self {
         Self {
             reason: reason.into(),
+            yielded: None,
             detail: None,
         }
     }
@@ -139,10 +143,19 @@ impl HeldReply {
         self
     }
 
+    /// Mark a running held reply as the final frame answering `tool.yield`.
+    pub fn with_yielded(mut self) -> Self {
+        self.yielded = Some(true);
+        self
+    }
+
     /// Validate the reason and optional opaque detail for a reply or late update.
     pub fn validate(&self) -> Result<(), ResultProblem> {
         if !is_snake_case(&self.reason) {
             return Err(problem("held.reason", "must be a nonempty snake_case code"));
+        }
+        if self.yielded == Some(true) && self.reason != held_reasons::RUNNING {
+            return Err(problem("held.yielded", "requires held.reason running"));
         }
         if self
             .detail
@@ -402,7 +415,7 @@ pub fn validate(result: &ToolResult) -> Result<(), ResultProblem> {
     Ok(())
 }
 
-fn is_snake_case(code: &str) -> bool {
+pub(crate) fn is_snake_case(code: &str) -> bool {
     code.as_bytes().first().is_some_and(u8::is_ascii_lowercase)
         && code.split('_').all(|word| {
             !word.is_empty()

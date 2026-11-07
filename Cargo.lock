@@ -664,7 +664,7 @@ dependencies = [
 name = "cortexkit-role-agent-data"
 version = "0.2.4"
 dependencies = [
- "cortexkit-role-llm-runner 0.8.16",
+ "cortexkit-role-llm-runner 0.8.17",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -718,7 +718,7 @@ dependencies = [
 name = "cortexkit-role-compaction"
 version = "0.2.7"
 dependencies = [
- "cortexkit-role-llm-runner 0.8.16",
+ "cortexkit-role-llm-runner 0.8.17",
  "serde",
  "serde_json",
  "serde_path_to_error",
@@ -782,7 +782,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.8.16"
+version = "0.8.17"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
@@ -794,13 +794,13 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.17.20"
+version = "0.17.21"
 dependencies = [
  "async-trait",
  "base64",
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-harness",
- "cortexkit-role-llm-runner 0.8.16",
+ "cortexkit-role-llm-runner 0.8.17",
  "cortexkit-role-tool-provider",
  "futures-util",
  "getrandom 0.4.3",
@@ -839,7 +839,7 @@ dependencies = [
 name = "cortexkit-role-routing"
 version = "0.7.4"
 dependencies = [
- "cortexkit-role-llm-runner 0.8.16",
+ "cortexkit-role-llm-runner 0.8.17",
  "cortexkit-role-media",
  "cortexkit-role-tool-provider",
  "serde",
@@ -864,7 +864,7 @@ dependencies = [
 name = "cortexkit-role-step-transform-provider"
 version = "0.5.0"
 dependencies = [
- "cortexkit-role-llm-runner 0.8.16",
+ "cortexkit-role-llm-runner 0.8.17",
  "serde",
  "serde_json",
 ]
@@ -882,7 +882,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.15.2"
+version = "0.15.3"
 dependencies = [
  "cortexkit-role-tool-display",
  "serde",
@@ -894,7 +894,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.15.2"
+version = "0.15.3"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",
@@ -964,7 +964,7 @@ dependencies = [
 name = "cortexkit-usage-steps"
 version = "0.2.4"
 dependencies = [
- "cortexkit-role-llm-runner 0.8.16",
+ "cortexkit-role-llm-runner 0.8.17",
  "serde",
  "serde_json",
  "sha2 0.10.9",

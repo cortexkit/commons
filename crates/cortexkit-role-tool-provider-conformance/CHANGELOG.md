@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.3
+
+- Check stop-session principal/session isolation, route-only addressing, label
+  bounds and item bounds through optional provider fixtures and failing fakes.
+- Pin the provider contract to `=0.15.3` and check call-yield deadlines,
+  per-tool opt-in, repeated yields and carrier-only lookup through optional hooks.
+
 ## 0.15.2
 
 - Pin the provider contract and shared vectors to `=0.15.2`.

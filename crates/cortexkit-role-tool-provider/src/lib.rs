@@ -19,6 +19,7 @@
 #![forbid(unsafe_code)]
 
 pub mod call;
+pub mod call_yield;
 pub mod catalog;
 pub mod describe;
 pub mod errors;
@@ -27,6 +28,7 @@ pub mod points;
 pub mod result;
 pub mod rich_ui;
 pub mod scope;
+pub mod stop_session;
 pub mod user_command;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
@@ -66,6 +68,29 @@ pub const TOOL_RESULT_V1_CAPABILITY: &str = "tool-result/v1";
 
 /// The route-bind capability a consumer declares when it understands held replies.
 pub const HELD_REPLY_V1: &str = "held-reply/v1";
+
+/// Provider manifest and consumer bind opt-in for `tool.yield`.
+/// Tools opt in separately with [`CALL_YIELD_TOOL_TAG`].
+pub const CALL_YIELD_V1: &str = "call-yield/v1";
+
+/// Per-tool catalog tag for a tool that can hand back a waiting call.
+pub const CALL_YIELD_TOOL_TAG: &str = "call.yield/v1";
+
+/// Provider manifest opt-in for stopping all work on a session's behalf.
+pub const STOP_SESSION_V1: &str = "stop-session/v1";
+
+/// Maximum delay from an accepted yield to the call's final frame.
+pub const CALL_YIELD_DEADLINE_MS: u64 = 5_000;
+
+/// Whether the bind declares all three capabilities needed for call yielding.
+pub fn consumer_reads_call_yield_v1(consumer_capabilities: Option<&[String]>) -> bool {
+    consumer_reads_held_reply_v1(consumer_capabilities)
+        && consumer_capabilities.is_some_and(|capabilities| {
+            capabilities
+                .iter()
+                .any(|capability| capability == CALL_YIELD_V1)
+        })
+}
 
 /// The route-bind capability a consumer declares when it understands non-terminal
 /// held-reason updates in `late_results`. Readers must opt in before providers
@@ -157,6 +182,10 @@ pub mod ops {
     /// Withdraw a call the provider holds. Required of a provider that can
     /// hold a call past its own reply; absent otherwise.
     pub const TOOL_WITHDRAW: &str = "tool.withdraw";
+    /// Hand back a waiting call without cancelling its work; requires `call-yield/v1`.
+    pub const TOOL_YIELD: &str = "tool.yield";
+    /// Stop or pause the work belonging to the route's bound session.
+    pub const TOOL_STOP_SESSION: &str = "tool.stop_session";
     /// Pull late results. Served by a provider that declares the
     /// `late_results` session capability.
     pub const LATE_RESULTS: &str = "late_results";
@@ -348,6 +377,8 @@ pub const DEFINED_CAPABILITY_TAGS: &[&str] = &[
     // Returns one model completion for a prompt, with no tools, from a model
     // chosen for an iq/eq demand.
     "llm.complete/v1",
+    // Hands a waiting call back without cancelling its work.
+    "call.yield/v1",
 ];
 
 /// Why a capability tag is not acceptable in a catalog.

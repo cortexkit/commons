@@ -1065,6 +1065,17 @@ async fn media_refs_reference_and_faulty_fakes() {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("call_yield_") || case.starts_with("stop_all_") {
+        if let Some(CaseOutcome::Inapplicable { reason }) = report.outcome(case) {
+            assert!(
+                reason == "runner does not declare call_yield"
+                    || reason == "runner does not declare stop_all"
+                    || reason.starts_with("adapter supplies no"),
+                "{case}: {reason}"
+            );
+            return;
+        }
+    }
     if case.starts_with("history_intake_")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { .. }))
     {

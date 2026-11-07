@@ -12,8 +12,12 @@ to them. Nothing here names a particular implementation.
 ## 1. Role identity and addressing
 
 - A provider lists `tool-provider/v1` in its manifest's `capabilities.provides`
-  (`PROVIDES`). That grammar covers roles only; a tool's capability tags never
-  go in the manifest.
+  (`PROVIDES`). Tool capability tags in general never go in the manifest.
+  The optional module capabilities below promise operations, not tool activity:
+  `tool-views/v1` promises `tool.views`; `call-yield/v1` promises `tool.yield`.
+  The distinct catalog tag `call.yield/v1` says which tools can hand back;
+  both the provider capability and the tool tag are required.
+  `stop-session/v1` promises `tool.stop_session` (§5.1); it has no tool tag.
 - Required ops: `role.describe` and `tool.catalog` (`REQUIRED_OPS`). A
   provider that can hold a call past its own reply also serves
   `tool.withdraw`. A provider that settles calls later also serves
@@ -36,7 +40,7 @@ exception is the bind-identity rule below, which also covers the consumer's
 other session-bound routes to the same module.
 
 - [pinned] A consumer that sends tool calls, `user_command.invoke`,
-  `tool.withdraw`, `late_results` or `late_results.ack` on a route declares
+  `tool.withdraw`, `tool.yield`, `late_results` or `late_results.ack` on a route declares
   `{"tool-provider": "v1"}` in that route's role versions when it opens the
   route. The daemon forwards them on the provider's bind
   (`RouteBindRequest.role_versions`). A consumer should declare it on every
@@ -79,6 +83,10 @@ other session-bound routes to the same module.
   pairs read as different sessions, so a consumer that splits one session
   across two pairs makes it look like two. Routes to different modules may use
   different identities.
+
+`tool.stop_session` acts only on work under the requesting route's own
+`(attested principal, harness, session)` key: a different principal with the
+same pair can never stop or list that work.
 
 ## 2. `role.describe`
 
@@ -466,6 +474,7 @@ idempotency and join requirements are in
     | `llm.classify/v1` | classifies one item with a model and returns its answers |
     | `llm.extract/v1` | extracts typed fields from one item with a model |
     | `llm.complete/v1` | returns one model completion for a prompt, with no tools, from a model chosen for an iq/eq demand |
+    | `call.yield/v1` | can hand back a waiting call through `tool.yield` under §4.6 without cancelling the work |
 
     A defined tag promises only the activity in its row. Everything else is
     the provider's own: its arguments, permission grants, consent flow,
@@ -1024,6 +1033,49 @@ the listed `tool-result/v1` replies and legacy bodies, including number
 formatting, and the size of a single text part at, one byte past and two bytes
 past the limit. It doesn't cover refusals or late-result selection.
 
+## 4.6. Handing back a waiting call: `call-yield/v1`
+
+A provider serving `tool.yield` declares `call-yield/v1` (`CALL_YIELD_V1`)
+in its manifest's `capabilities.provides` and lists the op in `role.describe`.
+It tags each tool that can hand back with the catalog tag `call.yield/v1`
+(`CALL_YIELD_TOOL_TAG`, §3). The tag says this tool can hand back; the
+hyphenated manifest capability says the provider serves `tool.yield`.
+The consumer opts in separately on each route by declaring `call-yield/v1`
+in `route.open.consumer_capabilities`, beside `tool-result/v1` and
+`held-reply/v1`. A yieldable call also has a `call_key`, uses
+`result_format: "tool-result/v1"`, and its provider declares `late_results`.
+Neither the manifest declaration nor a bind declaration alone is enough.
+
+The request is `{name: "tool.yield", arguments: {call_key, reason}}`
+(`call_yield::YieldArguments`). It has no top-level `call_key`, just like
+`tool.withdraw`. `reason` is an open nonempty snake_case string;
+`person_message` means the person sent a steer. `parse_yield_request` reuses
+withdraw's envelope and target-key checks. Malformed requests receive terminal
+`invalid_request` route errors naming the field.
+
+Only the call's carrier may yield: the attested principal that raised the
+call on that route. The call is looked up only under the caller's own carrier
+key and the route's scope; anything else answers `unknown_call`. An owner
+cannot yield another carrier's call. No new caller route-error codes are added.
+
+Answers are bare values (`call_yield::YieldAnswer`), not route errors:
+
+- `{answer: "accepted"}` promises the call's final frame within 5 seconds of
+  acceptance (`CALL_YIELD_DEADLINE_MS`). Accept only if that promise can be met.
+- `{answer: "not_yieldable", reason?}` means the call cannot hand back now.
+- `{answer: "unknown_call"}` means no open call under that key for this carrier
+  on this route. It covers a repeat or a yield after the final frame and changes
+  nothing. An accepted yield is not accepted again.
+
+After `accepted`, the final frame is either the real result if ready, an
+ordinary final result handing work to the provider's own background mechanism
+(whose completion arrives as its own notice), or a held reply with
+`held: {reason: "running", yielded: true}`. `held.yielded` is a new optional
+boolean, omitted on binds not declaring `call-yield/v1`; true means this held
+reply answers a yield. Such a held reply settles through `late_results` (§7)
+like any other held reply. Yielding never cancels the work. There is no
+`tool.cancel` operation.
+
 ## 5. `tool.withdraw`
 
 Served by a provider that can hold a call past its reply.
@@ -1089,6 +1141,48 @@ This includes a call whose first reply carries `held` (§4.1,
   | `withdraw_not_permitted` and the three errors above | terminal refusal | no |
   | a transient route refusal: `scope_not_synced`, or any code subc itself retries (`module_reloading`, `module_warming`, `target_unavailable`, `module_timeout`; `errors::is_transient`) | nothing yet | yes |
   | any other route error | terminal refusal | no |
+
+## 5.1. Session-wide stop: `stop-session/v1`
+
+A provider offering `tool.stop_session` declares `stop-session/v1`
+(`STOP_SESSION_V1`) in its manifest and lists the op in `role.describe`.
+This is a per-provider capability, not a catalog tag. A consumer invokes it
+only on that provider's session-bound route (§1.1):
+`{name: "tool.stop_session", arguments: {request_id}}`.
+
+The request ID is 1–128 printable ASCII characters. No request body carries
+session addressing or authority. A route without a session bind receives a
+terminal `invalid_request` naming `route`. Every unknown argument, including
+`session`, receives terminal `invalid_request` naming `arguments.<member>`.
+The op is a control operation answered at once and never held. A top-level
+`call_key` is refused with terminal `invalid_request` naming `call_key`.
+`stop_session::check_request` validates the request; the provider must use
+only the requesting route's attested key
+for its work lookup. The key includes the principal as well as both bind
+strings, so only the runner that started the work can stop it.
+
+The provider stops or pauses everything it runs for that session: active and
+handed-back calls, background tasks, and work started on the session's behalf,
+including remote builds. It never touches another session or principal.
+The operation is idempotent under that session key and `request_id`: a repeat
+stops nothing new, including work started after the first request.
+
+The reply is `{items: [{kind, id?, label, outcome, reason?}], more?}`
+(`stop_session::StopSessionReply`). `kind` is an open nonempty snake_case
+string, for example `shell`, `remote_build`, `program`, `call`, `worker` or
+`consult`. `id` is an optional work identifier. `label` is safe short display
+text of at most 120 characters, never a full command line or a secret.
+`outcome` is open; defined values are `stopped`, `paused` (resumable work),
+`already_finished`, and `could_not_stop`, which requires a `reason`.
+Return at most 64 items; when others are omitted, `more` is their count.
+Unknown kinds and outcomes are preserved by consumers.
+
+Answer promptly, never with a held reply. Work that cannot stop in time is
+reported as `could_not_stop`, not allowed to hold up the reply. A runner's
+session-wide operation has one total 15-second budget
+([llm-runner/v1 §9.22](../cortexkit-role-llm-runner/CONTRACT.md#922-stop_all-stop-the-sessions-work)),
+not a fresh budget per provider. Ordinary Stop is unchanged:
+ending a turn does not invoke this operation.
 
 ## 6. Approval execution on the provider
 

@@ -137,6 +137,23 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("call_yield_without_plans", &[], "call_yield requires plans"),
+    case("call_yield_without_delivery_order", &[], "call_yield requires delivery_order"),
+    case("call_yield_without_notices", &[], "call_yield requires notices"),
+    case("call_yield_without_message_marks", &[], "call_yield requires message_marks"),
+    case("stop_all_without_run_cancel_by_interrupt", &[], "stop_all requires run_cancel_by_interrupt"),
+    case("stop_all_after_durable_turn_end", &[], "provider fan-out starts only after the cancelled turn end is durable"),
+    case("stop_all_request_id_replays", &[], "a repeated request returns the stored first reply without another fan-out"),
+    case("stop_all_provider_failure_isolated", &[], "one provider's failure does not abort any other provider or the reply"),
+    case("stop_all_plan_union_only", &[], "only providers in the frozen or currently applied plan are called, deduplicated"),
+    case("stop_all_interrupt_grant_required", &[], "a non-owner sender without interrupt is refused before cancellation or fan-out"),
+    case("call_yield_queue_does_not_yield", &[], "a queued person message never yields a waiting call"),
+    case("call_yield_marked_message_does_not_yield", &[], "notice-marked and speaks_for messages never yield"),
+    case("call_yield_unmarked_sender_does_not_yield", &[], "a sender without person true never yields"),
+    case("call_yield_held_reply_never_pauses", &[], "a yielded held reply closes the call without held_calls or pausing"),
+    case("call_yield_late_result_is_notice", &[], "a terminal late result is durably delivered as a provider notice naming the call"),
+    case("call_yield_steer_stored_before_waiting", &[], "a blocked yield answer never delays durable steer storage"),
+    case("call_yield_stop_never_withdraws", &[], "Stop ends the turn without withdrawing yielded calls"),
     case("fork_answer_base_matches_digest", &[Capability::ForkAnswer, Queue, RunOps], "raw fork request extends the frozen head body with identical tools and settings"),
     case("fork_answer_refuses_mismatched_base", &[Capability::ForkAnswer, TranscriptReads, Queue, RunOps], "head advancement preserves the base; revert makes it unavailable"),
     case("fork_answer_refuses_tool_call", &[Capability::ForkAnswer, Queue, RunOps], "a tool call ends the fork without dispatch and stores only preceding text"),

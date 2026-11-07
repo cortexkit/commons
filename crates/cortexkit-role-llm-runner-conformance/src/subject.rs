@@ -772,6 +772,54 @@ pub enum AttributionFixture {
 /// contract; this kit does not check that protocol.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Script at least two real session-bound providers, including one failure
+    /// when requested. Observe frozen and currently applied plans independently.
+    /// Do not synthesize runner replies, turn termination, or durable storage.
+    async fn install_stop_all(
+        &self,
+        _session: &str,
+        _one_provider_fails: bool,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+    /// Read actual stop requests and durable turn/reply commits from outside
+    /// the runner, using one monotonically ordered observation log.
+    async fn observe_stop_all(
+        &self,
+        _session: &str,
+        _request_id: &str,
+    ) -> Result<crate::StopAllObservation, HarnessError> {
+        Err(HarnessError::new("no stop-all observation hook"))
+    }
+    /// Install a real waiting provider with `call-yield/v1` on its manifest
+    /// and session route, `call.yield/v1` on its catalog tool, plus late-results
+    /// and held-reply support.
+    /// If `block_answer`, withhold the yield answer/final frame until released.
+    /// The default supplies no fixture; it does not simulate a passing runner.
+    async fn install_call_yield(
+        &self,
+        _session: &str,
+        _arguments: &Value,
+        _block_answer: bool,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
+    /// Read actual incoming yield/withdraw requests and durable notice/store
+    /// events from outside the runner; never infer these from configuration.
+    async fn observe_call_yield(
+        &self,
+        _session: &str,
+        _arguments: &Value,
+        _send_id: &str,
+    ) -> Result<crate::call_yield::CallYieldObservation, HarnessError> {
+        Err(HarnessError::new("no call-yield observation hook"))
+    }
+
+    /// Release the provider's withheld yield answer and call final frame.
+    async fn release_call_yield(&self, arguments: &Value) -> Result<(), HarnessError> {
+        self.release_tool_call(arguments).await
+    }
     /// Read the carrying result directly from the host's store, independently
     /// of runner read replies. Required for `Notices`. The returned output
     /// is the native tool's text payload, without wrappers or ride rendering;

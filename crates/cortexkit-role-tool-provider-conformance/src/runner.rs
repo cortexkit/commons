@@ -242,7 +242,30 @@ where
             .filter(|required| !capabilities.contains(required))
             .copied()
             .collect();
-        let outcome = if spec.name == "system_text_default_served"
+        let outcome = if spec.name.starts_with("stop_session_") {
+            match &main {
+                Err(reason) => CaseOutcome::Failed {
+                    reason: reason.clone(),
+                },
+                Ok(handle) => {
+                    crate::stop_session::run(
+                        subject,
+                        handle.inner(),
+                        spec.name,
+                        &mint.next(spec.name),
+                    )
+                    .await
+                }
+            }
+        } else if spec.name.starts_with("call_yield_")
+            && subject
+                .call_yield_call(spec.name != "call_yield_untagged_not_yieldable")
+                .is_none()
+        {
+            CaseOutcome::Inapplicable {
+                reason: "adapter supplies no call-yield fixture for this tool".into(),
+            }
+        } else if spec.name == "system_text_default_served"
             && !capabilities.contains(&Capability::SystemTextDefault)
         {
             CaseOutcome::Inapplicable {
@@ -350,6 +373,60 @@ where
     S::Route: ToolRoute,
 {
     async fn run(&self, name: &str, mint: &mut KeyMint) -> CaseResult {
+        if name.starts_with("call_yield_") {
+            let principals = self.principals()?;
+            let caps = ["tool-result/v1", "held-reply/v1", "call-yield/v1"].map(str::to_owned);
+            let carrier = self
+                .subject
+                .route_with_consumer_capabilities(
+                    self.handle.inner(),
+                    &principals.stamp(&principals.carrier),
+                    &caps,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            let other = self
+                .subject
+                .route_with_consumer_capabilities(
+                    self.handle.inner(),
+                    &principals.stamp(&principals.other_carrier),
+                    &caps,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
+            let tagged = name != "call_yield_untagged_not_yieldable";
+            let spec = self
+                .subject
+                .call_yield_call(tagged)
+                .ok_or("missing call-yield fixture")?;
+            let catalog = self.catalog(&carrier).await?;
+            let tool = catalog
+                .tools
+                .iter()
+                .find(|tool| tool.name == spec.0)
+                .ok_or("call-yield tool missing from catalog")?;
+            if tool
+                .capabilities
+                .iter()
+                .any(|tag| tag == cortexkit_role_tool_provider::CALL_YIELD_TOOL_TAG)
+                != tagged
+            {
+                return Err("call-yield fixture disagrees with the live catalog tag".into());
+            }
+            if !catalog.declares(session_capabilities::LATE_RESULTS) {
+                return Err("call yielding requires late_results".into());
+            }
+            let key = mint.next(name);
+            return crate::call_yield::check(
+                name,
+                &carrier,
+                &other,
+                &key,
+                spec,
+                self.subject.await_yield_call(&key),
+            )
+            .await;
+        }
         match name {
             name if name.starts_with("user_commands_") => {
                 self.user_commands(name, mint.next(name)).await

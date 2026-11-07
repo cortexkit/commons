@@ -441,6 +441,9 @@ impl Template {
 pub struct PlanSender {
     /// The module, matched against the route's attested principal.
     pub module: String,
+    /// This module carries the person's own messages. Requires `call_yield`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub person: bool,
     /// Opt-in trusted relay frame, fixed at intake. Requires `sender_attribution`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution: Option<crate::attribution::Mode>,
@@ -463,6 +466,7 @@ impl PlanSender {
     pub fn new(module: impl Into<String>) -> Self {
         Self {
             module: module.into(),
+            person: false,
             attribution: None,
             succeeds: None,
             idle_start: false,
@@ -472,6 +476,11 @@ impl PlanSender {
     }
     pub fn with_idle_start(mut self) -> Self {
         self.idle_start = true;
+        self
+    }
+    /// Mark the sender carrying the person's own messages, such as the app gateway.
+    pub fn with_person(mut self) -> Self {
+        self.person = true;
         self
     }
     pub fn with_attribution_header(mut self) -> Self {

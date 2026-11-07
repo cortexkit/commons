@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.21
+
+- Check stop-all durable ordering, idempotent replay, isolated provider failure,
+  plan-union targeting and interrupt admission through optional provider hooks.
+- Pin the runner contract to `=0.8.17`. Add optional call-yield adapter hooks
+  and named cases for person-steer admission, yielded held replies, late notices,
+  prompt durable steer storage and Stop without withdrawal, with faulty fakes.
+
 ## 0.17.20
 
 - Add `call_identity_imported_call_carrier` through the optional defaulted
