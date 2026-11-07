@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.9
+
+- Pin PR6's protection through trailing system entries: the newest entry with
+  parts still keeps its final parts; when its role is `system`, the newest
+  non-system entry with parts keeps its final parts too. Role, not `notice`,
+  selects the entries, so a trailing user notice changes nothing. This strictly
+  extends the original protections; every accepted view passes the old rule.
+  Roll out the provider first, then runners: a runner checking the new rule
+  would refuse views that a provider still on the old rule builds. Violations
+  keep the existing `final_turn_removed` refusal and its zero-based edit index;
+  no wire change.
+
 ## 0.2.8
 
 - Clarify RD3 and the matching restart and `cache_expired` text: proven expiry

@@ -915,6 +915,7 @@ fn first_change_reports_where_a_shorter_plan_ends() {
 mod vector_file {
     use super::*;
     use crate::vectors::{call, Vector, FUNCTIONS};
+    use cortexkit_role_compaction::read::NoticeOrigin;
     use serde_json::{json, Value};
 
     /// A transcript as a runner presents it: ordinals count from 1.
@@ -1021,6 +1022,19 @@ mod vector_file {
         // The transcript up to its second user message, which then ends it.
         let user_last: Vec<Entry> = transcript([0, 0]).into_iter().take(3).collect();
         let calls_then_empty = calls_then_empty();
+        let one_system = calls_then_systems(1);
+        let two_systems = calls_then_systems(2);
+        let mut user_notice = calls_then_empty[..3].to_vec();
+        user_notice.push(
+            entry(
+                4,
+                "n1",
+                Role::User,
+                vec![text("nt1", 5, "please continue")],
+                None,
+            )
+            .with_notice(NoticeOrigin::new("example-notifier")),
+        );
         let placeholder = replace(1, &t, "u2", "t4", "text", json!("[dropped §4§]"));
         let own_output = replace(1, &t, "a1", "k1", "output", json!("[dropped §3§]"));
         let marker = replace(
@@ -1540,6 +1554,56 @@ mod vector_file {
                 "plan",
                 json!({"entries": calls_then_empty.clone(), "edits": [replace(1, &calls_then_empty, "a1", "k2", "output", json!("[dropped §4§]"))]}),
             ),
+            (
+                "one trailing system entry does not let the final call go",
+                "plan",
+                json!({"entries": one_system.clone(), "edits": [drop_part(1, "a1", "k1"), drop_part(1, "a1", "k2")]}),
+            ),
+            (
+                "one trailing system entry still lets an earlier call go",
+                "plan",
+                json!({"entries": one_system.clone(), "edits": [drop_part(1, "a1", "k1")]}),
+            ),
+            (
+                "two trailing system entries do not let the call entry go whole",
+                "plan",
+                json!({"entries": two_systems.clone(), "edits": [drop_message(1, "u1"), drop_message(1, "a1")]}),
+            ),
+            (
+                "two trailing system entries still let an earlier call go",
+                "plan",
+                json!({"entries": two_systems.clone(), "edits": [drop_part(1, "a1", "k1")]}),
+            ),
+            (
+                "a trailing user notice lets the call entry go whole",
+                "plan",
+                json!({"entries": user_notice, "edits": [drop_message(1, "a1")]}),
+            ),
+            (
+                "the newest system entry remains protected too",
+                "plan",
+                json!({"entries": one_system, "edits": [drop_message(1, "s1")]}),
+            ),
+            (
+                "an earlier trailing system entry is not additionally protected",
+                "plan",
+                json!({"entries": two_systems.clone(), "edits": [drop_message(1, "s1")]}),
+            ),
+            (
+                "a cut cannot reach the last non-system entry before trailing systems",
+                "plan",
+                json!({"entries": two_systems.clone(), "edits": [cut(1, "a1")]}),
+            ),
+            (
+                "the protected call before trailing systems may lose its output",
+                "plan",
+                json!({"entries": two_systems.clone(), "edits": [replace(1, &two_systems, "a1", "k2", "output", json!("[dropped §4§]"))]}),
+            ),
+            (
+                "an earlier plan version also protects the call before trailing systems",
+                "plan_at",
+                json!({"version": 2, "entries": two_systems, "edits": [drop_message(1, "a1")]}),
+            ),
         ]
     }
 
@@ -1564,6 +1628,81 @@ mod vector_file {
             entry(3, "r1", Role::User, vec![], None),
             entry(4, "a2", Role::Assistant, vec![], None),
         ]
+    }
+
+    // Tool results ride in a1's calls, leaving r1 empty. Standalone system
+    // deliveries follow that result message without a notice origin mark.
+    fn calls_then_systems(count: u64) -> Vec<Entry> {
+        let mut entries = calls_then_empty();
+        entries.truncate(3);
+        for number in 1..=count {
+            entries.push(entry(
+                number + 3,
+                &format!("s{number}"),
+                Role::System,
+                vec![Part::new(
+                    format!("st{number}"),
+                    PartBody::Text {
+                        text: "turn instructions".into(),
+                    },
+                )],
+                None,
+            ));
+        }
+        entries
+    }
+
+    #[test]
+    fn pr6_system_tail_protects_both_entries_by_edit_index() {
+        use crate::render::check_final_turn;
+
+        for count in 1..=3 {
+            let mut entries = calls_then_systems(count);
+            entries.push(entry(4 + count, "empty", Role::Assistant, vec![], None));
+            let edits = vec![drop_part(1, "a1", "k1"), drop_part(1, "a1", "k2")];
+            let refusal = ViewRefusal::Rule(RuleBreak::FinalTurnRemoved { index: 1 });
+            assert_eq!(check_final_turn(&entries, &edits), Err(refusal.clone()));
+            assert_eq!(plan(&entries, &edits), Err(refusal));
+            assert!(plan(&entries, &edits[..1]).is_ok());
+            assert_eq!(
+                check_final_turn(&entries, &[drop_message(1, &format!("s{count}"))]),
+                Err(ViewRefusal::Rule(RuleBreak::FinalTurnRemoved { index: 0 })),
+            );
+        }
+
+        let mut entries = vec![
+            entry(
+                1,
+                "u1",
+                Role::User,
+                vec![text("t1", 1, "one"), text("t2", 2, "two")],
+                None,
+            ),
+            entry(
+                2,
+                "s1",
+                Role::System,
+                vec![Part::new(
+                    "st1",
+                    PartBody::Text {
+                        text: "instructions".into(),
+                    },
+                )],
+                None,
+            ),
+        ];
+        let edits = vec![drop_part(1, "u1", "t1"), drop_part(1, "u1", "t2")];
+        assert!(plan(&entries, &edits[..1]).is_ok());
+        assert_eq!(
+            plan(&entries, &edits),
+            Err(ViewRefusal::Rule(RuleBreak::FinalTurnRemoved { index: 1 })),
+        );
+        entries.remove(0);
+        assert!(plan(&entries, &[]).is_ok());
+        assert_eq!(
+            plan(&entries, &[drop_message(1, "s1")]),
+            Err(ViewRefusal::Rule(RuleBreak::FinalTurnRemoved { index: 0 })),
+        );
     }
 
     /// The plan of [`transcript`] with two user messages inserted at the
@@ -1628,6 +1767,10 @@ mod vector_file {
                 (
                     68,
                     "e17d62170680e55235293eb35b269c3ec970f8a3e44195591b15f4a17e9c6505",
+                ),
+                (
+                    78,
+                    "b3465e2184731cd925a98d902c75149ee880061088275e4a2b5b918bd814e6fd",
                 ),
             ],
         ),

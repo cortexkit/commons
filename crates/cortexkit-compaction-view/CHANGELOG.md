@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.7
+
+- Extend PR6 (compaction 0.2.9) in `check_final_turn` and all render-plan paths:
+  when the newest entry with parts is system-role, also protect the newest
+  non-system entry with parts, skipping trailing system entries. The newest
+  entry remains protected. Selection uses role, not the optional notice mark;
+  a trailing user notice leaves the old behavior unchanged. Refusals keep the
+  existing `FinalTurnRemoved` zero-based edit index.
+- Add vectors for one and two trailing system entries and a trailing user
+  notice, including allowed edits and refusals. `PLAN_VERSION` stays 3: accepted
+  render plans keep the same output bytes, and all earlier vector outputs and
+  rendering checksum pins are unchanged. The WebAssembly adapter delegates to
+  the same planner and needs no code change.
+
 ## 0.1.6
 
 - `plan`, `plan_at` and `plan_with` refuse a view that removes the turn the

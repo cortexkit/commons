@@ -437,54 +437,74 @@ pub fn plan_with(
 }
 
 /// The compaction contract's rule PR6: a view never removes the turn the
-/// request ends on. The
-/// request ends with the newest entry that has parts; entries with no parts
-/// (a step the runner opened but hasn't filled, a dead step) render nothing.
-/// When that entry has a tool call, its last call must stay, because its
-/// result is what ends the request: dropped, the request would end on the
-/// model's own message, which providers such as Anthropic refuse. A view may
-/// still replace that call's output. When the entry has no tool call, at
-/// least one of its parts must stay. A cut through it removes it too.
+/// request ends on. The newest entry that has parts stays protected; entries
+/// with no parts render nothing. If that entry's role is `system`, the newest
+/// non-system entry with parts is protected too, skipping any trailing system
+/// entries. This depends on role, never the optional notice origin: a trailing
+/// user notice already ends the request on a user message.
+///
+/// For each protected entry, its last tool call must stay, because removing
+/// its result can leave the request ending on the model's own message, even
+/// before a standalone system delivery. Providers such as Anthropic refuse
+/// that request. A view may still replace the call's output. When the entry
+/// has no tool call, at least one of its parts must stay. No cut may reach it.
 ///
 /// Refuses with the `rule` refusal [`RuleBreak::FinalTurnRemoved`], naming the
-/// edit after which nothing that must stay is left. Entries appended after the view was built fall outside
-/// its edits and render as they are, so a later request ends on them.
+/// zero-based edit after which protected parts are gone. Entries appended
+/// after the view was built fall outside its edits and render as they are,
+/// so a later request ends on them.
 pub fn check_final_turn(entries: &[Entry], edits: &[Edit]) -> Result<(), ViewRefusal> {
     let Some(last) = entries.iter().rev().find(|entry| !entry.parts.is_empty()) else {
         return Ok(());
     };
-    let final_call = last
-        .parts
-        .iter()
-        .rev()
-        .find(|part| matches!(part.body, PartBody::Tool(_)));
-    let mut removed: HashSet<&str> = HashSet::new();
-    for (index, edit) in edits.iter().enumerate() {
-        let gone = match &edit.op {
-            EditOp::Drop { mid, part: None } => mid == &last.mid,
-            EditOp::Drop {
-                mid,
-                part: Some(part),
-            } if mid == &last.mid => {
-                removed.insert(part.as_str());
-                match final_call {
-                    Some(call) => removed.contains(call.id.as_str()),
-                    None => last
-                        .parts
-                        .iter()
-                        .all(|part| removed.contains(part.id.as_str())),
-                }
-            }
-            EditOp::Cut { through } => entries
+    let non_system = if last.role == Role::System {
+        entries
+            .iter()
+            .rev()
+            .find(|entry| !entry.parts.is_empty() && entry.role != Role::System)
+    } else {
+        None
+    };
+    let protected: Vec<_> = std::iter::once(last)
+        .chain(non_system)
+        .map(|entry| {
+            let final_call = entry
+                .parts
                 .iter()
-                .find(|entry| &entry.mid == through)
-                .is_some_and(|entry| entry.ordinal >= last.ordinal),
-            _ => false,
-        };
-        if gone {
-            return Err(ViewRefusal::Rule(RuleBreak::FinalTurnRemoved {
-                index: index as u64,
-            }));
+                .rev()
+                .find(|part| matches!(part.body, PartBody::Tool(_)));
+            (entry, final_call)
+        })
+        .collect();
+    let mut removed: HashSet<(&str, &str)> = HashSet::new();
+    for (index, edit) in edits.iter().enumerate() {
+        for (entry, final_call) in &protected {
+            let gone = match &edit.op {
+                EditOp::Drop { mid, part: None } => mid == &entry.mid,
+                EditOp::Drop {
+                    mid,
+                    part: Some(part),
+                } if mid == &entry.mid => {
+                    removed.insert((mid.as_str(), part.as_str()));
+                    match final_call {
+                        Some(call) => removed.contains(&(mid.as_str(), call.id.as_str())),
+                        None => entry
+                            .parts
+                            .iter()
+                            .all(|part| removed.contains(&(mid.as_str(), part.id.as_str()))),
+                    }
+                }
+                EditOp::Cut { through } => entries
+                    .iter()
+                    .find(|entry| &entry.mid == through)
+                    .is_some_and(|cut| cut.ordinal >= entry.ordinal),
+                _ => false,
+            };
+            if gone {
+                return Err(ViewRefusal::Rule(RuleBreak::FinalTurnRemoved {
+                    index: index as u64,
+                }));
+            }
         }
     }
     Ok(())

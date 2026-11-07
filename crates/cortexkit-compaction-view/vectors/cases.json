@@ -8315,5 +8315,1605 @@
         ]
       }
     }
+  },
+  {
+    "name": "one trailing system entry does not let the final call go",
+    "function": "plan",
+    "input": {
+      "edits": [
+        {
+          "mid": "a1",
+          "op": "drop",
+          "part": "k1",
+          "since": 1
+        },
+        {
+          "mid": "a1",
+          "op": "drop",
+          "part": "k2",
+          "since": 1
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "50c41e6817848b36d71ee069ce599861c657ec9dc243ac15e3ec3e63fa317d8f",
+          "mid": "s1",
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st1",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 4000
+        }
+      ]
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "index": 1,
+        "rule": "final_turn_removed"
+      }
+    }
+  },
+  {
+    "name": "one trailing system entry still lets an earlier call go",
+    "function": "plan",
+    "input": {
+      "edits": [
+        {
+          "mid": "a1",
+          "op": "drop",
+          "part": "k1",
+          "since": 1
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "50c41e6817848b36d71ee069ce599861c657ec9dc243ac15e3ec3e63fa317d8f",
+          "mid": "s1",
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st1",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 4000
+        }
+      ]
+    },
+    "output": {
+      "ok": {
+        "items": [
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k2",
+                "prefix": true,
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "s1",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "st1",
+                "prefix": false
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "two trailing system entries do not let the call entry go whole",
+    "function": "plan",
+    "input": {
+      "edits": [
+        {
+          "mid": "u1",
+          "op": "drop",
+          "since": 1
+        },
+        {
+          "mid": "a1",
+          "op": "drop",
+          "since": 1
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "50c41e6817848b36d71ee069ce599861c657ec9dc243ac15e3ec3e63fa317d8f",
+          "mid": "s1",
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st1",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 4000
+        },
+        {
+          "digest": "863d7d177350796943cc9a7318a1ed30fcdc8034e67f05b82ac2b2ba52fbba65",
+          "mid": "s2",
+          "ordinal": 5,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st2",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 5000
+        }
+      ]
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "index": 1,
+        "rule": "final_turn_removed"
+      }
+    }
+  },
+  {
+    "name": "two trailing system entries still let an earlier call go",
+    "function": "plan",
+    "input": {
+      "edits": [
+        {
+          "mid": "a1",
+          "op": "drop",
+          "part": "k1",
+          "since": 1
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "50c41e6817848b36d71ee069ce599861c657ec9dc243ac15e3ec3e63fa317d8f",
+          "mid": "s1",
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st1",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 4000
+        },
+        {
+          "digest": "863d7d177350796943cc9a7318a1ed30fcdc8034e67f05b82ac2b2ba52fbba65",
+          "mid": "s2",
+          "ordinal": 5,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st2",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 5000
+        }
+      ]
+    },
+    "output": {
+      "ok": {
+        "items": [
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k2",
+                "prefix": true,
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "s1",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "st1",
+                "prefix": false
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "s2",
+            "ordinal": 5,
+            "parts": [
+              {
+                "id": "st2",
+                "prefix": false
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "a trailing user notice lets the call entry go whole",
+    "function": "plan",
+    "input": {
+      "edits": [
+        {
+          "mid": "a1",
+          "op": "drop",
+          "since": 1
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "9ef939a9ee73d420585887c6c5d90816b787e91f7c0694d0bd9c830fb6a35707",
+          "mid": "n1",
+          "notice": {
+            "sender": "example-notifier"
+          },
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "ff5ec0445ea412dcd9fae1f45ca32c532135c5318c8462cee08cbd21cf91dc06",
+              "id": "nt1",
+              "kind": "text",
+              "tag": 5,
+              "text": "please continue"
+            }
+          ],
+          "role": "user",
+          "written_at": 4000
+        }
+      ]
+    },
+    "output": {
+      "ok": {
+        "items": [
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "n1",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "nt1",
+                "prefix": true,
+                "tag": 5
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "the newest system entry remains protected too",
+    "function": "plan",
+    "input": {
+      "edits": [
+        {
+          "mid": "s1",
+          "op": "drop",
+          "since": 1
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "50c41e6817848b36d71ee069ce599861c657ec9dc243ac15e3ec3e63fa317d8f",
+          "mid": "s1",
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st1",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 4000
+        }
+      ]
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "index": 0,
+        "rule": "final_turn_removed"
+      }
+    }
+  },
+  {
+    "name": "an earlier trailing system entry is not additionally protected",
+    "function": "plan",
+    "input": {
+      "edits": [
+        {
+          "mid": "s1",
+          "op": "drop",
+          "since": 1
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "50c41e6817848b36d71ee069ce599861c657ec9dc243ac15e3ec3e63fa317d8f",
+          "mid": "s1",
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st1",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 4000
+        },
+        {
+          "digest": "863d7d177350796943cc9a7318a1ed30fcdc8034e67f05b82ac2b2ba52fbba65",
+          "mid": "s2",
+          "ordinal": 5,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st2",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 5000
+        }
+      ]
+    },
+    "output": {
+      "ok": {
+        "items": [
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k1",
+                "prefix": true,
+                "tag": 3
+              },
+              {
+                "id": "k2",
+                "prefix": true,
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "s2",
+            "ordinal": 5,
+            "parts": [
+              {
+                "id": "st2",
+                "prefix": false
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "a cut cannot reach the last non-system entry before trailing systems",
+    "function": "plan",
+    "input": {
+      "edits": [
+        {
+          "op": "cut",
+          "since": 1,
+          "through": "a1"
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "50c41e6817848b36d71ee069ce599861c657ec9dc243ac15e3ec3e63fa317d8f",
+          "mid": "s1",
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st1",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 4000
+        },
+        {
+          "digest": "863d7d177350796943cc9a7318a1ed30fcdc8034e67f05b82ac2b2ba52fbba65",
+          "mid": "s2",
+          "ordinal": 5,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st2",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 5000
+        }
+      ]
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "index": 0,
+        "rule": "final_turn_removed"
+      }
+    }
+  },
+  {
+    "name": "the protected call before trailing systems may lose its output",
+    "function": "plan",
+    "input": {
+      "edits": [
+        {
+          "expect": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+          "field": "output",
+          "mid": "a1",
+          "op": "replace",
+          "part": "k2",
+          "since": 1,
+          "value": "[dropped §4§]"
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "50c41e6817848b36d71ee069ce599861c657ec9dc243ac15e3ec3e63fa317d8f",
+          "mid": "s1",
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st1",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 4000
+        },
+        {
+          "digest": "863d7d177350796943cc9a7318a1ed30fcdc8034e67f05b82ac2b2ba52fbba65",
+          "mid": "s2",
+          "ordinal": 5,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st2",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 5000
+        }
+      ]
+    },
+    "output": {
+      "ok": {
+        "items": [
+          {
+            "item": "entry",
+            "mid": "u1",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "a1",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "t2",
+                "prefix": true,
+                "tag": 2
+              },
+              {
+                "id": "k1",
+                "prefix": true,
+                "tag": 3
+              },
+              {
+                "id": "k2",
+                "prefix": false,
+                "replace": [
+                  {
+                    "field": "output",
+                    "value": "[dropped §4§]"
+                  }
+                ],
+                "tag": 4
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "s1",
+            "ordinal": 4,
+            "parts": [
+              {
+                "id": "st1",
+                "prefix": false
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "s2",
+            "ordinal": 5,
+            "parts": [
+              {
+                "id": "st2",
+                "prefix": false
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "an earlier plan version also protects the call before trailing systems",
+    "function": "plan_at",
+    "input": {
+      "edits": [
+        {
+          "mid": "a1",
+          "op": "drop",
+          "since": 1
+        }
+      ],
+      "entries": [
+        {
+          "digest": "b2f730d3fb8e807b722d4f13a5936d6db64ff38fcd220b9f5e423177c79fdb3c",
+          "mid": "u1",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "137b60134bed7d9a656c5b663fac3e279482e65e48ca2465849457f727ea3631",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "build it"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "193ba4c4e1397b208a8f9e1dd67a031a886dcb23d4dd3431f6f14978f1234c13",
+          "mid": "a1",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "9084ced05f76c0dfda7ea0896e94103187e8009ce27e5909c26d58aba3547767",
+              "id": "t2",
+              "kind": "text",
+              "tag": 2,
+              "text": "running both"
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k1",
+              "digest": "197f24250ac8f43412ce21043a13491bcaa0c8a7d68789571301bb7ea44f3728",
+              "id": "k1",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 3
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-k2",
+              "digest": "034b220e35e920185da7be40662aed3564c105d2ea3af164b1db4cf9e4f40bbf",
+              "id": "k2",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 4
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        },
+        {
+          "digest": "4da7716e04117af964049e583e4fa86ae872c38bfb148feca1d39a2b5180a363",
+          "mid": "r1",
+          "ordinal": 3,
+          "parts": [],
+          "role": "user",
+          "written_at": 3000
+        },
+        {
+          "digest": "50c41e6817848b36d71ee069ce599861c657ec9dc243ac15e3ec3e63fa317d8f",
+          "mid": "s1",
+          "ordinal": 4,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st1",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 4000
+        },
+        {
+          "digest": "863d7d177350796943cc9a7318a1ed30fcdc8034e67f05b82ac2b2ba52fbba65",
+          "mid": "s2",
+          "ordinal": 5,
+          "parts": [
+            {
+              "digest": "d4b6b51e9a695cfd6eb1eb4a13f6c49b0156c3b7edaaf392ff60ad8ed6a22005",
+              "id": "st2",
+              "kind": "text",
+              "text": "turn instructions"
+            }
+          ],
+          "role": "system",
+          "written_at": 5000
+        }
+      ],
+      "version": 2
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "index": 0,
+        "rule": "final_turn_removed"
+      }
+    }
   }
 ]
