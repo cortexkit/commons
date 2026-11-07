@@ -205,10 +205,11 @@ pub struct FieldReplace {
 }
 
 /// Validate edit structure, targets, running-tool restrictions, replacement
-/// restrictions, conflicts, and tag-prefix restrictions, then produce a render
-/// plan at the current [`crate::PLAN_VERSION`]. This does not validate the
-/// view checksum, version, `since` provenance, or provider-rule compliance.
-/// Check those separately before accepting a view.
+/// restrictions, conflicts, tag-prefix restrictions and the final turn
+/// ([`check_final_turn`]), then produce a render plan at the current
+/// [`crate::PLAN_VERSION`]. This does not validate the view checksum, version,
+/// `since` provenance, or the signed-part rules. Check those separately before
+/// accepting a view.
 pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal> {
     plan_with(RideRule::FollowOutput, entries, edits)
 }
@@ -363,6 +364,7 @@ pub fn plan_with(
             });
         }
     }
+    check_final_turn(entries, edits)?;
 
     let mut items = Vec::with_capacity(entries.len() + inserts_at_start.len());
     items.extend(inserts_at_start.into_iter().map(PlanItem::inserted));
@@ -430,6 +432,59 @@ pub fn plan_with(
         });
     }
     Ok(RenderPlan { items })
+}
+
+/// Contract PR6: a view never removes the turn the request ends on. The
+/// request ends with the newest entry that has parts; entries with no parts
+/// (a step the runner opened but hasn't filled, a dead step) render nothing.
+/// When that entry has a tool call, its last call must stay, because its
+/// result is what ends the request: dropped, the request would end on the
+/// model's own message, which providers such as Anthropic refuse. A view may
+/// still replace that call's output. When the entry has no tool call, at
+/// least one of its parts must stay. A cut through it removes it too.
+///
+/// Refuses with `UnsupportedEdit` naming the edit after which nothing that
+/// must stay is left. Entries appended after the view was built fall outside
+/// its edits and render as they are, so a later request ends on them.
+pub fn check_final_turn(entries: &[Entry], edits: &[Edit]) -> Result<(), ViewRefusal> {
+    let Some(last) = entries.iter().rev().find(|entry| !entry.parts.is_empty()) else {
+        return Ok(());
+    };
+    let final_call = last
+        .parts
+        .iter()
+        .rev()
+        .find(|part| matches!(part.body, PartBody::Tool(_)));
+    let mut removed: HashSet<&str> = HashSet::new();
+    for (index, edit) in edits.iter().enumerate() {
+        let gone = match &edit.op {
+            EditOp::Drop { mid, part: None } => mid == &last.mid,
+            EditOp::Drop {
+                mid,
+                part: Some(part),
+            } if mid == &last.mid => {
+                removed.insert(part.as_str());
+                match final_call {
+                    Some(call) => removed.contains(call.id.as_str()),
+                    None => last
+                        .parts
+                        .iter()
+                        .all(|part| removed.contains(part.id.as_str())),
+                }
+            }
+            EditOp::Cut { through } => entries
+                .iter()
+                .find(|entry| &entry.mid == through)
+                .is_some_and(|entry| entry.ordinal >= last.ordinal),
+            _ => false,
+        };
+        if gone {
+            return Err(ViewRefusal::UnsupportedEdit {
+                index: index as u64,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// The sends still riding a tool part after its replaces: the ones a

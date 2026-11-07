@@ -1018,6 +1018,9 @@ mod vector_file {
     fn cases() -> Vec<(&'static str, &'static str, Value)> {
         let t = transcript([0, 0]);
         let plan = |edits: Vec<Edit>| json!({"entries": t, "edits": edits});
+        // The transcript up to its second user message, which then ends it.
+        let user_last: Vec<Entry> = transcript([0, 0]).into_iter().take(3).collect();
+        let calls_then_empty = calls_then_empty();
         let placeholder = replace(1, &t, "u2", "t4", "text", json!("[dropped §4§]"));
         let own_output = replace(1, &t, "a1", "k1", "output", json!("[dropped §3§]"));
         let marker = replace(
@@ -1500,6 +1503,66 @@ mod vector_file {
                 "first_change",
                 json!({"before": head_plan("history", "recent"), "after": head_plan("history", "recent")}),
             ),
+            // The final turn (contract PR6): the request ends on the newest
+            // entry that has parts, and a view never removes what ends it.
+            (
+                "a view can't drop every part of the entry the request ends on",
+                "plan",
+                plan(vec![drop_part(1, "a2", "r2"), drop_part(1, "a2", "t5")]),
+            ),
+            (
+                "a cut through the entry the request ends on is refused",
+                "plan",
+                plan(vec![cut(1, "a2")]),
+            ),
+            (
+                "a view can't drop the newest user message",
+                "plan",
+                json!({"entries": user_last.clone(), "edits": [drop_part(1, "u2", "t4")]}),
+            ),
+            (
+                "the newest user message's text may become its placeholder",
+                "plan",
+                json!({"entries": user_last.clone(), "edits": [replace(1, &user_last, "u2", "t4", "text", json!("[dropped §4§]"))]}),
+            ),
+            (
+                "empty entries after the last call don't move the end: dropping that call is refused",
+                "plan",
+                json!({"entries": calls_then_empty.clone(), "edits": [drop_part(1, "a1", "k2")]}),
+            ),
+            (
+                "an earlier call of that entry may go whole",
+                "plan",
+                json!({"entries": calls_then_empty.clone(), "edits": [drop_part(1, "a1", "k1")]}),
+            ),
+            (
+                "the last call may lose its output and stay a call",
+                "plan",
+                json!({"entries": calls_then_empty.clone(), "edits": [replace(1, &calls_then_empty, "a1", "k2", "output", json!("[dropped §4§]"))]}),
+            ),
+        ]
+    }
+
+    /// A step with two finished calls, then the empty entries a runner can
+    /// hold after it: the message carrying the step's tool results, whose
+    /// results ride inside the calls, and the next step, opened but not yet
+    /// filled.
+    fn calls_then_empty() -> Vec<Entry> {
+        vec![
+            entry(1, "u1", Role::User, vec![text("t1", 1, "build it")], None),
+            entry(
+                2,
+                "a1",
+                Role::Assistant,
+                vec![
+                    text("t2", 2, "running both"),
+                    tool("k1", 3, ToolStatus::Completed),
+                    tool("k2", 4, ToolStatus::Completed),
+                ],
+                None,
+            ),
+            entry(3, "r1", Role::User, vec![], None),
+            entry(4, "a2", Role::Assistant, vec![], None),
         ]
     }
 
@@ -1559,6 +1622,12 @@ mod vector_file {
                 (
                     61,
                     "c13b7e9fe0cf560f4a9ae6e929947b2fe83132e304006fc1895a24b0116018c0",
+                ),
+                // The final-turn cases: refusals, and the edits that keep the
+                // request's end. Every earlier output is unchanged.
+                (
+                    68,
+                    "c6000b98acdf0d815f8a60a7329b983a39ecbb1c932be629476af2521c033617",
                 ),
             ],
         ),
