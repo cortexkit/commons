@@ -1,7 +1,7 @@
 //! The fake route has only implicit caching and cannot warm its scripted provider.
 
 use super::*;
-use cortexkit_role_llm_runner::cache::{self, Cache};
+use cortexkit_role_llm_runner::cache;
 
 pub(super) fn admit(module: &Module, session: &str, params: &Value) -> Option<Reply> {
     if !module.world.serves(groups::CACHE_POLICY) {
@@ -24,9 +24,28 @@ pub(super) fn admit(module: &Module, session: &str, params: &Value) -> Option<Re
         Some(value) => (value, "plan.cache"),
         None => (top?, "cache"),
     };
-    let cache: Cache = match serde_json::from_value(value.clone()) {
+    if defect.is_some_and(|name| {
+        name.starts_with("cache_policy_")
+            && *module.world.current_case.lock().unwrap() == Some(name)
+    }) && value.get("key").is_some()
+    {
+        // Reject a valid key or misname a bad key's refusal, only in the selected probe.
+        return Some(invalid(prefix));
+    }
+    if value.get("key").is_none()
+        && ((prefix == "plan.cache" && defect == Some("accept_plan_invalid"))
+            || (prefix == "cache" && defect == Some("accept_send_invalid")))
+    {
+        return None;
+    }
+    let checked = if prefix == "plan.cache" {
+        cache::check_plan(plan.unwrap().as_object().unwrap()).map(|cache| cache.unwrap())
+    } else {
+        cache::check_send_value(value)
+    };
+    let cache = match checked {
         Ok(cache) => cache,
-        Err(_) => return Some(invalid(prefix)),
+        Err(error) => return Some(invalid(error.detail["field"].as_str().unwrap())),
     };
     if ((prefix == "plan.cache" && defect == Some("reject_plan"))
         || (prefix == "cache" && defect == Some("reject_send")))
@@ -34,19 +53,6 @@ pub(super) fn admit(module: &Module, session: &str, params: &Value) -> Option<Re
         && cache.keep_warm == Some(cache::KeepWarm::Always)
     {
         return Some(invalid(prefix));
-    }
-    if (prefix == "plan.cache" && defect == Some("accept_plan_invalid"))
-        || (prefix == "cache" && defect == Some("accept_send_invalid"))
-    {
-        return None;
-    }
-    let result = if prefix == "plan.cache" {
-        cache::check(&cache)
-    } else {
-        cache::check_send(&cache)
-    };
-    if let Err(error) = result {
-        return Some(invalid(error.detail["field"].as_str().unwrap()));
     }
     if cache
         .hours

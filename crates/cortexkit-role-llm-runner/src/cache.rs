@@ -51,6 +51,13 @@ impl Hours {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Cache {
+    /// Opaque provider routing hint; callers must not put secrets or private data here.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_key"
+    )]
+    pub key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl: Option<Ttl>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -112,10 +119,49 @@ pub fn check_plan(
     let Some(value) = plan.get("cache") else {
         return Ok(None);
     };
-    let cache: Cache = serde_json::from_value(value.clone())
-        .map_err(|_| ErrorBody::invalid_params("plan.cache", "expected a cache policy object"))?;
+    let cache = decode_at(value, "plan.cache")?;
     check(&cache)?;
     Ok(Some(cache))
+}
+
+/// Decode and shape-check a creating send's raw cache policy.
+/// Use this before typed decoding to preserve exact refusal fields for bad key types.
+pub fn check_send_value(value: &serde_json::Value) -> Result<Cache, ErrorBody> {
+    let cache = decode_at(value, "cache")?;
+    check_send(&cache)?;
+    Ok(cache)
+}
+
+fn decode_at(value: &serde_json::Value, prefix: &str) -> Result<Cache, ErrorBody> {
+    if let Some(key) = value.get("key") {
+        check_key(key.as_str(), prefix)?;
+    }
+    serde_json::from_value(value.clone())
+        .map_err(|_| ErrorBody::invalid_params(prefix, "expected a cache policy object"))
+}
+
+fn deserialize_key<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let key = value.as_str();
+    // A present null must not become an omitted routing hint during typed decoding.
+    check_key(key, "cache")
+        .map_err(|error| serde::de::Error::custom(format!("cache.key: {}", error.message)))?;
+    Ok(key.map(str::to_owned))
+}
+
+fn check_key(key: Option<&str>, prefix: &str) -> Result<(), ErrorBody> {
+    if key.is_some_and(|key| {
+        (1..=128).contains(&key.len()) && key.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+    }) {
+        Ok(())
+    } else {
+        Err(ErrorBody::invalid_params(
+            format!("{prefix}.key"),
+            "expected 1 to 128 bytes of printable ASCII without spaces",
+        ))
+    }
 }
 
 pub(crate) fn deserialize_optional<'de, D: serde::Deserializer<'de>>(
@@ -127,6 +173,9 @@ pub(crate) fn deserialize_optional<'de, D: serde::Deserializer<'de>>(
 }
 
 fn check_at(cache: &Cache, prefix: &str) -> Result<(), ErrorBody> {
+    if let Some(key) = &cache.key {
+        check_key(Some(key), prefix)?;
+    }
     let invalid = |field: &str, message: &str| {
         ErrorBody::invalid_params(format!("{prefix}.{field}"), message)
     };

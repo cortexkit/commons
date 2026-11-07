@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.27
+
+- Pin runner contract `=0.8.23` and add named cache-key cases: valid keys on
+  plans and planless creating sends, plus exact pre-acceptance refusals for
+  empty, oversized, space-containing, control/non-ASCII and non-string keys
+  (including null).
+  Each case has a faulty-runner self-test that fails it by name. Undeclared
+  cache-policy runners remain untouched and receive N/A outcomes.
+- Cache-key checks cover admission, not provider-specific routing-hint mapping.
+
 ## 0.17.26
 
 - Pin runner 0.8.22, whose display projection carries bad tool-result files

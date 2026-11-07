@@ -337,7 +337,7 @@ pub mod capabilities {
     /// `session.baseline`. Identical later plans do not fetch again; different
     /// plans are refused to preserve the session's frozen manifest.
     pub const PLANS: &str = "plans";
-    /// Accept session cache lifetime and warming requests; no discovery metadata.
+    /// Accept session cache lifetime, warming and routing-key requests; no discovery metadata.
     pub const CACHE_POLICY: &str = "cache_policy";
     /// Admit preset-less system text only for a provider declaring
     /// `system-text-default/v1`, and forward the item unchanged.

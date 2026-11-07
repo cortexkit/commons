@@ -1,6 +1,18 @@
 use super::*;
 
 const CASE_NAMES: &[&str] = &[
+    "cache_policy_plan_key_accepted",
+    "cache_policy_send_key_accepted",
+    "cache_policy_plan_key_empty_refused",
+    "cache_policy_send_key_empty_refused",
+    "cache_policy_plan_key_oversized_refused",
+    "cache_policy_send_key_oversized_refused",
+    "cache_policy_plan_key_space_refused",
+    "cache_policy_send_key_space_refused",
+    "cache_policy_plan_key_control_refused",
+    "cache_policy_send_key_control_refused",
+    "cache_policy_plan_key_non_string_refused",
+    "cache_policy_send_key_non_string_refused",
     "cache_policy_plan_decode",
     "cache_policy_send_decode",
     "cache_policy_plan_refusals",
@@ -9,6 +21,17 @@ const CASE_NAMES: &[&str] = &[
     "cache_policy_plan_and_send_refused",
     "cache_policy_step_report",
 ];
+
+async fn run(subject: &FakeSubject) -> SuiteReport {
+    let current = subject.current_case.clone();
+    let options = SuiteOptions::new().with_progress(move |progress| match progress {
+        SuiteProgress::CaseStarted { case, .. } => *current.lock().unwrap() = Some(*case),
+        SuiteProgress::CaseFinished { .. } => *current.lock().unwrap() = None,
+        _ => {}
+    });
+    let dir = tempfile::tempdir().unwrap();
+    run_suite_with(subject, dir.path(), options).await.unwrap()
+}
 
 fn subject(defect: Option<&'static str>) -> FakeSubject {
     let mut subject = FakeSubject::new(Defects {
@@ -67,6 +90,17 @@ async fn cache_policy_faulty_runners_fail_each_case_by_name() {
         let report = run(&subject(Some(mode))).await;
         let reason = failed(&report, name);
         eprintln!("FAIL {name} ({mode}): {reason}");
+        assert_none_failed_but(&report, &[name]);
+    }
+}
+
+#[tokio::test]
+async fn cache_policy_key_faulty_runners_fail_each_case_by_name() {
+    for name in CASE_NAMES.iter().filter(|name| name.contains("_key_")) {
+        let report = run(&subject(Some(name))).await;
+        let reason = failed(&report, name);
+        assert!(reason.contains("invalid_params"), "{reason}");
+        eprintln!("FAIL {name}: {reason}");
         assert_none_failed_but(&report, &[name]);
     }
 }

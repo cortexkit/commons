@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.23
+
+- Add optional `cache.key`: 1–128 printable ASCII bytes without spaces, with
+  exact plan/creating-send refusal fields, including for null and non-string
+  values. Keep the policy's placement and freezing rules from CONTRACT.md
+  §9.3.5: `plan.cache` is frozen per run; top-level `cache` is allowed only
+  on a planless session's creating send and is fixed for that session's life.
+- Define deterministic per-route forwarding of the opaque routing hint,
+  independent of lifetime, warming and step reports. Warn against secrets or
+  private data in keys; routes without a cache routing hint ignore them.
+- Add shared raw-policy validation and accepted/refused cache-key examples;
+  `SHA256SUMS` pins the shipped fixture bytes.
+
 ## 0.8.22
 
 - Carry display projection failures per part: preserve tool-result text and good

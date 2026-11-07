@@ -16,6 +16,7 @@ submission id, leaves only that exact-id subcase not applicable.
 The `cache_policy` cases are N/A without the declared group and send no cache
 requests to such a runner. Declaring runners are checked for plan/creating-send
 decoding, exact pre-acceptance refusals, continuation and both-location refusal,
+including routing-key length, printable-ASCII and string-type checks,
 and actual lifetime (`ttl_ms` or `implicit`) plus warming state on step hints
 where `step_events` is available. Plan cases additionally need a plan fixture.
 The kit does **not** test real-time warming: schedules, local-time windows,
@@ -27,6 +28,8 @@ defaulting to `Etc/UTC`; an adapter can override it. Zone knowledge is not
 discoverable through the flag-only capability, so the kit uses this fixture
 for hours requests instead of requiring every runner to know the same zone.
 The unknown-zone refusal still uses the invented name `Example/Nowhere`.
+Cache-key cases check admission and unchanged state on refusal, not the
+provider's routing-hint mapping or cache hits.
 
 The independent `history_intake` group needs only `session.head`. Its two cases
 use the defaulted `begin_history_intake`, `advance_history_intake` and
@@ -159,6 +162,18 @@ opaque part keys come from the served envelope, not a reader's invented index.
 
 | Case | What an incorrect runner must not do |
 |---|---|
+| `cache_policy_plan_key_accepted` | Reject a valid plan cache key, including the 1- and 128-byte boundaries. |
+| `cache_policy_send_key_accepted` | Reject a valid planless creating-send cache key, including the length boundaries. |
+| `cache_policy_plan_key_empty_refused` | Accept an empty key, name any field other than `plan.cache.key`, or write before refusal. |
+| `cache_policy_send_key_empty_refused` | Accept an empty key, name any field other than `cache.key`, or write before refusal. |
+| `cache_policy_plan_key_oversized_refused` | Accept a 129-byte plan key or lose its exact pre-acceptance refusal field. |
+| `cache_policy_send_key_oversized_refused` | Accept a 129-byte creating-send key or lose its exact pre-acceptance refusal field. |
+| `cache_policy_plan_key_space_refused` | Accept a plan key containing a space or lose its exact pre-acceptance refusal field. |
+| `cache_policy_send_key_space_refused` | Accept a creating-send key containing a space or lose its exact pre-acceptance refusal field. |
+| `cache_policy_plan_key_control_refused` | Accept a plan key containing controls, DEL or non-ASCII bytes, or misname its refusal field. |
+| `cache_policy_send_key_control_refused` | Accept a creating-send key containing controls, DEL or non-ASCII bytes, or misname its refusal field. |
+| `cache_policy_plan_key_non_string_refused` | Accept a non-string plan key (including null) or lose its exact pre-acceptance refusal field. |
+| `cache_policy_send_key_non_string_refused` | Accept a non-string creating-send key (including null) or lose its exact pre-acceptance refusal field. |
 | `history_version_on_read_pages` | Omit the rewrite version from a read page. |
 | `stale_read_cursor_history_changed` | Answer a stale after-mid cursor instead of refusing `history_changed`. |
 | `read_from_ordinal_zero` | Skip the first entry when the request starts at zero. |

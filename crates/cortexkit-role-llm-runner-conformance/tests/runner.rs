@@ -1591,6 +1591,7 @@ async fn a_faithful_runner_whose_kills_end_a_process_passes() {
     ));
     for spec in CASES.iter().filter(|case| {
         case.name.starts_with("media_descriptors_")
+            || case.name.starts_with("cache_policy_")
             || case.name == "media_only_send"
             || case.name.starts_with("attachments_")
             || case.name.starts_with("call_identity_")

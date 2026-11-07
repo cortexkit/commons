@@ -144,6 +144,18 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("cache_policy_plan_key_accepted", CACHE_PLAN, "valid routing keys, including length boundaries, are accepted on a plan"),
+    case("cache_policy_send_key_accepted", CACHE, "valid routing keys, including length boundaries, are accepted on a planless creating send"),
+    case("cache_policy_plan_key_empty_refused", CACHE_PLAN, "an empty plan cache key is refused before acceptance naming plan.cache.key"),
+    case("cache_policy_send_key_empty_refused", CACHE, "an empty creating-send cache key is refused before acceptance naming cache.key"),
+    case("cache_policy_plan_key_oversized_refused", CACHE_PLAN, "a 129-byte plan cache key is refused before acceptance naming plan.cache.key"),
+    case("cache_policy_send_key_oversized_refused", CACHE, "a 129-byte creating-send cache key is refused before acceptance naming cache.key"),
+    case("cache_policy_plan_key_space_refused", CACHE_PLAN, "a plan cache key containing a space is refused before acceptance naming plan.cache.key"),
+    case("cache_policy_send_key_space_refused", CACHE, "a creating-send cache key containing a space is refused before acceptance naming cache.key"),
+    case("cache_policy_plan_key_control_refused", CACHE_PLAN, "plan cache keys containing controls, DEL or non-ASCII bytes are refused before acceptance naming plan.cache.key"),
+    case("cache_policy_send_key_control_refused", CACHE, "creating-send cache keys containing controls, DEL or non-ASCII bytes are refused before acceptance naming cache.key"),
+    case("cache_policy_plan_key_non_string_refused", CACHE_PLAN, "non-string plan cache keys, including null, are refused before acceptance naming plan.cache.key"),
+    case("cache_policy_send_key_non_string_refused", CACHE, "non-string creating-send cache keys, including null, are refused before acceptance naming cache.key"),
     case("cache_policy_plan_decode", CACHE_PLAN, "valid plan cache requests are accepted, even where provider support is partial"),
     case("cache_policy_send_decode", CACHE, "valid planless creating-send cache requests are accepted"),
     case("cache_policy_plan_refusals", CACHE_PLAN, "invalid plan cache combinations and unknown zones are refused before acceptance naming the exact field"),
@@ -979,7 +991,7 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
-    "cache_policy cases check admission and model-step report shape, not real-time warming schedules, cost/count caps, local-time transitions or expiry",
+    "cache_policy cases check admission and model-step report shape, not provider routing-hint mapping, cache hits, real-time warming schedules, cost/count caps, local-time transitions or expiry",
     "restart_survival relies on real-route captures and independent host/provider observations from an opted-in adapter; the in-process fake proves named rejection, not process survival. The cases cover held keyed reply custody, not the separate provider lost-reply/Pure retry protocol",
     "account_route checks verbatim admission names and run-fixed joining refusal without writing; pooled-key loading, automatic renewal and reassignment are not driven, and absent head.model leaves name distinctness to the unique kit-pool- prefix",
     "sender_attribution observes stored prefixes through reads, not the model's request; it does not exercise a plan refresh between intake and storage, and its photo-only case is inapplicable without media_only_send and an upload fixture",

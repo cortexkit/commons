@@ -1,12 +1,22 @@
 {
   "valid": [
     {},
+    {"key":"shared-prefix-v1"},
+    {"key":"prefix:group/2","ttl":"none","keep_warm":"off"},
     {"ttl":"none","keep_warm":"off"},
     {"ttl":"short","keep_warm":"auto"},
     {"ttl":"long","keep_warm":"always"},
     {"keep_warm":"hours","hours":{"from":"22:00","to":"06:00","tz":"Etc/UTC"}}
   ],
   "invalid": [
+    {"cache":{"key":""},"field":"key"},
+    {"cache":{"key":"123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"},"field":"key"},
+    {"cache":{"key":"shared prefix"},"field":"key"},
+    {"cache":{"key":"prefix\n"},"field":"key"},
+    {"cache":{"key":"prefix\u007f"},"field":"key"},
+    {"cache":{"key":"préfix"},"field":"key"},
+    {"cache":{"key":null},"field":"key"},
+    {"cache":{"key":7},"field":"key"},
     {"cache":{"ttl":"none","keep_warm":"auto"},"field":"keep_warm"},
     {"cache":{"ttl":"none","keep_warm":"always"},"field":"keep_warm"},
     {"cache":{"ttl":"none","keep_warm":"hours"},"field":"keep_warm"},

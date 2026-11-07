@@ -11,6 +11,7 @@ fn absent_cache_and_absent_mode_mean_warming_off() {
     assert_eq!(absent.unwrap_or_default().keep_warm(), KeepWarm::Off);
     let cache = request(json!({}));
     assert_eq!(cache.ttl, None);
+    assert_eq!(cache.key, None);
     assert_eq!(cache.keep_warm(), KeepWarm::Off);
     assert_eq!(serde_json::to_value(&cache).unwrap(), json!({}));
     assert!(cache::check(&cache).is_ok());
@@ -67,6 +68,73 @@ fn assert_refusal(cache: &Cache, field: &str) {
 }
 
 #[test]
+fn cache_key_boundaries_and_wire_round_trips() {
+    use cortexkit_role_llm_runner::send::SendRequest;
+    let printable: String = (0x21..=0x7e).map(char::from).collect();
+    for key in ["!".to_owned(), "~".repeat(128), printable] {
+        let value = json!({"key":key});
+        let cache = cache::check_send_value(&value).unwrap();
+        assert_eq!(cache.key.as_deref(), Some(key.as_str()));
+        assert_eq!(serde_json::to_value(&cache).unwrap(), value);
+        assert_eq!(cache.ttl, None);
+        assert_eq!(cache.keep_warm(), KeepWarm::Off);
+        for plan in [false, true] {
+            let mut wire = json!({"prompt":"hello","send_id":"cache-key"});
+            if plan {
+                wire["plan"] = json!({"cache":value});
+            } else {
+                wire["cache"] = value.clone();
+            }
+            let send: SendRequest = serde_json::from_value(wire.clone()).unwrap();
+            assert!(send.check_cache(true).is_ok());
+            assert_eq!(serde_json::to_value(send).unwrap(), wire);
+        }
+    }
+}
+
+#[test]
+fn cache_key_refusals_name_exact_fields_for_raw_and_typed_requests() {
+    use cortexkit_role_llm_runner::send::SendRequest;
+    for key in [
+        json!(""),
+        json!("x".repeat(129)),
+        json!("two words"),
+        json!("tab\t"),
+        json!("\u{0}"),
+        json!("\u{7f}"),
+        json!("é"),
+        json!(null),
+        json!(7),
+        json!(true),
+        json!([]),
+        json!({}),
+    ] {
+        let value = json!({"key":key});
+        for (result, field) in [
+            (
+                cache::check_plan(json!({"cache":value}).as_object().unwrap()).map(|_| ()),
+                "plan.cache.key",
+            ),
+            (cache::check_send_value(&value).map(|_| ()), "cache.key"),
+        ] {
+            let error = result.expect_err("invalid key must not disappear during decoding");
+            assert_eq!(error.code, "invalid_params");
+            assert_eq!(error.detail, json!({"field":field}));
+        }
+        let error = serde_json::from_value::<SendRequest>(json!({
+            "prompt":"hello", "send_id":"bad-key", "cache":value
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("cache.key"), "{error}");
+        if let Some(key) = key.as_str() {
+            let mut cache = Cache::new();
+            cache.key = Some(key.to_owned());
+            assert_refusal(&cache, "key");
+        }
+    }
+}
+
+#[test]
 fn cache_midnight_crossing_is_valid_and_zone_recognition_is_the_runners() {
     let mut cache = Cache::new();
     cache.ttl = Some(Ttl::Long);
@@ -85,7 +153,7 @@ fn cache_midnight_crossing_is_valid_and_zone_recognition_is_the_runners() {
 #[test]
 fn cache_send_lifecycle_and_both_locations_refuse_before_acceptance() {
     use cortexkit_role_llm_runner::send::SendRequest;
-    let cache = request(json!({"ttl":"long","keep_warm":"always"}));
+    let cache = request(json!({"key":"prefix-v1","ttl":"long","keep_warm":"always"}));
     let send = SendRequest::new("hello", "send-a").with_cache(cache);
     assert!(send.check_cache(true).is_ok());
     assert_eq!(
@@ -128,10 +196,21 @@ fn cache_vectors_cover_plan_send_and_step_report_round_trips() {
             .is_some());
     }
     for case in vectors["invalid"].as_array().unwrap() {
-        assert_refusal(
-            &request(case["cache"].clone()),
-            case["field"].as_str().unwrap(),
-        );
+        let policy = &case["cache"];
+        for (result, prefix) in [
+            (
+                cache::check_plan(json!({"cache":policy}).as_object().unwrap()).map(|_| ()),
+                "plan.cache",
+            ),
+            (cache::check_send_value(policy).map(|_| ()), "cache"),
+        ] {
+            let error = result.unwrap_err();
+            assert_eq!(error.code, "invalid_params");
+            assert_eq!(
+                error.detail,
+                json!({"field":format!("{prefix}.{}", case["field"].as_str().unwrap())})
+            );
+        }
     }
     let legacy: serde_json::Value = serde_json::from_str(include_str!(
         "../test-vectors/llm-runner-v1/step-events.json"

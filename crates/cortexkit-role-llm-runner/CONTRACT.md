@@ -3379,12 +3379,30 @@ A runner that declares `retract` serves `session.retract`.
   the field only to a declaring runner. The request is:
 
   ```json
-  {"ttl":"long","keep_warm":"hours","hours":{"from":"22:00","to":"06:00","tz":"Etc/UTC"}}
+  {"key":"shared-prefix-v1","ttl":"long","keep_warm":"hours","hours":{"from":"22:00","to":"06:00","tz":"Etc/UTC"}}
   ```
 
   `ttl` is optional (`none`, `short`, `long`); `keep_warm` is optional
   (`off`, `hours`, `always`, `auto`). `hours`, when used, contains `from`,
   `to` and an IANA zone name `tz`.
+- [pinned] `plan.cache.key`, or the creating send's `cache.key` on a planless
+  session, is optional. When present it is a string of 1 to 128 bytes, each
+  in `0x21` through `0x7E` (printable ASCII without spaces). Any other value,
+  including `null` or a non-string, is refused before acceptance with
+  `invalid_params {field: "plan.cache.key"}` (or `"cache.key"` on a planless
+  creating send), with nothing written. The key is frozen per run like the
+  rest of the policy, and follows the same policy-location rules below.
+- [pinned] The key is an opaque, caller-chosen routing hint grouping sessions
+  expected to share a prompt prefix. It changes no cache lifetime, no warming
+  and nothing the step report claims. A runner passes it to routes that take
+  a cache routing hint, mapping it to the route's form where needed, for
+  example by hashing it to fit a length cap. The mapping is deterministic per
+  route: equal keys give equal hints. Routes with no such hint ignore it.
+  Without a key, a runner may keep deriving its own hint.
+- [pinned] The key is sent to the provider. Callers must never put secrets or
+  private data in it.
+- [informative] OpenAI-style routes map the key to `prompt_cache_key`.
+  Anthropic routes have no such hint.
 - [pinned] A plan carries the request as `plan.cache`. It is frozen per run;
   a refresh changes it from the next run, never a run already in progress.
   A session without a plan may instead carry top-level `cache` on its
@@ -3423,6 +3441,7 @@ A runner that declares `retract` serves `session.retract`.
 
   | Request problem | Field |
   |---|---|
+  | Present `key` is not a string of 1–128 bytes in `0x21`–`0x7E` | `plan.cache.key` |
   | `ttl: none` with any effective `keep_warm` other than `off` | `plan.cache.keep_warm` |
   | `keep_warm: hours` without `hours`, or `hours` present with any other mode | `plan.cache.hours` |
   | Malformed `from`: not two-digit 00–23 hours, `:`, two-digit 00–59 minutes | `plan.cache.hours.from` |
@@ -3432,6 +3451,8 @@ A runner that declares `retract` serves `session.retract`.
   A window may cross midnight: 22:00 to 06:00 is valid. `cache::check(&Cache)`
   checks only provider-independent shape and returns an `ErrorBody` with the
   plan field names; `cache::check_send` uses creating-send field names.
+  `cache::check_plan` and `cache::check_send_value` also decode raw policy
+  values so a non-string key is refused with the same exact field.
   Zone validity belongs to the runner, not the crate's shape checks.
 - [pinned] Every warm resends the **last real request's bytes**, under the
   view already applied. It is a cache touch, never a step, a notice or

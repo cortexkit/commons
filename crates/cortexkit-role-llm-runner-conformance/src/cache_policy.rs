@@ -146,6 +146,47 @@ where
         ));
     }
     match name {
+        "cache_policy_plan_key_accepted" | "cache_policy_send_key_accepted" => {
+            for key in ["!".to_owned(), "shared-prefix-v1".into(), "~".repeat(128)] {
+                let mut session = open(case).await?;
+                let id = case.mint.next("cache-key-valid");
+                let policy = json!({"key":key});
+                let params = params(case, &session, &id, Some(&policy), plan)
+                    .ok_or("adapter supplies no admission plan")?;
+                accept(case, &mut session, id, params).await?;
+            }
+        }
+        name if name.contains("_key_") && name.ends_with("_refused") => {
+            let keys = if name.ends_with("_key_empty_refused") {
+                vec![json!("")]
+            } else if name.ends_with("_key_oversized_refused") {
+                vec![json!("x".repeat(129))]
+            } else if name.ends_with("_key_space_refused") {
+                vec![json!("shared prefix")]
+            } else if name.ends_with("_key_control_refused") {
+                vec![json!("prefix\n"), json!("prefix\u{7f}"), json!("préfix")]
+            } else if name.ends_with("_key_non_string_refused") {
+                vec![json!(7), json!(null), json!(true), json!([]), json!({})]
+            } else {
+                return Err(format!("unknown cache key case {name}"));
+            };
+            for key in keys {
+                let mut session = open(case).await?;
+                let id = case.mint.next("cache-key-invalid");
+                let policy = json!({"key":key});
+                let bad = params(case, &session, &id, Some(&policy), plan)
+                    .ok_or("adapter supplies no admission plan")?;
+                refuse(
+                    &session.route,
+                    bad,
+                    if plan { "plan.cache.key" } else { "cache.key" },
+                )
+                .await?;
+                let corrected = params(case, &session, &id, Some(&good), plan)
+                    .ok_or("adapter supplies no admission plan")?;
+                accept(case, &mut session, id, corrected).await?;
+            }
+        }
         "cache_policy_plan_decode" | "cache_policy_send_decode" => {
             for value in vectors["valid"].as_array().unwrap() {
                 let mut session = open(case).await?;
