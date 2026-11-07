@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.2
+
+- Clarify in §6.8 that a runner may retry an authentication refusal once on
+  the same account and selected model under routing §9.3. This is not a
+  reselection and never moves the batch to another model. Contract text
+  only; no wire or Rust API changes.
+
 ## 0.6.1
 
 - A catalog row whose `kind` is `decision` now serves this role. That is

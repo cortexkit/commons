@@ -304,6 +304,9 @@ numbers, and say what is this role's own.
 - [pinned] A `routed_models` provider reports usage per decision and account
   failures to routing under the routing contract's `route.report` (§8) and
   `route.account_observe` (§9.2); their reporting rules apply unchanged.
+- [pinned] A runner's own retry of an authentication refusal (routing §9.3)
+  is at most one more request on the same account and selected model, is not
+  a reselection, and never moves the batch to another model.
 
 ### 6.9 Spend guard
 

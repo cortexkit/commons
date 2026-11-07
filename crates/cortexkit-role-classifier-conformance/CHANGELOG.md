@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.2
+
+- Pin classifier 0.6.2 and allow its runner-owned single authentication
+  retry in the routed initial and partial account-failure checks, without
+  allowing extra selections, model changes or provider calls on replay.
+- Keep answered items at one call and unsent items at zero. Add self-tests
+  that accept one authentication retry and fail a runner that retries twice.
+
 ## 0.8.1
 
 - Pin classifier 0.6.1, whose catalog check accepts `decision` rows. The

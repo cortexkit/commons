@@ -196,6 +196,40 @@ async fn routed_initial_account_failure_cannot_select_twice() {
 }
 
 #[tokio::test]
+async fn routed_two_auth_retries_are_detected() {
+    let subject = FakeSubject::routed(Defects::default()).with_auth_refusal_retries(2);
+    let report = run(&subject).await;
+    expect_breaks(
+        &report,
+        &[
+            "routed_partial_failure_keeps_model",
+            "routed_initial_account_failure_bounded",
+        ],
+        "partial account failure",
+    );
+}
+
+#[tokio::test]
+async fn routed_single_auth_retry_passes_both_failure_cases() {
+    let subject = FakeSubject::routed(Defects::default()).with_auth_refusal_retries(1);
+    let report = run(&subject).await;
+    assert_eq!(
+        report.verdict,
+        SuiteVerdict::PassedExceptNotApplicable {
+            not_applicable: LEGACY_AUTH_CHECKS.to_vec()
+        },
+        "{}",
+        report.render()
+    );
+    for check in [
+        "routed_initial_account_failure_bounded",
+        "routed_partial_failure_keeps_model",
+    ] {
+        assert_eq!(report.outcome(check), Some(&CheckOutcome::Passed));
+    }
+}
+
+#[tokio::test]
 async fn faithful_routed_provider_passes_applicable_checks() {
     let report = run(&FakeSubject::routed(Defects::default())).await;
     assert_eq!(

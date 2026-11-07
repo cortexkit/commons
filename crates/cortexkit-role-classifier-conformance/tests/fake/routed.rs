@@ -99,7 +99,18 @@ impl FakeModule {
                     let answers = serde_json::from_str(answer.answers.get()).unwrap();
                     items.push(ItemResult::answered(index as u64, answers));
                 }
-                Scripted::Status { .. } => {
+                Scripted::Status { status, .. } => {
+                    if status == 401 {
+                        for _ in 0..self.auth_refusal_retries {
+                            self.routing
+                                .lock()
+                                .unwrap()
+                                .observations
+                                .provider_requests
+                                .push(used.clone());
+                            self.stand_in.call(&item.state).await;
+                        }
+                    }
                     if index == 0 && self.defects.initial_account_failure_reselects_twice {
                         for _ in 0..2 {
                             let next = self.routing.lock().unwrap().select();

@@ -181,12 +181,12 @@ impl<S: ClassifierSubject> Suite<'_, S> {
             }
             let log = self.routing_log().await?;
             if !(1..=2).contains(&log.selections)
-                || log.provider_requests.len() != log.selections
-                || self.calls(&key).await != log.selections
+                || !(log.selections..=2 * log.selections).contains(&log.provider_requests.len())
+                || self.calls(&key).await != log.provider_requests.len()
                 || self.calls(&unsent_key).await != 0
             {
                 return Err(
-                    "initial account failure exceeded one reselection or sent a later item".into(),
+                    "initial account failure exceeded one reselection or one authentication retry per selection, or sent a later item".into(),
                 );
             }
         } else if name == "routed_partial_failure_keeps_model" {
@@ -212,20 +212,33 @@ impl<S: ClassifierSubject> Suite<'_, S> {
                 return Err("partial account failure did not fail the unanswered items".into());
             }
             let log = self.routing_log().await?;
+            let answered_calls = self.calls(&key).await;
+            let refused_calls = self.calls(&failed_key).await;
+            let unsent_calls = self.calls(&unsent_key).await;
             if log.selections != 1
-                || log.provider_requests != vec![first.clone(), first.clone()]
-                || self.calls(&unsent_key).await != 0
+                || answered_calls != 1
+                || !(1..=2).contains(&refused_calls)
+                || log.provider_requests.len() != answered_calls + refused_calls
+                || log
+                    .provider_requests
+                    .iter()
+                    .any(|decision| decision != first)
+                || unsent_calls != 0
             {
-                return Err("partial account failure selected again or mixed models".into());
+                return Err(
+                    "partial account failure selected again, mixed decisions or exceeded one authentication retry".into(),
+                );
             }
             self.script_answer(&failed_key, noul_body("0.25", None))
                 .await;
             let replay = Self::routed_reply(self.send(&request.to_string()).await?, first)?;
+            let replay_log = self.routing_log().await?;
             if replay != reply
-                || self.routing_log().await?.selections != 1
-                || self.calls(&key).await != 1
-                || self.calls(&failed_key).await != 1
-                || self.calls(&unsent_key).await != 0
+                || replay_log.selections != log.selections
+                || replay_log.provider_requests != log.provider_requests
+                || self.calls(&key).await != answered_calls
+                || self.calls(&failed_key).await != refused_calls
+                || self.calls(&unsent_key).await != unsent_calls
             {
                 return Err(
                     "partial account failure was retried instead of replayed from storage".into(),

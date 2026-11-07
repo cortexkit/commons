@@ -270,6 +270,7 @@ struct RawItems {
 
 pub struct FakeModule {
     routed_models: bool,
+    auth_refusal_retries: usize,
     routing: Mutex<routed::RoutingState>,
     defects: Defects,
     priced: bool,
@@ -849,6 +850,11 @@ impl FakeSubject {
         subject
     }
 
+    pub fn with_auth_refusal_retries(mut self, retries: usize) -> Self {
+        Arc::get_mut(&mut self.module).unwrap().auth_refusal_retries = retries;
+        self
+    }
+
     fn build(
         defects: Defects,
         priced: bool,
@@ -859,6 +865,7 @@ impl FakeSubject {
         Self {
             module: Arc::new(FakeModule {
                 routed_models: false,
+                auth_refusal_retries: 0,
                 routing: Mutex::new(routed::RoutingState::default()),
                 defects,
                 priced,
