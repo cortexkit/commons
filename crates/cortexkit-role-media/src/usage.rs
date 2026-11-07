@@ -140,9 +140,9 @@ pub fn decimal_is_valid(value: &str) -> bool {
     !whole.is_empty()
         && whole.bytes().all(|b| b.is_ascii_digit())
         && (whole == "0" || !whole.starts_with('0'))
-        && whole.parse::<i64>().is_ok()
         && fraction
             .is_none_or(|f| !f.is_empty() && f.len() <= 9 && f.bytes().all(|b| b.is_ascii_digit()))
+        && value.replace('.', "").parse::<i64>().is_ok()
 }
 
 pub fn bounded_vendor_request_id(value: &str) -> String {

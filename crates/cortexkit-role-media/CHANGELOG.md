@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.2
+
+- Newly refuse usage quantities whose coefficient (all digits with the decimal
+  point removed) exceeds 9223372036854775807, even with at most 9 fractional
+  digits, as `invalid_usage_record` with field `quantity`. For example,
+  `9223372036.854775808` and `9223372036854775807.999999999` are now malformed.
+- Correct 0.1.1's wrong claim that bounding only the whole part and fractional
+  digit count lets a fixed-point ledger store every valid quantity exactly.
+  The ledger needs the entire coefficient to fit one signed 64-bit integer,
+  together with a scale of at most 9. Decimal shape rules are unchanged.
+- Ship as a patch because no producer emits media usage yet. Add the valid
+  coefficient edge `9223372036.854775807` and move the old whole-plus-fraction
+  sample to the refusal vectors; the whole-number maximum remains valid.
+
 ## 0.1.1
 
 - Newly refuse usage quantities with more than 9 fractional digits or a whole

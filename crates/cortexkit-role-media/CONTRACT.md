@@ -283,9 +283,11 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 - [pinned] `media.usage.decimal`: Measurement is `{role, unit, quantity, measure,
   source}`. Quantity is a decimal string matching
   `^(0|[1-9][0-9]*)(\.[0-9]+)?$`, preserved byte for byte, never a number.
-  The whole part is at most 9223372036854775807 (below 2^63), and the
-  fraction has at most 9 digits, so the ledger can store fixed-point decimals
-  exactly. Out-of-range quantities are malformed: refuse with
+  The fraction has at most 9 digits, and the coefficient is at most
+  9223372036854775807. The coefficient is the whole part's digits followed by
+  the fraction's digits, with the fraction's leading zeros kept, interpreted as
+  one integer. A ledger stores the quantity exactly as one signed 64-bit integer
+  and a scale of at most 9. Out-of-range quantities are malformed: refuse with
   `invalid_usage_record` and field `quantity`, just as for a bad decimal shape.
   Unit is open second/character/image/request/token; role is open
   input_audio/output_audio/cached_input_audio/input/output. Closed measure is

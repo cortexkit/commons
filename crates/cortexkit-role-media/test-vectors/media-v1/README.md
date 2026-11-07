@@ -13,8 +13,9 @@ Large examples are deterministic expansion recipes, not abbreviated wire values:
   legal. `text_bytes` becomes that many ASCII `a` characters in synthesis text.
 - usage bounds: expand every string to `scalar_limit` copies of U+1F600,
   including open enum strings and map keys, except quantity, which is
-  `9223372036854775807.999999999`. Quantities have separate decimal bounds:
-  at most 9 fractional digits and a whole part at most 9223372036854775807.
+  `9223372036.854775807`. Quantities have separate decimal bounds:
+  at most 9 fractional digits and a coefficient (all digits with the decimal
+  point removed) at most 9223372036854775807.
   `refused_records` names the malformed records and their refusal code and field.
   Distinct selector keys replace the first scalar with the
   corresponding U+1F601 through U+1F610. Failure.message uses 1,024 scalars;

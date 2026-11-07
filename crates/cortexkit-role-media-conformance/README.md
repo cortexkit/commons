@@ -1,6 +1,6 @@
 # media-provider/v1 conformance kit
 
-Version 0.1.1 pins `cortexkit-role-media` exactly. Implement `MediaSubject` in an
+Version 0.1.2 pins `cortexkit-role-media` exactly. Implement `MediaSubject` in an
 adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
 Each case needs an isolated, empty provider store and a Tokio runtime with time
 enabled. `Outcome::Failed` includes the case name; `NotApplicable` names an
@@ -68,8 +68,9 @@ renewals, principal-scoped keys, lapse and exactly-once release.
 
 The meta-tests run every mapped case against a conforming stateful fake and a
 faulty fake and require the faulty result to name that case. Empty transcripts,
-empty media, corrupt chunk reads and decimal rounding have independent focused
-faults. Synthetic WAV fixtures, exact durations and regeneration instructions
+empty media, corrupt chunk reads, decimal rounding, excess fractional digits
+and coefficient overflow have independent focused faults. Synthetic WAV fixtures,
+exact durations and regeneration instructions
 live under `test-vectors/media-v1/`. No recorded speech ships.
 
 ### Narrowings

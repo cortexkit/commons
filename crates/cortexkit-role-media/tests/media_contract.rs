@@ -576,6 +576,16 @@ fn media_contract_usage_refuses_whole_above_i64_max() {
 }
 
 #[test]
+fn media_contract_usage_refuses_coefficient_overflow_at_nine_decimals() {
+    refused_usage_sample("r-coefficient-over");
+}
+
+#[test]
+fn media_contract_usage_refuses_coefficient_overflow_at_whole_max() {
+    refused_usage_sample("r-whole-fraction-edge");
+}
+
+#[test]
 fn media_contract_usage_unicode_string_and_entry_bounds() {
     let recipe = vector("usage.json")["bounds"].clone();
     let text = recipe["scalar"]
@@ -585,7 +595,7 @@ fn media_contract_usage_unicode_string_and_entry_bounds() {
     let measurement = Measurement::new(
         MeasurementRole::Unknown(text.clone()),
         Unit::Unknown(text.clone()),
-        "9223372036854775807.999999999".into(),
+        "9223372036.854775807".into(),
         Measure::Billed,
         Source::VendorReply,
     );
