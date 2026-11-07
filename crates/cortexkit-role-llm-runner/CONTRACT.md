@@ -2395,6 +2395,29 @@ permits inferring an unreported reason.
   same way. A runner may deliver either refusal by refusing the subscribe,
   or by accepting it and then ending the stream with that error before any
   event. A subscriber treats both the same way.
+- [pinned] Read access is checked for a stream's whole life, not only when
+  `session.subscribe` opens it. When the caller stops being admitted to
+  `session.subscribe`, the runner ends the stream with the refusal a new
+  `session.subscribe` from that caller would get (`scope_owner_mismatch`),
+  never `transient`. The caller stops being admitted:
+  - for a reader that a refreshed plan's `readers` (§9.19) no longer
+    lists, when that refresh's acceptance is durable (§10.2, "Sender and
+    reader admission at acceptance");
+  - for the implicit compaction-provider reader, at the plan switch that
+    replaces it, at the next run (§9.19), so a running compaction is not
+    cut off;
+  - for a session owner replaced by an adoption, when that adoption is
+    accepted;
+  - for any other read admission the runner itself grants and later
+    withdraws, when it withdraws it.
+  The stream carries no event the runner records after that point. Events
+  recorded before it may still be sent, since the caller was admitted when
+  they were recorded. A runner meets this by admitting the caller again
+  before each page or event it sends, so the stream ends no later than its
+  next frame. A caller that lost access may subscribe again once it is
+  admitted again; until then a new `session.subscribe` is refused the same
+  way. A subscriber that gets this refusal on an open stream treats it as
+  lost access, never as a reason to resubscribe at once.
 - [pinned] Each event is `{kind, cursor?, ...}` (`SubscribeEvent`): `kind`
   is an open string; `control` events are durable and carry the `cursor` a
   later subscription may attach after; `display` events are best-effort and
@@ -5191,7 +5214,8 @@ froze for a run to every assistant reply the run writes.
   `role.describe` and `session.subscribe` admit only the listed principals
   and the implicit readers below. Matching uses the route's attested opener
   principal, never a request field. Every other principal is refused before
-  any work as `scope_owner_mismatch`.
+  any work as `scope_owner_mismatch`. A `session.subscribe` stream opened
+  earlier ends when its caller loses this admission (§7).
 - [pinned] The implicit readers are the session's owner and the compaction
   provider the session is currently using, named by the effective plan's
   `compaction_item.provider`. That implicit provider grant switches only

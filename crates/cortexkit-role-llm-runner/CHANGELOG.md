@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Contract §7: read access is checked for a `session.subscribe` stream's
+  whole life. When its caller loses read admission (a refresh drops it from
+  `readers`, the compaction provider is switched at the next run, or an
+  adoption replaces the owner), the runner ends the stream with
+  `scope_owner_mismatch`, sending no event recorded after that point.
+  §9.19 points to it. Text only.
+
 ## 0.8.18
 
 - Add opt-in `restart_survival`, requiring `interrupt_reason` and `live_events`:
