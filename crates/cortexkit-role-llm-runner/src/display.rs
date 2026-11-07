@@ -735,6 +735,13 @@ fn anthropic_file(block: &Value, part: String) -> Result<Option<FilePart>, Proje
     let mime = str_of(source, "media_type").to_owned();
     match str_of(source, "type") {
         "base64" => {
+            if source["data"]["type"] == "media_ref" {
+                let reference =
+                    serde_json::from_value(source["data"].clone()).map_err(|error| {
+                        ProjectionError::new(format!("invalid anthropic media_ref: {error}"))
+                    })?;
+                return Ok(Some(FilePart::media(part, reference)));
+            }
             let bytes = base64_decode(str_of(source, "data"))
                 .ok_or_else(|| ProjectionError::new("a media block's data is not base64"))?;
             let reference = Reference::media(
@@ -912,14 +919,26 @@ fn opencode_model(value: &Value) -> Option<String> {
 }
 
 /// An OpenCode file part (`{type: "file", mime, url, filename?}`): a
-/// `data:` URL holding base64 as a `media_ref`, any other URL as written.
+/// `data:` URL holding base64 as a `media_ref`, an existing `media_ref`
+/// unchanged, and any other URL as written.
 fn opencode_file(value: &Value, part: String) -> Result<FilePart, ProjectionError> {
     let mime = str_of(value, "mime").to_owned();
-    let url = str_of(value, "url");
     let filename = value
         .get("filename")
         .and_then(Value::as_str)
         .map(str::to_owned);
+    let url = &value["url"];
+    if url["type"] == "media_ref" {
+        let reference = serde_json::from_value(url.clone()).map_err(|error| {
+            ProjectionError::new(format!("invalid opencode file url media_ref: {error}"))
+        })?;
+        let mut output = FilePart::media(part, reference);
+        output.filename = filename;
+        return Ok(output);
+    }
+    let url = url.as_str().ok_or_else(|| {
+        ProjectionError::new("a file part's url is neither a string nor a media_ref")
+    })?;
     if let Some(data) = url
         .strip_prefix("data:")
         .and_then(|rest| rest.split_once(";base64,"))
@@ -1086,7 +1105,11 @@ fn opencode_v2_file(file: &Value, key: String) -> Result<FilePart, ProjectionErr
             key,
         );
     }
-    let payload = file.get("data").unwrap_or(file);
+    let payload = file
+        .get("uri")
+        .filter(|uri| uri["type"] == "media_ref")
+        .or_else(|| file.get("data"))
+        .unwrap_or(file);
     if payload["type"] == "media_ref" {
         let reference = serde_json::from_value(payload.clone()).map_err(|error| {
             ProjectionError::new(format!("invalid opencode-v2 media_ref: {error}"))
@@ -1655,6 +1678,52 @@ mod tests {
     #[test]
     fn opencode_aisdk_vectors_project() {
         check_profile("display-opencode-aisdk.json", OPENCODE_AISDK);
+    }
+
+    #[test]
+    fn opencode_file_refuses_non_string_urls_and_invalid_references() {
+        for url in [
+            Value::Null,
+            serde_json::json!(false),
+            serde_json::json!(42),
+            serde_json::json!([]),
+            serde_json::json!({"type":"unknown"}),
+            serde_json::json!({"type":"media_ref"}),
+        ] {
+            let file = serde_json::json!({"type":"file", "mime":"image/jpeg", "url":url});
+            let error = opencode_file(&file, "0".to_owned()).unwrap_err();
+            assert!(error.to_string().contains("url"), "{error}");
+        }
+    }
+
+    #[test]
+    fn anthropic_described_media_keeps_payload_metadata() {
+        use serde_json::json;
+
+        for (kind, mime) in [("image", "image/jpeg"), ("document", "application/pdf")] {
+            let reference = json!({
+                "type":"media_ref", "kind":if kind == "image" { "image" } else { "pdf" },
+                "mime":mime, "byte_size":3,
+                "sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                "part":"stored-file"
+            });
+            let file = json!({"type":kind,
+                "source":{"type":"base64", "media_type":mime, "data":reference}});
+            let body = json!({"role":"user", "content":[file,
+                {"type":"tool_result", "tool_use_id":"invented-call", "content":[
+                    {"type":"text", "text":"An invented result"}, file
+                ]}
+            ]});
+            let row = anthropic_messages(&body, None).unwrap();
+            assert_eq!(
+                serde_json::to_value(row).unwrap(),
+                json!({"role":"user", "text":"", "parts":[
+                    {"type":"file", "part":"0", "media":reference},
+                    {"type":"tool_result", "part":"1", "tool_call_id":"invented-call",
+                     "content":"An invented result", "files":[{"media":reference}]}
+                ]})
+            );
+        }
     }
 
     #[test]

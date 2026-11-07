@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.21
+
+- Preserve described media references in OpenCode 2 file `uri`, OpenCode
+  AISDK file `url`, and Anthropic base64 source `data` payloads when projecting
+  display rows, including tool-result images. Keep OpenCode filenames and
+  reject non-string file URLs that are not media references instead of showing
+  an empty URL.
+- Add checksum-pinned display vectors with invented tool-result images served
+  as media references for both OpenCode profiles.
+
 ## 0.8.20
 
 - Add opt-in `send_ids`, requiring `message_senders` and `read_display_facts`,

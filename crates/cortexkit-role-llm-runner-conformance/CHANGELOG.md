@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.25
+
+- Pin runner 0.8.21 so display rows preserve `media_ref` objects in OpenCode
+  file `uri` and `url` fields and Anthropic base64 source `data`, instead of
+  refusing rows or displaying empty payloads.
+
 ## 0.17.24
 
 - Pin runner 0.8.20 and check the opt-in `send_ids` guarantee on keyed and

@@ -1,6 +1,6 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.24** pins runner **0.8.20**. `read_display_facts_send_id` checks
+Version **0.17.25** pins runner **0.8.21**. `read_display_facts_send_id` checks
 the opt-in `send_ids` guarantee: exact keyed-send ids and returned unkeyed
 submission ids on opted-in reads and raw history. It is not applicable without
 `send_ids`; `read_display_facts_send_id_when_present` instead accepts absence

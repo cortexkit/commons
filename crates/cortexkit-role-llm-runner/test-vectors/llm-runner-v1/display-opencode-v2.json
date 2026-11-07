@@ -2,6 +2,73 @@
   "profile": "opencode-v2",
   "rows": [
     {
+      "name": "synthetic-described-tool-image",
+      "synthetic": true,
+      "body": {
+        "type": "assistant",
+        "content": [
+          {
+            "type": "tool",
+            "id": "described-image-call",
+            "name": "fixture",
+            "state": {
+              "status": "completed",
+              "input": {},
+              "content": [
+                {
+                  "type": "text",
+                  "text": "An invented image result"
+                },
+                {
+                  "type": "file",
+                  "mime": "image/jpeg",
+                  "name": "invented.jpg",
+                  "uri": {
+                    "type": "media_ref",
+                    "kind": "image",
+                    "mime": "image/jpeg",
+                    "byte_size": 3,
+                    "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "0",
+            "tool_call_id": "described-image-call",
+            "name": "fixture",
+            "arguments": "{}"
+          },
+          {
+            "type": "tool_result",
+            "part": "0",
+            "tool_call_id": "described-image-call",
+            "content": "An invented image result",
+            "files": [
+              {
+                "media": {
+                  "type": "media_ref",
+                  "kind": "image",
+                  "mime": "image/jpeg",
+                  "byte_size": 3,
+                  "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                },
+                "filename": "invented.jpg"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "name": "provider-run completed and errored tools mark both display parts",
       "body": {
         "id": "msg_provider_tools",

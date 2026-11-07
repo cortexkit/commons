@@ -2,6 +2,73 @@
   "profile": "opencode-aisdk",
   "rows": [
     {
+      "name": "synthetic-described-tool-image",
+      "synthetic": true,
+      "body": {
+        "info": {
+          "role": "assistant"
+        },
+        "parts": [
+          {
+            "type": "tool",
+            "id": "described-image-part",
+            "callID": "described-image-call",
+            "tool": "fixture",
+            "state": {
+              "status": "completed",
+              "input": {},
+              "output": "An invented image result",
+              "attachments": [
+                {
+                  "type": "file",
+                  "mime": "image/jpeg",
+                  "filename": "invented.jpg",
+                  "url": {
+                    "type": "media_ref",
+                    "kind": "image",
+                    "mime": "image/jpeg",
+                    "byte_size": 3,
+                    "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "row": {
+        "role": "assistant",
+        "text": "",
+        "parts": [
+          {
+            "type": "tool_call",
+            "part": "described-image-part",
+            "tool_call_id": "described-image-call",
+            "name": "fixture",
+            "arguments": "{}"
+          },
+          {
+            "type": "tool_result",
+            "part": "described-image-part",
+            "tool_call_id": "described-image-call",
+            "content": "An invented image result",
+            "files": [
+              {
+                "media": {
+                  "type": "media_ref",
+                  "kind": "image",
+                  "mime": "image/jpeg",
+                  "byte_size": 3,
+                  "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+                },
+                "filename": "invented.jpg"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
       "name": "provider-run completed and errored tools mark both display parts",
       "body": {
         "info": {
