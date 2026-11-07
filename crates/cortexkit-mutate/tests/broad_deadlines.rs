@@ -143,19 +143,20 @@ fn runners() -> Vec<&'static str> {
 #[test]
 fn broad_targets_get_independent_baseline_and_mutant_deadlines() {
     for runner in runners() {
-        // Each target fits a five-second deadline, but the pair cannot fit
-        // one. The two seconds of headroom per target absorb a slow test
-        // binary launch: on a loaded Windows runner a launch alone has taken
-        // over a second.
+        // Each target fits a nine-second deadline, but the pair cannot fit
+        // one. The four seconds of headroom per target absorb a slow or
+        // stalled test run on a loaded CI runner: a Windows launch alone has
+        // taken over a second, and an Ubuntu runner once stalled one target
+        // 2.4 s while its sibling ran in 36 ms over its sleep.
         let f = Fixture::new(
-            "std::thread::sleep(std::time::Duration::from_millis(3000)); assert!(deadline_fixture::guarded());",
-            "std::thread::sleep(std::time::Duration::from_millis(3000));",
+            "std::thread::sleep(std::time::Duration::from_millis(5000)); assert!(deadline_fixture::guarded());",
+            "std::thread::sleep(std::time::Duration::from_millis(5000));",
         );
-        let rows = f.run(&[5], runner);
+        let rows = f.run(&[9], runner);
         let row = &rows[0];
         assert_eq!(row["outcome"], "CAUGHT", "{runner}: {rows}");
-        assert!(row["baseline_test_ms"].as_u64().unwrap() > 5000, "{row}");
-        assert!(row["test_ms"].as_u64().unwrap() > 5000, "{row}");
+        assert!(row["baseline_test_ms"].as_u64().unwrap() > 9000, "{row}");
+        assert!(row["test_ms"].as_u64().unwrap() > 9000, "{row}");
         for phase in ["baseline_targets", "targets"] {
             let targets = row[phase].as_array().unwrap();
             assert_eq!(targets.len(), 3, "{runner}: {row}");
@@ -179,7 +180,9 @@ fn broad_targets_get_independent_baseline_and_mutant_deadlines() {
 #[test]
 fn broad_baseline_sharing_separates_deadlines_in_either_order() {
     for runner in runners() {
-        for timeouts in [[1, 3, 3], [3, 1, 3]] {
+        // The 1.1 s sleep must overrun a one-second deadline and fit the
+        // longer one with room for a stalled CI runner.
+        for timeouts in [[1, 5, 5], [5, 1, 5]] {
             let f = Fixture::new(
                 "std::thread::sleep(std::time::Duration::from_millis(1100)); assert!(deadline_fixture::guarded());",
                 "",
