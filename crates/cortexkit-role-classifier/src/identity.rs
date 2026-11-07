@@ -23,8 +23,10 @@ use crate::request::ClassifyRequest;
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct BatchIdentity {
-    /// The catalog id, compared as is.
-    pub model: String,
+    /// The caller's model pin, compared as is; omission remains distinct
+    /// from a pin even after routing has chosen a model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// SHA-256 of the JCS of `questions`, lowercase hex.
     pub questions: String,
     /// SHA-256 of the JCS of each item, its images in canonical form,
@@ -52,11 +54,11 @@ impl BatchIdentity {
     /// different item count) or `items[i]`. `None` when they are the same
     /// body, which makes the re-send a replay.
     pub fn first_difference(&self, sent: &Self) -> Option<String> {
+        if self.model != sent.model {
+            return Some("model".into());
+        }
         first_difference(
-            &[
-                ("model", &self.model, &sent.model),
-                ("questions", &self.questions, &sent.questions),
-            ],
+            &[("questions", &self.questions, &sent.questions)],
             &self.items,
             &sent.items,
         )
@@ -134,7 +136,7 @@ mod tests {
             Some("questions".into())
         );
         let mut other_model = request(vec![json!("a"), json!("b")]);
-        other_model.model = "typesafe/jev-1.13.0".into();
+        other_model.model = Some("typesafe/jev-1.13.0".into());
         assert_eq!(
             recorded.first_difference(&BatchIdentity::of(&other_model).unwrap()),
             Some("model".into())

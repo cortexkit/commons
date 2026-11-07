@@ -1,5 +1,7 @@
 //! The checks, each run against the live module through its route.
 
+mod routed;
+
 use std::{
     collections::BTreeSet,
     sync::atomic::{AtomicUsize, Ordering},
@@ -176,7 +178,29 @@ where
     }
 
     pub async fn run(&self, name: &str) -> Check {
+        if self.describe.declares_routed_models() {
+            let replacement = match name {
+                "auth_failure_stops_the_call_unstored" => {
+                    Some("routed_partial_failure_keeps_model")
+                }
+                "auth_failure_on_first_call_refused" => {
+                    Some("routed_initial_account_failure_bounded")
+                }
+                _ => None,
+            };
+            if let Some(replacement) = replacement {
+                return Ok(Ending::NotApplicable(format!(
+                    "routed_models stores account failures; covered by {replacement}"
+                )));
+            }
+        }
         match name {
+            "routed_replay_keeps_decision"
+            | "routed_partial_failure_keeps_model"
+            | "routed_reply_has_decision_id"
+            | "routed_pin_never_substituted"
+            | "routed_admission_refusals"
+            | "routed_initial_account_failure_bounded" => self.routed_check(name).await,
             "describe_complete" => self.describe_complete().await,
             "concurrent_call_refused_batch_in_progress" => self.concurrent().await,
             "retry_calls_only_unanswered_items" => self.retry_only_unanswered().await,

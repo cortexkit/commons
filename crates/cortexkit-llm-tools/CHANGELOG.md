@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0
+
+- Breaking: `llm.classify/v1` accepts an optional model pin in its request
+  type and input schema, and its result now names the model used. Providers
+  unable to choose a model refuse omission as `invalid_params` naming `model`.
+- Adopt classifier 0.6.0, retain its routing refusals, and update the tool
+  contract, schema/validator tests and vectors. The former missing-model
+  invalid-request vector is now a routed valid request; empty pins remain
+  invalid, and result vectors require the actual model.
+
 ## 0.2.1
 
 - New refusal-spend rule (`CONTRACT.md` beside the billing rule): the

@@ -62,6 +62,8 @@ const DECISION_TTL_MS: u64 = 600_000;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub ignore_questions: bool,
+    pub ignore_max_cost_usd: bool,
     pub engine_fault: &'static str,
     /// The new check whose contract rule this fake deliberately violates.
     pub extension: Option<&'static str>,
@@ -260,6 +262,7 @@ struct ConversationPin {
 
 #[derive(Default)]
 struct State {
+    model_input_facts: HashMap<String, cortexkit_role_routing_conformance::ModelInputFacts>,
     engine: select_engine::EngineState,
     extension_answers: HashMap<String, Value>,
     panels: HashMap<
@@ -317,6 +320,32 @@ struct State {
 const DEFAULT_HOLD_S: u64 = 900;
 
 impl State {
+    fn meets_input(
+        &self,
+        requirements: &Requirements,
+        model: &CatalogModel,
+        defects: Defects,
+    ) -> bool {
+        let facts = self.model_input_facts.get(&model.route_key());
+        let questions_ok = defects.ignore_questions
+            || requirements.questions.is_none_or(|asked| {
+                facts
+                    .and_then(|facts| facts.max_questions)
+                    .is_some_and(|limit| limit >= asked)
+            });
+        let cost_ok = defects.ignore_max_cost_usd
+            || requirements.max_cost_usd.as_ref().is_none_or(|cap| {
+                facts
+                    .and_then(|facts| facts.input_per_mtok_usd.as_ref())
+                    .and_then(serde_json::Number::as_f64)
+                    .is_some_and(|price| {
+                        price * requirements.input_tokens.unwrap_or_default() as f64 / 1_000_000.0
+                            <= cap.as_f64().unwrap()
+                    })
+            });
+        questions_ok && cost_ok
+    }
+
     fn next(&mut self, prefix: &str) -> String {
         self.counter += 1;
         format!("{prefix}-{}", self.counter)
@@ -362,6 +391,7 @@ impl State {
 }
 
 pub struct FakeSubject {
+    model_input_hook: bool,
     extensions: bool,
     panel_calls: Arc<std::sync::atomic::AtomicUsize>,
     continue_control: bool,
@@ -395,6 +425,7 @@ impl FakeSubject {
     }
     pub fn new(defects: Defects) -> Self {
         Self {
+            model_input_hook: true,
             extensions: true,
             panel_calls: Arc::default(),
             continue_control: true,
@@ -414,6 +445,13 @@ impl FakeSubject {
         Self {
             extensions: false,
             ..Self::new(defects)
+        }
+    }
+
+    pub fn without_model_input_hook() -> Self {
+        Self {
+            model_input_hook: false,
+            ..Self::new(Defects::default())
         }
     }
 
@@ -481,6 +519,20 @@ impl RoutingSubject for FakeSubject {
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String> {
         self.state.lock().unwrap().catalog = Some(catalog.clone());
         Ok(())
+    }
+
+    async fn configure_model_input_facts(
+        &self,
+        facts: &[cortexkit_role_routing_conformance::ModelInputFacts],
+    ) -> Result<bool, String> {
+        if !self.model_input_hook {
+            return Ok(false);
+        }
+        self.state.lock().unwrap().model_input_facts = facts
+            .iter()
+            .map(|facts| (facts.route_key.clone(), facts.clone()))
+            .collect();
+        Ok(true)
     }
 
     async fn configure_panel_class(
@@ -767,6 +819,11 @@ impl FakeRoute {
             }
         }
         let mut describe = RoleDescribe::new(consumers, true);
+        describe.requirement_fields.extend(
+            cortexkit_role_routing_conformance::wire::select::OPTIONAL_REQUIREMENT_FIELDS
+                .iter()
+                .map(|field| (*field).to_owned()),
+        );
         if self.extensions {
             describe = describe.with_capability("select_engine");
             if self.defects.engine_fault != "select_engine_opt_in" {
@@ -1017,6 +1074,7 @@ impl FakeRoute {
         let eligible = |model: &CatalogModel| {
             (!consumer.priced_only || model.priced_per_token)
                 && meets(&request.requirements, model, iq_ceiling)
+                && state.meets_input(&request.requirements, model, self.defects)
         };
         let runner_for = |key: &str| {
             catalog

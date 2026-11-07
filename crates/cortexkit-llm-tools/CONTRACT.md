@@ -118,10 +118,13 @@ fabricated answer. The tool-provider error envelope carries the failure.
 Input (`classify::Request`):
 
 ```text
-{model, questions: {<id>: Question}, item: Item, max_cost_usd}
+{model?, questions: {<id>: Question}, item: Item, max_cost_usd}
 ```
 
-`model` is the role's catalog ID `<provider>/<model>`, never substituted.
+`model` is an optional pin to the role's catalog ID `<provider>/<model>`,
+never substituted. Without it the serving provider chooses the model and
+account through routing. A serving provider that cannot choose a model
+refuses an absent one as `invalid_params` naming `model`.
 `Item` is **`cortexkit_role_classifier::request::Item`** (`{state, images?}`),
 `Question` is **`cortexkit_role_classifier::question::Question`**. This is one
 item of the published [classifier/v1 contract](../cortexkit-role-classifier/CONTRACT.md),
@@ -133,21 +136,24 @@ The ceiling `max_cost_usd` follows the common billing rule above.
 Result (`classify::Result`):
 
 ```text
-{answers: {<id>: Answer}, usage: Usage, cost_usd: number}
+{model, answers: {<id>: Answer}, usage: Usage, cost_usd: number}
 ```
 
 `Answer` is **`cortexkit_role_classifier::reply::Answer`**, including its open
 types and extra provider fields. There is one answer per requested question,
 with the matching question type. Do not normalize provider answers.
+`model` names the model actually used, whether routed or pinned.
 
 Model/item errors are exactly the classifier role's codes, with shared classes:
 
 | Codes | Class |
 |---|---|
-| `invalid_params`, `batch_id_reuse`, `model_unknown`, `model_not_classifier`, `cost_exceeded`, `auth_failed`, `model_unavailable`, `account_not_entitled`, `image_unavailable`, `provider_refused`, `invalid_item` | permanent |
-| `account_walled`, `batch_in_progress`, `account_limit_exhausted`, `image_source_unavailable`, `rate_limited`, `provider_error` | transient |
+| `invalid_params`, `batch_id_reuse`, `model_unknown`, `model_not_classifier`, `cost_exceeded`, `auth_failed`, `model_unavailable`, `account_not_entitled`, `image_unavailable`, `provider_refused`, `invalid_item`, `routing_refused` | permanent |
+| `account_walled`, `batch_in_progress`, `account_limit_exhausted`, `image_source_unavailable`, `rate_limited`, `provider_error`, `routing_unavailable` | transient |
 
 The role's admission/item distinctions and provider mappings remain unchanged;
+its routing-local refusal detail is retained, including the routing code,
+reason and pin when present.
 `answer_too_large` is not a classifier error. There is no second vocabulary.
 
 ## `llm.extract/v1`

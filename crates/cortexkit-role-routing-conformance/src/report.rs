@@ -284,6 +284,8 @@ pub const CHECKS: &[CheckSpec] = &[
         "invalid_task_ref_refused_by_name",
         "select_task_ref: an invalid task_ref is refused as invalid_request naming task_ref",
     ),
+    check("questions_requirement_honoured", "question limits admit a model at the served limit and refuse when no model meets it; not applicable without the requirement or model-input fixture hook"),
+    check("max_cost_usd_requirement_honoured", "an input-cost cap admits equality, refuses over-cap prices, and excludes unstated input prices; not applicable without the requirements or model-input fixture hook"),
 ];
 
 /// Where the kit checks less than the contract says, and why. Every report
@@ -308,7 +310,7 @@ pub const NARROWINGS: &[&str] = &[
     "Pool isolation, disabled-window omission by runners, and request-size fencing policy are not exercised by the current catalog and provider hooks; vectors check the wire members only.",
     "Declaration precedence is checked with max_output_tokens only; the other demand fields are not independently checked for precedence.",
     "The consumer-declaration checks do not check invalid catalog declarations or provider health reports for invalid, unverified or conflicting entries.",
-    "requirements other than tool_capabilities and the declared max_output_tokens floor are not checked against the catalog beyond what every check's answer must meet.",
+    "requirements other than tool_capabilities, the declared max_output_tokens floor, questions and max_cost_usd are not checked against the catalog beyond what every check's answer must meet. The new input checks use supplied model facts, not real token estimation or billing.",
     "Holds are checked with whole-account blocks set through a hook, on ladders of two entries; the operator max_hold limit alone, variants as separate entries, the metered-fallback rule and pooled windows are not checked, and the hold_ok true path past every entry is checked only through hold_ok false.",
     "When account_for holds only within a decision's recorded cap, the kit checks that a wait beyond it is refused with some code other than account_hold; it does not check which.",
     "exclude_providers is checked on demand-mode selects with no pin and nothing cooling down: a pin on an excluded provider, its pin fallback, its interaction with prefer and ladders, and the no_route comparison with a timed cause are not checked.",

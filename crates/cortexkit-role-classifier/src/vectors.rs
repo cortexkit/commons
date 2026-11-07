@@ -46,6 +46,10 @@ pub const STATE_OBJECT_JSON: &str = include_str!("../test-vectors/classifier-v1/
 pub const WORKERS_AI_CODES_JSON: &str =
     include_str!("../test-vectors/classifier-v1/workers-ai-codes.json");
 
+/// Optional model requests, routed replies and routing admission refusals.
+pub const ROUTED_MODELS_JSON: &str =
+    include_str!("../test-vectors/classifier-v1/routed-models.json");
+
 /// Every vector file as `(file name, contents)`, in `SHA256SUMS` order.
 pub const FILES: &[(&str, &str)] = &[
     ("admission-refusals.json", ADMISSION_REFUSALS_JSON),
@@ -59,6 +63,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("replay-batch-id-reuse.json", REPLAY_BATCH_ID_REUSE_JSON),
     ("replay-retry.json", REPLAY_RETRY_JSON),
     ("role-describe.json", ROLE_DESCRIBE_JSON),
+    ("routed-models.json", ROUTED_MODELS_JSON),
     ("state-array.json", STATE_ARRAY_JSON),
     ("state-object.json", STATE_OBJECT_JSON),
     ("workers-ai-codes.json", WORKERS_AI_CODES_JSON),

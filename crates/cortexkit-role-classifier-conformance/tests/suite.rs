@@ -13,6 +13,23 @@ use cortexkit_role_classifier_conformance::{
 };
 use fake::{Defects, FakeSubject};
 
+const ROUTED_CHECKS: &[&str] = &[
+    "routed_replay_keeps_decision",
+    "routed_partial_failure_keeps_model",
+    "routed_reply_has_decision_id",
+    "routed_pin_never_substituted",
+    "routed_admission_refusals",
+    "routed_initial_account_failure_bounded",
+];
+const LEGACY_AUTH_CHECKS: &[&str] = &[
+    "auth_failure_stops_the_call_unstored",
+    "auth_failure_on_first_call_refused",
+];
+
+fn legacy_skips(other: &[&'static str]) -> Vec<&'static str> {
+    other.iter().chain(ROUTED_CHECKS).copied().collect()
+}
+
 async fn run(subject: &FakeSubject) -> SuiteReport {
     run_suite(subject).await
 }
@@ -30,7 +47,16 @@ fn failing(report: &SuiteReport) -> Vec<&'static str> {
 /// first of them for a reason containing `because`.
 async fn breaks(defects: Defects, red: &[&str], because: &str) {
     let report = run(&FakeSubject::new(defects)).await;
-    assert_eq!(failing(&report), red, "{}", report.render());
+    expect_breaks(&report, red, because);
+}
+
+async fn routed_breaks(defects: Defects, red: &[&str], because: &str) {
+    let report = run(&FakeSubject::routed(defects)).await;
+    expect_breaks(&report, red, because);
+}
+
+fn expect_breaks(report: &SuiteReport, red: &[&str], because: &str) {
+    assert_eq!(failing(report), red, "{}", report.render());
     match report.outcome(red[0]) {
         Some(CheckOutcome::Failed { reason }) => {
             assert!(reason.contains(because), "{}: {reason}", red[0])
@@ -45,6 +71,10 @@ async fn a_faithful_module_passes_every_check() {
     let report = run(&FakeSubject::new(Defects::default())).await;
     assert_eq!(report.checks.len(), CHECKS.len());
     for check in &report.checks {
+        if ROUTED_CHECKS.contains(&check.check) {
+            assert!(matches!(check.outcome, CheckOutcome::NotApplicable { .. }));
+            continue;
+        }
         assert_eq!(
             check.outcome,
             CheckOutcome::Passed,
@@ -53,7 +83,138 @@ async fn a_faithful_module_passes_every_check() {
             report.render()
         );
     }
-    assert_eq!(report.verdict, SuiteVerdict::Passed);
+    assert_eq!(
+        report.verdict,
+        SuiteVerdict::PassedExceptNotApplicable {
+            not_applicable: legacy_skips(&[])
+        }
+    );
+}
+
+#[tokio::test]
+async fn routed_replay_reselection_is_detected() {
+    routed_breaks(
+        Defects {
+            replay_selects_again: true,
+            ..Defects::default()
+        },
+        &[
+            "routed_replay_keeps_decision",
+            "routed_partial_failure_keeps_model",
+        ],
+        "replay",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn routed_partial_model_switch_is_detected() {
+    routed_breaks(
+        Defects {
+            partial_failure_switches_model: true,
+            ..Defects::default()
+        },
+        &["routed_partial_failure_keeps_model"],
+        "partial account failure",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn routed_missing_decision_id_is_detected() {
+    routed_breaks(
+        Defects {
+            missing_decision_id: true,
+            ..Defects::default()
+        },
+        &["routed_reply_has_decision_id"],
+        "decision_id",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn routed_pin_substitution_is_detected() {
+    routed_breaks(
+        Defects {
+            pin_substituted: true,
+            ..Defects::default()
+        },
+        &["routed_pin_never_substituted"],
+        "substituted",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn routed_refusal_transport_confusion_is_detected() {
+    routed_breaks(
+        Defects {
+            routing_refusal_as_unavailable: true,
+            ..Defects::default()
+        },
+        &["routed_admission_refusals"],
+        "routing_refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn routing_checks_without_hook_are_not_applicable() {
+    let report = run(&FakeSubject::without_routing_hook()).await;
+    let expected: Vec<_> = LEGACY_AUTH_CHECKS
+        .iter()
+        .chain(ROUTED_CHECKS)
+        .copied()
+        .collect();
+    assert_eq!(
+        report.verdict,
+        SuiteVerdict::PassedExceptNotApplicable {
+            not_applicable: expected.to_vec()
+        },
+        "{}",
+        report.render()
+    );
+    for name in ROUTED_CHECKS {
+        assert!(
+            matches!(report.outcome(name), Some(CheckOutcome::NotApplicable { reason }) if reason.contains("no routing script hook"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn routed_initial_account_failure_cannot_select_twice() {
+    routed_breaks(
+        Defects {
+            initial_account_failure_reselects_twice: true,
+            ..Defects::default()
+        },
+        &["routed_initial_account_failure_bounded"],
+        "one reselection",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn faithful_routed_provider_passes_applicable_checks() {
+    let report = run(&FakeSubject::routed(Defects::default())).await;
+    assert_eq!(
+        report.verdict,
+        SuiteVerdict::PassedExceptNotApplicable {
+            not_applicable: LEGACY_AUTH_CHECKS.to_vec()
+        },
+        "{}",
+        report.render()
+    );
+    for (legacy, replacement) in LEGACY_AUTH_CHECKS.iter().zip([
+        "routed_partial_failure_keeps_model",
+        "routed_initial_account_failure_bounded",
+    ]) {
+        assert!(
+            matches!(report.outcome(legacy), Some(CheckOutcome::NotApplicable { reason }) if reason.contains(replacement))
+        );
+        assert_eq!(report.outcome(replacement), Some(&CheckOutcome::Passed));
+    }
 }
 
 #[tokio::test]
@@ -78,7 +239,7 @@ async fn an_unpriced_module_gets_not_applicable_never_passed() {
     assert_eq!(
         report.verdict,
         SuiteVerdict::PassedExceptNotApplicable {
-            not_applicable: not_applicable.to_vec()
+            not_applicable: legacy_skips(&not_applicable)
         },
         "{}",
         report.render()
@@ -100,7 +261,7 @@ fn only_the_image_hook_checks_not_applicable(report: &SuiteReport) {
     assert_eq!(
         report.verdict,
         SuiteVerdict::PassedExceptNotApplicable {
-            not_applicable: IMAGE_HOOK_CHECKS.to_vec()
+            not_applicable: legacy_skips(&IMAGE_HOOK_CHECKS)
         },
         "{}",
         report.render()
@@ -137,7 +298,7 @@ async fn a_stand_in_that_cannot_hold_makes_the_concurrent_check_not_applicable()
     assert_eq!(
         report.verdict,
         SuiteVerdict::PassedExceptNotApplicable {
-            not_applicable: vec!["concurrent_call_refused_batch_in_progress"]
+            not_applicable: legacy_skips(&["concurrent_call_refused_batch_in_progress"])
         }
     );
 }

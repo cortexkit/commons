@@ -13,7 +13,9 @@ pub const TAG: &str = "llm.classify/v1";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Request {
-    pub model: String,
+    /// Optional pin. Without it the serving provider must be able to choose a model.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub questions: IndexMap<String, Question>,
     pub item: Item,
     /// Required per-call ceiling; the caller supplies its remaining budget.
@@ -23,12 +25,15 @@ pub struct Request {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Result {
+    pub model: String,
     pub answers: IndexMap<String, Answer>,
     pub usage: Usage,
     pub cost_usd: Number,
 }
 
 /// Catalog-specific limits and model kind still require the role's admission checks.
+/// The serving provider must also refuse an absent model as `invalid_params`
+/// naming `model` when it cannot choose a model.
 /// An image reference `{handle}` is refused as an unsupported image: this is
 /// the validator of a provider that does not resolve references.
 pub fn validate_request(request: &Request) -> std::result::Result<(), ValidationError> {
@@ -45,7 +50,7 @@ pub fn validate_request_with_image_references(
 }
 
 fn validate(request: &Request, references: bool) -> std::result::Result<(), ValidationError> {
-    if request.model.is_empty() {
+    if request.model.as_ref().is_some_and(String::is_empty) {
         return Err(ValidationError::EmptyModel);
     }
     if request.questions.is_empty() {
@@ -71,6 +76,9 @@ fn validate(request: &Request, references: bool) -> std::result::Result<(), Vali
 }
 
 pub fn validate_result(result: &Result) -> std::result::Result<(), ValidationError> {
+    if result.model.is_empty() {
+        return Err(ValidationError::EmptyModel);
+    }
     non_negative(&result.cost_usd, "cost_usd")?;
     result.usage.validate()
 }

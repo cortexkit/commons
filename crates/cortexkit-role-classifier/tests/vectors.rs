@@ -40,6 +40,7 @@ const FILES: &[&str] = &[
     "replay-batch-id-reuse.json",
     "replay-retry.json",
     "role-describe.json",
+    "routed-models.json",
     "state-array.json",
     "state-object.json",
     "workers-ai-codes.json",
@@ -235,7 +236,11 @@ fn check_wrapping(file: &str, expected_type: Option<QuestionType>) {
     for vector in &file_vectors.vectors {
         let name = format!("{file} {}", vector.provider);
         providers.push(vector.provider.clone());
-        assert_eq!(vector.request.model, vector.provider, "{name}");
+        assert_eq!(
+            vector.request.model.as_deref(),
+            Some(vector.provider.as_str()),
+            "{name}"
+        );
         let provider_model = match vector.provider.as_str() {
             provider::catalog_ids::CLEF => provider::models::CLEF,
             provider::catalog_ids::JEV_1_13_0 => provider::models::JEV_1_13_0,
@@ -243,7 +248,9 @@ fn check_wrapping(file: &str, expected_type: Option<QuestionType>) {
         };
         assert_eq!(vector.provider_request.model, provider_model, "{name}");
         assert_eq!(vector.provider_response.model, provider_model, "{name}");
-        let model = describe.model(&vector.request.model).unwrap();
+        let model = describe
+            .model(vector.request.model.as_deref().unwrap())
+            .unwrap();
         check_request(&vector.request, model).unwrap_or_else(|e| panic!("{name}: {e}"));
         assert_eq!(vector.request.items.len(), 1, "{name}");
         assert_eq!(
@@ -327,6 +334,9 @@ fn object_and_array_states_are_forwarded_verbatim() {
 fn one_admission_refusal_per_code_as_the_crate_builds_it() {
     let file: AdmissionRefusals = exact("admission-refusals.json");
     for code in errors::ADMISSION_CODES {
+        if matches!(*code, errors::ROUTING_REFUSED | errors::ROUTING_UNAVAILABLE) {
+            continue; // The routing-local refusal shape is tested in routed_models_vector.
+        }
         assert!(
             file.refusals
                 .iter()
@@ -354,26 +364,30 @@ fn one_admission_refusal_per_code_as_the_crate_builds_it() {
         );
         let built = match vector.name.as_str() {
             errors::INVALID_PARAMS => {
-                let model = describe.model(&vector.request.model).unwrap();
+                let model = describe
+                    .model(vector.request.model.as_deref().unwrap())
+                    .unwrap();
                 check_request(&vector.request, model).unwrap_err()
             }
             errors::BATCH_ID_REUSE => Refusal::batch_id_reuse("items[0]"),
             errors::MODEL_UNKNOWN => {
-                assert!(describe.model(&vector.request.model).is_none());
+                assert!(describe
+                    .model(vector.request.model.as_deref().unwrap())
+                    .is_none());
                 cortexkit_role_classifier::request::check_catalog_row(
-                    &vector.request.model,
+                    vector.request.model.as_deref().unwrap(),
                     CatalogRow::Absent,
                 )
                 .unwrap_err()
             }
             "model_not_classifier" => cortexkit_role_classifier::request::check_catalog_row(
-                &vector.request.model,
+                vector.request.model.as_deref().unwrap(),
                 CatalogRow::Kind("chat"),
             )
             .unwrap_err(),
             "model_not_classifier_kindless" => {
                 cortexkit_role_classifier::request::check_catalog_row(
-                    &vector.request.model,
+                    vector.request.model.as_deref().unwrap(),
                     CatalogRow::Kindless,
                 )
                 .unwrap_err()
@@ -396,15 +410,19 @@ fn one_admission_refusal_per_code_as_the_crate_builds_it() {
                 refusal.with_detail(detail)
             }
             errors::MODEL_UNAVAILABLE => {
-                assert!(describe.model(&vector.request.model).is_some());
-                Refusal::model_unavailable(&vector.request.model)
+                assert!(describe
+                    .model(vector.request.model.as_deref().unwrap())
+                    .is_some());
+                Refusal::model_unavailable(vector.request.model.as_deref().unwrap())
             }
             errors::IMAGE_UNAVAILABLE | errors::IMAGE_SOURCE_UNAVAILABLE => {
                 // The request is admitted by a module that declares
                 // image_reference, refused as an unsupported image by one
                 // that does not, and refused by resolution on a declaring
                 // module whose resolver fails.
-                let model = describe.model(&vector.request.model).unwrap();
+                let model = describe
+                    .model(vector.request.model.as_deref().unwrap())
+                    .unwrap();
                 check_request_with_references(&vector.request, model).unwrap();
                 let undeclared = check_request(&vector.request, model).unwrap_err();
                 assert_eq!(undeclared.code, errors::INVALID_PARAMS);
@@ -531,7 +549,9 @@ fn refusals_name_the_narrowest_field_that_applies() {
     let describe = describe();
     for vector in &file.refusals {
         let name = &vector.name;
-        let model = describe.model(&vector.request.model).unwrap();
+        let model = describe
+            .model(vector.request.model.as_deref().unwrap())
+            .unwrap();
         let built = check_request(&vector.request, model).unwrap_err();
         assert_eq!(&built, &vector.refusal, "{name}");
         assert_eq!(built.code, errors::INVALID_PARAMS, "{name}");
@@ -573,7 +593,9 @@ struct AdmissionRefusalCase {
 fn one_image_in_both_encodings_is_one_identity_and_bad_base64_is_refused() {
     let file: ImageIdentity = exact("image-identity.json");
     let describe = describe();
-    let model = describe.model(&file.request.model).unwrap();
+    let model = describe
+        .model(file.request.model.as_deref().unwrap())
+        .unwrap();
     check_request(&file.request, model).unwrap();
     check_request(&file.resend, model).unwrap();
     assert_eq!(file.resend.batch_id, file.request.batch_id);
@@ -583,7 +605,9 @@ fn one_image_in_both_encodings_is_one_identity_and_bad_base64_is_refused() {
         recorded.first_difference(&BatchIdentity::of(&file.resend).unwrap()),
         None
     );
-    let model = describe.model(&file.malformed.request.model).unwrap();
+    let model = describe
+        .model(file.malformed.request.model.as_deref().unwrap())
+        .unwrap();
     let built = check_request(&file.malformed.request, model).unwrap_err();
     let pinned = &file.malformed.refusal;
     assert_eq!(built.code, pinned.code);

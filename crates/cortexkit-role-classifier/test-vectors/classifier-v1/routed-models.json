@@ -1,0 +1,19 @@
+{
+  "request": {
+    "batch_id": "routed-batch",
+    "questions": {"q": {"type": "noul", "instructions": "Is this item flagged?"}},
+    "items": [{"state": "example"}]
+  },
+  "reply": {
+    "batch_id": "routed-batch",
+    "model": "typesafe/jev-1.13.0",
+    "decision_id": "decision-1",
+    "items": [{"index": 0, "answers": {"q": {"type": "noul", "noul": 0.75}}}],
+    "usage": {}
+  },
+  "refusals": [
+    {"code": "routing_refused", "message": "routing refused the batch", "detail": {"class": "permanent", "routing_code": "no_adequate_model", "routing_reason": "no model meets the requirements"}},
+    {"code": "routing_refused", "message": "routing refused the batch", "detail": {"class": "permanent", "routing_code": "pin_unavailable", "routing_reason": "no account can serve the pin", "model": "typesafe/jev-1.13.0"}},
+    {"code": "routing_unavailable", "message": "routing timed out", "detail": {"class": "transient"}}
+  ]
+}

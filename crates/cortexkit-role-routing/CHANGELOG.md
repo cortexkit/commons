@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.4
+
+- Add optional `route.select` requirements `questions`, `input_tokens` and
+  `max_cost_usd`, advertised individually through `requirement_fields` and
+  usable by any consumer. Question limits and estimated input-price caps
+  constrain eligibility; a cap excludes unstated prices and requires a
+  positive token estimate. Without a cap, zero means no estimate.
+- Keep unknown requirements flattened for refusal by name, and keep legacy
+  describe replies valid without the new requirement members.
+- Clarify that `context_window` is the largest single request, image
+  modalities cover images, non-iq-ranked consumers send required `iq: 0`,
+  and a pin without fallback chooses only an account for that model.
+
 ## 0.7.3
 
 - Add the opt-in `select_engine` group, media engine declarations, strict

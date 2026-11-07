@@ -44,15 +44,20 @@ pub struct ConsumerEntry {
 }
 
 impl RoleDescribe {
-    /// An answer naming this role and major, every required op, and every
-    /// requirement field this version defines.
+    /// An answer naming this role and major, every required op, and the
+    /// original required requirement fields. Add optional fields to
+    /// `requirement_fields` only when the router reads them.
     pub fn new(consumers: Vec<ConsumerEntry>, detail_supported: bool) -> Self {
         Self {
             role: ROLE.to_owned(),
             version: VERSION_NUMBER,
             ops: REQUIRED_OPS.iter().map(|op| (*op).to_owned()).collect(),
             consumers,
-            requirement_fields: REQUIREMENT_FIELDS.iter().map(|f| (*f).to_owned()).collect(),
+            requirement_fields: REQUIREMENT_FIELDS
+                .iter()
+                .filter(|field| !crate::select::OPTIONAL_REQUIREMENT_FIELDS.contains(field))
+                .map(|field| (*field).to_owned())
+                .collect(),
             detail_supported,
             capabilities: Vec::new(),
         }
@@ -139,6 +144,9 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
         }
     }
     for field in REQUIREMENT_FIELDS {
+        if crate::select::OPTIONAL_REQUIREMENT_FIELDS.contains(field) {
+            continue;
+        }
         if !describe
             .requirement_fields
             .iter()
@@ -171,6 +179,28 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn decision_input_fields_are_individually_opt_in() {
+        let mut describe = super::RoleDescribe::new(vec![], false);
+        assert_eq!(
+            describe.requirement_fields,
+            [
+                "iq",
+                "eq",
+                "context_window",
+                "max_output_tokens",
+                "tools",
+                "tool_capabilities",
+                "modalities",
+                "structured_output"
+            ]
+        );
+        assert_eq!(super::check_describe(&describe), Ok(()));
+        for field in ["questions", "input_tokens", "max_cost_usd"] {
+            describe.requirement_fields.push(field.into());
+            assert_eq!(super::check_describe(&describe), Ok(()));
+        }
+    }
     use super::*;
 
     #[test]

@@ -121,6 +121,12 @@ pub const CHECKS: &[CheckSpec] = &[
         "image_reference_identity_is_its_handle",
         "with a module that declares image_reference, a re-send carrying the same handle is a replay with no new stand-in call, and a re-send carrying the same picture inline instead of the handle is refused batch_id_reuse naming items[0]; not applicable without the hook",
     ),
+    check("routed_replay_keeps_decision", "a routed batch replay returns its stored model and decision_id without selecting or dispatching again; not applicable without routed_models and the routing hook"),
+    check("routed_partial_failure_keeps_model", "after an answered item and a refused credential, unanswered items fail with auth_failed and no new routing decision or model is used; not applicable without routed_models and the routing hook"),
+    check("routed_reply_has_decision_id", "routed model and pinned-account replies carry the decision_id routing chose; not applicable without routed_models and the routing hook"),
+    check("routed_pin_never_substituted", "a pinned model with no account is refused routing_refused preserving the pin and no provider call; not applicable without routed_models and the routing hook"),
+    check("routed_admission_refusals", "answered routing refusals retain routing_code and routing_reason; transport failure is routing_unavailable, transient; not applicable without routed_models and the routing hook"),
+    check("routed_initial_account_failure_bounded", "an initial refused credential with no answered item permits at most one new routing decision and whole-batch attempt; no later item is sent while the first keeps failing; not applicable without routed_models and the routing hook"),
 ];
 
 /// Where the suite checks less than the contract says, and why. Every

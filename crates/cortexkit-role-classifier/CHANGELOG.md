@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0
+
+- Breaking: `ClassifyRequest.model` and the model pin in `BatchIdentity`
+  become optional. Providers opt in with the empty `routed_models` describe
+  group; legacy providers still require a model. `parse_request_for` checks
+  the declaration, and `ClassifyRequest::routed` builds an unpinned request.
+- Routing chooses one model and account per batch, frozen with its
+  `decision_id` before dispatch and preserved on replay. Pins never fall
+  back. One reselection is permitted only on account failure before any
+  answered item; partial batches never mix models.
+- Add optional reply `decision_id`, routing usage/reporting references, and
+  routed request/reply/refusal vectors with checksums.
+- Add classifier-local `RoutingRefusal`: `routing_refused` retains routing's
+  code, message and pin; `routing_unavailable` is a transient transport
+  failure. Answered refusals are conservatively terminal because routing
+  exposes no retryability predicate. Shared provider refusal types and
+  `model_unavailable` keep their meaning.
+
 ## 0.5.2
 
 - Pin OpenAI's error-code-first mapping in CONTRACT §8: HTTP 429

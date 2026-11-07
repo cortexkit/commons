@@ -62,6 +62,30 @@ pub fn state_key(state: &Value) -> String {
         .expect("JCS output is UTF-8")
 }
 
+/// A model and account returned by the routing stand-in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoutedDecision {
+    pub model: String,
+    pub account: String,
+    pub decision_id: String,
+}
+
+/// One answer, refusal, or transport failure from the routing stand-in.
+#[derive(Clone, Debug)]
+pub enum RoutingOutcome {
+    Selected(RoutedDecision),
+    Refused { code: String, message: String },
+    Unavailable,
+}
+
+/// Observations made by stand-ins, not inferred from the classifier reply.
+#[derive(Clone, Debug, Default)]
+pub struct RoutingObservations {
+    pub selections: usize,
+    /// The frozen decision actually used for each provider request, in order.
+    pub provider_requests: Vec<RoutedDecision>,
+}
+
 /// A classifier module under test.
 ///
 /// Every model it serves must route to a stand-in provider this subject
@@ -131,4 +155,21 @@ pub trait ClassifierSubject: Send + Sync {
     async fn set_image_source_down(&self, down: bool) {
         let _ = down;
     }
+
+    /// Script routing in order and reset its observations. After the last
+    /// outcome, repeat that outcome. Return false when no routing hook is
+    /// available; the routing checks then report not applicable.
+    async fn script_routing(&self, outcomes: Vec<RoutingOutcome>) -> bool {
+        let _ = outcomes;
+        false
+    }
+
+    /// Count actual routing selections and record model/account/decision
+    /// used by actual provider requests while a routing script is active.
+    async fn routing_observations(&self) -> Option<RoutingObservations> {
+        None
+    }
+
+    /// Restore normal routing after a scripted case, including failed cases.
+    async fn finish_routing(&self) {}
 }

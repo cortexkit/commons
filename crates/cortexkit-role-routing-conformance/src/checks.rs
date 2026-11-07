@@ -2,6 +2,7 @@
 //! from a freshly reset and configured provider.
 
 mod continuation;
+mod decision_inputs;
 mod extensions;
 mod select_engine;
 
@@ -237,6 +238,12 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
     /// Run the check named `name` from a fresh provider.
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         self.fresh().await?;
+        if matches!(
+            name,
+            "questions_requirement_honoured" | "max_cost_usd_requirement_honoured"
+        ) {
+            return self.decision_input_check(name).await;
+        }
         if name.starts_with("select_engine_") {
             return self.select_engine_check(name).await;
         }

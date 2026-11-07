@@ -193,6 +193,9 @@ impl ItemResult {
 pub struct ClassifyReply {
     pub batch_id: String,
     pub model: String,
+    /// Present whenever routing selected a model or an account for this batch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_id: Option<String>,
     /// One per request item, in request order.
     pub items: Vec<ItemResult>,
     /// Summed over answered items; a count no item reported is absent.
@@ -215,10 +218,16 @@ impl ClassifyReply {
         Self {
             batch_id: batch_id.into(),
             model: model.into(),
+            decision_id: None,
             items,
             usage,
             cost_usd: None,
         }
+    }
+
+    pub fn with_decision_id(mut self, decision_id: impl Into<String>) -> Self {
+        self.decision_id = Some(decision_id.into());
+        self
     }
 
     pub fn with_usage(mut self, usage: Usage) -> Self {
@@ -232,23 +241,35 @@ impl ClassifyReply {
     }
 }
 
-/// Check a reply against the request it answers: the same batch and model,
+/// Check a reply against the request it answers: the same batch, the model
+/// pin when supplied, a decision id when routing selected the model,
 /// one item per request item in request order, each with exactly one of
 /// `answers` and `error`, and every answered item answering exactly the
 /// request's questions with answers of the asked type. The error names the
 /// first problem.
 pub fn check_reply(reply: &ClassifyReply, request: &ClassifyRequest) -> Result<(), String> {
+    if reply.model.is_empty() {
+        return Err("model must name the model used".into());
+    }
     if reply.batch_id != request.batch_id {
         return Err(format!(
             "batch_id {} answers request {}",
             reply.batch_id, request.batch_id
         ));
     }
-    if reply.model != request.model {
+    if request
+        .model
+        .as_ref()
+        .is_some_and(|model| &reply.model != model)
+    {
         return Err(format!(
             "model {} answers a request for {}",
-            reply.model, request.model
+            reply.model,
+            request.model.as_deref().unwrap_or_default()
         ));
+    }
+    if request.model.is_none() && reply.decision_id.is_none() {
+        return Err("decision_id is required when routing selected the model".into());
     }
     if reply.items.len() != request.items.len() {
         return Err(format!(

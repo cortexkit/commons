@@ -254,6 +254,31 @@ impl EngineFacts {
     }
 }
 
+/// Per-model facts supplied by the decision-input requirement fixture hook.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ModelInputFacts {
+    pub route_key: String,
+    /// The model's served per-request question limit, if stated.
+    pub max_questions: Option<u64>,
+    /// The catalog's stated input price, in USD per million tokens.
+    pub input_per_mtok_usd: Option<serde_json::Number>,
+}
+
+impl ModelInputFacts {
+    pub fn new(
+        route_key: impl Into<String>,
+        max_questions: Option<u64>,
+        input_per_mtok_usd: Option<serde_json::Number>,
+    ) -> Self {
+        Self {
+            route_key: route_key.into(),
+            max_questions,
+            input_per_mtok_usd,
+        }
+    }
+}
+
 /// A routing provider under test.
 ///
 /// Before every check the kit calls [`reset`](Self::reset), then
@@ -278,6 +303,14 @@ pub trait RoutingSubject: Send + Sync {
     /// daemon verified, and the provider knows it as a runner); every other
     /// principal is not.
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String>;
+
+    /// Replace question-limit and input-price facts for the current catalog.
+    /// Return false when this fixture hook is unavailable; the checks then
+    /// report not applicable rather than passing without exercising a rule.
+    async fn configure_model_input_facts(&self, facts: &[ModelInputFacts]) -> Result<bool, String> {
+        let _ = facts;
+        Ok(false)
+    }
 
     /// Configure a panel class's counts. Its quality floor must be met by
     /// every model in the panel fixture. Required only with `select_panel`.

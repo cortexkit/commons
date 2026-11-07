@@ -32,8 +32,9 @@ only what is this role's own. Route roles and model discovery follow RULES §18.
   answers untouched. It does no inference itself. Local inference, when it
   exists, is another module under the same capability.
 - [pinned] A caller opens a route for `classifier/v1` as RULES §18
-  requires, then picks the module by **model id** using that section's
-  discovery procedure, not by capability alone.
+  requires. With a model pin it uses that section's model discovery
+  procedure. Without a pin it chooses a classifier provider declaring
+  `routed_models`; routing selects the model and account (§6.8).
 - [pinned] Starting providers: Cloudflare Workers AI `@cf/cloudflare/clef`
   (catalog ids `cloudflare-workers-ai/@cf/cloudflare/clef`,
   `cloudflare-workers-ai/@cf/cloudflare/clef-flash`) and TypeSafe
@@ -58,7 +59,8 @@ only what is this role's own. Route roles and model discovery follow RULES §18.
       price?: { input_per_mtok_usd?, output_per_mtok_usd? },  // absent if unpriced
       egress_host                 // the provider host item text is sent to
     } ],
-    image_reference?: {}          // present iff the module resolves image references (§3)
+    image_reference?: {},         // present iff the module resolves image references (§3)
+    routed_models?: {}            // routing chooses the model and account (§6.8)
   }
   ```
 
@@ -84,13 +86,18 @@ only what is this role's own. Route roles and model discovery follow RULES §18.
   ```
   {
     batch_id: string,            // required; 1-128 printable ASCII; the idempotency key
-    model: string,               // required; catalog id "<provider>/<model>"; never substituted
+    model?: string,              // optional pin; catalog id "<provider>/<model>"; never substituted
     questions: { <id>: Question },  // 1..model.max_questions; ids 1-64 [a-z0-9_-]
     items: [ { state, images? } ],  // 1..model.max_items, answered in this order
     max_cost_usd?: number        // optional spend ceiling for the batch (§6.4)
   }
   ```
 
+- [pinned] A caller omits `model` only for a provider declaring
+  `routed_models`. A provider without that group refuses a missing model
+  `invalid_params` naming `model`. There is no `needs` request member:
+  the provider derives routing requirements from the batch (§6.8).
+  `parse_request_for` enforces the declaration when decoding a request.
 - [pinned] `state` is a string, an object or an array, forwarded to the
   provider verbatim. Null, numbers and booleans are refused
   `invalid_params` with `detail.field` `items[i].state` (the real index).
@@ -151,7 +158,7 @@ with the providers' own field names (`question` module):
 
   ```
   {
-    batch_id, model,
+    batch_id, model, decision_id?,
     items: [ {
       index: n,                         // position in the request
       answers?: { <id>: Answer },       // present iff the item succeeded
@@ -164,6 +171,9 @@ with the providers' own field names (`question` module):
   ```
 
 - [pinned] Items come back in request order; `items[i].index == i`.
+- [pinned] `model` is the model used for the entire batch. `decision_id`
+  is present whenever routing made a decision, including an account-only
+  decision for a pinned model, and is unchanged on replay.
 - [pinned] `Answer` is the provider's answer object as returned:
   - `noul`: `{type, noul}`. `noul` is the probability that the answer is
     yes, from 0 (no) to 1 (yes) (providers' docs: "Probability the answer is
@@ -182,12 +192,14 @@ with the providers' own field names (`question` module):
 
 ## 6. Pinned rules
 
-The shared batch rules apply as RULES §2 to §11 state them. The subsections
-keep their numbers, and say what is this role's own.
+The shared batch rules apply as RULES §2 to §11 state them, except for the
+routed account-failure storage rules below. The subsections keep their
+numbers, and say what is this role's own.
 
 ### 6.1 Idempotent by `batch_id`
 
-- [pinned] As RULES §2. **Body identity** is the model, the questions, and
+- [pinned] As RULES §2. **Body identity** is the caller's model pin (or its
+  omission, not the model subsequently chosen by routing), the questions, and
   each item (its images in canonical form, a reference as its `{handle}`)
   (`BatchIdentity`).
 - [pinned] `detail.field` of `batch_id_reuse` names the first field that
@@ -201,7 +213,20 @@ keep their numbers, and say what is this role's own.
 
 ### 6.3 Stored errors on a re-send
 
-- [pinned] As RULES §4.
+- [pinned] As RULES §4 for providers without `routed_models`, including
+  same-batch retries of unstored account failures. For a `routed_models`
+  provider, a resent `batch_id` uses its frozen model, account and decision
+  id and never selects again:
+
+  | Stored item state | Re-send behavior |
+  |---|---|
+  | Answered | Replay the stored answer without a provider call. |
+  | Unanswered after a non-account transient error (rate limit, 503) | Retry on the same frozen model and account. |
+  | Failed for an account reason | Replay the stored failure; retry the item in a new batch. |
+
+  A completed replay answers entirely from storage. The account-failure
+  exception also applies if no item was answered after the optional initial
+  reselection (§6.8); an account failure does not discard the frozen batch.
 
 ### 6.4 `max_cost_usd` is a batch ceiling
 
@@ -234,12 +259,46 @@ keep their numbers, and say what is this role's own.
   missing `batch_id` names `batch_id` (`parse_request`,
   `test-vectors/classifier-v1/field-paths.json`).
 
-### 6.8 Model pinned
+### 6.8 Model pins and routed decisions
+
+- [pinned] For its own provider requests, a `routed_models` provider takes
+  the routing contract's runner role (§1), declaring the necessary runner
+  support and following its account admission (§9.1), renewal, observation
+  and report flow unchanged.
 
 - [pinned] As RULES §9: a missing row is `model_unknown`; a row whose
   `kind` is not `classifier` is `model_not_classifier`, with `detail.model`
   and `detail.kind`; a row that states no `kind` is that same code with
   `detail.model` only, never an invented kind (`check_catalog_row`).
+- [pinned] A provider declaring `routed_models` asks routing to choose the
+  model and account. It derives `questions` from the question count,
+  `modalities: ["image"]` when any item has images, `context_window` from
+  the largest single request, `input_tokens` from the estimated total input
+  for the batch, and `max_cost_usd` from the batch's cap. It sends requirement
+  members only to a router listing them in `requirement_fields` (routing
+  contract §5.1). Routing's wire-required `iq` is a 0–100 task-demand rank;
+  for a classifier consumer whose router does not rank by it, the provider
+  sends `iq: 0` and the router ignores it. Model ordering and price
+  preferences belong to router policy,
+  not to the caller or classifier contract.
+- [pinned] A supplied `model` is a routing pin with no fallback: routing
+  chooses only an account that can serve that model. No account means a
+  refusal, never substitution. If routing finds no model or no account for
+  a pin, admission is refused `routing_refused` (§7), preserving the pin.
+- [pinned] Before its first provider request, the classifier provider
+  stores the routing decision's model, account and `decision_id` with the
+  batch. A completed replay by `batch_id` answers from storage and never
+  selects again; incomplete non-account retries use the same frozen choice
+  (§6.3).
+- [pinned] On out-of-credit or credential-refused account failure before
+  any item has been answered, the provider may ask routing once more and
+  restart the whole batch on the new choice, storing that choice before
+  dispatch. A pin still applies. Once any item has been answered, no new
+  decision is allowed: all unanswered items fail with the account error,
+  and the caller retries them in a new batch. One batch never mixes models.
+- [pinned] A `routed_models` provider reports usage per decision and account
+  failures to routing under the routing contract's `route.report` (§8) and
+  `route.account_observe` (§9.2); their reporting rules apply unchanged.
 
 ### 6.9 Spend guard
 
@@ -271,6 +330,14 @@ detail and class, and which codes are stored and stop the call are RULES
   permanent (the handle is unknown, expired or not usable by this caller,
   one answer for all three); `image_source_unavailable` is transient, with
   `detail.retry_after_ms` (the issuing module is unreachable or timed out).
+- [pinned] Routed admission refusals (`RoutingRefusal`): `routing_refused`
+  means routing answered but found no model or no account for a pin. Its
+  detail carries `routing_code` verbatim, optional `routing_reason` (routing's
+  message), and `model` when pinned. Routing exposes no retryability
+  predicate, so this version conservatively classifies an answered refusal
+  as permanent. `routing_unavailable` means no routing answer
+  could be obtained (closed route, timeout, or routing not ready), and is
+  transient. It is never used for an answered routing refusal.
 - [pinned] Per-item errors (`ITEM_CODES`): `rate_limited`,
   `provider_error`, `provider_refused`, `invalid_item`, `cost_exceeded`,
   `auth_failed`, `model_unavailable`.
@@ -283,6 +350,10 @@ detail and class, and which codes are stored and stop the call are RULES
   answer bound and never answers with it.
 
 ## 8. Provider status mapping
+
+- [pinned] First-call account-refusal/no-record and same-batch account-retry
+  rules apply only to providers without `routed_models`. A routed provider
+  follows §§6.3 and 6.8 instead, preserving account failures with the batch.
 
 - [pinned] TypeSafe documents no error codes, so its errors map by status
   (RULES §15, the first table; `item_code_for_status`): its 401 is

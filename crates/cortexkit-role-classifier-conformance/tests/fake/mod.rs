@@ -17,6 +17,8 @@
 //! the suite's script. Everything it knows reaches the suite only as
 //! replies on a route.
 
+mod routed;
+
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::{
@@ -46,7 +48,8 @@ use cortexkit_role_classifier_conformance::{
         },
         IndexMap,
     },
-    ClassifierRoute, ClassifierSubject, Reply, RouteFailure, Scripted, ServedModel,
+    ClassifierRoute, ClassifierSubject, Reply, RouteFailure, RoutedDecision, RoutingObservations,
+    RoutingOutcome, Scripted, ServedModel,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Number, Value};
@@ -65,6 +68,12 @@ const PRICED_CONTEXT: u64 = 8192;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub replay_selects_again: bool,
+    pub partial_failure_switches_model: bool,
+    pub missing_decision_id: bool,
+    pub pin_substituted: bool,
+    pub routing_refusal_as_unavailable: bool,
+    pub initial_account_failure_reselects_twice: bool,
     /// role.describe states a context of 1 token for the priced model
     /// instead of the catalog's.
     pub describe_wrong_context_tokens: bool,
@@ -260,6 +269,8 @@ struct RawItems {
 }
 
 pub struct FakeModule {
+    routed_models: bool,
+    routing: Mutex<routed::RoutingState>,
     defects: Defects,
     priced: bool,
     /// Whether role.describe declares image_reference and references are
@@ -302,7 +313,10 @@ impl FakeModule {
         if self.defects.describe_omits_model {
             models.truncate(1);
         }
-        let describe = RoleDescribe::new(Limits::new(MAX_ITEMS, MAX_REQUEST_BYTES), models);
+        let mut describe = RoleDescribe::new(Limits::new(MAX_ITEMS, MAX_REQUEST_BYTES), models);
+        if self.routed_models {
+            describe = describe.with_routed_models();
+        }
         if self.references {
             describe.with_image_reference(ImageReferenceSupport::new())
         } else {
@@ -336,6 +350,9 @@ impl FakeModule {
     }
 
     async fn classify(&self, text: &str) -> Reply {
+        if self.routing.lock().unwrap().active {
+            return self.classify_routed(text).await;
+        }
         let describe = self.describe();
         if let Err(refusal) = check_request_bytes(text.len(), &describe.limits) {
             return refused(refusal);
@@ -351,16 +368,22 @@ impl FakeModule {
                 Err(refusal) => return refused(refusal),
             }
         };
-        if self.defects.kindless_model_as_unknown && request.model == KINDLESS {
-            return refused(Refusal::model_unknown(&request.model));
+        let Some(model_id) = request.model.as_deref() else {
+            return refused(Refusal::invalid_params(
+                "model",
+                "model is required without routing",
+            ));
+        };
+        if self.defects.kindless_model_as_unknown && model_id == KINDLESS {
+            return refused(Refusal::model_unknown(model_id));
         }
-        if let Err(refusal) = check_catalog_row(&request.model, self.catalog_row(&request.model)) {
+        if let Err(refusal) = check_catalog_row(model_id, self.catalog_row(model_id)) {
             return refused(refusal);
         }
         let catalog = self.catalog();
         let model = catalog
             .iter()
-            .find(|entry| entry.model == request.model)
+            .find(|entry| entry.model == model_id)
             .unwrap()
             .clone();
         let mut checked = request.clone();
@@ -628,7 +651,9 @@ impl FakeModule {
                     return Err(Refusal::auth_failed());
                 }
                 if code == errors::MODEL_UNAVAILABLE {
-                    return Err(Refusal::model_unavailable(&request.model));
+                    return Err(Refusal::model_unavailable(
+                        request.model.as_deref().unwrap(),
+                    ));
                 }
             }
             let stops = error.stops_the_call()
@@ -743,7 +768,7 @@ impl FakeModule {
         }
         let reply = ReplyText {
             batch_id: request.batch_id.clone(),
-            model: request.model.clone(),
+            model: request.model.clone().unwrap(),
             items,
             usage,
             cost_usd: model.is_priced().then(|| Number::from_f64(cost).unwrap()),
@@ -778,6 +803,7 @@ impl ClassifierRoute for FakeRoute {
 
 /// The subject the suite's tests run against.
 pub struct FakeSubject {
+    routing_hook: bool,
     module: Arc<FakeModule>,
     can_hold: bool,
     /// Whether `issue_image_reference` hands out handles.
@@ -810,6 +836,19 @@ impl FakeSubject {
         Self::build(Defects::default(), true, true, true, false)
     }
 
+    pub fn without_routing_hook() -> Self {
+        Self {
+            routing_hook: false,
+            ..Self::routed(Defects::default())
+        }
+    }
+
+    pub fn routed(defects: Defects) -> Self {
+        let mut subject = Self::new(defects);
+        Arc::get_mut(&mut subject.module).unwrap().routed_models = true;
+        subject
+    }
+
     fn build(
         defects: Defects,
         priced: bool,
@@ -819,6 +858,8 @@ impl FakeSubject {
     ) -> Self {
         Self {
             module: Arc::new(FakeModule {
+                routed_models: false,
+                routing: Mutex::new(routed::RoutingState::default()),
                 defects,
                 priced,
                 references,
@@ -828,6 +869,7 @@ impl FakeSubject {
             }),
             can_hold,
             image_hook,
+            routing_hook: true,
         }
     }
 }
@@ -838,6 +880,25 @@ impl ClassifierSubject for FakeSubject {
 
     async fn route(&self) -> Result<FakeRoute, String> {
         Ok(FakeRoute(self.module.clone()))
+    }
+
+    async fn script_routing(&self, outcomes: Vec<RoutingOutcome>) -> bool {
+        if !self.routing_hook {
+            return false;
+        }
+        let mut routing = self.module.routing.lock().unwrap();
+        routing.active = true;
+        routing.outcomes = outcomes;
+        routing.observations = RoutingObservations::default();
+        true
+    }
+
+    async fn routing_observations(&self) -> Option<RoutingObservations> {
+        Some(self.module.routing.lock().unwrap().observations.clone())
+    }
+
+    async fn finish_routing(&self) {
+        self.module.routing.lock().unwrap().active = false;
     }
 
     fn served_models(&self) -> Vec<ServedModel> {

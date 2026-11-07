@@ -30,6 +30,6 @@ pub use route::{Reply, RouteFailure, RoutingRoute};
 pub use runner::run_suite;
 pub use subject::{
     Catalog, CatalogAccount, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig,
-    ConsumerMode, ContinueCredential, EngineFacts, HoldLimits, OperatorRequirements,
-    ReachableToolProvider, RouteStamp, RoutingSubject, ScopeStamp,
+    ConsumerMode, ContinueCredential, EngineFacts, HoldLimits, ModelInputFacts,
+    OperatorRequirements, ReachableToolProvider, RouteStamp, RoutingSubject, ScopeStamp,
 };

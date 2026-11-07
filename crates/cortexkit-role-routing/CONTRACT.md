@@ -377,6 +377,9 @@ a module plays.
 - [pinned] `requirements` (required, an object):
   - `iq` (required, 0 to 100) and `eq` (optional, 0 to 100): task demand,
     which the provider maps onto its own model facts.
+    For a consumer whose router does not rank by iq (such as a classifier
+    consumer), callers send `0` and the router ignores it; it remains
+    required on the wire.
   - `context_window` and `max_output_tokens`: floors, in tokens.
   - `tools`: `"none"` (only runner and model pairs that run with no tools
     offered) or `"required"` (only routes that accept tool calls). Absent
@@ -391,6 +394,21 @@ a module plays.
   - `modalities`: input modalities the work sends (`image`, `pdf`,
     `audio`).
   - `structured_output`: bool.
+  - `questions` (integer ≥ 1): the most questions any single provider
+    request will carry; the model's served question limit must be at least
+    this value.
+  - `input_tokens` (non-negative integer): estimated total input tokens the
+    decision will spend, not the largest single request. Without a cap it
+    is optional, and `0` means no estimate.
+  - `max_cost_usd` (number > 0): an input-spend cap. A model whose stated
+    input price multiplied by `input_tokens` (converting price units to
+    tokens) exceeds the cap is ineligible. A model with no stated input
+    price is ineligible under a cap. A cap requires `input_tokens` ≥ 1;
+    missing or zero is `invalid_requirements` naming `input_tokens`.
+    These three members are usable by any consumer, but callers send each
+    only to routers listing it in `requirement_fields`.
+    Existing `context_window` covers the largest single request, and
+    `modalities: ["image"]` covers image inputs.
 - [pinned] A requirement member the provider does not read is refused
   `invalid_requirements {field}` naming it as sent; it is never ignored. A
   malformed requirement (a missing `iq`, a demand above 100, a `tools` or
@@ -400,6 +418,8 @@ a module plays.
   before the first `/`; a variant is what follows the last `:` after it. A
   pin that cannot be served is `pin_unavailable`; a malformed one is
   `pin_unavailable` with reason `invalid`.
+  With no fallback, routing chooses only an account for that model and
+  refuses if none can serve it; it never substitutes another model.
 - [pinned] `pin_fallback`: `"route"` beside a pin. When the pin cannot be
   served, the provider routes normally instead of refusing
   `pin_unavailable`. Routing still decides, since only it knows why the pin

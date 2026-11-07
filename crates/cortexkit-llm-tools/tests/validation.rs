@@ -183,6 +183,33 @@ fn classify_request_without_max_cost_usd_is_refused() {
 }
 
 #[test]
+fn classify_optional_model_and_actual_model_result_agree_with_schemas() {
+    let value = json!({"questions":{"q":{"type":"noul","instructions":"Test"}},"item":{"state":"example"},"max_cost_usd":0.01});
+    let request: classify::Request = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(request.model, None);
+    classify::validate_request(&request).unwrap();
+    assert!(jsonschema::validator_for(&classify::input_schema())
+        .unwrap()
+        .is_valid(&value));
+    assert!(serde_json::to_value(request)
+        .unwrap()
+        .get("model")
+        .is_none());
+    let result = json!({"model":"example/classifier", "answers":{"q":{"type":"noul","noul":0.5}}, "usage":{},"cost_usd":0.001});
+    let typed: classify::Result = serde_json::from_value(result.clone()).unwrap();
+    classify::validate_result(&typed).unwrap();
+    let schema = jsonschema::validator_for(&classify::result_schema()).unwrap();
+    assert!(schema.is_valid(&result));
+    let mut missing = result;
+    missing.as_object_mut().unwrap().remove("model");
+    assert!(!schema.is_valid(&missing));
+    assert!(serde_json::from_value::<classify::Result>(missing)
+        .unwrap_err()
+        .to_string()
+        .contains("model"));
+}
+
+#[test]
 fn extract_request_without_max_cost_usd_is_refused() {
     let mut value = json!({"model":"example/extractor",
         "fields":{"color":{"type":"text"}},"item":{"state":"An imaginary blue moon."}});

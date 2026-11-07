@@ -297,7 +297,15 @@ fn role_describe() {
     let describe: RoleDescribe = round_trip("answer", &file["answer"], &file["answer"]);
     assert_eq!(check_describe(&describe), Ok(()));
     assert_eq!(describe.ops, REQUIRED_OPS);
-    assert_eq!(describe.requirement_fields, REQUIREMENT_FIELDS);
+    // This legacy vector advertises only the original required fields.
+    let required: Vec<_> = REQUIREMENT_FIELDS
+        .iter()
+        .filter(|field| {
+            !cortexkit_role_routing::select::OPTIONAL_REQUIREMENT_FIELDS.contains(field)
+        })
+        .copied()
+        .collect();
+    assert_eq!(describe.requirement_fields, required);
     assert!(describe.consumer("codemode").unwrap().priced_only);
     assert!(describe.consumer("flow").unwrap().priced_only);
 }

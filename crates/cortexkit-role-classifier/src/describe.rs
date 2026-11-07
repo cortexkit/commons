@@ -13,7 +13,7 @@ pub use cortexkit_model_batch::image::ImageReferenceSupport;
 
 use crate::PROVIDES;
 
-/// The answer to `role.describe`: `{role, limits, models, image_reference?}`.
+/// The answer to `role.describe`, including optional capability groups.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct RoleDescribe {
@@ -25,7 +25,15 @@ pub struct RoleDescribe {
     /// §3); absent when it refuses them as unsupported images.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_reference: Option<ImageReferenceSupport>,
+    /// Present when routing selects the batch's model and account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routed_models: Option<RoutedModelsSupport>,
 }
+
+/// The `routed_models` opt-in group. It has no required members.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RoutedModelsSupport {}
 
 impl RoleDescribe {
     pub fn new(limits: Limits, models: Vec<ModelEntry>) -> Self {
@@ -34,7 +42,18 @@ impl RoleDescribe {
             limits,
             models,
             image_reference: None,
+            routed_models: None,
         }
+    }
+
+    /// Declare that routing selects the batch's model and account.
+    pub fn with_routed_models(mut self) -> Self {
+        self.routed_models = Some(RoutedModelsSupport::default());
+        self
+    }
+
+    pub fn declares_routed_models(&self) -> bool {
+        self.routed_models.is_some()
     }
 
     /// Declare that the module resolves image references.

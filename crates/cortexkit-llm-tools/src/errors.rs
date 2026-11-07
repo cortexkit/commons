@@ -54,7 +54,7 @@ pub fn class(code: &str) -> Option<ErrorClass> {
     {
         Some(ErrorClass::Permanent)
     } else {
-        batch::admission_class(code).or_else(|| batch::item_class(code))
+        classifier::admission_class(code).or_else(|| batch::item_class(code))
     }
 }
 

@@ -933,6 +933,71 @@ async fn ignoring_an_unknown_requirement_fails() {
 }
 
 #[tokio::test]
+async fn ignoring_questions_is_detected() {
+    breaks(
+        Defects {
+            ignore_questions: true,
+            ..Defects::default()
+        },
+        "questions_requirement_honoured",
+        "questions_requirement_honoured",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn ignoring_max_cost_usd_is_detected() {
+    breaks(
+        Defects {
+            ignore_max_cost_usd: true,
+            ..Defects::default()
+        },
+        "max_cost_usd_requirement_honoured",
+        "max_cost_usd_requirement_honoured",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn decision_input_checks_without_fixture_hook_are_not_applicable() {
+    let report = run_suite(&FakeSubject::without_model_input_hook()).await;
+    assert!(report.failing().is_empty(), "{}", report.render());
+    let expected = [
+        "questions_requirement_honoured",
+        "max_cost_usd_requirement_honoured",
+    ];
+    for name in expected {
+        assert!(
+            matches!(report.outcome(name), Some(CheckOutcome::NotApplicable { reason }) if reason.contains("no model-input facts hook")),
+            "{}",
+            report.render()
+        );
+    }
+    let allowed_skips = [
+        "undeclared_pin_slot_refused",
+        "undeclared_available_routes_refused",
+        "undeclared_prefer_prompt_cache_refused",
+        "undeclared_settings_refused",
+        "undeclared_observe_decision_id_refused",
+        "undeclared_observe_retry_at_ms_refused",
+        "undeclared_observe_provider_code_refused",
+        "account_for_tier_undeclared",
+        "undeclared_harness_group_refuses_member",
+        "undeclared_prefer_group_refuses_member",
+        "undeclared_exclude_providers_group_refuses_member",
+        "continue_undeclared_group_refuses_mode",
+        "questions_requirement_honoured",
+        "max_cost_usd_requirement_honoured",
+    ];
+    let skipped: Vec<_> = CHECKS
+        .iter()
+        .filter(|check| allowed_skips.contains(&check.name))
+        .map(|check| check.name)
+        .collect();
+    assert_eq!(report.not_applicable(), skipped);
+}
+
+#[tokio::test]
 async fn answering_an_unknown_consumer_fails() {
     breaks(
         Defects {

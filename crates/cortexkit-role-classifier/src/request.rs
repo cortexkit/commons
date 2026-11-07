@@ -25,7 +25,7 @@ pub use cortexkit_model_batch::admission::{
 };
 
 use crate::{
-    describe::{Limits, ModelEntry},
+    describe::{Limits, ModelEntry, RoleDescribe},
     errors::Refusal,
     question::{
         bounded, check_question, DecodedImage, Image, ImageReference, Question, ResolveFailure,
@@ -45,8 +45,10 @@ pub struct ClassifyRequest {
     /// The idempotency key: 1 to [`BATCH_ID_MAX_LEN`] printable ASCII
     /// characters.
     pub batch_id: String,
-    /// The catalog id, `<provider>/<model>`. Never substituted.
-    pub model: String,
+    /// An optional catalog id, `<provider>/<model>`. A pin is never substituted.
+    /// Omit only for a provider declaring `routed_models`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// The questions, by caller-chosen id, in the order the caller wrote
     /// them.
     pub questions: IndexMap<String, Question>,
@@ -68,7 +70,22 @@ impl ClassifyRequest {
     ) -> Self {
         Self {
             batch_id: batch_id.into(),
-            model: model.into(),
+            model: Some(model.into()),
+            questions,
+            items,
+            max_cost_usd: None,
+        }
+    }
+
+    /// Let a provider declaring `routed_models` select the model and account.
+    pub fn routed(
+        batch_id: impl Into<String>,
+        questions: IndexMap<String, Question>,
+        items: Vec<Item>,
+    ) -> Self {
+        Self {
+            batch_id: batch_id.into(),
+            model: None,
             questions,
             items,
             max_cost_usd: None,
@@ -130,7 +147,6 @@ pub fn parse_request(text: &str) -> Result<ClassifyRequest, Refusal> {
     let malformed = |field: String, what: &str| Refusal::invalid_params(field, what.to_owned());
     for (field, what) in [
         ("batch_id", "a string"),
-        ("model", "a string"),
         ("questions", "an object"),
         ("items", "an array"),
     ] {
@@ -143,6 +159,10 @@ pub fn parse_request(text: &str) -> Result<ClassifyRequest, Refusal> {
         if !ok {
             return Err(malformed(field.to_owned(), &format!("{field} is {what}")));
         }
+    }
+    match params.get("model") {
+        None | Some(Value::Null) | Some(Value::String(_)) => {}
+        Some(_) => return Err(malformed("model".into(), "model is a string")),
     }
     match params.get("max_cost_usd") {
         None | Some(Value::Null) | Some(Value::Number(_)) => {}
@@ -210,6 +230,18 @@ pub fn parse_request(text: &str) -> Result<ClassifyRequest, Refusal> {
     // Every member was checked above, so this decode does not fail for any
     // reason a narrower path could name; `params` covers what is left.
     serde_json::from_str(text).map_err(|e| Refusal::invalid_params("params", e.to_string()))
+}
+
+/// Decode a request and enforce the provider's model-selection declaration.
+pub fn parse_request_for(text: &str, describe: &RoleDescribe) -> Result<ClassifyRequest, Refusal> {
+    let request = parse_request(text)?;
+    if request.model.is_none() && !describe.declares_routed_models() {
+        return Err(Refusal::invalid_params(
+            "model",
+            "model is required without routed_models",
+        ));
+    }
+    Ok(request)
 }
 
 /// Check the request body's size against the module's limit. The refusal

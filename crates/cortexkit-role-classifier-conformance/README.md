@@ -34,6 +34,15 @@ fake under `tests/fake/` exists only to test the suite itself.
 
 ## Verdict
 
+For `routed_models`, optionally implement `script_routing`,
+`routing_observations` and `finish_routing`. The hook scripts ordered
+`RoutingOutcome`s, counts actual selections, and records the model, account
+and decision id used for each actual provider request. The last scripted
+outcome repeats. Observations must come from the stand-ins, not be inferred
+from the classifier's reply. The suite restores routing after each case.
+Without the group or script hook these cases report not applicable, with a
+reason, rather than passing.
+
 A check the module gives the suite no way to ask is **not applicable**,
 never passed: the cost and ceiling checks on a module that serves no priced
 model; the concurrent-call check on a stand-in that cannot hold a call; and
@@ -65,8 +74,8 @@ module does", naming them; only a run where every check ran and passed is
 | `answers_in_request_order` | — |
 | `provider_numbers_byte_for_byte` | — |
 | `one_failing_item_does_not_fail_batch` | — |
-| `auth_failure_stops_the_call_unstored` | — |
-| `auth_failure_on_first_call_refused` | — |
+| `auth_failure_stops_the_call_unstored` | provider declares `routed_models`; see its replacement below |
+| `auth_failure_on_first_call_refused` | provider declares `routed_models`; see its replacement below |
 | `model_unavailable_stops_the_call_unstored` | — |
 | `rate_limit_stops_the_rest_of_the_call` | — |
 | `unreported_usage_stays_absent` | — |
@@ -75,12 +84,25 @@ module does", naming them; only a run where every check ran and passed is
 | `image_reference_oversized_refused_like_inline` | as above |
 | `image_source_down_refused_transient` | as above |
 | `image_reference_identity_is_its_handle` | as above |
+| `routed_replay_keeps_decision` | no `routed_models` group or routing hook |
+| `routed_partial_failure_keeps_model` | as above |
+| `routed_reply_has_decision_id` | as above |
+| `routed_pin_never_substituted` | as above |
+| `routed_admission_refusals` | as above |
+| `routed_initial_account_failure_bounded` | as above |
+
+The two legacy auth checks are not applicable to `routed_models` providers:
+`auth_failure_stops_the_call_unstored` is replaced by
+`routed_partial_failure_keeps_model`, and `auth_failure_on_first_call_refused`
+by `routed_initial_account_failure_bounded`. Non-account transient retries
+remain applicable and must use the frozen model and account.
 
 `CHECKS` in `src/report.rs` states what each check asserts, and `NARROWINGS`
 where it checks less than the contract says; every report prints both.
 
 ## The suite's own tests
 
-`tests/suite.rs` runs the suite against the fake: a faithful fake passes
-every check, and each deliberate break in `fake::Defects` turns its check
-red by name. Each test pins exactly which checks a break turns red.
+`tests/suite.rs` runs the suite against legacy and routed fake providers:
+each passes every applicable check and names its not-applicable cases.
+Each deliberate break in `fake::Defects` turns its check red by name. Each
+test pins exactly which checks a break turns red.

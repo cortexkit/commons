@@ -1,8 +1,10 @@
 //! Error codes, their classes, and the two error shapes of `classify.run`.
 //!
 //! An admission refusal answers the whole request with an `ERROR` frame
-//! whose body is `{code, message, detail}` ([`Refusal`]); it writes nothing
-//! and dispatches nothing. After admission the batch never fails as a
+//! whose body is `{code, message, detail}` ([`Refusal`]); validation and
+//! routing admission refusals dispatch nothing. Routed account failures
+//! retain the frozen batch (contract §6.3), unlike legacy first-call account
+//! refusals. After admission the batch never fails as a
 //! whole: an item that could not be answered carries an [`ItemError`] in
 //! its place in the reply.
 //!
@@ -19,13 +21,78 @@
 //! the Workers AI account codes its §8 maps clef's errors to.
 
 pub use cortexkit_model_batch::errors::{
-    admission_class, classes, is_batch_level, item_class, ErrorClass, ItemError, ItemErrorDetail,
-    Refusal, RefusalDetail, ACCOUNT_LIMIT_EXHAUSTED, ACCOUNT_NOT_ENTITLED, ACCOUNT_WALLED,
-    ANSWER_TOO_LARGE, AUTH_FAILED, BATCH_ID_REUSE, BATCH_IN_PROGRESS, BATCH_LEVEL_CODES,
-    COST_EXCEEDED, IMAGE_SOURCE_UNAVAILABLE, IMAGE_UNAVAILABLE, INVALID_ITEM, INVALID_PARAMS,
+    classes, is_batch_level, item_class, ErrorClass, ItemError, ItemErrorDetail, Refusal,
+    RefusalDetail, ACCOUNT_LIMIT_EXHAUSTED, ACCOUNT_NOT_ENTITLED, ACCOUNT_WALLED, ANSWER_TOO_LARGE,
+    AUTH_FAILED, BATCH_ID_REUSE, BATCH_IN_PROGRESS, BATCH_LEVEL_CODES, COST_EXCEEDED,
+    IMAGE_SOURCE_UNAVAILABLE, IMAGE_UNAVAILABLE, INVALID_ITEM, INVALID_PARAMS,
     MODEL_NOT_CLASSIFIER, MODEL_UNAVAILABLE, MODEL_UNKNOWN, PROVIDER_ERROR, PROVIDER_REFUSED,
     RATE_LIMITED,
 };
+
+/// Routing answered but could not select a model or an account for a pin.
+pub const ROUTING_REFUSED: &str = "routing_refused";
+/// No answer could be obtained from routing.
+pub const ROUTING_UNAVAILABLE: &str = "routing_unavailable";
+
+/// A routing admission refusal, separate from provider and batch refusals.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct RoutingRefusal {
+    pub code: String,
+    pub message: String,
+    pub detail: RoutingRefusalDetail,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct RoutingRefusalDetail {
+    pub class: ErrorClass,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+impl RoutingRefusal {
+    /// Preserve routing's refusal code and message, and the caller's pin.
+    /// Routing exposes no retryability predicate, so an answered refusal
+    /// is conservatively terminal rather than guessing a code's class.
+    pub fn refused(code: impl Into<String>, reason: Option<String>, model: Option<String>) -> Self {
+        Self {
+            code: ROUTING_REFUSED.into(),
+            message: "routing refused the batch".into(),
+            detail: RoutingRefusalDetail {
+                class: ErrorClass::Permanent,
+                routing_code: Some(code.into()),
+                routing_reason: reason,
+                model,
+            },
+        }
+    }
+
+    pub fn unavailable(message: impl Into<String>) -> Self {
+        Self {
+            code: ROUTING_UNAVAILABLE.into(),
+            message: message.into(),
+            detail: RoutingRefusalDetail {
+                class: ErrorClass::Transient,
+                routing_code: None,
+                routing_reason: None,
+                model: None,
+            },
+        }
+    }
+}
+
+pub fn admission_class(code: &str) -> Option<ErrorClass> {
+    match code {
+        ROUTING_REFUSED => Some(ErrorClass::Permanent),
+        ROUTING_UNAVAILABLE => Some(ErrorClass::Transient),
+        _ => cortexkit_model_batch::errors::admission_class(code),
+    }
+}
 
 /// Every admission refusal code in the contract's §7 table, in its order.
 /// The batch-level account codes, which refuse a call only when its first
@@ -43,6 +110,8 @@ pub const ADMISSION_CODES: &[&str] = &[
     MODEL_UNAVAILABLE,
     IMAGE_UNAVAILABLE,
     IMAGE_SOURCE_UNAVAILABLE,
+    ROUTING_REFUSED,
+    ROUTING_UNAVAILABLE,
 ];
 
 /// Every per-item error code in the contract's §7 table, in its order.

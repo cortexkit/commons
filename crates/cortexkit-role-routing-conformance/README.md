@@ -5,7 +5,7 @@ available tier, ordered fallback with the chosen tier recorded, and a caller
 that omits tiers for a non-declaring router. The cases use the existing
 `configure_service_tiers` plan fixture hook; for an unsupported fixture the
 report marks each affected case `NotApplicable` with its name and reason,
-never passed. This release pins routing 0.7.3 exactly, whose account answer
+never passed. This release pins routing 0.7.4 exactly, whose account answer
 and pin use constructors instead of exhaustive Rust struct literals.
 
 The conformance kit for the `routing/v1` role
@@ -16,7 +16,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.10.3"
+cortexkit-role-routing-conformance = "0.10.4"
 ```
 
 ```rust,ignore
@@ -25,6 +25,16 @@ assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
 ```
 
 ## What a provider supplies
+
+The decision-input checks `questions_requirement_honoured` and
+`max_cost_usd_requirement_honoured` use optional
+`RoutingSubject::configure_model_input_facts` to supply `ModelInputFacts`:
+route key, served question limit, and stated input price per million tokens.
+The cap check admits equality, rejects an over-cap estimate, and excludes
+models with no stated input price. Each case reports not applicable with a
+reason if the router does not advertise its requirement members or the
+subject cannot supply these facts. The default hook returns `false`,
+preserving existing adapters.
 
 - A `RoutingRoute` adapter: send one `{method, params}` request over a real
   route to the provider and return the reply's exact body text, or the

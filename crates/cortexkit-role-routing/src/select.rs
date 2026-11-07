@@ -3,16 +3,15 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Number, Value};
 
 use crate::{
     capabilities::SELECT_HOLD_CONTROL,
     errors::{PinUnavailableReason, Refusal},
     members::Members,
 };
-/// Every requirement member this version defines, in contract order. A
-/// `routing/v1` provider reads every one of them; `role.describe` lists them
-/// in `requirement_fields`.
+/// Every requirement member this version defines, in contract order.
+/// Providers list the members they read in `requirement_fields`.
 pub const REQUIREMENT_FIELDS: &[&str] = &[
     "iq",
     "eq",
@@ -22,7 +21,13 @@ pub const REQUIREMENT_FIELDS: &[&str] = &[
     "tool_capabilities",
     "modalities",
     "structured_output",
+    "questions",
+    "input_tokens",
+    "max_cost_usd",
 ];
+
+/// Requirement members callers send only when the router lists them.
+pub const OPTIONAL_REQUIREMENT_FIELDS: &[&str] = &["questions", "input_tokens", "max_cost_usd"];
 
 /// The highest `iq` or `eq` a request may state.
 pub const DEMAND_MAX: u8 = 100;
@@ -166,6 +171,16 @@ pub struct Requirements {
     pub modalities: Option<Vec<Modality>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub structured_output: Option<bool>,
+    /// The most questions in any single provider request; at least one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub questions: Option<u64>,
+    /// Estimated total input tokens for the decision. Zero means no estimate
+    /// and is allowed only without a cost cap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    /// Positive input-spend cap; requires a positive `input_tokens` estimate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cost_usd: Option<Number>,
     /// Members this version does not define, kept so a provider can refuse
     /// them by name instead of losing them in a decode.
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
@@ -998,6 +1013,23 @@ pub(crate) fn parse_requirements(value: Option<&Value>) -> Result<Requirements, 
             format!("{unknown} is not a modality this provider reads"),
         ));
     }
+    let questions: Option<u64> = members.optional("questions")?;
+    if questions == Some(0) {
+        return Err(members.refuse("questions", "questions must be at least 1"));
+    }
+    let input_tokens: Option<u64> = members.optional("input_tokens")?;
+    let max_cost_usd: Option<Number> = members.optional("max_cost_usd")?;
+    if let Some(cap) = &max_cost_usd {
+        if !cap.as_f64().is_some_and(|cap| cap > 0.0) {
+            return Err(members.refuse("max_cost_usd", "max_cost_usd must be positive"));
+        }
+        if input_tokens.unwrap_or_default() == 0 {
+            return Err(members.refuse(
+                "input_tokens",
+                "a cost cap requires input_tokens at least 1",
+            ));
+        }
+    }
     Ok(Requirements {
         iq,
         eq,
@@ -1007,6 +1039,9 @@ pub(crate) fn parse_requirements(value: Option<&Value>) -> Result<Requirements, 
         tool_capabilities,
         modalities,
         structured_output: members.optional("structured_output")?,
+        questions,
+        input_tokens,
+        max_cost_usd,
         unknown: BTreeMap::new(),
     })
 }
@@ -1207,6 +1242,57 @@ mod tests {
         .unwrap_err();
         assert_eq!(refusal.code, RefusalCode::InvalidRequirements);
         assert_eq!(field(&refusal), "gpu_count");
+    }
+
+    #[test]
+    fn decision_input_requirements_validate_and_keep_unknowns() {
+        let valid = serde_json::json!({"iq": 0, "questions": 3,
+            "input_tokens": 1000, "max_cost_usd": 0.01});
+        let parsed = parse_requirements(Some(&valid)).unwrap();
+        assert_eq!(parsed.questions, Some(3));
+        assert_eq!(parsed.input_tokens, Some(1000));
+        assert_eq!(
+            parsed.max_cost_usd,
+            Some(serde_json::Number::from_f64(0.01).unwrap())
+        );
+        assert_eq!(serde_json::to_value(&parsed).unwrap(), valid);
+        for (addition, expected) in [
+            (serde_json::json!({"questions": 0}), "questions"),
+            (serde_json::json!({"questions": 1.5}), "questions"),
+            (serde_json::json!({"input_tokens": -1}), "input_tokens"),
+            (serde_json::json!({"input_tokens": 1.5}), "input_tokens"),
+            (serde_json::json!({"max_cost_usd": 0}), "max_cost_usd"),
+            (serde_json::json!({"max_cost_usd": -1}), "max_cost_usd"),
+            (serde_json::json!({"max_cost_usd": "1"}), "max_cost_usd"),
+            (serde_json::json!({"max_cost_usd": 1}), "input_tokens"),
+            (
+                serde_json::json!({"max_cost_usd": 1, "input_tokens": 0}),
+                "input_tokens",
+            ),
+        ] {
+            let mut requirements = serde_json::json!({"iq": 0});
+            requirements
+                .as_object_mut()
+                .unwrap()
+                .extend(addition.as_object().unwrap().clone());
+            assert_eq!(
+                field(&parse_requirements(Some(&requirements)).unwrap_err()),
+                expected
+            );
+        }
+        for value in [
+            serde_json::json!({"iq":0}),
+            serde_json::json!({"iq":0,"input_tokens":0}),
+        ] {
+            assert!(parse_requirements(Some(&value)).is_ok());
+        }
+        let unknown = serde_json::json!({"iq":0,"future_requirement":1});
+        let decoded: Requirements = serde_json::from_value(unknown.clone()).unwrap();
+        assert_eq!(decoded.unknown["future_requirement"], 1);
+        assert_eq!(
+            field(&parse_requirements(Some(&unknown)).unwrap_err()),
+            "future_requirement"
+        );
     }
 
     #[test]

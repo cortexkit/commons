@@ -1,4 +1,6 @@
 [
+  {"code":"routing_refused","message":"Routing found no eligible model.","detail":{"class":"permanent","routing_code":"no_route","routing_reason":"no model meets the requirements","no_spend":true}},
+  {"code":"routing_unavailable","message":"Routing timed out.","detail":{"class":"transient","no_spend":true}},
   {"code":"scope_required","message":"A daemon-stamped scope is required.","detail":{"class":"permanent"}},
   {"code":"flow_scope_required","message":"The flow carrier requires a flow scope.","detail":{"class":"permanent"}},
   {"code":"cost_unpriceable","message":"No per-token rate is known for the invented route.","detail":{"class":"permanent","model":"example/unpriced"}},

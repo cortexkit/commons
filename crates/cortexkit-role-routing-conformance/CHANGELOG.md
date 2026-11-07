@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.4
+
+- Pin routing 0.7.4 and add defaulted model-input facts for question limits
+  and stated input prices.
+- Check `questions` and `max_cost_usd` eligibility at their boundaries,
+  including unstated prices under a cap, with faulty-router self-tests for
+  ignored constraints. Cases are not applicable when the requirement or
+  fixture hook is unavailable.
+
 ## 0.10.3
 
 - Pin routing 0.7.3 and add group-gated `select_engine` cases for atomic

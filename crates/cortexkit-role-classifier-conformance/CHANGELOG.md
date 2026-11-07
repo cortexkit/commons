@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.0
+
+- Pin classifier 0.6.0, whose optional model pin changes the public request
+  and batch identity types.
+- Add defaulted routing-script and observation hooks. Routed checks are
+  explicitly not applicable without the group or hook.
+- Detect replay reselection, model mixing after a partial account failure,
+  missing routed/account decision ids, and substituted pins. Check routing
+  refusal detail and transport-failure codes. Each case has a faulty-provider
+  self-test that must fail by name.
+- Gate legacy account-retry checks to providers without `routed_models`;
+  routed checks instead verify frozen partial failures and the one-reselection
+  bound before any answer. Legacy, routed, and missing-hook fixtures each
+  assert their complete not-applicable lists. Non-account transient retries
+  remain on the same frozen decision.
+
 ## 0.7.1
 
 - Pin classifier 0.5.2 for its OpenAI provider error mapping contract.

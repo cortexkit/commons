@@ -82,7 +82,7 @@ pub(crate) fn classify_input(references: bool) -> Value {
                 "propertyNames":{"pattern":"^[a-z0-9_-]{1,64}$"},"additionalProperties":question()},
             "item":object(json!({"state":{"type":["string","object","array"]},"images":images(references)}), &["state"])
         }),
-        &["model", "questions", "item", "max_cost_usd"],
+        &["questions", "item", "max_cost_usd"],
     ))
 }
 
@@ -169,7 +169,15 @@ pub(crate) fn role_result(extract: bool) -> Value {
         properties["truncated"] = json!({"type":"boolean"});
         properties["state_text"] = text();
     }
-    document(object(properties, &["answers", "usage", "cost_usd"]))
+    if extract {
+        document(object(properties, &["answers", "usage", "cost_usd"]))
+    } else {
+        properties["model"] = nonempty();
+        document(object(
+            properties,
+            &["model", "answers", "usage", "cost_usd"],
+        ))
+    }
 }
 
 pub(crate) fn complete_input() -> Value {
