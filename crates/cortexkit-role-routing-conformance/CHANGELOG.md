@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.6
+
+- Pin routing 0.7.6, including its shared answered-refusal retry classifier.
+  No routing-provider case changes.
+
 ## 0.10.5
 
 - Pin routing 0.7.5. No case changes.

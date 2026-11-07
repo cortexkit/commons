@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.3
+
+- Classify answered routing refusals using routing 0.7.6: temporary refusals
+  become transient `routing_deferred`, with a saturating `retry_after_ms`
+  for every timed refusal, including `no_route` and
+  `account_pool_exhausted`. Permanent refusals remain `routing_refused`; no answer
+  remains `routing_unavailable`.
+- Define `routing_refused` and `routing_deferred` for undispatched items
+  after a lease-renewal refusal, preserving `detail.routing_code` through
+  model-batch 0.3.4. Add helpers for detail-aware refusals and item conversion.
+
 ## 0.6.2
 
 - Clarify in §6.8 that a runner may retry an authentication refusal once on

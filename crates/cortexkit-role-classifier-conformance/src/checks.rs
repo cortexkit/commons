@@ -200,6 +200,9 @@ where
             | "routed_reply_has_decision_id"
             | "routed_pin_never_substituted"
             | "routed_admission_refusals"
+            | "routed_transient_admission_refusals"
+            | "routed_permanent_admission_refusal"
+            | "routed_renewal_refusals"
             | "routed_initial_account_failure_bounded" => self.routed_check(name).await,
             "describe_complete" => self.describe_complete().await,
             "concurrent_call_refused_batch_in_progress" => self.concurrent().await,

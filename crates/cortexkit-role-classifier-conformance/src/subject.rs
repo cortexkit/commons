@@ -78,6 +78,31 @@ pub enum RoutingOutcome {
     Unavailable,
 }
 
+/// An answered routing refusal, including detail such as a retry timestamp.
+/// Use the constructor and setters so future fixture members stay additive.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct RoutingRefusalFixture {
+    pub code: String,
+    pub message: String,
+    pub detail: Value,
+}
+
+impl RoutingRefusalFixture {
+    pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            code: code.into(),
+            message: message.into(),
+            detail: serde_json::json!({}),
+        }
+    }
+
+    pub fn with_detail(mut self, detail: Value) -> Self {
+        self.detail = detail;
+        self
+    }
+}
+
 /// Observations made by stand-ins, not inferred from the classifier reply.
 #[derive(Clone, Debug, Default)]
 pub struct RoutingObservations {
@@ -161,6 +186,22 @@ pub trait ClassifierSubject: Send + Sync {
     /// available; the routing checks then report not applicable.
     async fn script_routing(&self, outcomes: Vec<RoutingOutcome>) -> bool {
         let _ = outcomes;
+        false
+    }
+
+    /// Refuse admission with this answered routing refusal. Reset routing
+    /// observations and repeat the refusal until `finish_routing`. Return
+    /// false when unsupported, making the case not applicable.
+    async fn script_routing_admission_refusal(&self, refusal: RoutingRefusalFixture) -> bool {
+        let _ = refusal;
+        false
+    }
+
+    /// With a selection script active, force lease renewal after the first
+    /// answered item and before any later dispatch; answer renewal with this
+    /// refusal. Do not select a new decision. Return false when unsupported.
+    async fn script_routing_renewal(&self, refusal: RoutingRefusalFixture) -> bool {
+        let _ = refusal;
         false
     }
 

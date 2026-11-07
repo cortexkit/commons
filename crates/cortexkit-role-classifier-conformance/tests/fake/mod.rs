@@ -49,7 +49,7 @@ use cortexkit_role_classifier_conformance::{
         IndexMap,
     },
     ClassifierRoute, ClassifierSubject, Reply, RouteFailure, RoutedDecision, RoutingObservations,
-    RoutingOutcome, Scripted, ServedModel,
+    RoutingOutcome, RoutingRefusalFixture, Scripted, ServedModel,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{value::RawValue, Number, Value};
@@ -73,6 +73,14 @@ pub struct Defects {
     pub missing_decision_id: bool,
     pub pin_substituted: bool,
     pub routing_refusal_as_unavailable: bool,
+    pub transient_routing_as_permanent: bool,
+    pub permanent_routing_as_transient: bool,
+    pub routing_delay_missing: bool,
+    pub timed_no_route_as_permanent: bool,
+    pub timed_pool_exhausted_as_permanent: bool,
+    pub renewal_as_provider_error: bool,
+    pub renewal_loses_routing_code: bool,
+    pub renewal_wrong_class: bool,
     pub initial_account_failure_reselects_twice: bool,
     /// role.describe states a context of 1 token for the priced model
     /// instead of the catalog's.
@@ -805,6 +813,7 @@ impl ClassifierRoute for FakeRoute {
 /// The subject the suite's tests run against.
 pub struct FakeSubject {
     routing_hook: bool,
+    retry_hooks: bool,
     module: Arc<FakeModule>,
     can_hold: bool,
     /// Whether `issue_image_reference` hands out handles.
@@ -812,6 +821,13 @@ pub struct FakeSubject {
 }
 
 impl FakeSubject {
+    pub fn without_retry_hooks() -> Self {
+        Self {
+            retry_hooks: false,
+            ..Self::routed(Defects::default())
+        }
+    }
+
     pub fn new(defects: Defects) -> Self {
         Self::build(defects, true, true, true, true)
     }
@@ -877,6 +893,7 @@ impl FakeSubject {
             can_hold,
             image_hook,
             routing_hook: true,
+            retry_hooks: true,
         }
     }
 }
@@ -896,7 +913,29 @@ impl ClassifierSubject for FakeSubject {
         let mut routing = self.module.routing.lock().unwrap();
         routing.active = true;
         routing.outcomes = outcomes;
+        routing.admission_refusal = None;
+        routing.renewal_refusal = None;
         routing.observations = RoutingObservations::default();
+        true
+    }
+
+    async fn script_routing_admission_refusal(&self, refusal: RoutingRefusalFixture) -> bool {
+        if !self.routing_hook || !self.retry_hooks {
+            return false;
+        }
+        let mut routing = self.module.routing.lock().unwrap();
+        routing.active = true;
+        routing.admission_refusal = Some(refusal);
+        routing.renewal_refusal = None;
+        routing.observations = RoutingObservations::default();
+        true
+    }
+
+    async fn script_routing_renewal(&self, refusal: RoutingRefusalFixture) -> bool {
+        if !self.routing_hook || !self.retry_hooks {
+            return false;
+        }
+        self.module.routing.lock().unwrap().renewal_refusal = Some(refusal);
         true
     }
 
@@ -905,7 +944,10 @@ impl ClassifierSubject for FakeSubject {
     }
 
     async fn finish_routing(&self) {
-        self.module.routing.lock().unwrap().active = false;
+        let mut routing = self.module.routing.lock().unwrap();
+        routing.active = false;
+        routing.admission_refusal = None;
+        routing.renewal_refusal = None;
     }
 
     fn served_models(&self) -> Vec<ServedModel> {

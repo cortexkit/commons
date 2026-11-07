@@ -19,6 +19,9 @@ const ROUTED_CHECKS: &[&str] = &[
     "routed_reply_has_decision_id",
     "routed_pin_never_substituted",
     "routed_admission_refusals",
+    "routed_transient_admission_refusals",
+    "routed_permanent_admission_refusal",
+    "routed_renewal_refusals",
     "routed_initial_account_failure_bounded",
 ];
 const LEGACY_AUTH_CHECKS: &[&str] = &[
@@ -127,7 +130,7 @@ async fn routed_missing_decision_id_is_detected() {
             missing_decision_id: true,
             ..Defects::default()
         },
-        &["routed_reply_has_decision_id"],
+        &["routed_reply_has_decision_id", "routed_renewal_refusals"],
         "decision_id",
     )
     .await;
@@ -176,10 +179,152 @@ async fn routing_checks_without_hook_are_not_applicable() {
         report.render()
     );
     for name in ROUTED_CHECKS {
+        let hook = if matches!(
+            *name,
+            "routed_transient_admission_refusals" | "routed_permanent_admission_refusal"
+        ) {
+            "no detail-aware routing admission hook"
+        } else {
+            "no routing script hook"
+        };
         assert!(
-            matches!(report.outcome(name), Some(CheckOutcome::NotApplicable { reason }) if reason.contains("no routing script hook"))
+            matches!(report.outcome(name), Some(CheckOutcome::NotApplicable { reason }) if reason.contains(hook))
         );
     }
+}
+
+#[tokio::test]
+async fn new_routing_hooks_default_to_named_skips() {
+    let report = run(&FakeSubject::without_retry_hooks()).await;
+    assert_eq!(
+        report.verdict,
+        SuiteVerdict::PassedExceptNotApplicable {
+            not_applicable: LEGACY_AUTH_CHECKS
+                .iter()
+                .copied()
+                .chain([
+                    "routed_transient_admission_refusals",
+                    "routed_permanent_admission_refusal",
+                    "routed_renewal_refusals",
+                ])
+                .collect()
+        },
+        "{}",
+        report.render()
+    );
+    for (name, hook) in [
+        ("routed_transient_admission_refusals", "admission hook"),
+        ("routed_permanent_admission_refusal", "admission hook"),
+        ("routed_renewal_refusals", "renewal hook"),
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CheckOutcome::NotApplicable { reason }) if reason.contains(hook))
+        );
+    }
+}
+
+#[tokio::test]
+async fn transient_routing_admission_must_be_deferred() {
+    routed_breaks(
+        Defects {
+            transient_routing_as_permanent: true,
+            ..Defects::default()
+        },
+        &["routed_transient_admission_refusals"],
+        "routing_deferred",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn permanent_routing_admission_must_stay_refused() {
+    routed_breaks(
+        Defects {
+            permanent_routing_as_transient: true,
+            ..Defects::default()
+        },
+        &["routed_permanent_admission_refusal"],
+        "routing_refused",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn timed_routing_admission_requires_retry_delay() {
+    routed_breaks(
+        Defects {
+            routing_delay_missing: true,
+            ..Defects::default()
+        },
+        &["routed_transient_admission_refusals"],
+        "retry_after_ms",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn renewal_refusal_is_not_provider_error() {
+    routed_breaks(
+        Defects {
+            renewal_as_provider_error: true,
+            ..Defects::default()
+        },
+        &["routed_renewal_refusals"],
+        "routing_code, code or class",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn timed_no_route_admission_must_be_deferred() {
+    routed_breaks(
+        Defects {
+            timed_no_route_as_permanent: true,
+            ..Defects::default()
+        },
+        &["routed_transient_admission_refusals"],
+        "routing_deferred",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn timed_pool_exhausted_renewal_must_be_deferred() {
+    routed_breaks(
+        Defects {
+            timed_pool_exhausted_as_permanent: true,
+            ..Defects::default()
+        },
+        &["routed_renewal_refusals"],
+        "routing_code, code or class",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn renewal_refusal_requires_routing_code() {
+    routed_breaks(
+        Defects {
+            renewal_loses_routing_code: true,
+            ..Defects::default()
+        },
+        &["routed_renewal_refusals"],
+        "routing_code, code or class",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn renewal_refusal_requires_matching_class() {
+    routed_breaks(
+        Defects {
+            renewal_wrong_class: true,
+            ..Defects::default()
+        },
+        &["routed_renewal_refusals"],
+        "routing_code, code or class",
+    )
+    .await;
 }
 
 #[tokio::test]

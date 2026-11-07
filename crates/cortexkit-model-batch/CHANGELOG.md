@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.4
+
+- Add optional `ItemErrorDetail.routing_code` and its `with_routing_code`
+  setter for items left undispatched by an answered routing refusal.
+  Unknown detail members remain accepted and absent members stay omitted.
+
 ## 0.3.3
 
 - Add `status::openai_item_code` and OpenAI code constants and vectors.

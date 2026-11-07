@@ -269,12 +269,15 @@ impl<'de> Deserialize<'de> for ErrorClass {
 
 // ---- per-item error -------------------------------------------------------
 
-/// The optional `detail` of an item error. Only [`ANSWER_TOO_LARGE`] sends
-/// one today; every other item error leaves it out, so its wire form is
-/// `{code, class, message, retry_after_ms?}`.
+/// The optional `detail` of an item error. Roles define which members a
+/// code sends; absent members are omitted from the wire.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ItemErrorDetail {
+    /// Routing's code, only for items left undispatched by an answered
+    /// routing refusal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing_code: Option<String>,
     /// The field the error is about, as the role names it in a request.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
@@ -284,6 +287,13 @@ pub struct ItemErrorDetail {
     /// The size that broke the bound, in bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
+}
+
+impl ItemErrorDetail {
+    pub fn with_routing_code(mut self, routing_code: impl Into<String>) -> Self {
+        self.routing_code = Some(routing_code.into());
+        self
+    }
 }
 
 /// An item's error in a batch reply: `{code, class, message,
@@ -303,7 +313,7 @@ pub struct ItemError {
     /// When the provider said how long to wait.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after_ms: Option<u64>,
-    /// Present only on codes that define one ([`ANSWER_TOO_LARGE`]).
+    /// Present only on codes that define detail members.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<ItemErrorDetail>,
 }
@@ -341,6 +351,7 @@ impl ItemError {
             field: Some(field),
             limit: Some(limit),
             size: Some(size),
+            ..ItemErrorDetail::default()
         });
         error
     }
@@ -822,6 +833,22 @@ mod tests {
         );
         assert!(error.is_stored());
         assert!(!error.is_retried_on_resend());
+    }
+
+    #[test]
+    fn routing_item_detail_is_optional_and_open() {
+        let error = ItemError::new("routing_deferred", ErrorClass::Transient, "renewal refused")
+            .with_detail(ItemErrorDetail::default().with_routing_code("account_hold"));
+        assert_eq!(
+            serde_json::to_value(&error).unwrap(),
+            serde_json::json!({"code": "routing_deferred", "class": "transient", "message": "renewal refused", "detail": {"routing_code": "account_hold"}})
+        );
+        let mut value = serde_json::to_value(&error).unwrap();
+        value["detail"]["future_member"] = serde_json::json!(true);
+        assert_eq!(serde_json::from_value::<ItemError>(value).unwrap(), error);
+        let detail: ItemErrorDetail = serde_json::from_str("{}").unwrap();
+        assert_eq!(detail.routing_code, None);
+        assert_eq!(serde_json::to_string(&detail).unwrap(), "{}");
     }
 
     #[test]

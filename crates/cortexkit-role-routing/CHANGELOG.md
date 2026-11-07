@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.6
+
+- Add the pure `refusals::retry_class` helper and non-exhaustive `RetryClass`.
+  Share the timed-code logic with `Refusal::wait_until_ms`: every timed
+  refusal is `RetryAt`, including `no_route` and `account_pool_exhausted`.
+  Untimed account selection unavailability is transient; other untimed
+  refusals, including unknown codes and malformed timestamps, are permanent.
+
 ## 0.7.5
 
 - Recognise `call.yield/v1`, the tool-provider tag for a tool that can hand

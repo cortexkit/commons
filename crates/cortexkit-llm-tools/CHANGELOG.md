@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- A classify refusal can now carry the classifier's `routing_deferred` code
+  (transient): routing refused for now but names a retry time, or has no
+  account free at the moment. `detail.retry_after_ms` is present for a timed
+  one. The refusal samples cover it, and the crate requires classifier 0.6.3.
+
 ## 0.3.0
 
 - Breaking: `llm.classify/v1` accepts an optional model pin in its request

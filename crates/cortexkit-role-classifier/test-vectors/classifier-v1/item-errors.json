@@ -394,6 +394,134 @@
           "output_tokens": 9
         }
       }
+    },
+    {
+      "name": "routing_refused",
+      "request": {
+        "batch_id": "vec-item-routing-refused",
+        "model": "typesafe/jev-1.13.0",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "answered"
+          },
+          {
+            "state": "undispatched"
+          },
+          {
+            "state": "also undispatched"
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-item-routing-refused",
+        "model": "typesafe/jev-1.13.0",
+        "decision_id": "decision-1",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            }
+          },
+          {
+            "index": 1,
+            "error": {
+              "code": "routing_refused",
+              "class": "permanent",
+              "message": "routing refused the batch",
+              "detail": {
+                "routing_code": "auth_required"
+              }
+            }
+          },
+          {
+            "index": 2,
+            "error": {
+              "code": "routing_refused",
+              "class": "permanent",
+              "message": "routing refused the batch",
+              "detail": {
+                "routing_code": "auth_required"
+              }
+            }
+          }
+        ],
+        "usage": {}
+      }
+    },
+    {
+      "name": "routing_deferred",
+      "request": {
+        "batch_id": "vec-item-routing-deferred",
+        "model": "typesafe/jev-1.13.0",
+        "questions": {
+          "urgent": {
+            "type": "noul",
+            "instructions": "Is this support request urgent?"
+          }
+        },
+        "items": [
+          {
+            "state": "answered"
+          },
+          {
+            "state": "undispatched"
+          },
+          {
+            "state": "also undispatched"
+          }
+        ]
+      },
+      "reply": {
+        "batch_id": "vec-item-routing-deferred",
+        "model": "typesafe/jev-1.13.0",
+        "decision_id": "decision-1",
+        "items": [
+          {
+            "index": 0,
+            "answers": {
+              "urgent": {
+                "type": "noul",
+                "noul": 0.97
+              }
+            }
+          },
+          {
+            "index": 1,
+            "error": {
+              "code": "routing_deferred",
+              "class": "transient",
+              "message": "routing refused the batch",
+              "retry_after_ms": 2000,
+              "detail": {
+                "routing_code": "account_hold"
+              }
+            }
+          },
+          {
+            "index": 2,
+            "error": {
+              "code": "routing_deferred",
+              "class": "transient",
+              "message": "routing refused the batch",
+              "retry_after_ms": 2000,
+              "detail": {
+                "routing_code": "account_hold"
+              }
+            }
+          }
+        ],
+        "usage": {}
+      }
     }
   ]
 }

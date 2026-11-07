@@ -21,16 +21,17 @@
 //! the Workers AI account codes its §8 maps clef's errors to.
 
 pub use cortexkit_model_batch::errors::{
-    classes, is_batch_level, item_class, ErrorClass, ItemError, ItemErrorDetail, Refusal,
-    RefusalDetail, ACCOUNT_LIMIT_EXHAUSTED, ACCOUNT_NOT_ENTITLED, ACCOUNT_WALLED, ANSWER_TOO_LARGE,
-    AUTH_FAILED, BATCH_ID_REUSE, BATCH_IN_PROGRESS, BATCH_LEVEL_CODES, COST_EXCEEDED,
-    IMAGE_SOURCE_UNAVAILABLE, IMAGE_UNAVAILABLE, INVALID_ITEM, INVALID_PARAMS,
-    MODEL_NOT_CLASSIFIER, MODEL_UNAVAILABLE, MODEL_UNKNOWN, PROVIDER_ERROR, PROVIDER_REFUSED,
-    RATE_LIMITED,
+    classes, is_batch_level, ErrorClass, ItemError, ItemErrorDetail, Refusal, RefusalDetail,
+    ACCOUNT_LIMIT_EXHAUSTED, ACCOUNT_NOT_ENTITLED, ACCOUNT_WALLED, ANSWER_TOO_LARGE, AUTH_FAILED,
+    BATCH_ID_REUSE, BATCH_IN_PROGRESS, BATCH_LEVEL_CODES, COST_EXCEEDED, IMAGE_SOURCE_UNAVAILABLE,
+    IMAGE_UNAVAILABLE, INVALID_ITEM, INVALID_PARAMS, MODEL_NOT_CLASSIFIER, MODEL_UNAVAILABLE,
+    MODEL_UNKNOWN, PROVIDER_ERROR, PROVIDER_REFUSED, RATE_LIMITED,
 };
 
 /// Routing answered but could not select a model or an account for a pin.
 pub const ROUTING_REFUSED: &str = "routing_refused";
+/// Routing answered with a temporary refusal.
+pub const ROUTING_DEFERRED: &str = "routing_deferred";
 /// No answer could be obtained from routing.
 pub const ROUTING_UNAVAILABLE: &str = "routing_unavailable";
 
@@ -53,21 +54,48 @@ pub struct RoutingRefusalDetail {
     pub routing_reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
 }
 
 impl RoutingRefusal {
     /// Preserve routing's refusal code and message, and the caller's pin.
-    /// Routing exposes no retryability predicate, so an answered refusal
-    /// is conservatively terminal rather than guessing a code's class.
+    /// Use [`Self::refused_with_detail`] when routing supplies detail,
+    /// including a retry timestamp.
     pub fn refused(code: impl Into<String>, reason: Option<String>, model: Option<String>) -> Self {
+        Self::refused_with_detail(code, reason, model, &serde_json::Value::Null, 0)
+    }
+
+    /// Classify an answered refusal with routing's shared retry predicate.
+    /// `now_ms` is the current Unix time in milliseconds; an elapsed retry
+    /// timestamp produces a zero delay, never an underflow.
+    pub fn refused_with_detail(
+        code: impl Into<String>,
+        reason: Option<String>,
+        model: Option<String>,
+        detail: &serde_json::Value,
+        now_ms: u64,
+    ) -> Self {
+        use cortexkit_role_routing::refusals::{retry_class, RetryClass};
+        let routing_code = code.into();
+        let (code, class, retry_after_ms) = match retry_class(&routing_code, detail) {
+            RetryClass::Transient => (ROUTING_DEFERRED, ErrorClass::Transient, None),
+            RetryClass::RetryAt(at) => (
+                ROUTING_DEFERRED,
+                ErrorClass::Transient,
+                Some(at.saturating_sub(now_ms)),
+            ),
+            _ => (ROUTING_REFUSED, ErrorClass::Permanent, None),
+        };
         Self {
-            code: ROUTING_REFUSED.into(),
+            code: code.into(),
             message: "routing refused the batch".into(),
             detail: RoutingRefusalDetail {
-                class: ErrorClass::Permanent,
-                routing_code: Some(code.into()),
+                class,
+                routing_code: Some(routing_code),
                 routing_reason: reason,
                 model,
+                retry_after_ms,
             },
         }
     }
@@ -81,16 +109,35 @@ impl RoutingRefusal {
                 routing_code: None,
                 routing_reason: None,
                 model: None,
+                retry_after_ms: None,
             },
         }
+    }
+
+    /// Convert an answered lease-renewal refusal for each undispatched item.
+    /// Returns `None` for a transport failure, which has no routing code.
+    pub fn into_item_error(self) -> Option<ItemError> {
+        let routing_code = self.detail.routing_code?;
+        let mut error = ItemError::new(self.code, self.detail.class, self.message)
+            .with_detail(ItemErrorDetail::default().with_routing_code(routing_code));
+        error.retry_after_ms = self.detail.retry_after_ms;
+        Some(error)
     }
 }
 
 pub fn admission_class(code: &str) -> Option<ErrorClass> {
     match code {
         ROUTING_REFUSED => Some(ErrorClass::Permanent),
-        ROUTING_UNAVAILABLE => Some(ErrorClass::Transient),
+        ROUTING_DEFERRED | ROUTING_UNAVAILABLE => Some(ErrorClass::Transient),
         _ => cortexkit_model_batch::errors::admission_class(code),
+    }
+}
+
+pub fn item_class(code: &str) -> Option<ErrorClass> {
+    match code {
+        ROUTING_REFUSED => Some(ErrorClass::Permanent),
+        ROUTING_DEFERRED => Some(ErrorClass::Transient),
+        _ => cortexkit_model_batch::errors::item_class(code),
     }
 }
 
@@ -111,6 +158,7 @@ pub const ADMISSION_CODES: &[&str] = &[
     IMAGE_UNAVAILABLE,
     IMAGE_SOURCE_UNAVAILABLE,
     ROUTING_REFUSED,
+    ROUTING_DEFERRED,
     ROUTING_UNAVAILABLE,
 ];
 
@@ -128,11 +176,108 @@ pub const ITEM_CODES: &[&str] = &[
     COST_EXCEEDED,
     AUTH_FAILED,
     MODEL_UNAVAILABLE,
+    ROUTING_REFUSED,
+    ROUTING_DEFERRED,
 ];
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn routing_refusals_use_shared_retry_class_and_saturate_delays() {
+        for (code, detail, expected, delay) in [
+            (
+                "account_selection_unavailable",
+                serde_json::json!({}),
+                ROUTING_DEFERRED,
+                None,
+            ),
+            (
+                "account_hold",
+                serde_json::json!({"until_ms": 150}),
+                ROUTING_DEFERRED,
+                Some(50),
+            ),
+            (
+                "account_hold",
+                serde_json::json!({"until_ms": 50}),
+                ROUTING_DEFERRED,
+                Some(0),
+            ),
+            (
+                "pin_unavailable",
+                serde_json::json!({"reset_at_ms": 125}),
+                ROUTING_DEFERRED,
+                Some(25),
+            ),
+            (
+                "no_route",
+                serde_json::json!({"reset_at_ms": 140}),
+                ROUTING_DEFERRED,
+                Some(40),
+            ),
+            (
+                "account_pool_exhausted",
+                serde_json::json!({"reset_at_ms": 175}),
+                ROUTING_DEFERRED,
+                Some(75),
+            ),
+            ("no_route", serde_json::json!({}), ROUTING_REFUSED, None),
+            (
+                "account_pool_exhausted",
+                serde_json::json!({}),
+                ROUTING_REFUSED,
+                None,
+            ),
+            (
+                "pin_unavailable",
+                serde_json::json!({}),
+                ROUTING_REFUSED,
+                None,
+            ),
+            (
+                "unknown_code",
+                serde_json::json!({"reset_at_ms": 125}),
+                ROUTING_REFUSED,
+                None,
+            ),
+        ] {
+            let refusal = RoutingRefusal::refused_with_detail(
+                code,
+                Some("reason".into()),
+                Some("p/m".into()),
+                &detail,
+                100,
+            );
+            assert_eq!(refusal.code, expected, "{code}");
+            assert_eq!(
+                refusal.detail.class,
+                if expected == ROUTING_DEFERRED {
+                    ErrorClass::Transient
+                } else {
+                    ErrorClass::Permanent
+                }
+            );
+            assert_eq!(refusal.detail.routing_code.as_deref(), Some(code));
+            assert_eq!(refusal.detail.routing_reason.as_deref(), Some("reason"));
+            assert_eq!(refusal.detail.model.as_deref(), Some("p/m"));
+            assert_eq!(refusal.detail.retry_after_ms, delay);
+            let error = refusal.into_item_error().unwrap();
+            assert_eq!(error.code, expected);
+            assert_eq!(Some(error.class.clone()), item_class(expected));
+            assert_eq!(error.retry_after_ms, delay);
+            assert_eq!(error.detail.unwrap().routing_code.as_deref(), Some(code));
+        }
+        assert_eq!(
+            RoutingRefusal::unavailable("no answer").into_item_error(),
+            None
+        );
+        assert_eq!(
+            RoutingRefusal::refused("account_selection_unavailable", None, None).code,
+            ROUTING_DEFERRED
+        );
+    }
 
     #[test]
     fn every_listed_code_has_its_tables_class() {

@@ -24,6 +24,7 @@
 //!   each with its request, validator and answer;
 //! - [`declarations`]: consumer defaults and runner matching inputs from the catalog;
 //! - [`errors`]: refusal codes, the refusal body and each code's detail;
+//! - [`refusals`]: the shared pure retry classification for answered refusals;
 //! - [`wire`]: the `{"result": <answer>}` reply envelope;
 //! - `vectors` (with the `test-vectors` feature): the role's vector files,
 //!   compiled in, so a module's tests can use the same bytes.
@@ -57,6 +58,7 @@ pub mod explain;
 pub mod head_choices;
 pub mod observe;
 pub mod panel;
+pub mod refusals;
 pub mod report;
 pub mod select;
 pub mod select_engine;

@@ -1341,6 +1341,13 @@ What a runner saw on an account, so the provider's headroom stays current.
 | `routing_unavailable` | a consumer, for its own work (§1) | `{}` | no |
 | `routing_ambiguous` | a consumer, for its own work (§1) | `{modules}` | no |
 
+- [pinned] `refusals::retry_class(code, detail)` classifies an answered
+  refusal as `RetryAt(t)` exactly when `Refusal::wait_until_ms` returns
+  `Some(t)`: every timed row in the table above retries at the time it names,
+  an absolute Unix timestamp in milliseconds. A missing or malformed
+  timestamp is untimed and permanent. `account_selection_unavailable` is
+  `Transient`; every other untimed refusal, unknown codes included, is
+  `Permanent`. Both helpers use the same timed-code logic.
 - [pinned] `Refusal::wait_until_ms` reads the time a timed refusal names,
   and `None` for every other refusal, an unknown code included.
 - [pinned] `test-vectors/routing-v1/refusals.json` holds one body for every

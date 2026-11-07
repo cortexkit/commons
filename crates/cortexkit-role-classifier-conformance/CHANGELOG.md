@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.3
+
+- Pin classifier 0.6.3 and check permanent and transient routing admission
+  refusals, timed retry delays, and mid-batch renewal refusal item details.
+  Cover timed `no_route` admission and `account_pool_exhausted` renewal as
+  transient `routing_deferred`, with faulty providers rejected by name.
+- Add optional detail-aware admission and renewal fixture hooks without
+  changing `RoutingOutcome`; adapters without them report named skips.
+  Whole-kit self-tests reject faulty classifier providers by check name.
+
 ## 0.8.2
 
 - Pin classifier 0.6.2 and allow its runner-owned single authentication

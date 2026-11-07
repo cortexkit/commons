@@ -525,7 +525,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-llm-tools"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cortexkit-model-batch",
  "cortexkit-role-classifier",
@@ -555,7 +555,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-model-batch"
-version = "0.3.3"
+version = "0.3.4"
 dependencies = [
  "base64",
  "serde",
@@ -690,9 +690,10 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "cortexkit-model-batch",
+ "cortexkit-role-routing",
  "indexmap",
  "serde",
  "serde_json",
@@ -702,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier-conformance"
-version = "0.8.2"
+version = "0.8.3"
 dependencies = [
  "async-trait",
  "cortexkit-role-classifier",
@@ -837,7 +838,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing"
-version = "0.7.5"
+version = "0.7.6"
 dependencies = [
  "cortexkit-role-llm-runner 0.8.19",
  "cortexkit-role-media",
@@ -850,7 +851,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing-conformance"
-version = "0.10.5"
+version = "0.10.6"
 dependencies = [
  "async-trait",
  "cortexkit-role-routing",

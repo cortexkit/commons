@@ -289,7 +289,8 @@ numbers, and say what is this role's own.
 - [pinned] A supplied `model` is a routing pin with no fallback: routing
   chooses only an account that can serve that model. No account means a
   refusal, never substitution. If routing finds no model or no account for
-  a pin, admission is refused `routing_refused` (§7), preserving the pin.
+  a pin, admission is refused `routing_refused` or `routing_deferred` (§7),
+  preserving the pin.
 - [pinned] Before its first provider request, the classifier provider
   stores the routing decision's model, account and `decision_id` with the
   batch. A completed replay by `batch_id` answers from storage and never
@@ -338,17 +339,27 @@ detail and class, and which codes are stored and stop the call are RULES
   permanent (the handle is unknown, expired or not usable by this caller,
   one answer for all three); `image_source_unavailable` is transient, with
   `detail.retry_after_ms` (the issuing module is unreachable or timed out).
-- [pinned] Routed admission refusals (`RoutingRefusal`): `routing_refused`
-  means routing answered but found no model or no account for a pin. Its
-  detail carries `routing_code` verbatim, optional `routing_reason` (routing's
-  message), and `model` when pinned. Routing exposes no retryability
-  predicate, so this version conservatively classifies an answered refusal
-  as permanent. `routing_unavailable` means no routing answer
+- [pinned] Routed admission refusals (`RoutingRefusal`): classify an answered
+  routing refusal using routing's `refusals::retry_class` (routing §10).
+  `Permanent` becomes `routing_refused`, permanent; `Transient` or `RetryAt`
+  becomes `routing_deferred`, transient. Both carry `routing_code` verbatim,
+  optional `routing_reason` (routing's message), and `model` when pinned.
+  For `RetryAt`, detail also carries `retry_after_ms`, the retry timestamp
+  minus the current Unix time in milliseconds, saturating at zero. Untimed
+  refusals omit `retry_after_ms`. `routing_unavailable` means no routing answer
   could be obtained (closed route, timeout, or routing not ready), and is
   transient. It is never used for an answered routing refusal.
 - [pinned] Per-item errors (`ITEM_CODES`): `rate_limited`,
   `provider_error`, `provider_refused`, `invalid_item`, `cost_exceeded`,
-  `auth_failed`, `model_unavailable`.
+  `auth_failed`, `model_unavailable`, `routing_refused`, `routing_deferred`.
+- [pinned] An answered routing refusal of a lease renewal during a batch
+  leaves every undispatched item with the code and class admission would
+  have given: `routing_refused` or `routing_deferred`, never `provider_error`.
+  Each such item error carries `detail.routing_code` verbatim and, for a
+  timed refusal, `retry_after_ms` computed as above. Already answered items
+  retain their answers; no new decision or provider dispatch follows the
+  refusal in that call. These routing item codes are only for items left
+  undispatched by an answered routing refusal.
 - [pinned] The batch-level account codes provider errors map to (§8,
   `BATCH_LEVEL_CODES`): `account_limit_exhausted` and
   `account_not_entitled`, as an admission refusal when the call's first

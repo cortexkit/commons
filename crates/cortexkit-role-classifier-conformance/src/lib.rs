@@ -25,6 +25,6 @@ pub use report::{
 pub use route::{ClassifierRoute, Reply, RouteFailure};
 pub use runner::run_suite;
 pub use subject::{
-    state_key, ClassifierSubject, RoutedDecision, RoutingObservations, RoutingOutcome, Scripted,
-    ServedModel, MAX_POLLS,
+    state_key, ClassifierSubject, RoutedDecision, RoutingObservations, RoutingOutcome,
+    RoutingRefusalFixture, Scripted, ServedModel, MAX_POLLS,
 };

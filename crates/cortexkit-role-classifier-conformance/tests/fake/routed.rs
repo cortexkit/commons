@@ -9,6 +9,8 @@ pub(super) struct RoutingState {
     pub active: bool,
     pub outcomes: Vec<RoutingOutcome>,
     pub observations: RoutingObservations,
+    pub admission_refusal: Option<RoutingRefusalFixture>,
+    pub renewal_refusal: Option<RoutingRefusalFixture>,
     batches: BTreeMap<String, (RoutedDecision, Option<String>)>,
 }
 
@@ -32,6 +34,53 @@ fn routing_error(refusal: RoutingRefusal) -> Reply {
 }
 
 impl FakeModule {
+    fn fixture_refusal(
+        &self,
+        fixture: RoutingRefusalFixture,
+        model: Option<String>,
+        renewal: bool,
+    ) -> RoutingRefusal {
+        let timed_no_route_as_permanent =
+            !renewal && self.defects.timed_no_route_as_permanent && fixture.code == "no_route";
+        let timed_pool_exhausted_as_permanent = renewal
+            && self.defects.timed_pool_exhausted_as_permanent
+            && fixture.code == "account_pool_exhausted";
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let mut refusal = RoutingRefusal::refused_with_detail(
+            fixture.code,
+            Some(fixture.message),
+            model,
+            &fixture.detail,
+            now_ms,
+        );
+        if timed_no_route_as_permanent || timed_pool_exhausted_as_permanent {
+            refusal.code = errors::ROUTING_REFUSED.into();
+            refusal.detail.class = errors::ErrorClass::Permanent;
+            refusal.detail.retry_after_ms = None;
+        }
+        if !renewal
+            && self.defects.transient_routing_as_permanent
+            && refusal.code == errors::ROUTING_DEFERRED
+        {
+            refusal.code = errors::ROUTING_REFUSED.into();
+            refusal.detail.class = errors::ErrorClass::Permanent;
+        }
+        if !renewal
+            && self.defects.permanent_routing_as_transient
+            && refusal.code == errors::ROUTING_REFUSED
+        {
+            refusal.code = errors::ROUTING_DEFERRED.into();
+            refusal.detail.class = errors::ErrorClass::Transient;
+        }
+        if !renewal && self.defects.routing_delay_missing {
+            refusal.detail.retry_after_ms = None;
+        }
+        refusal
+    }
+
     pub(super) async fn classify_routed(&self, text: &str) -> Reply {
         let request = match parse_request(text) {
             Ok(request) => request,
@@ -39,6 +88,10 @@ impl FakeModule {
         };
         let selected = {
             let mut routing = self.routing.lock().unwrap();
+            if let Some(fixture) = routing.admission_refusal.clone() {
+                routing.observations.selections += 1;
+                return routing_error(self.fixture_refusal(fixture, request.model, false));
+            }
             if let Some((decision, Some(reply))) = routing.batches.get(&request.batch_id).cloned() {
                 if self.defects.replay_selects_again {
                     routing.select();
@@ -80,6 +133,27 @@ impl FakeModule {
         let mut items = Vec::new();
         let mut stopped = false;
         for (index, item) in request.items.iter().enumerate() {
+            let renewal = self.routing.lock().unwrap().renewal_refusal.clone();
+            if let Some(fixture) = renewal.filter(|_| index > 0) {
+                let mut error = self
+                    .fixture_refusal(fixture, request.model.clone(), true)
+                    .into_item_error()
+                    .unwrap();
+                if self.defects.renewal_as_provider_error {
+                    error = ItemError::for_code(errors::PROVIDER_ERROR, "routing renewal refused");
+                }
+                if self.defects.renewal_loses_routing_code {
+                    error.detail = None;
+                }
+                if self.defects.renewal_wrong_class {
+                    error.class = match error.class {
+                        errors::ErrorClass::Transient => errors::ErrorClass::Permanent,
+                        _ => errors::ErrorClass::Transient,
+                    };
+                }
+                items.push(ItemResult::failed(index as u64, error));
+                continue;
+            }
             if stopped {
                 items.push(ItemResult::failed(
                     index as u64,

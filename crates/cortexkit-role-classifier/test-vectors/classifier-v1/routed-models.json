@@ -14,6 +14,8 @@
   "refusals": [
     {"code": "routing_refused", "message": "routing refused the batch", "detail": {"class": "permanent", "routing_code": "no_adequate_model", "routing_reason": "no model meets the requirements"}},
     {"code": "routing_refused", "message": "routing refused the batch", "detail": {"class": "permanent", "routing_code": "pin_unavailable", "routing_reason": "no account can serve the pin", "model": "typesafe/jev-1.13.0"}},
-    {"code": "routing_unavailable", "message": "routing timed out", "detail": {"class": "transient"}}
+    {"code": "routing_unavailable", "message": "routing timed out", "detail": {"class": "transient"}},
+    {"code": "routing_deferred", "message": "routing refused the batch", "detail": {"class": "transient", "routing_code": "account_selection_unavailable", "routing_reason": "allocator busy"}},
+    {"code": "routing_deferred", "message": "routing refused the batch", "detail": {"class": "transient", "routing_code": "account_hold", "routing_reason": "account held", "model": "typesafe/jev-1.13.0", "retry_after_ms": 2000}}
   ]
 }

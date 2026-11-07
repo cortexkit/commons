@@ -126,6 +126,9 @@ pub const CHECKS: &[CheckSpec] = &[
     check("routed_reply_has_decision_id", "routed model and pinned-account replies carry the decision_id routing chose; not applicable without routed_models and the routing hook"),
     check("routed_pin_never_substituted", "a pinned model with no account is refused routing_refused preserving the pin and no provider call; not applicable without routed_models and the routing hook"),
     check("routed_admission_refusals", "answered routing refusals retain routing_code and routing_reason; transport failure is routing_unavailable, transient; not applicable without routed_models and the routing hook"),
+    check("routed_transient_admission_refusals", "temporary routing admission refusals are routing_deferred, transient, preserving routing_code, routing_reason and the pin; timed delays saturate at zero; not applicable without routed_models and the detail-aware admission hook"),
+    check("routed_permanent_admission_refusal", "permanent and unknown routing admission refusals remain routing_refused, permanent, without retry_after_ms and without dispatch; not applicable without routed_models and the detail-aware admission hook"),
+    check("routed_renewal_refusals", "an answered renewal refusal preserves the answered item and frozen decision, fails every undispatched item with routing_refused or routing_deferred, the right class, detail.routing_code and timed retry delay, and sends no later provider call; not applicable without routed_models and the renewal hook"),
     check("routed_initial_account_failure_bounded", "an initial refused credential with no answered item permits at most one new routing decision and whole-batch attempt; no later item is sent while the first keeps failing; not applicable without routed_models and the routing hook"),
 ];
 

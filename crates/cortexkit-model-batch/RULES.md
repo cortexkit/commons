@@ -330,7 +330,10 @@ contract's tables say which codes that role answers with.
   still knows whether to retry.
 - [pinned] A per-item error is `{code, class, message, retry_after_ms?,
   detail?}` (`ItemError`). `detail` is present only on a code that defines
-  one (`answer_too_large`).
+  one (`answer_too_large`, or a role's routing refusal codes). The optional
+  `ItemErrorDetail.routing_code` is sent only for items left undispatched
+  by an answered routing refusal; it preserves routing's code verbatim.
+  Detail remains open to unknown members.
 - [pinned] `class` is `transient` or `permanent`. The set is fixed for
   `v1`; a new class means a new role version. A caller that meets an
   unknown value treats it as `permanent`, the safe direction

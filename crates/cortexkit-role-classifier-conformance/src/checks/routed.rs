@@ -1,5 +1,14 @@
 use super::*;
-use crate::subject::{RoutedDecision, RoutingObservations, RoutingOutcome};
+use crate::subject::{RoutedDecision, RoutingObservations, RoutingOutcome, RoutingRefusalFixture};
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock is after Unix epoch")
+        .as_millis()
+        .try_into()
+        .expect("Unix milliseconds fit u64")
+}
 
 impl<S: ClassifierSubject> Suite<'_, S> {
     pub(super) async fn routed_check(&self, name: &str) -> Check {
@@ -14,6 +23,16 @@ impl<S: ClassifierSubject> Suite<'_, S> {
             account: "account-1".into(),
             decision_id: self.mint("decision-1"),
         };
+        if matches!(
+            name,
+            "routed_transient_admission_refusals"
+                | "routed_permanent_admission_refusal"
+                | "routed_renewal_refusals"
+        ) {
+            let result = self.routing_retry_scenario(name, &first).await;
+            self.subject.finish_routing().await;
+            return result;
+        }
         let second = RoutedDecision {
             model: self
                 .describe
@@ -99,7 +118,7 @@ impl<S: ClassifierSubject> Suite<'_, S> {
                 return Err(format!("routing refusal changed {key}"));
             }
         }
-        let class = if code == errors::ROUTING_UNAVAILABLE {
+        let class = if matches!(code, errors::ROUTING_UNAVAILABLE | errors::ROUTING_DEFERRED) {
             "transient"
         } else {
             "permanent"
@@ -108,6 +127,203 @@ impl<S: ClassifierSubject> Suite<'_, S> {
             return Err(format!("{code} has wrong class"));
         }
         Ok(())
+    }
+
+    async fn routing_retry_scenario(&self, name: &str, first: &RoutedDecision) -> Check {
+        let renewal = name == "routed_renewal_refusals";
+        let fixtures = if name == "routed_permanent_admission_refusal" {
+            vec![
+                (
+                    RoutingRefusalFixture::new("auth_required", "login needed"),
+                    None,
+                    false,
+                ),
+                (
+                    RoutingRefusalFixture::new("pin_unavailable", "pin unavailable"),
+                    None,
+                    false,
+                ),
+                (
+                    RoutingRefusalFixture::new("future_refusal", "unknown refusal")
+                        .with_detail(json!({"until_ms": u64::MAX})),
+                    None,
+                    false,
+                ),
+            ]
+        } else {
+            let until = now_ms() + 60_000;
+            let mut fixtures = vec![
+                (
+                    RoutingRefusalFixture::new("account_selection_unavailable", "allocator busy"),
+                    None,
+                    true,
+                ),
+                (
+                    RoutingRefusalFixture::new("account_hold", "account held")
+                        .with_detail(json!({"until_ms": until})),
+                    Some(until),
+                    true,
+                ),
+                (
+                    RoutingRefusalFixture::new("pin_unavailable", "pin cooling down")
+                        .with_detail(json!({"reset_at_ms": until})),
+                    Some(until),
+                    true,
+                ),
+                (
+                    RoutingRefusalFixture::new("no_route", "routes cooling down")
+                        .with_detail(json!({"reset_at_ms": until})),
+                    Some(until),
+                    true,
+                ),
+                (
+                    RoutingRefusalFixture::new("account_hold", "hold elapsed")
+                        .with_detail(json!({"until_ms": 0})),
+                    Some(0),
+                    true,
+                ),
+            ];
+            if renewal {
+                fixtures.push((
+                    RoutingRefusalFixture::new("account_pool_exhausted", "pool exhausted")
+                        .with_detail(json!({"reset_at_ms": until})),
+                    Some(until),
+                    true,
+                ));
+                fixtures.push((
+                    RoutingRefusalFixture::new("auth_required", "login needed"),
+                    None,
+                    false,
+                ));
+            }
+            fixtures
+        };
+        for (fixture, retry_at, transient) in fixtures {
+            if renewal {
+                if !self
+                    .subject
+                    .script_routing(vec![RoutingOutcome::Selected(first.clone())])
+                    .await
+                {
+                    return Ok(Ending::NotApplicable(
+                        "subject has no routing script hook".into(),
+                    ));
+                }
+                if !self.subject.script_routing_renewal(fixture.clone()).await {
+                    return Ok(Ending::NotApplicable(
+                        "subject has no routing renewal hook".into(),
+                    ));
+                }
+            } else if !self
+                .subject
+                .script_routing_admission_refusal(fixture.clone())
+                .await
+            {
+                return Ok(Ending::NotApplicable(
+                    "subject has no detail-aware routing admission hook".into(),
+                ));
+            }
+            let (state, key) = self.marker("routing-retry-first");
+            let (unsent, unsent_key) = self.marker("routing-retry-unsent");
+            let (last, last_key) = self.marker("routing-retry-last");
+            for key in [&key, &unsent_key, &last_key] {
+                self.script_answer(key, noul_body("0.75", None)).await;
+            }
+            let request = json!({"batch_id": self.mint("routing-retry"), "model": first.model, "questions": noul_question(), "items": items(&[&state, &unsent, &last])});
+            let expected_code = if transient {
+                errors::ROUTING_DEFERRED
+            } else {
+                errors::ROUTING_REFUSED
+            };
+            let before = now_ms();
+            let reply = self.send(&request.to_string()).await?;
+            let after = now_ms();
+            if renewal {
+                let reply = Self::routed_reply(reply, first)?;
+                if reply.decision_id.as_deref() != Some(&first.decision_id)
+                    || reply.items.len() != 3
+                    || reply.items[0].answers.is_none()
+                {
+                    return Err("renewal refusal lost the answered item or frozen decision".into());
+                }
+                for (index, item) in reply.items.iter().enumerate().skip(1) {
+                    let error = item
+                        .error
+                        .as_ref()
+                        .ok_or("renewal refusal did not fail an unanswered item")?;
+                    if item.index != index as u64
+                        || item.answers.is_some()
+                        || error.code != expected_code
+                        || error.class
+                            != if transient {
+                                ErrorClass::Transient
+                            } else {
+                                ErrorClass::Permanent
+                            }
+                        || error
+                            .detail
+                            .as_ref()
+                            .and_then(|d| d.routing_code.as_deref())
+                            != Some(&fixture.code)
+                    {
+                        return Err("renewal refusal lost routing_code, code or class on an undispatched item".into());
+                    }
+                    Self::retry_delay(error.retry_after_ms, retry_at, before, after)?;
+                }
+            } else {
+                Self::routing_refusal(
+                    reply.clone(),
+                    expected_code,
+                    Some(&fixture.code),
+                    Some(&fixture.message),
+                    Some(&first.model),
+                )?;
+                let Reply::Error(body) = reply else {
+                    unreachable!()
+                };
+                let detail = body.detail.unwrap();
+                let delay = detail
+                    .get("retry_after_ms")
+                    .map(|value| value.as_u64().ok_or("retry_after_ms is not unsigned"))
+                    .transpose()?;
+                Self::retry_delay(delay, retry_at, before, after)?;
+            }
+            let log = self.routing_log().await?;
+            let expected_calls = usize::from(renewal);
+            if log.selections != 1
+                || log.provider_requests.len() != expected_calls
+                || log
+                    .provider_requests
+                    .iter()
+                    .any(|decision| decision != first)
+                || self.calls(&key).await != expected_calls
+                || self.calls(&unsent_key).await != 0
+                || self.calls(&last_key).await != 0
+            {
+                return Err(
+                    "routing refusal selected again or dispatched an unanswered item".into(),
+                );
+            }
+            self.subject.finish_routing().await;
+        }
+        Ok(Ending::Passed)
+    }
+
+    fn retry_delay(
+        delay: Option<u64>,
+        retry_at: Option<u64>,
+        before: u64,
+        after: u64,
+    ) -> Result<(), String> {
+        match (delay, retry_at) {
+            (None, None) => Ok(()),
+            (Some(delay), Some(at))
+                if (at.saturating_sub(after)..=at.saturating_sub(before)).contains(&delay) =>
+            {
+                Ok(())
+            }
+            _ => Err("routing refusal has missing, unexpected or incorrect retry_after_ms".into()),
+        }
     }
 
     async fn routed_scenario(&self, name: &str, first: &RoutedDecision) -> Check {

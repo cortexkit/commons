@@ -43,6 +43,23 @@ from the classifier's reply. The suite restores routing after each case.
 Without the group or script hook these cases report not applicable, with a
 reason, rather than passing.
 
+Two additional optional hooks exercise answered refusals with detail, without
+changing the existing `RoutingOutcome` enum. Build a non-exhaustive
+`RoutingRefusalFixture` with `new(code, message)` and `with_detail(value)`:
+
+- `script_routing_admission_refusal(fixture)` resets observations and makes
+  routing refuse admission with that body until `finish_routing`.
+- `script_routing_renewal(fixture)` runs after `script_routing` has installed
+  the initial selection. Force a lease renewal after the first answered item,
+  before any later item dispatch, and refuse it with the fixture. Renewal is
+  not a new selection. Keep recording actual provider requests and selections.
+
+Both hooks default to unsupported (`false`); their cases then report named
+`NotApplicable` outcomes, never failures or passes. `finish_routing` must
+also clear these scripts. Timed fixtures use absolute Unix milliseconds;
+the checks bound `retry_after_ms` by the actual call's start and end times
+and require zero for an elapsed timestamp.
+
 A check the module gives the suite no way to ask is **not applicable**,
 never passed: the cost and ceiling checks on a module that serves no priced
 model; the concurrent-call check on a stand-in that cannot hold a call; and
@@ -89,6 +106,9 @@ module does", naming them; only a run where every check ran and passed is
 | `routed_reply_has_decision_id` | as above |
 | `routed_pin_never_substituted` | as above |
 | `routed_admission_refusals` | as above |
+| `routed_transient_admission_refusals` | no `routed_models` group or detail-aware admission hook |
+| `routed_permanent_admission_refusal` | as above |
+| `routed_renewal_refusals` | no `routed_models` group, routing script hook, or renewal hook |
 | `routed_initial_account_failure_bounded` | as above |
 
 The two legacy auth checks are not applicable to `routed_models` providers:

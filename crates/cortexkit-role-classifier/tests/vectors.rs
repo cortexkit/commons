@@ -334,7 +334,10 @@ fn object_and_array_states_are_forwarded_verbatim() {
 fn one_admission_refusal_per_code_as_the_crate_builds_it() {
     let file: AdmissionRefusals = exact("admission-refusals.json");
     for code in errors::ADMISSION_CODES {
-        if matches!(*code, errors::ROUTING_REFUSED | errors::ROUTING_UNAVAILABLE) {
+        if matches!(
+            *code,
+            errors::ROUTING_REFUSED | errors::ROUTING_DEFERRED | errors::ROUTING_UNAVAILABLE
+        ) {
             continue; // The routing-local refusal shape is tested in routed_models_vector.
         }
         assert!(
@@ -465,7 +468,14 @@ fn one_item_error_per_code_beside_an_answered_item() {
         // carrying the same code; other codes leave the batch going.
         for later in &vector.reply.items[2..] {
             let later_error = later.error.as_ref().unwrap();
-            assert!(error.stops_the_call(), "{name}: an item after the error");
+            assert!(
+                error.stops_the_call()
+                    || matches!(
+                        name.as_str(),
+                        errors::ROUTING_REFUSED | errors::ROUTING_DEFERRED
+                    ),
+                "{name}: an item after the error"
+            );
             assert_eq!(later_error.code, error.code, "{name}");
             assert_eq!(later_error.class, error.class, "{name}");
             assert_eq!(later.usage, None, "{name}: an unsent item reports no usage");
@@ -479,7 +489,21 @@ fn one_item_error_per_code_beside_an_answered_item() {
         } else {
             assert!(error.is_stored(), "{name}");
         }
-        let mut built = ItemError::for_code(name, error.message.clone());
+        let mut built = match name.as_str() {
+            errors::ROUTING_REFUSED => errors::RoutingRefusal::refused("auth_required", None, None)
+                .into_item_error()
+                .unwrap(),
+            errors::ROUTING_DEFERRED => errors::RoutingRefusal::refused_with_detail(
+                "account_hold",
+                None,
+                None,
+                &serde_json::json!({"until_ms": 3000}),
+                1000,
+            )
+            .into_item_error()
+            .unwrap(),
+            _ => ItemError::for_code(name, error.message.clone()),
+        };
         if let Some(ms) = error.retry_after_ms {
             built = built.with_retry_after_ms(ms);
         }

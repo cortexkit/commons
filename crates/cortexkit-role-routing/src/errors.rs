@@ -304,15 +304,17 @@ impl Refusal {
     /// `until_ms` for `account_hold`. `None` for every other code, an
     /// unknown code included, whatever its detail carries.
     pub fn wait_until_ms(&self) -> Option<u64> {
-        let key = match self.code {
-            RefusalCode::PinUnavailable
-            | RefusalCode::NoRoute
-            | RefusalCode::AccountPoolExhausted => "reset_at_ms",
-            RefusalCode::AccountHold => "until_ms",
-            _ => return None,
-        };
-        self.detail.get(key).and_then(Value::as_u64)
+        timed_wait_until_ms(self.code.as_str(), &self.detail)
     }
+}
+
+pub(crate) fn timed_wait_until_ms(code: &str, detail: &Map<String, Value>) -> Option<u64> {
+    let key = match code {
+        "pin_unavailable" | "no_route" | "account_pool_exhausted" => "reset_at_ms",
+        "account_hold" => "until_ms",
+        _ => return None,
+    };
+    detail.get(key).and_then(Value::as_u64)
 }
 
 impl std::fmt::Display for Refusal {

@@ -59,6 +59,18 @@ fn routed_models_vector() {
             Some("typesafe/jev-1.13.0".into()),
         ),
         RoutingRefusal::unavailable("routing timed out"),
+        RoutingRefusal::refused(
+            "account_selection_unavailable",
+            Some("allocator busy".into()),
+            None,
+        ),
+        RoutingRefusal::refused_with_detail(
+            "account_hold",
+            Some("account held".into()),
+            Some("typesafe/jev-1.13.0".into()),
+            &json!({"until_ms": 3000}),
+            1000,
+        ),
     ];
     assert_eq!(vector.refusals, built);
     for refusal in vector.refusals {
