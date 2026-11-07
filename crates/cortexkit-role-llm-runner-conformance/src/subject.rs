@@ -140,6 +140,8 @@ pub enum Capability {
     /// Opt-in client ids, tool times, assistant completion times and reasoning
     /// summaries on raw read entries.
     ReadDisplayFacts,
+    /// Guaranteed caller-visible module-send identities on read envelopes.
+    SendIds,
     /// `send.status`: what a re-send of a `send_id` would answer, without
     /// its body.
     SendStatus,
@@ -248,6 +250,7 @@ impl Capability {
         Self::Notices,
         Self::MessageMarks,
         Self::ReadDisplayFacts,
+        Self::SendIds,
         Self::SendStatus,
         Self::UserCommands,
         Self::HistoryDisplay,
@@ -326,6 +329,7 @@ impl Capability {
             Self::Notices => groups::NOTICES,
             Self::MessageMarks => groups::MESSAGE_MARKS,
             Self::ReadDisplayFacts => groups::READ_DISPLAY_FACTS,
+            Self::SendIds => groups::SEND_IDS,
             Self::SendStatus => groups::SEND_STATUS,
             Self::HistoryDisplay => groups::HISTORY_DISPLAY,
             Self::LiveEvents => groups::LIVE_EVENTS,

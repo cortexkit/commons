@@ -453,6 +453,11 @@ pub struct ReadMessage {
     /// move `history_version`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<String>,
+    /// The module send's own id, or its returned submission_id when unkeyed.
+    /// Served beside sender only with include_display_facts. The send_ids group
+    /// guarantees it when known; non-declaring runners may omit it (unknown).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_id: Option<String>,
     /// Agent whose words this module carries; outside bodies and checksums.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaks_for: Option<crate::message_marks::SpeaksFor>,
@@ -715,6 +720,11 @@ impl ReadMessage {
         self
     }
 
+    pub fn with_send_id(mut self, send_id: impl Into<String>) -> Self {
+        self.send_id = Some(send_id.into());
+        self
+    }
+
     pub fn with_tool_times(mut self, tool_times: Vec<ToolTime>) -> Self {
         self.tool_times = tool_times;
         self
@@ -756,6 +766,7 @@ impl ReadMessage {
             rich_ui: None,
             client_message_id: None,
             sender: None,
+            send_id: None,
             speaks_for: None,
             notice: false,
             created_at: None,

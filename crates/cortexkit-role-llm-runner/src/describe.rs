@@ -97,6 +97,8 @@ pub mod problem_names {
     pub const MESSAGE_SENDERS_WITHOUT_HISTORY_DISPLAY: &str =
         "message_senders_without_history_display";
     pub const MESSAGE_SENDERS_WITHOUT_LIVE_EVENTS: &str = "message_senders_without_live_events";
+    pub const SEND_IDS_WITHOUT_MESSAGE_SENDERS: &str = "send_ids_without_message_senders";
+    pub const SEND_IDS_WITHOUT_READ_DISPLAY_FACTS: &str = "send_ids_without_read_display_facts";
     pub const STEP_EVENTS_MISSING: &str = "step_events_missing";
     pub const STEP_EVENTS_UNDECLARED: &str = "step_events_undeclared";
     pub const INVALID_STEP_EVENTS: &str = "invalid_step_events";
@@ -898,6 +900,22 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         problems.push(DescribeProblem::Undecodable(
             problem_names::CALL_IDENTITY_WITHOUT_DISPLAY.into(),
         ));
+    }
+    if describe.declares(capabilities::SEND_IDS) {
+        for (dependency, problem) in [
+            (
+                capabilities::MESSAGE_SENDERS,
+                problem_names::SEND_IDS_WITHOUT_MESSAGE_SENDERS,
+            ),
+            (
+                capabilities::READ_DISPLAY_FACTS,
+                problem_names::SEND_IDS_WITHOUT_READ_DISPLAY_FACTS,
+            ),
+        ] {
+            if !describe.declares(dependency) {
+                problems.push(DescribeProblem::Undecodable(problem.into()));
+            }
+        }
     }
     if describe.declares(capabilities::MESSAGE_SENDERS) {
         for (dependency, problem) in [
@@ -2064,5 +2082,57 @@ mod fork_answer_tests {
                 }]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod send_ids_tests {
+    use super::*;
+
+    #[test]
+    fn send_ids_requires_both_prerequisites_without_changing_legacy_declarations() {
+        let groups = [
+            capabilities::HISTORY_DISPLAY,
+            capabilities::LIVE_EVENTS,
+            capabilities::MESSAGE_SENDERS,
+            capabilities::READ_DISPLAY_FACTS,
+            capabilities::SEND_IDS,
+        ];
+        let mut ops = crate::REQUIRED_OPS.to_vec();
+        for group in groups {
+            ops.extend_from_slice(capabilities::group_ops(group).unwrap());
+        }
+        let complete = serde_json::json!({
+            "majors":[{"version":crate::PROVIDES,"ops":ops,"stability":"stable"}],
+            "implementation_version":"test",
+            "capabilities":groups,
+            "session_capabilities_from":"baseline"
+        });
+        assert!(
+            check_describe(&complete).is_ok(),
+            "{:?}",
+            check_describe(&complete)
+        );
+        for dependency in [
+            capabilities::MESSAGE_SENDERS,
+            capabilities::READ_DISPLAY_FACTS,
+        ] {
+            let mut missing = complete.clone();
+            missing["capabilities"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|group| group != dependency);
+            assert!(check_describe(&missing)
+                .unwrap_err()
+                .contains(&DescribeProblem::Undecodable(format!(
+                    "send_ids_without_{dependency}"
+                ))));
+        }
+        let mut legacy = complete;
+        legacy["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|group| group != capabilities::SEND_IDS);
+        assert!(check_describe(&legacy).is_ok());
     }
 }

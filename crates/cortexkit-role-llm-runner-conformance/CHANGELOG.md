@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.24
+
+- Pin runner 0.8.20 and check the opt-in `send_ids` guarantee on keyed and
+  unkeyed module sends. Non-declaring runners may omit the field; any present
+  value must still match. Readers rely only on declaring runners or served ids.
+- Check describe prerequisites and reject faulty read, history and unkeyed ids.
+
 ## 0.17.23
 
 - Pin runner contract 0.8.19 and add seven `cache_policy` cases: valid plan

@@ -1,4 +1,4 @@
-# `tool-display/v1` — provider-authored transcript display
+# `tool-display/v1` — writer-authored transcript display
 
 Stability: **alpha**. This document is normative. The Rust crate contains wire
 shapes and pure validators, not a server, runner, template interpreter or store.
@@ -38,7 +38,7 @@ and reads never change for that pin (tool-provider §2.1).
 
 ## 2. `display.write`
 
-The display server serves the named request
+For tool data, the display server serves the named request
 `{name: "display.write", arguments: {runner, call_key, kind, schema_pin, body}}`.
 The params are `DisplayWrite`, a non-exhaustive struct with a constructor.
 
@@ -93,6 +93,9 @@ fetching a view. Record/completion schema checks are separate so accepting a
 write never needs a network read or a previously fetched view. A decoder's
 structural error (including an invalid Principal or non-object body) must be
 mapped to `invalid_params` naming the field by the serving implementation.
+
+The same operation also accepts the separate `kind: "wake"` envelope in §8.
+It does not require a tool call key, schema pin or provider view.
 
 ## 3. Records and completions
 
@@ -288,3 +291,107 @@ only the reads its views declare. A declared read is a provider operation that
 is not offered to the model as a tool, which the app server calls to page
 through a call's details; its request and reply shapes are the provider's own. A view declaration grants no broader route
 authority and does not turn a read into a model tool.
+
+## 8. Wake records
+
+Wake records describe the bundle that woke an agent, not a tool call. The writer
+declares `wake-record-writer/v1` (`WAKE_RECORD_WRITER_CAPABILITY`); the display
+server declares `wake-record-display/v1` (`WAKE_RECORD_DISPLAY_CAPABILITY`).
+Neither writes nor serves wake records unless the other has declared its token.
+As with tool display discovery, the writer writes only to exactly one live
+declaring display server, and skips writes when discovery is missing or ambiguous.
+The tokens are independent of `tool-display/v1` and `app-server/v1`.
+
+### 8.1 Writes, identity and lookup
+
+The named request is `{name: "display.write", arguments:
+{kind: "wake", runner, session, send_id, body}}` (`WakeWrite`). `runner` is the
+destination runner's `Principal`; `session` and `send_id` obey the opaque-field
+rule in §2. `send_id` is the writer's own send id. When the runner delivers the
+send riding a tool result instead of as its own message (llm-runner §9.7), the
+notice it records for that delivery names the same `send_id`, so the record
+matches either delivery. A writer keys every send it writes a record
+for, because a runner-assigned `submission_id` arrives only after the send.
+An unkeyed send gets no wake record and its row draws the plain card.
+
+The sender is exclusively the route's daemon-attested writer, verified by
+`check_writer` exactly as in §2. There is no claimed `sender` member in either
+envelope or body; a payload attempting to supply one is malformed
+(`invalid_params`). A direct or unverified writer is refused
+`display_writer_unverified`. Only the sending module may write for its own
+sends: another module cannot claim its identity, and its writes cannot join
+rows whose attested `sender` differs.
+
+The immutable storage key is `(session, attested sender, send_id)`.
+`wake_idempotency_key` encodes it using the RFC 8785 JSON Canonicalization
+Scheme (JCS). The server stores canonical body bytes
+atomically; identical retries answer `already_stored`, different bytes at that
+key are `display_write_conflict`, and the first write answers `stored`, as in
+§2. The destination runner is provenance, not an extra key component. Stored
+records never change and the display server retains them for **180 days**.
+
+Apps fetch records beside the chat page, **by message id** for the rows they
+draw, and never parse wake prompt text. The server reads `(sender, send_id)`
+from the runner's row in the session requested by the app, never from prompt
+text or a claimed writer. A record with that pair in the same session matches
+immediately. For a row moved to another session (including an imported head),
+it matches only when exactly one stored record has that pair across sessions.
+Two or more are ambiguous: return no record and draw the row's plain card.
+Missing or unknown display facts likewise mean no match. The app operation
+`session.wake_records` and the watch hint belong to the display server's app
+protocol, **not this crate**; that protocol reuses `WakeRecord` defined here.
+
+Writers write before sending, with their own short deadline. A missed write
+deadline never holds back or fails the send: the row then draws the existing
+plain card. Retries retain the first canonical bytes, never refreshed facts.
+
+### 8.2 Record and item shapes
+
+`WakeRecord` is `{items: [WakeItem, ...], omittedItems?: n}`. An item is
+`{kind, refs, from?, to?, at, excerpt}`. Field spelling is snake_case for refs
+and envelope fields; `omittedItems` deliberately reuses the existing display
+cut marker. `at` is an i64 JSON integer in milliseconds since Unix epoch.
+`from` and `to` are `{agent_id, display_name?}` (`WakeAgent`), reusing the
+registry fleet's agent identity and display-name concepts with snake_case
+spelling. A registry id is `agent_` followed by 8 or 16 lowercase hex digits.
+The optional name is a fallback for an agent not listed in the fleet; these
+identities are not module principals.
+
+`excerpt` is **plain text, not Markdown**, at most **200 Unicode scalar values**.
+The writer cuts it from the text the model actually received, never authors a
+separate summary. When cut it ends with `…`, included in the 200-character
+limit. Validators can check length but cannot prove provenance or detect
+whether arbitrary text was intended as Markdown; those remain writer duties.
+
+Writers use the following closed set. On the wire `kind` is an open string.
+Readers preserve unknown kinds, including their refs, and the app draws a
+plain card instead of failing the record. `WakeRecord::check` accepts unknown
+kinds; `check_writer` on the record refuses them. Known refs are checked even
+by readers; required strings obey the opaque-field rule unless stated below.
+
+| Kind | `refs` | Additional rules |
+| --- | --- | --- |
+| `peer_message` | `{id}` | `id` starts `pm_`; `from` and `to` required |
+| `room_post` | `{room, first_seq, last_seq}` | u64 integer sequences, `first_seq <= last_seq`; one item covers a fold of posts from one room |
+| `worker_question` | `{ask, task}` | both required |
+| `work_result` | `{task, run?, item?}` | optional refs are validated when present |
+| `sidekick_answer` | `{id}` | required |
+| `approval_card` | `{id}` | starts `acc_` or `el_` |
+| `notice` | `{family, title}` | `family` is an opaque identifier; `title` is nonempty plain text |
+
+`notice` covers every bundle member outside the other kinds, including consult
+results, ask answers, flow digests, stall alerts, worker notices and module
+notices, so a stack never silently loses part of its bundle.
+
+### 8.3 Limits and refusals
+
+A record's canonical JCS body is at most **16 KiB** and it contains at most
+**64 items**. These wake ceilings are fixed, not additions to `DisplayLimits`:
+§5's served tool limits remain unchanged. A writer exceeding either keeps the
+first items that fit both limits and sets `omittedItems` to the number omitted,
+including the marker itself in the encoded byte budget. The server refuses an
+oversized record as `display_too_large` with `{kind: "wake", max_bytes: 16384}`
+and never cuts it itself. Malformed known kinds, missing peer agents and
+overlong excerpts are `invalid_params` naming the field. `WakeWrite::check`
+checks the envelope, verified writer, record and closed writer vocabulary;
+structural decode failures must also be mapped to `invalid_params`.

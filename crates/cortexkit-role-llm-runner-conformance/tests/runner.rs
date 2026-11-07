@@ -1389,6 +1389,7 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::SendIds,
     Capability::CachePolicy,
     Capability::ForkAnswer,
     Capability::HistoryIntake,

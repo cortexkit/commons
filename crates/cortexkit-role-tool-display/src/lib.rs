@@ -8,6 +8,7 @@
 pub mod schema;
 #[cfg(feature = "test-vectors")]
 pub mod vectors;
+pub mod wake;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Map, Value};
@@ -18,6 +19,7 @@ use subc_protocol::{
 
 pub use schema::{FieldKind, RecordSchema};
 pub use subc_protocol::Principal;
+pub use wake::*;
 
 pub const CONTRACT: &str = "tool-display/v1";
 /// Declared by the module serving app-reader operations, not display storage.

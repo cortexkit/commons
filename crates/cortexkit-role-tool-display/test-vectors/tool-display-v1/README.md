@@ -1,5 +1,11 @@
 # tool-display/v1 vectors
 
+`wakes.json` contains tagged wake writes covering every kind, an exact 16 KiB /
+64-item record with `omittedItems`, a keyed riding notice, refusal cases, and
+same-session, moved-row and ambiguous lookups. All agents and names are invented.
+Wake refs and identities use snake_case; `omittedItems` keeps the display marker's
+existing spelling. Lookup examples describe server behavior, not an app read op.
+
 - `canonical.json`: equivalent bodies with differing spacing, key order and
   number spelling, with the exact RFC 8785 JCS bytes.
 - `field-kinds.json`: valid and invalid scalars for all nine field kinds,

@@ -6,6 +6,52 @@ use cortexkit_role_llm_runner::{
 use serde_json::json;
 
 #[test]
+fn send_id_is_optional_read_and_history_metadata() {
+    use cortexkit_role_llm_runner::history::HistoryEntry;
+    let body = json!({"role":"user","content":"A keyed module send"});
+    let plain = ReadMessage::new(1, "m1", body.clone()).with_written_at(42);
+    assert!(serde_json::to_value(&plain)
+        .unwrap()
+        .get("send_id")
+        .is_none());
+    assert!(
+        serde_json::to_value(HistoryEntry::from_read(plain.clone()).unwrap())
+            .unwrap()
+            .get("send_id")
+            .is_none()
+    );
+    for send_id in ["keyed-send-example", "submission-example"] {
+        let decorated = plain
+            .clone()
+            .with_sender("example-notifier")
+            .with_send_id(send_id);
+        let wire = serde_json::to_value(&decorated).unwrap();
+        assert_eq!(wire["send_id"], send_id);
+        assert_eq!(wire["message"], body);
+        let decoded: ReadMessage = serde_json::from_value(wire).unwrap();
+        assert_eq!(decoded.send_id.as_deref(), Some(send_id));
+        let history = HistoryEntry::from_read(decoded).unwrap();
+        let wire = serde_json::to_value(&history).unwrap();
+        assert_eq!(wire["send_id"], send_id);
+        assert_eq!(wire["message"], body);
+        assert_eq!(
+            serde_json::from_value::<HistoryEntry>(wire)
+                .unwrap()
+                .send_id
+                .as_deref(),
+            Some(send_id)
+        );
+    }
+    assert_eq!(
+        HistoryEntry::new(1, "m1", 42, body)
+            .with_send_id("keyed-send-example")
+            .send_id
+            .as_deref(),
+        Some("keyed-send-example")
+    );
+}
+
+#[test]
 fn sender_is_an_optional_read_and_history_fact_not_message_content() {
     use cortexkit_role_llm_runner::history::HistoryEntry;
     let body = json!({"role":"user","content":"A module's notice"});

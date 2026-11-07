@@ -1,5 +1,11 @@
 # cortexkit-role-llm-runner
 
+Version **0.8.20** adds opt-in `send_ids`, requiring `message_senders` and
+`read_display_facts`, to guarantee caller-visible `send_id` beside `sender` on
+opted-in raw reads and raw history. Readers rely on declaring runners or a
+present field, never treat absence on non-declaring runners as a negative
+claim, and keep message bytes and digests unchanged. See CONTRACT §4.2.
+
 Version **0.8.19** adds opt-in `cache_policy`: request a cache lifetime and
 warming mode in `plan.cache`, or on the creating send of a planless session.
 `cache::check` validates shape; a runner validates zones and maps provider

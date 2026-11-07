@@ -1,5 +1,18 @@
 # cortexkit-role-llm-runner-conformance
 
+Version **0.17.24** pins runner **0.8.20**. `read_display_facts_send_id` checks
+the opt-in `send_ids` guarantee: exact keyed-send ids and returned unkeyed
+submission ids on opted-in reads and raw history. It is not applicable without
+`send_ids`; `read_display_facts_send_id_when_present` instead accepts absence
+on non-declaring runners and rejects any incorrect served id. Readers rely only
+on declaring runners or a present field. Default reads and message bytes stay
+unchanged. The probes need `message_senders`, `read_display_facts`,
+`host_history`, `delivery_order` with
+`idle_start`, queue/read support, `head_sender_identities` for two distinct
+module routes, and `send_fields_with_plan` for a plan granting the second module
+permission to send. Missing fixtures are not applicable. Refusing optional unkeyed sends, or returning no
+submission id, leaves only that exact-id subcase not applicable.
+
 The `cache_policy` cases are N/A without the declared group and send no cache
 requests to such a runner. Declaring runners are checked for plan/creating-send
 decoding, exact pre-acceptance refusals, continuation and both-location refusal,

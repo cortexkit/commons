@@ -16,6 +16,12 @@ fn subject(mut defects: Defects) -> FakeSubject {
     subject
 }
 
+fn send_ids_subject(defects: Defects) -> FakeSubject {
+    let mut subject = subject(defects);
+    subject.capabilities.insert(Capability::SendIds);
+    subject
+}
+
 #[tokio::test]
 async fn message_senders_missing_read_sender_fails_by_name() {
     let report = run(&subject(Defects {
@@ -222,5 +228,129 @@ async fn message_senders_missing_dependencies_are_inapplicable_by_name() {
             "{}",
             report.render()
         );
+    }
+}
+
+#[tokio::test]
+async fn read_display_facts_send_id_faithful_runner_covers_keyed_and_unkeyed() {
+    let report = run(&send_ids_subject(Defects::default())).await;
+    assert_eq!(
+        report.outcome("read_display_facts_send_id"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn read_display_facts_send_id_wrong_read_id_fails_by_name() {
+    let report = run(&send_ids_subject(Defects {
+        send_id_read_wrong: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "read_display_facts_send_id");
+    assert!(reason.contains("read entry send_id"), "{reason}");
+    assert_none_failed_but(&report, &["read_display_facts_send_id"]);
+    println!("FAIL read_display_facts_send_id: {reason}");
+}
+
+#[tokio::test]
+async fn read_display_facts_send_id_wrong_history_id_fails_by_name() {
+    let report = run(&send_ids_subject(Defects {
+        send_id_history_wrong: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "read_display_facts_send_id");
+    assert!(reason.contains("history entry send_id"), "{reason}");
+    assert_none_failed_but(&report, &["read_display_facts_send_id"]);
+    println!("FAIL read_display_facts_send_id: {reason}");
+}
+
+#[tokio::test]
+async fn read_display_facts_send_id_unkeyed_internal_id_fails_by_name() {
+    let report = run(&send_ids_subject(Defects {
+        send_id_unkeyed_internal: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "read_display_facts_send_id");
+    assert!(
+        reason.contains("read entry send_id") && reason.contains("internal-unkeyed"),
+        "{reason}"
+    );
+    assert_none_failed_but(&report, &["read_display_facts_send_id"]);
+    println!("FAIL read_display_facts_send_id: {reason}");
+}
+
+#[tokio::test]
+async fn read_display_facts_send_id_optional_unkeyed_policies_are_not_failures() {
+    for policy in ["refused", "no_id"] {
+        let report = run(&send_ids_subject(Defects {
+            send_id_unkeyed: Some(policy),
+            ..Defects::default()
+        }))
+        .await;
+        assert!(
+            matches!(report.outcome("read_display_facts_send_id"), Some(CaseOutcome::PassedWithInapplicableRule { reason }) if reason.contains("read_display_facts_send_id_unkeyed")),
+            "{}",
+            report.render()
+        );
+        assert_none_failed_but(&report, &[]);
+    }
+}
+
+#[tokio::test]
+async fn read_display_facts_send_id_missing_from_declaring_runner_fails_by_name() {
+    let report = run(&send_ids_subject(Defects {
+        send_id_missing: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "read_display_facts_send_id");
+    assert!(reason.contains("read entry send_id is None"), "{reason}");
+    assert_none_failed_but(&report, &["read_display_facts_send_id"]);
+}
+
+#[tokio::test]
+async fn read_display_facts_send_id_undeclared_accepts_absence_or_correct_values() {
+    for missing in [true, false] {
+        let report = run(&subject(Defects {
+            send_id_missing: missing,
+            ..Defects::default()
+        }))
+        .await;
+        assert_eq!(
+            report.outcome("read_display_facts_send_id_when_present"),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+        assert!(
+            matches!(report.outcome("read_display_facts_send_id"), Some(CaseOutcome::Inapplicable { reason }) if reason.contains("send_ids")),
+            "{}",
+            report.render()
+        );
+        assert_none_failed_but(&report, &[]);
+    }
+}
+
+#[tokio::test]
+async fn read_display_facts_send_id_undeclared_rejects_wrong_present_values() {
+    for history in [false, true] {
+        let report = run(&subject(Defects {
+            send_id_read_wrong: !history,
+            send_id_history_wrong: history,
+            ..Defects::default()
+        }))
+        .await;
+        let name = "read_display_facts_send_id_when_present";
+        let reason = failed(&report, name);
+        let op = if history { "history" } else { "read" };
+        assert!(reason.contains(&format!("{op} entry send_id")), "{reason}");
+        assert_none_failed_but(&report, &[name]);
+        println!("FAIL {name}: {reason}");
     }
 }

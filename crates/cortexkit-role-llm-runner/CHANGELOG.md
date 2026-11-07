@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.20
+
+- Add opt-in `send_ids`, requiring `message_senders` and `read_display_facts`,
+  to guarantee caller-visible `send_id` beside `sender` on opted-in reads and raw
+  history. Existing runners need not declare it or serve the new field.
+- Readers rely on declaring runners or a present field: any served value must
+  equal the send key or returned unkeyed `submission_id`. Message bytes, digests
+  and default reads stay unchanged; absence on non-declaring runners is unknown.
+
 ## 0.8.19
 
 - Add the flag-only `cache_policy` group and typed cache requests: lifetime,

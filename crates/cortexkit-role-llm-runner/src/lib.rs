@@ -240,6 +240,9 @@ pub mod capabilities {
     /// Opt-in client ids, per-call times, assistant completion times and
     /// reasoning summaries beside `session.read` message bodies.
     pub const READ_DISPLAY_FACTS: &str = "read_display_facts";
+    /// Guarantees caller-visible send ids on module-send read entries.
+    /// Requires [`MESSAGE_SENDERS`] and [`READ_DISPLAY_FACTS`].
+    pub const SEND_IDS: &str = "send_ids";
     /// Positive agent/notice marks on sends and their display facts.
     /// Requires [`READ_DISPLAY_FACTS`] and [`HISTORY_DISPLAY`].
     pub const MESSAGE_MARKS: &str = "message_marks";
@@ -478,6 +481,7 @@ pub mod capabilities {
         (HOST_HISTORY, &[ops::SESSION_HISTORY]),
         (HISTORY_DISPLAY, &[ops::SESSION_HISTORY]),
         (READ_DISPLAY_FACTS, &[ops::SESSION_READ]),
+        (SEND_IDS, &[ops::SESSION_READ, ops::SESSION_HISTORY]),
         (
             MESSAGE_MARKS,
             &[ops::SESSION_SEND, ops::SESSION_READ, ops::SESSION_HISTORY],

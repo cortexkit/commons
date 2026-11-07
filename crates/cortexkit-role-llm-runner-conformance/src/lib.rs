@@ -66,6 +66,7 @@ mod read_display_facts;
 mod report;
 mod restart_survival;
 mod retention;
+mod send_identity;
 pub use restart_survival::{RestartMode, RestartPoint, RestartSurvivalObservation};
 pub mod rich_ui_stamp;
 mod route;

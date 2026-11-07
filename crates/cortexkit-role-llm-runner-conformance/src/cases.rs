@@ -198,6 +198,9 @@ where
             "head_has_no_bodies" => passed(self.head_has_no_bodies().await),
             "head_sender_is_callers_effective_grant" => crate::head_sender::run(self).await,
             "message_senders_rows_name_their_sender" => crate::message_senders::run(self).await,
+            "read_display_facts_send_id" | "read_display_facts_send_id_when_present" => {
+                crate::send_identity::run(self, name).await
+            }
             "sender_succession_same_payload_receipt"
             | "sender_succession_changed_payload_refused"
             | "sender_succession_third_sender_fresh"

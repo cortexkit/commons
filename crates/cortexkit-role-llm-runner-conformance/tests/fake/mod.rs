@@ -78,6 +78,7 @@ mod message_senders;
 mod notices;
 mod output_refs;
 mod rich_ui;
+mod send_identity;
 mod service_tier;
 mod session_change;
 mod step_events;
@@ -205,6 +206,11 @@ pub struct Defects {
     pub message_marks: Option<&'static str>,
     pub message_senders_omit: bool,
     pub sender_read_missing: bool,
+    pub send_id_missing: bool,
+    pub send_id_read_wrong: bool,
+    pub send_id_history_wrong: bool,
+    pub send_id_unkeyed_internal: bool,
+    pub send_id_unkeyed: Option<&'static str>,
     pub message_senders_owner: bool,
     pub message_senders_late: bool,
     pub message_senders_no_observer: bool,
@@ -864,6 +870,7 @@ struct Msg {
     /// The route principal whose send wrote this user message, kept beside
     /// its body; `None` for a turn the host started.
     sender: Option<String>,
+    send_id: Option<String>,
 }
 
 /// A `session.send` carrying a `delivery_order` list that the fake
@@ -1090,6 +1097,7 @@ impl Sess {
             written_at: 0,
             client_message_id: None,
             sender: None,
+            send_id: None,
         });
         ordinal
     }
@@ -1861,6 +1869,7 @@ impl Module {
                 let mut body = json!({ "role": role, "text": queued.text });
                 attachments::add_parts(&mut body, record);
                 let sender = queued.sender.clone();
+                let send_id = queued.send_id.clone();
                 let attribution = queued.attribution.clone();
                 attribution::store(&mut body, attribution.as_deref(), &self.world.defects);
                 let client_id = queued.request["client_message_id"]
@@ -1872,6 +1881,7 @@ impl Module {
                 message.attribution = attribution;
                 message.delivered_as = Some(record["delivered_as"].clone());
                 message.sender = Some(sender);
+                message.send_id = Some(send_id);
                 message.client_message_id = client_id;
                 message.marks = marks;
                 let row = message.mid.clone();
@@ -1969,6 +1979,12 @@ impl Module {
                 sess.at_mut(ordinal).client_message_id =
                     record["client_message_id"].as_str().map(str::to_owned);
                 sess.at_mut(ordinal).sender = record["sender"].as_str().map(str::to_owned);
+                sess.at_mut(ordinal).send_id = record["sender"].as_str().and_then(|_| {
+                    record["cause"]
+                        .as_str()
+                        .or_else(|| record["send_id"].as_str())
+                        .map(str::to_owned)
+                });
                 sess.at_mut(ordinal).marks =
                     serde_json::from_value(record["message_marks"].clone()).unwrap_or_default();
                 if let Some(delivered) = record.get("delivered_as").filter(|d| !d.is_null()) {
@@ -3566,6 +3582,9 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if params.get("send_id").is_none() {
+            return self.unkeyed_send(stamp, session, params);
+        }
         if let Some(reply) = cache_policy::admit(self, session, &params) {
             return Ok(reply);
         }
@@ -4533,6 +4552,7 @@ impl Module {
             .map(|m| {
                 let mut entry = self.read_message(sess, m);
                 entry.sender = None;
+                entry.send_id = None;
                 entry.speaks_for = None;
                 entry.notice = false;
                 entry.attribution = None;
@@ -4556,6 +4576,9 @@ impl Module {
                         && !self.world.defects.sender_read_missing
                     {
                         entry.sender = m.sender.clone();
+                    }
+                    if self.world.serves(groups::MESSAGE_SENDERS) {
+                        entry.send_id = self.send_id_fact(m, false);
                     }
                     entry.notices = notices::facts(m, &self.world.defects);
                     entry.attribution = attribution::fact(m, &self.world.defects);
@@ -4747,6 +4770,11 @@ impl Module {
             && !self.world.defects.sender_read_missing
         {
             message.sender = m.sender.clone();
+        }
+        if self.world.serves(groups::MESSAGE_SENDERS)
+            && self.world.serves(groups::READ_DISPLAY_FACTS)
+        {
+            message.send_id = self.send_id_fact(m, true);
         }
         if let Some(delivered) = &m.delivered_as {
             message = message.with_delivered_as(serde_json::from_value(delivered.clone()).unwrap());

@@ -451,6 +451,11 @@ pub struct HistoryEntry {
     /// outside all checksums and does not move `history_version`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sender: Option<String>,
+    /// The same positive-only module send identity as [`ReadMessage::send_id`].
+    /// Served beside sender under read_display_facts, without a request flag.
+    /// The send_ids group guarantees it when known; otherwise absence is unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub send_id: Option<String>,
     /// Agent whose words this module carries; outside bodies and checksums.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaks_for: Option<crate::message_marks::SpeaksFor>,
@@ -479,6 +484,11 @@ impl HistoryEntry {
         self
     }
 
+    pub fn with_send_id(mut self, send_id: impl Into<String>) -> Self {
+        self.send_id = Some(send_id.into());
+        self
+    }
+
     pub fn with_part_keys(mut self, keys: Vec<String>) -> Self {
         self.part_keys = Some(keys);
         self
@@ -500,6 +510,7 @@ impl HistoryEntry {
             role: None,
             delivered_as: None,
             sender: None,
+            send_id: None,
             speaks_for: None,
             notice: false,
             attribution: None,
@@ -524,6 +535,7 @@ impl HistoryEntry {
             role: read.role,
             delivered_as: read.delivered_as,
             sender: read.sender,
+            send_id: read.send_id,
             speaks_for: read.speaks_for,
             notice: read.notice,
             attribution: read.attribution,

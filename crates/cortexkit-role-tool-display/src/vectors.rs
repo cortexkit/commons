@@ -31,6 +31,10 @@ pub const FILES: &[(&str, &str)] = &[
     ("views.json", VIEWS_JSON),
     ("view-tools.json", VIEW_TOOLS_JSON),
     (
+        "wakes.json",
+        include_str!("../test-vectors/tool-display-v1/wakes.json"),
+    ),
+    (
         "README.md",
         include_str!("../test-vectors/tool-display-v1/README.md"),
     ),

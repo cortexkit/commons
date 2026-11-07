@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4
+
+- Add opt-in wake records on `display.write`, with verified writer identity,
+  immutable keyed-send records, bounded items and excerpts, and open reader kinds.
+- Define session-aware lookup for moved rows, ambiguity fallback, and 180-day
+  retention; app read and watch operations remain the display server's protocol.
+
 ## 0.1.3
 
 - Contract §6: ask `tool.views` before judging current catalog membership,

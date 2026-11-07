@@ -35,6 +35,13 @@ the `session_change` request, reply and refusal shapes (§10.2) are pinned.
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation.
 
+## Changes in 0.8.20
+
+- Add opt-in `send_ids` (§4.2), requiring `message_senders` and
+  `read_display_facts`: caller-visible module-send ids beside `sender` in
+  opted-in raw reads and raw history. Readers rely only on a declared guarantee
+  or a present field; absence on a non-declaring runner means unknown.
+
 ## Changes in 0.8.19
 
 - Add opt-in `cache_policy` (§9.3.5): requested lifetime and warming policy,
@@ -601,6 +608,23 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   nothing (§4.7). It is outside every checksum and never moves
   `history_version`. Raw `session.history` entries carry the same fact
   under those declarations; history has no display-facts request flag.
+- [pinned] The opt-in `send_ids` group (`SEND_IDS`) requires both
+  `message_senders` and `read_display_facts`; `check_describe` names a missing
+  prerequisite. A declaring runner serves `send_id?: string` beside `sender`
+  on every module-send entry that has `sender`, on `session.read` with
+  `include_display_facts: true` and on raw `session.history` without a request
+  flag. The value is exactly the send's own `send_id`, or the runner's returned
+  `submission_id` for an unkeyed send, also used by riding notices (§9.7), never
+  another runner-internal id. It is absent only when an admitted unkeyed send
+  returned no `submission_id`. The group adds no obligation to admit unkeyed
+  sends or to return an id for them.
+- [pinned] A runner not declaring `send_ids` MAY still serve `send_id` under the
+  same read opt-in and history rules, but any present value MUST be correct.
+  Absence then means unknown, never proof that a message was not sent. Readers
+  rely on the guarantee only from declaring runners and otherwise act only on
+  a present field. Like `sender`, `send_id` never enters stored message bodies
+  or content digests, never moves `history_version`, and is absent from default
+  `session.read` output.
 - [pinned] With `message_marks`, `speaks_for?: {agent_id: string}` and
   `notice?: true` carry the send's positive marks beside `sender`, with the
   same storage-time guarantee. Raw history serves them without an opt-in flag;
