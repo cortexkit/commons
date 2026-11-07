@@ -4712,9 +4712,11 @@ its host's file storage, not a second copy of the host's media store.
   bytes included, is refused `reply_too_large` in blocks mode exactly as in
   inline mode, and descriptors mode is how a reader pages such a message.
 - [pinned] The independent `media_refs` group serves the inline-with-media-
-  references mode in §4.2. A runner that stores media only by reference may
-  serve this mode exactly as it serves `blocks`. The group adds no byte
-  transport: `session.media_read` supplies the referenced bytes.
+  references mode in §4.2. Each byte-backed media payload is served as
+  §4.2's `media_ref`, whatever the runner stores: a runner that stores media
+  only by reference serves that reference in the `media_ref` shape, never in
+  its own stored block shape. The group adds no byte transport:
+  `session.media_read` supplies the referenced bytes.
 - [pinned] Model fallback and reads share `attachments::marker` and the
   grammar above. The context selects `reason`: `not_requested` for default
   reads, `unsupported` when a model cannot take stored media. Size and hash
