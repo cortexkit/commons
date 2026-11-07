@@ -82,3 +82,11 @@ required-features = ["test-vectors"]
 [[test]]
 name = "vectors_feature"
 required-features = ["test-vectors"]
+
+[[test]]
+name = "call_yield"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "stop_session"
+required-features = ["test-vectors"]

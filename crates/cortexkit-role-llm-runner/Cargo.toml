@@ -37,3 +37,11 @@ cortexkit-role-tool-provider = { version = "0.15.0", path = "../cortexkit-role-t
 [[test]]
 name = "vectors_feature"
 required-features = ["test-vectors"]
+
+[[test]]
+name = "call_yield"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "stop_all"
+required-features = ["test-vectors"]
