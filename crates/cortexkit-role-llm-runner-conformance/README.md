@@ -1,5 +1,26 @@
 # cortexkit-role-llm-runner-conformance
 
+Version **0.17.28** pins runner **0.8.24**. Mid-step `"live"` attaches
+(including absent or null `from`) replay the current step's real durable
+controls in cursor order before the display snapshot. This is required of
+every `streaming` runner, without a new describe group. The typed-event
+probes need `live_events`, `streaming`, queue and transcript reads; the
+in-flight probe additionally needs `HoldToolCalls`. It holds a later tool
+call in the same run so replay of an earlier step cannot pass as current-step
+replay. Faulty fakes omit controls, include an earlier step, put controls
+after the snapshot, or replay controls while idle, and fail by case name.
+
+### Live-attach narrowings
+
+The kit does not implement a reader and cannot observe whether its durable
+tool/run state survives `display_reset`, including a leniently decoded unknown
+event. There is no separate mid-step-reset case: the adapter cannot inject a
+reset during a held call or observe an ongoing stream after its quiet boundary.
+The attach case rejects controls re-sent after the attach snapshot's reset
+within the collected stream, but does not claim to test later provider-retry
+resets or reader-side retractions. Readers must preserve durable control state
+before runners enable replay; older runners may still omit the running call.
+
 Version **0.17.25** pins runner **0.8.21**. `read_display_facts_send_id` checks
 the opt-in `send_ids` guarantee: exact keyed-send ids and returned unkeyed
 submission ids on opted-in reads and raw history. It is not applicable without
@@ -162,6 +183,8 @@ opaque part keys come from the served envelope, not a reader's invented index.
 
 | Case | What an incorrect runner must not do |
 |---|---|
+| `live_attach_replays_step_controls` | Omit current-step controls, change their cursors/order, replay an earlier step, or send controls after the display snapshot while a tool call is held. |
+| `live_attach_idle_unchanged` | Replay any control event on an idle `"live"`, absent-from or null-from attach. |
 | `cache_policy_plan_key_accepted` | Reject a valid plan cache key, including the 1- and 128-byte boundaries. |
 | `cache_policy_send_key_accepted` | Reject a valid planless creating-send cache key, including the length boundaries. |
 | `cache_policy_plan_key_empty_refused` | Accept an empty key, name any field other than `plan.cache.key`, or write before refusal. |

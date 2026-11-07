@@ -14,7 +14,8 @@ use serde_json::{Map, Value};
 pub enum SubscribeFrom {
     /// Replay every durable event from the start of the active path.
     Start,
-    /// Only events after the subscription attaches.
+    /// Events after the subscription attaches, preceded, while a step is in
+    /// flight, by that step's durable controls and display snapshot (0.8.24+).
     Live,
     /// Strictly after a position a page's `head` (or an earlier event's
     /// `cursor`) returned, passed back verbatim.

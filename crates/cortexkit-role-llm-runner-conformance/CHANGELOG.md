@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.28
+
+- Pin runner `=0.8.24` and add `live_attach_replays_step_controls` and
+  `live_attach_idle_unchanged`, checking real current-step controls before
+  the display snapshot and no replay when idle.
+- Exercise missing replay, earlier-step replay and controls-after-snapshot
+  faults, plus idle replay, with named faulty-runner self-tests. Display-only
+  reset state retention remains a reader-side rule, outside the runner adapter.
+
 ## 0.17.27
 
 - Pin runner contract `=0.8.23` and add named cache-key cases: valid keys on

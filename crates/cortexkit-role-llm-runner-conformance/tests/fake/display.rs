@@ -553,9 +553,52 @@ impl Module {
             .get(session)
             .map(|s| (s.events.clone(), s.live.clone()))
             .unwrap_or_default();
+        // Model holds precede storage; tool holds use the already-stored
+        // assistant step. Derive the latter from unfinished durable calls so
+        // releasing a call cannot leave a stale snapshot behind.
+        let in_flight = self.world.in_flight.lock().unwrap().get(session).cloned()
+            .or_else(|| {
+                let sess = sessions.get(session)?;
+                let (key, call) = sess.calls.iter().find(|(_, call)| call.intent && !call.result)?;
+                let (mid, _) = call_holder(sess, key);
+                let scripts = self.world.scripts.lock().unwrap();
+                let turn = scripts.get(session)?.turns.iter().find(|turn| {
+                    turn.parts.iter().any(|part| {
+                        matches!(part, ScriptedPart::ToolCall(tool) if tool.arguments == call.arguments)
+                    })
+                })?;
+                Some((mid, turn.parts.clone()))
+            });
+        let is_live = request.attach_point() == SubscribeFrom::Live;
         let after = match request.attach_point() {
             SubscribeFrom::Start => (0, u64::MAX),
-            SubscribeFrom::Live => (events.len() as u64, u64::MAX),
+            SubscribeFrom::Live => {
+                let first = in_flight.as_ref().and_then(|(mid, _)| {
+                    recorded.iter().position(|(_, event)| {
+                        event["type"] == "message_started" && event["mid"] == *mid
+                    })
+                });
+                if (in_flight.is_some() && self.world.defects.live_attach_earlier_controls)
+                    || (in_flight.is_none() && self.world.defects.live_attach_idle_replays)
+                {
+                    (0, u64::MAX)
+                } else if self.world.defects.live_attach_skips_controls {
+                    (events.len() as u64, u64::MAX)
+                } else if let Some(first) = first {
+                    let index = recorded[first].0;
+                    let sub = recorded[..first]
+                        .iter()
+                        .filter(|(at, _)| *at == index)
+                        .count();
+                    if sub == 0 {
+                        (index as u64, u64::MAX)
+                    } else {
+                        (index as u64 + 1, sub as u64 - 1)
+                    }
+                } else {
+                    (events.len() as u64, u64::MAX)
+                }
+            }
             SubscribeFrom::After(position) => {
                 if let Err(error) = check_subscribe_cursor(
                     &position,
@@ -648,7 +691,10 @@ impl Module {
             }
         }
         drop(sessions);
-        let in_flight = self.world.in_flight.lock().unwrap().get(session).cloned();
+        let controls_len = frames.len();
+        let delay_controls = is_live
+            && in_flight.is_some()
+            && self.world.defects.live_attach_controls_after_snapshot;
         if let Some((mid, parts)) =
             in_flight.filter(|_| !self.world.defects.live_attach_skips_replay)
         {
@@ -671,6 +717,9 @@ impl Module {
                     )),
                 }));
             }
+        }
+        if delay_controls {
+            frames.rotate_left(controls_len);
         }
         let mut next = (live::FIRST_SEQ, live::FIRST_SEQ);
         SubscribeOutcome::Events(

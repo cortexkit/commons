@@ -35,6 +35,12 @@ the `session_change` request, reply and refusal shapes (§10.2) are pinned.
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation.
 
+## Changes in 0.8.24
+
+- Pin display-lane-only `display_reset` semantics and current-step durable
+  control replay before a mid-step `"live"` attach's snapshot (§7). Every
+  `streaming` runner implements the replay from 0.8.24, without a new group.
+
 ## Changes in 0.8.20
 
 - Add opt-in `send_ids` (§4.2), requiring `message_senders` and
@@ -2476,6 +2482,10 @@ permits inferring an unreported reason.
   is an open string; `control` events are durable and carry the `cursor` a
   later subscription may attach after; `display` events are best-effort and
   never replayed.
+- [pinned] From 0.8.24 every `streaming` runner replays the current step's
+  durable controls before the display snapshot on a mid-step `"live"`
+  attach, as specified under **Attach replay** below. This requires no
+  describe group, including on a runner without typed `live_events`.
 - [pinned] A stream event that names why a run is paused or waiting uses
   `reason`, an open, display-only string with known values `auth_required`,
   `restart`, `context_ceiling_wait` and `compaction_wait`, as `run.status`
@@ -2627,32 +2637,54 @@ new members.
      or tool control event is emitted for it.
   7. A host that names messages at creation never sends `live_id`; its streams
      are unchanged.
-- [pinned] `display_reset` means: drop all live state for the step in
-  flight (a provider retry, or a write-time hook rewriting a finished
-  message). If the step continues or is rebuilt, its current deltas stream
-  again; after an unstored message is abandoned (rule 6 above), none
-  follow. A reader decodes an event whose
-  `type` it does not know, on either lane, as `display_reset`
-  (`LiveEvent`'s lenient decoding; `LiveEvent::decode_strict` is the strict
-  one).
+- [pinned] `display_reset` resets only the display lane: live words,
+  reasoning and tool-input deltas. Durable control state a reader has
+  applied stands across it: stored messages, running and finished tool
+  calls, and the run in flight. If the step continues or is rebuilt, its
+  current deltas stream again; after an unstored message is abandoned
+  (rule 6 above), none follow. No reset can un-start a call: tools start
+  only after their message is stored, and a reset concerns the unstored
+  stream (for example a provider retry) or a rewrite of a finished
+  message's text. A reader decodes an event whose `type` it does not know,
+  on either lane, as `display_reset` (`LiveEvent`'s lenient decoding;
+  `LiveEvent::decode_strict` is the strict one). That decoded reset has
+  the same display-lane-only effect; durable control state still stands.
 - [pinned] **Ids.** A consumer replaces a live row with the stored one by
   `mid`, and a live tool row by `mid` plus `tool_call_id`, because the
-  model's id alone is not unique in a session.
+  model's id alone is not unique in a session. Replayed controls are
+  ordinary durable events, applied idempotently by these same ids (and
+  run events by `run_id`, as above). A reader that read `session.head`
+  before attaching `"live"` may receive controls whose cursors are at or
+  below that head. It applies or ignores them, never treating them as an
+  error or a gap. Storing such a cursor only replays more on resume.
 - [pinned] **Order.** Every frame of one stream carries `seq`
   (`live::SEQ_FIELD`), starting at `live::FIRST_SEQ` (1) and rising by one
   per frame, control and display together. A new stream starts again at 1.
   Control frames keep their durable `cursor`, which is what a consumer
   resumes from. A jump in `seq`, or a `display_gap`, means frames were lost:
   the consumer drops its live rows and attaches again.
-- [pinned] **Attach replay.** A newly attached stream first gets the step in
-  flight as it stands, after any durable replay its attach point asks for:
-  `display_reset`, then one coalesced delta per part so far (with `part` and
-  `mid`, or `live_id` before storage for an opted-in subscriber), then the
-  live deltas, all in the stream's `seq` order. A subscriber that did not opt
-  in, attaching while the message is unstored, gets those snapshot and live
-  deltas only once `mid` is known, never under a `live_id`. With no
-  step in flight there is nothing to replay. It is the only recovery for
-  live state.
+- [pinned] **Attach replay.** Durable control replay precedes the display
+  snapshot on every attach. Cursor and `"start"` attaches keep their
+  existing durable replay. A `"live"` attach (also an absent or null
+  `from`) made while a step is in flight first replays every durable
+  control event of that step, from its first one (normally the in-flight
+  message's `message_started`) up to the attach point, and nothing from
+  an earlier step. These are the real records, with their own cursors,
+  in cursor order, not newly minted events or cursors. Then comes the
+  step in flight as it stands: `display_reset`, one coalesced delta per
+  part so far (with `part` and `mid`, or `live_id` before storage for an
+  opted-in subscriber), then live events, all in the stream's `seq`
+  order. A subscriber that did not opt in, attaching while the message
+  is unstored, gets those snapshot and live deltas only once `mid` is
+  known, never under a `live_id`. With no step in flight, `"live"` is
+  unchanged: it replays no control events and there is no display snapshot.
+  The snapshot is the only recovery for display-lane state.
+- [pinned] Every `streaming` runner implements current-step control replay
+  on `"live"` attach from 0.8.24. There is no describe group for it. A
+  reader cannot rely on it from an older runner; there it may miss a
+  running call, as before.
+- [informative] Rollout: readers that cleared tool state on a reset must
+  stop doing so before runners turn current-step control replay on.
 
 ## 8. Model input
 

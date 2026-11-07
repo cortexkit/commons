@@ -5,7 +5,7 @@
 //! The route collects a stream only until it goes quiet
 //! ([`RunnerRoute::subscribe`]), so the suite reads replays of idle sessions
 //! and, for the attach replay, a stream attached while the adapter holds a
-//! model answer mid-stream.
+//! model answer mid-stream or a tool call in flight.
 
 use cortexkit_role_llm_runner::{
     capabilities as groups,
@@ -35,6 +35,8 @@ where
         "live_message_and_tool_events_durable" => lifecycle(case).await.map(|()| Ending::Passed),
         "live_run_events" => runs(case).await.map(|()| Ending::Passed),
         "live_attach_replays_the_current_step" => attach(case).await,
+        "live_attach_replays_step_controls" => attach_controls(case).await.map(|()| Ending::Passed),
+        "live_attach_idle_unchanged" => attach_idle(case).await.map(|()| Ending::Passed),
         "live_seq_rises_across_lanes" => seq(case).await,
         "live_untimed_history_call_leaves_times_out" => untimed(case).await,
         "run_cause_queued_start_names_its_send" => {
@@ -62,6 +64,10 @@ pub(crate) async fn stream<R: RunnerRoute>(
     from: SubscribeFrom,
 ) -> Result<Vec<Frame>, String> {
     let params = serde_json::to_value(LiveSubscribeRequest::new(from)).expect("serializes");
+    stream_params(route, params).await
+}
+
+async fn stream_params<R: RunnerRoute>(route: &R, params: Value) -> Result<Vec<Frame>, String> {
     let events = match route
         .subscribe(params)
         .await
@@ -308,6 +314,122 @@ where
                  {finished:?} and run_paused at {paused:?}: a completed run has one run_started \
                  and, after it, one run_finished with reason completed"
             ))
+        }
+    }
+    Ok(())
+}
+
+/// Compare live replay with the durable history while a later step's call is
+/// held. The earlier call is in the same run, so replaying the whole run is
+/// not enough to satisfy the current-step boundary.
+async fn attach_controls<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let earlier = case.mint.call("live-earlier-call");
+    let mut held = case.mint.call("live-held-call");
+    held.hold = true;
+    let session = case
+        .open(
+            "live-controls",
+            Script {
+                turns: vec![
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(earlier)]),
+                    ScriptedTurn::new(vec![ScriptedPart::ToolCall(held.clone())]),
+                    ScriptedTurn::new(vec![case.mint.text("live-after-held-call").0]),
+                ],
+            },
+        )
+        .await?;
+    let reply: SendReply = decode(
+        "session.send",
+        expect_ok(
+            "session.send",
+            call(
+                &session.route,
+                ops::SESSION_SEND,
+                send_params(
+                    case.subject,
+                    &session.name,
+                    true,
+                    &case.mint.next("live-prompt"),
+                    &case.mint.next("send"),
+                    None,
+                ),
+            )
+            .await?,
+        )?,
+    )?;
+    case.subject
+        .await_tool_call(&held.arguments)
+        .await
+        .map_err(|e| format!("waiting for the held call: {e}"))?;
+    let checked = async {
+        // A prior head does not suppress current-step replay on a live attach.
+        head(&session.route).await?;
+        let history = control(&stream(&session.route, SubscribeFrom::Start).await?);
+        let (tool_index, tool) = history.iter().enumerate().find_map(|(index, (_, event))| match event {
+            Some(LiveEvent::ToolStarted(tool))
+                if serde_json::from_str::<Value>(&tool.arguments).ok()
+                    == Some(held.arguments.clone()) => Some((index, tool)),
+            _ => None,
+        }).ok_or("durable history has no tool_started for the held call")?;
+        let first = history.iter().position(|(_, event)| {
+            matches!(event, Some(LiveEvent::MessageStarted(message)) if message.mid == tool.mid)
+        }).ok_or("durable history has no message_started for the held call's mid")?;
+        let expected = &history[first..];
+        if first == 0 || tool_index <= first || expected.iter().any(|(_, event)| {
+            matches!(event, Some(LiveEvent::ToolFinished(done)) if done.mid == tool.mid && done.tool_call_id == held.tool_call_id)
+        }) {
+            return Err("the fixture needs an earlier step and a call still in flight".into());
+        }
+        let cursors: Vec<_> = expected.iter().map(|(cursor, _)| cursor).collect();
+        if cursors.iter().any(|cursor| cursor.is_none())
+            || cursors.iter().enumerate().any(|(i, cursor)| cursors[..i].contains(cursor))
+        {
+            return Err("current-step durable controls need their own distinct cursors".into());
+        }
+        for params in [serde_json::json!({"from": "live"}), serde_json::json!({}), serde_json::json!({"from": null})] {
+            let frames = stream_params(&session.route, params.clone()).await?;
+            check_seq("on a live attach during a held call", &frames)?;
+            let reset = frames.iter().position(|frame| {
+                frame.frame.kind == kinds::DISPLAY && frame.event == Some(LiveEvent::DisplayReset)
+            }).ok_or("live attach has no display_reset snapshot while the call is in flight")?;
+            if control(&frames[..reset]) != expected
+                || frames[reset..].iter().any(|frame| frame.frame.kind == kinds::CONTROL)
+            {
+                return Err(format!(
+                    "live attach {params} must replay exactly the current step's durable controls, \
+                     with their original cursors in order, before the display snapshot; \
+                     expected {expected:?}, got {:?}", control(&frames)
+                ));
+            }
+        }
+        Ok(())
+    }.await;
+    let released = case.subject.release_tool_call(&held.arguments).await;
+    checked?;
+    released.map_err(|e| format!("releasing the held call: {e}"))?;
+    wait_run_end(case.subject, &session.route, case.declared, None, &reply).await?;
+    Ok(())
+}
+
+/// An idle live attachment does not turn into a durable history replay.
+async fn attach_idle<S>(case: &Case<'_, S>) -> Check
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    let (session, _, _) = with_tool_call(case).await?;
+    for params in [
+        serde_json::json!({"from": "live"}),
+        serde_json::json!({}),
+        serde_json::json!({"from": null}),
+    ] {
+        let frames = stream_params(&session.route, params).await?;
+        if !control(&frames).is_empty() {
+            return Err("an idle live attach replays control events: no step is in flight".into());
         }
     }
     Ok(())

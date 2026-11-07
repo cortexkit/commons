@@ -567,6 +567,14 @@ pub struct Defects {
     pub live_tool_time_invented: bool,
     /// A newly attached stream gets no replay of the step in flight.
     pub live_attach_skips_replay: bool,
+    /// Live attach omits the current step's durable controls.
+    pub live_attach_skips_controls: bool,
+    /// Live attach also replays controls from earlier steps.
+    pub live_attach_earlier_controls: bool,
+    /// Live attach puts durable controls after the display snapshot.
+    pub live_attach_controls_after_snapshot: bool,
+    /// Live attach replays durable history even when idle.
+    pub live_attach_idle_replays: bool,
     /// Display frames carry a `seq` of their own, apart from control frames.
     pub live_seq_per_lane: bool,
     /// A run a `queue` send started names an id the runner made for its
@@ -5436,9 +5444,9 @@ impl Module {
 
     fn subscribe(&self, session: &str, params: Value) -> SubscribeOutcome {
         if self.world.defects.subscribe_malformed_from_accepted
-            && params
-                .get("from")
-                .is_some_and(|from| !from.is_object() && from != "start" && from != "live")
+            && params.get("from").is_some_and(|from| {
+                !from.is_null() && !from.is_object() && from != "start" && from != "live"
+            })
         {
             return SubscribeOutcome::Events(Vec::new());
         }

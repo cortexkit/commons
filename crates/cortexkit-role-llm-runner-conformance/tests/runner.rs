@@ -1223,6 +1223,20 @@ fn assert_passed(report: &SuiteReport, case: &str) {
             return;
         }
     }
+    if case == "live_attach_replays_step_controls" {
+        if let Some(CaseOutcome::Skipped { missing }) = report.outcome(case) {
+            let needs = [
+                Capability::LiveEvents,
+                Capability::Streaming,
+                Capability::Queue,
+                Capability::TranscriptReads,
+                Capability::HoldToolCalls,
+            ];
+            if !missing.is_empty() && missing.iter().all(|capability| needs.contains(capability)) {
+                return;
+            }
+        }
+    }
     if case == NO_RUN_OPS_STEER_CASE {
         if matches!(
             report.outcome(case),
@@ -6045,6 +6059,8 @@ const DISPLAY_AND_LIVE_CASES: &[&str] = &[
     "live_message_and_tool_events_durable",
     "live_run_events",
     "live_attach_replays_the_current_step",
+    "live_attach_replays_step_controls",
+    "live_attach_idle_unchanged",
     "live_seq_rises_across_lanes",
     "live_untimed_history_call_leaves_times_out",
 ];
@@ -6473,6 +6489,7 @@ async fn an_attach_without_the_step_replay_fails_the_attach_case() {
         &report,
         &[
             "live_attach_replays_the_current_step",
+            "live_attach_replays_step_controls",
             "live_seq_rises_across_lanes",
         ],
         "display",
@@ -6488,8 +6505,84 @@ async fn a_seq_per_lane_fails_the_stream_order_case() {
     .await;
     fails_only(
         &report,
-        &["live_seq_rises_across_lanes"],
+        &[
+            "live_seq_rises_across_lanes",
+            "live_attach_replays_step_controls",
+        ],
         "rising by one per frame",
+    );
+}
+
+#[tokio::test]
+async fn live_attach_without_controls_fails_the_step_controls_case() {
+    let report = run(&displaying(Defects {
+        live_attach_skips_controls: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["live_attach_replays_step_controls"],
+        "before the display snapshot",
+    );
+}
+
+#[tokio::test]
+async fn live_attach_with_earlier_controls_fails_the_step_controls_case() {
+    let report = run(&displaying(Defects {
+        live_attach_earlier_controls: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["live_attach_replays_step_controls"],
+        "current step's durable controls",
+    );
+}
+
+#[tokio::test]
+async fn live_attach_with_late_controls_fails_the_step_controls_case() {
+    let report = run(&displaying(Defects {
+        live_attach_controls_after_snapshot: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["live_attach_replays_step_controls"],
+        "before the display snapshot",
+    );
+}
+
+#[tokio::test]
+async fn live_attach_with_idle_replay_fails_the_idle_case() {
+    let report = run(&displaying(Defects {
+        live_attach_idle_replays: true,
+        ..Defects::default()
+    }))
+    .await;
+    fails_only(
+        &report,
+        &["live_attach_idle_unchanged"],
+        "idle live attach replays control events",
+    );
+}
+
+#[tokio::test]
+async fn live_attach_step_controls_need_a_held_tool_fixture() {
+    let mut subject = displaying(Defects::default());
+    subject.capabilities.remove(&Capability::HoldToolCalls);
+    let report = run(&subject).await;
+    assert_eq!(
+        report.outcome("live_attach_replays_step_controls"),
+        Some(&CaseOutcome::Skipped {
+            missing: vec![Capability::HoldToolCalls],
+        })
+    );
+    assert_eq!(
+        report.outcome("live_attach_idle_unchanged"),
+        Some(&CaseOutcome::Passed)
     );
 }
 

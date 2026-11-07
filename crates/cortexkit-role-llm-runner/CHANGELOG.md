@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.24
+
+- Pin `display_reset` to the display lane only, including leniently decoded
+  unknown events. Applied message, tool and run control state survives resets.
+- Require every `streaming` runner to replay the current step's real durable
+  controls, in cursor order, before a mid-step `"live"` attach's reset and
+  snapshot. Idle live attaches, cursor attaches and start attaches are unchanged.
+- Clarify idempotent reader handling when replayed cursors precede a previously
+  read head, and the reader-first rollout needed by older reset implementations.
+
 ## 0.8.23
 
 - Add optional `cache.key`: 1–128 printable ASCII bytes without spaces, with

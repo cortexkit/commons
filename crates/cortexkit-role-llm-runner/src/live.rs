@@ -508,8 +508,9 @@ impl DisplayGap {
 
 /// A typed stream event. Decoded leniently: an event whose `type` this
 /// crate does not know, or a known type whose members do not decode, is
-/// [`LiveEvent::DisplayReset`], so a reader drops its live state rather
-/// than show something it cannot place. [`LiveEvent::decode_strict`] is the
+/// [`LiveEvent::DisplayReset`], so a reader drops only its display-lane state
+/// rather than show something it cannot place. Applied durable control state
+/// survives this reset. [`LiveEvent::decode_strict`] is the
 /// strict decoding a conformance check uses.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -528,9 +529,10 @@ pub enum LiveEvent {
     ReasoningDelta(TextDelta),
     ToolInputDelta(ToolInputDelta),
     DisplayGap(DisplayGap),
-    /// Drop all live state for the step in flight. If the step continues or
-    /// is rebuilt, its current deltas stream again; after an unstored message
-    /// is abandoned, none follow.
+    /// Drop only live words, reasoning and tool-input deltas. Applied durable
+    /// state (stored messages, running and finished calls, and the run in
+    /// flight) survives. If the step continues or is rebuilt, its current
+    /// deltas stream again; after an unstored message is abandoned, none follow.
     DisplayReset,
 }
 
