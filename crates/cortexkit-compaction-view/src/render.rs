@@ -19,6 +19,7 @@ use cortexkit_role_compaction::part::{
     Delivered, FileMedia, OutputFormat, Part, PartBody, ToolStatus,
 };
 use cortexkit_role_compaction::read::{Entry, NoticeOrigin, Role};
+use cortexkit_role_compaction::rules::RuleBreak;
 use cortexkit_role_compaction::view::{
     Edit, EditOp, InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
 };
@@ -445,8 +446,8 @@ pub fn plan_with(
 /// still replace that call's output. When the entry has no tool call, at
 /// least one of its parts must stay. A cut through it removes it too.
 ///
-/// Refuses with `UnsupportedEdit` naming the edit after which nothing that
-/// must stay is left. Entries appended after the view was built fall outside
+/// Refuses with the `rule` refusal [`RuleBreak::FinalTurnRemoved`], naming the
+/// edit after which nothing that must stay is left. Entries appended after the view was built fall outside
 /// its edits and render as they are, so a later request ends on them.
 pub fn check_final_turn(entries: &[Entry], edits: &[Edit]) -> Result<(), ViewRefusal> {
     let Some(last) = entries.iter().rev().find(|entry| !entry.parts.is_empty()) else {
@@ -481,9 +482,9 @@ pub fn check_final_turn(entries: &[Entry], edits: &[Edit]) -> Result<(), ViewRef
             _ => false,
         };
         if gone {
-            return Err(ViewRefusal::UnsupportedEdit {
+            return Err(ViewRefusal::Rule(RuleBreak::FinalTurnRemoved {
                 index: index as u64,
-            });
+            }));
         }
     }
     Ok(())

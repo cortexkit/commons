@@ -7473,8 +7473,9 @@
     },
     "output": {
       "refused": {
-        "code": "unsupported_edit",
-        "index": 1
+        "code": "rule",
+        "index": 1,
+        "rule": "final_turn_removed"
       }
     }
   },
@@ -7607,8 +7608,9 @@
     },
     "output": {
       "refused": {
-        "code": "unsupported_edit",
-        "index": 0
+        "code": "rule",
+        "index": 0,
+        "rule": "final_turn_removed"
       }
     }
   },
@@ -7714,8 +7716,9 @@
     },
     "output": {
       "refused": {
-        "code": "unsupported_edit",
-        "index": 0
+        "code": "rule",
+        "index": 0,
+        "rule": "final_turn_removed"
       }
     }
   },
@@ -7995,8 +7998,9 @@
     },
     "output": {
       "refused": {
-        "code": "unsupported_edit",
-        "index": 0
+        "code": "rule",
+        "index": 0,
+        "rule": "final_turn_removed"
       }
     }
   },
