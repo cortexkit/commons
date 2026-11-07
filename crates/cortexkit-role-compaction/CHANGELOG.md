@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.10
+
+- Define compaction-item refreshes: accept adding one, refuse removing one
+  with `plan.compaction_item`, and allow refusing or applying provider, preset
+  and params changes. Applied changes trigger Setup; the last view stays in
+  force until its replacement, never exposing the whole history at once.
+- Add optional `AppliedViewAnswer.applied_by`, recorded from the attested
+  applying route, so providers replace foreign views without adopting their
+  cuts or edits. Add optional `SetupRequest.child_harness` for child sessions
+  when the parent's host cannot create them.
+- Add checksummed optional `View.built_through` and open-string `new_signed`.
+  Define `strip` as permission to drop invalidated signed parts strictly after
+  an active-path message anchor, preserving PR5 and PR6. Document captured
+  Anthropic evidence and the absence of Gemini evidence; encrypted reasoning
+  is unaffected. Include wire and checksum compatibility coverage.
+- Roll out providers that decode the new members before runners send them.
+
 ## 0.2.9
 
 - Pin PR6's protection through trailing system entries: the newest entry with

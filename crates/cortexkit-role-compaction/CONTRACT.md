@@ -53,10 +53,10 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| S1 | The runner calls `compaction.setup` (W5.1) when it starts serving a session whose preset has a compaction provider, when an applied plan names a different compaction provider (to the new provider, W2.5), after its own restart, before the next send after a Setup that failed with no view applied (W1.3a), and when a notice answers `setup_required` or a ride is refused `unknown_session`. |
+| S1 | The runner calls `compaction.setup` (W5.1) when it starts serving a session whose preset has a compaction provider, when a compaction item is first applied or the applied item's provider, preset or params changed (to the current provider, W2.5), after its own restart, before the next send after a Setup that failed with no view applied (W1.3a), and when a notice answers `setup_required` or a ride is refused `unknown_session`. |
 | S2 | Setup either answers `ready` or fails with a refusal (W1.3) naming why. It never carries content, and the provider never reads the transcript inside it. |
 | S3 | A second Setup for a session the provider already holds keeps the provider's state; both sides restart the notice count (W5.2 `seq`). |
-| S4 | If the applied view differs from the one the provider holds (version or checksum), the provider adopts the runner's with `session.applied_view`. |
+| S4 | If the applied view differs from the one the provider holds (version or checksum), the provider reads the runner's with `session.applied_view` and adopts it unless it is foreign (W5.6). |
 | S5 | The provider sets no ceiling or percentage on the runner. |
 
 ## A5. Notices
@@ -82,7 +82,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | Id | Rule |
 |---|---|
 | V1 | A view (W6) is a version, a checksum, and edits over the transcript addressed by message and part id. Everything not named is rendered unchanged. |
-| V2 | Views are cumulative: each one carries every edit of the previous view, unchanged or changed in place (a changed edit takes the new version as its `since`, W6.2), plus new ones. Never both an old and a new replace of the same field. An edit leaves only when a revert removes the message it names. |
+| V2 | Views are cumulative: each one carries every edit of the previous view, unchanged or changed in place (a changed edit takes the new version as its `since`, W6.2), plus new ones. Never both an old and a new replace of the same field. An edit leaves only when a revert removes the message it names, except that a provider replaces a foreign view whole (W5.6). |
 | V3 | Edits: drop, replace, insert, cut (W6.2). |
 | V4 | The provider hands over a view with `session.apply_view` (W5.5), or inline in a ride's answer. The runner checks it (W6.5), answers in the same call, stores an accepted view durably, and applies it from the next step boundary, never in the middle of a step. How the runner stores views is its own choice; storing each one as the edits new since the previous one is fine. |
 | V5 | A view is always sent whole, in one call. A provider refuses by name (`view_too_large`, logged on its side) to send a view over 3 MiB of JSON. There is no fetch-by-version op. |
@@ -96,7 +96,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | Id | Rule |
 |---|---|
 | PR1 | The runner declares the session's rules (W3.3) on Setup and in every notice and ride. Only it knows the route and the account. Defaults by model family come from the view library, so runners keep no table of their own. |
-| PR2 | Under `signed_parts: bound`, a kept signed part is valid only while everything rendered before it, apart from signed parts left out as allowed here, renders as it did when the part was generated. Among the session's signed parts, those left out may form only an oldest run, a newest run, or both; any other edit before a kept signed part invalidates it. The provider writes the companion drops this requires into the view; the runner refuses a view that breaks it. |
+| PR2 | Under `signed_parts: bound`, a kept signed part is valid only while everything rendered before it, apart from signed parts left out as allowed here, renders as it did when the part was generated. Among the session's signed parts, those left out may form only an oldest run, a newest run, or both; any other edit before a kept signed part invalidates it. The provider writes the companion drops this requires into the view; the runner refuses a view that breaks it, except for the explicitly authorized stripping of newer signed parts in W6.1. |
 | PR3 | A tool call is never separated from its result. |
 | PR4 | `history_edit_cost: full_resend` changes nothing in the runner. It tells the provider that any edit to history already sent costs a full resend. A runner that cannot tell whether requests are chained (for example where an auth plugin chains) declares `suffix`. |
 | PR5 | A sealed part (signed or encrypted) can be dropped but never replaced; neither can a provider-executed tool part (the host replays it by reference). |
@@ -203,6 +203,7 @@ Codes and what the caller does next:
 | Part kind | provider | An opaque part (W4.5): it may be dropped, never replaced, and its remaining payload is carried unchanged. `tokens` remains reserved Part envelope metadata (W4.11). |
 | Entry role | provider | Every part of that entry is handled as an opaque part. |
 | `seal` | provider and runner | A sealed part: it may be dropped, never replaced (PR5). |
+| View `new_signed` | runner | Absent: no automatic stripping of signed parts (W6.1). |
 | Tool `status` | provider and runner | `running`: never dropped, replaced or cut. |
 | Output format | provider and runner | `output` is never replaced; the whole part may still be dropped. |
 | `delivered.forms` item | provider and runner | Skip the unknown value; if no known form remains, use `tool_result`. |
@@ -251,10 +252,18 @@ Compaction routes require a bound session at bind.
 | `reason` | When |
 |---|---|
 | `provider_mismatch` | The applied plan's compaction item names a different provider. |
-| `no_compaction_item` | The applied plan has no compaction item. |
+| `no_compaction_item` | The applied plan has no compaction item; this arises only for a session that never had one. |
 | `session_not_held` | The route carries a bind identity, but the runner holds no session under this contract for it. A route with no bind identity is `route_unbound` (W2.4). |
 
-A runner may also check each call and refuse it with the same code. When a change takes effect that leaves a caller without this authority, the runner closes that caller's existing `compaction-runner/v1` routes for the session, or refuses every later call on them with this code. Such changes are: an applied plan that names a different provider, an applied plan with no compaction item, and the runner ceasing to hold the session. A runner may instead refuse a `session.refresh` that would change the compaction item's provider, with `invalid_params {field: "plan.compaction_item"}`; that conforms too.
+A runner may also check each call and refuse it with the same code. When a change takes effect that leaves a caller without this authority, the runner closes that caller's existing `compaction-runner/v1` routes for the session, or refuses every later call on them with this code. Such changes are an applied plan that names a different provider and the runner ceasing to hold the session.
+
+For `session.refresh`, changes to the session's compaction item follow these rules:
+
+- Adding an item to a session that has none MUST be accepted. It applies at the next run, and the runner sends Setup to its provider (S1).
+- Removing the item from a session that has one MUST be refused with `invalid_params {field: "plan.compaction_item"}`. Without the item nothing would shrink the session again, and the old provider's notices and records would lose their owner.
+- Any other change to an existing item (another provider, another `preset` or `params`) MAY be refused with that same field, or applied at the next run. A runner that applies it sends a new Setup to the current provider (S1). The session's last applied view stays in force, unchanged, until the current provider applies a view of its own. A runner never drops an applied view on its own: doing so would put the whole history in front of the model at once.
+
+A refusal of a compaction-item change names `plan.compaction_item`, never `plan`.
 
 On this code, whatever the reason, and when the runner closes such a route, the provider suspends its work for that (`runner`, `harness`, `session`). It logs the reason, keeps its state (S3) and opens no further routes for that session. It resumes only after a later `compaction.setup` from that same attested runner for the same session answers `ready`. Setup does not bypass this rule, and the provider still reads the transcript only after Setup (S2).
 
@@ -508,6 +517,7 @@ Request:
 | Field | Type | Meaning |
 |---|---|---|
 | `preset` | string | The session's preset, for example `head`, `worker`, `reader`. |
+| `child_harness` | string, optional | The harness the provider binds when it creates sessions for this session's work, such as summarizer children, on this same runner. Absent means the session's own harness. The runner sends it only when its own host for the session cannot create sessions. |
 | `model` | `ModelRef` | W3.1. |
 | `accepts_images` | boolean, optional | Whether the session's model reads images. The runner sends it only when known; absent means unknown. A provider inserts images only when it is `true`. |
 | `context_window` | integer | W3.4. |
@@ -517,6 +527,8 @@ Request:
 | `applied_view` | `AppliedView`, optional | The view the runner applies now: after its restart, the one it reloaded; for a session moved in, the installed first view. |
 | `newest` | `Cursor`, optional | The newest entry; absent for an empty transcript. |
 | `now` | integer | The runner's clock. |
+
+The provider never derives `child_harness` from runner or host names. A Setup that changes it applies to the next child; a running child keeps the harness it was created with.
 
 Answer: `{"answer": "ready"}`. Refusals: `unknown_preset`, `invalid_params`.
 
@@ -607,7 +619,14 @@ Refusals: `invalid_params`.
 
 ### W5.6 `session.applied_view` (runner, `compaction-runner/v1`)
 
-Request: `{}`. Answer: `{"view"?: View}`, the whole view the runner applies now; absent when it applies none.
+Request: `{}`. Answer:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `view` | `View`, optional | The whole view the runner applies now; absent when it applies none. |
+| `applied_by` | string, optional | The module id the daemon attested for the route whose `session.apply_view` installed that view. The runner records it when it accepts the view, never from a request field. Absent when the runner did not record it, such as a view applied before support for this field or a moved-in first view. |
+
+A runner that applies compaction-item changes under W2.5 MUST send `applied_by` for views whose applying module it recorded. A provider treats a view whose `applied_by` is not its own module id as foreign: it takes neither the cut nor the edits, and replaces the view whole with its first apply at a higher version. Until then the runner keeps applying the foreign view unchanged (W2.5). With `applied_by` absent, the provider keeps its current behaviour. Unknown answer fields are ignored (W1.4).
 
 ### W5.7 `session.send` and `run.result` (runner, `llm-runner/v1`)
 
@@ -623,8 +642,16 @@ Used as llm-runner publishes them; this contract adds nothing. What a provider s
 | Field | Type | Meaning |
 |---|---|---|
 | `version` | integer | At least 1. Greater than every view the provider built for the session before. |
-| `checksum` | string | Checksum of `{"version", "edits"}` (W7). |
+| `checksum` | string | Checksum of `version`, `edits` and the optional members below when present (W7). |
 | `edits` | array of `Edit` | Applied in order. |
+| `built_through` | string, optional | The `mid` of the newest entry the provider's index held when it built the view. |
+| `new_signed` | open string, optional | Only `strip` is defined: authorize dropping invalidated signed parts in entries newer than `built_through`, as below. An unknown value behaves as absent. |
+
+At every point the runner checks a view, if applying its edits invalidates a `seal: signed` part under PR2, the render plan drops that part instead of refusing only when `new_signed` is `strip` and its entry is strictly after `built_through` on the active path. This never replaces a sealed part (PR5). The existing `signed_part_invalid` refusal stands when `built_through` is absent, its mid is no longer on the active path after a revert or branch switch, the signed part is in an entry at or before the anchor, or `new_signed` is absent or unknown. Ordinals cannot anchor this permission because they are reused after a revert. PR6 still applies: stripping reasoning never removes a protected entry's last tool part, and stripping cannot remove all its parts when it has no tool part.
+
+A runner gets this strip behaviour through the view library's view-aware planning entry point (`render::plan_view`, or JSON `plan_view` for WebAssembly), supplying the whole view and the session's provider rules. The edit-only planning and rule-checking entry points do not grant this permission and keep refusing invalidated signatures. That remains conformant: stripping is an authorized alternative to refusal, never permission to keep an invalidated signed part.
+
+**Provider guidance (informative).** Set `new_signed: strip` only for model families with captured evidence. Anthropic Messages has that evidence: on 2026-10-22, through a production transport with a cached prefix of about 31k tokens, Opus 5.5, Sonnet 5.5, Fable 5.1 and Haiku 5.5 each answered 200 under both adaptive and budget thinking with the newest assistant message's signed thinking removed mid tool loop. `cache_read` equalled the unchanged control (31,318, or 31,280 on Haiku). Gemini thought signatures are also `seal: signed`; do not authorize stripping them until a Gemini capture exists, so invalidated signatures keep refusing. OpenAI reasoning is `seal: encrypted`, is not bound to earlier history, and never reaches this rule.
 
 **W6.2 `Edit`:** `since` (integer: the version of the first view that held this edit unchanged; a new or changed edit gets the view's own version) plus `op` and the op's fields:
 
@@ -693,7 +720,7 @@ Every checksum is the lowercase hex SHA-256 of the value's RFC 8785 (JCS) serial
 |---|---|
 | Part `digest` | The part's object in full form without `id`, `tag`, `digest` and `tokens`. |
 | Entry `digest` | `{"role", "notice", "parts"}`, with each part in full form including its `id`, `tag` and `digest`, but without its `tokens`. |
-| View `checksum` | `{"version", "edits"}`, including inserted images and their base64 data. Empty `images` arrays hash as absent (W1.6). |
+| View `checksum` | `{"version", "edits", "built_through"?, "new_signed"?}`, including inserted images and their base64 data. Absent optional members never enter it; present `new_signed` values enter it even when unknown. Empty `images` arrays hash as absent (W1.6). |
 
 Entry timing metadata (`written_at` and `completed_at`) enters none of these checksums.
 Count metadata (`tokens`, including each `delivered` item's count, assistant-entry `reasoning_tokens`, condition `system_tokens` and `tools_tokens`), `token_family` and `token_family_exact` also enter none of these checksums. `tokens` is reserved in the Part envelope even for unknown kinds; the remaining unknown-kind payload is preserved under W1.5. Opaque payload fields with the same names are content, not count metadata, and remain in checksums.

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.8
+
+- Require compaction 0.2.10. Add view-aware `plan_view`, `plan_view_at`,
+  `plan_view_with` and `apply_with_rules` entry points, with JSON dispatch for
+  WebAssembly. They honor checksummed `built_through` and `new_signed: strip`
+  only for invalidated signed parts strictly newer than an active-path anchor.
+  Temporary drops never change the stored view, bypass running-tool checks,
+  or remove the final protected tool part. Unknown policy values stay strict.
+- Keep edit-only APIs strict. Add stripping, anchor, refusal and checksum
+  vectors without changing any earlier vector or plan bytes. `PLAN_VERSION`
+  stays 3; the WebAssembly adapter passes the new members through unchanged
+  and needs no code or version change.
+- Roll out providers that decode the new members before runners send them.
+
 ## 0.1.7
 
 - Extend PR6 (compaction 0.2.9) in `check_final_turn` and all render-plan paths:

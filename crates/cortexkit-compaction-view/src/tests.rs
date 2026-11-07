@@ -57,6 +57,123 @@ fn signed(id: &str) -> Part {
     )
 }
 
+fn strip_entries() -> Vec<Entry> {
+    vec![
+        entry(1, "anchor", Role::User, vec![text("t1", 1, "old")], None),
+        entry(
+            2,
+            "reply",
+            Role::Assistant,
+            vec![signed("thinking"), tool("call", 2, ToolStatus::Completed)],
+            None,
+        ),
+    ]
+}
+
+fn strip_view(anchor: Option<&str>, policy: Option<&str>) -> View {
+    View::seal_with_policy(
+        1,
+        vec![insert(1, InsertAt::Start, "summary")],
+        anchor.map(str::to_owned),
+        policy.map(str::to_owned),
+    )
+}
+
+fn assert_policy_vector(name: &str) {
+    let vectors: Vec<crate::vectors::Vector> =
+        serde_json::from_str(include_str!("../vectors/cases.json")).unwrap();
+    let vector = vectors.iter().find(|vector| vector.name == name).unwrap();
+    assert_eq!(
+        crate::vectors::call(&vector.function, vector.input.clone()),
+        vector.output,
+        "{name}"
+    );
+}
+
+#[test]
+fn strip_vector_drops_newer_thinking_and_keeps_the_final_tool() {
+    assert_policy_vector(
+        "strip an invalidated signed part newer than the anchor and keep the newest assistant tool",
+    );
+    let entries = strip_entries();
+    let view = strip_view(Some("anchor"), Some("strip"));
+    let planned = crate::render::plan_view(&entries, &view, &bound()).unwrap();
+    let crate::render::PlanItem::Entry { mid, parts, .. } = planned.items.last().unwrap() else {
+        panic!("the reply must remain");
+    };
+    assert_eq!(mid, "reply");
+    assert_eq!(
+        parts
+            .iter()
+            .map(|part| part.id.as_str())
+            .collect::<Vec<_>>(),
+        ["call"]
+    );
+    assert!(parts[0].replace.is_empty());
+    assert_eq!(parts[0].tag, Some(2));
+    assert!(view.verify());
+    assert_eq!(view.edits.len(), 1, "temporary drops never change the view");
+    let rendered = crate::render::apply_with_rules(&entries, &view, &bound()).unwrap();
+    assert_eq!(
+        rendered.last().unwrap().parts,
+        vec![entries[1].parts[1].clone()]
+    );
+    assert!(
+        check(&entries, &view.edits, &bound()).is_err(),
+        "the edit-only checker remains strict"
+    );
+}
+
+#[test]
+fn anchor_vector_refuses_a_signature_at_the_anchor() {
+    assert_policy_vector("a signed part at the anchor is never stripped");
+    let view = strip_view(Some("reply"), Some("strip"));
+    assert_eq!(
+        crate::render::plan_view(&strip_entries(), &view, &bound()),
+        Err(ViewRefusal::Rule(RuleBreak::SignedPartInvalid {
+            mid: "reply".into(),
+            part: "thinking".into(),
+        })),
+    );
+}
+
+#[test]
+fn stripping_requires_a_known_policy_and_an_active_earlier_anchor() {
+    for (anchor, policy) in [
+        (None, Some("strip")),
+        (Some("removed-branch"), Some("strip")),
+        (Some("anchor"), None),
+        (Some("anchor"), Some("future-policy")),
+    ] {
+        assert!(
+            matches!(
+                crate::render::plan_view(&strip_entries(), &strip_view(anchor, policy), &bound()),
+                Err(ViewRefusal::Rule(RuleBreak::SignedPartInvalid { .. }))
+            ),
+            "{anchor:?} {policy:?}"
+        );
+    }
+    let mut entries = strip_entries();
+    let view = strip_view(Some("anchor"), Some("strip"));
+    entries[0].mid = "another-message-at-the-same-ordinal".into();
+    assert!(crate::render::plan_view(&entries, &view, &bound()).is_err());
+}
+
+#[test]
+fn stripping_never_drops_a_protected_last_part_or_tool_or_encrypted_part() {
+    let view = strip_view(Some("anchor"), Some("strip"));
+    let mut entries = strip_entries();
+    entries[1].parts.pop();
+    assert!(crate::render::plan_view(&entries, &view, &bound()).is_err());
+    entries = strip_entries();
+    entries[1].parts[1].seal = Seal::Signed;
+    assert!(crate::render::plan_view(&entries, &view, &bound()).is_err());
+    entries = strip_entries();
+    entries[1].parts[0].seal = Seal::Encrypted;
+    let rendered = crate::render::apply_with_rules(&entries, &view, &bound()).unwrap();
+    assert_eq!(rendered.last().unwrap().parts, entries[1].parts);
+}
+
 fn tool_body(id: &str, status: ToolStatus) -> ToolPart {
     let running = status == ToolStatus::Running;
     let body = ToolPart::new(
@@ -1604,6 +1721,66 @@ mod vector_file {
                 "plan_at",
                 json!({"version": 2, "entries": two_systems, "edits": [drop_message(1, "a1")]}),
             ),
+            (
+                "strip an invalidated signed part newer than the anchor and keep the newest assistant tool",
+                "plan_view",
+                json!({"entries": strip_entries(), "view": strip_view(Some("anchor"), Some("strip")), "rules": bound()}),
+            ),
+            (
+                "a missing built_through refuses an invalidated signature",
+                "plan_view",
+                json!({"entries": strip_entries(), "view": strip_view(None, Some("strip")), "rules": bound()}),
+            ),
+            (
+                "an anchor off the active path refuses an invalidated signature",
+                "plan_view",
+                json!({"entries": strip_entries(), "view": strip_view(Some("removed-branch"), Some("strip")), "rules": bound()}),
+            ),
+            (
+                "a signed part at the anchor is never stripped",
+                "plan_view",
+                json!({"entries": strip_entries(), "view": strip_view(Some("reply"), Some("strip")), "rules": bound()}),
+            ),
+            (
+                "an unknown new_signed policy refuses an invalidated signature",
+                "plan_view",
+                json!({"entries": strip_entries(), "view": strip_view(Some("anchor"), Some("future-policy")), "rules": bound()}),
+            ),
+            (
+                "an absent new_signed policy refuses an invalidated signature",
+                "plan_view",
+                json!({"entries": strip_entries(), "view": strip_view(Some("anchor"), None), "rules": bound()}),
+            ),
+            (
+                "versioned view-aware planning strips newer signatures",
+                "plan_view_at",
+                json!({"version": 3, "entries": strip_entries(), "view": strip_view(Some("anchor"), Some("strip")), "rules": bound()}),
+            ),
+            (
+                "view-aware application strips only the newer signed part",
+                "apply_with_rules",
+                json!({"entries": strip_entries(), "view": strip_view(Some("anchor"), Some("strip")), "rules": bound()}),
+            ),
+            (
+                "view checksum includes both signature policy members",
+                "seal_view",
+                json!({"version": 1, "edits": [], "built_through": "anchor", "new_signed": "strip"}),
+            ),
+            (
+                "view checksum includes an anchor without a policy",
+                "seal_view",
+                json!({"version": 1, "edits": [], "built_through": "anchor"}),
+            ),
+            (
+                "view checksum includes an unknown policy without an anchor",
+                "seal_view",
+                json!({"version": 1, "edits": [], "new_signed": "future-policy"}),
+            ),
+            (
+                "view checksum without optional signature policy members is unchanged",
+                "seal_view",
+                json!({"version": 1, "edits": []}),
+            ),
         ]
     }
 
@@ -1772,12 +1949,19 @@ mod vector_file {
                     78,
                     "b3465e2184731cd925a98d902c75149ee880061088275e4a2b5b918bd814e6fd",
                 ),
+                (
+                    86,
+                    "6aef800fa9b8366d8531b6e76bc2fdc008aa5f4c9682133e221d7dfe7b6f7f36",
+                ),
             ],
         ),
     ];
 
     /// The functions whose output a runner renders, or renders from.
     const RENDERING: &[&str] = &[
+        "plan_view",
+        "plan_view_at",
+        "apply_with_rules",
         "plan",
         "plan_at",
         "apply",
@@ -1870,6 +2054,16 @@ mod vector_file {
         if std::env::var_os("UPDATE_VECTORS").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, &written).unwrap();
+            let outputs: Vec<&Value> = vectors
+                .iter()
+                .filter(|vector| RENDERING.contains(&vector.function.as_str()))
+                .map(|vector| &vector.output)
+                .collect();
+            println!(
+                "rendering prefix: ({}, {:?})",
+                outputs.len(),
+                rendered_checksum(&outputs, outputs.len())
+            );
         }
         let file = std::fs::read_to_string(&path)
             .expect("vectors/cases.json is missing; run the tests with UPDATE_VECTORS=1");

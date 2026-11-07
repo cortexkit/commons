@@ -6,7 +6,7 @@ and view libraries share this contract without depending on an implementation.
 
 ```toml
 [dependencies]
-cortexkit-role-compaction = "0.2.8"
+cortexkit-role-compaction = "0.2.10"
 ```
 
 `Delivered` adds optional `send_id`, ordered `forms` and ride-text `tokens`

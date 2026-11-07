@@ -19,7 +19,7 @@ use cortexkit_role_compaction::part::{
     Delivered, FileMedia, OutputFormat, Part, PartBody, ToolStatus,
 };
 use cortexkit_role_compaction::read::{Entry, NoticeOrigin, Role};
-use cortexkit_role_compaction::rules::RuleBreak;
+use cortexkit_role_compaction::rules::{ProviderRules, RuleBreak};
 use cortexkit_role_compaction::view::{
     Edit, EditOp, InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
 };
@@ -83,11 +83,23 @@ pub enum Source {
 /// Apply a view to the transcript and return what the model sees, in the
 /// neutral part model. It checks the view's checksum and shape;
 /// [`crate::rules::check`] checks the provider rules on top.
+/// Use [`apply_with_rules`] to honor the view's newer-signature policy.
 pub fn apply(entries: &[Entry], view: &View) -> Result<Vec<RenderedMessage>, ViewRefusal> {
     if !view.verify() {
         return Err(ViewRefusal::BadChecksum);
     }
     apply_edits(entries, &view.edits)
+}
+
+/// Apply a whole view with provider-rule checking and authorized stripping
+/// of invalidated signatures newer than its active-path anchor.
+pub fn apply_with_rules(
+    entries: &[Entry],
+    view: &View,
+    rules: &ProviderRules,
+) -> Result<Vec<RenderedMessage>, ViewRefusal> {
+    let plan = plan_view(entries, view, rules)?;
+    Ok(render_plan(entries, &plan))
 }
 
 /// What a runner renders, as instructions over its own host messages
@@ -212,12 +224,14 @@ pub struct FieldReplace {
 /// that each edit's `since` names the view that first carried it
 /// ([`check_carried`]), or the provider's rules for signed parts
 /// ([`crate::rules::check`]). Check those separately before accepting a view.
+/// Use [`plan_view`] to honor a view's newer-signature policy.
 pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal> {
     plan_with(RideRule::FollowOutput, entries, edits)
 }
 
 /// [`plan`] at an earlier plan version, for a view a runner first rendered
 /// under it. `None` when this library doesn't render that version.
+/// Use [`plan_view_at`] to honor a view's newer-signature policy.
 pub fn plan_at(
     version: u32,
     entries: &[Entry],
@@ -227,6 +241,7 @@ pub fn plan_at(
 }
 
 /// [`plan`] with an explicit ride rule.
+/// Use [`plan_view_with`] to honor a view's newer-signature policy.
 pub fn plan_with(
     rule: RideRule,
     entries: &[Entry],
@@ -436,6 +451,50 @@ pub fn plan_with(
     Ok(RenderPlan { items })
 }
 
+/// Plan a whole view, including its checksum, provider rules and explicit
+/// permission to strip newer invalidated signatures. Call at acceptance and
+/// each step boundary: a revert can remove the anchor. Version ordering and
+/// honest `since` values still require the runner's own checks.
+pub fn plan_view(
+    entries: &[Entry],
+    view: &View,
+    rules: &ProviderRules,
+) -> Result<RenderPlan, ViewRefusal> {
+    plan_view_with(RideRule::FollowOutput, entries, view, rules)
+}
+
+/// [`plan_view`] at a supported historical plan version.
+pub fn plan_view_at(
+    version: u32,
+    entries: &[Entry],
+    view: &View,
+    rules: &ProviderRules,
+) -> Option<Result<RenderPlan, ViewRefusal>> {
+    RideRule::for_version(version).map(|rule| plan_view_with(rule, entries, view, rules))
+}
+
+/// [`plan_view`] with an explicit ride rule. Temporary drops affect only the
+/// render plan; the stored view and its checksum remain unchanged.
+pub fn plan_view_with(
+    rule: RideRule,
+    entries: &[Entry],
+    view: &View,
+    rules: &ProviderRules,
+) -> Result<RenderPlan, ViewRefusal> {
+    if !view.verify() {
+        return Err(ViewRefusal::BadChecksum);
+    }
+    // Validate explicit edits first, so stripping never hides a malformed
+    // replacement, a running tool or a final-turn violation.
+    let original = plan_with(rule, entries, &view.edits)?;
+    let edits = crate::rules::edits_for_view(entries, view, rules).map_err(ViewRefusal::Rule)?;
+    if matches!(edits, std::borrow::Cow::Borrowed(_)) {
+        Ok(original)
+    } else {
+        plan_with(rule, entries, &edits)
+    }
+}
+
 /// The compaction contract's rule PR6: a view never removes the turn the
 /// request ends on. The newest entry that has parts stays protected; entries
 /// with no parts render nothing. If that entry's role is `system`, the newest
@@ -453,6 +512,7 @@ pub fn plan_with(
 /// zero-based edit after which protected parts are gone. Entries appended
 /// after the view was built fall outside its edits and render as they are,
 /// so a later request ends on them.
+/// [`plan_view`] also checks any automatically stripped signed parts.
 pub fn check_final_turn(entries: &[Entry], edits: &[Edit]) -> Result<(), ViewRefusal> {
     let Some(last) = entries.iter().rev().find(|entry| !entry.parts.is_empty()) else {
         return Ok(());
@@ -581,14 +641,18 @@ fn writes_final_text(replace: &[FieldReplace]) -> bool {
 /// Apply a view's edits to the transcript and return what the model sees, in
 /// the neutral part model: the render plan ([`plan`]) carried out over the
 /// entries. Providers use it to know their own view's effect.
+/// Use [`apply_with_rules`] to honor a view's newer-signature policy.
 pub fn apply_edits(entries: &[Entry], edits: &[Edit]) -> Result<Vec<RenderedMessage>, ViewRefusal> {
     let plan = plan(entries, edits)?;
+    Ok(render_plan(entries, &plan))
+}
+
+fn render_plan(entries: &[Entry], plan: &RenderPlan) -> Vec<RenderedMessage> {
     let by_mid: HashMap<&str, &Entry> = entries
         .iter()
         .map(|entry| (entry.mid.as_str(), entry))
         .collect();
-    Ok(plan
-        .items
+    plan.items
         .iter()
         .map(|item| match item {
             PlanItem::Insert {
@@ -630,7 +694,7 @@ pub fn apply_edits(entries: &[Entry], edits: &[Edit]) -> Result<Vec<RenderedMess
                 }
             }
         })
-        .collect())
+        .collect()
 }
 
 /// Filter the existing view's edits for the new active transcript, as the

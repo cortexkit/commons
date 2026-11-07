@@ -163,6 +163,33 @@ fn samples() -> Vec<(&'static str, Value)> {
                 setup.clone().with_accepts_images(true),
             ),
         ),
+        (
+            "setup-child-harness-request.json",
+            request(
+                ops::COMPACTION_SETUP,
+                setup.clone().with_child_harness("example-child-host"),
+            ),
+        ),
+        (
+            "applied-view-attributed.json",
+            value(
+                AppliedViewAnswer::new()
+                    .with_view(view.clone())
+                    .with_applied_by("example-provider"),
+            ),
+        ),
+        (
+            "apply-view-signed-policy-request.json",
+            request(
+                ops::SESSION_APPLY_VIEW,
+                ApplyViewRequest::new(View::seal_with_policy(
+                    2,
+                    view.edits.clone(),
+                    Some("message-b".into()),
+                    Some("strip".into()),
+                )),
+            ),
+        ),
         ("setup-request.json", request(ops::COMPACTION_SETUP, setup)),
         ("setup-answer.json", value(SetupAnswer::Ready)),
         (

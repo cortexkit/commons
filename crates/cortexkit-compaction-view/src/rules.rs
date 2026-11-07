@@ -1,13 +1,14 @@
 //! Checking a view against the provider rules a runner declared, and the
 //! rules a runner declares for a model unless it knows better. The runner
-//! refuses a view that breaks a rule by name; it never fixes one up.
+//! refuses a view that breaks a rule by name. A view may explicitly authorize
+//! stripping invalidated signatures that arrived after it was built.
 
 use std::collections::BTreeSet;
 
 use cortexkit_role_compaction::part::Seal;
 use cortexkit_role_compaction::read::Entry;
 use cortexkit_role_compaction::rules::{EditCost, ProviderRules, RuleBreak, SignedParts};
-use cortexkit_role_compaction::view::{Edit, EditOp, InsertAt};
+use cortexkit_role_compaction::view::{Edit, EditOp, InsertAt, View};
 
 /// Claude models whose signed thinking Anthropic binds to the request
 /// prefix, as family, major and minor. The source is Anthropic's
@@ -79,6 +80,7 @@ pub fn is_bound_signed_model(model: &str) -> bool {
 /// An edit already in the view a signed part was generated under (its
 /// `since` is not later than that view's version) was part of the history the
 /// part was signed against, so it does not invalidate the part.
+/// Use [`crate::render::plan_view`] to honor a view's newer-signature policy.
 pub fn check(entries: &[Entry], edits: &[Edit], rules: &ProviderRules) -> Result<(), RuleBreak> {
     match invalid_signed_parts(entries, edits, rules)
         .into_iter()
@@ -92,6 +94,7 @@ pub fn check(entries: &[Entry], edits: &[Edit], rules: &ProviderRules) -> Result
 /// The signed parts a view keeps that its own edits invalidate, in
 /// transcript order. A provider adds a drop for each of them; since a drop is
 /// itself an edit, it repeats until this returns nothing.
+/// [`crate::render::plan_view`] also handles authorized newer-signature drops.
 pub fn invalid_signed_parts(
     entries: &[Entry],
     edits: &[Edit],
@@ -209,6 +212,57 @@ pub fn invalid_signed_parts(
         }
     }
     invalid
+}
+
+/// Resolve the view's explicit permission into temporary drops. These are
+/// render instructions, never edits written back into the stored view: the
+/// anchor must be checked again after every transcript change.
+pub(crate) fn edits_for_view<'a>(
+    entries: &[Entry],
+    view: &'a View,
+    rules: &ProviderRules,
+) -> Result<std::borrow::Cow<'a, [Edit]>, RuleBreak> {
+    let anchor = view
+        .built_through
+        .as_ref()
+        .and_then(|mid| entries.iter().position(|entry| &entry.mid == mid));
+    let mut edits = std::borrow::Cow::Borrowed(view.edits.as_slice());
+    loop {
+        let invalid = invalid_signed_parts(entries, &edits, rules);
+        if invalid.is_empty() {
+            return Ok(edits);
+        }
+        for (mid, part) in invalid {
+            let refusal = || RuleBreak::SignedPartInvalid {
+                mid: mid.clone(),
+                part: part.clone(),
+            };
+            // The anchor is a message identity, not an ordinal: a new branch
+            // can reuse an old ordinal without having been seen by the view.
+            if view.new_signed.as_deref() != Some("strip")
+                || !anchor.is_some_and(|anchor| {
+                    entries.iter().position(|entry| entry.mid == mid).unwrap() > anchor
+                })
+            {
+                return Err(refusal());
+            }
+            edits.to_mut().push(Edit::new(
+                view.version,
+                EditOp::Drop {
+                    mid: mid.clone(),
+                    part: Some(part.clone()),
+                },
+            ));
+            // Permission to strip a signature does not waive the final-turn
+            // rule. Refuse the invalid signature instead of producing a plan
+            // that loses a protected tool call or the entry's last part.
+            if crate::render::check_final_turn(entries, &edits).is_err() {
+                return Err(refusal());
+            }
+        }
+        // A newly omitted signature can create a gap under PR2. Recheck until
+        // the retained signatures are valid, or a protected one must refuse.
+    }
 }
 
 /// A place in the transcript: entry index, then slot within the entry. Slot

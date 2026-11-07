@@ -33,6 +33,18 @@ pub struct Vector {
 
 /// The functions [`call`] serves, with the input each takes.
 pub const FUNCTIONS: &[(&str, &str)] = &[
+    (
+        "plan_view",
+        "{entries, view, rules}: the view-aware render plan with authorized newer-signature stripping",
+    ),
+    (
+        "plan_view_at",
+        "{version, entries, view, rules}: the view-aware plan at a supported plan version",
+    ),
+    (
+        "apply_with_rules",
+        "{entries, view, rules}: rendered messages with provider rules and newer-signature stripping",
+    ),
     ("plan", "{entries, edits}: the render plan, or the refusal"),
     (
         "plan_at",
@@ -79,7 +91,7 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
         "{role, notice?, parts}: an entry's checksum",
     ),
     ("body_digest", "{seal?, body}: a part's checksum"),
-    ("seal_view", "{version, edits}: the view with its checksum"),
+    ("seal_view", "{version, edits, built_through?, new_signed?}: the view with its checksum"),
     (
         "plan_version",
         "{}: the version of what this library renders (`PLAN_VERSION`)",
@@ -104,6 +116,30 @@ enum Outcome {
 
 fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
     Ok(match function {
+        "plan_view" | "apply_with_rules" => {
+            let input: ViewRules = parse(input)?;
+            if function == "plan_view" {
+                refusable(render::plan_view(&input.entries, &input.view, &input.rules))
+            } else {
+                refusable(render::apply_with_rules(
+                    &input.entries,
+                    &input.view,
+                    &input.rules,
+                ))
+            }
+        }
+        "plan_view_at" => {
+            let input: VersionedViewRules = parse(input)?;
+            match render::plan_view_at(
+                input.version,
+                &input.input.entries,
+                &input.input.view,
+                &input.input.rules,
+            ) {
+                Some(result) => refusable(result),
+                None => return Err(format!("unsupported plan version {}", input.version)),
+            }
+        }
         "plan" => {
             let input: EntriesEdits = parse(input)?;
             refusable(render::plan(&input.entries, &input.edits))
@@ -166,7 +202,12 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
         }
         "seal_view" => {
             let input: Sealing = parse(input)?;
-            ok(View::seal(input.version, input.edits))
+            ok(View::seal_with_policy(
+                input.version,
+                input.edits,
+                input.built_through,
+                input.new_signed,
+            ))
         }
         "plan_version" => ok(crate::PLAN_VERSION),
         other => return Err(format!("unknown function {other}")),
@@ -207,6 +248,20 @@ struct VersionedEdits {
 struct EntriesView {
     entries: Vec<Entry>,
     view: View,
+}
+
+#[derive(Deserialize)]
+struct ViewRules {
+    entries: Vec<Entry>,
+    view: View,
+    rules: ProviderRules,
+}
+
+#[derive(Deserialize)]
+struct VersionedViewRules {
+    version: u32,
+    #[serde(flatten)]
+    input: ViewRules,
 }
 
 #[derive(Deserialize)]
@@ -265,4 +320,8 @@ struct Body {
 struct Sealing {
     version: u64,
     edits: Vec<Edit>,
+    #[serde(default)]
+    built_through: Option<String>,
+    #[serde(default)]
+    new_signed: Option<String>,
 }

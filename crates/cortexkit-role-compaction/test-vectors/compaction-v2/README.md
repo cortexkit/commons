@@ -15,6 +15,12 @@ are unchanged when count metadata is removed (W7).
 `view-rule-final-turn.json` is the `rule` refusal a runner sends for a view
 that removes the turn the request ends on (PR6).
 
+`setup-child-harness-request.json` names the harness for the next child on
+the same runner. `applied-view-attributed.json` carries the recorded applying
+module id; the older applied-view examples omit it. The signed-policy apply
+request carries both optional view members inside its checksum; older views
+omit them and retain their checksums.
+
 Regenerate JSON from the repository root after an intentional wire change:
 
 ```sh

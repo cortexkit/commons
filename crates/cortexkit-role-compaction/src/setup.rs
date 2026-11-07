@@ -23,6 +23,12 @@ pub struct SetupRequest {
     /// The session's preset, for example `head`, `worker` or `reader`. The
     /// provider decides what each preset enables.
     pub preset: String,
+    /// Harness for child sessions on this runner. Absent means the session's
+    /// own harness. Sent only when that host cannot create sessions; never
+    /// inferred from runner or host names. A change affects the next child,
+    /// not a child already running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_harness: Option<String>,
     pub model: ModelRef,
     /// Whether the session's model reads images. Set only when known; absent
     /// means unknown. A provider inserts images only when this is `true`.
@@ -91,6 +97,7 @@ impl SetupRequest {
     ) -> Self {
         Self {
             preset: preset.into(),
+            child_harness: None,
             model,
             accepts_images: None,
             context_window,
@@ -101,6 +108,11 @@ impl SetupRequest {
             applied_view: None,
             newest: None,
         }
+    }
+
+    pub fn with_child_harness(mut self, child_harness: impl Into<String>) -> Self {
+        self.child_harness = Some(child_harness.into());
+        self
     }
 
     pub fn with_accepts_images(mut self, accepts_images: bool) -> Self {

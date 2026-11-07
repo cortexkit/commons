@@ -9915,5 +9915,982 @@
         "rule": "final_turn_removed"
       }
     }
+  },
+  {
+    "name": "strip an invalidated signed part newer than the anchor and keep the newest assistant tool",
+    "function": "plan_view",
+    "input": {
+      "entries": [
+        {
+          "digest": "097a9bd07fbc18ca770b168b40f81a8d0b307731b7888ffa01ae57a760656594",
+          "mid": "anchor",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "3fe57f6365da551f88d5a3c9647e0e5c5a0e074c6d9a5f607d964a223be2b758",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "old"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "d37c33a442fa9d2d5c73e3e87556816d8279365cf952c8f8454dd284a613b56d",
+          "mid": "reply",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "bb23c45f3a64e0095202165101ab4a427142dcf64c96e76ab7aae48d0563f640",
+              "id": "thinking",
+              "kind": "reasoning",
+              "seal": "signed",
+              "text": "thinking",
+              "text_bytes": 8
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-call",
+              "digest": "881325eb65d23a7a12ae1aaa924b165c51161c06360c3806df0157900c514b01",
+              "id": "call",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 2
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        }
+      ],
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "bound"
+      },
+      "view": {
+        "built_through": "anchor",
+        "checksum": "e8deaa52d3345918b02da0dafb13bd54201ff9bbd69cdc339fe80ced654f9df9",
+        "edits": [
+          {
+            "at": "start",
+            "message": {
+              "id": "summary",
+              "role": "user",
+              "texts": [
+                "<session-history>...</session-history>"
+              ]
+            },
+            "op": "insert",
+            "since": 1
+          }
+        ],
+        "new_signed": "strip",
+        "version": 1
+      }
+    },
+    "output": {
+      "ok": {
+        "items": [
+          {
+            "id": "summary",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "<session-history>...</session-history>"
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "anchor",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "reply",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "call",
+                "prefix": true,
+                "tag": 2
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "a missing built_through refuses an invalidated signature",
+    "function": "plan_view",
+    "input": {
+      "entries": [
+        {
+          "digest": "097a9bd07fbc18ca770b168b40f81a8d0b307731b7888ffa01ae57a760656594",
+          "mid": "anchor",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "3fe57f6365da551f88d5a3c9647e0e5c5a0e074c6d9a5f607d964a223be2b758",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "old"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "d37c33a442fa9d2d5c73e3e87556816d8279365cf952c8f8454dd284a613b56d",
+          "mid": "reply",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "bb23c45f3a64e0095202165101ab4a427142dcf64c96e76ab7aae48d0563f640",
+              "id": "thinking",
+              "kind": "reasoning",
+              "seal": "signed",
+              "text": "thinking",
+              "text_bytes": 8
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-call",
+              "digest": "881325eb65d23a7a12ae1aaa924b165c51161c06360c3806df0157900c514b01",
+              "id": "call",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 2
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        }
+      ],
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "bound"
+      },
+      "view": {
+        "checksum": "90d1b3d7527ac421c4c93f90601ccdfd85daa50115fc88ecf8c6c0c9ddf827cd",
+        "edits": [
+          {
+            "at": "start",
+            "message": {
+              "id": "summary",
+              "role": "user",
+              "texts": [
+                "<session-history>...</session-history>"
+              ]
+            },
+            "op": "insert",
+            "since": 1
+          }
+        ],
+        "new_signed": "strip",
+        "version": 1
+      }
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "mid": "reply",
+        "part": "thinking",
+        "rule": "signed_part_invalid"
+      }
+    }
+  },
+  {
+    "name": "an anchor off the active path refuses an invalidated signature",
+    "function": "plan_view",
+    "input": {
+      "entries": [
+        {
+          "digest": "097a9bd07fbc18ca770b168b40f81a8d0b307731b7888ffa01ae57a760656594",
+          "mid": "anchor",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "3fe57f6365da551f88d5a3c9647e0e5c5a0e074c6d9a5f607d964a223be2b758",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "old"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "d37c33a442fa9d2d5c73e3e87556816d8279365cf952c8f8454dd284a613b56d",
+          "mid": "reply",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "bb23c45f3a64e0095202165101ab4a427142dcf64c96e76ab7aae48d0563f640",
+              "id": "thinking",
+              "kind": "reasoning",
+              "seal": "signed",
+              "text": "thinking",
+              "text_bytes": 8
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-call",
+              "digest": "881325eb65d23a7a12ae1aaa924b165c51161c06360c3806df0157900c514b01",
+              "id": "call",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 2
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        }
+      ],
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "bound"
+      },
+      "view": {
+        "built_through": "removed-branch",
+        "checksum": "aac2a5fa5cff534a1358148d1325f232fbfdf09a50c9053227554b253da1336f",
+        "edits": [
+          {
+            "at": "start",
+            "message": {
+              "id": "summary",
+              "role": "user",
+              "texts": [
+                "<session-history>...</session-history>"
+              ]
+            },
+            "op": "insert",
+            "since": 1
+          }
+        ],
+        "new_signed": "strip",
+        "version": 1
+      }
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "mid": "reply",
+        "part": "thinking",
+        "rule": "signed_part_invalid"
+      }
+    }
+  },
+  {
+    "name": "a signed part at the anchor is never stripped",
+    "function": "plan_view",
+    "input": {
+      "entries": [
+        {
+          "digest": "097a9bd07fbc18ca770b168b40f81a8d0b307731b7888ffa01ae57a760656594",
+          "mid": "anchor",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "3fe57f6365da551f88d5a3c9647e0e5c5a0e074c6d9a5f607d964a223be2b758",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "old"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "d37c33a442fa9d2d5c73e3e87556816d8279365cf952c8f8454dd284a613b56d",
+          "mid": "reply",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "bb23c45f3a64e0095202165101ab4a427142dcf64c96e76ab7aae48d0563f640",
+              "id": "thinking",
+              "kind": "reasoning",
+              "seal": "signed",
+              "text": "thinking",
+              "text_bytes": 8
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-call",
+              "digest": "881325eb65d23a7a12ae1aaa924b165c51161c06360c3806df0157900c514b01",
+              "id": "call",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 2
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        }
+      ],
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "bound"
+      },
+      "view": {
+        "built_through": "reply",
+        "checksum": "752bd829604bb26db2efd83cccffd08ec4ef501b4c403304b1c3ea4e05cd28a7",
+        "edits": [
+          {
+            "at": "start",
+            "message": {
+              "id": "summary",
+              "role": "user",
+              "texts": [
+                "<session-history>...</session-history>"
+              ]
+            },
+            "op": "insert",
+            "since": 1
+          }
+        ],
+        "new_signed": "strip",
+        "version": 1
+      }
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "mid": "reply",
+        "part": "thinking",
+        "rule": "signed_part_invalid"
+      }
+    }
+  },
+  {
+    "name": "an unknown new_signed policy refuses an invalidated signature",
+    "function": "plan_view",
+    "input": {
+      "entries": [
+        {
+          "digest": "097a9bd07fbc18ca770b168b40f81a8d0b307731b7888ffa01ae57a760656594",
+          "mid": "anchor",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "3fe57f6365da551f88d5a3c9647e0e5c5a0e074c6d9a5f607d964a223be2b758",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "old"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "d37c33a442fa9d2d5c73e3e87556816d8279365cf952c8f8454dd284a613b56d",
+          "mid": "reply",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "bb23c45f3a64e0095202165101ab4a427142dcf64c96e76ab7aae48d0563f640",
+              "id": "thinking",
+              "kind": "reasoning",
+              "seal": "signed",
+              "text": "thinking",
+              "text_bytes": 8
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-call",
+              "digest": "881325eb65d23a7a12ae1aaa924b165c51161c06360c3806df0157900c514b01",
+              "id": "call",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 2
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        }
+      ],
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "bound"
+      },
+      "view": {
+        "built_through": "anchor",
+        "checksum": "14d8ef5338f1a13c2c12b75aeeb52bbcbcc3bee607bee7121990c80ddee5aece",
+        "edits": [
+          {
+            "at": "start",
+            "message": {
+              "id": "summary",
+              "role": "user",
+              "texts": [
+                "<session-history>...</session-history>"
+              ]
+            },
+            "op": "insert",
+            "since": 1
+          }
+        ],
+        "new_signed": "future-policy",
+        "version": 1
+      }
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "mid": "reply",
+        "part": "thinking",
+        "rule": "signed_part_invalid"
+      }
+    }
+  },
+  {
+    "name": "an absent new_signed policy refuses an invalidated signature",
+    "function": "plan_view",
+    "input": {
+      "entries": [
+        {
+          "digest": "097a9bd07fbc18ca770b168b40f81a8d0b307731b7888ffa01ae57a760656594",
+          "mid": "anchor",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "3fe57f6365da551f88d5a3c9647e0e5c5a0e074c6d9a5f607d964a223be2b758",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "old"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "d37c33a442fa9d2d5c73e3e87556816d8279365cf952c8f8454dd284a613b56d",
+          "mid": "reply",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "bb23c45f3a64e0095202165101ab4a427142dcf64c96e76ab7aae48d0563f640",
+              "id": "thinking",
+              "kind": "reasoning",
+              "seal": "signed",
+              "text": "thinking",
+              "text_bytes": 8
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-call",
+              "digest": "881325eb65d23a7a12ae1aaa924b165c51161c06360c3806df0157900c514b01",
+              "id": "call",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 2
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        }
+      ],
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "bound"
+      },
+      "view": {
+        "built_through": "anchor",
+        "checksum": "8b04551f58cfb2f502353acbc44cfad2bbfdb376e338d79cc3690f22c441b9f9",
+        "edits": [
+          {
+            "at": "start",
+            "message": {
+              "id": "summary",
+              "role": "user",
+              "texts": [
+                "<session-history>...</session-history>"
+              ]
+            },
+            "op": "insert",
+            "since": 1
+          }
+        ],
+        "version": 1
+      }
+    },
+    "output": {
+      "refused": {
+        "code": "rule",
+        "mid": "reply",
+        "part": "thinking",
+        "rule": "signed_part_invalid"
+      }
+    }
+  },
+  {
+    "name": "versioned view-aware planning strips newer signatures",
+    "function": "plan_view_at",
+    "input": {
+      "entries": [
+        {
+          "digest": "097a9bd07fbc18ca770b168b40f81a8d0b307731b7888ffa01ae57a760656594",
+          "mid": "anchor",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "3fe57f6365da551f88d5a3c9647e0e5c5a0e074c6d9a5f607d964a223be2b758",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "old"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "d37c33a442fa9d2d5c73e3e87556816d8279365cf952c8f8454dd284a613b56d",
+          "mid": "reply",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "bb23c45f3a64e0095202165101ab4a427142dcf64c96e76ab7aae48d0563f640",
+              "id": "thinking",
+              "kind": "reasoning",
+              "seal": "signed",
+              "text": "thinking",
+              "text_bytes": 8
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-call",
+              "digest": "881325eb65d23a7a12ae1aaa924b165c51161c06360c3806df0157900c514b01",
+              "id": "call",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 2
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        }
+      ],
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "bound"
+      },
+      "version": 3,
+      "view": {
+        "built_through": "anchor",
+        "checksum": "e8deaa52d3345918b02da0dafb13bd54201ff9bbd69cdc339fe80ced654f9df9",
+        "edits": [
+          {
+            "at": "start",
+            "message": {
+              "id": "summary",
+              "role": "user",
+              "texts": [
+                "<session-history>...</session-history>"
+              ]
+            },
+            "op": "insert",
+            "since": 1
+          }
+        ],
+        "new_signed": "strip",
+        "version": 1
+      }
+    },
+    "output": {
+      "ok": {
+        "items": [
+          {
+            "id": "summary",
+            "item": "insert",
+            "role": "user",
+            "texts": [
+              "<session-history>...</session-history>"
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "anchor",
+            "ordinal": 1,
+            "parts": [
+              {
+                "id": "t1",
+                "prefix": true,
+                "tag": 1
+              }
+            ]
+          },
+          {
+            "item": "entry",
+            "mid": "reply",
+            "ordinal": 2,
+            "parts": [
+              {
+                "id": "call",
+                "prefix": true,
+                "tag": 2
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "view-aware application strips only the newer signed part",
+    "function": "apply_with_rules",
+    "input": {
+      "entries": [
+        {
+          "digest": "097a9bd07fbc18ca770b168b40f81a8d0b307731b7888ffa01ae57a760656594",
+          "mid": "anchor",
+          "ordinal": 1,
+          "parts": [
+            {
+              "digest": "3fe57f6365da551f88d5a3c9647e0e5c5a0e074c6d9a5f607d964a223be2b758",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "old"
+            }
+          ],
+          "role": "user",
+          "written_at": 1000
+        },
+        {
+          "digest": "d37c33a442fa9d2d5c73e3e87556816d8279365cf952c8f8454dd284a613b56d",
+          "mid": "reply",
+          "ordinal": 2,
+          "parts": [
+            {
+              "digest": "bb23c45f3a64e0095202165101ab4a427142dcf64c96e76ab7aae48d0563f640",
+              "id": "thinking",
+              "kind": "reasoning",
+              "seal": "signed",
+              "text": "thinking",
+              "text_bytes": 8
+            },
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-call",
+              "digest": "881325eb65d23a7a12ae1aaa924b165c51161c06360c3806df0157900c514b01",
+              "id": "call",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 2
+            }
+          ],
+          "role": "assistant",
+          "written_at": 2000
+        }
+      ],
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "bound"
+      },
+      "view": {
+        "built_through": "anchor",
+        "checksum": "e8deaa52d3345918b02da0dafb13bd54201ff9bbd69cdc339fe80ced654f9df9",
+        "edits": [
+          {
+            "at": "start",
+            "message": {
+              "id": "summary",
+              "role": "user",
+              "texts": [
+                "<session-history>...</session-history>"
+              ]
+            },
+            "op": "insert",
+            "since": 1
+          }
+        ],
+        "new_signed": "strip",
+        "version": 1
+      }
+    },
+    "output": {
+      "ok": [
+        {
+          "parts": [
+            {
+              "digest": "ce666cedb0ea59c56eaa44d6804c082ea6027538cbd65927f9301cd78c291b18",
+              "id": "summary:0",
+              "kind": "text",
+              "text": "<session-history>...</session-history>"
+            }
+          ],
+          "role": "user",
+          "source": {
+            "inserted": {
+              "id": "summary"
+            }
+          }
+        },
+        {
+          "parts": [
+            {
+              "digest": "3fe57f6365da551f88d5a3c9647e0e5c5a0e074c6d9a5f607d964a223be2b758",
+              "id": "t1",
+              "kind": "text",
+              "tag": 1,
+              "text": "old"
+            }
+          ],
+          "role": "user",
+          "source": {
+            "entry": {
+              "mid": "anchor",
+              "ordinal": 1
+            }
+          }
+        },
+        {
+          "parts": [
+            {
+              "attachments": [
+                {
+                  "id": "img-1",
+                  "kind": "file",
+                  "mime": "image/png",
+                  "size": 2048,
+                  "transport": "inline"
+                }
+              ],
+              "call_id": "call-call",
+              "digest": "881325eb65d23a7a12ae1aaa924b165c51161c06360c3806df0157900c514b01",
+              "id": "call",
+              "input": {
+                "count": 3,
+                "old_string": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "path": "a.rs"
+              },
+              "kind": "tool",
+              "name": "edit",
+              "output": "done",
+              "output_bytes": 4,
+              "status": "completed",
+              "tag": 2
+            }
+          ],
+          "role": "assistant",
+          "source": {
+            "entry": {
+              "mid": "reply",
+              "ordinal": 2
+            }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "view checksum includes both signature policy members",
+    "function": "seal_view",
+    "input": {
+      "built_through": "anchor",
+      "edits": [],
+      "new_signed": "strip",
+      "version": 1
+    },
+    "output": {
+      "ok": {
+        "built_through": "anchor",
+        "checksum": "89baa0ebc4c4822413a53fe49468b4a34ddffbdcec1c7a97fe762a860f2f2a17",
+        "edits": [],
+        "new_signed": "strip",
+        "version": 1
+      }
+    }
+  },
+  {
+    "name": "view checksum includes an anchor without a policy",
+    "function": "seal_view",
+    "input": {
+      "built_through": "anchor",
+      "edits": [],
+      "version": 1
+    },
+    "output": {
+      "ok": {
+        "built_through": "anchor",
+        "checksum": "e7a7f0675f2c32dc8d624237e685dc2ca60c59eac11afd3a67a5f2afa37ea1ff",
+        "edits": [],
+        "version": 1
+      }
+    }
+  },
+  {
+    "name": "view checksum includes an unknown policy without an anchor",
+    "function": "seal_view",
+    "input": {
+      "edits": [],
+      "new_signed": "future-policy",
+      "version": 1
+    },
+    "output": {
+      "ok": {
+        "checksum": "09d6087978e80ad8d7d43200fa6658cc5db4bf5f4d932126d087ad0cd7726dd3",
+        "edits": [],
+        "new_signed": "future-policy",
+        "version": 1
+      }
+    }
+  },
+  {
+    "name": "view checksum without optional signature policy members is unchanged",
+    "function": "seal_view",
+    "input": {
+      "edits": [],
+      "version": 1
+    },
+    "output": {
+      "ok": {
+        "checksum": "e615510e918d655c957a3c7f89dc77177d10aba205cfa7cec43e22555c1eb27e",
+        "edits": [],
+        "version": 1
+      }
+    }
   }
 ]

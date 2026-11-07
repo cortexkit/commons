@@ -4,8 +4,10 @@
 //! A view is cumulative: each new version carries every edit of the previous
 //! one, unchanged or changed in place (a changed edit takes the new version
 //! as its `since`), plus new ones. An edit leaves only when a revert removes
-//! the message it names. Everything a view does not name is rendered
-//! unchanged. While the transcript only grows and the view stays the same,
+//! the message it names, except when a provider replaces a foreign view whole
+//! (CONTRACT.md W5.6). Parts not named by edits render unchanged unless the view
+//! explicitly authorizes stripping invalidated newer signatures (CONTRACT.md W6.1).
+//! While the transcript only grows and the view stays the same,
 //! each request extends the previous one byte for byte; a revert, branch
 //! switch or host edit can break that before a newer view arrives. Whether
 //! the model provider's cache still holds the prefix depends on the cache's
@@ -37,27 +39,60 @@ pub struct View {
     /// session before, whether or not the runner accepted it.
     #[serde(deserialize_with = "crate::integer::required")]
     pub version: u64,
-    /// Checksum of `version` and `edits` ([`View::seal`]).
+    /// Checksum of `version`, `edits` and the optional policy members when
+    /// present ([`View::seal_with_policy`]).
     pub checksum: String,
     pub edits: Vec<Edit>,
+    /// Newest message the provider's index held when it built the view.
+    /// Message ids, unlike ordinals, are never reused after a revert.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub built_through: Option<String>,
+    /// `strip` permits dropping invalidated signed parts strictly after the
+    /// `built_through` message. Unknown strings are preserved but grant no permission.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_signed: Option<String>,
 }
 
 impl View {
     /// Build a view, computing its checksum. Nothing else is checked: not
     /// the version, the edits, or what they name.
     pub fn seal(version: u64, edits: Vec<Edit>) -> Self {
-        let checksum = view_checksum(version, &edits);
+        Self::seal_with_policy(version, edits, None, None)
+    }
+
+    /// Build a view whose checksum includes the policy members that are
+    /// present. Absent members do not change checksums of older views.
+    pub fn seal_with_policy(
+        version: u64,
+        edits: Vec<Edit>,
+        built_through: Option<String>,
+        new_signed: Option<String>,
+    ) -> Self {
+        let checksum = view_checksum(
+            version,
+            &edits,
+            built_through.as_deref(),
+            new_signed.as_deref(),
+        );
         Self {
             version,
             checksum,
             edits,
+            built_through,
+            new_signed,
         }
     }
 
-    /// Whether the checksum matches `version` and `edits`. The view is not
-    /// checked against a transcript or the provider rules.
+    /// Whether the checksum matches the view's content, including present
+    /// policy members. The transcript and provider rules are not checked.
     pub fn verify(&self) -> bool {
-        self.checksum == view_checksum(self.version, &self.edits)
+        self.checksum
+            == view_checksum(
+                self.version,
+                &self.edits,
+                self.built_through.as_deref(),
+                self.new_signed.as_deref(),
+            )
     }
 
     pub fn applied(&self) -> AppliedView {
@@ -68,13 +103,27 @@ impl View {
     }
 }
 
-fn view_checksum(version: u64, edits: &[Edit]) -> String {
+fn view_checksum(
+    version: u64,
+    edits: &[Edit],
+    built_through: Option<&str>,
+    new_signed: Option<&str>,
+) -> String {
     #[derive(Serialize)]
     struct Sealed<'a> {
         version: u64,
         edits: &'a [Edit],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        built_through: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        new_signed: Option<&'a str>,
     }
-    crate::digest::checksum(&Sealed { version, edits })
+    crate::digest::checksum(&Sealed {
+        version,
+        edits,
+        built_through,
+        new_signed,
+    })
 }
 
 /// Names a view by version and checksum. A version alone is not enough: a
@@ -338,6 +387,14 @@ pub struct AppliedViewRequest {}
 pub struct AppliedViewAnswer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view: Option<View>,
+    /// Applying module id, attested by the daemon for the caller's route and
+    /// recorded when the runner accepts the view, never from request data.
+    /// Absent when the author was not recorded, including first views imported
+    /// from standalone sessions. Providers replace a foreign module's whole
+    /// view instead of adopting its edits, including the cut that hides earlier
+    /// history (CONTRACT.md W5.6).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_by: Option<String>,
 }
 
 impl AppliedView {
@@ -400,11 +457,19 @@ impl Default for AppliedViewRequest {
 impl AppliedViewAnswer {
     /// Build the value with its required fields.
     pub fn new() -> Self {
-        Self { view: None }
+        Self {
+            view: None,
+            applied_by: None,
+        }
     }
 
     pub fn with_view(mut self, view: View) -> Self {
         self.view = Some(view);
+        self
+    }
+
+    pub fn with_applied_by(mut self, module: impl Into<String>) -> Self {
+        self.applied_by = Some(module.into());
         self
     }
 }
