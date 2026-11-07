@@ -3,7 +3,8 @@
 ## 0.1.6
 
 - `plan`, `plan_at` and `plan_with` refuse a view that removes the turn the
-  request ends on (contract PR6), with `unsupported_edit` naming the edit
+  request ends on (the compaction contract's rule PR6), with
+  `unsupported_edit` naming the edit
   after which nothing that must stay is left. The request ends on the newest
   entry that has parts: entries with no parts, such as a step the runner has
   opened but not filled or a message whose tool results ride inside the

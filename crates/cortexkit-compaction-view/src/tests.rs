@@ -1503,7 +1503,7 @@ mod vector_file {
                 "first_change",
                 json!({"before": head_plan("history", "recent"), "after": head_plan("history", "recent")}),
             ),
-            // The final turn (contract PR6): the request ends on the newest
+            // The final turn (the compaction contract's rule PR6): the request ends on the newest
             // entry that has parts, and a view never removes what ends it.
             (
                 "a view can't drop every part of the entry the request ends on",

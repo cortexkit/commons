@@ -207,9 +207,10 @@ pub struct FieldReplace {
 /// Validate edit structure, targets, running-tool restrictions, replacement
 /// restrictions, conflicts, tag-prefix restrictions and the final turn
 /// ([`check_final_turn`]), then produce a render plan at the current
-/// [`crate::PLAN_VERSION`]. This does not validate the view checksum, version,
-/// `since` provenance, or the signed-part rules. Check those separately before
-/// accepting a view.
+/// [`crate::PLAN_VERSION`]. This does not check the view checksum or version,
+/// that each edit's `since` names the view that first carried it
+/// ([`check_carried`]), or the provider's rules for signed parts
+/// ([`crate::rules::check`]). Check those separately before accepting a view.
 pub fn plan(entries: &[Entry], edits: &[Edit]) -> Result<RenderPlan, ViewRefusal> {
     plan_with(RideRule::FollowOutput, entries, edits)
 }
@@ -434,7 +435,8 @@ pub fn plan_with(
     Ok(RenderPlan { items })
 }
 
-/// Contract PR6: a view never removes the turn the request ends on. The
+/// The compaction contract's rule PR6: a view never removes the turn the
+/// request ends on. The
 /// request ends with the newest entry that has parts; entries with no parts
 /// (a step the runner opened but hasn't filled, a dead step) render nothing.
 /// When that entry has a tool call, its last call must stay, because its
