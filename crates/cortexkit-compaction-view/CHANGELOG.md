@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.6
+
+- `plan`, `plan_at` and `plan_with` refuse a view that removes the turn the
+  request ends on (the compaction contract's rule PR6, compaction 0.2.7),
+  with the `rule` refusal `final_turn_removed` naming the edit
+  after which nothing that must stay is left. The request ends on the newest
+  entry that has parts: entries with no parts, such as a step the runner has
+  opened but not filled or a message whose tool results ride inside the
+  calls, render nothing. When that entry has a tool call, its last call must
+  stay (its output may still be replaced); otherwise at least one of its
+  parts must stay, and a cut may not reach it. `check_final_turn` runs the
+  same check on its own. Seven new vectors; every earlier vector,
+  `PLAN_VERSION` and the pinned rendering checksums are unchanged.
+
 ## 0.1.5
 
 - `first_change(before, after)` compares two render plans of the same

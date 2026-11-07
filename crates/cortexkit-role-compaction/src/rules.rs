@@ -65,6 +65,10 @@ open_tagged! {
 pub enum RuleBreak, "rule" {
     /// A signed part the view keeps is no longer valid.
     SignedPartInvalid => "signed_part_invalid" { mid: String, part: String },
+    /// The view removes the turn the request ends on (contract PR6). `index`
+    /// is the zero-based position in `edits` of the edit after which nothing
+    /// that must stay of that turn is left.
+    FinalTurnRemoved => "final_turn_removed" { index: u64 },
 }
 }
 

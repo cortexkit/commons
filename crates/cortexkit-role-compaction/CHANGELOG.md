@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.7
+
+- Add provider rule PR6: a view never removes the turn the request ends on,
+  the newest entry that has parts. Its last tool part stays (its output may
+  be replaced), or at least one of its parts, and no cut reaches it. Runners
+  refuse a view that breaks it with the new `rule` refusal
+  `RuleBreak::FinalTurnRemoved` (`{"rule": "final_turn_removed", "index"}`),
+  keeping the view in force, and report `view_refused` at a step boundary.
+  `RuleBreak` is non-exhaustive, so older readers decode it as an unknown
+  rule. New vector `view-rule-final-turn.json`.
+
 ## 0.2.6
 
 - Add optional `Delivered.send_id`, ordered rendering `forms` and ride-text
