@@ -539,6 +539,10 @@ pub const FILES: &[(&str, &str)] = &[
         "served-bytes.json",
         include_str!("../test-vectors/llm-runner-v1/served-bytes.json"),
     ),
+    (
+        "display-unprojected.json",
+        include_str!("../test-vectors/llm-runner-v1/display-unprojected.json"),
+    ),
 ];
 
 /// `sha256sum` output over [`FILES`]: one `<hex>  <name>` line per file.

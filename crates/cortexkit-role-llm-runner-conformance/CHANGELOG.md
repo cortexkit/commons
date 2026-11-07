@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.26
+
+- Pin runner 0.8.22, whose display projection carries bad tool-result files
+  and standalone parts without losing the rest of the row. No kit case
+  depended on refusing these rows.
+
 ## 0.17.25
 
 - Pin runner 0.8.21 so display rows preserve `media_ref` objects in OpenCode

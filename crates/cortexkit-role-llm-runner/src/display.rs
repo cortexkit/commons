@@ -269,7 +269,7 @@ impl<'de> Deserialize<'de> for DisplayPart {
             part_types::TOOL_RESULT => Self::ToolResult(typed::<_, D::Error>(value)?),
             part_types::FILE => Self::File(typed::<_, D::Error>(value)?),
             part_types::OTHER => Self::Other(typed::<_, D::Error>(value)?),
-            _ => Self::Other(OtherPart { part, kind }),
+            _ => Self::Other(OtherPart::new(part, kind)),
         })
     }
 }
@@ -348,7 +348,8 @@ pub struct ToolCallPart {
 
 /// A tool result. `content` is its text: a string result as stored, or the
 /// text blocks of a structured result joined like a row's text. Media in
-/// the result is in `files`.
+/// the result is in `files`. A bad file is recorded in `unprojected` instead
+/// of hiding the tool's text, which is the content the person reads.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolResultPart {
@@ -366,6 +367,54 @@ pub struct ToolResultPart {
     pub truncated: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<FilePart>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unprojected: Vec<UnprojectedPart>,
+}
+
+/// A tool-result file that could not be projected. Reasons are fixed library
+/// text from [`projection_reasons`], never text taken from the stored body.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct UnprojectedPart {
+    pub kind: String,
+    pub reason: String,
+}
+
+impl UnprojectedPart {
+    pub fn new(kind: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            kind: kind.into(),
+            reason: reason.into(),
+        }
+    }
+}
+
+/// Stable reasons for a part that could not be projected. These strings never
+/// include body content or diagnostics from a decoder.
+pub mod projection_reasons {
+    pub const INVALID_MEDIA_REF: &str = "invalid media_ref";
+    pub const DATA_NOT_BASE64: &str = "data is not base64";
+    pub const INVALID_FILE_URL: &str = "file url is neither a string nor a media_ref";
+    pub const MISSING_FILE_DATA: &str = "file has no hydrated data";
+    pub const INVALID_TEXT: &str = "text is neither a string nor a text_ref";
+    pub const INVALID_SHELL: &str = "shell command or output is not a string";
+    pub const INVALID_LOCATION: &str = "location has no directory";
+    pub const INVALID_SUMMARY: &str = "branch summary is not a string";
+    pub const UNSUPPORTED_PART_KIND: &str = "unsupported part type";
+
+    /// Every reason above, so a reader can tell a known reason from one a
+    /// newer library added.
+    pub const ALL: &[&str] = &[
+        INVALID_MEDIA_REF,
+        DATA_NOT_BASE64,
+        INVALID_FILE_URL,
+        MISSING_FILE_DATA,
+        INVALID_TEXT,
+        INVALID_SHELL,
+        INVALID_LOCATION,
+        INVALID_SUMMARY,
+        UNSUPPORTED_PART_KIND,
+    ];
 }
 
 /// A file or media item: byte-backed media as a `media_ref` (never its
@@ -394,6 +443,10 @@ pub struct OtherPart {
     /// The stored part's own type.
     #[serde(default)]
     pub kind: String,
+    /// A standalone part is itself the content, so keep its key and native
+    /// type when projection fails, with a reason from [`projection_reasons`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl ToolCallPart {
@@ -467,6 +520,11 @@ impl ToolCallPart {
 }
 
 impl ToolResultPart {
+    pub fn with_unprojected(mut self, unprojected: Vec<UnprojectedPart>) -> Self {
+        self.unprojected = unprojected;
+        self
+    }
+
     /// Record whether the model provider ran this tool itself.
     pub fn with_provider_executed(mut self, provider_executed: bool) -> Self {
         self.provider_executed = provider_executed;
@@ -531,7 +589,13 @@ impl OtherPart {
         Self {
             part: part.into(),
             kind: kind.into(),
+            reason: None,
         }
+    }
+
+    pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
+        self.reason = Some(reason.into());
+        self
     }
 }
 
@@ -603,7 +667,7 @@ pub fn project_with_attribution(
         let content = match profile {
             ANTHROPIC_MESSAGES => Some(body["content"].clone()),
             OPENCODE_AISDK => Some(body["parts"].clone()),
-            OPENCODE_V2 => crate::serializer_profile::opencode_v2::projected_content(body).ok(),
+            OPENCODE_V2 => opencode_v2_display_content(body).ok().map(Value::Array),
             PI => crate::serializer_profile::pi::projected_content(body).ok(),
             _ => None,
         };
@@ -707,11 +771,17 @@ fn result_part(
         content,
         truncated,
         files,
+        unprojected: Vec::new(),
     })
 }
 
 fn str_of<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or_default()
+}
+
+// Native file containers can imply the file type without a `type` member.
+fn file_kind(value: &Value) -> &str {
+    value.get("type").and_then(Value::as_str).unwrap_or("file")
 }
 
 /// The descriptor `kind` for a media type, as descriptors mode names it.
@@ -736,14 +806,12 @@ fn anthropic_file(block: &Value, part: String) -> Result<Option<FilePart>, Proje
     match str_of(source, "type") {
         "base64" => {
             if source["data"]["type"] == "media_ref" {
-                let reference =
-                    serde_json::from_value(source["data"].clone()).map_err(|error| {
-                        ProjectionError::new(format!("invalid anthropic media_ref: {error}"))
-                    })?;
+                let reference = serde_json::from_value(source["data"].clone())
+                    .map_err(|_| ProjectionError::new(projection_reasons::INVALID_MEDIA_REF))?;
                 return Ok(Some(FilePart::media(part, reference)));
             }
             let bytes = base64_decode(str_of(source, "data"))
-                .ok_or_else(|| ProjectionError::new("a media block's data is not base64"))?;
+                .ok_or_else(|| ProjectionError::new(projection_reasons::DATA_NOT_BASE64))?;
             let reference = Reference::media(
                 (!part.is_empty()).then(|| part.clone()),
                 media_kind(&mime),
@@ -813,10 +881,31 @@ fn redacted_reasoning(part: String, stored: &Value) -> DisplayPart {
 }
 
 fn other(part: String, kind: &str) -> DisplayPart {
-    DisplayPart::Other(OtherPart {
-        part,
-        kind: kind.to_owned(),
-    })
+    DisplayPart::Other(OtherPart::new(part, kind))
+}
+
+fn projected_file(
+    file: Result<FilePart, ProjectionError>,
+    part: String,
+    kind: &str,
+) -> DisplayPart {
+    match file {
+        Ok(file) => DisplayPart::File(file),
+        Err(error) => DisplayPart::Other(OtherPart::new(part, kind).with_reason(error.message)),
+    }
+}
+
+fn tool_file(
+    file: Result<Option<FilePart>, ProjectionError>,
+    kind: &str,
+    files: &mut Vec<FilePart>,
+    unprojected: &mut Vec<UnprojectedPart>,
+) {
+    match file {
+        Ok(Some(file)) => files.push(file),
+        Ok(None) => {}
+        Err(error) => unprojected.push(UnprojectedPart::new(kind, error.message)),
+    }
 }
 
 /// The row for an `anthropic-messages` body (CONTRACT.md §4.4): a Messages
@@ -869,6 +958,7 @@ pub fn anthropic_messages(
             "tool_result" => {
                 let mut texts = Vec::new();
                 let mut files = Vec::new();
+                let mut unprojected = Vec::new();
                 match block.get("content") {
                     Some(Value::String(text)) => texts.push(text.clone()),
                     Some(Value::Array(nested)) => {
@@ -876,9 +966,12 @@ pub fn anthropic_messages(
                             match str_of(inner, "type") {
                                 "text" => texts.push(str_of(inner, "text").to_owned()),
                                 "image" | "document" => {
-                                    if let Some(file) = anthropic_file(inner, String::new())? {
-                                        files.push(file);
-                                    }
+                                    tool_file(
+                                        anthropic_file(inner, String::new()),
+                                        str_of(inner, "type"),
+                                        &mut files,
+                                        &mut unprojected,
+                                    );
                                 }
                                 _ => {}
                             }
@@ -886,18 +979,24 @@ pub fn anthropic_messages(
                     }
                     _ => {}
                 }
-                result_part(
-                    key,
-                    str_of(block, "tool_use_id").to_owned(),
-                    block.get("is_error") == Some(&Value::Bool(true)),
-                    &crate::run::join_text_parts(texts),
-                    files,
-                    limits,
+                DisplayPart::ToolResult(
+                    ToolResultPart::new(
+                        key,
+                        str_of(block, "tool_use_id").to_owned(),
+                        block.get("is_error") == Some(&Value::Bool(true)),
+                        &crate::run::join_text_parts(texts),
+                        files,
+                        limits,
+                    )
+                    .with_unprojected(unprojected),
                 )
             }
-            "image" | "document" => match anthropic_file(block, key.clone())? {
-                Some(file) => DisplayPart::File(file),
-                None => other(key, kind),
+            "image" | "document" => match anthropic_file(block, key.clone()) {
+                Ok(Some(file)) => DisplayPart::File(file),
+                Ok(None) => other(key, kind),
+                Err(error) => {
+                    DisplayPart::Other(OtherPart::new(key, kind).with_reason(error.message))
+                }
             },
             _ => other(key, kind),
         });
@@ -929,23 +1028,22 @@ fn opencode_file(value: &Value, part: String) -> Result<FilePart, ProjectionErro
         .map(str::to_owned);
     let url = &value["url"];
     if url["type"] == "media_ref" {
-        let reference = serde_json::from_value(url.clone()).map_err(|error| {
-            ProjectionError::new(format!("invalid opencode file url media_ref: {error}"))
-        })?;
+        let reference = serde_json::from_value(url.clone())
+            .map_err(|_| ProjectionError::new(projection_reasons::INVALID_MEDIA_REF))?;
         let mut output = FilePart::media(part, reference);
         output.filename = filename;
         return Ok(output);
     }
-    let url = url.as_str().ok_or_else(|| {
-        ProjectionError::new("a file part's url is neither a string nor a media_ref")
-    })?;
+    let url = url
+        .as_str()
+        .ok_or_else(|| ProjectionError::new(projection_reasons::INVALID_FILE_URL))?;
     if let Some(data) = url
         .strip_prefix("data:")
         .and_then(|rest| rest.split_once(";base64,"))
         .map(|(_, data)| data)
     {
         let bytes = base64_decode(data)
-            .ok_or_else(|| ProjectionError::new("a file part's data URL is not base64"))?;
+            .ok_or_else(|| ProjectionError::new(projection_reasons::DATA_NOT_BASE64))?;
         let reference = Reference::media(
             (!part.is_empty()).then(|| part.clone()),
             media_kind(&mime),
@@ -1027,42 +1125,38 @@ pub fn opencode_aisdk(
                     )
                     .with_provider_executed(provider_executed),
                 ));
-                match str_of(state, "status") {
-                    "completed" => {
-                        let files = state
-                            .get("attachments")
-                            .and_then(Value::as_array)
-                            .into_iter()
-                            .flatten()
-                            .map(|file| opencode_file(file, String::new()))
-                            .collect::<Result<Vec<_>, _>>()?;
-                        parts.push(DisplayPart::ToolResult(
-                            ToolResultPart::new(
-                                key,
-                                call_id,
-                                false,
-                                str_of(state, "output"),
-                                files,
-                                limits,
-                            )
-                            .with_provider_executed(provider_executed),
-                        ));
+                if let status @ ("completed" | "error") = str_of(state, "status") {
+                    let is_error = status == "error";
+                    let mut files = Vec::new();
+                    let mut unprojected = Vec::new();
+                    for file in state
+                        .get("attachments")
+                        .and_then(Value::as_array)
+                        .into_iter()
+                        .flatten()
+                    {
+                        tool_file(
+                            opencode_file(file, String::new()).map(Some),
+                            file_kind(file),
+                            &mut files,
+                            &mut unprojected,
+                        );
                     }
-                    "error" => parts.push(DisplayPart::ToolResult(
+                    parts.push(DisplayPart::ToolResult(
                         ToolResultPart::new(
                             key,
                             call_id,
-                            true,
-                            str_of(state, "error"),
-                            Vec::new(),
+                            is_error,
+                            str_of(state, if is_error { "error" } else { "output" }),
+                            files,
                             limits,
                         )
-                        .with_provider_executed(provider_executed),
-                    )),
-                    _ => {}
+                        .with_provider_executed(provider_executed)
+                        .with_unprojected(unprojected),
+                    ));
                 }
             }
-            "file" => parts.push(DisplayPart::File(opencode_file(part, key)?)),
+            "file" => parts.push(projected_file(opencode_file(part, key.clone()), key, kind)),
             kind if OPENCODE_BOOKKEEPING_PARTS.contains(&kind) => {}
             _ => parts.push(other(key, kind)),
         }
@@ -1077,14 +1171,14 @@ pub fn opencode_aisdk(
 fn pi_image(image: &Value, part: String) -> Result<FilePart, ProjectionError> {
     if image["type"] == "media_ref" {
         let reference = serde_json::from_value(image.clone())
-            .map_err(|e| ProjectionError::new(format!("invalid pi media_ref: {e}")))?;
+            .map_err(|_| ProjectionError::new(projection_reasons::INVALID_MEDIA_REF))?;
         return Ok(FilePart::media(part, reference));
     }
     if image["data"].is_object() {
         return pi_image(&image["data"], part);
     }
     let bytes = base64_decode(str_of(image, "data"))
-        .ok_or_else(|| ProjectionError::new("a pi image's data is not base64"))?;
+        .ok_or_else(|| ProjectionError::new(projection_reasons::DATA_NOT_BASE64))?;
     let mime = str_of(image, "mimeType");
     Ok(FilePart::media(
         part.clone(),
@@ -1111,9 +1205,8 @@ fn opencode_v2_file(file: &Value, key: String) -> Result<FilePart, ProjectionErr
         .or_else(|| file.get("data"))
         .unwrap_or(file);
     if payload["type"] == "media_ref" {
-        let reference = serde_json::from_value(payload.clone()).map_err(|error| {
-            ProjectionError::new(format!("invalid opencode-v2 media_ref: {error}"))
-        })?;
+        let reference = serde_json::from_value(payload.clone())
+            .map_err(|_| ProjectionError::new(projection_reasons::INVALID_MEDIA_REF))?;
         let mut output = FilePart::media(key, reference);
         output.filename = file.get("name").and_then(Value::as_str).map(str::to_owned);
         return Ok(output);
@@ -1121,9 +1214,9 @@ fn opencode_v2_file(file: &Value, key: String) -> Result<FilePart, ProjectionErr
     let mime = str_of(file, "mime");
     let data = payload
         .as_str()
-        .ok_or_else(|| ProjectionError::new("an opencode-v2 file has no hydrated data"))?;
+        .ok_or_else(|| ProjectionError::new(projection_reasons::MISSING_FILE_DATA))?;
     let bytes = base64_decode(data)
-        .ok_or_else(|| ProjectionError::new("an opencode-v2 file's data is not base64"))?;
+        .ok_or_else(|| ProjectionError::new(projection_reasons::DATA_NOT_BASE64))?;
     let mut output = FilePart::media(
         key.clone(),
         Reference::media(
@@ -1138,6 +1231,68 @@ fn opencode_v2_file(file: &Value, key: String) -> Result<FilePart, ProjectionErr
     Ok(output)
 }
 
+fn opencode_v2_display_content(body: &Value) -> Result<Vec<Value>, ProjectionError> {
+    let role = str_of(body, "type");
+    if role == "compaction" {
+        return Err(ProjectionError::new(
+            "an opencode-v2 compaction is never served",
+        ));
+    }
+    // Model-context validation rejects an entire body for one bad native slot.
+    // Display keeps the slot so its failure cannot hide the neighbouring text.
+    let array = |name: &str| -> Result<Vec<Value>, ProjectionError> {
+        match body.get(name) {
+            None => Ok(Vec::new()),
+            Some(Value::Array(values)) => Ok(values.clone()),
+            _ => Err(ProjectionError::new(
+                "an opencode-v2 content container is not an array",
+            )),
+        }
+    };
+    let text = |value: &Value| serde_json::json!({"type":"text", "text":value});
+    Ok(match role {
+        "assistant" => array("content")?,
+        "user" => {
+            let mut content = Vec::new();
+            for skill in array("skills")? {
+                if let Some(value) = skill.get("text") {
+                    content.push(text(value));
+                }
+            }
+            if let Some(value) = body.get("text").filter(|value| value.as_str() != Some("")) {
+                content.push(text(value));
+            }
+            content.extend(array("files")?);
+            content
+        }
+        "synthetic" | "system" | "skill" => vec![text(&body["text"])],
+        "shell" | "location-switched" => {
+            let mut visible = body.clone();
+            if role == "shell" {
+                // Background execution is omitted from model context, not from display.
+                visible["metadata"] = serde_json::json!({"background":false});
+            }
+            crate::serializer_profile::opencode_v2::projected_content(&visible)
+                .map_err(|_| {
+                    ProjectionError::new(if role == "shell" {
+                        projection_reasons::INVALID_SHELL
+                    } else {
+                        projection_reasons::INVALID_LOCATION
+                    })
+                })?
+                .as_array()
+                .expect("native units")
+                .clone()
+        }
+        "model-switched" | "agent-switched" | "idle" => Vec::new(),
+        _ => {
+            return Err(ProjectionError::new(
+                "opencode-v2 body has no supported native type",
+            ))
+        }
+    })
+}
+
 /// OpenCode 2's decoded message (`data` plus native `id` and `type`). Notices
 /// keep their native type rather than adopting their model-request authority.
 /// Compaction checkpoints are never served. Tool calls and outcomes share a
@@ -1145,28 +1300,29 @@ fn opencode_v2_file(file: &Value, key: String) -> Result<FilePart, ProjectionErr
 /// A tool slot's `executed` flag marks both parts as provider-executed.
 pub fn opencode_v2(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, ProjectionError> {
     let role = str_of(body, "type");
-    if role == "compaction" {
-        return Err(ProjectionError::new(
-            "an opencode-v2 compaction is never served",
-        ));
-    }
-    let mut visible = body.clone();
-    if role == "shell" {
-        // Background execution is omitted from model context, not from display.
-        visible["metadata"] = serde_json::json!({"background":false});
-    }
-    let content = crate::serializer_profile::opencode_v2::projected_content(&visible)
-        .map_err(ProjectionError::new)?;
+    let content = match opencode_v2_display_content(body) {
+        Ok(content) => content,
+        Err(error) if matches!(role, "shell" | "location-switched") => {
+            return Ok(DisplayRow::new(
+                role,
+                vec![DisplayPart::Other(
+                    OtherPart::new("0", role).with_reason(error.message),
+                )],
+            ));
+        }
+        Err(error) => return Err(error),
+    };
     let mut parts = Vec::new();
-    for (index, slot) in content
-        .as_array()
-        .expect("projected native units")
-        .iter()
-        .enumerate()
-    {
+    for (index, slot) in content.iter().enumerate() {
         let key = index.to_string();
-        if role == "user" && slot.get("mime").is_some() {
-            parts.push(DisplayPart::File(opencode_v2_file(slot, key)?));
+        if role == "user"
+            && (slot.get("mime").is_some() || matches!(str_of(slot, "type"), "file" | "media_ref"))
+        {
+            parts.push(projected_file(
+                opencode_v2_file(slot, key.clone()),
+                key,
+                file_kind(slot),
+            ));
             continue;
         }
         match str_of(slot, "type") {
@@ -1178,7 +1334,10 @@ pub fn opencode_v2(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, 
                 };
                 parts.push(match value.as_str() {
                     Some(text) => DisplayPart::Text(TextPart::new(key, text)),
-                    None => other(key, "text_ref"),
+                    None if value["type"] == "text_ref" => other(key, "text_ref"),
+                    None => DisplayPart::Other(
+                        OtherPart::new(key, "text").with_reason(projection_reasons::INVALID_TEXT),
+                    ),
                 });
             }
             "reasoning" => parts.push(DisplayPart::Reasoning(TextPart::new(
@@ -1203,12 +1362,20 @@ pub fn opencode_v2(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, 
                 if matches!(status, "completed" | "error") {
                     let mut texts = Vec::new();
                     let mut files = Vec::new();
+                    let mut unprojected = Vec::new();
                     if let Some(content) = state["content"].as_array() {
                         for item in content {
                             if item["type"] == "text" {
                                 texts.push(str_of(item, "text").to_owned());
-                            } else if item.get("mime").is_some() || item["type"] == "media_ref" {
-                                files.push(opencode_v2_file(item, String::new())?);
+                            } else if item.get("mime").is_some()
+                                || matches!(str_of(item, "type"), "file" | "media_ref")
+                            {
+                                tool_file(
+                                    opencode_v2_file(item, String::new()).map(Some),
+                                    file_kind(item),
+                                    &mut files,
+                                    &mut unprojected,
+                                );
                             }
                         }
                     }
@@ -1233,11 +1400,19 @@ pub fn opencode_v2(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, 
                             files,
                             limits,
                         )
-                        .with_provider_executed(provider_executed),
+                        .with_provider_executed(provider_executed)
+                        .with_unprojected(unprojected),
                     ));
                 }
             }
-            "media_ref" => parts.push(DisplayPart::File(opencode_v2_file(slot, key)?)),
+            "media_ref" => parts.push(projected_file(
+                opencode_v2_file(slot, key.clone()),
+                key,
+                "media_ref",
+            )),
+            kind if role == "assistant" => parts.push(DisplayPart::Other(
+                OtherPart::new(key, kind).with_reason(projection_reasons::UNSUPPORTED_PART_KIND),
+            )),
             kind => parts.push(other(key, kind)),
         }
     }
@@ -1282,8 +1457,25 @@ pub fn pi(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, Projectio
     if role == "bashExecution" {
         visible["message"]["excludeFromContext"] = Value::Bool(false);
     }
-    let content =
-        crate::serializer_profile::pi::projected_content(&visible).map_err(ProjectionError::new)?;
+    let (content, failed_native_part) =
+        match crate::serializer_profile::pi::projected_content(&visible) {
+            Ok(content) => (content, None),
+            Err(_) if role == "bashExecution" => {
+                let mut blocks = vec![Value::Null];
+                if let Some(images) = body["message"]["images"].as_array() {
+                    blocks.extend(images.iter().cloned());
+                }
+                (
+                    Value::Array(blocks),
+                    Some(("bashExecution", projection_reasons::INVALID_SHELL)),
+                )
+            }
+            Err(_) if role == "branchSummary" => (
+                Value::Array(vec![Value::Null]),
+                Some(("branch_summary", projection_reasons::INVALID_SUMMARY)),
+            ),
+            Err(error) => return Err(ProjectionError::new(error)),
+        };
     let blocks = match content {
         Value::String(text) => vec![serde_json::json!({"type":"text", "text":text})],
         Value::Array(blocks) => blocks,
@@ -1293,6 +1485,12 @@ pub fn pi(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, Projectio
     let mut parts = Vec::new();
     for (index, block) in blocks.iter().enumerate() {
         let key = index.to_string();
+        if let Some((kind, reason)) = failed_native_part.filter(|_| index == 0) {
+            parts.push(DisplayPart::Other(
+                OtherPart::new(key, kind).with_reason(reason),
+            ));
+            continue;
+        }
         parts.push(match str_of(block, "type") {
             "redacted_reasoning" => redacted_reasoning(key, block),
             "text" => DisplayPart::Text(TextPart::new(key, str_of(block, "text"))),
@@ -1304,34 +1502,49 @@ pub fn pi(body: &Value, limits: Option<&Limits>) -> Result<DisplayRow, Projectio
                 &block["arguments"],
                 limits,
             ),
-            "image" | "media_ref" => DisplayPart::File(pi_image(
-                block,
-                if role == "toolResult" {
-                    String::new()
-                } else {
-                    key
-                },
-            )?),
+            kind @ ("image" | "media_ref") => projected_file(
+                pi_image(
+                    block,
+                    if role == "toolResult" {
+                        String::new()
+                    } else {
+                        key.clone()
+                    },
+                ),
+                key,
+                kind,
+            ),
             kind => other(key, kind),
         });
     }
     if role == "toolResult" {
         let mut texts = Vec::new();
         let mut files = Vec::new();
+        let mut unprojected = Vec::new();
         for part in parts {
             match part {
                 DisplayPart::Text(text) => texts.push(text.text),
                 DisplayPart::File(file) => files.push(file),
+                DisplayPart::Other(OtherPart {
+                    kind,
+                    reason: Some(reason),
+                    ..
+                }) => {
+                    unprojected.push(UnprojectedPart::new(kind, reason));
+                }
                 _ => {}
             }
         }
-        parts = vec![result_part(
-            "0".into(),
-            str_of(&body["message"], "toolCallId").to_owned(),
-            body["message"]["isError"] == true,
-            &crate::run::join_text_parts(texts),
-            files,
-            limits,
+        parts = vec![DisplayPart::ToolResult(
+            ToolResultPart::new(
+                "0",
+                str_of(&body["message"], "toolCallId").to_owned(),
+                body["message"]["isError"] == true,
+                &crate::run::join_text_parts(texts),
+                files,
+                limits,
+            )
+            .with_unprojected(unprojected),
         )];
     }
     Ok(DisplayRow::new(role, parts))
@@ -1630,6 +1843,141 @@ mod tests {
             .map(|limits| serde_json::from_value(limits.clone()).expect("limits decode"))
     }
 
+    fn check_failure_vectors(section: &str) {
+        let file = vectors::load("display-unprojected.json");
+        for case in vectors::cases(&file, section) {
+            let name = case["name"].as_str().unwrap();
+            let row = project(case["profile"].as_str().unwrap(), &case["body"], None)
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(serde_json::to_value(&row).unwrap(), case["row"], "{name}");
+            assert_eq!(
+                vectors::round_trip::<DisplayRow>(name, &case["row"]),
+                row,
+                "{name}"
+            );
+        }
+    }
+
+    /// Every carried reason in the failure vectors is one of the published
+    /// constants, so no reason can quote a transcript value.
+    #[test]
+    fn carried_reasons_are_published_constants() {
+        let file = vectors::load("display-unprojected.json");
+        let mut seen = 0;
+        let mut check = |value: &Value| {
+            let reason = value.as_str().expect("a reason is a string");
+            assert!(
+                projection_reasons::ALL.contains(&reason),
+                "unpublished reason {reason:?}"
+            );
+            seen += 1;
+        };
+        for section in [
+            "tool_files",
+            "standalone",
+            "native_failures",
+            "carried_refusals",
+        ] {
+            for case in vectors::cases(&file, section) {
+                for part in case["row"]["parts"].as_array().into_iter().flatten() {
+                    if let Some(reason) = part.get("reason") {
+                        check(reason);
+                    }
+                    for item in part["unprojected"].as_array().into_iter().flatten() {
+                        check(&item["reason"]);
+                    }
+                }
+            }
+        }
+        assert!(seen > 0, "the failure vectors carry no reason");
+    }
+
+    #[test]
+    fn display_tool_results_carry_bad_files() {
+        check_failure_vectors("tool_files");
+    }
+
+    #[test]
+    fn display_error_tool_results_carry_bad_files() {
+        let file = vectors::load("display-unprojected.json");
+        for case in vectors::cases(&file, "tool_files") {
+            let profile = case["profile"].as_str().unwrap();
+            if !matches!(profile, OPENCODE_V2 | OPENCODE_AISDK) {
+                continue;
+            }
+            let mut body = case["body"].clone();
+            let state = if profile == OPENCODE_V2 {
+                &mut body["content"][0]["state"]
+            } else {
+                &mut body["parts"][0]["state"]
+            };
+            state["status"] = Value::String("error".into());
+            state["error"] = Value::String("tool failed".into());
+            let mut expected = case["row"].clone();
+            expected["parts"][1]["is_error"] = Value::Bool(true);
+            expected["parts"][1]["content"] = Value::String(
+                if profile == OPENCODE_V2 {
+                    "readable resulttool failed"
+                } else {
+                    "tool failed"
+                }
+                .into(),
+            );
+            assert_eq!(
+                serde_json::to_value(project(profile, &body, None).unwrap()).unwrap(),
+                expected,
+                "{profile}"
+            );
+        }
+    }
+
+    #[test]
+    fn display_standalone_parts_carry_failures() {
+        check_failure_vectors("standalone");
+        check_failure_vectors("native_failures");
+        check_failure_vectors("carried_refusals");
+    }
+
+    #[test]
+    fn display_attribution_still_hides_frame_with_a_bad_neighbour() {
+        let stored = format!("{}readable message", crate::attribution::header("chat"));
+        let fact = crate::attribution::verified(1, "chat", &stored).unwrap();
+        let body = serde_json::json!({"type":"assistant", "content":[
+            {"type":"future-part"}, {"type":"text", "text":stored}
+        ]});
+        let row = project_with_attribution(OPENCODE_V2, &body, None, Some(&fact)).unwrap();
+        assert_eq!(row.text, "readable message");
+        assert_eq!(row.attribution, Some(fact));
+        assert_eq!(
+            row.parts[1],
+            DisplayPart::Text(TextPart::new("1", "readable message"))
+        );
+        assert!(
+            matches!(&row.parts[0], DisplayPart::Other(part) if part.part == "0" && part.reason.as_deref() == Some(projection_reasons::UNSUPPORTED_PART_KIND))
+        );
+    }
+
+    #[test]
+    fn display_unknown_shapes_still_refuse() {
+        let file = vectors::load("display-unprojected.json");
+        for case in vectors::cases(&file, "refused") {
+            let name = case["name"].as_str().unwrap();
+            let error =
+                project(case["profile"].as_str().unwrap(), &case["body"], None).expect_err(name);
+            assert!(!error.message.contains("private-body-sentinel!"), "{name}");
+        }
+    }
+
+    #[test]
+    fn display_never_served_bodies_still_refuse() {
+        let file = vectors::load("display-unprojected.json");
+        for case in vectors::cases(&file, "never_served") {
+            let error = project(case["profile"].as_str().unwrap(), &case["body"], None)
+                .expect_err(case["name"].as_str().unwrap());
+            assert_eq!(error.message, case["reason"].as_str().unwrap());
+        }
+    }
+
     fn check_profile(file: &str, profile: &str) {
         let file = vectors::load(file);
         assert_eq!(file["profile"], profile);
@@ -1654,10 +2002,36 @@ mod tests {
             }
         }
         assert!(cut_any, "{profile}: no vector cuts anything");
+        // Preserve the published fixture bytes, but explicitly check the two
+        // old per-image refusals against the newly carried display rows.
+        let failures = vectors::load("display-unprojected.json");
+        let carried: Vec<_> = vectors::cases(&failures, "carried_refusals")
+            .iter()
+            .filter(|case| case["profile"] == profile)
+            .collect();
+        let mut carried_count = 0;
         for case in vectors::cases(&file, "refused") {
             let name = case["name"].as_str().unwrap();
-            assert!(project(profile, &case["body"], None).is_err(), "{name}");
+            if let Some(expected) = carried.iter().find(|expected| expected["name"] == name) {
+                assert_eq!(
+                    case["body"], expected["body"],
+                    "{name}: historical body changed"
+                );
+                assert_eq!(
+                    serde_json::to_value(project(profile, &case["body"], None).unwrap()).unwrap(),
+                    expected["row"],
+                    "{name}"
+                );
+                carried_count += 1;
+            } else {
+                assert!(project(profile, &case["body"], None).is_err(), "{name}");
+            }
         }
+        assert_eq!(
+            carried_count,
+            carried.len(),
+            "{profile}: carried refusal is not a historical fixture"
+        );
     }
 
     #[test]
@@ -1692,8 +2066,149 @@ mod tests {
         ] {
             let file = serde_json::json!({"type":"file", "mime":"image/jpeg", "url":url});
             let error = opencode_file(&file, "0".to_owned()).unwrap_err();
-            assert!(error.to_string().contains("url"), "{error}");
+            let expected = if file["url"]["type"] == "media_ref" {
+                projection_reasons::INVALID_MEDIA_REF
+            } else {
+                projection_reasons::INVALID_FILE_URL
+            };
+            assert_eq!(error.message, expected);
         }
+    }
+
+    #[test]
+    fn display_reasons_are_fixed_and_contain_no_body_bytes() {
+        use projection_reasons::*;
+        use serde_json::json;
+        const SECRET: &str = "private-body-sentinel!";
+        let allowed = [
+            INVALID_MEDIA_REF,
+            DATA_NOT_BASE64,
+            INVALID_FILE_URL,
+            MISSING_FILE_DATA,
+            INVALID_TEXT,
+            INVALID_SHELL,
+            INVALID_LOCATION,
+            INVALID_SUMMARY,
+            UNSUPPORTED_PART_KIND,
+        ];
+        let mut reasons = Vec::new();
+        let bad_ref = json!({"type":"media_ref", "kind":"image", "mime":"image/png", "byte_size":SECRET, "sha256":"b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640"});
+        let cases = [
+            (
+                anthropic_file(
+                    &json!({"source":{"type":"base64", "data":bad_ref}}),
+                    "0".into(),
+                )
+                .unwrap_err(),
+                INVALID_MEDIA_REF,
+            ),
+            (
+                anthropic_file(
+                    &json!({"source":{"type":"base64", "data":SECRET}}),
+                    "0".into(),
+                )
+                .unwrap_err(),
+                DATA_NOT_BASE64,
+            ),
+            (
+                opencode_file(&json!({"url":bad_ref}), "0".into()).unwrap_err(),
+                INVALID_MEDIA_REF,
+            ),
+            (
+                opencode_file(&json!({"url":{"secret":SECRET}}), "0".into()).unwrap_err(),
+                INVALID_FILE_URL,
+            ),
+            (
+                opencode_file(
+                    &json!({"url":format!("data:image/png;base64,{SECRET}")}),
+                    "0".into(),
+                )
+                .unwrap_err(),
+                DATA_NOT_BASE64,
+            ),
+            (
+                opencode_v2_file(&json!({"data":bad_ref}), "0".into()).unwrap_err(),
+                INVALID_MEDIA_REF,
+            ),
+            (
+                opencode_v2_file(&json!({"data":{"secret":SECRET}}), "0".into()).unwrap_err(),
+                MISSING_FILE_DATA,
+            ),
+            (
+                opencode_v2_file(&json!({"data":SECRET}), "0".into()).unwrap_err(),
+                DATA_NOT_BASE64,
+            ),
+            (
+                pi_image(&bad_ref, "0".into()).unwrap_err(),
+                INVALID_MEDIA_REF,
+            ),
+            (
+                pi_image(&json!({"data":SECRET}), "0".into()).unwrap_err(),
+                DATA_NOT_BASE64,
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.message, expected);
+            reasons.push(error.message);
+        }
+        let file = vectors::load("display-unprojected.json");
+        for section in [
+            "tool_files",
+            "standalone",
+            "native_failures",
+            "carried_refusals",
+        ] {
+            for case in vectors::cases(&file, section) {
+                let row = project(case["profile"].as_str().unwrap(), &case["body"], None).unwrap();
+                for part in row.parts {
+                    match part {
+                        DisplayPart::ToolResult(result) => reasons
+                            .extend(result.unprojected.into_iter().map(|failure| failure.reason)),
+                        DisplayPart::Other(OtherPart {
+                            reason: Some(reason),
+                            ..
+                        }) => reasons.push(reason),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        for reason in &reasons {
+            assert!(allowed.contains(&reason.as_str()), "{reason}");
+            assert!(!reason.contains(SECRET));
+        }
+        for reason in allowed {
+            assert!(
+                reasons.iter().any(|seen| seen == reason),
+                "untested reason: {reason}"
+            );
+        }
+    }
+
+    #[test]
+    fn display_clean_rows_omit_failure_fields() {
+        let result = ToolResultPart::new("0", "call", false, "readable", vec![], None);
+        let other = OtherPart::new("1", "unknown");
+        assert_eq!(
+            serde_json::to_string(&result).unwrap(),
+            r#"{"part":"0","tool_call_id":"call","content":"readable"}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&other).unwrap(),
+            r#"{"part":"1","kind":"unknown"}"#
+        );
+        assert!(
+            serde_json::from_value::<ToolResultPart>(serde_json::to_value(result).unwrap())
+                .unwrap()
+                .unprojected
+                .is_empty()
+        );
+        assert!(
+            serde_json::from_value::<OtherPart>(serde_json::to_value(other).unwrap())
+                .unwrap()
+                .reason
+                .is_none()
+        );
     }
 
     #[test]
@@ -1774,7 +2289,8 @@ mod tests {
             row.parts,
             vec![DisplayPart::Other(OtherPart {
                 part: "3".into(),
-                kind: "hologram".into()
+                kind: "hologram".into(),
+                reason: None,
             })]
         );
         let row = row.with_model("acme/m1").with_model("acme/m2");

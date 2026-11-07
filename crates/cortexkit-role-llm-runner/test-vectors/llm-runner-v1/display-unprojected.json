@@ -1,0 +1,90 @@
+{
+  "tool_files": [
+    {
+      "name": "OpenCode 2 keeps text and good files after a bad file",
+      "profile": "opencode-v2",
+      "body": {"type":"assistant", "content":[{"type":"tool", "id":"call", "name":"read", "state":{"status":"completed", "input":{}, "content":[{"type":"text", "text":"readable result"}, {"type":"file", "mime":"image/png", "data":"private-body-sentinel!"}, {"type":"file", "mime":"image/png", "uri":"https://example.invalid/good.png"}]}}]},
+      "row": {"role":"assistant", "text":"", "parts":[{"type":"tool_call", "part":"0", "tool_call_id":"call", "name":"read", "arguments":"{}"}, {"type":"tool_result", "part":"0", "tool_call_id":"call", "content":"readable result", "files":[{"url":"https://example.invalid/good.png", "mime":"image/png"}], "unprojected":[{"kind":"file", "reason":"data is not base64"}]}]}
+    },
+    {
+      "name": "AI SDK keeps text and good attachments after a bad file",
+      "profile": "opencode-aisdk",
+      "body": {"info":{"role":"assistant"}, "parts":[{"id":"native-tool", "type":"tool", "callID":"call", "tool":"read", "state":{"status":"completed", "input":{}, "output":"readable result", "attachments":[{"type":"file", "mime":"image/png", "url":"data:image/png;base64,private-body-sentinel!"}, {"type":"file", "mime":"image/png", "url":"https://example.invalid/good.png"}]}}]},
+      "row": {"role":"assistant", "text":"", "parts":[{"type":"tool_call", "part":"native-tool", "tool_call_id":"call", "name":"read", "arguments":"{}"}, {"type":"tool_result", "part":"native-tool", "tool_call_id":"call", "content":"readable result", "files":[{"url":"https://example.invalid/good.png", "mime":"image/png"}], "unprojected":[{"kind":"file", "reason":"data is not base64"}]}]}
+    },
+    {
+      "name": "Anthropic keeps text and good images after a bad image",
+      "profile": "anthropic-messages",
+      "body": {"role":"user", "content":[{"type":"tool_result", "tool_use_id":"call", "content":[{"type":"text", "text":"readable result"}, {"type":"image", "source":{"type":"base64", "media_type":"image/png", "data":"private-body-sentinel!"}}, {"type":"image", "source":{"type":"url", "media_type":"image/png", "url":"https://example.invalid/good.png"}}]}]},
+      "row": {"role":"user", "text":"", "parts":[{"type":"tool_result", "part":"0", "tool_call_id":"call", "content":"readable result", "files":[{"url":"https://example.invalid/good.png", "mime":"image/png"}], "unprojected":[{"kind":"image", "reason":"data is not base64"}]}]}
+    },
+    {
+      "name": "Pi keeps text and good images after a bad image",
+      "profile": "pi",
+      "body": {"type":"message", "message":{"role":"toolResult", "toolCallId":"call", "content":[{"type":"text", "text":"readable result"}, {"type":"image", "mimeType":"image/png", "data":"private-body-sentinel!"}, {"type":"image", "data":{"type":"media_ref", "kind":"image", "mime":"image/png", "byte_size":69, "sha256":"b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640"}}]}},
+      "row": {"role":"toolResult", "text":"", "parts":[{"type":"tool_result", "part":"0", "tool_call_id":"call", "content":"readable result", "files":[{"media":{"type":"media_ref", "kind":"image", "mime":"image/png", "byte_size":69, "sha256":"b1ff9c8ea3a780bad09b346c423d2d0e46815926879b18e841d928376a946640"}}], "unprojected":[{"kind":"image", "reason":"data is not base64"}]}]}
+    }
+  ],
+  "standalone": [
+    {
+      "name": "OpenCode 2 keeps a failed message file in its native slot",
+      "profile": "opencode-v2",
+      "body": {"type":"user", "text":"readable message", "files":[{"mime":"image/png", "data":"private-body-sentinel!"}]},
+      "row": {"role":"user", "text":"readable message", "parts":[{"type":"text", "part":"0", "text":"readable message"}, {"type":"other", "part":"1", "kind":"file", "reason":"data is not base64"}]}
+    },
+    {
+      "name": "AI SDK keeps a failed message file and its native key",
+      "profile": "opencode-aisdk",
+      "body": {"info":{"role":"user"}, "parts":[{"id":"native-text", "type":"text", "text":"readable message"}, {"id":"native-photo", "type":"file", "mime":"image/png", "url":"data:image/png;base64,private-body-sentinel!"}]},
+      "row": {"role":"user", "text":"readable message", "parts":[{"type":"text", "part":"native-text", "text":"readable message"}, {"type":"other", "part":"native-photo", "kind":"file", "reason":"data is not base64"}]}
+    },
+    {
+      "name": "Anthropic keeps a failed message image in its native slot",
+      "profile": "anthropic-messages",
+      "body": {"role":"user", "content":[{"type":"text", "text":"readable message"}, {"type":"image", "source":{"type":"base64", "media_type":"image/png", "data":"private-body-sentinel!"}}]},
+      "row": {"role":"user", "text":"readable message", "parts":[{"type":"text", "part":"0", "text":"readable message"}, {"type":"other", "part":"1", "kind":"image", "reason":"data is not base64"}]}
+    },
+    {
+      "name": "Pi keeps a failed message image in its native slot",
+      "profile": "pi",
+      "body": {"type":"message", "message":{"role":"user", "content":[{"type":"text", "text":"readable message"}, {"type":"image", "mimeType":"image/png", "data":"private-body-sentinel!"}]}},
+      "row": {"role":"user", "text":"readable message", "parts":[{"type":"text", "part":"0", "text":"readable message"}, {"type":"other", "part":"1", "kind":"image", "reason":"data is not base64"}]}
+    },
+    {
+      "name": "OpenCode 2 keeps an unsupported assistant slot",
+      "profile": "opencode-v2",
+      "body": {"type":"assistant", "content":[{"type":"future-part", "data":"private-body-sentinel!"}, {"type":"text", "text":"readable message"}]},
+      "row": {"role":"assistant", "text":"readable message", "parts":[{"type":"other", "part":"0", "kind":"future-part", "reason":"unsupported part type"}, {"type":"text", "part":"1", "text":"readable message"}]}
+    },
+    {
+      "name": "OpenCode 2 keeps malformed native text alongside files",
+      "profile": "opencode-v2",
+      "body": {"type":"user", "text":{"secret":"private-body-sentinel!"}, "files":[{"type":"file", "mime":"image/png", "uri":"https://example.invalid/good.png"}]},
+      "row": {"role":"user", "text":"", "parts":[{"type":"other", "part":"0", "kind":"text", "reason":"text is neither a string nor a text_ref"}, {"type":"file", "part":"1", "url":"https://example.invalid/good.png", "mime":"image/png"}]}
+    }
+  ],
+  "native_failures": [
+    {"name":"OpenCode 2 shell without command", "profile":"opencode-v2", "body":{"type":"shell", "command":{"secret":"private-body-sentinel!"}}, "row":{"role":"shell", "text":"", "parts":[{"type":"other", "part":"0", "kind":"shell", "reason":"shell command or output is not a string"}]}},
+    {"name":"OpenCode 2 location without directory", "profile":"opencode-v2", "body":{"type":"location-switched", "location":{"directory":{"secret":"private-body-sentinel!"}}}, "row":{"role":"location-switched", "text":"", "parts":[{"type":"other", "part":"0", "kind":"location-switched", "reason":"location has no directory"}]}},
+    {"name":"Pi shell without output retains its images", "profile":"pi", "body":{"type":"message", "message":{"role":"bashExecution", "command":"private-body-sentinel!", "images":[{"type":"image", "data":"private-body-sentinel!"}]}}, "row":{"role":"bashExecution", "text":"", "parts":[{"type":"other", "part":"0", "kind":"bashExecution", "reason":"shell command or output is not a string"}, {"type":"other", "part":"1", "kind":"image", "reason":"data is not base64"}]}},
+    {"name":"Pi branch summary is not a string", "profile":"pi", "body":{"type":"branch_summary", "summary":{"secret":"private-body-sentinel!"}}, "row":{"role":"branchSummary", "text":"", "parts":[{"type":"other", "part":"0", "kind":"branch_summary", "reason":"branch summary is not a string"}]}}
+  ],
+  "refused": [
+    {"name":"OpenCode 2 has no role", "profile":"opencode-v2", "body":{"content":[]}},
+    {"name":"OpenCode 2 content is not an array", "profile":"opencode-v2", "body":{"type":"assistant", "content":{"secret":"private-body-sentinel!"}}},
+    {"name":"AI SDK has no role", "profile":"opencode-aisdk", "body":{"info":{}, "parts":[]}},
+    {"name":"AI SDK parts is not an array", "profile":"opencode-aisdk", "body":{"info":{"role":"assistant"}, "parts":{"secret":"private-body-sentinel!"}}},
+    {"name":"Anthropic has no role", "profile":"anthropic-messages", "body":{"content":[]}},
+    {"name":"Anthropic content has no usable shape", "profile":"anthropic-messages", "body":{"role":"user", "content":{"secret":"private-body-sentinel!"}}},
+    {"name":"Pi has no role", "profile":"pi", "body":{"type":"message", "message":{"content":[]}}},
+    {"name":"Pi content has no usable shape", "profile":"pi", "body":{"type":"message", "message":{"role":"user", "content":{"secret":"private-body-sentinel!"}}}}
+  ],
+  "never_served": [
+    {"name":"OpenCode 2 compaction is never served", "profile":"opencode-v2", "body":{"type":"compaction"}, "reason":"an opencode-v2 compaction is never served"},
+    {"name":"Pi compaction is never served", "profile":"pi", "body":{"type":"compaction"}, "reason":"a pi display body is not an ordinal-bearing entry"}
+  ],
+  "carried_refusals": [
+    {"name":"media data that is not base64", "profile":"anthropic-messages", "body":{"role":"user", "content":[{"type":"image", "source":{"type":"base64", "media_type":"image/png", "data":"not base64!"}}]}, "row":{"role":"user", "text":"", "parts":[{"type":"other", "part":"0", "kind":"image", "reason":"data is not base64"}]}},
+    {"name":"invalid-image-base64", "profile":"pi", "body":{"type":"message", "message":{"role":"user", "content":[{"type":"image", "mimeType":"image/png", "data":"?"}]}}, "row":{"role":"user", "text":"", "parts":[{"type":"other", "part":"0", "kind":"image", "reason":"data is not base64"}]}}
+  ]
+}

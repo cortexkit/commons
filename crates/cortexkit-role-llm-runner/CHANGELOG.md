@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.22
+
+- Carry display projection failures per part: preserve tool-result text and good
+  files with `unprojected` diagnostics, and keep standalone failed parts as
+  `other` with their native type, key and optional `reason`.
+- Publish fixed, body-independent projection reason constants. Omit the new
+  fields on clean rows, retaining existing display bytes and vectors.
+- Keep row refusals for never-served entries and bodies without usable shape.
+
 ## 0.8.21
 
 - Preserve described media references in OpenCode 2 file `uri`, OpenCode

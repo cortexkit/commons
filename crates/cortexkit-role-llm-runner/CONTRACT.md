@@ -1497,12 +1497,34 @@ display-ready row for an app's reader on a runner declaring
   schema_pin?, started_at?, finished_at?, unanswered?}` with `arguments`
   the call's arguments as compact JSON text (`call_key`, `call_carrier` and `schema_pin`
   only on a runner declaring `call_identity`, §9.16), `tool_result {tool_call_id,
-  provider_executed?, is_error?, content, truncated?, files?}`, `file {media? | url, mime?,
-  filename?}` and `other {kind}` for a part the projection does not show.
+  provider_executed?, is_error?, content, truncated?, files?, unprojected?}`, `file {media? | url, mime?,
+  filename?}` and `other {kind, reason?}` for a part the projection does not show.
   A reader decodes a part type it does not know as `other`. `text` joins the
   text parts as `run.result` does (§6). Media is described by the
   `media_ref` descriptors mode serves (§4.2), never inlined; a URL stays a
   URL.
+- [pinned] **Projection failures are carried, not hidden.** A file inside a
+  tool result that cannot be projected is omitted from `files` and recorded
+  in `unprojected: [{kind, reason}]`, in native order. `kind` is the item's
+  native type, such as `file` or `image`. The tool result keeps its text and
+  its good files: the tool's text is the content the person reads. This
+  includes OpenCode 2 `state.content`, AI SDK `state.attachments`, Anthropic
+  `tool_result` content blocks, Pi tool-result images and equivalent nested
+  files. Any other failing part becomes `other {part, kind, reason}`, keeping
+  its stored key and native type: a standalone part is itself the content,
+  so it must remain visible rather than disappear. This applies to files,
+  tool calls, reasoning and other parts, not just media.
+  A whole row is refused only for a deliberately never-served body (such as
+  an OpenCode 2 compaction or a Pi control entry), or a body with no usable
+  shape: no supported role/native message type, or an invalid parts/content
+  container. Native string content and `text_ref` shapes already accepted
+  by a profile remain accepted; optional native containers remain optional.
+  The shared dispatcher still refuses a profile it does not implement.
+  Every carried `reason` is fixed library text from the public
+  `display::projection_reasons` constants, never a quoted value, transcript
+  byte, serde diagnostic or base64 decoder message. `unprojected` is
+  optional and omitted when empty; `reason` is optional and omitted when
+  absent. Clean rows serialize byte-for-byte as before.
 - [pinned] On `tool_call` and `tool_result`, `provider_executed: true` means
   the model provider ran the tool itself (for example, hosted web search,
   code execution or image generation). Its result reaches the model as a
