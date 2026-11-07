@@ -100,6 +100,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | PR3 | A tool call is never separated from its result. |
 | PR4 | `history_edit_cost: full_resend` changes nothing in the runner. It tells the provider that any edit to history already sent costs a full resend. A runner that cannot tell whether requests are chained (for example where an auth plugin chains) declares `suffix`. |
 | PR5 | A sealed part (signed or encrypted) can be dropped but never replaced; neither can a provider-executed tool part (the host replays it by reference). |
+| PR6 | A view never removes the turn the request it renders ends on. That turn is the transcript's newest entry that has parts; entries with no parts (a step the runner has opened but not filled, or a message whose tool results ride inside the calls) render nothing and never count. When that entry holds a tool call, its last tool call stays, though its output may be replaced, because a result whose call is dropped does not render; otherwise at least one of its parts stays; and no cut reaches it. Without this the request can end on the model's own reply, which providers refuse. The provider builds views that keep it. The runner checks it wherever it checks a view (`session.apply_view`, a ride's answer, and each step boundary) and refuses a view that breaks it with the `rule` refusal `final_turn_removed` (W6.5), keeping the view already in force; at a step boundary it reports `view_refused`. |
 
 ## A9. Rides
 
@@ -675,7 +676,7 @@ What could mislead the model is a number in bytes the provider writes, such as a
 | `duplicate_cut` | | More than one cut. |
 | `tagged_insert` | `id` | An inserted message's text contains a tag prefix (W6.4). |
 | `foreign_tag` | `mid`, `part`, `field`, `tag` | A replace value contains a tag prefix the part neither owns nor already contained (W6.4). |
-| `rule` | `rule`, and its fields | The view breaks a provider rule: `{"rule": "signed_part_invalid", "mid", "part"}`. |
+| `rule` | `rule`, and its fields | The view breaks a provider rule: `{"rule": "signed_part_invalid", "mid", "part"}` (PR2), or `{"rule": "final_turn_removed", "index"}` (PR6), where `index` is the zero-based position in `edits` of the edit after which nothing that must stay of the final turn is left. |
 | `unsupported_edit` | `index` | The edit at this zero-based position of `edits` has an `op`, an insert `at` or an inserted message `role` the runner does not know (W1.5), or carries images the runner cannot apply (below). |
 
 An insert with images is refused as `unsupported_edit` when its role is not `user`, any image's `media_type` is not `image/png`, or any image's `data` is not valid standard padded base64. Each case carries the same detail: `index` names the insert's zero-based position in `edits`; no image-specific detail field is added. The runner checks the standard base64 alphabet, length, padding placement and zero padding bits; inspecting PNG contents is not required by this contract. A conforming runner performs these checks before applying the view. This wire crate preserves the strings without decoding or validating them; image checks and image entries in the render plan are the view library's (W6.3), which adds them in a release after this one.

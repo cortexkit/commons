@@ -366,6 +366,10 @@ fn samples() -> Vec<(&'static str, Value)> {
     for (name, (_, refusal)) in names.into_iter().zip(refusals) {
         samples.push((name, value(refusal)));
     }
+    samples.push((
+        "view-rule-final-turn.json",
+        value(ViewRefusal::Rule(RuleBreak::FinalTurnRemoved { index: 4 })),
+    ));
     samples.extend([
         (
             "refusal-invalid-params.json",

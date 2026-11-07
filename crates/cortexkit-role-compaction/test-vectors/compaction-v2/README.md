@@ -12,6 +12,9 @@ states and both surface-count exactness values. The page's `token_family_exact`
 is `true` and the notice's is `false`. Digests inside those examples
 are unchanged when count metadata is removed (W7).
 
+`view-rule-final-turn.json` is the `rule` refusal a runner sends for a view
+that removes the turn the request ends on (PR6).
+
 Regenerate JSON from the repository root after an intentional wire change:
 
 ```sh
