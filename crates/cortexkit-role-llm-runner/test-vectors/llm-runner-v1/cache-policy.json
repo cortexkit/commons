@@ -1,0 +1,33 @@
+{
+  "valid": [
+    {},
+    {"ttl":"none","keep_warm":"off"},
+    {"ttl":"short","keep_warm":"auto"},
+    {"ttl":"long","keep_warm":"always"},
+    {"keep_warm":"hours","hours":{"from":"22:00","to":"06:00","tz":"Etc/UTC"}}
+  ],
+  "invalid": [
+    {"cache":{"ttl":"none","keep_warm":"auto"},"field":"keep_warm"},
+    {"cache":{"ttl":"none","keep_warm":"always"},"field":"keep_warm"},
+    {"cache":{"ttl":"none","keep_warm":"hours"},"field":"keep_warm"},
+    {"cache":{"keep_warm":"hours"},"field":"hours"},
+    {"cache":{"hours":{"from":"09:00","to":"17:00","tz":"Etc/UTC"}},"field":"hours"},
+    {"cache":{"keep_warm":"off","hours":{"from":"09:00","to":"17:00","tz":"Etc/UTC"}},"field":"hours"},
+    {"cache":{"keep_warm":"auto","hours":{"from":"09:00","to":"17:00","tz":"Etc/UTC"}},"field":"hours"},
+    {"cache":{"keep_warm":"always","hours":{"from":"09:00","to":"17:00","tz":"Etc/UTC"}},"field":"hours"},
+    {"cache":{"keep_warm":"hours","hours":{"from":"9:00","to":"17:00","tz":"Etc/UTC"}},"field":"hours.from"},
+    {"cache":{"keep_warm":"hours","hours":{"from":"24:00","to":"17:00","tz":"Etc/UTC"}},"field":"hours.from"},
+    {"cache":{"keep_warm":"hours","hours":{"from":"09:00","to":"17:60","tz":"Etc/UTC"}},"field":"hours.to"},
+    {"cache":{"keep_warm":"hours","hours":{"from":"09:00","to":"09:00","tz":"Etc/UTC"}},"field":"hours.to"}
+  ],
+  "unknown_zone": {"keep_warm":"hours","hours":{"from":"09:00","to":"17:00","tz":"Example/Nowhere"}},
+  "reports": [
+    {"ttl_ms":300000,"warming":{"on":true}},
+    {"implicit":true,"warming":{"on":false,"stop_reason":"unsupported"}},
+    {"ttl_ms":3600000,"warming":{"on":false,"stop_reason":"cost-cap"}},
+    {"ttl_ms":300000,"warming":{"on":false,"stop_reason":"count-cap"}},
+    {"ttl_ms":300000,"warming":{"on":false,"stop_reason":"outside-hours"}},
+    {"ttl_ms":300000,"warming":{"on":false,"stop_reason":"session-ended"}},
+    {"ttl_ms":0,"warming":{"on":false}}
+  ]
+}

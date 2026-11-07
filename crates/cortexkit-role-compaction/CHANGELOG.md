@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.8
+
+- Clarify RD3 and the matching restart and `cache_expired` text: proven expiry
+  requires every cache touch since the runner's own start, warms included,
+  and the newest touch plus its reported lifetime to have passed. Expiry is
+  unknown after start until a touch arrives; implicit caches never count as
+  expired. Stopping warming leaves expiry at the last touch plus its lifetime.
+  This is a text-only clarification with no wire change.
+
 ## 0.2.7
 
 - Add provider rule PR6: a view never removes the turn the request ends on,

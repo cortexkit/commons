@@ -135,6 +135,9 @@ pub struct StepFinished {
     pub cache_write_5m_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_1h_tokens: Option<u64>,
+    /// Actual cache lifetime and session warming state; absent means unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache: Option<crate::cache::Report>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_included_in_output: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -200,6 +203,7 @@ impl StepFinished {
             reasoning_tokens: None,
             cache_write_5m_tokens: None,
             cache_write_1h_tokens: None,
+            cache: None,
             reasoning_included_in_output: None,
             request_body_bytes: None,
             context_limit: None,
@@ -255,12 +259,15 @@ impl StepFinished {
         Ok(())
     }
 
-    /// Check the producer-side identity rules and timing containment before
+    /// Check producer-side identity, cache consistency and timing containment before
     /// publication: `first_to_last_content_ms` must not exceed
     /// `sent_to_last_content_ms` when both are present. Uniqueness and
     /// equality with the durable record are the runner's to enforce.
     pub fn check(&self) -> Result<(), &'static str> {
         self.check_identity()?;
+        if let Some(cache) = &self.cache {
+            cache.check()?;
+        }
         if let (Some(sent), Some(first)) =
             (self.sent_to_last_content_ms, self.first_to_last_content_ms)
         {

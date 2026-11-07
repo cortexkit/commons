@@ -1,4 +1,10 @@
-# llm-runner/v1 vectors for runner 0.8.9
+# llm-runner/v1 vectors for runner 0.8.19
+
+`cache-policy.json` covers accepted cache requests, shape-refusal fields,
+an unknown-zone runner refusal, and actual explicit/implicit step cache reports
+with warming stop reasons. The crate checks shape only; zone recognition is
+the runner's responsibility. Cache unit tests and the conformance kit consume
+these bytes. No vector simulates real-time warming.
 
 `result-rides.json` pins `rides::append` and `rides::append_to_content`:
 exact two-newline separators, untrimmed UTF-8 text, multiple rides, and text

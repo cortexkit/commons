@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.23
+
+- Pin runner contract 0.8.19 and add seven `cache_policy` cases: valid plan
+  and planless-send decoding, exact pre-acceptance refusal fields, frozen
+  continuation policy, refusal of both policy locations, and actual cache
+  lifetime plus warming state in model-step reports. Each case has a faulty
+  runner self-test that fails it by name. Undeclared runners remain untouched
+  and receive N/A outcomes. Real-time warming behaviour is not kit-tested.
+- Add an overridable known-zone adapter fixture, defaulting to `Etc/UTC`,
+  because the capability does not advertise zone knowledge. Keep an invented
+  zone for the negative refusal check.
+- Consume the contract's checksum-pinned cache vectors through its published
+  `test-vectors` feature, rather than depending on a sibling source checkout.
+
 ## 0.17.22
 
 - Pin runner 0.8.18 and add default-false `host_survives_restart` plus a

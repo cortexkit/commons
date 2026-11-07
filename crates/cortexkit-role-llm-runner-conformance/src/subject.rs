@@ -42,6 +42,8 @@ impl LiveIdsObservation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Capability {
+    /// Session cache lifetime and warming requests.
+    CachePolicy,
     /// Provider service levels; the kit checks omitted served metadata on unknown wires.
     ServiceTier,
     /// Durable plan-selected model and next-run tier.
@@ -202,6 +204,7 @@ impl Capability {
     /// The role groups represented by this enum, in the order of
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
+        Self::CachePolicy,
         Self::ServiceTier,
         Self::HeadSelection,
         Self::ArchivePrunesReasoning,
@@ -278,6 +281,7 @@ impl Capability {
     /// capability.
     pub fn group(self) -> Option<&'static str> {
         Some(match self {
+            Self::CachePolicy => groups::CACHE_POLICY,
             Self::ServiceTier => groups::SERVICE_TIER,
             Self::HeadSelection => groups::HEAD_SELECTION,
             Self::ArchivePrunesReasoning => groups::ARCHIVE_PRUNES_REASONING,
@@ -772,6 +776,12 @@ pub enum AttributionFixture {
 /// contract; this kit does not check that protocol.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// An IANA zone the runner knows, used for cache-policy hours requests.
+    /// Zone knowledge is not discoverable through the flag-only capability.
+    fn cache_policy_zone(&self) -> &str {
+        "Etc/UTC"
+    }
+
     /// Whether this adapter drives hosts that outlive a runner process restart.
     /// False leaves the restart-survival experiments not applicable and keeps
     /// the existing crash cases unchanged. True requires `restart_survival`.

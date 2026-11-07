@@ -1,5 +1,13 @@
 # cortexkit-role-llm-runner
 
+Version **0.8.19** adds opt-in `cache_policy`: request a cache lifetime and
+warming mode in `plan.cache`, or on the creating send of a planless session.
+`cache::check` validates shape; a runner validates zones and maps provider
+support without refusing an unsupported request. Optional `StepFinished.cache`
+reports actual lifetime and session warming state. Step-hint readers upgrade
+to 0.8.19 before a runner emits this new closed-body member. See CONTRACT
+§9.3.5 and §14.3.
+
 Version **0.8.15** adds independent opt-in `media_refs`, `plan_notes` and
 `history_intake`.
 `media_refs` preserves inline text, arguments, reasoning and paging while

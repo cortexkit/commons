@@ -101,6 +101,9 @@ pub(super) fn publish(module: &Module, session: &str, record: &Value, durable: b
         .check()
         .expect("faithful event passes producer checks");
     let mut body = serde_json::to_value(event).unwrap();
+    if module.world.serves(groups::CACHE_POLICY) && defects.cache_policy != Some("missing_report") {
+        body["cache"] = json!({"implicit":true,"warming":{"on":false,"stop_reason":"unsupported"}});
+    }
     if STEP_EVENT_DEFECTS_ENABLED && defects.step_events_missing_attempt_id {
         body.as_object_mut().unwrap().remove("harness_step_ref");
         body.as_object_mut().unwrap().remove("attempt_id");

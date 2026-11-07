@@ -22,6 +22,10 @@ pub const STOP_ALL_JSON: &str = include_str!("../test-vectors/llm-runner-v1/stop
 /// Every vector file as `(file name, contents)`, in the order
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
+    (
+        "cache-policy.json",
+        include_str!("../test-vectors/llm-runner-v1/cache-policy.json"),
+    ),
     ("restart-survival.json", RESTART_SURVIVAL_JSON),
     ("stop-all.json", STOP_ALL_JSON),
     ("call-yield.json", CALL_YIELD_JSON),

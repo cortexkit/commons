@@ -108,7 +108,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 |---|---|
 | RD1 | Before a model request that rewrites the model provider's cache anyway, or that would not fit, the runner calls `compaction.ride` (W5.3) with every cause that applies, and waits up to its deadline. |
 | RD2 | The answer is a view or nothing. A late or missing answer means the request goes out with the view the runner has. |
-| RD3 | Cache expiry is the runner's knowledge (W5.3), and `cache_expired` means proven expiry. The runner sends it only when all of these hold: it knows the cache lifetime it asked the model provider for on its last request for the session (for example a prompt-cache TTL); it has that request's time, recorded on the same clock it reads now and kept durably if it is to survive a restart; and that clock shows the lifetime has passed. Keep-warm requests count as requests. A runner missing any of these, including after its own restart without such a record, or behind a host that keeps the cache warm without telling it the lifetime, sends no `cache_expired`: the provider's cache may still be warm, and a provider treats `cache_expired` as a rebuild that costs nothing extra. |
+| RD3 | Cache expiry is the runner's knowledge (W5.3), and `cache_expired` means proven expiry. A runner may report it only when it holds every cache touch for the session since its own start, warms included, and its own clock shows that the newest touch plus that touch's reported lifetime has passed. After a runner start, expiry is unknown until a touch arrives; an older durable request record alone is not proof. An `implicit` cache is never reported expired. When warming stops, expiry follows at the last touch plus its lifetime, not at the time warming stopped. A runner missing any touch or its reported lifetime, including behind a host that warms without reporting touches, sends no `cache_expired`: the cache may still be warm, and a compaction provider treats `cache_expired` as a rebuild that costs nothing extra. |
 | RD4 | The runner's only limit is its own usable window (W3.4). When the next request would exceed it, the runner rides with `over_limit`. If the request still does not fit, it refuses the turn with `context_ceiling`. It never sends over its limit. |
 | RD5 | Setup lists the causes the runner can detect (`detects`). A cause the runner cannot detect is unknown to the provider, never "did not happen". A runner lists `cache_expired` only for routes where it can meet RD3; a route that cannot leaves it out. If `cache_expired` is absent from `detects`, the provider treats expiry as unknown. If it is listed but absent from a ride's causes, expiry was not proven for that ride; that does not certify the cache is warm. |
 | RD6 | A one-step fallback is not a model change: a resend to another model after a refusal, or a model provider's own server-side fallback. The session's model stays as it was in the conditions, and no ride happens. |
@@ -153,7 +153,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 |---|---|
 | F1 | Provider unreachable: the runner keeps applying its last view. An `over_limit` ride with no answer ends in `context_ceiling`. |
 | F2 | Provider restart: notices answer `setup_required`, rides are refused `unknown_session`, the runner calls Setup again, and the provider rebuilds from its store and one read from its last cut. |
-| F3 | Runner restart: it reloads its stored applied view and transcript and keeps applying them, and calls Setup again. It rides with `cache_expired` only when its durable record of its last request proves that the requested cache lifetime has passed (RD3). |
+| F3 | Runner restart: it reloads its stored applied view and transcript and keeps applying them, and calls Setup again. Cache expiry is unknown until a cache touch arrives after that start. It reports `cache_expired` only with every touch since its own start and the newest touch's reported lifetime passed; never for an `implicit` cache (RD3). |
 | F4 | One session's slow or silent runner never delays another session. |
 
 # Part B: wire reference
@@ -563,7 +563,7 @@ Causes:
 
 | Cause | When the runner rides with it |
 |---|---|
-| `cache_expired` | Its own clock shows that the time since its last request for the session (keep-warm requests count) is longer than the cache lifetime it requested. Never sent when it cannot tell (RD3). |
+| `cache_expired` | The runner holds every cache touch since its own start, warms included, and its own clock shows that the newest touch plus that touch's reported lifetime has passed. Unknown until a touch arrives after start; never for an `implicit` cache. After warming stops, use the last touch plus its lifetime (RD3). |
 | `chain_reset` | It is about to start a new request chain on a chained route (connection age or idle limit, a run starting without a kept connection). |
 | `model_change` | The next request uses a different model than the previous one, other than a one-step fallback (RD6). |
 | `tier_change` | A different service tier. |

@@ -41,6 +41,13 @@ const fn case(
 }
 
 const READS: &[Capability] = &[TranscriptReads, Queue];
+const CACHE: &[Capability] = &[Capability::CachePolicy, Queue, TranscriptReads];
+const CACHE_PLAN: &[Capability] = &[
+    Capability::CachePolicy,
+    Capability::Plans,
+    Queue,
+    TranscriptReads,
+];
 const RUNS: &[Capability] = &[RunOps, Queue];
 const DISPATCH: &[Capability] = &[DispatchAttribution, Queue, TranscriptReads];
 const SENDS: &[Capability] = &[Queue, TranscriptReads];
@@ -137,6 +144,13 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("cache_policy_plan_decode", CACHE_PLAN, "valid plan cache requests are accepted, even where provider support is partial"),
+    case("cache_policy_send_decode", CACHE, "valid planless creating-send cache requests are accepted"),
+    case("cache_policy_plan_refusals", CACHE_PLAN, "invalid plan cache combinations and unknown zones are refused before acceptance naming the exact field"),
+    case("cache_policy_send_refusals", CACHE, "invalid creating-send cache combinations and unknown zones are refused before acceptance naming the exact field"),
+    case("cache_policy_continuation_refused", CACHE, "a continuation carrying cache is refused even when unchanged"),
+    case("cache_policy_plan_and_send_refused", CACHE_PLAN, "a creating send carrying both plan and top-level cache is refused before writing"),
+    case("cache_policy_step_report", &[Capability::CachePolicy, Capability::StepEvents, Queue, TranscriptReads], "each model step reports ttl_ms or implicit and the session warming state"),
     case("restart_survival_model_step", &[], "crash and orderly restart mid-model preserve the active run_id through its natural host end"),
     case("restart_survival_held_tool_call", &[], "a held keyed call survives both restart modes and executes at its provider exactly once"),
     case("restart_survival_send_handoff", &[], "a pre-restart handoff settles delivered or outcome_unknown and send_id replay never hands it twice"),
@@ -963,6 +977,7 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
+    "cache_policy cases check admission and model-step report shape, not real-time warming schedules, cost/count caps, local-time transitions or expiry",
     "restart_survival relies on real-route captures and independent host/provider observations from an opted-in adapter; the in-process fake proves named rejection, not process survival. The cases cover held keyed reply custody, not the separate provider lost-reply/Pure retry protocol",
     "account_route checks verbatim admission names and run-fixed joining refusal without writing; pooled-key loading, automatic renewal and reassignment are not driven, and absent head.model leaves name distinctness to the unique kit-pool- prefix",
     "sender_attribution observes stored prefixes through reads, not the model's request; it does not exercise a plan refresh between intake and storage, and its photo-only case is inapplicable without media_only_send and an upload fixture",

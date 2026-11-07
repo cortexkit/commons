@@ -287,6 +287,12 @@ struct WireSendRequest {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::cache::deserialize_optional"
+    )]
+    cache: Option<crate::cache::Cache>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_retention"
     )]
     retention: Option<u64>,
@@ -328,6 +334,7 @@ impl From<WireSendRequest> for SendRequest {
             delivery,
             delivery_order,
             plan: wire.plan,
+            cache: wire.cache,
             retention: wire.retention,
             retention_policy: wire.retention_policy,
             service_tier: wire.service_tier,
@@ -353,6 +360,7 @@ impl From<SendRequest> for WireSendRequest {
             send_id: request.send_id,
             delivery,
             plan: request.plan,
+            cache: request.cache,
             retention: request.retention,
             retention_policy: request.retention_policy,
             service_tier: request.service_tier,
@@ -485,6 +493,9 @@ pub struct SendRequest {
     /// a different plan is refused as `plan_drift` so an ordinary send cannot
     /// replace the session's frozen manifest.
     pub plan: Option<Map<String, Value>>,
+    /// Cache policy for a planless session, fixed by its creating send.
+    /// Continuations omit it, even when repeating the same value.
+    pub cache: Option<crate::cache::Cache>,
     /// Whole-session retention in seconds. Frozen on the first send;
     /// subsequent sends may only shorten it. Absent initially means forever.
     pub retention: Option<u64>,
@@ -625,6 +636,7 @@ impl SendRequest {
             delivery: None,
             delivery_order: None,
             plan: None,
+            cache: None,
             retention: None,
             retention_policy: None,
             service_tier: None,
@@ -694,6 +706,30 @@ impl SendRequest {
     pub fn with_plan(mut self, plan: Map<String, Value>) -> Self {
         self.plan = Some(plan);
         self
+    }
+
+    pub fn with_cache(mut self, cache: crate::cache::Cache) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+
+    /// Validate cache shape before acceptance on a `cache_policy` runner.
+    /// `creating` describes the session, not whether this send starts a run.
+    /// Zone recognition remains the runner's responsibility.
+    pub fn check_cache(&self, creating: bool) -> Result<(), crate::cache::ErrorBody> {
+        if let Some(cache) = &self.cache {
+            if !creating || self.plan.is_some() {
+                return Err(crate::cache::ErrorBody::invalid_params(
+                    "cache",
+                    "cache is only allowed on a planless session's creating send",
+                ));
+            }
+            crate::cache::check_send(cache)?;
+        }
+        if let Some(plan) = &self.plan {
+            crate::cache::check_plan(plan)?;
+        }
+        Ok(())
     }
 
     pub fn with_retention(mut self, seconds: u64) -> Self {

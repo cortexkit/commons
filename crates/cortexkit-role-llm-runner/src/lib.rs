@@ -28,6 +28,7 @@ pub mod archive_prunes_reasoning;
 pub mod attachments;
 pub mod attribution;
 pub mod baseline;
+pub mod cache;
 mod call_carrier;
 pub mod call_yield;
 pub mod compaction;
@@ -333,6 +334,8 @@ pub mod capabilities {
     /// `session.baseline`. Identical later plans do not fetch again; different
     /// plans are refused to preserve the session's frozen manifest.
     pub const PLANS: &str = "plans";
+    /// Accept session cache lifetime and warming requests; no discovery metadata.
+    pub const CACHE_POLICY: &str = "cache_policy";
     /// Admit preset-less system text only for a provider declaring
     /// `system-text-default/v1`, and forward the item unchanged.
     pub const SYSTEM_TEXT_DEFAULT: &str = "system_text_default";
@@ -525,6 +528,7 @@ pub mod capabilities {
         (QUEUE, &[ops::SESSION_SEND]),
         (INTERRUPT, &[ops::SESSION_SEND]),
         (PLANS, &[ops::SESSION_SEND]),
+        (CACHE_POLICY, &[ops::SESSION_SEND]),
         (RETENTION, &[ops::SESSION_SEND]),
         (INPUT_TOKEN_CAP, &[ops::SESSION_SEND]),
         (MAX_STEPS, &[ops::SESSION_SEND]),

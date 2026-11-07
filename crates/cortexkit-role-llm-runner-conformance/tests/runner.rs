@@ -3,6 +3,7 @@
 
 mod account_route;
 mod adopt_open;
+mod cache_policy;
 mod fake;
 
 const HEAD_SELECTION_CASES: &[&str] = &[
@@ -1338,7 +1339,8 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     }
     // Legacy fixtures do not opt into these groups or supply their optional
     // metadata/clock hooks. Inapplicable cases are not counted as passing coverage.
-    if (case.starts_with("sender_succession_")
+    if (case.starts_with("cache_policy_")
+        || case.starts_with("sender_succession_")
         || case.starts_with("history_intake_")
         || case.starts_with("plan_notes_")
         || case.starts_with("media_refs_")
@@ -1387,6 +1389,7 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::CachePolicy,
     Capability::ForkAnswer,
     Capability::HistoryIntake,
     Capability::PlanNotes,
@@ -1528,6 +1531,7 @@ const TIMED_RETENTION_CASES: &[&str] = &[
 
 fn faithful_runner_with_all_supported_groups() -> FakeSubject {
     let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::CachePolicy);
     subject.capabilities.insert(Capability::Plans);
     subject.held_calls_group = true;
     subject.capabilities.insert(Capability::RunStatus);
@@ -1919,6 +1923,7 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             continue;
         }
         if spec.name == "media_only_send"
+            || spec.name.starts_with("cache_policy_")
             || spec.name.starts_with("media_refs_")
             || spec.name.starts_with("plan_notes_")
             || spec.name.starts_with("adopt_open_")

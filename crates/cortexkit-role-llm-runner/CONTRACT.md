@@ -35,6 +35,13 @@ the `session_change` request, reply and refusal shapes (§10.2) are pinned.
 An LLM runner is any module that runs model sessions. Nothing here names a
 particular implementation.
 
+## Changes in 0.8.19
+
+- Add opt-in `cache_policy` (§9.3.5): requested lifetime and warming policy,
+  planless session freezing, pre-acceptance checks, and optional actual cache
+  facts in `step.finished.v1`. Readers of a runner's step hints move to 0.8.19
+  before that runner emits the new `cache` member (§14.3).
+
 ## Changes in 0.8.16
 
 - Add independent opt-in `fork_answer` (§9.20): question-answering branches
@@ -254,6 +261,7 @@ alias until the next breaking release.
 | `account_route` | `session.send` account admission names; requires `routed_accounts` | §9.3.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `head_selection` | `session.send`, `session.head`; requires `plans`; selection through `session.refresh` additionally requires `session_change` | §9.3.4 |
+| `cache_policy` | `session.send`; flag accepting `cache`, no discovery metadata | §9.3.5 |
 | `call_identity` | No added op; `call_key`, `schema_pin` and `call_carrier` on reader call facts (it requires `history_display` or `live_events`) | §9.16 |
 | `read_display_facts` | `session.read` (`include_display_facts`, entry client ids, module senders, creation times, tool times, assistant completion times and reasoning summaries) | §4.2, §4.7.1 |
 | `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `session.send_status` where served | §9.7 |
@@ -3317,6 +3325,86 @@ A runner that declares `retract` serves `session.retract`.
   soon as acceptance is durable, before any run. Model or tier changes still
   use the compaction contract's existing `model_change` / `tier_change`
   causes; this group defines no new cause or notice shape.
+
+### 9.3.5 `cache_policy`: session cache requests
+
+- [pinned] `cache_policy` is a flag in `role.describe.capabilities`, meaning
+  the runner accepts `cache`. It adds no discovery metadata. A caller sends
+  the field only to a declaring runner. The request is:
+
+  ```json
+  {"ttl":"long","keep_warm":"hours","hours":{"from":"22:00","to":"06:00","tz":"Etc/UTC"}}
+  ```
+
+  `ttl` is optional (`none`, `short`, `long`); `keep_warm` is optional
+  (`off`, `hours`, `always`, `auto`). `hours`, when used, contains `from`,
+  `to` and an IANA zone name `tz`.
+- [pinned] A plan carries the request as `plan.cache`. It is frozen per run;
+  a refresh changes it from the next run, never a run already in progress.
+  A session without a plan may instead carry top-level `cache` on its
+  creating `session.send`. That value is fixed for the session's life, and
+  every continuation omits it, exactly like `tools` in §9.3.1. Even an
+  unchanged `cache` on a continuation is refused `invalid_params` naming
+  `cache`, before writing anything. A send carrying both `plan` and top-level
+  `cache` is likewise refused before any write, naming `cache`: with a plan,
+  the only cache-policy location is `plan.cache`.
+- [pinned] When neither the plan nor the creating send carries `cache`, the
+  runner uses its own `ttl`, with `keep_warm: off`. An omitted `ttl` leaves
+  lifetime selection to the runner; an omitted `keep_warm` means `off`.
+  Warming never becomes a default cost for a caller that does not know the
+  field. A caller wanting `auto` requests it explicitly through the plan.
+- [pinned] Cache policy is a request, not a provider capability requirement.
+  A runner never refuses it because a provider cannot do what it asks: it
+  applies what the route supports, and otherwise the provider's own caching
+  applies. Applying only part of a warming mode is allowed, for example
+  warming only during tool waits where the route supports that.
+- [pinned] `short` and `long` select the shortest and longest **explicit**
+  cache lifetimes the route offers. The runner maps the request per route
+  and reports the lifetime actually used (§14.3); a request and its result
+  are distinct facts. `none` asks for no explicit cache.
+- [informative] Example route mappings, not fixed provider promises:
+
+  | Route | `short` / `long` |
+  |---|---|
+  | Anthropic | 5 min / 1 h |
+  | OpenAI API: per model | Newer models: `prompt_cache_options.ttl` values `30m` / `12h` (30 min / 12 h). Earlier models: `prompt_cache_retention` values `in_memory` / `24h`; `short` reports `implicit` because `in_memory` has no provable lifetime (typically 5–10 min), and `long` is 24 h. |
+  | Gemini | An explicit cache with a TTL the runner picks |
+  | Subscription routes | Implicit caching, nothing to choose |
+
+- [pinned] Before accepting a creating send or refresh, the runner refuses
+  these requests with `invalid_params`, naming the exact field below. On
+  a planless creating send, replace `plan.cache` with `cache` in each path.
+
+  | Request problem | Field |
+  |---|---|
+  | `ttl: none` with any effective `keep_warm` other than `off` | `plan.cache.keep_warm` |
+  | `keep_warm: hours` without `hours`, or `hours` present with any other mode | `plan.cache.hours` |
+  | Malformed `from`: not two-digit 00–23 hours, `:`, two-digit 00–59 minutes | `plan.cache.hours.from` |
+  | Malformed `to`, or `from == to` | `plan.cache.hours.to` |
+  | `tz` is not an IANA zone name the runner knows | `plan.cache.hours.tz` |
+
+  A window may cross midnight: 22:00 to 06:00 is valid. `cache::check(&Cache)`
+  checks only provider-independent shape and returns an `ErrorBody` with the
+  plan field names; `cache::check_send` uses creating-send field names.
+  Zone validity belongs to the runner, not the crate's shape checks.
+- [pinned] Every warm resends the **last real request's bytes**, under the
+  view already applied. It is a cache touch, never a step, a notice or
+  `last_prompt_tokens`. A warm never reopens an ended session; warming stops
+  when the session ends. These rules apply to every mode other than `off`.
+- [informative] Recommended timing: first warm at
+  `ttl − min(30 s, ttl/2)` after the last touch, then at that interval. Skip
+  a warm that would land in the last `min(5 s, ttl/10)` of the lifetime.
+- [pinned] `auto` warms idle sessions and tool waits until the warms since
+  the last real request reach the cost of one cache rewrite: its cost cap
+  is counted from that real request. `always` warms at any time. `hours`
+  warms only while local time in `tz` is in the half-open interval
+  [`from`, `to`), including midnight-crossing windows.
+- [pinned] `always` and `hours` stop after 24 warms without a real request.
+  Any real request resets that count and resets the `auto` cost cap too.
+  When warming stops, its reason in the step cache report (§14.3) is one of
+  `cost-cap`, `count-cap`, `outside-hours`, `session-ended` or `unsupported`.
+  Real-time warming schedules, cost/count caps and local-time transitions
+  are not exercised by the conformance kit.
 
 ### 9.4 `structured_output`: schema-shaped run output
 
@@ -6580,8 +6668,25 @@ to the session's whole length.
   | `request_body_bytes?`, `context_limit?`, `finish_reason?` | Optional unsigned 64-bit request-byte count and context-token limit, and optional open finish-reason string |
   | `sent_to_last_content_ms?`, `first_to_last_content_ms?` | Optional unsigned 64-bit milliseconds from sending the model request to its last content, and from its first to last content |
   | `route_decision_id?` | Optional string: the run's routing decision (§9.3.3), absent when the run had none |
+  | `cache?` | Optional closed object: actual cache lifetime as `ttl_ms?` (u64 milliseconds) or `implicit?: true`, and optional session `warming?: {on: boolean, stop_reason?: string}` (§9.3.5). Missing members mean unknown, not zero or off. |
   | `started_at_ms`, `finished_at_ms` | Required unsigned 64-bit Unix epoch millisecond timestamps |
 
+- [pinned] A `cache_policy` runner records each model step's actual cache
+  lifetime as exactly one of `cache.ttl_ms` or `cache.implicit: true`, and
+  whether warming is on for the session in `cache.warming.on`. An implicit
+  cache has no provable lifetime. `implicit: false` and a report carrying
+  both lifetime forms are invalid producer reports. A warming stop records
+  `on: false` with one of §9.3.5's `stop_reason` values; an `off` policy that
+  never started warming needs no stop reason. An on state has no stop reason.
+  The `cache` and nested `warming` objects are closed to unknown members;
+  classification values stay open when read. `StepFinished::check` validates
+  cache consistency before publication; readers preserve measurements even
+  when that producer check would fail, just as for timing faults.
+- [pinned] **Readers first for 0.8.19:** every reader of a runner's step hints
+  moves to runner contract 0.8.19 or later before that runner emits `cache`.
+  `StepFinished` uses `deny_unknown_fields`, so older readers refuse the new
+  member. Absent `cache` leaves older bodies byte for byte unchanged. This is
+  the same rollout order as the 0.8.7 timing members below.
 - [pinned] Both content times measure a model call, not tool time. The send
   measured is the recorded attempt's send under `per_attempt`, and the step's
   last attempt's send under `per_completed_step`. Zero is a measured value;

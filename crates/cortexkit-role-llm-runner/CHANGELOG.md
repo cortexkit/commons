@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.19
+
+- Add the flag-only `cache_policy` group and typed cache requests: lifetime,
+  optional warming mode and local-time hours. Plan policy is frozen per run;
+  a planless session may set its lifetime policy once on its creating send.
+  Continuations and sends combining a plan with top-level cache are refused.
+- Add pure `cache::check` shape validation and exact plan/creating-send
+  refusal fields. Zone recognition remains the runner's responsibility.
+  Route support is best-effort; absent policy leaves warming off. Define warm
+  byte reuse, cost/count caps, stop reasons and recommended timing.
+- Add optional actual cache lifetime (`ttl_ms` or `implicit`) and session
+  warming state in `StepFinished.cache`, with checksum-pinned cache vectors.
+  The step event still uses `deny_unknown_fields`: every step-hint reader
+  must move to 0.8.19 before a runner emits the new member, following the
+  readers-first rollout used for the 0.8.7 timing fields. Absent metadata
+  remains unknown and preserves older event bytes.
+
 ## Unreleased
 
 - Contract §7: read access is checked for a `session.subscribe` stream's

@@ -1,5 +1,20 @@
 # cortexkit-role-llm-runner-conformance
 
+The `cache_policy` cases are N/A without the declared group and send no cache
+requests to such a runner. Declaring runners are checked for plan/creating-send
+decoding, exact pre-acceptance refusals, continuation and both-location refusal,
+and actual lifetime (`ttl_ms` or `implicit`) plus warming state on step hints
+where `step_events` is available. Plan cases additionally need a plan fixture.
+The kit does **not** test real-time warming: schedules, local-time windows,
+cost/count caps, session-end stopping and cache expiry need runner-specific
+tests. These cases make no claim to have exercised that behaviour.
+
+`LlmRunnerSubject::cache_policy_zone()` supplies an IANA zone the runner knows,
+defaulting to `Etc/UTC`; an adapter can override it. Zone knowledge is not
+discoverable through the flag-only capability, so the kit uses this fixture
+for hours requests instead of requiring every runner to know the same zone.
+The unknown-zone refusal still uses the invented name `Example/Nowhere`.
+
 The independent `history_intake` group needs only `session.head`. Its two cases
 use the defaulted `begin_history_intake`, `advance_history_intake` and
 `finish_history_intake` hooks to hold a growing native-history import. They

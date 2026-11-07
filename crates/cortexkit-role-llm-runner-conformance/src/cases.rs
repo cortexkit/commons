@@ -89,6 +89,7 @@ where
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         let passed = |result: Check| result.map(|()| Ending::Passed);
         match name {
+            name if name.starts_with("cache_policy_") => crate::cache_policy::run(self, name).await,
             "call_yield_without_plans"
             | "call_yield_without_delivery_order"
             | "call_yield_without_notices"

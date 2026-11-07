@@ -66,6 +66,7 @@ use subc_protocol::ErrorBody;
 
 mod attachments;
 mod attribution;
+mod cache_policy;
 mod display;
 mod fork_answer;
 mod held_calls;
@@ -174,6 +175,7 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub cache_policy: Option<&'static str>,
     pub fork: ForkDefect,
     pub history_intake_fixture: bool,
     pub history_intake: Option<&'static str>,
@@ -729,6 +731,7 @@ struct World {
     models: Mutex<BTreeMap<String, String>>,
     /// The prompt-cache lifetime each session's requests carry.
     observed_cache_lifetimes: Mutex<BTreeMap<String, Option<u64>>>,
+    cache_policy_zone: String,
     /// Sessions whose next model answer streams this many parts and holds.
     stream_holds: Mutex<BTreeMap<String, usize>>,
     /// The step in flight of each session whose answer is held mid-stream:
@@ -3563,6 +3566,9 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(reply) = cache_policy::admit(self, session, &params) {
+            return Ok(reply);
+        }
         if let Some(reply) = history_intake::intercept_send(self, stamp, session, &params) {
             return Ok(reply);
         }
@@ -5816,6 +5822,7 @@ pub struct FakeSubject {
     pub pause_for: Option<Duration>,
     /// Whether the scripted route supports a turn-scoped system message.
     pub turn_system: bool,
+    pub cache_policy_zone: String,
     /// This adapter cannot create fetch-plan sessions.
     pub without_plans: bool,
     /// The adapter can give a session host history before its first send
@@ -5933,6 +5940,7 @@ impl FakeSubject {
             early_held_steer_receipt: None,
             pause_for: None,
             turn_system: true,
+            cache_policy_zone: "Etc/UTC".into(),
             host_prefix_hook: false,
             seed_hook: false,
             host_prefix_everywhere: 0,
@@ -6065,6 +6073,7 @@ impl FakeSubject {
                     ceiling_holds: Mutex::new(BTreeSet::new()),
                     models: Mutex::new(BTreeMap::new()),
                     observed_cache_lifetimes: Mutex::new(BTreeMap::new()),
+                    cache_policy_zone: self.cache_policy_zone.clone(),
                     stream_holds: Mutex::new(BTreeMap::new()),
                     in_flight: Mutex::new(BTreeMap::new()),
                     late_seal_reads: AtomicUsize::new(self.late_seal_reads),
@@ -6183,6 +6192,10 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    fn cache_policy_zone(&self) -> &str {
+        &self.cache_policy_zone
+    }
+
     fn routing_peer_error_replies(&self) -> bool {
         self.fork_peer_errors
     }

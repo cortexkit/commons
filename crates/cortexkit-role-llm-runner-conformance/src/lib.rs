@@ -26,6 +26,7 @@ mod adopt;
 mod archive_pruning;
 mod attachments;
 mod attribution;
+mod cache_policy;
 pub mod call_identity;
 mod call_yield;
 mod cancel;
