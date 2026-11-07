@@ -44,7 +44,7 @@ use cortexkit_role_classifier_conformance::{
         request::{
             check_catalog_row, check_request, check_request_bytes, check_request_with_references,
             check_resolved_item_images, effective_ceiling, parse_request, resolve_item_images,
-            CatalogRow, ClassifyRequest, CLASSIFIER_KIND,
+            CatalogRow, ClassifyRequest, DECISION_KIND,
         },
         IndexMap,
     },
@@ -326,7 +326,7 @@ impl FakeModule {
 
     fn catalog_row(&self, model: &str) -> CatalogRow<'static> {
         match model {
-            PRICED | TEXT_ONLY => CatalogRow::Kind(CLASSIFIER_KIND),
+            PRICED | TEXT_ONLY => CatalogRow::Kind(DECISION_KIND),
             CHAT => CatalogRow::Kind("chat"),
             KINDLESS => CatalogRow::Kindless,
             _ => CatalogRow::Absent,

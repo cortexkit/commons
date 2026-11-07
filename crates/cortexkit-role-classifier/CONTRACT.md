@@ -266,10 +266,15 @@ numbers, and say what is this role's own.
   support and following its account admission (§9.1), renewal, observation
   and report flow unchanged.
 
-- [pinned] As RULES §9: a missing row is `model_unknown`; a row whose
-  `kind` is not `classifier` is `model_not_classifier`, with `detail.model`
-  and `detail.kind`; a row that states no `kind` is that same code with
-  `detail.model` only, never an invented kind (`check_catalog_row`).
+- [pinned] As RULES §9: a missing row is `model_unknown`. A row serves this
+  role when its `kind` is `decision`, the model catalog's word for
+  question-answering decision models, or `classifier`, the role's own name,
+  which earlier releases required (`SERVING_KINDS`). A row with any other
+  `kind`, such as `extraction` (the extractor role's) or `chat`, is
+  `model_not_classifier`, with `detail.model` and `detail.kind`; a row that
+  states no `kind` is that same code with `detail.model` only, never an
+  invented kind (`check_catalog_row`). A router choosing models for this
+  role filters on the same set.
 - [pinned] A provider declaring `routed_models` asks routing to choose the
   model and account. It derives `questions` from the question count,
   `modalities: ["image"]` when any item has images, `context_window` from

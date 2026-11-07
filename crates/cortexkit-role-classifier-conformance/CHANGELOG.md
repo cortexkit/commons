@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1
+
+- Pin classifier 0.6.1, whose catalog check accepts `decision` rows. The
+  kit's own fake provider now marks its classifier models `decision`, the
+  model catalog's word. No case changes.
+
 ## 0.8.0
 
 - Pin classifier 0.6.0, whose optional model pin changes the public request

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1
+
+- A catalog row whose `kind` is `decision` now serves this role. That is
+  the word the model catalog uses for question-answering decision models.
+  Until now `check_catalog_row` accepted only `classifier`, so a provider
+  calling it refused every catalog decision model. `classifier` stays
+  accepted. Add `DECISION_KIND` and `SERVING_KINDS`; every other stated
+  kind, including `extraction`, is still `model_not_classifier`. No other
+  change.
+
 ## 0.6.0
 
 - Breaking: `ClassifyRequest.model` and the model pin in `BatchIdentity`

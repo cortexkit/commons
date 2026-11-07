@@ -32,8 +32,19 @@ use crate::{
     },
 };
 
-/// The catalog `kind` of a classifier model.
+/// The catalog's word for a model that answers this role's questions: the
+/// model catalog marks question-answering decision models `decision`.
+pub const DECISION_KIND: &str = "decision";
+
+/// The role's own name, which the first releases of this contract required as
+/// the catalog `kind`. Still accepted, so rows that already state it keep
+/// serving.
 pub const CLASSIFIER_KIND: &str = "classifier";
+
+/// Every catalog `kind` that can serve `classify.run`. Any other stated kind,
+/// such as `extraction` (a different role) or `chat`, is
+/// `model_not_classifier`.
+pub const SERVING_KINDS: &[&str] = &[DECISION_KIND, CLASSIFIER_KIND];
 
 /// The `classify.run` request.
 ///
@@ -252,9 +263,19 @@ pub fn check_request_bytes(len: usize, limits: &Limits) -> Result<(), Refusal> {
 }
 
 /// Check the model's catalog row: [`CatalogRow::Absent`] is `model_unknown`;
-/// a row with another kind or no kind is `model_not_classifier`. A kindless
-/// refusal names the model without inventing a kind.
+/// a row whose kind is one of [`SERVING_KINDS`] serves; a row with any other
+/// kind or no kind is `model_not_classifier`. A kindless refusal names the
+/// model without inventing a kind, and any other refusal names the kind the
+/// row stated.
 pub fn check_catalog_row(model: &str, row: CatalogRow<'_>) -> Result<(), Refusal> {
+    // The shared check compares against one kind, so a serving kind is passed
+    // on as the role's own word and every other row unchanged.
+    let row = match row {
+        CatalogRow::Kind(kind) if SERVING_KINDS.contains(&kind) => {
+            CatalogRow::Kind(CLASSIFIER_KIND)
+        }
+        other => other,
+    };
     check_row(model, row, CLASSIFIER_KIND, |model, kind| match kind {
         Some(kind) => Refusal::model_not_classifier(model, kind),
         None => {
@@ -566,7 +587,11 @@ mod tests {
 
     #[test]
     fn catalog_rows_are_pinned() {
+        assert!(check_catalog_row("m", CatalogRow::Kind("decision")).is_ok());
         assert!(check_catalog_row("m", CatalogRow::Kind("classifier")).is_ok());
+        let extraction = check_catalog_row("m", CatalogRow::Kind("extraction")).unwrap_err();
+        assert_eq!(extraction.code, MODEL_NOT_CLASSIFIER);
+        assert_eq!(extraction.detail.kind.as_deref(), Some("extraction"));
         assert_eq!(
             check_catalog_row("m", CatalogRow::Absent).unwrap_err().code,
             MODEL_UNKNOWN
