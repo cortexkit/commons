@@ -28,6 +28,23 @@ fn assert_passed(report: &SuiteReport, case: &str) {
             return;
         }
     }
+    // The reference fake declares neither reply custody nor session notices,
+    // so those cases are skipped or not applicable in every suite run against
+    // it, whichever defect a test switches on.
+    if case.starts_with("reply_custody_") {
+        if let Some(CaseOutcome::Skipped { missing }) = report.outcome(case) {
+            assert!(
+                missing.contains(&Capability::ReplyCustody),
+                "{case}: {missing:?}"
+            );
+            return;
+        }
+    }
+    if case == "session_notices_describe" {
+        if let Some(CaseOutcome::Inapplicable { .. }) = report.outcome(case) {
+            return;
+        }
+    }
     assert_eq!(
         report.outcome(case),
         Some(&CaseOutcome::Passed),
@@ -41,7 +58,14 @@ async fn a_faithful_provider_passes_every_case_but_its_simulated_kills_fail_the_
     let report = run(&FakeSubject::new(Defects::default())).await;
     assert_eq!(report.cases.len(), CASES.len());
     for spec in CASES {
-        if spec.name == "system_text_default_served" {
+        if spec.name.starts_with("reply_custody_") {
+            assert!(
+                matches!(report.outcome(spec.name), Some(CaseOutcome::Skipped { missing })
+                if missing.contains(&Capability::ReplyCustody))
+            );
+            continue;
+        }
+        if ["system_text_default_served", "session_notices_describe"].contains(&spec.name) {
             assert!(matches!(
                 report.outcome(spec.name),
                 Some(CaseOutcome::Inapplicable { .. })
@@ -211,7 +235,15 @@ async fn without_legacy_reply_the_legacy_case_is_skipped_never_passed() {
     assert_eq!(
         report.verdict,
         SuiteVerdict::ConformingForDeclaredCapabilities {
-            skipped: vec![Capability::ApprovalExecution, Capability::LegacyReply],
+            skipped: vec![
+                Capability::ApprovalExecution,
+                Capability::ReplyCustody,
+                Capability::ReplyCustodyPure,
+                Capability::ReplyCustodyHeld,
+                Capability::ReplyCustodyRefusal,
+                Capability::ReplyCustodyCatalogChange,
+                Capability::LegacyReply
+            ],
         },
         "{}",
         report.render()
@@ -636,11 +668,13 @@ async fn digesting_a_json_wrapper_fails_system_text_digests_match_text_by_name()
         if spec.name == "system_text_preset_optional_served" {
             let reason = failed(&report, spec.name);
             assert!(reason.contains("system_text.item_digest"), "{reason}");
-        } else if ![
-            "system_text_digests_match_text",
-            "system_text_default_served",
-        ]
-        .contains(&spec.name)
+        } else if !spec.name.starts_with("reply_custody_")
+            && ![
+                "system_text_digests_match_text",
+                "system_text_default_served",
+                "session_notices_describe",
+            ]
+            .contains(&spec.name)
         {
             assert_passed(&report, spec.name);
         }
@@ -790,11 +824,13 @@ async fn refusing_a_preset_less_system_text_item_fails_the_optional_preset_case_
     assert!(reason.contains("refused as invalid_params"), "{reason}");
     assert!(reason.contains("without a preset"), "{reason}");
     for spec in CASES {
-        if ![
-            "system_text_preset_optional_served",
-            "system_text_default_served",
-        ]
-        .contains(&spec.name)
+        if !spec.name.starts_with("reply_custody_")
+            && ![
+                "system_text_preset_optional_served",
+                "system_text_default_served",
+                "session_notices_describe",
+            ]
+            .contains(&spec.name)
         {
             assert_passed(&report, spec.name);
         }
@@ -895,6 +931,11 @@ async fn a_case_whose_capability_is_undeclared_is_skipped_never_passed() {
             skipped: vec![
                 Capability::DisableTool,
                 Capability::ApprovalExecution,
+                Capability::ReplyCustody,
+                Capability::ReplyCustodyPure,
+                Capability::ReplyCustodyHeld,
+                Capability::ReplyCustodyRefusal,
+                Capability::ReplyCustodyCatalogChange,
                 Capability::SystemText
             ],
         },
@@ -986,4 +1027,84 @@ async fn system_text_default_undeclared_is_not_applicable() {
     assert!(matches!(report.outcome("system_text_default_served"),
         Some(CaseOutcome::Inapplicable { reason }) if reason == "provider does not declare system-text-default/v1"));
     assert!(report.render().contains("N/A system_text_default_served"));
+}
+
+#[tokio::test]
+async fn reply_custody_undeclared_cases_are_skipped_never_passed() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    let mut count = 0;
+    for spec in CASES
+        .iter()
+        .filter(|spec| spec.name.starts_with("reply_custody_"))
+    {
+        count += 1;
+        assert!(
+            matches!(report.outcome(spec.name), Some(CaseOutcome::Skipped { missing })
+            if missing.contains(&Capability::ReplyCustody)),
+            "{}: {:?}",
+            spec.name,
+            report.outcome(spec.name)
+        );
+    }
+    assert_eq!(count, 12);
+}
+
+#[tokio::test]
+async fn reply_custody_declared_missing_fixtures_fail_by_case_name() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.extend([
+        Capability::ReplyCustody,
+        Capability::ReplyCustodyPure,
+        Capability::ReplyCustodyHeld,
+        Capability::ReplyCustodyRefusal,
+        Capability::ReplyCustodyCatalogChange,
+    ]);
+    let report = run(&subject).await;
+    for spec in CASES
+        .iter()
+        .filter(|spec| spec.name.starts_with("reply_custody_"))
+    {
+        let reason = failed(&report, spec.name);
+        assert!(
+            reason.contains("no reply-custody lifecycle fixture supplied"),
+            "{}: {reason}",
+            spec.name
+        );
+    }
+}
+
+#[tokio::test]
+async fn session_notices_live_token_enables_describe_case() {
+    let subject = FakeSubject::new(Defects {
+        session_notices_token: Some("session-notices/v1"),
+        ..Defects::default()
+    });
+    assert!(!subject.capabilities.contains(&Capability::SessionNotices));
+    assert_passed(&run(&subject).await, "session_notices_describe");
+}
+
+#[tokio::test]
+async fn session_notices_malformed_capabilities_fail_the_named_case() {
+    let report = run(&FakeSubject::new(Defects {
+        session_notices_token: Some("session-notices/v1"),
+        malformed_notice_capabilities: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "session_notices_describe").contains("Undecodable"));
+}
+
+#[tokio::test]
+async fn session_notices_unknown_or_absent_token_is_not_applicable() {
+    for token in [None, Some("session-notices/future")] {
+        let report = run(&FakeSubject::new(Defects {
+            session_notices_token: token,
+            ..Defects::default()
+        }))
+        .await;
+        assert!(matches!(
+            report.outcome("session_notices_describe"),
+            Some(CaseOutcome::Inapplicable { .. })
+        ));
+    }
 }

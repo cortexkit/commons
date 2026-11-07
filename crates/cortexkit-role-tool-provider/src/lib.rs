@@ -25,6 +25,7 @@ pub mod describe;
 pub mod errors;
 pub mod late_results;
 pub mod points;
+pub mod reply_custody;
 pub mod result;
 pub mod rich_ui;
 pub mod scope;
@@ -72,6 +73,10 @@ pub const HELD_REPLY_V1: &str = "held-reply/v1";
 /// Provider manifest and consumer bind opt-in for `tool.yield`.
 /// Tools opt in separately with [`CALL_YIELD_TOOL_TAG`].
 pub const CALL_YIELD_V1: &str = "call-yield/v1";
+
+/// Provider manifest capability for notices about work started by a session's
+/// own calls. Only completions may start a run; progress never does.
+pub const SESSION_NOTICES_V1: &str = "session-notices/v1";
 
 /// Per-tool catalog tag for a tool that can hand back a waiting call.
 pub const CALL_YIELD_TOOL_TAG: &str = "call.yield/v1";

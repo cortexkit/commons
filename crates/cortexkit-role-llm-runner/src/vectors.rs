@@ -10,6 +10,10 @@
 /// The vectors' directory name, inside `test-vectors/`.
 pub const DIR: &str = "llm-runner-v1";
 
+/// Restart discovery, degraded head, terminal reason and recovery samples.
+pub const RESTART_SURVIVAL_JSON: &str =
+    include_str!("../test-vectors/llm-runner-v1/restart-survival.json");
+
 /// Person-steer triggers, gated sender declarations and durable yielded identity.
 pub const CALL_YIELD_JSON: &str = include_str!("../test-vectors/llm-runner-v1/call-yield.json");
 /// Session-wide stop addressing and durable replay reply shape.
@@ -18,6 +22,7 @@ pub const STOP_ALL_JSON: &str = include_str!("../test-vectors/llm-runner-v1/stop
 /// Every vector file as `(file name, contents)`, in the order
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
+    ("restart-survival.json", RESTART_SURVIVAL_JSON),
     ("stop-all.json", STOP_ALL_JSON),
     ("call-yield.json", CALL_YIELD_JSON),
     (

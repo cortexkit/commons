@@ -37,6 +37,19 @@ const CRASH: &[Capability] = &[
 
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    CaseSpec { name: "session_notices_describe", requires: &[Capability::SessionNotices], checks: "a provider declaring session-notices/v1 has a well-formed role.describe answer; notice behavior is not checked" },
+    CaseSpec { name: "reply_custody_dependencies", requires: &[Capability::ReplyCustody], checks: "reply_custody requires late_results and call_key declarations" },
+    CaseSpec { name: "reply_custody_immediate", requires: &[Capability::ReplyCustody], checks: "an immediate keyed reply also has its terminal custody entry" },
+    CaseSpec { name: "reply_custody_held", requires: &[Capability::ReplyCustody, Capability::ReplyCustodyHeld], checks: "a held keyed call still writes its terminal entry" },
+    CaseSpec { name: "reply_custody_refusal_after_dispatch", requires: &[Capability::ReplyCustody, Capability::ReplyCustodyRefusal], checks: "a post-dispatch refusal is retained as an outcome" },
+    CaseSpec { name: "reply_custody_route_close", requires: &[Capability::ReplyCustody], checks: "ordinary route closure does not cancel non-Pure keyed work" },
+    CaseSpec { name: "reply_custody_restart", requires: &[Capability::ReplyCustody], checks: "a started call records its pinned observed outcome or unknown after restart, never re-running" },
+    CaseSpec { name: "reply_custody_fresh_key", requires: &[Capability::ReplyCustody], checks: "a fresh key dispatches a new call with its own entry" },
+    CaseSpec { name: "reply_custody_pure_direct", requires: &[Capability::ReplyCustody, Capability::ReplyCustodyPure], checks: "Pure direct replies may omit custody; a kept entry agrees with the direct outcome" },
+    CaseSpec { name: "reply_custody_pure_route_close", requires: &[Capability::ReplyCustody, Capability::ReplyCustodyPure], checks: "a Pure call without a sent direct reply still records its outcome after route closure, even if stopped" },
+    CaseSpec { name: "reply_custody_pure_held", requires: &[Capability::ReplyCustody, Capability::ReplyCustodyPure, Capability::ReplyCustodyHeld], checks: "Pure held replies do not receive the direct-reply exemption" },
+    CaseSpec { name: "reply_custody_frozen_catalog", requires: &[Capability::ReplyCustody, Capability::ReplyCustodyCatalogChange], checks: "changing the live catalog to pure cannot cancel or exempt an outstanding non-Pure call" },
+    CaseSpec { name: "reply_custody_retention_ack", requires: &[Capability::ReplyCustody], checks: "reads retain an unacknowledged outcome unchanged; acknowledgement removes it" },
     CaseSpec { name: "stop_session_other_principal_isolated", requires: &[], checks: "the same harness/session pair under another principal cannot stop the runner's work" },
     CaseSpec { name: "stop_session_body_address_refused", requires: &[], checks: "body session addressing is refused without stopping work" },
     CaseSpec { name: "stop_session_label_bounded", requires: &[], checks: "stop labels contain at most 120 characters" },

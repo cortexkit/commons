@@ -89,3 +89,10 @@ and its send.status alias for the optional group.
 Template `part_tag` slots and output references use the writing request's
 compaction A3 numbers, supplied by the runner. These vectors do not define a
 second numbering function or a compaction-runner conformance suite.
+
+- `restart-survival.json` (runner 0.8.18): opt-in discovery with required
+  dependencies/ops, degraded `host: "unknown"` head, `host_unknown` Stop result,
+  retryable recovery refusal, inconclusive final send receipt and natural run
+  completion. `tests/restart_survival.rs` checks dependency/operation validation,
+  open head-state decoding and interrupted-reason round trips. Interrupted
+  reasons remain open strings for older readers.

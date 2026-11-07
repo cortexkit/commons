@@ -43,6 +43,16 @@ pub enum Capability {
     /// The provider declares the `late_results` session capability and
     /// serves `late_results` and `late_results.ack`.
     LateResults,
+    /// The provider opts into reply custody and supplies real lifecycle probes.
+    ReplyCustody,
+    /// Supplies Pure-tool probes in addition to the core custody fixture.
+    ReplyCustodyPure,
+    /// Supplies held-call probes for custody, independently of approval APIs.
+    ReplyCustodyHeld,
+    /// Supplies a call refused after dispatch, with a pinned error body.
+    ReplyCustodyRefusal,
+    /// Can change the live execution mode while a non-Pure call is running.
+    ReplyCustodyCatalogChange,
     /// The provider serves system text alongside its catalog. See
     /// [`ToolProviderSubject::system_text_catalog_arguments`].
     SystemText,
@@ -80,6 +90,8 @@ pub enum Capability {
     /// `capabilities.provides`. The adapter supplies this fact because the
     /// provider route does not expose the daemon's module catalog.
     SystemTextDefault,
+    /// Inferred from the exact session-notices/v1 token in live role.describe.
+    SessionNotices,
 }
 
 impl Capability {
@@ -95,6 +107,11 @@ impl Capability {
             Self::Cancellation => "cancellation",
             Self::ApprovalExecution => "approval_execution",
             Self::LateResults => "late_results",
+            Self::ReplyCustody => "reply_custody",
+            Self::ReplyCustodyPure => "reply_custody_pure_fixture",
+            Self::ReplyCustodyHeld => "reply_custody_held_fixture",
+            Self::ReplyCustodyRefusal => "reply_custody_refusal_fixture",
+            Self::ReplyCustodyCatalogChange => "reply_custody_catalog_change_fixture",
             Self::SystemText => "system_text",
             Self::CallModes => "call_modes",
             Self::ToolResultV1 => "tool-result/v1",
@@ -105,6 +122,7 @@ impl Capability {
             Self::Presets => "presets",
             Self::SystemTextOptionalPreset => "system_text_optional_preset",
             Self::SystemTextDefault => cortexkit_role_tool_provider::SYSTEM_TEXT_DEFAULT,
+            Self::SessionNotices => cortexkit_role_tool_provider::SESSION_NOTICES_V1,
         }
     }
 }
@@ -172,6 +190,22 @@ pub struct CallModeProbe {
 /// the harness's real route; nothing here answers on the module's behalf.
 #[async_trait]
 pub trait ToolProviderSubject: Harness {
+    /// A fresh instance for this custody scenario, under an unused state root.
+    /// Required only when declaring ReplyCustody. Calls and log reads must use
+    /// real routes; lifecycle controls must not synthesize their outcomes.
+    async fn reply_custody_fixture(
+        &self,
+        _state_root: &Path,
+        _scenario: crate::ReplyCustodyScenario,
+    ) -> Result<crate::ReplyCustodyFixture<Self::Route>, HarnessError>
+    where
+        Self::Route: crate::ToolRoute,
+    {
+        Err(HarnessError::new(
+            "no reply-custody lifecycle fixture supplied",
+        ))
+    }
+
     /// Seed fresh live work in two sessions. The alternate-principal route
     /// binds the primary harness/session pair under another attested principal.
     /// Supplied fixtures require a manifest declaring `stop-session/v1`.

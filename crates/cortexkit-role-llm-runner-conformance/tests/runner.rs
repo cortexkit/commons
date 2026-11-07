@@ -1065,6 +1065,11 @@ async fn media_refs_reference_and_faulty_fakes() {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("restart_survival_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter declares host_survives_restart: false")
+    {
+        return;
+    }
     if case.starts_with("call_yield_") || case.starts_with("stop_all_") {
         if let Some(CaseOutcome::Inapplicable { reason }) = report.outcome(case) {
             assert!(
@@ -1850,6 +1855,12 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
     subject.kill_points.clear();
     let report = run(&subject).await;
     for spec in CASES {
+        if spec.name.starts_with("restart_survival_") {
+            assert!(
+                matches!(report.outcome(spec.name), Some(CaseOutcome::Inapplicable { reason })
+                if reason == "adapter declares host_survives_restart: false")
+            );
+        }
         if spec.requires.is_empty() {
             continue;
         }

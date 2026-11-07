@@ -907,6 +907,10 @@ pub struct HeadRequest {}
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct HeadMeta {
+    /// Under `restart_survival`, present as `unknown` while host liveness is
+    /// unresolved. Absence is not a liveness guarantee without that group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<HostState>,
     /// Initial host-history intake is in progress. Only a runner declaring
     /// `history_intake` promises that absence makes `last_ordinal` final for
     /// that intake. Unknown values mean running; readers must not seed a
@@ -995,6 +999,35 @@ pub struct HeadMeta {
     /// is not a snapshot change: the value survives cuts and reverts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_pruned: Option<crate::archive_prunes_reasoning::ReasoningPruned>,
+}
+
+/// Host degradation under `restart_survival`. Other values remain readable
+/// without being treated as proof of liveness.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(from = "String", into = "String")]
+#[non_exhaustive]
+pub enum HostState {
+    /// Liveness cannot be established; no replacement host may be started.
+    Unknown,
+    Other(String),
+}
+
+impl From<String> for HostState {
+    fn from(value: String) -> Self {
+        match value.as_str() {
+            "unknown" => Self::Unknown,
+            _ => Self::Other(value),
+        }
+    }
+}
+
+impl From<HostState> for String {
+    fn from(value: HostState) -> Self {
+        match value {
+            HostState::Unknown => "unknown".into(),
+            HostState::Other(value) => value,
+        }
+    }
 }
 
 /// The caller's own delivery grant on `session.head`, independent of history_version.
@@ -1151,6 +1184,10 @@ impl HeadInput {
 }
 
 impl HeadMeta {
+    pub fn with_host(mut self, host: HostState) -> Self {
+        self.host = Some(host);
+        self
+    }
     pub fn with_reasoning_pruned(
         mut self,
         state: crate::archive_prunes_reasoning::ReasoningPruned,
@@ -1187,6 +1224,7 @@ impl HeadMeta {
     /// A never-written session still has a cache identity.
     pub fn empty(history_version: u64, incarnation: impl Into<String>) -> Self {
         Self {
+            host: None,
             history_intake: None,
             last_ordinal: None,
             first_ordinal: None,

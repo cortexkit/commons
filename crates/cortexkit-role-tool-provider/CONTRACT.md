@@ -13,11 +13,13 @@ to them. Nothing here names a particular implementation.
 
 - A provider lists `tool-provider/v1` in its manifest's `capabilities.provides`
   (`PROVIDES`). Tool capability tags in general never go in the manifest.
-  The optional module capabilities below promise operations, not tool activity:
+  The optional module capabilities below are also allowed in the manifest:
   `tool-views/v1` promises `tool.views`; `call-yield/v1` promises `tool.yield`.
   The distinct catalog tag `call.yield/v1` says which tools can hand back;
   both the provider capability and the tool tag are required.
   `stop-session/v1` promises `tool.stop_session` (§5.1); it has no tool tag.
+  `session-notices/v1` (`SESSION_NOTICES_V1`) promises the session notice rules
+  in §2.2; it is a provider capability, not a per-tool tag.
 - Required ops: `role.describe` and `tool.catalog` (`REQUIRED_OPS`). A
   provider that can hold a call past its own reply also serves
   `tool.withdraw`. A provider that settles calls later also serves
@@ -224,6 +226,38 @@ admits only the reads its views declare. The full identity, field, limit,
 idempotency and join requirements are in
 [`tool-display/v1`](../cortexkit-role-tool-display/CONTRACT.md).
 
+### 2.2. Session notices: `session-notices/v1`
+
+A provider may declare `session-notices/v1` (`SESSION_NOTICES_V1`) in its
+manifest's `capabilities.provides`, beside `call-yield/v1`, with the same
+exception to the rule that tool capability tags do not belong in manifests.
+It also reports the token in `role.describe.capabilities`. This is a provider
+capability, not a per-tool catalog tag; routing's tool-tag list is unchanged.
+
+The provider's notices about work started by the calls of a session it serves
+may enter that session as the provider's own sender, marked `notice: true`.
+Delivery is either through the provider's own `session.send` to the runner,
+or through the runner turning the provider's frames on that tool route into
+such a send, as that provider. The same rules apply either way:
+
+- Only a completion may start a run. Completions are the end of work that
+  session's own calls started, or a handed-back call's result.
+- Status updates, progress and reminders only ride a tool result or are
+  steered into a running turn, and never start one.
+- The provider sends nothing else there, and never as the person.
+
+A consumer that composes a plan adds the plan sender
+`{"module": <provider id>, "idle_start": true}` for each tool provider with a
+tool item in that plan that declares the token, with `interrupt` left false.
+In the runner contract's plan sender, every named sender may already use the
+`tool_result`, `steer` and `queue` delivery modes; `idle_start` adds starting
+a run. A provider without the token gets no sender.
+
+**Readers first:** consumers accept the token before providers declare it.
+The provider conformance kit checks the declared token's `role.describe`
+shape only. Notice behavior and plan composition are runner and composer
+responsibilities, not behaviors checked by this provider kit.
+
 ## 3. `tool.catalog`
 
 - [pinned] A tool may declare `reference_slots: [{name, kind}]`: at most
@@ -342,9 +376,14 @@ idempotency and join requirements are in
     carries each composition, its JCS bytes and the digest). Absent when the
     request carried no composition.
   - `capabilities` is a top-level object of session-level capabilities, keyed
-    by name: `host_params`, `late_results`. A capability is declared by the
+    by name: `host_params`, `late_results`, `call_key`, `reply_custody`. A capability is declared by the
     value `true`; any other value is not a declaration. The runner freezes
     them with the tools.
+    `reply_custody` requires both `late_results` and `call_key`; refuse a
+    combination missing either by name (`reply_custody::check_dependencies`).
+    A route opts into `reply_custody` at bind, in `consumer_capabilities`, the
+    same way it opts into `late_results`. Per-call arguments do not opt in.
+    Routes that do not opt in keep their existing behavior.
   - `tool_capabilities` in `role.describe` is the sorted, unique union of the
     per-tool capability tags in the full catalog. An advertising provider's
     filtered answer still contains exactly the tools selected by any requested
@@ -574,6 +613,13 @@ idempotency and join requirements are in
       malformed member.
     - `test-vectors/tool-provider-v1/emits-events.json` pins `false`, `true`,
       absent, `null` and refused non-boolean declarations.
+- A tool may declare optional `execution_mode`: `pure`, `mutating` or
+  `unfenceable`, matching the module manifest's execution vocabulary. A
+  provider SHOULD report the same value its module manifest declares for
+  that tool. The catalog type is open; unknown strings are preserved. Only
+  explicit `pure` grants the reply-custody exemption (§7.1); absent or unknown
+  values do not. The runner reads the catalog as frozen for the run, never
+  the live catalog. Absence emits no bytes, preserving existing catalogs.
 - The answer is a pure function of its inputs (the plan item's preset and
   params, the composition, user and project configuration, host facts), so
   `catalog_digest` covers the preset: a `digest_only` request with the same
@@ -1321,6 +1367,58 @@ update, is the call's answer, correlated by `(carrier, call_key)`.
   until acked. At most 1,000 unacked results per session and 1,000 expired
   entries per scope owner are kept, oldest dropped first.
 
+### 7.1. Opt-in reply custody
+
+`reply_custody` adds no delivery path: it builds entirely on `late_results`.
+The session capability requires `late_results` and `call_key` (§3); the route
+opts in at bind. Nothing changes for routes that do not opt in.
+
+- **Recording.** On an opted-in route, every keyed call's terminal outcome is
+  also written as a `late_results` `result` entry for its custodian, whether
+  or not a direct reply was sent. This covers immediate replies, held calls
+  (as today), and refusals after dispatch. The custodian acknowledges through
+  `late_results.ack` only after its own store has durably committed the
+  outcome. Existing retention applies: kept until acknowledged, or 24 h,
+  with §7's existing bounds and expiry rules unchanged.
+- **A closed route.** If it closes for any reason other than scope end (§6),
+  a keyed call on an opted-in route is not cancelled. It runs to its end
+  under the provider's own limits, and its entry is written. Stop, the cancel
+  operation, withdraw and scope end still apply exactly as now.
+- **Provider restart.** A keyed call the provider had started when it
+  restarted gets an entry with the observed outcome, or `unknown`, as §6
+  already requires. It is never re-run. Prepared and Authorized calls that
+  never reached DispatchStarted retain §6's `not_started` rules.
+- **Dedupe.** The custodian keys terminal outcomes on `(provider, call_key)`.
+  When the direct reply arrived first, it acknowledges the entry without
+  applying it again. This outcome-level dedupe does not replace §7's
+  event-level `IntakeKey` for cursor replay or non-terminal updates.
+- **Re-dispatch under a fresh key.** Nothing forbids a runner from
+  re-dispatching a call it chooses to re-run under a new key. That is a new
+  call, with its own custody, and a provider never treats it as a repeat of
+  the old key. The carrier never reuses a `call_key` (§4's uniqueness rule).
+- **Pure tools.** A provider may leave out custody entries for direct
+  replies to calls whose tool the run's frozen catalog declares
+  `execution_mode: "pure"`. It may also stop such a call when its route
+  closes. Omission requires a direct terminal reply actually written to the
+  route before it closed, to the provider's own best knowledge; the provider
+  cannot know whether the custodian committed it. Without that direct reply,
+  an entry is still required, though the Pure custodian never waits for it.
+  The exemption covers direct replies only: a Pure call answered as
+  held still writes its late result, as today, including its stopped outcome
+  if the provider stops it on route closure. `execution_mode` is read from
+  the catalog as frozen for the run, never the live catalog, so a catalog
+  change cannot make an outstanding call re-runnable.
+  The custodian never waits for an entry for a Pure call. After a restart it
+  may re-dispatch such a call at once under a fresh key, or answer
+  `outcome_unknown`. If the original key's entry arrives first, it uses it
+  and does not re-run. If it arrives later, it acknowledges and ignores it.
+
+`reply_custody::entry_required` and `survives_route_close` take the frozen
+catalog entry and make these decisions without I/O. A false custody decision
+for a Pure direct reply permits omission, not a prohibition on keeping it.
+`test-vectors/tool-provider-v1/reply-custody.json` pins the decisions and
+execution-mode catalog shape.
+
 ## 8. Crash harness and kill points
 
 Implementations supply a `cortexkit-role-harness` `Harness`. The suite calls
@@ -1332,7 +1430,7 @@ refuses anything else. This role's kill points (`points.rs`):
 |---|---|---|
 | `Prepared` | the held call and its filed question, nothing authorized or sent | yes |
 | `Authorized` | the approval decision recorded, nothing sent | yes |
-| `DispatchStarted` | sending may have begun | declared, not cut yet |
+| `DispatchStarted` | sending may have begun | `reply_custody_restart` fixture, when declared |
 
 A provider whose approval state lives in a store where truncation is not
 meaningful (SQLite, say) reaches these points with a fault hook followed by a
@@ -1345,6 +1443,7 @@ CI against its real module over a real route; never against a double.
 
 | Case | Requires |
 |---|---|
+| `session_notices_describe` | exact `session-notices/v1` in live `role.describe.capabilities`; otherwise N/A |
 | `role_describe_shape`, `role_describe_cacheable` | — |
 | `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_emits_events_boolean`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
 | `catalog_capability_filter_matches_describe`, `catalog_filter_preserves_plan_item`, `catalog_filter_model_refused` | `tool-catalog-capability-filter/v1` advertised in `role.describe` |
@@ -1365,7 +1464,19 @@ CI against its real module over a real route; never against a double.
 | `withdraw_unknown_call`, `withdraw_answer_identical_on_repeat_and_owner`, `withdraw_owner_as_carrier_needs_no_carrier`, `withdraw_owner_without_carrier_refused`, `withdraw_carrier_naming_other_carrier_refused`, `withdraw_scope_mismatch_refused`, `withdraw_top_level_call_key_refused`, `withdraw_malformed_target_key_refused`, `withdraw_not_permitted_is_route_error` | `held_calls`, `scope_stamp`, `call_key` |
 | `late_results_cursor_round_trip`, `late_results_ack` | `late_results`, `scope_stamp`, `held_calls`, `call_key`, `approval_execution` |
 | `late_results_incarnation_change_refused` | `late_results`, `scope_stamp` |
+| `reply_custody_dependencies`, `reply_custody_immediate`, `reply_custody_route_close`, `reply_custody_restart`, `reply_custody_fresh_key`, `reply_custody_retention_ack` | `reply_custody` |
+| `reply_custody_held`, `reply_custody_refusal_after_dispatch` | `reply_custody` plus the respective held/refusal fixture declaration |
+| `reply_custody_pure_direct`, `reply_custody_pure_route_close`, `reply_custody_pure_held` | `reply_custody` plus Pure fixture declaration; held also needs the held fixture |
+| `reply_custody_frozen_catalog` | `reply_custody` plus live-catalog-change fixture declaration |
 | `crash_after_prepared_not_started`, `crash_after_authorized_not_started` | `approval_execution`, `held_calls`, `scope_stamp`, `call_key`, `late_results` |
+
+The custody cases are opt-in by `Capability::ReplyCustody`; undeclared cases
+are named skips, never passes. The kit README lists the additional fixture
+declarations and lifecycle hooks. A declared but missing fixture fails its
+case. All outcomes are observed over real routes. Fake providers in the kit's
+own tests deliberately violate each obligation and must be rejected by name;
+those tests do not claim a production provider conforms. The retention case
+checks retention across reads until ack, not a 24-hour wall-clock wait.
 
 The result cases infer their `tool-result/v1` requirement from the catalog, not
 from an opt-out flag on the subject (the adapter a provider writes to run

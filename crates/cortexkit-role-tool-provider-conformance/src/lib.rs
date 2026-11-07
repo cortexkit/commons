@@ -27,15 +27,18 @@
 #![forbid(unsafe_code)]
 
 mod call_yield;
+mod reply_custody;
 mod report;
 mod route;
 mod runner;
+mod session_notices;
 mod stop_session;
 pub use stop_session::StopSessionFixture;
 mod subject;
 
 pub use cortexkit_role_harness as harness;
 pub use cortexkit_role_tool_provider as wire;
+pub use reply_custody::{ReplyCustodyControl, ReplyCustodyFixture, ReplyCustodyScenario};
 pub use report::{CaseOutcome, CaseReport, CaseSpec, SuiteReport, SuiteVerdict, CASES};
 pub use route::{
     single_terminal, Exchange, ObservedFrame, RouteFailure, TerminalProblem, ToolRoute,

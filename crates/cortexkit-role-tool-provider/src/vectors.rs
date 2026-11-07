@@ -7,6 +7,10 @@
 /// The vectors' directory name, inside `test-vectors/`.
 pub const DIR: &str = "tool-provider-v1";
 
+/// Frozen execution modes, custody decisions and dependency refusals.
+pub const REPLY_CUSTODY_JSON: &str =
+    include_str!("../test-vectors/tool-provider-v1/reply-custody.json");
+
 /// Opt-in yield requests, answers and a yielded held reply.
 pub const CALL_YIELD_JSON: &str = include_str!("../test-vectors/tool-provider-v1/call-yield.json");
 /// Bound session stops, body-address refusals, and bounded open reply items.
@@ -131,6 +135,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("view-tools.json", VIEW_TOOLS_JSON),
     ("model-visible-size.json", MODEL_VISIBLE_SIZE_JSON),
     ("README.md", README),
+    ("reply-custody.json", REPLY_CUSTODY_JSON),
 ];
 
 /// `sha256sum` output for every file in [`FILES`].

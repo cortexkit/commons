@@ -236,6 +236,7 @@ alias until the next breaking release.
 
 | Group | Ops (`capabilities::GROUPS`) | Section |
 |---|---|---|
+| `restart_survival` | `session.head`, `session.read`, `session.subscribe`, `run.result`, `run.status`; requires `interrupt_reason` and `live_events` | §14.4 |
 | `fork_answer` | `session.fork_prepare`, `session.fork_ask`, `session.fork_end`; no group dependencies | §9.20 |
 | `output_refs` | `session.output_refs`, `session.output_ref_read` | §9.13 |
 | `tool_upfront` | `session.send` with per-plan-item `upfront`; no added op | §9.18 |
@@ -326,7 +327,8 @@ alias until the next breaking release.
   history itself, must declare it. A runner on a host (one that runs its
   sessions inside another program's store, such as OpenCode's) may declare
   it, and then serves the history from the host's own storage on demand,
-  never from a copy of its own. `check_describe` checks the group for its
+  never from a copy of its own, except during `restart_survival` recovery
+  (§14.4 R6). `check_describe` checks the group for its
   op; whether a runner is its own host is not visible in the answer, so a
   consumer that needs the history checks for the group.
 - [pinned] `run_status`, `run_cancel`, `retract`, `input_token_cap`,
@@ -876,8 +878,14 @@ that a model meant as content; it does not tell decoration from content.
 
 - [pinned] Head metadata without bodies: `{last_ordinal?, first_ordinal?,
   cut?, history_version, incarnation, head?, last_run_state?, last_run_error?,
-  last_run_rich_ui?, updated_at?, input?, model?, service_tier?, usage?, sender?, reasoning_pruned?, history_intake?}`
+  last_run_rich_ui?, updated_at?, input?, model?, service_tier?, usage?, sender?, reasoning_pruned?, history_intake?, host?}`
   (`HeadMeta`). The required cache identity follows §4.5.
+- [pinned] Under `restart_survival`, `host: "unknown"` (`read::HostState::Unknown`)
+  is present while the host's liveness cannot be established (§14.4 R2).
+  It reports a degraded session, not a terminal run. Otherwise it is absent;
+  without the group, absence promises nothing. Future host-state strings
+  decode as `HostState::Other`, retaining their spelling, never as proof that
+  the host is alive.
 - [pinned] The independent opt-in `history_intake` group has no group
   dependencies and requires only `session.head`. When a declaring runner first
   takes in history the host already held, `session.head` carries
@@ -2192,6 +2200,11 @@ whichever runner served it.
   `runner_crash` (`RUNNER_CRASH`), sealed at the next start after the
   runner died, and `host_exited` (`HOST_EXITED`), sealed when the harness
   host the runner drives exited while the runner itself stayed up.
+  Under `restart_survival`, §14.4 R1–R2 excepts restart-based sealing:
+  `host_exited` also covers a host proven gone during recovery, and
+  `host_unknown` (`HOST_UNKNOWN`) records an owner's Stop or interrupt of
+  a session's turn whose host liveness is unknown. No host request is sent
+  for that immediate settlement.
   Runner-specific values are allowed: `reason` stays decoded open, with no
   new wire member.
 - [pinned] The recorded value is the same on `run.result`, `run.status` and
@@ -2772,7 +2785,8 @@ Model-view reads and replacement-entry pages are not part of this contract.
     `outcome_unknown` and never re-sends;
   - on a `guaranteed` runner (`role.describe.steer_receipt` absent or
     `guaranteed`), a durably accepted steer is delivered: `delivered` may be
-    absent, and must never be `pending` or `unknown`;
+    absent, and must never be `pending` or `unknown`, except for the narrowly
+    scoped inconclusive pre-restart handoff in §14.4 R5;
   - on a `confirm` runner (`role.describe.steer_receipt: confirm`), an absent
     `delivered` means `pending`, never delivered;
   - the owner re-checks a `confirm` runner's undelivered steers by re-sending
@@ -6157,7 +6171,7 @@ treats it as a terminal refusal of that one request.
 | `user_commands_unsupported` | runner does not declare `user_commands` | — | no |
 | `plan_drift` | a later send's plan differs from the frozen one (while a change is pending, from both the effective and the latest accepted plan, which `frozen` then names, §10.2); a `session.adopt` plan differs from the one applied at host start (§9.5) | `frozen?`, `sent` (plan identities; `frozen` is the latest accepted plan, else the effective one, and is absent only when neither exists, or on `session.adopt` when no plan was applied) | no |
 | `pre_user_unavailable` | a steer or queue under an unavailable `refuse` PreUser | `provider` | no |
-| `transient` | a condition that may clear by itself | — | **yes** |
+| `transient` | a condition that may clear by itself; a host-dependent mutation before `restart_survival` reattach finishes (§14.4 R6) | `reason: "recovering"` for that recovery refusal | **yes** |
 | `scope_not_synced` | the scope's owner has not re-synced after a daemon restart | — | **yes**, with backoff within the hold bound |
 | `rung_unsupported` | a `session.refresh` or `session.refresh_policy` whose policy names a rung the session does not support for a surface the change touches | `{surface, rung}` | no |
 | `pending_superseded` | a `session.refresh_policy` for a generation a later refresh superseded | `{generation, pending}` | no |
@@ -6265,7 +6279,9 @@ above.
   not be repeated just to see it. No truncation or redispatch (§11.3.1).
 
 - [pinned] `outcome_unknown`: the call had a dispatch intent and no result at
-  a restart; it may or may not have run, and is never re-dispatched.
+  a restart; it may or may not have run, and is never re-dispatched under
+  that key. `restart_survival` first resolves custody under §14.4 R7; only
+  Pure tools may be tried again under a fresh key there.
 - [pinned] `pre_tool_denied`, `pre_tool_unavailable`, `pre_tool_declined`,
   `pre_tool_expired`: the call was denied before it executed. No dispatch
   intent exists.
@@ -6349,10 +6365,12 @@ state root (`cortexkit-role-harness`):
    is not a rewrite: it never raises the version or invalidates the read.
 3. [pinned] **One terminal per run.** Every run reaches exactly one terminal
    state. A run cut by a kill ends `interrupted`, never `cancelled`, and
-   never gets a second terminal.
+    never gets a second terminal. A kill of only the runner does not cut a
+    surviving host's run under `restart_survival` (§14.4 R1).
 4. [pinned] **At-most-once dispatch.** A tool call is dispatched at most
    once. A call with a durable dispatch intent and no result is closed with
-   an `outcome_unknown` result before any later model call in the session,
+    an `outcome_unknown` result before any later model call in the session
+    (except the custody resolution and fresh-key Pure retry of §14.4 R7),
    is visible as indeterminate until then, and is never re-dispatched. A call
    whose step is durable but whose intent is not was never sent. The runner
    either resumes the run and dispatches it exactly once, or seals the run
@@ -6598,9 +6616,116 @@ to the session's whole length.
   adapter evidence fails by case name; a later read alone does not prove
   publish-after-durability.
 
+## 14.4 Restart survival (`restart_survival`)
+
+- [pinned] A runner declares `restart_survival` only when its hosts outlive a
+  runner restart, crash or orderly. The group requires `interrupt_reason`
+  and `live_events`; `check_describe` names missing dependencies
+  `restart_survival_without_interrupt_reason` and
+  `restart_survival_without_live_events`. It requires the ops listed in §3,
+  and extends `session.history` where served. Without the group, the existing
+  crash and shutdown rules stand unchanged. A host can serve many sessions;
+  none of the session-turn actions below means stopping or killing a host
+  process.
+  Survival assumes the same durable runner store. Restoring an older copy is
+  not a surviving restart; the existing restore and cursor-expiry rules apply.
+
+- [pinned] **R1 — A run survives with its host.** This extends §6's run
+  lifecycle and excepts §6.5's `runner_shutdown` / `runner_crash` sealing and
+  §14 property 3 when the host survives. When a restarted runner finds a
+  session's host still running, every active run stays active under the same
+  `run_id`. Its end comes only from host evidence: the host's turn ending,
+  its own exit, or its plugin's terminal report. No restart-caused timeout
+  ends it, and it is never sealed `runner_crash`. Explicit caller deadlines
+  still apply, including a send's `expires_at_ms` and run limits in the plan.
+  An explicit owner stop remains effective under R2.
+
+- [pinned] **R2 — Unknown host.** This extends §4.3's head metadata and
+  §6.5's interrupted reasons, and excepts §6.2's ordinary cancellation
+  settlement only for an unknown host. If liveness cannot be established,
+  its runs stay active, `session.head` carries `host: "unknown"`, and the
+  session is degraded; the runner never starts a second host in its place.
+  Only a host proven gone, by pid **and start time** or its own signal,
+  ends its runs under the existing rules, with `host_exited`. The owner's
+  Stop or interrupt instead settles the affected run at once as
+  `interrupted` with `reason: "host_unknown"`, sending nothing to the host.
+  Even a requested `step_boundary` Stop settles immediately here, because the
+  step's end cannot be observed while the host is unknown; this does not change
+  cancellation when the host is known. An interrupting send records and queues
+  its new message until reattach while settling the old run `host_unknown`.
+  `stop_all`'s separate provider fan-out (§9.22) remains unchanged; provider
+  `tool.stop_session` requests are not host-process stops.
+  If the host later proves alive, the runner interrupts that session's turn
+  on the host, rather than resuming it. It never stops or kills the host
+  process, which could be serving other sessions. This settlement is durable
+  and never gains a second terminal (§14 property 3).
+
+- [pinned] **R3 — History unchanged.** This strengthens §4.5's history and
+  incarnation identity, §7's cursor replay and §14 property 1. A surviving
+  restart raises neither `history_version` nor `incarnation`. Every stored
+  cursor stays valid; `session.subscribe` resumes from the caller's stored
+  position without `cursor_expired`. Catch-up appends, never rewrites history
+  merely because the runner restarted.
+
+- [pinned] **R4 — Events.** This extends §7.1's durable control replay,
+  best-effort display lane and run-order rule. Every stored event the host
+  produced while the runner was down is written exactly once in host order,
+  before any newer event. Live text deltas lost in the gap are not replayed:
+  the stream carries the existing `display_gap {dropped}` marker for that
+  reply, and its stored reply supersedes the lost deltas by §7.1's ids rule.
+  `run_finished` is never published before its `run_started`; a run's end
+  precedes a later run's start even when both arrive in the same catch-up
+  write. The same order holds for any turn hints the runner also publishes
+  elsewhere. Stream `seq` still starts anew on each attachment; the durable
+  cursor, not stream `seq`, is the resume position.
+
+- [pinned] **R5 — Sends.** This extends §9's receipt and final-outcome rules,
+  §9.8's status replay and §14 property 6. An accepted send never handed to
+  the host stays queued and is handed after reattach. A handed send without
+  confirmation is settled from host evidence: delivered if the host holds
+  the message; not sent if the host proves it never took it. The latter
+  remains queued for its first actual delivery, not marked delivered. If the
+  send is a guaranteed steer, its optional `delivered` receipt is omitted until
+  delivery is confirmed; this internal queued state does not permit a `pending`
+  or `unknown` guaranteed receipt. If the evidence after reattach remains
+  inconclusive, settle `outcome_unknown`
+  (`delivered.as: "unknown"`), and never hand it again. Only this
+  inconclusive handoff **before a runner restart** excepts §9's guaranteed
+  steer receipt rule; it does not permit pending or unknown receipts for
+  other guaranteed steers. Replays of `send_id` answer the stored outcome,
+  never restart delivery or move a final receipt backward. §14 property 10's
+  separate person-command `outcome_unknown` rule is unchanged.
+
+- [pinned] **R6 — Operations during recovery.** This extends the read
+  availability rules (§4, §6.1) and §12.1's retryable `transient` refusal.
+  While reattaching, `session.head`, `session.read`, `session.history` where
+  served, and `run.status` answer from the runner's store. This is a narrow
+  exception to §4.6's on-demand host-history source: recovery pages keep the
+  same `history_version`, and on-demand host reads resume once reattach
+  finishes. A mutation needing the host before reattach finishes is refused
+  retryable `transient`, `detail.reason: "recovering"`, with nothing written.
+  Stop and interrupt are never refused for recovery; R2 governs unknown hosts.
+
+- [pinned] **R7 — Tool calls.** This extends §6.3's indeterminate outcome,
+  §12.3's `outcome_unknown` and §14 properties 4, 5 and 7, using tool-provider
+  0.15.4's `reply_custody` contract. A keyed call in flight at restart is
+  answered from the runner's durable record, or reattached to the provider's
+  kept reply, never dispatched twice. If its reply is lost, a non-Pure call
+  settles `outcome_unknown` before any later model call, never retried. A
+  Pure call may be re-dispatched only under a **fresh** key, never the same
+  one. Pure means the frozen provider catalog's `execution_mode: "pure"`
+  in tool-provider 0.15.4. The fresh attempt has a separate call record: the
+  old call's identity and recorded outcome stay unchanged, including in
+  `run.tool_calls` and live/history surfaces. The fresh attempt does not
+  replace or reuse its key. Durable hook outputs still replay without
+  re-invocation (§14 property 5).
+
 ## 15. Conformance suite
 
-`cortexkit-role-llm-runner-conformance` 0.17.0 pins this 0.8.0 contract.
+`cortexkit-role-llm-runner-conformance` 0.17.22 pins this 0.8.18 contract.
+The opt-in `restart_survival_*` cases run crash and orderly experiments when
+an adapter declares `host_survives_restart: true`; otherwise they are not
+applicable, and the existing crash cases remain unchanged.
 Its `CASES` registry names each executable check and its capability gates.
 New checks cover history_version on read pages, stale-cursor history_changed,
 from_ordinal 0, required incarnation on head/read/history pages, route_decision_id

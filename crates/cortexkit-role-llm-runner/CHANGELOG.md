@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.18
+
+- Add opt-in `restart_survival`, requiring `interrupt_reason` and `live_events`:
+  surviving hosts keep active run ids, history identities and cursors across
+  crash or orderly runner restart. Pin catch-up ordering, send reconciliation,
+  recovery reads/refusals and tool-provider `reply_custody` integration.
+- Add typed `HeadMeta.host` degradation and the open interrupted reason
+  `host_unknown`. Owner Stop interrupts only the affected session's turn,
+  never a shared host process. Add discovery and wire samples with checksums.
+
 ## 0.8.17
 
 - Add `stop_all` and `session.stop_all`: durable turn termination followed by

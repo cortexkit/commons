@@ -21,6 +21,21 @@ pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.10.4; version
 subc-protocol 0.32; versions 0.7.x pair with protocol 0.31, and versions 0.6.x
 pair with protocol 0.30.
 
+## Session notices (0.15.4)
+
+`session_notices_describe` runs only for the exact live module capability
+`session-notices/v1` in `role.describe.capabilities`. Its shape must pass the
+ordinary describe validator and still declare the token. An absent or unknown
+token is `N/A`, not a pass or an error. No new duplicate-token or unknown-name
+restriction is imposed. A deliberately faulty provider declaring the token
+alongside a non-string capability member fails this case by name.
+
+The provider's completion-only idle starts, progress steering and sender
+identity promise live in the role contract; behavioral enforcement belongs
+to runners and plan composers, not this provider kit. Consumers must accept
+the token before providers declare it. The token is a provider capability,
+not a per-tool tag, so routing's tag list is unchanged.
+
 ## Call keepalives
 
 The wire crate defines opt-in `call-keepalive/v1`, its body and deadline helpers,
@@ -243,3 +258,68 @@ preset-less item fails this case by name. The older
 `system_text_preset_optional_served` fixture and its skip behavior remain
 available for compatibility. `SystemTextOptionalPreset` is a conformance
 fixture flag, not a manifest fact; composers use `system-text-default/v1`.
+
+## Reply custody (0.15.4)
+
+Version 0.15.4 pins cortexkit-role-tool-provider exactly to 0.15.4. Declare
+`Capability::ReplyCustody` only for a provider advertising the `reply_custody`
+session capability. Every custody case requires that declaration; without it,
+the report prints named skips, never passes. Core cases need no additional
+fixture declaration:
+
+- `reply_custody_dependencies` checks the catalog's `late_results` and
+  `call_key` dependencies.
+- `reply_custody_immediate`, `reply_custody_route_close`,
+  `reply_custody_restart`, `reply_custody_fresh_key` and
+  `reply_custody_retention_ack` check a non-Pure keyed call's entry, survival
+  after ordinary route closure, observed or unknown outcome without re-execution after a
+  real restart, fresh-key dispatch, and retention across reads until ack.
+
+Additional declarations unlock probes not every provider can supply:
+
+| Fixture capability | Cases |
+|---|---|
+| `ReplyCustodyHeld` | `reply_custody_held` |
+| `ReplyCustodyRefusal` | `reply_custody_refusal_after_dispatch` |
+| `ReplyCustodyPure` | `reply_custody_pure_direct`, `reply_custody_pure_route_close` |
+| `ReplyCustodyPure` and `ReplyCustodyHeld` | `reply_custody_pure_held` |
+| `ReplyCustodyCatalogChange` | `reply_custody_frozen_catalog` |
+
+Implement `reply_custody_fixture(state_root, scenario)` for each enabled case.
+A declared fixture that is missing or fails to open fails the case, not skips
+it. Each fixture owns a fresh real provider instance, opened on the supplied
+unused state root. Its call route declares `reply_custody`, `late_results` and
+`call_key` at bind; held probes additionally declare `tool-result/v1` and
+`held-reply/v1`. The catalog is fetched before dispatch and frozen for the
+probe. Only the Pure scenarios use a tool declaring `execution_mode: "pure"`.
+Supply pinned expected terminal result/error values and the expected outcome
+string for entries that retain only the outcome rather than the full result.
+Never obtain expected values by another call to the live provider.
+
+`ReplyCustodyControl::finish` observes dispatch and controls only the fixture's
+lifecycle. It releases held work after its first reply, closes only the call
+route for RouteClose, or kills the actual provider after DispatchStarted and
+restarts it on the same root for Restart. Pin the observed result when it can
+be recovered, or set `expected_reduced_outcome: "unknown"` for a fixture whose
+outcome cannot be determined. Both recovery paths are accepted; neither may
+re-dispatch the call. For
+FrozenCatalog it changes the live execution mode to pure after dispatch,
+then closes the call route before releasing the work. It returns a fresh
+late-results route as the same custodian, after settlement. All entries and
+acks are checked over real routes, not synthesized by the hook.
+`dispatch_count` observes actual dispatches/effects independently of the
+returned bodies; it must survive the restart. Dropping the fixture must stop
+its provider. Restart probes must really kill the process, not just drop a route.
+`restart_kill_report` must report DispatchStarted and a real-process kill
+mechanism; missing reports and simulated kills fail the restart case.
+
+The Pure direct case accepts either omission or a truthful retained entry.
+The Pure route-close case permits stopping but requires an entry when no
+direct terminal reply was sent. The Pure held case always requires an entry.
+The retention case verifies that
+reading does not delete an entry and that ack removes it, not a 24-hour wall
+clock wait. Custodian-side durable commits, outcome deduplication and Pure
+restart re-dispatch policy are responsibilities described by the contract,
+not claims made by this provider kit. Its deliberately faulty in-process
+providers test rejection of every case by name; they do not establish any
+production provider's conformance.

@@ -108,6 +108,7 @@ where
     let mut capabilities = subject.capabilities();
     capabilities.remove(&Capability::CatalogCapabilityFilter);
     capabilities.remove(&Capability::CatalogModel);
+    capabilities.remove(&Capability::SessionNotices);
     // A provider may serve every known mode on every tool. Without a
     // restricted probe there is no refusal to exercise, so report a skip.
     if subject.call_mode_probe().is_none() {
@@ -149,6 +150,10 @@ where
             Capability::CatalogCapabilityFilter,
         ),
         (CATALOG_MODEL, Capability::CatalogModel),
+        (
+            cortexkit_role_tool_provider::SESSION_NOTICES_V1,
+            Capability::SessionNotices,
+        ),
     ] {
         if catalog_capabilities
             .iter()
@@ -265,6 +270,12 @@ where
             CaseOutcome::Inapplicable {
                 reason: "adapter supplies no call-yield fixture for this tool".into(),
             }
+        } else if spec.name == "session_notices_describe"
+            && !capabilities.contains(&Capability::SessionNotices)
+        {
+            CaseOutcome::Inapplicable {
+                reason: "provider does not declare session-notices/v1".into(),
+            }
         } else if spec.name == "system_text_default_served"
             && !capabilities.contains(&Capability::SystemTextDefault)
         {
@@ -373,6 +384,12 @@ where
     S::Route: ToolRoute,
 {
     async fn run(&self, name: &str, mint: &mut KeyMint) -> CaseResult {
+        if let Some(scenario) = crate::ReplyCustodyScenario::from_name(name) {
+            let root = self.work_dir.join(name);
+            std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+            return crate::reply_custody::run(self.subject, &root, scenario, &mint.next(name))
+                .await;
+        }
         if name.starts_with("call_yield_") {
             let principals = self.principals()?;
             let caps = ["tool-result/v1", "held-reply/v1", "call-yield/v1"].map(str::to_owned);
@@ -428,6 +445,10 @@ where
             .await;
         }
         match name {
+            "session_notices_describe" => {
+                let route = self.plain_route().await?;
+                crate::session_notices::check(&route).await
+            }
             name if name.starts_with("user_commands_") => {
                 self.user_commands(name, mint.next(name)).await
             }

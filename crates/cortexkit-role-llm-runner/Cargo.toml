@@ -9,7 +9,7 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-llm-runner"
-version = "0.8.17"
+version = "0.8.18"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -44,4 +44,8 @@ required-features = ["test-vectors"]
 
 [[test]]
 name = "stop_all"
+required-features = ["test-vectors"]
+
+[[test]]
+name = "restart_survival"
 required-features = ["test-vectors"]

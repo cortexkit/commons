@@ -1,0 +1,28 @@
+{
+  "catalogs": [
+    {"name":"absent","tool":{"name":"work","schema_digest":"digest","semantics":1,"capabilities":[],"input_schema":{"type":"object"}}},
+    {"name":"pure","tool":{"name":"work","schema_digest":"digest","semantics":1,"capabilities":[],"execution_mode":"pure","input_schema":{"type":"object"}}},
+    {"name":"mutating","tool":{"name":"work","schema_digest":"digest","semantics":1,"capabilities":[],"execution_mode":"mutating","input_schema":{"type":"object"}}},
+    {"name":"unfenceable","tool":{"name":"work","schema_digest":"digest","semantics":1,"capabilities":[],"execution_mode":"unfenceable","input_schema":{"type":"object"}}},
+    {"name":"future","tool":{"name":"work","schema_digest":"digest","semantics":1,"capabilities":[],"execution_mode":"future_mode","input_schema":{"type":"object"}}}
+  ],
+  "decisions": [
+    {"mode":"pure","opt_in":true,"keyed":true,"held":false,"direct_reply_sent":false,"entry":true,"survives":false},
+    {"mode":null,"opt_in":true,"keyed":true,"held":false,"entry":true,"survives":true},
+    {"mode":"mutating","opt_in":true,"keyed":true,"held":false,"entry":true,"survives":true},
+    {"mode":"unfenceable","opt_in":true,"keyed":true,"held":false,"entry":true,"survives":true},
+    {"mode":"future_mode","opt_in":true,"keyed":true,"held":false,"entry":true,"survives":true},
+    {"mode":"Pure","opt_in":true,"keyed":true,"held":false,"entry":true,"survives":true},
+    {"mode":"pure","opt_in":true,"keyed":true,"held":false,"entry":false,"survives":false},
+    {"mode":"pure","opt_in":true,"keyed":true,"held":true,"entry":true,"survives":false},
+    {"mode":"pure","opt_in":false,"keyed":true,"held":true,"entry":true,"survives":false},
+    {"mode":"mutating","opt_in":false,"keyed":true,"held":false,"entry":false,"survives":false},
+    {"mode":"mutating","opt_in":true,"keyed":false,"held":false,"entry":false,"survives":false}
+  ],
+  "dependencies": [
+    {"custody":true,"late":true,"key":true,"missing":null},
+    {"custody":false,"late":false,"key":false,"missing":null},
+    {"custody":true,"late":false,"key":true,"missing":"late_results"},
+    {"custody":true,"late":true,"key":false,"missing":"call_key"}
+  ]
+}

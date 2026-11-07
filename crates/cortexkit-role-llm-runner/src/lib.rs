@@ -188,6 +188,9 @@ pub const SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY: &str = "system-text-default/v
 /// the session-level capabilities a session's admission reply or baseline
 /// declares.
 pub mod capabilities {
+    /// Active runs and stored cursors survive a runner restart with their host.
+    /// Requires `interrupt_reason` and `live_events` (CONTRACT §14.4).
+    pub const RESTART_SURVIVAL: &str = "restart_survival";
     /// Person-steer hand-back of waiting tools, with durable late-result notices.
     pub const CALL_YIELD: &str = "call_yield";
     /// Session-wide work stop, admitted like interrupt-granted cancellation.
@@ -417,6 +420,16 @@ pub mod capabilities {
     /// must serve. A group adds no op of its own when it only adds fields to
     /// another group's reply, so it names the op it extends.
     pub const GROUPS: &[(&str, &[&str])] = &[
+        (
+            RESTART_SURVIVAL,
+            &[
+                ops::SESSION_HEAD,
+                ops::SESSION_READ,
+                ops::SESSION_SUBSCRIBE,
+                ops::RUN_RESULT,
+                ops::RUN_STATUS,
+            ],
+        ),
         (CALL_YIELD, &[ops::SESSION_SEND]),
         (STOP_ALL, &[ops::SESSION_STOP_ALL]),
         (

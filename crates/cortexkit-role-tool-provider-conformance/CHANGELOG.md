@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.4
+
+- Check `session-notices/v1` describe shape only when the exact live token is
+  declared; notice behavior belongs to runners and plan composers. Readers
+  must accept the token before providers declare it.
+
+- Pin the provider contract to `=0.15.4` and add declaration-gated reply-custody
+  checks with deliberately faulty providers for each checked obligation.
+
 ## 0.15.3
 
 - Check stop-session principal/session isolation, route-only addressing, label

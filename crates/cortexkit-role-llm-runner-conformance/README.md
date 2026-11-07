@@ -386,3 +386,37 @@ the full body, raw history carries the verified fact without a new request
 flag, and display rows remove only a verified prefix. The kit observes stored
 bytes through reads; it does not inspect the model's request or exercise a plan
 refresh between intake and storage.
+
+## Host-preserving runner restarts
+
+Runner 0.8.18's additive `restart_survival` group is checked by kit 0.17.22.
+The adapter's `host_survives_restart()` defaults to false: the eight
+`restart_survival_*` cases are then not applicable, and existing crash checks
+stay unchanged. An adapter returning true must expose the group (including
+its `interrupt_reason` and `live_events` dependencies), and implement
+`restart_survival_observation`. A missing hook fails, rather than earning a pass.
+
+The kit selects a model-step, held-tool, send-handoff, unknown-host or recovering
+experiment, and runs it with both crash and orderly restarts on isolated roots.
+The hook drives real management routes and restarts only the runner process.
+It returns unmodified replies/frames and host/provider records kept outside the
+runner's process and state root; configured scripts are not evidence of execution.
+Use a reply-custody provider for held keyed calls. Hold send confirmation after
+handoff, then replay the same send_id and count all handoffs. For event experiments,
+lose live text in the gap, finish with the supplied marker as stored assistant
+text, and emit no newer live text deltas after reconnect; include the first run's
+end and a later run's start/end in the captured control stream.
+
+The checks cover natural completion with the same run_id, keyed execution once,
+final send receipt replay without double handoff, stored-cursor continuity,
+unchanged history identity, ordered catch-up with a display gap, immediate
+unknown-host Stop, and stored reads/no-write mutation refusal during reattach.
+For unknown-host Stop, keep another session active on the same host: resolving
+liveness must interrupt only the stopped session's turn, never kill the shared
+host. Faulty in-process runners exercise every check by name.
+
+For surviving-host adapters only, `crash_at_DispatchIntent`,
+`run_result_interrupted_not_cancelled` and `interrupt_reason_shutdown_durable`
+are not applicable: those three assert restart-based sealing, which survival
+replaces. Other crash properties, including durable identity and replay, remain
+applicable.

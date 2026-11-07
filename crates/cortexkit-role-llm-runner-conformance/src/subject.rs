@@ -772,6 +772,51 @@ pub enum AttributionFixture {
 /// contract; this kit does not check that protocol.
 #[async_trait]
 pub trait LlmRunnerSubject: Harness {
+    /// Whether this adapter drives hosts that outlive a runner process restart.
+    /// False leaves the restart-survival experiments not applicable and keeps
+    /// the existing crash cases unchanged. True requires `restart_survival`.
+    fn host_survives_restart(&self) -> bool {
+        false
+    }
+
+    /// Drive a fresh experiment on `state_root`, restarting only the runner
+    /// (crash or orderly) at `point`. Hold the actual model answer, provider
+    /// reply, or send confirmation until after restarting. The send point is
+    /// after host handoff but before confirmation; record all later handoffs,
+    /// including after a replay of its send_id. For a held keyed call, use a
+    /// provider keeping its reply under `reply_custody`, and count executions
+    /// independently across both processes. Finish the turn naturally with
+    /// `marker` as its final assistant text; capture the active run before and
+    /// during recovery, then its terminal result and native stored reply.
+    ///
+    /// Save a durable cursor before restart; let the host store events and
+    /// lose some live text while the runner is down. Resume using that cursor,
+    /// recording complete prior/resumed frames and independent host events in
+    /// order. Include the run's start and end and a later run's start/end.
+    /// Never reconstruct frames, replies, host records or counts from scripts.
+    /// Reads and Stop must use the real management route. Capture native pid
+    /// and start-time identities independently for both runner processes and
+    /// the surviving host; a no-op restart or replacement host earns no credit.
+    ///
+    /// `UnknownHost` withholds liveness evidence, checks the head, issues owner
+    /// Stop while the host is still unknown, then resolves it alive. Observe
+    /// that only that session's turn is interrupted and another active session
+    /// on the same host is unchanged. `Recovering` holds reattach, reads every
+    /// served read op, tries a host-dependent mutation, and observes store writes.
+    /// The adapter owns process/host cleanup. Missing hooks fail opted-in cases;
+    /// they never count as a pass or as not applicable.
+    async fn restart_survival_observation(
+        &self,
+        _state_root: &std::path::Path,
+        _point: crate::RestartPoint,
+        _mode: crate::RestartMode,
+        _marker: &str,
+    ) -> Result<crate::RestartSurvivalObservation, HarnessError> {
+        Err(HarnessError::new(
+            "restart-survival experiment hook is not implemented",
+        ))
+    }
+
     /// Script at least two real session-bound providers, including one failure
     /// when requested. Observe frozen and currently applied plans independently.
     /// Do not synthesize runner replies, turn termination, or durable storage.

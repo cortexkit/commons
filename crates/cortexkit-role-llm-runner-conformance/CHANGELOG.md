@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.22
+
+- Pin runner 0.8.18 and add default-false `host_survives_restart` plus a
+  crash/orderly restart experiment hook with independent host/provider evidence.
+- Add eight named restart-survival checks, each rejected against a faulty fake:
+  natural model/tool completion, keyed at-most-once dispatch, send handoff,
+  cursor continuity, history identity, catch-up ordering/display gaps,
+  unknown-host Stop and recovery operations. Opted-out adapters retain the
+  existing crash checks; opted-in adapters use survival instead of the three
+  checks requiring restart-based interruption.
+
 ## 0.17.21
 
 - Check stop-all durable ordering, idempotent replay, isolated provider failure,

@@ -137,6 +137,14 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("restart_survival_model_step", &[], "crash and orderly restart mid-model preserve the active run_id through its natural host end"),
+    case("restart_survival_held_tool_call", &[], "a held keyed call survives both restart modes and executes at its provider exactly once"),
+    case("restart_survival_send_handoff", &[], "a pre-restart handoff settles delivered or outcome_unknown and send_id replay never hands it twice"),
+    case("restart_survival_stored_cursor", &[], "the stored cursor resumes a contiguous catch-up without cursor_expired"),
+    case("restart_survival_history_identity", &[], "surviving restart preserves history_version and incarnation"),
+    case("restart_survival_event_log", &[], "catch-up stores host events once in order, preserves run order and marks lost display deltas"),
+    case("restart_survival_unknown_host_stop", &[], "unknown host is degraded; owner Stop settles host_unknown immediately and later interrupts only that session's turn"),
+    case("restart_survival_recovery_operations", &[], "stored reads remain available while a host-dependent mutation refuses retryable transient/recovering with no writes"),
     case("call_yield_without_plans", &[], "call_yield requires plans"),
     case("call_yield_without_delivery_order", &[], "call_yield requires delivery_order"),
     case("call_yield_without_notices", &[], "call_yield requires notices"),
@@ -955,6 +963,7 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
+    "restart_survival relies on real-route captures and independent host/provider observations from an opted-in adapter; the in-process fake proves named rejection, not process survival. The cases cover held keyed reply custody, not the separate provider lost-reply/Pure retry protocol",
     "account_route checks verbatim admission names and run-fixed joining refusal without writing; pooled-key loading, automatic renewal and reassignment are not driven, and absent head.model leaves name distinctness to the unique kit-pool- prefix",
     "sender_attribution observes stored prefixes through reads, not the model's request; it does not exercise a plan refresh between intake and storage, and its photo-only case is inapplicable without media_only_send and an upload fixture",
     "routed_accounts checks follows_account_choice and an account_for admission for every listed method; automatic renewal, release timing, auth.pool/credential forwarding and which secret reached the provider are not checked by the live cases",

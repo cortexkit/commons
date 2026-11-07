@@ -1,0 +1,18 @@
+{
+  "describe": {
+    "majors": [{"version":"llm-runner/v1","stability":"alpha","ops":["role.describe","session.baseline","session.send","session.head","session.read","session.subscribe","run.result","run.status"]}],
+    "implementation_version":"1.0.0",
+    "capabilities":["restart_survival","interrupt_reason","live_events"],
+    "session_capabilities_from":"admission"
+  },
+  "unknown_head": {
+    "history_version":7,
+    "incarnation":"record-1",
+    "host":"unknown",
+    "last_run_state":{"run_id":"run-1","state":"active"}
+  },
+  "stopped":{"run_id":"run-1","state":"interrupted","reason":"host_unknown"},
+  "recovering_refusal":{"code":"transient","message":"host reattach pending","detail":{"reason":"recovering"}},
+  "unknown_send":{"state":"finished","delivered":{"as":"unknown"}},
+  "survived":{"run_id":"run-1","state":"completed","final_message":{"mid":"reply-1","ordinal":2,"text":"natural reply"}}
+}

@@ -75,3 +75,9 @@ different template, changed record schema, changed reads). Each case
 compares its `fetched` view with the shared `kept` view; a case's optional
 `kept_revision` (default 0) is the kept view's `template_revision` for that
 case.
+
+`reply-custody.json` pins the optional catalog `execution_mode` vocabulary
+(including absent and unknown values), dependency refusals and pure decisions
+for keyed custody, held results and ordinary route closure. The mode is always
+read from the catalog frozen for the run. A Pure direct reply may omit its
+entry, while a Pure held reply keeps its existing late-result obligation.

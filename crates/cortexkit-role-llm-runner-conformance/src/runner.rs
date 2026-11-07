@@ -119,7 +119,18 @@ where
                     }
                     Err(_) => Ok(None),
                 };
-                let result = if let Err(error) = mode_gate {
+                let result = if subject.host_survives_restart()
+                    && matches!(
+                        spec.name,
+                        "crash_at_DispatchIntent"
+                            | "run_result_interrupted_not_cancelled"
+                            | "interrupt_reason_shutdown_durable"
+                    ) {
+                    Ok(Ending::Inapplicable(
+                        "surviving hosts use restart_survival instead of restart-based sealing"
+                            .into(),
+                    ))
+                } else if let Err(error) = mode_gate {
                     Err(error)
                 } else if let Ok(Some(reason)) = mode_gate {
                     Ok(Ending::Inapplicable(reason))
@@ -136,6 +147,23 @@ where
                         spec.name,
                     )
                     .await
+                } else if spec.name.starts_with("restart_survival_") {
+                    match &main {
+                        Err(error) => Err(error.clone()),
+                        Ok(handle) => {
+                            crate::restart_survival::run(
+                                &Case {
+                                    subject,
+                                    handle,
+                                    declared: &declared,
+                                    mint: &mint,
+                                },
+                                work_dir,
+                                spec.name,
+                            )
+                            .await
+                        }
+                    }
                 } else if spec.name == "input_token_cap_restart_between_episodes" {
                     crate::input_token_cap::restart(
                         subject,

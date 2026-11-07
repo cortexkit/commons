@@ -111,6 +111,10 @@ pub enum SystemTextDefect {
 /// Fixture variations and deliberate contract breaks for runner tests.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    /// Optional provider capability, including unknown-token probes.
+    pub session_notices_token: Option<&'static str>,
+    /// Preserve the notice token but add a non-string capability member.
+    pub malformed_notice_capabilities: bool,
     pub user_command: Option<&'static str>,
     /// A cancelled call gets a second terminal frame after its error.
     pub double_terminal_on_cancel: bool,
@@ -440,7 +444,14 @@ impl Module {
         if !self.defects.omit_catalog_model {
             role.capabilities.push(CATALOG_MODEL.into());
         }
-        serde_json::to_value(role).unwrap()
+        if let Some(token) = self.defects.session_notices_token {
+            role.capabilities.push(token.into());
+        }
+        let mut raw = serde_json::to_value(role).unwrap();
+        if self.defects.malformed_notice_capabilities {
+            raw["capabilities"].as_array_mut().unwrap().push(json!(7));
+        }
+        raw
     }
 
     /// The served tools, each with its schema digest computed from its schema.

@@ -26,6 +26,10 @@ pub mod session_capabilities {
     pub const HOST_PARAMS: &str = "host_params";
     /// The provider may settle a call later and serves `late_results`.
     pub const LATE_RESULTS: &str = "late_results";
+    /// The provider accepts keyed calls.
+    pub const CALL_KEY: &str = "call_key";
+    /// Keyed terminal outcomes are also retained for their custodian.
+    pub const REPLY_CUSTODY: &str = crate::reply_custody::CAPABILITY;
 }
 
 /// The schema keyword marking a host-only parameter, and its value. Such a
@@ -541,6 +545,10 @@ pub struct CatalogTool {
     /// readers treat unknown values as absent but round-trip them unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load: Option<ToolLoad>,
+    /// Execution semantics, frozen for the run. Only an explicit `pure`
+    /// permits the direct-reply custody exemption; absent and unknown do not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_mode: Option<crate::reply_custody::ExecutionMode>,
     /// Capability tags naming what the tool does, for example
     /// `code.outline/v1` or `acme:code.callgraph/v1`. Data only; never in the
     /// module's HELLO manifest.
@@ -613,6 +621,12 @@ impl CatalogTool {
     /// Ask the host how to load this tool's definition.
     pub fn with_load(mut self, load: ToolLoad) -> Self {
         self.load = Some(load);
+        self
+    }
+
+    /// Set execution semantics to freeze with this catalog entry.
+    pub fn with_execution_mode(mut self, mode: crate::reply_custody::ExecutionMode) -> Self {
+        self.execution_mode = Some(mode);
         self
     }
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.4
+
+- Add provider capability `session-notices/v1` for completion-only idle starts
+  and non-starting progress notices, with explicit plan sender modes. Readers
+  first: consumers must accept the token before providers declare it.
+
+- Add opt-in `reply_custody`, requiring `late_results` and `call_key`, so keyed
+  outcomes survive route closure and remain in late results until acknowledged
+  or the existing retention limit expires.
+- Define frozen-catalog Pure exemptions, provider restart handling, custodian
+  deduplication and fresh-key re-dispatch. Add pure custody decisions and vectors.
+
 ## 0.15.3
 
 - Add `stop-session/v1`, route-keyed session-wide stop requests, safe bounded

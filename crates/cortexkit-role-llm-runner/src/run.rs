@@ -288,6 +288,9 @@ impl RunResult {
 
 /// Durable reasons recorded when sealing an interrupted run (§6.5).
 pub mod interrupt_reasons {
+    /// The owner stopped a session's turn while its host's liveness was unknown.
+    /// The runner sent nothing to that host (CONTRACT §14.4).
+    pub const HOST_UNKNOWN: &str = "host_unknown";
     /// The runner sealed the run during a planned stop.
     pub const RUNNER_SHUTDOWN: &str = "runner_shutdown";
     /// The next runner start sealed a run left open by process death.
