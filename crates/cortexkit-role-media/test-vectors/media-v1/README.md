@@ -12,8 +12,11 @@ Large examples are deterministic expansion recipes, not abbreviated wire values:
   byte 97, its actual sha256 and base64. Both inline values are individually
   legal. `text_bytes` becomes that many ASCII `a` characters in synthesis text.
 - usage bounds: expand every string to `scalar_limit` copies of U+1F600,
-  including open enum strings and map keys, except quantity, which is that many
-  ASCII digits `9`. Distinct selector keys replace the first scalar with the
+  including open enum strings and map keys, except quantity, which is
+  `9223372036854775807.999999999`. Quantities have separate decimal bounds:
+  at most 9 fractional digits and a whole part at most 9223372036854775807.
+  `refused_records` names the malformed records and their refusal code and field.
+  Distinct selector keys replace the first scalar with the
   corresponding U+1F601 through U+1F610. Failure.message uses 1,024 scalars;
   failure.detail has field and limit at 256 scalars each. Status and closed
   enums remain the stated values, so they cannot reach the generic string

@@ -169,6 +169,9 @@ impl State {
                 m["quantity"] = json!("9007199254740993.0");
             }
         }
+        if self.fault("usage_quantity_bounds") {
+            ms[0]["quantity"] = json!("0.1234567890");
+        }
         let mut r = json!({"record_id":record_id,"principal":j.principal,"job_id":id,"provider":"fixture","model":j.request["model"],"charge_basis":"vendor","credential_ref":"fixture-credential","auth_method":"api_key","started_at_ms":self.now(),"finished_at_ms":self.now(),"status":status,"selectors":{},"measurements":ms});
         if j.attempt == 1 {
             r["decision_id"] = j.request["decision_id"].clone();

@@ -66,6 +66,19 @@ case_tests! {
     media_kit_core_renewal_lapse_ends_work,
 }
 
+#[tokio::test]
+async fn media_kit_core_usage_quantity_bounds() {
+    let case = "usage_quantity_bounds";
+    assert_eq!(
+        run_case(&Fake::new(None, true, true), case).await,
+        Outcome::Passed
+    );
+    assert_eq!(
+        run_case(&Fake::new(Some(case), true, true), case).await,
+        Outcome::Failed(format!("{case}: invalid_usage_record: quantity"))
+    );
+}
+
 #[test]
 fn media_kit_rule_map_covers_all_pinned_ids() {
     let map = validate_rule_map(CONTRACT, RULE_MAP, CASES, |_| true).unwrap();
@@ -80,6 +93,7 @@ fn media_kit_rule_map_covers_all_pinned_ids() {
         ("media.objects.read", "chunked_result_checksum"),
         ("media.output.nonempty", "empty_transcript_is_a_failure"),
         ("media.usage.decimal", "usage_no_rounding"),
+        ("media.usage.decimal", "usage_quantity_bounds"),
     ] {
         let rule = map.rules.iter().find(|r| r.id == id).unwrap();
         assert!(rule.bug_shaped && rule.cases.iter().any(|v| v == case));

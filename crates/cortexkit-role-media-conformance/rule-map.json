@@ -31,7 +31,7 @@
     {"id":"media.usage.attempt","cases":["usage_record_per_attempt"],"bug_shaped":false},
     {"id":"media.usage.record","cases":["usage_record_per_attempt"],"bug_shaped":false},
     {"id":"media.usage.bounds","cases":["usage_record_bounds"],"bug_shaped":false},
-    {"id":"media.usage.decimal","cases":["usage_absent_is_not_zero","usage_no_rounding"],"bug_shaped":true},
+    {"id":"media.usage.decimal","cases":["usage_absent_is_not_zero","usage_no_rounding","usage_quantity_bounds"],"bug_shaped":true},
     {"id":"media.feed.admission","cases":["usage_feed_admits_only_reader"],"bug_shaped":false},
     {"id":"media.feed.read","cases":["usage_feed_redelivers_until_ack","usage_feed_oversize_entry_acks"],"bug_shaped":false},
     {"id":"media.feed.ack","cases":["usage_ack_beyond_written_refused","usage_ack_answer"],"bug_shaped":false},

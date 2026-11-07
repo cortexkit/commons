@@ -642,7 +642,7 @@ fn attach_request(id: &str, t: &Value, session: &str) -> Value {
     json!({"call_id":id,"token_ref":t["token_ref"],"vendor_session_id":session})
 }
 fn vendor_usage() -> Value {
-    json!([{"role":"input_audio","unit":"second","quantity":"1.250000000000000001","measure":"billed","source":"vendor_reply"}])
+    json!([{"role":"input_audio","unit":"second","quantity":"1.250000001","measure":"billed","source":"vendor_reply"}])
 }
 async fn attach<S: MediaSubject>(
     s: &S,

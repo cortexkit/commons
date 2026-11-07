@@ -1,6 +1,6 @@
 # media-provider/v1 conformance kit
 
-Version 0.1.0 pins `cortexkit-role-media` exactly. Implement `MediaSubject` in an
+Version 0.1.1 pins `cortexkit-role-media` exactly. Implement `MediaSubject` in an
 adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
 Each case needs an isolated, empty provider store and a Tokio runtime with time
 enabled. `Outcome::Failed` includes the case name; `NotApplicable` names an

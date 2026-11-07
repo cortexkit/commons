@@ -501,10 +501,10 @@ fn media_contract_usage_vectors_exact_decimals_and_statuses() {
         check_usage_record(&record).unwrap();
     }
     for valid in cases["valid_quantities"].as_array().unwrap() {
-        assert!(decimal_is_valid(valid.as_str().unwrap()));
+        assert!(decimal_is_valid(valid.as_str().unwrap()), "{valid}");
     }
     for invalid in cases["invalid_quantities"].as_array().unwrap() {
-        assert!(!decimal_is_valid(invalid.as_str().unwrap()));
+        assert!(!decimal_is_valid(invalid.as_str().unwrap()), "{invalid}");
     }
     assert_eq!(
         bounded_vendor_request_id(&"v".repeat(257)),
@@ -541,6 +541,40 @@ fn media_contract_usage_vectors_exact_decimals_and_statuses() {
     assert!(serde_json::from_value::<UsageRecord>(value).is_err());
 }
 
+fn refused_usage_sample(id: &str) {
+    let cases = vector("usage.json");
+    let case = cases["refused_records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|case| case["record"]["record_id"] == id)
+        .unwrap();
+    let record: UsageRecord = round_trip(&case["record"]);
+    let error = check_usage_record(&record).expect_err(id);
+    assert_eq!(error.code, case["code"].as_str().unwrap(), "{id}");
+    assert_eq!(error.field.as_deref(), case["field"].as_str(), "{id}");
+}
+
+#[test]
+fn media_contract_usage_refuses_r_done() {
+    refused_usage_sample("r-done");
+}
+
+#[test]
+fn media_contract_usage_refuses_r_ended() {
+    refused_usage_sample("r-ended");
+}
+
+#[test]
+fn media_contract_usage_refuses_ten_fractional_digits() {
+    refused_usage_sample("r-fraction-over");
+}
+
+#[test]
+fn media_contract_usage_refuses_whole_above_i64_max() {
+    refused_usage_sample("r-whole-over");
+}
+
 #[test]
 fn media_contract_usage_unicode_string_and_entry_bounds() {
     let recipe = vector("usage.json")["bounds"].clone();
@@ -551,7 +585,7 @@ fn media_contract_usage_unicode_string_and_entry_bounds() {
     let measurement = Measurement::new(
         MeasurementRole::Unknown(text.clone()),
         Unit::Unknown(text.clone()),
-        "9".repeat(256),
+        "9223372036854775807.999999999".into(),
         Measure::Billed,
         Source::VendorReply,
     );
@@ -619,14 +653,7 @@ fn media_contract_usage_unicode_string_and_entry_bounds() {
             continue;
         }
         let mut broken = value.clone();
-        *broken.pointer_mut(&path).unwrap() = json!(format!(
-            "{current}{}",
-            if path.ends_with("/quantity") {
-                "9"
-            } else {
-                "😀"
-            }
-        ));
+        *broken.pointer_mut(&path).unwrap() = json!(format!("{current}😀"));
         let broken: UsageRecord = decode(&broken);
         assert!(check_usage_record(&broken).is_err(), "{path}");
     }
