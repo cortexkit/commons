@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.5
+
+- Recognise `call.yield/v1`, the tool-provider tag for a tool that can hand
+  back a waiting call (tool-provider 0.15.3), as a defined unprefixed
+  capability name, so routing accepts it wherever it accepts the other
+  defined tool capabilities. No other change.
+
 ## 0.7.4
 
 - Add optional `route.select` requirements `questions`, `input_tokens` and

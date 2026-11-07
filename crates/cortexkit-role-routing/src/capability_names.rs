@@ -21,6 +21,7 @@ const DEFINED_TOOL_CAPABILITIES: &[&str] = &[
     "llm.classify/v1",
     "llm.extract/v1",
     "llm.complete/v1",
+    "call.yield/v1",
 ];
 
 pub(crate) fn is_capability_name(tag: &str) -> bool {

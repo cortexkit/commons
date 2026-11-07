@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.5
+
+- Pin routing 0.7.5. No case changes.
+
 ## 0.10.4
 
 - Pin routing 0.7.4 and add defaulted model-input facts for question limits
