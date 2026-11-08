@@ -341,6 +341,10 @@ pub enum ViewRefusal, "code" {
     },
     /// More than one cut.
     DuplicateCut => "duplicate_cut",
+    /// A moved-in session's view has no cut or cuts before the move's cut.
+    CutBeforeMove => "cut_before_move" {
+        moved_through: String,
+    },
     /// An inserted message's text contains a tag prefix.
     TaggedInsert => "tagged_insert" {
         id: String,

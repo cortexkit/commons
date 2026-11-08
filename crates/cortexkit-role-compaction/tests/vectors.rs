@@ -371,6 +371,12 @@ fn samples() -> Vec<(&'static str, Value)> {
         ),
         ("duplicate-cut", ViewRefusal::DuplicateCut),
         (
+            "cut-before-move",
+            ViewRefusal::CutBeforeMove {
+                moved_through: "message-a".into(),
+            },
+        ),
+        (
             "tagged-insert",
             ViewRefusal::TaggedInsert {
                 id: "insert-a".into(),
@@ -410,6 +416,7 @@ fn samples() -> Vec<(&'static str, Value)> {
         "view-unknown-anchor.json",
         "view-duplicate-insert.json",
         "view-duplicate-cut.json",
+        "view-cut-before-move.json",
         "view-tagged-insert.json",
         "view-foreign-tag.json",
         "view-rule.json",

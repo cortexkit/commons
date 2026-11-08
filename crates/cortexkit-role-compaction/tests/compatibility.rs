@@ -65,6 +65,14 @@ fn later_tagged_values_retain_their_name_and_payload() {
 }
 
 #[test]
+fn cut_before_move_round_trips_as_a_known_refusal() {
+    let raw = json!({"code":"cut_before_move","moved_through":"m"});
+    let decoded: ViewRefusal = serde_json::from_value(raw.clone()).unwrap();
+    assert!(!matches!(&decoded, ViewRefusal::Unknown { .. }));
+    assert_eq!(serde_json::to_value(decoded).unwrap(), raw);
+}
+
+#[test]
 fn unknown_part_kind_keeps_payload_and_reads_tokens_as_envelope_metadata() {
     for tokens in [json!({"count": 3}), json!({"input": 5, "output": 7})] {
         let raw = json!({
@@ -107,6 +115,7 @@ fn malformed_known_values_are_not_mistaken_for_later_variants() {
     rejects!(EditOp, json!({"op":"replace","mid":"message-a"}));
     rejects!(RuleBreak, json!({"rule":"signed_part_invalid"}));
     rejects!(ViewRefusal, json!({"code":"stale_version","version":1}));
+    rejects!(ViewRefusal, json!({"code":"cut_before_move"}));
     rejects!(RideAnswer, json!({"answer":"view"}));
     rejects!(ApplyViewAnswer, json!({"answer":"refused"}));
     rejects!(NoticeAnswer, json!({"answer":true}));

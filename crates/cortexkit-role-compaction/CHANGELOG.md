@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.2
+
+- Add MV7: every accepted view of a moved-in session must cut through the
+  entry the move's cut goes through or a later entry on the active path.
+  Runners check handed-over views, `compaction.ride` answers and step
+  boundaries, keep the view already in force on refusal, and report
+  `view_refused` at a step boundary.
+- Add `ViewRefusal::CutBeforeMove` (`cut_before_move`) with `moved_through`,
+  the `mid` the move's cut goes through, for a missing or earlier cut.
+  This is additive: `ViewRefusal` is non-exhaustive, and its `open_tagged!`
+  decoder preserves unrecognized codes and their fields as `Unknown`, so
+  older readers keep the new code and payload without interpreting them.
+
 ## 0.3.1
 
 - Add optional `Conditions.last_prompt_view` to notices and rides to attribute

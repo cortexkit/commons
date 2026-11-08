@@ -103,3 +103,28 @@ macro_rules! open_tagged {
         }
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    open_tagged! {
+        /// A reader that knows only an older refusal code still preserves new ones.
+        #[derive(Debug, PartialEq, Eq)]
+        pub enum OlderViewRefusal, "code" {
+            DuplicateCut => "duplicate_cut",
+        }
+    }
+
+    #[test]
+    fn older_reader_preserves_cut_before_move_as_unknown() {
+        let raw = json!({"code":"cut_before_move","moved_through":"m"});
+        let decoded: OlderViewRefusal = serde_json::from_value(raw.clone()).unwrap();
+        assert!(matches!(
+            &decoded,
+            OlderViewRefusal::Unknown { name, fields }
+                if name == "cut_before_move" && fields.get("moved_through") == Some(&json!("m"))
+        ));
+        assert_eq!(serde_json::to_value(decoded).unwrap(), raw);
+    }
+}
