@@ -34,7 +34,12 @@ fn protocol_integer_boundaries() {
     let part = json!({"id": "part-a", "kind": "text", "text": "Example.", "digest": "example"});
     boundaries::<Conditions>(
         conditions.clone(),
-        &["context_window", "output_reserve", "last_prompt_tokens"],
+        &[
+            "context_window",
+            "output_reserve",
+            "last_prompt_tokens",
+            "last_prompt_view",
+        ],
     );
     boundaries::<SetupRequest>(
         json!({"preset": "example", "model": model, "rules": rules, "context_window": 100, "output_reserve": 10, "detects": [], "now": 0}),
@@ -132,6 +137,82 @@ fn protocol_integer_boundaries() {
             .unwrap_err();
         assert_eq!(refusal.detail, Some(json!({"field": field})));
     }
+}
+
+#[test]
+fn last_prompt_view_absence_and_legacy_conditions() {
+    let legacy = json!({
+        "model": {"provider": "example-provider", "model": "example-model"},
+        "rules": {"signed_parts": "none", "history_edit_cost": "suffix"},
+        "context_window": 100,
+        "output_reserve": 10,
+        "last_prompt_tokens": 80,
+    });
+    let decoded: Conditions = wire::params(legacy.clone()).unwrap();
+    assert_eq!(decoded.last_prompt_tokens, Some(80));
+    assert_eq!(decoded.last_prompt_view, None);
+    assert_eq!(serde_json::to_value(&decoded).unwrap(), legacy);
+
+    let fresh = Conditions::new(
+        decoded.model,
+        decoded.context_window,
+        decoded.output_reserve,
+        decoded.rules,
+    );
+    assert_eq!(fresh.last_prompt_view, None);
+    let encoded = serde_json::to_value(&fresh).unwrap();
+    assert!(encoded.get("last_prompt_view").is_none());
+    let decoded: Conditions = wire::params(encoded).unwrap();
+    assert_eq!(decoded.last_prompt_tokens, None);
+    assert_eq!(decoded.last_prompt_view, None);
+
+    for version in [0, 7, 9_007_199_254_740_991] {
+        let conditions = fresh
+            .clone()
+            .with_last_prompt_tokens(80)
+            .with_last_prompt_view(version);
+        let encoded = serde_json::to_value(conditions).unwrap();
+        assert_eq!(encoded["last_prompt_view"], version);
+        let decoded: Conditions = wire::params(encoded.clone()).unwrap();
+        assert_eq!(decoded.last_prompt_view, Some(version));
+        assert_eq!(serde_json::to_value(decoded).unwrap(), encoded);
+    }
+}
+
+#[test]
+fn last_prompt_view_rejects_invalid_integers() {
+    let mut conditions = json!({
+        "model": {"provider": "example-provider", "model": "example-model"},
+        "rules": {"signed_parts": "none", "history_edit_cost": "suffix"},
+        "context_window": 100,
+        "output_reserve": 10,
+        "last_prompt_tokens": 80,
+    });
+    for invalid in [json!(9_007_199_254_740_992_u64), json!(-1), json!(1.5)] {
+        conditions["last_prompt_view"] = invalid;
+        let refusal = wire::params::<Conditions>(conditions.clone()).unwrap_err();
+        assert_eq!(refusal.code, "invalid_params");
+        assert_eq!(refusal.detail, Some(json!({"field": "last_prompt_view"})));
+    }
+}
+
+#[test]
+fn last_prompt_view_is_carried_by_rides() {
+    let request = json!({
+        "causes": ["over_limit"],
+        "deadline_ms": 10,
+        "conditions": {
+            "model": {"provider": "example-provider", "model": "example-model"},
+            "rules": {"signed_parts": "none", "history_edit_cost": "suffix"},
+            "context_window": 100,
+            "output_reserve": 10,
+            "last_prompt_tokens": 80,
+            "last_prompt_view": 7,
+        },
+    });
+    let decoded: RideRequest = wire::params(request.clone()).unwrap();
+    assert_eq!(decoded.conditions.last_prompt_view, Some(7));
+    assert_eq!(serde_json::to_value(decoded).unwrap(), request);
 }
 
 #[test]

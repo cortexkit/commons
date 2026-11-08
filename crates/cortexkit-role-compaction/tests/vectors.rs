@@ -131,7 +131,7 @@ fn samples() -> Vec<(&'static str, Value)> {
         .with_applied_view(view.applied());
     let empty_notice = NoticeRequest::new(2, conditions.clone())
         .with_events(vec![Event::TranscriptChanged { from_ordinal: 1 }]);
-    let ride = RideRequest::new(vec![RideCause::OverLimit], 1_500, conditions)
+    let ride = RideRequest::new(vec![RideCause::OverLimit], 1_500, conditions.clone())
         .with_request_tokens(30_000)
         .with_applied_view(view.applied());
     let image_message = InsertedMessage::new(
@@ -156,6 +156,21 @@ fn samples() -> Vec<(&'static str, Value)> {
         ))
     };
     let mut samples = vec![
+        (
+            "notice-last-prompt-view-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(3, conditions.clone().with_last_prompt_view(7))
+                    .with_applied_view(View::seal(7, view.edits.clone()).applied()),
+            ),
+        ),
+        (
+            "notice-last-prompt-no-view-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(4, conditions.clone().with_last_prompt_view(0)),
+            ),
+        ),
         (
             "notice-keep-entry.json",
             value(

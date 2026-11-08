@@ -303,8 +303,11 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | For the current model and account. |
 | `last_prompt_tokens` | integer, optional | The prompt size the model provider reported for the session's newest model request: uncached input plus cache reads plus cache writes. Absent before the first request, or when the provider reported none. Requests of child sessions do not count. |
+| `last_prompt_view` | integer, optional | The applied view version the request measured by `last_prompt_tokens` was rendered with when the runner built it. At least 1 names an applied view (view versions start at 1, W6.1); `0` means no view was applied. Absent means unknown, for example after a runner restart when it cannot tie the reading to a request it answered; providers may use the reading for compaction without checking a view version. The runner sends it only with `last_prompt_tokens`; the provider ignores it when `last_prompt_tokens` is absent. |
 | `system_tokens` | `{count, exact}`, optional | Count of the runner's own system text for the next request under these conditions, excluding system entries; in notices only, never rides (W4.11). |
 | `tools_tokens` | `{count, exact}`, optional | Count of the tool definitions for the next request under these conditions; in notices only, never rides (W4.11). |
+
+Informative for providers: when `last_prompt_view` is present, a reading counts toward a compaction decision only when `last_prompt_view` equals the newest version the provider has seen the runner apply; a lower version, or `0` once any view is applied, is stale. The provider should wait for a reading under the current view rather than base a compaction decision on a stale reading. W6.5's `stale_version` means a runner refuses any view whose version is not greater than the latest it accepted, so a version a runner reports names exactly one view in that session. Over-limit rides still act on their own estimate.
 
 **W3.6 `Cursor`:** where an entry sits. `ordinal` (W4.1), `mid` (the message id) and `digest` (the entry checksum, W7). A provider holding an entry with the same three values is caught up to it.
 

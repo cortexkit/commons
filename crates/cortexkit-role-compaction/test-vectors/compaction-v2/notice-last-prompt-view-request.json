@@ -1,0 +1,25 @@
+{
+  "method": "compaction.notice",
+  "params": {
+    "applied_view": {
+      "checksum": "149314d963cdc8e13e724d10c2c98d225153d93b568003de01ba8430a6882bf7",
+      "version": 7
+    },
+    "conditions": {
+      "context_window": 32768,
+      "last_prompt_tokens": 1024,
+      "last_prompt_view": 7,
+      "model": {
+        "model": "example-model",
+        "provider": "example-provider",
+        "variant": "standard"
+      },
+      "output_reserve": 4096,
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "none"
+      }
+    },
+    "seq": 3
+  }
+}

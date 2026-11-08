@@ -81,6 +81,18 @@ pub struct Conditions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::integer::optional")]
     pub last_prompt_tokens: Option<u64>,
+    /// The applied view version used to render the request measured by
+    /// `last_prompt_tokens` when the runner built it. `0` means no view was
+    /// applied; absent means unknown, for example after a runner restart.
+    /// Send only with `last_prompt_tokens`; providers ignore it without a reading.
+    /// W6.5's `stale_version` refuses any version not greater than the latest
+    /// accepted, so a runner-reported version names exactly one view in that
+    /// session. When present, a reading counts toward compaction only if this
+    /// equals the newest version the provider has seen the runner apply; a lower
+    /// version, or `0` once any view is applied, is stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
+    pub last_prompt_view: Option<u64>,
     /// Count of the runner's own system text for the next request under these
     /// conditions, excluding system entries. Notices only, never rides (W4.11).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -194,6 +206,7 @@ impl Conditions {
             output_reserve,
             rules,
             last_prompt_tokens: None,
+            last_prompt_view: None,
             system_tokens: None,
             tools_tokens: None,
         }
@@ -206,6 +219,11 @@ impl Conditions {
 
     pub fn with_last_prompt_tokens(mut self, last_prompt_tokens: u64) -> Self {
         self.last_prompt_tokens = Some(last_prompt_tokens);
+        self
+    }
+
+    pub fn with_last_prompt_view(mut self, last_prompt_view: u64) -> Self {
+        self.last_prompt_view = Some(last_prompt_view);
         self
     }
 

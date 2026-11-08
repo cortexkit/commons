@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.1
+
+- Add optional `Conditions.last_prompt_view` to notices and rides to attribute
+  `last_prompt_tokens` to the applied view used when the runner built the request.
+  Positive versions name a view, `0` means no view, and absence means unknown.
+  Send it only with `last_prompt_tokens`; providers ignore it without that reading.
+  Explain how providers avoid compacting from stale readings after a newer view
+  is applied; over-limit rides still act on their own estimate.
+- No Setup opt-in is needed: `Conditions` has no `deny_unknown_fields`, so older
+  providers ignore the new field, and the field enters no checksum defined in
+  CONTRACT.md W7. Existing vectors and their checksums are unchanged.
+
 ## 0.3.0
 
 - Add the `turn_system_cleared` ride form for confirmed clearing routes and
