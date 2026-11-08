@@ -608,12 +608,14 @@ Causes:
 | Cause | When the runner rides with it |
 |---|---|
 | `cache_expired` | The runner holds every cache touch since its own start, warms included, and its own clock shows that the newest touch plus that touch's reported lifetime has passed. Unknown until a touch arrives after start or after a serving-model change, including a switch away and back; never for an `implicit` cache. After warming stops, use the last touch plus its lifetime (RD3). |
-| `chain_reset` | It is about to start a new request chain on a chained route (connection age or idle limit, a run starting without a kept connection). |
+| `chain_reset` | It is about to start a new request chain on a chained route (connection age or idle limit, a run starting without a kept connection). On a route whose model provider keeps a prefix cache apart from the connection, a new chain does not by itself lose the cached prefix. |
 | `model_change` | The next request uses a different model than the previous one, other than a one-step fallback (RD6). |
 | `tier_change` | A different service tier. |
 | `account_change` | A different account. |
 | `surface_change` | A different system prompt or tool definitions. |
 | `over_limit` | Its estimate of the next request exceeds the usable window (W3.4). |
+
+A cause says what changed at the runner, not what the provider must do. Only `over_limit` needs a smaller request. With every other cause, `nothing` is a valid answer, and a provider decides from its own policy whether that cause makes edits cheap to land.
 
 Answer: `{"answer": "view", "view": View}` or `{"answer": "nothing"}`. The runner checks a returned view like one handed over with `session.apply_view` (W6.5). If accepted, it applies the view to this very request and stores it as its latest; if refused, it keeps its view and reports `view_refused` in its next notice. With `over_limit`, it then estimates again, and refuses the turn with `context_ceiling` if the request still does not fit.
 
