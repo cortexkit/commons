@@ -289,6 +289,7 @@ alias until the next breaking release.
 | `run_status` | `run.status` | §6.1 |
 | `held_calls` | `run.status` and run status events with held tool calls | §6.1 |
 | `call_yield` | Person-steer hand-back of waiting calls and late-result notices; requires `plans`, `delivery_order`, `notices`, `message_marks` | §9.21 |
+| `notice_yield` | Owner-requested hand-back of waiting calls for an urgent message; requires `call_yield` | §9.23 |
 | `stop_all` | `session.stop_all`; requires `run_cancel_by_interrupt` | §9.22 |
 | `run_cancel` | `run.cancel` | §6.2 |
 | `run_cancel_by_interrupt` | no additional op; requires `run_cancel` and `delivery_order` | §6.2 |
@@ -5694,6 +5695,46 @@ provider's breakpoint limit (four on Anthropic).
   without another fan-out or stopping work that began afterward. Ordinary
   Stop's treatment of yielded calls and late notices (§9.21) is unchanged;
   only `session.stop_all` asks providers to stop their work.
+
+### 9.23 `notice_yield`: hand back a waiting tool for the owner's urgent message
+
+- [pinned] A runner declares `notice_yield` only with `call_yield` (§9.21).
+  A missing prerequisite is refused as `notice_yield_without_call_yield`.
+  The session's scope owner decides which of its messages need urgent
+  hand-back; the runner implements the mechanism, not an urgency policy.
+- [pinned] `PlanSender` adds optional `yields: true`. Absence means false and
+  is omitted when serialized; sender decoding stays `deny_unknown_fields`.
+  Only the sender entry whose module is the session's scope owner, the plan's
+  composer, may supply this member. On any other entry, refuse
+  `invalid_params {field: "plan.senders[i].yields"}`. A runner without
+  `notice_yield` refuses any supplied `yields`, even false, by the same field,
+  before storing or fetching the plan. `call_yield::check_plan` checks the
+  group-only members; use `call_yield::check_plan_for_owner` for full plan
+  admission, or `SendRequest::check_notice_yield` and the refresh helpers of
+  the same name. Runners must not reimplement these admission rules.
+- [pinned] `session.send` adds optional `yield: true`. False equals absent and
+  is omitted when serialized. A true value is admitted only when the runner
+  declares `notice_yield`, the route's attested sender is a plan sender marked
+  `yields: true`, and delivery is legacy `"steer"` or an ordered list whose
+  first mode is `"steer"`. Otherwise refuse
+  `invalid_params {field: "yield"}` before any write. Use the shared send
+  helper with the attested sender and admitted plan senders, never a sender
+  identity from the message body.
+- [pinned] Unlike the person's steer trigger, `notice: true` and `speaks_for`
+  do not prevent this hand-back. Their existing admission and rendering rules
+  (§9.7.2–9.7.3) still apply, including their mutual exclusion.
+- [pinned] An admitted marked send uses exactly the hand-back machinery of
+  §9.21, with `tool.yield` reason `"urgent_notice"` instead of
+  `"person_message"`. It requires an active run whose current step waits on
+  eligible calls, using the same frozen-catalog, route, provider, bind and
+  call-key eligibility rules. Yields go out in parallel without delaying the
+  durable store of the send. The same five-second wait per call, held-reply
+  handling, durable `YieldedCall` identity, late-result notices, Stop and
+  restart rules apply. A call already yielded by either trigger is never
+  re-yielded by either trigger.
+- [pinned] With no active run, the send is an ordinary steer, or follows its
+  delivery list, and nothing is yielded. Hand-back changes neither the send's
+  delivery modes nor its notice or speaker marks.
 
 ## 10. `session.baseline` and the admission reply
 

@@ -43,6 +43,7 @@ mod fork_answer;
 mod head_selection;
 mod head_sender;
 mod held_calls;
+mod notice_yield;
 pub use call_yield::CallYieldObservation;
 mod call_control_dependencies;
 mod stop_all;

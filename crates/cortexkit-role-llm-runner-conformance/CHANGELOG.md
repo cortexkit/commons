@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.29
+
+- Pin runner contract 0.8.25 and add `notice_yield` cases for urgent hand-back,
+  sender and delivery admission, owner-only plan grants, undeclared members,
+  notice-marked sends and already-yielded call deduplication. Reuse the
+  call-yield provider fixture and independent observations.
+- Defend every new case with a named deliberately faulty runner; report
+  behavioral cases inapplicable without the group and check undeclared-member
+  refusals only on runners that do not declare it.
+
 ## 0.17.28
 
 - Pin runner `=0.8.24` and add `live_attach_replays_step_controls` and

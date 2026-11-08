@@ -854,6 +854,8 @@ pub trait LlmRunnerSubject: Harness {
     /// and session route, `call.yield/v1` on its catalog tool, plus late-results
     /// and held-reply support.
     /// If `block_answer`, withhold the yield answer/final frame until released.
+    /// Multiple calls in the same session may install independent fixtures;
+    /// keep each answer blocked until that call is released.
     /// The default supplies no fixture; it does not simulate a passing runner.
     async fn install_call_yield(
         &self,
@@ -873,6 +875,18 @@ pub trait LlmRunnerSubject: Harness {
         _send_id: &str,
     ) -> Result<crate::call_yield::CallYieldObservation, HarnessError> {
         Err(HarnessError::new("no call-yield observation hook"))
+    }
+
+    /// Snapshot actual durable admission state and the plan-fetch request log
+    /// outside the runner, including baseline creation and send-id reservations.
+    /// Notice-yield refusal cases compare these bytes before and after a send.
+    /// Return None when the adapter cannot observe these effects independently;
+    /// those cases then report inapplicable rather than assuming no write.
+    async fn call_yield_admission_state(
+        &self,
+        _session: &str,
+    ) -> Result<Option<Vec<u8>>, HarnessError> {
+        Ok(None)
     }
 
     /// Release the provider's withheld yield answer and call final frame.

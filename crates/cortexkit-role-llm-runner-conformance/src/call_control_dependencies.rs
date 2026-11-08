@@ -52,6 +52,7 @@ mod tests {
             "call_yield_without_delivery_order",
             "call_yield_without_notices",
             "call_yield_without_message_marks",
+            "notice_yield_without_call_yield",
             "stop_all_without_run_cancel_by_interrupt",
         ] {
             let (group, dependency) = name.split_once("_without_").unwrap();

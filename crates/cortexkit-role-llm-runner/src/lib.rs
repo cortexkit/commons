@@ -194,6 +194,8 @@ pub mod capabilities {
     pub const RESTART_SURVIVAL: &str = "restart_survival";
     /// Person-steer hand-back of waiting tools, with durable late-result notices.
     pub const CALL_YIELD: &str = "call_yield";
+    /// Scope-owner-requested hand-back of waiting tools for urgent messages.
+    pub const NOTICE_YIELD: &str = "notice_yield";
     /// Session-wide work stop, admitted like interrupt-granted cancellation.
     pub const STOP_ALL: &str = "stop_all";
     /// Questions on an isolated branch of the head's last served request.
@@ -437,6 +439,7 @@ pub mod capabilities {
             ],
         ),
         (CALL_YIELD, &[ops::SESSION_SEND]),
+        (NOTICE_YIELD, &[ops::SESSION_SEND]),
         (STOP_ALL, &[ops::SESSION_STOP_ALL]),
         (
             FORK_ANSWER,

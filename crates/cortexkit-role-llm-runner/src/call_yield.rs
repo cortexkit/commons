@@ -1,15 +1,19 @@
-//! Opt-in person-steer admission and durable identity for handed-back calls.
+//! Shared person-steer and urgent-owner admission for handed-back calls.
 
 use crate::{capabilities, delivery_order::PlanSender};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-/// Refuse any supplied `person` member before decoding or storing a plan when
-/// `call_yield` is undeclared. Even false is a group-only member on the wire.
+/// Refuse group-only sender marks before decoding, fetching or storing a plan.
+/// Even false requires the mark's group. Also call [`check_plan_for_owner`]
+/// with the session's scope owner to validate who may supply `yields`.
 pub fn check_plan<S: AsRef<str>>(plan: &Map<String, Value>, groups: &[S]) -> Result<(), String> {
     let declared = groups
         .iter()
         .any(|group| group.as_ref() == capabilities::CALL_YIELD);
+    let notice_yield = groups
+        .iter()
+        .any(|group| group.as_ref() == capabilities::NOTICE_YIELD);
     if let Some(senders) = plan.get("senders").and_then(Value::as_array) {
         for (index, sender) in senders.iter().enumerate() {
             if let Some(person) = sender.get("person") {
@@ -17,9 +21,46 @@ pub fn check_plan<S: AsRef<str>>(plan: &Map<String, Value>, groups: &[S]) -> Res
                     return Err(format!("plan.senders[{index}].person"));
                 }
             }
+            if let Some(yields) = sender.get("yields") {
+                if !notice_yield || !yields.is_boolean() {
+                    return Err(format!("plan.senders[{index}].yields"));
+                }
+            }
         }
     }
     Ok(())
+}
+
+/// Only the session's scope owner (the plan composer) may supply `yields`.
+/// An unscoped session has no such sender. Identity comes from route admission,
+/// not a field supplied by the caller in the plan.
+pub fn check_plan_for_owner<S: AsRef<str>>(
+    plan: &Map<String, Value>,
+    groups: &[S],
+    scope_owner: Option<&str>,
+) -> Result<(), String> {
+    check_plan(plan, groups)?;
+    if let Some(senders) = plan.get("senders").and_then(Value::as_array) {
+        for (index, sender) in senders.iter().enumerate() {
+            if sender.get("yields").is_some()
+                && (scope_owner.is_none()
+                    || sender.get("module").and_then(Value::as_str) != scope_owner)
+            {
+                return Err(format!("plan.senders[{index}].yields"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The delivery forms shared by both hand-back triggers.
+pub fn is_steer(delivery: &Value) -> bool {
+    delivery.as_str() == Some("steer")
+        || delivery
+            .as_array()
+            .and_then(|modes| modes.first())
+            .and_then(Value::as_str)
+            == Some("steer")
 }
 
 /// Whether an admitted send is the person's steer. Use the attested sender,
@@ -32,13 +73,7 @@ pub fn is_person_steer(
     notice: bool,
     speaks_for: bool,
 ) -> bool {
-    let steer = delivery.as_str() == Some("steer")
-        || delivery
-            .as_array()
-            .and_then(|modes| modes.first())
-            .and_then(Value::as_str)
-            == Some("steer");
-    steer
+    is_steer(delivery)
         && !notice
         && !speaks_for
         && senders

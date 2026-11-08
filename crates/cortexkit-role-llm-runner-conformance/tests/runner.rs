@@ -1071,10 +1071,14 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
-    if case.starts_with("call_yield_") || case.starts_with("stop_all_") {
+    if case.starts_with("call_yield_")
+        || case.starts_with("notice_yield_")
+        || case.starts_with("stop_all_")
+    {
         if let Some(CaseOutcome::Inapplicable { reason }) = report.outcome(case) {
             assert!(
                 reason == "runner does not declare call_yield"
+                    || reason == "runner does not declare notice_yield"
                     || reason == "runner does not declare stop_all"
                     || reason.starts_with("adapter supplies no"),
                 "{case}: {reason}"

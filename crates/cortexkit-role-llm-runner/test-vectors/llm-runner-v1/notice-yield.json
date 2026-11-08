@@ -1,0 +1,27 @@
+{
+  "plans": [
+    {"name":"owner","groups":["notice_yield"],"owner":"core","plan":{"senders":[{"module":"core","yields":true}]},"accepted":true},
+    {"name":"owner-false","groups":["notice_yield"],"owner":"core","plan":{"senders":[{"module":"core","yields":false}]},"accepted":true},
+    {"name":"non-owner","groups":["notice_yield"],"owner":"core","plan":{"senders":[{"module":"peer","yields":true}]},"field":"plan.senders[0].yields"},
+    {"name":"non-owner-false","groups":["notice_yield"],"owner":"core","plan":{"senders":[{"module":"peer","yields":false}]},"field":"plan.senders[0].yields"},
+    {"name":"unscoped","groups":["notice_yield"],"plan":{"senders":[{"module":"core","yields":true}]},"field":"plan.senders[0].yields"},
+    {"name":"undeclared","groups":[],"owner":"core","plan":{"senders":[{"module":"core","yields":true}]},"field":"plan.senders[0].yields"},
+    {"name":"undeclared-false","groups":[],"owner":"core","plan":{"senders":[{"module":"core","yields":false}]},"field":"plan.senders[0].yields"},
+    {"name":"malformed","groups":["notice_yield"],"owner":"core","plan":{"senders":[{"module":"core","yields":null}]},"field":"plan.senders[0].yields"}
+  ],
+  "senders": [{"module":"core","yields":true},{"module":"peer"}],
+  "sends": [
+    {"name":"owner-steer","groups":["notice_yield"],"sender":"core","request":{"send_id":"s1","prompt":"urgent","delivery":"steer","yield":true},"trigger":true},
+    {"name":"owner-list","groups":["notice_yield"],"sender":"core","request":{"send_id":"s2","prompt":"urgent","delivery":["steer","idle_start"],"yield":true},"trigger":true},
+    {"name":"notice","groups":["notice_yield"],"sender":"core","request":{"send_id":"s3","prompt":"urgent","delivery":"steer","yield":true,"notice":true},"trigger":true},
+    {"name":"speaker","groups":["notice_yield"],"sender":"core","request":{"send_id":"s4","prompt":"urgent","delivery":"steer","yield":true,"speaks_for":{"agent_id":"agent"}},"trigger":true},
+    {"name":"unmarked","groups":["notice_yield"],"sender":"peer","request":{"send_id":"s5","prompt":"urgent","delivery":"steer","yield":true},"field":"yield"},
+    {"name":"unknown","groups":["notice_yield"],"sender":"unknown","request":{"send_id":"s6","prompt":"urgent","delivery":"steer","yield":true},"field":"yield"},
+    {"name":"queue-first","groups":["notice_yield"],"sender":"core","request":{"send_id":"s7","prompt":"urgent","delivery":["idle_start","steer"],"yield":true},"field":"yield"},
+    {"name":"queue","groups":["notice_yield"],"sender":"core","request":{"send_id":"s8","prompt":"urgent","delivery":"queue","yield":true},"field":"yield"},
+    {"name":"absent-delivery","groups":["notice_yield"],"sender":"core","request":{"send_id":"s9","prompt":"urgent","yield":true},"field":"yield"},
+    {"name":"undeclared","groups":[],"sender":"core","request":{"send_id":"s10","prompt":"urgent","delivery":"steer","yield":true},"field":"yield"},
+    {"name":"false-is-absent","groups":[],"sender":"peer","request":{"send_id":"s11","prompt":"ordinary","yield":false},"trigger":false},
+    {"name":"malformed","groups":["notice_yield"],"sender":"core","request":{"send_id":"s12","prompt":"urgent","delivery":"steer","yield":"true"},"field":"yield"}
+  ]
+}

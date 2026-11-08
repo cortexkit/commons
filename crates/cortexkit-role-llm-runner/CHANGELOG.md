@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.25
+
+- Add `notice_yield`, requiring `call_yield`, for scope-owner-requested
+  hand-back of waiting calls with reason `urgent_notice`. Reuse the existing
+  eligibility, parallel dispatch, five-second wait, durable yielded identity
+  and late-result notice rules.
+- Add owner-only plan sender `yields` and steer-first send `yield`, with
+  shared send and refresh admission helpers and accepted/refused request
+  vectors. Notice and speaker marks remain available on these sends.
+
 ## 0.8.24
 
 - Pin `display_reset` to the display lane only, including leniently decoded

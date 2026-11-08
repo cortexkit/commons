@@ -350,6 +350,9 @@ impl From<SendRequest> for WireSendRequest {
         if request.runner_params.get("notice") == Some(&Value::Bool(false)) {
             request.runner_params.remove("notice");
         }
+        if request.runner_params.get("yield") == Some(&Value::Bool(false)) {
+            request.runner_params.remove("yield");
+        }
         let delivery = match (request.delivery_order, request.delivery) {
             (Some(modes), _) => Some(WireDelivery::Order(modes)),
             (None, mode) => mode.map(WireDelivery::Mode),
@@ -1047,11 +1050,58 @@ impl SendRequest {
             None => Ok(()),
         }
     }
-    /// Validate the group-only person mark before decoding senders or storing a plan.
+    /// Validate group-only sender marks before decoding senders or storing a plan.
     pub fn check_call_yield<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         self.plan
             .as_ref()
             .map_or(Ok(()), |plan| crate::call_yield::check_plan(plan, declared))
+    }
+    /// Set or clear the urgent hand-back request. False is equivalent to absent.
+    pub fn with_yield(mut self, requested: bool) -> Self {
+        if requested {
+            self.runner_params.insert("yield".into(), Value::Bool(true));
+        } else {
+            self.runner_params.remove("yield");
+        }
+        self
+    }
+
+    /// Validate urgent hand-back before any write. Pass the route's attested
+    /// sender, the session's scope owner, and the admitted plan's senders.
+    /// A true result triggers the existing call-yield machinery only while an
+    /// active step waits on eligible calls; notice and speaker marks are checked
+    /// separately and do not suppress this trigger.
+    pub fn check_notice_yield<S: AsRef<str>>(
+        &self,
+        declared: &[S],
+        scope_owner: Option<&str>,
+        attested_sender: &str,
+        senders: &[crate::delivery_order::PlanSender],
+    ) -> Result<bool, String> {
+        if let Some(plan) = &self.plan {
+            crate::call_yield::check_plan_for_owner(plan, declared, scope_owner)?;
+        }
+        match self.runner_params.get("yield") {
+            None | Some(Value::Bool(false)) => return Ok(false),
+            Some(Value::Bool(true)) => {}
+            _ => return Err("yield".into()),
+        }
+        let delivery = self
+            .delivery_order
+            .as_ref()
+            .map(|modes| serde_json::to_value(modes).expect("delivery modes serialize"))
+            .unwrap_or_else(|| Value::String(self.delivery().as_str().into()));
+        if !declared
+            .iter()
+            .any(|group| group.as_ref() == crate::capabilities::NOTICE_YIELD)
+            || !senders
+                .iter()
+                .any(|sender| sender.module == attested_sender && sender.yields)
+            || !crate::call_yield::is_steer(&delivery)
+        {
+            return Err("yield".into());
+        }
+        Ok(true)
     }
     /// Check attribution before decoding senders or writing admission state.
     pub fn check_sender_attribution<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {

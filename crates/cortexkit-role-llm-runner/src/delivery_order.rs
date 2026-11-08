@@ -444,6 +444,9 @@ pub struct PlanSender {
     /// This module carries the person's own messages. Requires `call_yield`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub person: bool,
+    /// The scope owner may request urgent hand-back. Requires `notice_yield`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub yields: bool,
     /// Opt-in trusted relay frame, fixed at intake. Requires `sender_attribution`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution: Option<crate::attribution::Mode>,
@@ -467,6 +470,7 @@ impl PlanSender {
         Self {
             module: module.into(),
             person: false,
+            yields: false,
             attribution: None,
             succeeds: None,
             idle_start: false,
@@ -481,6 +485,11 @@ impl PlanSender {
     /// Mark the sender carrying the person's own messages, such as the app gateway.
     pub fn with_person(mut self) -> Self {
         self.person = true;
+        self
+    }
+    /// Mark the scope owner's sender entry for urgent hand-back requests.
+    pub fn with_yields(mut self) -> Self {
+        self.yields = true;
         self
     }
     pub fn with_attribution_header(mut self) -> Self {

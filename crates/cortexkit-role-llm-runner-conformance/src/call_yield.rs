@@ -44,23 +44,9 @@ fn check(
             Err("message that is not the person's steer triggered a yield".into())
         };
     }
-    if observation.call_key.is_empty()
-        || observation.yield_requests.len() != 1
-        || observation.yield_requests[0]["arguments"]["call_key"] != observation.call_key
-        || observation.yield_requests[0]["arguments"]["reason"] != "person_message"
-    {
-        return Err("expected exactly one person_message yield for the observed call".into());
-    }
-    if held_wait {
-        return Err("yielded held reply paused the run or entered held_calls".into());
-    }
-    let stored_without_wait = observation.steer_stored_sequence.is_some_and(|stored| {
-        observation
-            .first_yield_answer_sequence
-            .is_none_or(|answer| stored < answer)
-    });
-    if name == "call_yield_steer_stored_before_waiting" && !stored_without_wait {
-        return Err("steer storage waited behind the yield answer".into());
+    check_yield(observation, held_wait, "person_message")?;
+    if name == "call_yield_steer_stored_before_waiting" {
+        check_stored_before_answer(observation)?;
     }
     if name == "call_yield_stop_never_withdraws" && !observation.withdraw_requests.is_empty() {
         return Err("Stop withdrew a yielded call".into());
@@ -79,6 +65,39 @@ fn check(
             "terminal late result was not durably stored as a provider notice naming the call"
                 .into(),
         );
+    }
+    Ok(())
+}
+
+/// Both triggers must use the same provider request and held-reply rules.
+pub(crate) fn check_yield(
+    observation: &CallYieldObservation,
+    held_wait: bool,
+    reason: &str,
+) -> Result<(), String> {
+    if observation.call_key.is_empty()
+        || observation.yield_requests.len() != 1
+        || observation.yield_requests[0]["arguments"]["call_key"] != observation.call_key
+        || observation.yield_requests[0]["arguments"]["reason"] != reason
+    {
+        return Err(format!(
+            "expected exactly one {reason} yield for the observed call"
+        ));
+    }
+    if held_wait {
+        return Err("yielded held reply paused the run or entered held_calls".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn check_stored_before_answer(observation: &CallYieldObservation) -> Result<(), String> {
+    let stored_without_wait = observation.steer_stored_sequence.is_some_and(|stored| {
+        observation
+            .first_yield_answer_sequence
+            .is_none_or(|answer| stored < answer)
+    });
+    if !stored_without_wait {
+        return Err("steer storage waited behind the yield answer".into());
     }
     Ok(())
 }

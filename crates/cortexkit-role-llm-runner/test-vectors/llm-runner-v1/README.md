@@ -1,5 +1,10 @@
 # llm-runner/v1 vectors for runner 0.8.19
 
+`notice-yield.json` pins accepted and refused owner-only `yields` plan entries
+and urgent `yield` sends, including group gating, steer-first delivery, notice
+and speaker marks, malformed values and false-as-absent sends. The
+`notice_yield` integration tests exercise send and both refresh helpers.
+
 `cache-policy.json` covers accepted cache requests, shape-refusal fields,
 an unknown-zone runner refusal, and actual explicit/implicit step cache reports
 with warming stop reasons. The crate checks shape only; zone recognition is

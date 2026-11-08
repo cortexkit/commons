@@ -78,9 +78,18 @@ pub struct RelaunchRefreshRequest {
 }
 
 impl RelaunchRefreshRequest {
-    /// Validate the group-only person mark before storing a refresh.
+    /// Validate group-only sender marks before storing a refresh.
     pub fn check_call_yield<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         crate::call_yield::check_plan(&self.plan, declared)
+    }
+    /// Validate sender marks and the scope-owner-only `yields` grant before
+    /// fetching or storing the refresh plan.
+    pub fn check_notice_yield<S: AsRef<str>>(
+        &self,
+        declared: &[S],
+        scope_owner: Option<&str>,
+    ) -> Result<(), String> {
+        crate::call_yield::check_plan_for_owner(&self.plan, declared, scope_owner)
     }
     /// Validate fork callers before fetching or storing an accepted refresh.
     pub fn check_fork_callers<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
@@ -152,9 +161,18 @@ impl From<RefreshRequest> for RelaunchRefreshRequest {
 }
 
 impl RefreshRequest {
-    /// Validate the group-only person mark before storing a refresh.
+    /// Validate group-only sender marks before storing a refresh.
     pub fn check_call_yield<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), String> {
         crate::call_yield::check_plan(&self.plan, declared)
+    }
+    /// Validate sender marks and the scope-owner-only `yields` grant before
+    /// fetching or storing the refresh plan.
+    pub fn check_notice_yield<S: AsRef<str>>(
+        &self,
+        declared: &[S],
+        scope_owner: Option<&str>,
+    ) -> Result<(), String> {
+        crate::call_yield::check_plan_for_owner(&self.plan, declared, scope_owner)
     }
     /// Validate fork callers before fetching or storing an accepted refresh.
     pub fn check_fork_callers<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {

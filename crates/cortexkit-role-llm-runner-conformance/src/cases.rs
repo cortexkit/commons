@@ -94,11 +94,13 @@ where
             | "call_yield_without_delivery_order"
             | "call_yield_without_notices"
             | "call_yield_without_message_marks"
+            | "notice_yield_without_call_yield"
             | "stop_all_without_run_cancel_by_interrupt" => {
                 crate::call_control_dependencies::run(self, name).await
             }
             name if name.starts_with("stop_all_") => crate::stop_all::run(self, name).await,
             name if name.starts_with("call_yield_") => crate::call_yield::run(self, name).await,
+            name if name.starts_with("notice_yield_") => crate::notice_yield::run(self, name).await,
             name if name.starts_with("fork_answer_") => crate::fork_answer::run(self, name).await,
             name if name.starts_with("history_intake_") => {
                 crate::history_intake::run(self, name).await

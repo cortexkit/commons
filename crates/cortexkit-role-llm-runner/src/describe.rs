@@ -36,6 +36,7 @@ pub mod problem_names {
     pub const CALL_YIELD_WITHOUT_DELIVERY_ORDER: &str = "call_yield_without_delivery_order";
     pub const CALL_YIELD_WITHOUT_NOTICES: &str = "call_yield_without_notices";
     pub const CALL_YIELD_WITHOUT_MESSAGE_MARKS: &str = "call_yield_without_message_marks";
+    pub const NOTICE_YIELD_WITHOUT_CALL_YIELD: &str = "notice_yield_without_call_yield";
     pub const FORK_IDLE_S_MISSING: &str = "fork_idle_s_missing";
     pub const FORK_IDLE_S_UNDECLARED: &str = "fork_idle_s_undeclared";
     pub const FORK_IDLE_S_INVALID: &str = "fork_idle_s_invalid";
@@ -656,6 +657,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         }
     }
     for (group, dependency, problem) in [
+        (
+            capabilities::NOTICE_YIELD,
+            capabilities::CALL_YIELD,
+            problem_names::NOTICE_YIELD_WITHOUT_CALL_YIELD,
+        ),
         (
             capabilities::ACCOUNT_ROUTE,
             capabilities::ROUTED_ACCOUNTS,

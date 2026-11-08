@@ -16,6 +16,8 @@ pub const RESTART_SURVIVAL_JSON: &str =
 
 /// Person-steer triggers, gated sender declarations and durable yielded identity.
 pub const CALL_YIELD_JSON: &str = include_str!("../test-vectors/llm-runner-v1/call-yield.json");
+/// Urgent-owner plan and send admission, including precise refusal fields.
+pub const NOTICE_YIELD_JSON: &str = include_str!("../test-vectors/llm-runner-v1/notice-yield.json");
 /// Session-wide stop addressing and durable replay reply shape.
 pub const STOP_ALL_JSON: &str = include_str!("../test-vectors/llm-runner-v1/stop-all.json");
 
@@ -29,6 +31,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("restart-survival.json", RESTART_SURVIVAL_JSON),
     ("stop-all.json", STOP_ALL_JSON),
     ("call-yield.json", CALL_YIELD_JSON),
+    ("notice-yield.json", NOTICE_YIELD_JSON),
     (
         "fork-answer.json",
         include_str!("../test-vectors/llm-runner-v1/fork-answer.json"),
