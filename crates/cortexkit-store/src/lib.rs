@@ -103,6 +103,8 @@ pub enum StoreError {
     Migration(String),
     /// A backend (database driver) operation failed.
     Backend(String),
+    /// Recorded schema versions could not be read safely.
+    SchemaVersionsUnavailable { reason: String },
     /// An io failure preparing the store location.
     Io(std::io::Error),
     /// The database belongs to a different module or storage namespace.
@@ -157,6 +159,9 @@ impl std::fmt::Display for StoreError {
             ),
             StoreError::Migration(m) => write!(f, "migration: {m}"),
             StoreError::Backend(m) => write!(f, "storage backend: {m}"),
+            StoreError::SchemaVersionsUnavailable { reason } => {
+                write!(f, "schema versions unavailable: {reason}")
+            }
             StoreError::Io(e) => write!(f, "storage io: {e}"),
             StoreError::OwnershipMismatch {
                 recorded_module_id,
@@ -234,6 +239,8 @@ fn lease_key(descriptor: &StorageDescriptor) -> LeaseKey {
 mod sqlite_backend {
     use super::*;
     use std::{
+        collections::BTreeMap,
+        io::Read,
         path::{Path, PathBuf},
         sync::{Arc, Condvar, Mutex},
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -681,6 +688,146 @@ mod sqlite_backend {
             StorageBackend::Sqlite { path } => Ok(path.clone()),
             other => Err(StoreError::UnsupportedBackend(other.label().to_string())),
         }
+    }
+
+    /// Read each namespace's highest recorded migration version without opening a store.
+    ///
+    /// Returns `None` if the database file is missing, or `Some` with an empty map
+    /// if it has no `cortexkit_schema_version` table (or no recorded versions).
+    /// Only SQLite filesystem paths are supported, not SQLite URIs or in-memory
+    /// databases. Other backends return [`StoreError::UnsupportedBackend`].
+    ///
+    /// The database is opened read-only, never with create. Existing WAL shared
+    /// memory is requested read-only. One short read transaction sees committed
+    /// versions, including WAL commits, while a lease holder continues writing.
+    /// No lease, epoch, fence, ownership, migration, removals replay, data deletion, or
+    /// checkpoint is performed. SQLite read locks are nonblocking; contention
+    /// and unreadable or invalid data return an error, never an empty map.
+    ///
+    /// A WAL database must have a readable `-wal` and initialized `-shm` file at
+    /// the precheck; otherwise this returns [`StoreError::SchemaVersionsUnavailable`]
+    /// without opening SQLite. A cleanly closed WAL store therefore returns that
+    /// error. With no running holder, take the lease and open normally instead.
+    /// This function never creates the database, directories, lease, or journal.
+    /// There is one sidecar race: if a writer closes and removes WAL sidecars
+    /// between the precheck and the open, SQLite may create its own `-wal`/`-shm`
+    /// sidecars. A subsequent normal store open handles those files.
+    ///
+    /// This is a snapshot, not a compatibility decision or a reservation: the
+    /// running holder may advance versions immediately afterward. Re-check after
+    /// taking the lease and before migrating. Removals may still need replay at
+    /// that later open; this function does not validate the journal or ownership.
+    pub fn read_schema_versions(
+        descriptor: &StorageDescriptor,
+    ) -> Result<Option<BTreeMap<String, u64>>, StoreError> {
+        let path = sqlite_path(descriptor)?;
+        let unavailable = |reason: String| StoreError::SchemaVersionsUnavailable { reason };
+        if path.starts_with("file:") || path == ":memory:" {
+            return Err(unavailable(
+                "expected a SQLite filesystem path, not a URI or in-memory database".into(),
+            ));
+        }
+        let path = match std::fs::canonicalize(&path) {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(unavailable(format!("database path: {error}"))),
+        };
+        let file = std::fs::File::open(&path)
+            .map_err(|error| unavailable(format!("database file: {error}")))?;
+        if file
+            .metadata()
+            .map_err(|error| unavailable(format!("database metadata: {error}")))?
+            .len()
+            < 512
+        {
+            // SQLite can discard a WAL beside a main file too small to contain
+            // even one page. Inspection must not erase that possible recovery data.
+            let mut wal = path.as_os_str().to_os_string();
+            wal.push("-wal");
+            match std::fs::metadata(wal) {
+                Ok(_) => {
+                    return Err(unavailable(
+                        "truncated database with an existing WAL".into(),
+                    ))
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(unavailable(format!("WAL metadata: {error}"))),
+            }
+        }
+        let mut header = Vec::with_capacity(20);
+        file.take(20)
+            .read_to_end(&mut header)
+            .map_err(|error| unavailable(format!("database header: {error}")))?;
+        if header.len() == 20 && (header[18] == 2 || header[19] == 2) {
+            for suffix in ["-wal", "-shm"] {
+                let mut sidecar = path.as_os_str().to_os_string();
+                sidecar.push(suffix);
+                let metadata = std::fs::metadata(&sidecar)
+                    .map_err(|error| unavailable(format!("no usable existing {suffix} file (no shared memory may be present): {error}")))?;
+                // An empty WAL is valid after a checkpoint, but SQLite needs at
+                // least one complete shared-memory region for its WAL index.
+                let minimum_len = if suffix == "-wal" { 0 } else { 32768 };
+                if !metadata.is_file() || metadata.len() < minimum_len {
+                    return Err(unavailable(format!(
+                        "no usable existing {suffix} file (no shared memory may be present)"
+                    )));
+                }
+                std::fs::File::open(&sidecar).map_err(|error| {
+                    unavailable(format!("no usable existing {suffix} file: {error}"))
+                })?;
+            }
+        }
+        // Request existing shared memory read-only. Unlike immutable=1, this
+        // still reads committed WAL frames rather than ignoring a live writer.
+        let mut uri = String::from("file:");
+        let path = path
+            .to_str()
+            .ok_or_else(|| unavailable("database path is not UTF-8".into()))?;
+        for byte in path.bytes() {
+            if byte.is_ascii_alphanumeric() || b"/:-_.".contains(&byte) {
+                uri.push(char::from(byte));
+            } else {
+                use std::fmt::Write;
+                write!(uri, "%{byte:02X}").expect("writing to a String");
+            }
+        }
+        uri.push_str("?mode=ro&readonly_shm=1");
+        let read = || -> rusqlite::Result<BTreeMap<String, u64>> {
+            let mut conn = Connection::open_with_flags(
+                uri,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+            )?;
+            conn.set_db_config(
+                rusqlite::config::DbConfig::SQLITE_DBCONFIG_NO_CKPT_ON_CLOSE,
+                true,
+            )?;
+            conn.pragma_update(None, "temp_store", "MEMORY")?;
+            conn.busy_timeout(Duration::ZERO)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema \
+                 WHERE name = 'cortexkit_schema_version')",
+                [],
+                |row| row.get(0),
+            )?;
+            let mut versions = BTreeMap::new();
+            if exists {
+                let mut stmt = tx.prepare(
+                    "SELECT namespace, MAX(version) FROM cortexkit_schema_version GROUP BY namespace",
+                )?;
+                for row in stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, u64>(1)?))
+                })? {
+                    let (namespace, version) = row?;
+                    versions.insert(namespace, version);
+                }
+            }
+            tx.commit()?;
+            Ok(versions)
+        };
+        read().map(Some).map_err(|error| {
+            unavailable(format!("{error}; read-only WAL access requires usable existing shared memory; no shared memory may be present"))
+        })
     }
 
     /// The directory a SQLite file lives in; `.` for a path with no parent.
@@ -1699,8 +1846,9 @@ mod sqlite_backend {
 
 #[cfg(feature = "sqlite")]
 pub use sqlite_backend::{
-    acquire_store_lease, open_sqlite, open_sqlite_with, open_sqlite_with_removals, Removal,
-    RemovalJournal, RemovalRecord, RemovalsHandler, SqliteOpenOptions, SqliteStore, StoreLease,
+    acquire_store_lease, open_sqlite, open_sqlite_with, open_sqlite_with_removals,
+    read_schema_versions, Removal, RemovalJournal, RemovalRecord, RemovalsHandler,
+    SqliteOpenOptions, SqliteStore, StoreLease,
 };
 
 #[cfg(all(test, feature = "sqlite"))]

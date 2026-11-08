@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2
+
+- Add `read_schema_versions` to inspect recorded namespace versions without
+  taking the lease, replaying removals, migrating, or creating a database,
+  lease, or journal.
+  Reads include committed WAL data while a live holder continues writing.
+  Unavailable read-only shared memory is reported as an error, not as an empty
+  or potentially stale version map. Callers must re-check after taking the
+  lease and before migrating. SQLite may create WAL sidecars if a writer closes
+  and removes them between the sidecar precheck and the read-only open.
+
 ## 0.4.1
 
 - Fix: a superseded writer could leave a removal in the journal that no
