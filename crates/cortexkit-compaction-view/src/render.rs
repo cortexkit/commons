@@ -212,8 +212,13 @@ pub enum RideRender {
 /// later: the only cost is the reminders of the turn that was open at the
 /// switch, never sent on the new route.
 ///
-/// `form` is the form the ride was delivered as; `route_clears` is whether
-/// the session's current route clears. Every other form renders unchanged.
+/// `form` is the form the ride was actually delivered in, as the runner
+/// recorded it at delivery (`delivered_as`). It's never taken from the
+/// send's `forms` list: that list is only what the send allowed, and a send
+/// allowing `turn_system_cleared` that went out as `tool_result` on a route
+/// that can't clear must keep rendering as `tool_result`. `route_clears` is
+/// whether the session's current route clears. Every other form renders
+/// unchanged.
 pub fn cleared_ride(form: RideForm, route_clears: bool) -> RideRender {
     match form {
         RideForm::TurnSystemCleared if route_clears => RideRender::Cleared,
