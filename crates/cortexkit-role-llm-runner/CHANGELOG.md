@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.27
+
+- Clarify §9.6.1: `tag_read` still resolves tags for surviving calls across
+  compaction cuts and undo, but a call removed by undo refuses `unknown_call`.
+  Runners keep nothing about removed messages for this read. No type or wire
+  changes.
+
 ## 0.8.26
 
 - Add owner-only `tag_read`: resolve model-visible tags against the request

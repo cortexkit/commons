@@ -1589,10 +1589,11 @@ pub trait LlmRunnerSubject: Harness {
         None
     }
 
-    /// Insert a host-typed person's user message into an idle session, with
-    /// `marker` in a nonzero stored part and as its app client_message_id.
-    /// Return its actual message id and part index. Do not use session.send:
-    /// the fixture must distinguish a person's entry from a module's send.
+    /// Insert a person's user message into an idle session, with `marker` in a
+    /// nonzero stored part and as its app client_message_id. The entry may come
+    /// from a plan sender marked `person: true`, so its sender may be present.
+    /// Return its actual message id and part index. The entry must have no
+    /// notice or speaks_for mark.
     /// Unsupported adapters leave the person-message cases inapplicable.
     async fn seed_tag_read_person(
         &self,

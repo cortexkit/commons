@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.31
+
+- Pin runner `=0.8.27` and rework `tag_read_before_undo`: a surviving call
+  still resolves its original entry and part, while a removed call refuses
+  `unknown_call` without changing session head or reads. Drop the replacement
+  entry and reused-number fixture; the case remains inapplicable without undo.
+- The faithful fake refuses removed calls, and a named faulty-runner self-test
+  checks that the case rejects a runner that still answers them.
+- Accept person-entry fixtures from a plan sender marked `person: true` as
+  well as sender-less entries; keep checking the resolved sender exactly.
+
 ## 0.17.30
 
 - Add seven `tag_read` cases and named faulty-runner checks for call-fixed

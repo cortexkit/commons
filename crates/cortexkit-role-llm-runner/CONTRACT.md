@@ -3890,9 +3890,12 @@ Opaque per-part identities are carried by `part_digests` or, for an
 - [pinned] `tag` is the part number the runner showed the model, using the
   compaction contract's numbering. `call_key` names a tool call this session's
   own model made. A key that is not one of this session's own calls, including
-  an imported or foreign call, refuses `unknown_call`. A tag not shown in the
-  model request that produced that call, or never assigned by this runner,
-  refuses `unknown_tag`. These are named refusals, not empty answers.
+  an imported or foreign call, refuses `unknown_call`. A call removed by an undo
+  is no longer one of the session's calls and its key refuses `unknown_call`
+  like any other such key. The runner keeps nothing about removed messages for
+  this read. A tag not shown in the model request that produced that call, or
+  never assigned by this runner, refuses `unknown_tag`. These are named
+  refusals, not empty answers.
 - [pinned] Answer `{entry: ReadMessage, part: u32}` (`read::TagReadAnswer`):
   exactly one ordinary read row, with display facts always on (including
   sender, message marks and app `client_message_id` when present), plus the
@@ -3900,14 +3903,14 @@ Opaque per-part identities are carried by `part_digests` or, for an
   by that call's model request. The entry carries `client_message_id` exactly
   as an opted-in `session.read` row does (§9.11); `send_id` is not the app's
   message identity and never substitutes for it. Resolve against that request,
-  never today's numbering. An undo may reuse a number for another message;
-  the old call still names the original message.
-  No undo lands inside one step, because the session is busy for the whole step.
-- [pinned] Retain resolution for every tag this runner ever assigned in the
-  session, including after compaction cuts or undo. This retention does not
-  make an unseen tag visible to a later call. Numbers assigned before history
-  was transferred into the session from another runner, or imported, belong to
-  the source, not the serving runner, and refuse `unknown_tag`.
+  never today's numbering.
+- [pinned] For calls that remain in the session, retain resolution for every tag
+  this runner ever assigned in the session, including after compaction cuts.
+  A tag cited by a call that survives an undo still resolves as that call's
+  model request showed it. This retention does not make an unseen tag visible
+  to a later call. Numbers assigned before history was transferred into the
+  session from another runner, or imported, belong to the source, not the
+  serving runner, and refuse `unknown_tag`.
 - The application coordinating agents resolves when the citing call reaches it
   and stores the answer, so readers never resolve a tag twice.
 

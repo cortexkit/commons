@@ -87,7 +87,6 @@ where
             .clone();
         if part == 0
             || entry.role.as_deref() != Some("user")
-            || entry.sender.is_some()
             || entry.notice
             || entry.speaks_for.is_some()
             || entry.client_message_id.as_deref() != Some(marker.as_str())
@@ -148,60 +147,29 @@ where
             }
         }
         if name == "tag_read_before_undo" {
+            let before = read_all(&session.route).await?.1;
+            case.run_prompt(&mut session, "make a later turn to undo")
+                .await?;
+            let later = read_all(&session.route)
+                .await?
+                .1
+                .into_iter()
+                .find(|message| {
+                    message.role.as_deref() == Some("user")
+                        && !before.iter().any(|old| old.mid == message.mid)
+                })
+                .ok_or("later turn stored no user entry")?;
             if let Err(error) = case
                 .subject
-                .revert_session(case.handle.inner(), &session.name, &entry.mid)
+                .revert_session(case.handle.inner(), &session.name, &later.mid)
                 .await
             {
                 return Ok(Ending::Inapplicable(format!(
                     "adapter cannot undo: {error}"
                 )));
             }
-            let Some((new_mid, new_part)) = case
-                .subject
-                .seed_tag_read_person(
-                    case.handle.inner(),
-                    &session.name,
-                    &case.mint.next("replacement-words"),
-                )
-                .await
-                .map_err(|e| e.to_string())?
-            else {
-                return Ok(Ending::Inapplicable(
-                    "adapter cannot seed the replacement entry".into(),
-                ));
-            };
-            case.run_prompt(&mut session, "show the reused number")
-                .await?;
-            let page = read(
-                &session.route,
-                &ReadRequest::range(1).with_include_display_facts(true),
-            )
-            .await?;
-            let new_entry = page
-                .messages
-                .iter()
-                .find(|row| row.mid == new_mid)
-                .ok_or("replacement person entry is absent")?;
-            let new_parts = case.subject.read_parts(&new_entry.message);
-            let new_key = &new_parts
-                .get(new_part as usize)
-                .ok_or("replacement part is absent")?
-                .0;
-            if new_mid == entry.mid {
-                return Err("undo reused a message id".into());
-            }
-            if case
-                .subject
-                .shown_part_number(&session.name, &new_mid, new_key)
-                != Some(tag)
-            {
-                return Ok(Ending::Inapplicable(
-                    "undo did not reuse the target number".into(),
-                ));
-            }
         }
-        let request = TagReadRequest::new(tag, call_key);
+        let request = TagReadRequest::new(tag, call_key.clone());
         let answer: TagReadAnswer = decode(
             name,
             expect_ok(
@@ -226,6 +194,36 @@ where
             return Err(format!(
                 "call-fixed tag resolved the wrong entry, part or display facts: {answer:?}"
             ));
+        }
+        if name == "tag_read_before_undo" {
+            if let Err(error) = case
+                .subject
+                .revert_session(case.handle.inner(), &session.name, &entry.mid)
+                .await
+            {
+                return Ok(Ending::Inapplicable(format!(
+                    "adapter cannot undo: {error}"
+                )));
+            }
+            let before = (head(&session.route).await?, read_all(&session.route).await?);
+            let error = expect_error(
+                name,
+                call(
+                    &session.route,
+                    ops::SESSION_READ,
+                    json!({"tag":tag,"call_key":call_key}),
+                )
+                .await?,
+            )?;
+            if error.code != errors::UNKNOWN_CALL {
+                return Err(format!(
+                    "removed call refused {}, not unknown_call",
+                    error.code
+                ));
+            }
+            if (head(&session.route).await?, read_all(&session.route).await?) != before {
+                return Err("refused tag read wrote session state".into());
+            }
         }
         return Ok(Ending::Passed);
     }

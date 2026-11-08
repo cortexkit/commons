@@ -228,7 +228,7 @@ pub const CASES: &[CaseSpec] = &[
     case("message_marks_served", &[Capability::MessageMarks, Capability::ReadDisplayFacts, Capability::HistoryDisplay, Capability::HostHistory, Queue, TranscriptReads], "notice and scope-owner agent marks survive opted-in reads, raw history and display; unmarked sends have neither"),
     case("tag_read_person", TAG_READ, "a person's model-visible tag resolves the call-fixed read entry with exact app client_message_id (never substituted by send_id), display facts and its stored part index"),
     case("tag_read_before_cut", TAG_READ, "a call made before a compaction cut still resolves its original tag; inapplicable without a cut fixture"),
-    case("tag_read_before_undo", TAG_READ, "a call made before undo resolves the original entry after its number is reused; inapplicable without an undo fixture"),
+    case("tag_read_before_undo", TAG_READ, "a surviving call still resolves its original entry and part after undo; a removed call refuses unknown_call without writes; inapplicable without an undo fixture"),
     case("tag_read_unknown_call", TAG_READ, "a foreign or nonexistent call is refused unknown_call, not answered or guessed"),
     case("tag_read_unknown_tag", TAG_READ, "a number not shown in the call's model request is refused unknown_tag"),
     case("tag_read_non_owner", TAG_READ, "a non-owner route is refused scope_owner_mismatch before lookup"),

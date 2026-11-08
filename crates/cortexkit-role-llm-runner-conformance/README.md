@@ -71,7 +71,7 @@ Absent optional fixtures are graded not applicable, not passed. Faulty fake
 runners exercise every new check, including replacing the short system note
 with the entire new system text.
 
-Version **0.17.30** pins `cortexkit-role-llm-runner =0.8.26`. The six
+Version **0.17.31** pins `cortexkit-role-llm-runner =0.8.27`. The six
 `notice_keep_*` cases check owner acceptance and read/history/display marks,
 required `notice`, non-owner refusal before writes, undeclared refusal even for
 false, false-as-absent, and refusal of kept tool-result rides naming `delivery`.

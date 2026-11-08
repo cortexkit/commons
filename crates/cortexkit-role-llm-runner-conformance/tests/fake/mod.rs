@@ -2325,6 +2325,9 @@ impl Module {
                     vec![],
                 );
                 sess.at_mut(ordinal).client_message_id = Some(marker);
+                if sess.name.contains("tag_read_person") {
+                    sess.at_mut(ordinal).sender = Some("person-app".into());
+                }
                 sess.at_mut(ordinal).written_at = record["at"].as_u64().unwrap_or(1);
             }
             "host_compact" | "revert" | "seed" => {

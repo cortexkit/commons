@@ -124,13 +124,8 @@ async fn tag_read_faulty_runner_forgets_cut_tags() {
     rejects("cut", "tag_read_before_cut", "unknown_tag").await;
 }
 #[tokio::test]
-async fn tag_read_faulty_runner_uses_today_after_undo() {
-    rejects(
-        "undo",
-        "tag_read_before_undo",
-        "wrong entry, part or display facts",
-    )
-    .await;
+async fn tag_read_faulty_runner_answers_removed_call() {
+    rejects("removed_call", "tag_read_before_undo", "not refused").await;
 }
 #[tokio::test]
 async fn tag_read_faulty_runner_misnames_unknown_call() {

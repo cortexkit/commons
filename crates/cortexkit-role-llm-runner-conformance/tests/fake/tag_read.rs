@@ -76,20 +76,19 @@ pub(super) fn read(module: &Module, stamp: &RouteStamp, session: &str, params: &
             None,
         );
     };
+    if defect != Some("removed_call")
+        && !sess
+            .archive
+            .iter()
+            .chain(&sess.messages)
+            .any(|message| message.calls.contains(&request.call_key))
+    {
+        return refuse(errors::UNKNOWN_CALL, None);
+    }
     if defect == Some("cut") && session.contains("tag_read_before_cut") && !sess.cuts.is_empty() {
         return refuse(errors::UNKNOWN_TAG, None);
     }
-    let current;
-    let answers = if defect == Some("undo")
-        && session.contains("tag_read_before_undo")
-        && sess.history_version > 0
-    {
-        current = snapshot(module, sess);
-        &current
-    } else {
-        saved
-    };
-    let Some(mut answer) = answers.get(&request.tag).cloned() else {
+    let Some(mut answer) = saved.get(&request.tag).cloned() else {
         return if defect == Some("unknown_tag") {
             Reply::Response(json!({}))
         } else {
