@@ -3339,7 +3339,10 @@ A runner that declares `retract` serves `session.retract`.
 - [pinned] For `transient_backoff`, `retry_at_ms` is the provider's retry time
   when it gives one; otherwise it is the final attempt's receipt time plus
   5,000 ms. The runner decides the observation only from structured provider
-  error codes or types, never message text.
+  error codes or types, never message text, which can quote a user. The one
+  exception is routing §9.3's anchored whole-message template under a single
+  structured type, for a case the provider signals no other way; a message
+  that does not match the template exactly yields no blocking observation.
 - [pinned] A caller (the session owner) may stop sending its own blocking
   observations or imposing its own local account blocks for runs on a runner declaring
   `admission_reports`. A caller never relays an observation for an admission it

@@ -1311,8 +1311,14 @@ What a runner saw on an account, so the provider's headroom stays current.
   admission, before releasing it with `run_finished`. It sends it only to a
   router declaring `observe_credential_refused`, and only from the provider's
   structured error (a code or type), never inferred from message text, which
-  can quote a user. Limits that reset stay `account_limit_exhausted` or
-  `transient_backoff`. For an API key, an authentication refusal that
+  can quote a user. When a provider signals the case only by a fixed message
+  under one structured type, the runner may match that message, provided the
+  match is checked only under that type (and HTTP status), covers the whole
+  message as an exact string or a fixed template whose variable parts are
+  provider-generated values (a reset time, a key prefix) parsed strictly, and
+  never searches for a substring or keyword. A message that does not match
+  exactly yields no blocking observation. Limits that reset stay
+  `account_limit_exhausted` or `transient_backoff`. For an API key, an authentication refusal that
   persists after the runner's own retry (the key is invalid or revoked)
   counts as refused for any use. For a sign-in method such as OAuth, the same
   refusal means the sign-in must be renewed: the runner pauses for sign-in and
