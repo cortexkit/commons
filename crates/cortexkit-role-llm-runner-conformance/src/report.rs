@@ -226,6 +226,7 @@ pub const CASES: &[CaseSpec] = &[
     case("media_refs_large_payloads_inline", &[Capability::MediaRefs, Capability::Attachments, TranscriptReads, Queue, RunOps], "large text, arguments and reasoning stay exactly inline"),
     case("media_refs_descriptor_digests", &[Capability::MediaRefs, Capability::Attachments, TranscriptReads, Queue, RunOps], "media references and any served content identities equal descriptors"),
     case("message_marks_served", &[Capability::MessageMarks, Capability::ReadDisplayFacts, Capability::HistoryDisplay, Capability::HostHistory, Queue, TranscriptReads], "notice and scope-owner agent marks survive opted-in reads, raw history and display; unmarked sends have neither"),
+    case("message_marks_retry_changed", &[Capability::MessageMarks, Queue, TranscriptReads], "changed notice, speaker and (when declared) keep marks refuse send_id_reuse before writes; identical marks and false/absent marks replay the accepted send"),
     case("tag_read_person", TAG_READ, "a person's model-visible tag resolves the call-fixed read entry with exact app client_message_id (never substituted by send_id), display facts and its stored part index"),
     case("tag_read_before_cut", TAG_READ, "a call made before a compaction cut still resolves its original tag; inapplicable without a cut fixture"),
     case("tag_read_before_undo", TAG_READ, "a surviving call still resolves its original entry and part after undo; a removed call refuses unknown_call without writes; inapplicable without an undo fixture"),

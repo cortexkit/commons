@@ -1,5 +1,9 @@
 # Compaction wire examples
 
+`view-anchor-shapes.json` pins Setup's absent, false and true `view_anchor`
+flags and sealed view bytes. Without true, both policy members are absent and
+the view retains the 0.2.9 shape and checksum.
+
 `delivered-rides.json` shows legacy and new ride entries with optional
 `send_id` and ordered `forms`, plus a later ride-text `tokens` count that
 leaves part and entry digests unchanged.

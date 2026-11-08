@@ -1,5 +1,17 @@
 # cortexkit-role-llm-runner-conformance
 
+Version **0.17.32** pins runner **0.8.28**. The message-mark retry case checks
+refusal of changed marks and replay of identical marks. The optional
+`admission_reports` describe token has no capability prerequisites.
+
+Adapters that flatten tool-output media to text must implement the defaulted
+`media_refs_tool_output_pointer` hook. It identifies only the tool output's
+exact JSON pointer in each native read message. Missing references there are
+accepted only when the output is byte-identical to inline; any served media
+reference must match descriptors' SHA-256, byte size and kind. Outside the
+identified outputs, comparisons are unchanged. The default `None` identifies
+no exception and retains strict comparison everywhere.
+
 Version **0.17.28** pins runner **0.8.24**. Mid-step `"live"` attaches
 (including absent or null `from`) replay the current step's real durable
 controls in cursor order before the display snapshot. This is required of

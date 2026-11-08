@@ -1067,6 +1067,61 @@ async fn media_refs_reference_and_faulty_fakes() {
     }
 }
 
+#[tokio::test]
+async fn media_refs_flattened_tool_output_is_unchanged_with_opt_in() {
+    let mut subject = media_reference_subject(Some("refs_flattened"));
+    subject.media_refs_output_hook = true;
+    let report = run(&subject).await;
+    for name in [
+        "media_refs_media_are_refs",
+        "media_refs_large_payloads_inline",
+        "media_refs_descriptor_digests",
+    ] {
+        assert_passed(&report, name);
+    }
+}
+
+#[tokio::test]
+async fn media_refs_flattened_tool_output_without_hook_stays_strict() {
+    let report = run(&media_reference_subject(Some("refs_flattened"))).await;
+    for name in ["media_refs_media_are_refs", "media_refs_descriptor_digests"] {
+        let reason = failed(&report, name);
+        assert!(reason.contains("media_refs"), "{reason}");
+    }
+}
+
+#[tokio::test]
+async fn media_refs_faulty_tool_output_changes_text_without_references() {
+    let mut subject = media_reference_subject(Some("refs_output_changed"));
+    subject.media_refs_output_hook = true;
+    let report = run(&subject).await;
+    let name = "media_refs_media_are_refs";
+    let reason = failed(&report, name);
+    assert!(
+        reason.contains("tool output omitted media_ref but differs from inline"),
+        "{reason}"
+    );
+    println!("FAIL {name}: {reason}");
+}
+
+#[tokio::test]
+async fn media_refs_tool_output_hook_keeps_envelope_references_strict() {
+    let name = "media_refs_descriptor_digests";
+    let mut subject = media_reference_subject(Some("refs_flattened_envelope"));
+    subject.media_refs_output_hook = true;
+    subject.descriptor_case = Some(name);
+    assert_passed(&run(&subject).await, name);
+    let mut subject = media_reference_subject(Some("refs_envelope_digest"));
+    subject.media_refs_output_hook = true;
+    subject.descriptor_case = Some(name);
+    let reason = failed(&run(&subject).await, name);
+    assert!(
+        reason.contains("metadata/digests differ from descriptors"),
+        "{reason}"
+    );
+    println!("FAIL {name}: {reason}");
+}
+
 fn assert_passed(report: &SuiteReport, case: &str) {
     if case.starts_with("restart_survival_")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter declares host_survives_restart: false")

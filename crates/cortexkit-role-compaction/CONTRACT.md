@@ -520,6 +520,7 @@ Request:
 | `child_harness` | string, optional | The harness the provider binds when it creates sessions for this session's work, such as summarizer children, on this same runner. Absent means the session's own harness. The runner sends it only when its own host for the session cannot create sessions. |
 | `model` | `ModelRef` | W3.1. |
 | `accepts_images` | boolean, optional | Whether the session's model reads images. The runner sends it only when known; absent means unknown. A provider inserts images only when it is `true`. |
+| `view_anchor` | boolean, optional | Runner opt-in to checksummed `View.built_through` and `View.new_signed`. Only `true` enables either member. |
 | `context_window` | integer | W3.4. |
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | W3.3. |
@@ -529,6 +530,14 @@ Request:
 | `now` | integer | The runner's clock. |
 
 The provider never derives `child_harness` from runner or host names. A Setup that changes it applies to the next child; a running child keeps the harness it was created with.
+
+The runner sends `view_anchor: true` only when it verifies `built_through` and
+`new_signed` in the view checksum and plans views through `render::plan_view`
+(view library 0.1.8 or later). Without that true flag, the provider sends neither
+member and seals the checksum over `version` and `edits` only, exactly as in
+0.2.9. A Setup adding or removing the flag applies to the next view. Every future
+view field that enters the checksum needs its own Setup opt-in; lenient field
+decoding alone cannot make an older runner verify a new checksum shape.
 
 Answer: `{"answer": "ready"}`. Refusals: `unknown_preset`, `invalid_params`.
 
@@ -646,6 +655,9 @@ Used as llm-runner publishes them; this contract adds nothing. What a provider s
 | `edits` | array of `Edit` | Applied in order. |
 | `built_through` | string, optional | The `mid` of the newest entry the provider's index held when it built the view. |
 | `new_signed` | open string, optional | Only `strip` is defined: authorize dropping invalidated signed parts in entries newer than `built_through`, as below. An unknown value behaves as absent. |
+
+Providers send `built_through` and `new_signed` only when the latest Setup
+contains `view_anchor: true` (W5.1). `View::seal_for_setup` enforces this gate.
 
 At every point the runner checks a view, if applying its edits invalidates a `seal: signed` part under PR2, the render plan drops that part instead of refusing only when `new_signed` is `strip` and its entry is strictly after `built_through` on the active path. This never replaces a sealed part (PR5). The existing `signed_part_invalid` refusal stands when `built_through` is absent, its mid is no longer on the active path after a revert or branch switch, the signed part is in an entry at or before the anchor, or `new_signed` is absent or unknown. Ordinals cannot anchor this permission because they are reused after a revert. PR6 still applies: stripping reasoning never removes a protected entry's last tool part, and stripping cannot remove all its parts when it has no tool part.
 

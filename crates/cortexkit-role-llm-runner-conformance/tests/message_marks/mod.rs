@@ -109,3 +109,26 @@ async fn message_marks_faulty_runner_accepts_non_owner() {
     )
     .await;
 }
+
+#[tokio::test]
+async fn message_marks_faulty_runner_accepts_changed_retry_marks() {
+    rejects("retry", "message_marks_retry_changed", "not refused").await;
+}
+
+#[tokio::test]
+async fn message_marks_retry_checks_keep_when_declared() {
+    let mut faithful = subject(None, true);
+    faithful.capabilities.insert(Capability::NoticeKeep);
+    let report = run(&faithful).await;
+    assert_passed(&report, "message_marks_retry_changed");
+    assert_none_failed_but(&report, &[]);
+
+    let mut faulty = subject(Some("retry_keep"), true);
+    faulty.capabilities.insert(Capability::NoticeKeep);
+    let report = run(&faulty).await;
+    let name = "message_marks_retry_changed";
+    let reason = failed(&report, name);
+    assert!(reason.contains("changed keep marks"), "{reason}");
+    println!("FAIL {name}: {reason}");
+    assert_none_failed_but(&report, &[name]);
+}

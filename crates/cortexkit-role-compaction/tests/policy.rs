@@ -4,6 +4,62 @@ use cortexkit_role_compaction::view::{AppliedViewAnswer, View};
 use serde_json::json;
 
 #[test]
+fn view_anchor_setup_gates_sealed_bytes_and_tracks_the_latest_setup() {
+    let base = SetupRequest::new(
+        "example",
+        ModelRef::new("example-provider", "example-model"),
+        32768,
+        4096,
+        ProviderRules::new(SignedParts::Bound, EditCost::Suffix),
+        vec![],
+        1,
+    );
+    let cases: serde_json::Value = serde_json::from_str(include_str!(
+        "../test-vectors/compaction-v2/view-anchor-shapes.json"
+    ))
+    .unwrap();
+    for case in cases["cases"].as_array().unwrap() {
+        let mut wire = serde_json::to_value(&base).unwrap();
+        wire.as_object_mut()
+            .unwrap()
+            .extend(case["setup"].as_object().unwrap().clone());
+        let setup: SetupRequest = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&setup).unwrap(), wire);
+        let view = View::seal_for_setup(
+            &setup,
+            1,
+            vec![],
+            Some("anchor".into()),
+            Some("strip".into()),
+        );
+        assert_eq!(
+            serde_json::to_string(&view).unwrap(),
+            case["sealed"].as_str().unwrap(),
+            "{}",
+            case["name"]
+        );
+        assert!(view.verify());
+    }
+    let seal = |setup: &SetupRequest| {
+        View::seal_for_setup(
+            setup,
+            2,
+            vec![],
+            Some("new-anchor".into()),
+            Some("strip".into()),
+        )
+    };
+    let enabled = base.clone().with_view_anchor(true);
+    assert_eq!(seal(&enabled).built_through.as_deref(), Some("new-anchor"));
+    let removed = base;
+    assert_eq!(seal(&removed), View::seal(2, vec![]));
+    assert_eq!(
+        seal(&enabled.with_view_anchor(false)),
+        View::seal(2, vec![])
+    );
+}
+
+#[test]
 fn applied_by_is_optional_and_answers_still_ignore_unknown_fields() {
     let old: AppliedViewAnswer = serde_json::from_value(json!({"future": true})).unwrap();
     assert_eq!(old.applied_by, None);

@@ -292,6 +292,9 @@ pub mod capabilities {
     /// Sign-in methods whose accounts the runner admits, renews and releases
     /// through routing, listed in `role.describe.routed_accounts`.
     pub const ROUTED_ACCOUNTS: &str = "routed_accounts";
+    /// The runner holds each run's routing admission and sends blocking account
+    /// observations itself. Independent of `routed_accounts` declaration.
+    pub const ADMISSION_REPORTS: &str = "admission_reports";
     /// Accept routing's provider and model names for run account admission.
     /// Requires `routed_accounts`.
     pub const ACCOUNT_ROUTE: &str = "account_route";
@@ -525,6 +528,7 @@ pub mod capabilities {
         (STEP_EVENTS, &[]),
         (ROUTED_ACCOUNTS, &[]),
         (ACCOUNT_ROUTE, &[ops::SESSION_SEND]),
+        (ADMISSION_REPORTS, &[]),
         (ARCHIVE_PRUNES_REASONING, &[ops::SESSION_READ]),
         // Extends whichever display surface the runner serves; `check_describe`
         // requires at least one of them by name.

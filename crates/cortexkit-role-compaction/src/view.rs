@@ -54,6 +54,22 @@ pub struct View {
 }
 
 impl View {
+    /// Seal for the latest Setup. Without explicit anchor support, omit both
+    /// policy members so older runners verify the original checksum shape.
+    pub fn seal_for_setup(
+        setup: &crate::setup::SetupRequest,
+        version: u64,
+        edits: Vec<Edit>,
+        built_through: Option<String>,
+        new_signed: Option<String>,
+    ) -> Self {
+        if setup.view_anchor == Some(true) {
+            Self::seal_with_policy(version, edits, built_through, new_signed)
+        } else {
+            Self::seal(version, edits)
+        }
+    }
+
     /// Build a view, computing its checksum. Nothing else is checked: not
     /// the version, the edits, or what they name.
     pub fn seal(version: u64, edits: Vec<Edit>) -> Self {
@@ -62,6 +78,8 @@ impl View {
 
     /// Build a view whose checksum includes the policy members that are
     /// present. Absent members do not change checksums of older views.
+    /// Providers may include either member only after Setup's `view_anchor`
+    /// opt-in; [`Self::seal_for_setup`] applies that gate automatically.
     pub fn seal_with_policy(
         version: u64,
         edits: Vec<Edit>,

@@ -1,0 +1,20 @@
+{
+  "about": "Only an explicit Setup view_anchor opt-in permits checksummed policy members. The unflagged sealed bytes are the 0.2.9 shape.",
+  "cases": [
+    {
+      "name": "legacy",
+      "setup": {},
+      "sealed": "{\"version\":1,\"checksum\":\"e615510e918d655c957a3c7f89dc77177d10aba205cfa7cec43e22555c1eb27e\",\"edits\":[]}"
+    },
+    {
+      "name": "explicit_false",
+      "setup": {"view_anchor": false},
+      "sealed": "{\"version\":1,\"checksum\":\"e615510e918d655c957a3c7f89dc77177d10aba205cfa7cec43e22555c1eb27e\",\"edits\":[]}"
+    },
+    {
+      "name": "anchored",
+      "setup": {"view_anchor": true},
+      "sealed": "{\"version\":1,\"checksum\":\"89baa0ebc4c4822413a53fe49468b4a34ddffbdcec1c7a97fe762a860f2f2a17\",\"edits\":[],\"built_through\":\"anchor\",\"new_signed\":\"strip\"}"
+    }
+  ]
+}

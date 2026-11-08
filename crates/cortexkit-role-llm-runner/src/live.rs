@@ -622,6 +622,10 @@ pub struct NoticeDelivered {
     /// Optional agent label; every delivery event is already a notice.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaks_for: Option<crate::message_marks::SpeaksFor>,
+    /// Open rendering-form name, as on a notices read fact. Absence means
+    /// `tool_result`; serve another known form without waiting for a read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delivered_as: Option<String>,
     pub mid: String,
     pub part: u32,
     pub call_key: String,
@@ -639,6 +643,11 @@ pub struct NoticeDelivered {
 }
 
 impl NoticeDelivered {
+    pub fn with_delivered_as(mut self, delivered_as: impl Into<String>) -> Self {
+        self.delivered_as = Some(delivered_as.into());
+        self
+    }
+
     /// Name the other runner that minted the call's key; never set for local calls.
     pub fn with_call_carrier(mut self, call_carrier: impl Into<String>) -> Self {
         self.call_carrier = Some(call_carrier.into());
@@ -667,6 +676,7 @@ impl NoticeDelivered {
             sender: sender.into(),
             text: String::new(),
             speaks_for: None,
+            delivered_as: None,
         }
     }
 

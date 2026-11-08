@@ -25,6 +25,10 @@ pub const STOP_ALL_JSON: &str = include_str!("../test-vectors/llm-runner-v1/stop
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
     (
+        "message-marks-retry.json",
+        include_str!("../test-vectors/llm-runner-v1/message-marks-retry.json"),
+    ),
+    (
         "cache-policy.json",
         include_str!("../test-vectors/llm-runner-v1/cache-policy.json"),
     ),

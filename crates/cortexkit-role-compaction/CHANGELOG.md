@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.12
+
+- Align the runner dependency with 0.8.28.
+- Add runner-sent Setup opt-in `view_anchor`. Providers include `built_through`
+  and `new_signed` in views and their checksums only for opted-in runners; without it,
+  preserve the pre-anchor sealed shape byte for byte. Future checksummed view
+  fields also require an individual Setup opt-in.
+
 ## 0.2.11
 
 - Add `NoticeOrigin.keep`: default false, omitted when false, and included in

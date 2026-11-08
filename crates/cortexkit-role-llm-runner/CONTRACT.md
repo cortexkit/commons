@@ -273,6 +273,7 @@ alias until the next breaking release.
 | `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started`, and raw entries with `read_display_facts` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
 | `step_events` | No added op; plain bus hints after native step recording | §14.3 |
 | `routed_accounts` | No added op; sign-in methods whose accounts the runner routes itself | §2, §9.3.3 |
+| `admission_reports` | No added op or describe prerequisite; runner-held admissions and runner-sent blocking observations | §9.3.3 |
 | `account_route` | `session.send` account admission names; requires `routed_accounts` | §9.3.3 |
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `head_selection` | `session.send`, `session.head`; requires `plans`; selection through `session.refresh` additionally requires `session_change` | §9.3.4 |
@@ -705,6 +706,11 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   present, still identify the full stored content, and equal descriptors'
   identities. This mode applies to `session.read` and raw `session.history`
   wherever served. Media bytes are obtained through `session.media_read`.
+  Media inside a tool result's output is replaced by `media_ref` in place only
+  where the inline read carries the media payload there. Where the inline read
+  flattens that output to text, the `media_refs` read serves the same text.
+  This release defines no member for carrying media references beside flattened
+  text; adding one is deferred to a future release.
 - [pinned] In descriptors mode every byte-backed image, file, PDF or audio
   payload becomes `{type: "media_ref", part?, kind, mime, byte_size, sha256,
   width?, height?}`. Size and SHA-256 are over decoded bytes, never base64.
@@ -3308,6 +3314,23 @@ A runner that declares `retract` serves `session.retract`.
   the group, the caller keeps naming the account as the runner accepts it
   today, and routing §5.2 applies unchanged.
 
+- [pinned] A runner declaring `admission_reports` holds the routing admission
+  for each of its runs, whether through `routed_accounts` or by calling
+  `route.account_for` itself. The group has no describe prerequisite. For every
+  admission it holds, the runner itself sends `route.account_observe` for
+  `transient_backoff` and `account_limit_exhausted`, on every sign-in method.
+  It sends `credential_refused` exactly where routing §9.3 requires it: a
+  refused pooled or API-key credential. A subscription or OAuth sign-in failure
+  pauses for sign-in and sends no `credential_refused`.
+- [pinned] For `transient_backoff`, `retry_at_ms` is the provider's retry time
+  when it gives one; otherwise it is the final attempt's receipt time plus
+  5,000 ms. The runner decides the observation only from structured provider
+  error codes or types, never message text.
+- [pinned] A caller (the session owner) may stop sending its own blocking
+  observations or imposing its own local account blocks for runs on a runner declaring
+  `admission_reports`. A caller never relays an observation for an admission it
+  does not hold. Without the group, callers keep their current behaviour.
+
 - [pinned] The opt-in `account_route` group requires `routed_accounts`;
   `check_describe` refuses a declaration without it as
   `account_route_without_routed_accounts`. A caller sends the optional typed
@@ -4463,9 +4486,13 @@ never less. This is the safe fallback because nothing gets hidden.
   or part. All notices of one carrying call are listed on one entry, in delivery order, so a reader
   can order them from that one list.
 - [pinned] Delivery emits the live event
-  `notice_delivered {mid, part, call_key, call_carrier?, send_id, sender, text, speaks_for?}`
+  `notice_delivered {mid, part, call_key, call_carrier?, send_id, sender, text, speaks_for?, delivered_as?}`
   (`live::NoticeDelivered`), with `call_carrier` following §9.16, identifying the
-  carrying message and part, not a new entry. Neither delivery nor the fact
+  carrying message and part, not a new entry. The optional `delivered_as` is an
+  open string with the same values as the notices read fact's `delivered_as`;
+  absent means `tool_result`. The runner carries it when it knows a form other
+  than `tool_result`, so live readers can tell forms apart without waiting for
+  a read. Neither delivery nor the fact
   moves `history_version`. Neither the live event nor the read/display fact
   is covered by any checksum; this does not exempt the compaction contract's
   separate `Delivered` projection from W7. A fact may
@@ -4507,8 +4534,19 @@ never less. This is the safe fallback because nothing gets hidden.
 - [pinned] Riding `notices` facts and `notice_delivered` events carry optional
   `speaks_for` with the same shape. They never serve `notice`, because every
   such fact or event is already a notice.
+- [pinned] Marks are part of a send's retry identity. A resend under the same
+  `send_id` whose `speaks_for`, `notice` or `keep` differs from the accepted
+  send is refused `send_id_reuse`, with `detail.field` naming any one of the
+  differing fields, before any write. Compare `speaks_for` as the whole object;
+  false `notice` and false `keep` equal absence. Identical marks replay the
+  original answer. Marks stay outside every checksum: this is retry identity
+  only (`message_marks::retry_difference`).
 
 ### 9.7.4 `notice_keep`: protect notices carrying a person's words
+
+`keep` participates in mark retry identity under §9.7.3: false equals absence,
+changed marks refuse `send_id_reuse` before any write, and identical marks replay
+the original answer. This does not add marks to checksums.
 
 - [pinned] A runner declaring `notice_keep` also declares `message_marks`.
   `check_describe` refuses a missing prerequisite as
@@ -5781,6 +5819,8 @@ provider's breakpoint limit (four on Anthropic).
 
 - [pinned] A runner declares `notice_yield` only with `call_yield` (§9.21).
   A missing prerequisite is refused as `notice_yield_without_call_yield`.
+  Since `call_yield` requires `plans`, `delivery_order`, `notices` and
+  `message_marks`, every runner declaring `notice_yield` has `delivery_order`.
   The session's scope owner decides which of its messages need urgent
   hand-back; the runner implements the mechanism, not an urgency policy.
 - [pinned] `PlanSender` adds optional `yields: true`. Absence means false and

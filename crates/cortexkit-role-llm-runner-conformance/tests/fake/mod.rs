@@ -925,6 +925,7 @@ struct SendRec {
     admitted: bool,
     resend_count: usize,
     client_message_id: Option<String>,
+    marks: serde_json::Map<String, Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -2015,6 +2016,10 @@ impl Module {
                         admitted: record["admitted"] == json!(true),
                         resend_count: 0,
                         client_message_id: record["client_message_id"].as_str().map(str::to_owned),
+                        marks: record["retry_marks"]
+                            .as_object()
+                            .cloned()
+                            .unwrap_or_default(),
                     },
                 );
                 if kind == "send" && record["no_run"] != json!(true) {
@@ -4074,6 +4079,17 @@ impl Module {
                 // A granted interrupt goes on exactly as the owner's would.
             }
             if let Some(send) = sess.sends.get(&request.send_id) {
+                if let Some(field) = cortexkit_role_llm_runner::message_marks::retry_difference(
+                    &send.marks,
+                    &request.runner_params,
+                ) {
+                    if self.world.defects.message_marks != Some("retry")
+                        && !(field == "keep"
+                            && self.world.defects.message_marks == Some("retry_keep"))
+                    {
+                        return Ok(refuse(errors::SEND_ID_REUSE, Some(json!({"field": field}))));
+                    }
+                }
                 if send.prompt != request.prompt_text() && !self.world.defects.reuse_accepted {
                     return Ok(refuse(
                         errors::SEND_ID_REUSE,
@@ -4284,6 +4300,7 @@ impl Module {
             session,
             json!({ "kind": "send", "send_id": request.send_id, "prompt": request.prompt_text(),
                     "message_marks": marks,
+                    "retry_marks": request.runner_params,
                     "attribution": self.attribution_for(session, &stamp.principal),
                     "route_decision_id": request.route_decision_id,
                     "account_route": request.account_route,
@@ -5892,6 +5909,7 @@ pub struct FakeSubject {
     pub held_calls_group: bool,
     pub descriptor_case: Option<&'static str>,
     pub descriptor_fixtures: bool,
+    pub media_refs_output_hook: bool,
     /// Store attachment media in the runner's own schema as a `data:` URL
     /// `file` part, with no digest anywhere in the stored message.
     pub data_url_media: bool,
@@ -6029,6 +6047,7 @@ impl FakeSubject {
             descriptor_case: None,
             data_url_media: false,
             descriptor_fixtures: false,
+            media_refs_output_hook: false,
             no_image_results: false,
             late_seal_reads: 0,
             retention_defect: RetentionDefect::None,
@@ -6828,17 +6847,34 @@ impl LlmRunnerSubject for FakeSubject {
         media::parts(message)
     }
 
+    fn media_refs_tool_output_pointer(&self, message: &Value, _part_key: &str) -> Option<String> {
+        (self.media_refs_output_hook
+            && message["role"] == "tool"
+            && message["content"]["type"] == "tool_result")
+            .then(|| "/content/content".into())
+    }
+
     fn media_tool_result(&self, bytes: &[u8], nested: bool, scenario: &str) -> Option<Value> {
         use base64::{engine::general_purpose::STANDARD, Engine};
         if !self.descriptor_fixtures || self.descriptor_case.is_some_and(|case| case != scenario) {
             return None;
         }
         let image = json!({"type":"image","source":{"type":"base64","media_type":"image/png","data":STANDARD.encode(bytes)}});
-        Some(if nested {
-            json!({"type":"tool_result","tool_use_id":"descriptor-call","is_error":true,"content":[image]})
-        } else {
-            image
-        })
+        Some(
+            if nested
+                && matches!(
+                    self.defects.media,
+                    Some("refs_flattened_envelope" | "refs_envelope_digest")
+                )
+            {
+                json!({"type":"tool_result","tool_use_id":"descriptor-call","is_error":true,
+                "content":[image.clone()],"metadata_media":image})
+            } else if nested {
+                json!({"type":"tool_result","tool_use_id":"descriptor-call","is_error":true,"content":[image]})
+            } else {
+                image
+            },
+        )
     }
 
     fn plan_notes_fixture(

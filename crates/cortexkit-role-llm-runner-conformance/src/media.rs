@@ -14,6 +14,7 @@ use cortexkit_role_llm_runner::{
     send::SendReply,
 };
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet};
 
 type Check = Result<(), String>;
 
@@ -563,6 +564,91 @@ where
     Ok(Ending::Passed)
 }
 
+type ToolOutputs = BTreeMap<(String, String), Value>;
+
+fn partition_media_refs<S: LlmRunnerSubject>(
+    subject: &S,
+    messages: &[ReadMessage],
+) -> Result<(Vec<Value>, ToolOutputs), String> {
+    let mut outside = Vec::new();
+    let mut outputs = BTreeMap::new();
+    for message in messages {
+        let mut body = message.message.clone();
+        for (key, _) in subject.read_parts(&message.message) {
+            let Some(pointer) = subject.media_refs_tool_output_pointer(&message.message, &key)
+            else {
+                continue;
+            };
+            // The adapter identifies only an output, never the whole message.
+            // Nulling that exact subtree leaves every surrounding ref checked.
+            if pointer.is_empty() {
+                return Err("media_refs output pointer identifies the whole message".into());
+            }
+            if outputs.keys().any(|(mid, previous): &(String, String)| {
+                mid == &message.mid
+                    && (previous == &pointer
+                        || previous.starts_with(&format!("{pointer}/"))
+                        || pointer.starts_with(&format!("{previous}/")))
+            }) {
+                return Err("media_refs output pointers overlap or repeat".into());
+            }
+            let output = body
+                .pointer_mut(&pointer)
+                .ok_or("media_refs output pointer is missing or overlaps another output")?;
+            let value = std::mem::replace(output, Value::Null);
+            if outputs
+                .insert((message.mid.clone(), pointer), value)
+                .is_some()
+            {
+                return Err("media_refs output pointer is repeated".into());
+            }
+        }
+        refs(&body, &mut outside);
+    }
+    Ok((outside, outputs))
+}
+
+fn check_tool_output_refs(served: &Value, inline: &Value, described: &Value) -> Check {
+    let mut actual = Vec::new();
+    let mut expected = Vec::new();
+    refs(served, &mut actual);
+    refs(described, &mut expected);
+    expected.retain(|value| value["type"] == "media_ref");
+    for reference in actual.iter().filter(|value| value["type"] == "media_ref") {
+        let Some(index) = expected.iter().position(|descriptor| {
+            ["sha256", "byte_size", "kind"]
+                .iter()
+                .all(|field| reference[*field] == descriptor[*field])
+        }) else {
+            return Err(
+                "tool-output media_ref differs from descriptors' sha256, byte_size or kind".into(),
+            );
+        };
+        expected.remove(index);
+    }
+    if !expected.is_empty()
+        && serde_json::to_vec(served).unwrap() != serde_json::to_vec(inline).unwrap()
+    {
+        return Err("tool output omitted media_ref but differs from inline".into());
+    }
+    Ok(())
+}
+
+fn check_outside_refs(name: &str, actual: &[Value], expected: &[Value], has_media: bool) -> Check {
+    match name {
+        "media_refs_media_are_refs"
+            if !has_media
+                || actual.iter().filter(|v| v["type"] == "media_ref").count() != expected.len() =>
+        {
+            Err("media_refs returned bytes or markers instead of media_ref".into())
+        }
+        "media_refs_descriptor_digests" if actual != expected => {
+            Err("media_refs metadata/digests differ from descriptors".into())
+        }
+        _ => Ok(()),
+    }
+}
+
 async fn check_media_refs<S: LlmRunnerSubject>(
     case: &Case<'_, S>,
     route: &S::Route,
@@ -574,25 +660,47 @@ where
 {
     let referenced = pages(case, route, MediaMode::MediaRefs, None).await?;
     let inline = pages(case, route, MediaMode::Inline, None).await?;
-    let mut actual = Vec::new();
-    let mut expected = Vec::new();
+    let mut all_actual = Vec::new();
+    let mut all_expected = Vec::new();
     for message in &referenced {
-        refs(&message.message, &mut actual);
+        refs(&message.message, &mut all_actual);
     }
     for message in described {
-        refs(&message.message, &mut expected);
+        refs(&message.message, &mut all_expected);
+    }
+    let (actual, served_outputs) = partition_media_refs(case.subject, &referenced)?;
+    let (mut expected, described_outputs) = partition_media_refs(case.subject, described)?;
+    let (_, inline_outputs) = partition_media_refs(case.subject, &inline)?;
+    let output_keys: BTreeSet<_> = described_outputs
+        .keys()
+        .chain(served_outputs.keys())
+        .collect();
+    for key in output_keys {
+        check_tool_output_refs(
+            served_outputs
+                .get(key)
+                .ok_or("media_refs omitted a tool output")?,
+            inline_outputs
+                .get(key)
+                .ok_or("inline read omitted a tool output")?,
+            described_outputs
+                .get(key)
+                .ok_or("descriptors omitted a tool output")?,
+        )?;
     }
     expected.retain(|value| value["type"] == "media_ref");
+    check_outside_refs(
+        name,
+        &actual,
+        &expected,
+        all_expected
+            .iter()
+            .any(|value| value["type"] == "media_ref"),
+    )?;
     match name {
-        "media_refs_media_are_refs" => {
-            if expected.is_empty()
-                || actual.iter().filter(|v| v["type"] == "media_ref").count() != expected.len()
-            {
-                return Err("media_refs returned bytes or markers instead of media_ref".into());
-            }
-        }
+        "media_refs_media_are_refs" => {}
         "media_refs_large_payloads_inline" => {
-            if actual.iter().any(|v| v["type"] != "media_ref") {
+            if all_actual.iter().any(|v| v["type"] != "media_ref") {
                 return Err("media_refs described a non-media payload".into());
             }
             let normal = serde_json::to_string(&inline).unwrap();
@@ -634,7 +742,7 @@ where
             }
         }
         "media_refs_descriptor_digests" => {
-            if actual != expected {
+            if all_actual.iter().any(|v| v["type"] != "media_ref") {
                 return Err("media_refs metadata/digests differ from descriptors".into());
             }
             for message in &referenced {
@@ -742,6 +850,81 @@ mod tests {
         lost_call["parts"][0].as_object_mut().unwrap().remove("id");
         let error = pairing(&inline, &lost_call).unwrap_err();
         assert!(error.ends_with("field id"), "{error}");
+    }
+
+    fn media_reference() -> Value {
+        json!({"type":"media_ref", "kind":"image", "mime":"image/png", "byte_size":3,
+            "sha256":"a".repeat(64)})
+    }
+
+    #[test]
+    fn tool_output_refs_allow_only_byte_identical_omissions() {
+        let described = json!([media_reference()]);
+        let inline = json!("[image omitted]\nunchanged 🦀");
+        assert!(check_tool_output_refs(&inline, &inline, &described).is_ok());
+        for changed in [json!("[image omitted]\nchanged 🦀"), json!([]), Value::Null] {
+            assert!(check_tool_output_refs(&changed, &inline, &described)
+                .unwrap_err()
+                .contains("differs from inline"));
+        }
+        let partial = json!([media_reference()]);
+        let described = json!([media_reference(), media_reference()]);
+        assert!(check_tool_output_refs(&partial, &inline, &described).is_err());
+    }
+
+    #[test]
+    fn tool_output_refs_match_descriptor_sha_size_kind_and_multiplicity() {
+        let reference = media_reference();
+        let described = json!([reference]);
+        assert!(check_tool_output_refs(&described, &json!("inline"), &described).is_ok());
+        for (field, value) in [
+            ("sha256", json!("b".repeat(64))),
+            ("byte_size", json!(4)),
+            ("kind", json!("audio")),
+        ] {
+            let mut changed = reference.clone();
+            changed[field] = value;
+            assert!(
+                check_tool_output_refs(&json!([changed]), &json!("inline"), &described)
+                    .unwrap_err()
+                    .contains("differs from descriptors")
+            );
+        }
+        assert!(check_tool_output_refs(
+            &json!([reference, reference]),
+            &json!("inline"),
+            &described
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn outside_tool_outputs_keep_exact_refs_and_counts() {
+        let expected = vec![media_reference()];
+        for (field, value) in [
+            ("sha256", json!("b".repeat(64))),
+            ("byte_size", json!(4)),
+            ("kind", json!("audio")),
+            ("mime", json!("image/jpeg")),
+            ("width", json!(1)),
+            ("part", json!("different-part")),
+        ] {
+            let mut actual = expected.clone();
+            actual[0][field] = value;
+            assert!(
+                check_outside_refs("media_refs_descriptor_digests", &actual, &expected, true)
+                    .is_err()
+            );
+        }
+        assert!(check_outside_refs("media_refs_media_are_refs", &[], &expected, true).is_err());
+        assert!(check_outside_refs(
+            "media_refs_media_are_refs",
+            &[expected[0].clone(), expected[0].clone()],
+            &expected,
+            true
+        )
+        .is_err());
+        assert!(check_outside_refs("media_refs_media_are_refs", &[], &[], false).is_err());
     }
 
     /// Every problem with `png` as a PNG: its signature, each chunk's

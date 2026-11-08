@@ -173,6 +173,8 @@ pub enum Capability {
     RoutedAccounts,
     /// Routing's provider and model names for runner-owned account admission.
     AccountRoute,
+    /// Runner-held admissions and runner-sent blocking account observations.
+    AdmissionReports,
     /// Private read-only model conversations rooted in a head snapshot.
     ForkAnswer,
     /// The runner adapter can hold a session's next request at the context
@@ -267,6 +269,7 @@ impl Capability {
         Self::StepEvents,
         Self::RoutedAccounts,
         Self::AccountRoute,
+        Self::AdmissionReports,
         Self::ForkAnswer,
     ];
 
@@ -347,6 +350,7 @@ impl Capability {
             Self::StepEvents => groups::STEP_EVENTS,
             Self::RoutedAccounts => groups::ROUTED_ACCOUNTS,
             Self::AccountRoute => groups::ACCOUNT_ROUTE,
+            Self::AdmissionReports => groups::ADMISSION_REPORTS,
             Self::ForkAnswer => groups::FORK_ANSWER,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
@@ -1838,6 +1842,17 @@ pub trait LlmRunnerSubject: Harness {
     /// image; otherwise the result is an image block. Unsupported adapters
     /// name the media-fixture cases inapplicable.
     fn media_tool_result(&self, _bytes: &[u8], _nested: bool, _scenario: &str) -> Option<Value> {
+        None
+    }
+
+    /// Exact JSON pointer, relative to `message`, of the output inside the
+    /// tool-result part named by `part_key` from [`Self::read_parts`]. Return it
+    /// consistently for inline, descriptors and media-refs reads. Only values
+    /// beneath that pointer may omit media refs when unchanged from inline;
+    /// the part's envelope and all other values keep the strict comparison.
+    /// Flattening adapters must supply this hook. `None` keeps the existing
+    /// strict comparison everywhere; never identify a non-tool output here.
+    fn media_refs_tool_output_pointer(&self, _message: &Value, _part_key: &str) -> Option<String> {
         None
     }
 

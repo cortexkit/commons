@@ -310,7 +310,36 @@ pub fn media_refs_message(
         }
         corrupt(&mut message.message);
     }
+    flatten_tool_output(&mut message.message, defects, true);
+    if defects.media == Some("refs_envelope_digest")
+        && message.message["role"] == "tool"
+        && message.message["content"]["metadata_media"]["type"] == "media_ref"
+    {
+        message.message["content"]["metadata_media"]["mime"] = json!("image/jpeg");
+    }
     Ok(message)
+}
+
+fn flatten_tool_output(message: &mut Value, defects: &Defects, referenced: bool) {
+    if matches!(
+        defects.media,
+        Some(
+            "refs_flattened"
+                | "refs_output_changed"
+                | "refs_flattened_envelope"
+                | "refs_envelope_digest"
+        )
+    ) && message["role"] == "tool"
+        && message["content"]["type"] == "tool_result"
+    {
+        message["content"]["content"] = json!(if referenced
+            && defects.media == Some("refs_output_changed")
+        {
+            "different text without media references"
+        } else {
+            "[image/png; media omitted]"
+        });
+    }
 }
 
 /// Deliberately violate fallback ordering while retaining the normal media
@@ -395,6 +424,11 @@ pub fn page(page: ReadPage, mode: Option<MediaMode>, budget: usize, defects: &De
     }
     if !matches!(mode, Some(MediaMode::Descriptors | MediaMode::MediaRefs)) {
         attachments::page(&mut page, mode, defects);
+    }
+    if matches!(mode, None | Some(MediaMode::Inline)) {
+        for message in &mut page.messages {
+            flatten_tool_output(&mut message.message, defects, false);
+        }
     }
     let value = serde_json::to_value(page).unwrap();
     if mode != Some(MediaMode::Descriptors)

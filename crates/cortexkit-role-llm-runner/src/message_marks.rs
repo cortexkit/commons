@@ -84,3 +84,43 @@ pub fn check(
     }
     Ok(marks)
 }
+
+/// Compare marks on two admitted sends sharing a `send_id`. A differing field
+/// names a `send_id_reuse` refusal before any write. Compare `speaks_for` as the
+/// whole object; false `notice` and `keep` equal absence. Marks remain outside
+/// checksums: this comparison is retry identity only.
+pub fn retry_difference(
+    accepted: &Map<String, Value>,
+    resent: &Map<String, Value>,
+) -> Option<&'static str> {
+    if accepted.get("speaks_for") != resent.get("speaks_for") {
+        return Some("speaks_for");
+    }
+    ["notice", "keep"].into_iter().find(|field| {
+        (accepted.get(*field) == Some(&Value::Bool(true)))
+            != (resent.get(*field) == Some(&Value::Bool(true)))
+    })
+}
+
+#[cfg(all(test, feature = "test-vectors"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn marks_retry_identity_uses_whole_speaker_and_normalized_booleans() {
+        let file: Value =
+            serde_json::from_str(crate::vectors::file("message-marks-retry.json").unwrap())
+                .unwrap();
+        for case in file["cases"].as_array().unwrap() {
+            assert_eq!(
+                retry_difference(
+                    case["accepted"].as_object().unwrap(),
+                    case["resent"].as_object().unwrap(),
+                ),
+                case["field"].as_str(),
+                "{}",
+                case["name"]
+            );
+        }
+    }
+}

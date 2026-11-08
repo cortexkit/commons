@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.28
+
+- Clarify that `media_refs` preserves flattened inline tool-result text; only
+  media payloads actually present in the inline output are replaced in place.
+- Include speaker, notice and keep marks in a send's retry identity, with false
+  notice and keep equal to absence. Marks remain outside checksums.
+- Clarify that `notice_yield` already implies `delivery_order` through
+  `call_yield`; no capability requirement changes.
+- Add `admission_reports` for runners that hold their runs' routing admissions
+  and send blocking account observations themselves.
+- Add optional open-string `notice_delivered.delivered_as` so live readers can
+  distinguish delivery forms; absent retains the `tool_result` meaning.
+
 ## 0.8.27
 
 - Clarify §9.6.1: `tag_read` still resolves tags for surviving calls across

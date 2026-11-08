@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.32
+
+- Accept missing tool-output media references only when that output is unchanged
+  from inline; retain exact descriptor equality everywhere outside tool outputs.
+  Flattening adapters must supply `media_refs_tool_output_pointer`; its default
+  keeps the strict comparison everywhere.
+- Pin runner 0.8.28. Check changed message marks under the same send identity
+  and replay with identical marks.
+- Cover the `admission_reports` describe token's round trip.
+
 ## 0.17.31
 
 - Pin runner `=0.8.27` and rework `tag_read_before_undo`: a surviving call

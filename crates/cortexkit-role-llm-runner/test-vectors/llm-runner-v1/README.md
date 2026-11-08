@@ -1,4 +1,8 @@
-# llm-runner/v1 vectors for runner 0.8.19
+# llm-runner/v1 vectors for runner 0.8.28
+
+`message-marks-retry.json` pins whole-object speaker comparison, changed notice
+and keep refusal fields, identical marks, and false/absent retry equivalence.
+The mark retry-identity unit test consumes these cases without hashing marks.
 
 `notice-yield.json` pins accepted and refused owner-only `yields` plan entries
 and urgent `yield` sends, including group gating, steer-first delivery, notice

@@ -33,6 +33,9 @@ pub(crate) async fn run<S: LlmRunnerSubject>(
 where
     S::Route: RunnerRoute,
 {
+    if name == "message_marks_retry_changed" {
+        return retry_changed(case).await;
+    }
     let owner_only = name == "message_marks_speaks_for_owner_only";
     let stamps = if owner_only {
         let Some((carrier, owner)) = case.subject.scoped_session_start_stamps() else {
@@ -233,6 +236,109 @@ where
         )? != before_baseline
     {
         return Err("refused marked send wrote history, head or baseline".into());
+    }
+    Ok(Ending::Passed)
+}
+
+async fn retry_changed<S: LlmRunnerSubject>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S::Route: RunnerRoute,
+{
+    let mut probes = vec![
+        (json!({"notice": true}), json!({}), Some("notice")),
+        (
+            json!({"speaks_for": {"agent_id": "agent-a"}}),
+            json!({"speaks_for": {"agent_id": "agent-b"}}),
+            Some("speaks_for"),
+        ),
+        (json!({"notice": false}), json!({}), None),
+    ];
+    if case.declared.contains(&Capability::NoticeKeep) {
+        probes.extend([
+            (
+                json!({"notice": true, "keep": true}),
+                json!({"notice": true}),
+                Some("keep"),
+            ),
+            (json!({"keep": false}), json!({}), None),
+        ]);
+    }
+    let mut session = case
+        .open(
+            "marks-retry",
+            Script {
+                turns: probes
+                    .iter()
+                    .map(|_| ScriptedTurn::new(vec![case.mint.text("answer").0]))
+                    .collect(),
+            },
+        )
+        .await?;
+    for (marks, changed, field) in probes {
+        let send_id = case.mint.next("marks-retry-send");
+        let prompt = case.mint.next("marks-retry-prompt");
+        let mut params = case.params(&session, &prompt, &send_id, None);
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(marks.as_object().unwrap().clone());
+        let accepted: SendReply = decode(
+            "marked send",
+            expect_ok(
+                "marked send",
+                call(&session.route, ops::SESSION_SEND, params.clone()).await?,
+            )?,
+        )?;
+        wait_run_end(case.subject, &session.route, case.declared, None, &accepted).await?;
+        session.first.get_or_insert((send_id, prompt));
+        // Settle the run before comparing full answers: run state may advance
+        // between acceptance and a retry, but retrying never creates a new send.
+        let original = expect_ok(
+            "identical marks",
+            call(&session.route, ops::SESSION_SEND, params.clone()).await?,
+        )?;
+        let before = read_all(&session.route).await?;
+        let before_head = head(&session.route).await?;
+        let before_baseline = expect_ok(
+            "baseline",
+            call(&session.route, ops::SESSION_BASELINE, json!({})).await?,
+        )?;
+        let replay = expect_ok(
+            "identical marks",
+            call(&session.route, ops::SESSION_SEND, params.clone()).await?,
+        )?;
+        let replayed: SendReply = decode("identical marks", replay.clone())?;
+        if replay != original
+            || replayed.run_id != accepted.run_id
+            || replayed.submission_id != accepted.submission_id
+        {
+            return Err("identical marks did not replay the accepted send's answer".into());
+        }
+        let mut resent = params;
+        for key in ["speaks_for", "notice", "keep"] {
+            resent.as_object_mut().unwrap().remove(key);
+        }
+        resent
+            .as_object_mut()
+            .unwrap()
+            .extend(changed.as_object().unwrap().clone());
+        let response = call(&session.route, ops::SESSION_SEND, resent).await?;
+        if let Some(field) = field {
+            let label = format!("changed {field} marks");
+            let error = expect_error(&label, response)?;
+            expect_field(&label, &error, errors::SEND_ID_REUSE, field)?;
+        } else if expect_ok("false equals absent", response)? != original {
+            return Err("false/absent marks did not replay the accepted answer".into());
+        }
+        if read_all(&session.route).await? != before
+            || head(&session.route).await? != before_head
+            || expect_ok(
+                "baseline",
+                call(&session.route, ops::SESSION_BASELINE, json!({})).await?,
+            )? != before_baseline
+        {
+            return Err("marked retry wrote history, head or baseline".into());
+        }
     }
     Ok(Ending::Passed)
 }

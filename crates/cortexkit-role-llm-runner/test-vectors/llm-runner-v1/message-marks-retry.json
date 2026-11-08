@@ -1,0 +1,15 @@
+{
+  "cases": [
+    {"name":"notice_removed","accepted":{"notice":true},"resent":{},"field":"notice"},
+    {"name":"notice_added","accepted":{},"resent":{"notice":true},"field":"notice"},
+    {"name":"notice_false_absent","accepted":{"notice":false},"resent":{},"field":null},
+    {"name":"keep_removed","accepted":{"notice":true,"keep":true},"resent":{"notice":true},"field":"keep"},
+    {"name":"keep_added","accepted":{"notice":true},"resent":{"notice":true,"keep":true},"field":"keep"},
+    {"name":"keep_false_absent","accepted":{"notice":true,"keep":false},"resent":{"notice":true},"field":null},
+    {"name":"speaker_changed","accepted":{"speaks_for":{"agent_id":"agent-a"}},"resent":{"speaks_for":{"agent_id":"agent-b"}},"field":"speaks_for"},
+    {"name":"speaker_whole_object","accepted":{"speaks_for":{"agent_id":"agent-a"}},"resent":{"speaks_for":{"agent_id":"agent-a","future":"different"}},"field":"speaks_for"},
+    {"name":"speaker_removed","accepted":{"speaks_for":{"agent_id":"agent-a"}},"resent":{},"field":"speaks_for"},
+    {"name":"identical_marks","accepted":{"notice":true,"keep":true},"resent":{"notice":true,"keep":true},"field":null},
+    {"name":"identical_speaker","accepted":{"speaks_for":{"agent_id":"agent-a"}},"resent":{"speaks_for":{"agent_id":"agent-a"}},"field":null}
+  ]
+}

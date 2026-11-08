@@ -34,6 +34,11 @@ pub struct SetupRequest {
     /// means unknown. A provider inserts images only when this is `true`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accepts_images: Option<bool>,
+    /// Runner opt-in to checksummed `built_through` and `new_signed` view
+    /// members. Send true only when verifying both and using `render::plan_view`
+    /// (view library 0.1.8 or later). Changes apply to the next view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_anchor: Option<bool>,
     /// The model's context window in tokens.
     #[serde(deserialize_with = "crate::integer::required")]
     pub context_window: u64,
@@ -100,6 +105,7 @@ impl SetupRequest {
             child_harness: None,
             model,
             accepts_images: None,
+            view_anchor: None,
             context_window,
             output_reserve,
             rules,
@@ -112,6 +118,11 @@ impl SetupRequest {
 
     pub fn with_child_harness(mut self, child_harness: impl Into<String>) -> Self {
         self.child_harness = Some(child_harness.into());
+        self
+    }
+
+    pub fn with_view_anchor(mut self, view_anchor: bool) -> Self {
+        self.view_anchor = Some(view_anchor);
         self
     }
 
