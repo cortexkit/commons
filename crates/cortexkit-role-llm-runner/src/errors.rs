@@ -146,6 +146,11 @@ impl ServedBytesChangedDetail {
 /// message of the session's history.
 pub const UNKNOWN_MID: &str = "unknown_mid";
 
+/// The tag selector's call key was not minted by this session's runner.
+pub const UNKNOWN_CALL: &str = "unknown_call";
+/// The call's request did not show this runner-assigned tag.
+pub const UNKNOWN_TAG: &str = "unknown_tag";
+
 /// A `session.history` cursor no longer names a place in the session's
 /// history: a revert or a rewrite removed or changed the entry it was
 /// minted next to, or an entry older than it, or the cursor was minted for
@@ -586,6 +591,8 @@ pub const CODES: &[&str] = &[
     HISTORY_CHANGED,
     SERVED_BYTES_CHANGED,
     UNKNOWN_MID,
+    UNKNOWN_CALL,
+    UNKNOWN_TAG,
     CURSOR_EXPIRED,
     UNKNOWN_ORDINAL,
     REPLY_TOO_LARGE,
@@ -882,11 +889,13 @@ mod tests {
         let output_refs = vectors::load("output-refs.json");
         let system_text_default = vectors::load("system-text-default.json");
         let session_retention = vectors::load("session-retention.json");
+        let tag_read = vectors::load("tag-read.json");
         let cases: Vec<_> = vectors::cases(&file, "codes")
             .iter()
             .chain(vectors::cases(&output_refs, "codes"))
             .chain(vectors::cases(&system_text_default, "codes"))
             .chain(vectors::cases(&session_retention, "codes"))
+            .chain(vectors::cases(&tag_read, "codes"))
             .collect();
         let listed: Vec<&str> = cases
             .iter()

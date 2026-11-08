@@ -31,6 +31,10 @@ pub struct MessageMarks {
     pub speaks_for: Option<SpeaksFor>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub notice: bool,
+    /// Owner-marked notice carrying a person's words; false is absent.
+    /// Set only after [`crate::send::SendRequest::check_notice_keep`] succeeds.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep: bool,
 }
 
 /// The fallback agent-id grammar: 1–128 printable ASCII bytes, including space.

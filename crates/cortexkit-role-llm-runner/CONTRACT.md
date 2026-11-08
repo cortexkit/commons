@@ -266,6 +266,8 @@ alias until the next breaking release.
 | `sender_attribution` | `session.send`, `session.read`, `session.history`; requires `delivery_order`, `read_display_facts` and `history_display` | §9.7.1 |
 | `notices` | `session.read`, `session.history`, live subscription; requires `read_display_facts`, `history_display` and `live_events` | §9.7.2 |
 | `message_marks` | `session.send`, `session.read`, `session.history`; requires `read_display_facts` and `history_display` | §9.7.3 |
+| `notice_keep` | `session.send`, `session.read`, `session.history`; requires `message_marks` | §9.7.4 |
+| `tag_read` | `session.read` with a call-fixed part tag; requires `message_senders`, `message_marks`, `client_message_id` and `read_display_facts` | §9.6.1 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
 | `live_ids` | `session.subscribe` with opt-in provisional display ids (requires `live_events`; added in 0.7.46) | §7.1 |
 | `message_senders` | `session.history`, `session.subscribe`; sender binding on display rows by `message_started`, and raw entries with `read_display_facts` (requires `history_display` and `live_events`; added in 0.7.47) | §4.7, §7.1 |
@@ -3866,6 +3868,49 @@ The `tags` group, `session.resolve`,
 read-entry tag rows and `render_tags` plan setting are not part of this role.
 Opaque per-part identities are carried by `part_digests` or, for an
 `archive_prunes_reasoning` entry without digests, `part_keys` (§9.14.1).
+
+### 9.6.1 `tag_read`: read the message a call's tag named
+
+- [pinned] A runner declaring `tag_read` also declares `message_senders`,
+  `message_marks`, `client_message_id` and `read_display_facts`. `check_describe`
+  refuses missing prerequisites as `tag_read_without_message_senders`,
+  `tag_read_without_message_marks`, `tag_read_without_client_message_id` and
+  `tag_read_without_read_display_facts`.
+- [pinned] A `session.read` body carrying `tag` is parsed as the tag selector,
+  not a page request: `{tag: u64, call_key: string}`
+  (`read::TagReadRequest`). Any other member, including position, paging,
+  formatting or session-identity fields, refuses `invalid_params` naming that
+  member. A missing or malformed required member names `tag` or `call_key`.
+  A runner without `tag_read` refuses the selector naming `tag`.
+- [pinned] Only the session's owner on its own plain session route is admitted;
+  take the session from the route, never the body. Listed readers and flow- or
+  run-scoped routes are not owners (§10.1). Refuse all other callers with
+  `scope_owner_mismatch` before lookup. Identities come from the daemon's
+  attestation, not request fields.
+- [pinned] `tag` is the part number the runner showed the model, using the
+  compaction contract's numbering. `call_key` names a tool call this session's
+  own model made. A key that is not one of this session's own calls, including
+  an imported or foreign call, refuses `unknown_call`. A tag not shown in the
+  model request that produced that call, or never assigned by this runner,
+  refuses `unknown_tag`. These are named refusals, not empty answers.
+- [pinned] Answer `{entry: ReadMessage, part: u32}` (`read::TagReadAnswer`):
+  exactly one ordinary read row, with display facts always on (including
+  sender, message marks and app `client_message_id` when present), plus the
+  zero-based stored top-level part index the tag names. The meaning is fixed
+  by that call's model request. The entry carries `client_message_id` exactly
+  as an opted-in `session.read` row does (§9.11); `send_id` is not the app's
+  message identity and never substitutes for it. Resolve against that request,
+  never today's numbering. An undo may reuse a number for another message;
+  the old call still names the original message.
+  No undo lands inside one step, because the session is busy for the whole step.
+- [pinned] Retain resolution for every tag this runner ever assigned in the
+  session, including after compaction cuts or undo. This retention does not
+  make an unseen tag visible to a later call. Numbers assigned before history
+  was transferred into the session from another runner, or imported, belong to
+  the source, not the serving runner, and refuse `unknown_tag`.
+- The application coordinating agents resolves when the citing call reaches it
+  and stores the answer, so readers never resolve a tag twice.
+
 ### 9.7 `delivery_order`: ordered delivery modes, plan senders and templates
 
 A send does not always want to become a turn. A module's reminder should
@@ -4459,6 +4504,39 @@ never less. This is the safe fallback because nothing gets hidden.
 - [pinned] Riding `notices` facts and `notice_delivered` events carry optional
   `speaks_for` with the same shape. They never serve `notice`, because every
   such fact or event is already a notice.
+
+### 9.7.4 `notice_keep`: protect notices carrying a person's words
+
+- [pinned] A runner declaring `notice_keep` also declares `message_marks`.
+  `check_describe` refuses a missing prerequisite as
+  `notice_keep_without_message_marks`.
+- [pinned] `session.send` accepts optional `keep: bool` under this group.
+  False equals absent, is not stored, and is omitted when serialized. A runner
+  without the group refuses any supplied `keep`, including false, as
+  `invalid_params {field: "keep"}` before any write.
+- [pinned] True is admitted only with `notice: true` and when the daemon-attested
+  route sender is the session's scope owner. An unscoped session or any other
+  sender refuses `invalid_params {field: "keep"}` before any write. Body fields
+  never establish ownership: otherwise any sender could pin notices in another
+  agent's context indefinitely. Runners MUST use
+  `SendRequest::check_notice_keep(declared, scope_owner, attested_sender)`, not
+  reimplement its admission checks, and persist the returned mark with `notice`.
+- [pinned] After those checks, a true `keep` with a delivery list containing
+  `"tool_result"` refuses `invalid_params {field: "delivery"}` before any write.
+  Legacy `delivery: "tool_result"` is also refused naming `delivery` (it is not
+  a legacy mode). A kept notice must have its own transcript entry: a ride
+  belongs to a tool part, and protecting it would also pin the tool's output.
+  Riding `NoticeFact` and `NoticeDelivered` shapes do not gain `keep`.
+- [pinned] Serve `keep: true` beside `notice` wherever §9.7.3 serves an entry's
+  marks: opted-in read entries, raw history entries and display rows. Default
+  reads omit it; absent and false serialize identically. These facts remain
+  outside runner transcript checksums and never move `history_version`.
+  On a compaction entry, serve it as `NoticeOrigin.keep`, where true enters
+  the entry digest as part of `notice` under the compaction contract.
+- [pinned] The session owner marked this notice as carrying the person's own
+  words; a compaction provider never drops it automatically. An agent's own
+  explicit drop still may. Deploy runners and providers that decode `keep`
+  before core sends it; core sends it only to runners declaring `notice_keep`.
 
 ### 9.8 `send_status`: `session.send_status`
 

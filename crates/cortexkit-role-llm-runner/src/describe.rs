@@ -46,6 +46,11 @@ pub mod problem_names {
     pub const MESSAGE_MARKS_WITHOUT_READ_DISPLAY_FACTS: &str =
         "message_marks_without_read_display_facts";
     pub const MESSAGE_MARKS_WITHOUT_HISTORY_DISPLAY: &str = "message_marks_without_history_display";
+    pub const NOTICE_KEEP_WITHOUT_MESSAGE_MARKS: &str = "notice_keep_without_message_marks";
+    pub const TAG_READ_WITHOUT_MESSAGE_SENDERS: &str = "tag_read_without_message_senders";
+    pub const TAG_READ_WITHOUT_MESSAGE_MARKS: &str = "tag_read_without_message_marks";
+    pub const TAG_READ_WITHOUT_CLIENT_MESSAGE_ID: &str = "tag_read_without_client_message_id";
+    pub const TAG_READ_WITHOUT_READ_DISPLAY_FACTS: &str = "tag_read_without_read_display_facts";
     pub const NOTICES_WITHOUT_READ_DISPLAY_FACTS: &str = "notices_without_read_display_facts";
     pub const NOTICES_WITHOUT_HISTORY_DISPLAY: &str = "notices_without_history_display";
     pub const NOTICES_WITHOUT_LIVE_EVENTS: &str = "notices_without_live_events";
@@ -661,6 +666,31 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             capabilities::NOTICE_YIELD,
             capabilities::CALL_YIELD,
             problem_names::NOTICE_YIELD_WITHOUT_CALL_YIELD,
+        ),
+        (
+            capabilities::TAG_READ,
+            capabilities::MESSAGE_SENDERS,
+            problem_names::TAG_READ_WITHOUT_MESSAGE_SENDERS,
+        ),
+        (
+            capabilities::TAG_READ,
+            capabilities::MESSAGE_MARKS,
+            problem_names::TAG_READ_WITHOUT_MESSAGE_MARKS,
+        ),
+        (
+            capabilities::TAG_READ,
+            capabilities::CLIENT_MESSAGE_ID,
+            problem_names::TAG_READ_WITHOUT_CLIENT_MESSAGE_ID,
+        ),
+        (
+            capabilities::TAG_READ,
+            capabilities::READ_DISPLAY_FACTS,
+            problem_names::TAG_READ_WITHOUT_READ_DISPLAY_FACTS,
+        ),
+        (
+            capabilities::NOTICE_KEEP,
+            capabilities::MESSAGE_MARKS,
+            problem_names::NOTICE_KEEP_WITHOUT_MESSAGE_MARKS,
         ),
         (
             capabilities::ACCOUNT_ROUTE,

@@ -137,6 +137,10 @@ pub enum Capability {
     Notices,
     /// Positive agent/automatic-notice marks on sends and display facts.
     MessageMarks,
+    /// Owner-only protection for notices carrying a person's words.
+    NoticeKeep,
+    /// Resolve model-visible part numbers in the request that produced a call.
+    TagRead,
     /// Opt-in client ids, tool times, assistant completion times and reasoning
     /// summaries on raw read entries.
     ReadDisplayFacts,
@@ -249,6 +253,8 @@ impl Capability {
         Self::SenderAttribution,
         Self::Notices,
         Self::MessageMarks,
+        Self::NoticeKeep,
+        Self::TagRead,
         Self::ReadDisplayFacts,
         Self::SendIds,
         Self::SendStatus,
@@ -328,6 +334,8 @@ impl Capability {
             Self::SenderAttribution => groups::SENDER_ATTRIBUTION,
             Self::Notices => groups::NOTICES,
             Self::MessageMarks => groups::MESSAGE_MARKS,
+            Self::NoticeKeep => groups::NOTICE_KEEP,
+            Self::TagRead => groups::TAG_READ,
             Self::ReadDisplayFacts => groups::READ_DISPLAY_FACTS,
             Self::SendIds => groups::SEND_IDS,
             Self::SendStatus => groups::SEND_STATUS,
@@ -1426,7 +1434,7 @@ pub trait LlmRunnerSubject: Harness {
     fn capabilities(&self) -> BTreeSet<Capability>;
 
     /// The owner identity cases use to start and manage their sessions.
-    /// With `MessageMarks` or `AdoptOpen`, this must be a daemon-attested
+    /// With `MessageMarks`, `NoticeKeep`, `TagRead` or `AdoptOpen`, this must be a daemon-attested
     /// plain-scope route whose principal owns the scope, so cases can mark
     /// messages with `speaks_for` or open a session without a message.
     fn owner_stamp(&self) -> RouteStamp;
@@ -1579,6 +1587,20 @@ pub trait LlmRunnerSubject: Harness {
     /// fixtures use this mapping without the removed tags group or resolve op.
     fn shown_part_number(&self, _session: &str, _mid: &str, _part: &str) -> Option<u64> {
         None
+    }
+
+    /// Insert a host-typed person's user message into an idle session, with
+    /// `marker` in a nonzero stored part and as its app client_message_id.
+    /// Return its actual message id and part index. Do not use session.send:
+    /// the fixture must distinguish a person's entry from a module's send.
+    /// Unsupported adapters leave the person-message cases inapplicable.
+    async fn seed_tag_read_person(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _marker: &str,
+    ) -> Result<Option<(String, u32)>, HarnessError> {
+        Ok(None)
     }
 
     /// Fixture-only import of a historical stored tool output for the named

@@ -165,6 +165,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/system-text-default.json"),
     ),
     (
+        "tag-read.json",
+        include_str!("../test-vectors/llm-runner-v1/tag-read.json"),
+    ),
+    (
         "head-incarnation.json",
         include_str!("../test-vectors/llm-runner-v1/head-incarnation.json"),
     ),
@@ -425,6 +429,10 @@ pub const FILES: &[(&str, &str)] = &[
     (
         "run_status.usage_unreported_step.json",
         include_str!("../test-vectors/llm-runner-v1/run_status.usage_unreported_step.json"),
+    ),
+    (
+        "send-notice-keep.json",
+        include_str!("../test-vectors/llm-runner-v1/send-notice-keep.json"),
     ),
     (
         "send-status-describe.json",

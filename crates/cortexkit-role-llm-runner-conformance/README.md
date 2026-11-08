@@ -71,6 +71,20 @@ Absent optional fixtures are graded not applicable, not passed. Faulty fake
 runners exercise every new check, including replacing the short system note
 with the entire new system text.
 
+Version **0.17.30** pins `cortexkit-role-llm-runner =0.8.26`. The six
+`notice_keep_*` cases check owner acceptance and read/history/display marks,
+required `notice`, non-owner refusal before writes, undeclared refusal even for
+false, false-as-absent, and refusal of kept tool-result rides naming `delivery`.
+Only the undeclared probe applies without `notice_keep`; it is inapplicable
+when the group is declared. The owner-only probe needs the optional
+`scoped_session_start_stamps` hook, which supplies a non-owner carrier and the
+scope owner under the same plain scope; without it the probe is inapplicable. A subject
+declaring `notice_keep` supplies an owner stamp on a real scope owned by that
+principal. Entry-surface probes need `host_history`, and the ride-refusal probe
+needs `delivery_order`; all need `queue` and `transcript_reads`. Roll out runners
+and providers that decode `keep` before core sends it; core sends it only to
+runners declaring `notice_keep`.
+
 Version **0.17.14** pins `cortexkit-role-llm-runner =0.8.12` and adds
 `message_marks_served`, `message_marks_both_refused`, and
 `message_marks_speaks_for_owner_only`. All three require `message_marks`; only
@@ -126,6 +140,22 @@ The suite drives a **real runner** over its actual management route, through
 its `cortexkit-role-harness` adapter, with a scripted model and tool provider.
 The in-process fake under `tests/fake` tests the suite itself, never a runner's
 production compliance. A production runner uses this crate as a dev-dependency.
+
+### Call-fixed tag reads
+
+The `tag_read_*` cases resolve a person's multi-part message with its app id,
+retain that answer after a cut or a number-reusing undo, and check foreign
+calls, unseen tags, non-owner routes and undeclared selectors by refusal name.
+The unseen-tag probe checks both an unassigned number and a number assigned
+only after the citing call. Cases use `run.tool_calls` to obtain real keys.
+Only the undeclared probe applies without `tag_read`.
+
+`seed_tag_read_person` seeds a host-typed entry, not a module send, and defaults
+to unsupported. `shown_part_number` observes actual model-visible numbers,
+never numbers reconstructed from ordinals. Cut and undo probes use the existing
+native fixture hooks and are inapplicable when those hooks cannot produce the
+required cut or number reuse. A declaring adapter supplies an owner stamp with
+a daemon-attested plain session scope. Display facts are always on in tag answers.
 
 ## Changes from 0.16
 

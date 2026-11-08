@@ -511,9 +511,11 @@ async fn mode3_user_commands_are_bound_only_by_the_route() {
 mod finish_reason;
 mod message_marks;
 mod message_senders;
+mod notice_keep;
 mod notices;
 mod sender_attribution;
 mod subscribe_resume;
+mod tag_read;
 
 fn head_error_subject(defects: fake::Defects) -> fake::FakeSubject {
     let mut subject = declaring(Capability::RunStatus, defects);
@@ -1366,6 +1368,8 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         || case.starts_with("live_ids_")
         || case.starts_with("message_senders_")
         || case.starts_with("read_display_facts_")
+        || case.starts_with("notice_keep_")
+        || case.starts_with("tag_read_")
         || case == "delivery_deadline_retry_keeps_original_expiry")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { .. }))
     {
@@ -1924,6 +1928,24 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             );
             continue;
         }
+        if spec.name.starts_with("notice_keep_") && spec.name != "notice_keep_undeclared" {
+            assert_eq!(
+                report.outcome(spec.name),
+                Some(&CaseOutcome::Inapplicable {
+                    reason: "notice_keep is not declared".into()
+                })
+            );
+            continue;
+        }
+        if spec.name.starts_with("tag_read_") && spec.name != "tag_read_undeclared" {
+            assert_eq!(
+                report.outcome(spec.name),
+                Some(&CaseOutcome::Inapplicable {
+                    reason: "tag_read is not declared".into()
+                })
+            );
+            continue;
+        }
         if spec.name.starts_with("archive_pruning_") {
             assert_eq!(
                 report.outcome(spec.name),
@@ -1953,6 +1975,8 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             || spec.name.starts_with("live_ids_")
             || spec.name.starts_with("message_senders_")
             || spec.name.starts_with("read_display_facts_")
+            || spec.name == "notice_keep_undeclared"
+            || spec.name == "tag_read_undeclared"
             || spec.name == "delivery_deadline_retry_keeps_original_expiry"
         {
             assert_eq!(

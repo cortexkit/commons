@@ -353,6 +353,9 @@ impl From<SendRequest> for WireSendRequest {
         if request.runner_params.get("yield") == Some(&Value::Bool(false)) {
             request.runner_params.remove("yield");
         }
+        if request.runner_params.get("keep") == Some(&Value::Bool(false)) {
+            request.runner_params.remove("keep");
+        }
         let delivery = match (request.delivery_order, request.delivery) {
             (Some(modes), _) => Some(WireDelivery::Order(modes)),
             (None, mode) => mode.map(WireDelivery::Mode),
@@ -521,6 +524,50 @@ pub struct SendRequest {
 }
 
 impl SendRequest {
+    /// Protect a notice carrying a person's words from automatic compaction drops.
+    /// Send only to a runner declaring `notice_keep`; false serializes as absent.
+    pub fn with_keep(mut self, keep: bool) -> Self {
+        self.runner_params.insert("keep".into(), Value::Bool(keep));
+        self
+    }
+
+    /// Validate before any write, using identities from the daemon-attested route,
+    /// never body fields. Runners must use this helper, not duplicate its checks.
+    /// Persist the returned value beside the notice mark. Explicit agent drops
+    /// remain allowed; only the scope owner may prevent automatic drops.
+    pub fn check_notice_keep(
+        &self,
+        declared: bool,
+        scope_owner: Option<&str>,
+        attested_sender: &str,
+    ) -> Result<bool, &'static str> {
+        let Some(raw) = self.runner_params.get("keep") else {
+            return Ok(false);
+        };
+        if !declared {
+            return Err("keep");
+        }
+        let keep = raw.as_bool().ok_or("keep")?;
+        if !keep {
+            return Ok(false);
+        }
+        if self.runner_params.get("notice") != Some(&Value::Bool(true))
+            || scope_owner != Some(attested_sender)
+        {
+            return Err("keep");
+        }
+        // A ride belongs to a tool part: keeping it would also pin that tool's
+        // output. Protected notices need their own independently droppable entry.
+        if self
+            .delivery_order
+            .as_ref()
+            .is_some_and(|modes| modes.contains(&crate::delivery_order::Mode::ToolResult))
+        {
+            return Err("delivery");
+        }
+        Ok(true)
+    }
+
     /// Carry another agent's words. Send only with `message_marks` declared.
     pub fn with_speaks_for(mut self, speaks_for: crate::message_marks::SpeaksFor) -> Self {
         self.runner_params.insert(

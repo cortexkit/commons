@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.11
+
+- Add `NoticeOrigin.keep`: default false, omitted when false, and included in
+  the entry digest only when true. Existing vectors and entry digests stay
+  unchanged. The owner marks notices carrying the person's own words; providers
+  never drop them automatically, but an agent's explicit drop still may.
+- Clarify RD3's one cache clock per session: a serving-model change invalidates
+  earlier touches, even after a switch away and back, and expiry remains unknown
+  until a touch on the model now serving.
+- Roll out runners and providers that decode `keep` before core sends it; core
+  sends it only to runners declaring `notice_keep`.
+
 ## 0.2.10
 
 - Define compaction-item refreshes: accept adding one, refuse removing one

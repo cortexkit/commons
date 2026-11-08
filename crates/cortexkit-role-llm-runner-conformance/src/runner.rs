@@ -382,6 +382,22 @@ mod submit_variant_verdict_tests {
 /// The outcome of a case that cannot run against this subject: skipped
 /// with what it lacks, or inapplicable. `None` when the case can run.
 fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome> {
+    if spec.name.starts_with("tag_read_")
+        && spec.name != "tag_read_undeclared"
+        && !declared.contains(&Capability::TagRead)
+    {
+        return Some(CaseOutcome::Inapplicable {
+            reason: "tag_read is not declared".into(),
+        });
+    }
+    if spec.name.starts_with("notice_keep_")
+        && spec.name != "notice_keep_undeclared"
+        && !declared.contains(&Capability::NoticeKeep)
+    {
+        return Some(CaseOutcome::Inapplicable {
+            reason: "notice_keep is not declared".into(),
+        });
+    }
     if spec.name.starts_with("account_route_") && !declared.contains(&Capability::AccountRoute) {
         return Some(CaseOutcome::Inapplicable {
             reason: "account_route is not declared".into(),
@@ -437,6 +453,8 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
             || spec.name.starts_with("sender_attribution_")
             || spec.name.starts_with("notices_")
             || spec.name.starts_with("message_marks_")
+            || spec.name.starts_with("notice_keep_")
+            || spec.name.starts_with("tag_read_")
             || spec.name.starts_with("adopt_open_")
             || spec.name.starts_with("sender_succession_")
             || spec.name.starts_with("head_selection_")

@@ -118,6 +118,10 @@ pub struct NoticeOrigin {
     /// The template it was rendered from, when it was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub template: Option<String>,
+    /// The session owner marked this notice as carrying the person's own words.
+    /// Providers never drop it automatically; an agent's explicit drop still may.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep: bool,
 }
 
 /// Token counts the model provider reported for one request, attached to the
@@ -351,11 +355,18 @@ impl NoticeOrigin {
         Self {
             sender: sender.into(),
             template: None,
+            keep: false,
         }
     }
 
     pub fn with_template(mut self, template: impl Into<String>) -> Self {
         self.template = Some(template.into());
+        self
+    }
+
+    /// Protect this notice from automatic provider drops, not explicit agent drops.
+    pub fn with_keep(mut self, keep: bool) -> Self {
+        self.keep = keep;
         self
     }
 }

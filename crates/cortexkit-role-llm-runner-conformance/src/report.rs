@@ -41,6 +41,12 @@ const fn case(
 }
 
 const READS: &[Capability] = &[TranscriptReads, Queue];
+const TAG_READ: &[Capability] = &[
+    Capability::TagRead,
+    Capability::RunToolCalls,
+    Queue,
+    TranscriptReads,
+];
 const CACHE: &[Capability] = &[Capability::CachePolicy, Queue, TranscriptReads];
 const CACHE_PLAN: &[Capability] = &[
     Capability::CachePolicy,
@@ -220,6 +226,25 @@ pub const CASES: &[CaseSpec] = &[
     case("media_refs_large_payloads_inline", &[Capability::MediaRefs, Capability::Attachments, TranscriptReads, Queue, RunOps], "large text, arguments and reasoning stay exactly inline"),
     case("media_refs_descriptor_digests", &[Capability::MediaRefs, Capability::Attachments, TranscriptReads, Queue, RunOps], "media references and any served content identities equal descriptors"),
     case("message_marks_served", &[Capability::MessageMarks, Capability::ReadDisplayFacts, Capability::HistoryDisplay, Capability::HostHistory, Queue, TranscriptReads], "notice and scope-owner agent marks survive opted-in reads, raw history and display; unmarked sends have neither"),
+    case("tag_read_person", TAG_READ, "a person's model-visible tag resolves the call-fixed read entry with exact app client_message_id (never substituted by send_id), display facts and its stored part index"),
+    case("tag_read_before_cut", TAG_READ, "a call made before a compaction cut still resolves its original tag; inapplicable without a cut fixture"),
+    case("tag_read_before_undo", TAG_READ, "a call made before undo resolves the original entry after its number is reused; inapplicable without an undo fixture"),
+    case("tag_read_unknown_call", TAG_READ, "a foreign or nonexistent call is refused unknown_call, not answered or guessed"),
+    case("tag_read_unknown_tag", TAG_READ, "a number not shown in the call's model request is refused unknown_tag"),
+    case("tag_read_non_owner", TAG_READ, "a non-owner route is refused scope_owner_mismatch before lookup"),
+    CaseSpec { name: "tag_read_undeclared", requires: READS, requires_any: &[], requires_undeclared_any: &[Capability::TagRead], checks: "a runner without tag_read refuses the selector naming tag" },
+    case("notice_keep_owner_served", &[Capability::NoticeKeep, Capability::MessageMarks, Capability::HostHistory, Queue, TranscriptReads], "an owner's kept notice is accepted and survives opted-in reads, raw history and display without changing bodies or history versions"),
+    case("notice_keep_requires_notice", &[Capability::NoticeKeep, Queue, TranscriptReads], "keep without notice refuses invalid_params naming keep before any write"),
+    case("notice_keep_owner_only", &[Capability::NoticeKeep, Queue, TranscriptReads], "a non-owner carrier cannot keep a notice; refusal names keep before any write"),
+    case("notice_keep_false_absent", &[Capability::NoticeKeep, Capability::HostHistory, Queue, TranscriptReads], "false keep equals absent, is accepted without notice, and is omitted from entry surfaces"),
+    case("notice_keep_tool_result_refused", &[Capability::NoticeKeep, Capability::DeliveryOrder, Queue, TranscriptReads], "a kept notice listing tool_result refuses invalid_params naming delivery before any write"),
+    CaseSpec {
+        name: "notice_keep_undeclared",
+        requires: &[Queue, TranscriptReads],
+        requires_any: &[],
+        requires_undeclared_any: &[Capability::NoticeKeep],
+        checks: "a runner without notice_keep refuses any supplied keep, including false, naming keep before any write",
+    },
     case("message_marks_both_refused", &[Capability::MessageMarks, Queue, TranscriptReads], "conflicting marks refuse invalid_params naming notice before any write"),
     case("message_marks_speaks_for_owner_only", &[Capability::MessageMarks, Queue, TranscriptReads], "a non-owner carrier cannot speak for an agent; refusal names speaks_for before any write"),
     case("notices_no_transcript_entry", NOTICES, "a tool_result ride writes no transcript entry or history rewrite"),

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.26
+
+- Add owner-only `tag_read`: resolve model-visible tags against the request
+  that made a call, preserving their meaning after cuts and undo. Add typed
+  flat selectors and `{entry, part}` answers with display facts, plus named
+  `unknown_call` and `unknown_tag` refusals, with canonical request, answer
+  and refusal examples under `test-vectors/llm-runner-v1`.
+
+- Add the `notice_keep` group, requiring `message_marks`, and the shared
+  `SendRequest::check_notice_keep` admission helper. Only the scope owner's
+  attested route may keep a `notice: true` entry; every invalid keep refuses
+  before any write. Without the group, even supplied false is refused.
+- Persist and serve true `keep` beside entry marks on opted-in reads, raw
+  history and display rows; false is absent. Kept notices never ride tool
+  results: a delivery list containing `tool_result` refuses naming `delivery`
+  because a ride cannot be protected independently of the tool's output.
+- Ship accepted/refused send vectors. Roll out runners and providers that decode
+  `keep` before core sends it; core sends it only to runners declaring
+  `notice_keep`.
+
 ## 0.8.25
 
 - Add `notice_yield`, requiring `call_yield`, for scope-owner-requested

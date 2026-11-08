@@ -157,6 +157,16 @@ fn samples() -> Vec<(&'static str, Value)> {
     };
     let mut samples = vec![
         (
+            "notice-keep-entry.json",
+            value(
+                entry.clone().with_notice(
+                    NoticeOrigin::new("example-notifier")
+                        .with_template("example")
+                        .with_keep(true),
+                ),
+            ),
+        ),
+        (
             "setup-accepts-images-request.json",
             request(
                 ops::COMPACTION_SETUP,
@@ -582,7 +592,44 @@ fn request_round_trip<T: DeserializeOwned + Serialize>(
 }
 
 fn check(name: &str, json: Value) {
-    if name == "delivered-rides.json" {
+    if name == "notice-keep-entry.json" {
+        round_trip::<Entry>(json.clone());
+        let mut entry: Entry = serde_json::from_value(json.clone()).unwrap();
+        assert!(entry.notice.as_ref().unwrap().keep);
+        assert_eq!(
+            entry.digest,
+            cortexkit_role_compaction::read::entry_digest(
+                entry.role.clone(),
+                entry.notice.as_ref(),
+                &entry.parts
+            )
+        );
+        entry.notice.as_mut().unwrap().keep = false;
+        assert!(value(entry.notice.as_ref().unwrap()).get("keep").is_none());
+        // This digest belongs to the pre-keep notice-request vector. Keeping the
+        // literal proves false does not silently change an existing entry's hash.
+        let legacy = "e4565946a06648fa4ba6a87d56934d4506449a4e850ef6a5f588e3375f1e5ea7";
+        assert_eq!(
+            cortexkit_role_compaction::read::entry_digest(
+                entry.role.clone(),
+                entry.notice.as_ref(),
+                &entry.parts
+            ),
+            legacy
+        );
+        assert_ne!(entry.digest, legacy);
+        let mut explicit_false = value(&entry);
+        explicit_false["notice"]["keep"] = json!(false);
+        let decoded: Entry = serde_json::from_value(explicit_false).unwrap();
+        assert_eq!(
+            cortexkit_role_compaction::read::entry_digest(
+                decoded.role,
+                decoded.notice.as_ref(),
+                &decoded.parts
+            ),
+            legacy
+        );
+    } else if name == "delivered-rides.json" {
         for form in ["legacy", "current", "counted"] {
             round_trip::<Entry>(json[form].clone());
             let entry: Entry = serde_json::from_value(json[form].clone()).unwrap();

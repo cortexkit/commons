@@ -1,0 +1,31 @@
+{
+  "request": {"tag":7,"call_key":"call-before-undo"},
+  "answer": {
+    "entry": {"ordinal":2,"mid":"original-message","message":{"role":"user","parts":[{"type":"text","text":"earlier part"},{"type":"text","text":"the person's words"}]},"role":"user","client_message_id":"app-message-7"},
+    "part":1
+  },
+  "codes": [
+    {"code":"unknown_call","retryable":false},
+    {"code":"unknown_tag","retryable":false}
+  ],
+  "refusals": [
+    {"request":{"tag":7,"call_key":"other-session-call"},"code":"unknown_call"},
+    {"request":{"tag":99,"call_key":"call-before-undo"},"code":"unknown_tag"},
+    {"request":{"tag":7,"call_key":"call-before-undo"},"owner":false,"code":"scope_owner_mismatch"},
+    {"request":{"tag":7,"call_key":"call-before-undo"},"declared":false,"code":"invalid_params","field":"tag"}
+  ],
+  "invalid": [
+    {"request":{"tag":7},"field":"call_key"},
+    {"request":{"call_key":"call-before-undo"},"field":"tag"},
+    {"request":{"tag":-1,"call_key":"call-before-undo"},"field":"tag"},
+    {"request":{"tag":"7","call_key":"call-before-undo"},"field":"tag"},
+    {"request":{"tag":7,"call_key":null},"field":"call_key"},
+    {"request":{"tag":7,"call_key":"call-before-undo","from_ordinal":1},"field":"from_ordinal"},
+    {"request":{"tag":7,"call_key":"call-before-undo","after_mid":"today"},"field":"after_mid"},
+    {"request":{"tag":7,"call_key":"call-before-undo","history_version":0},"field":"history_version"},
+    {"request":{"tag":7,"call_key":"call-before-undo","limit":1},"field":"limit"},
+    {"request":{"tag":7,"call_key":"call-before-undo","max_bytes":100},"field":"max_bytes"},
+    {"request":{"tag":7,"call_key":"call-before-undo","include_display_facts":false},"field":"include_display_facts"},
+    {"request":{"tag":7,"call_key":"call-before-undo","session":"other"},"field":"session"}
+  ]
+}

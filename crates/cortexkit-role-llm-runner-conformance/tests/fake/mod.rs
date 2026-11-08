@@ -83,6 +83,7 @@ mod service_tier;
 mod session_change;
 mod step_events;
 mod system_text_default;
+mod tag_read;
 mod user_commands;
 use display::{anthropic_assistant, live_events, profiled, result_text};
 pub use fork_answer::ForkDefect;
@@ -204,6 +205,8 @@ pub struct Defects {
     pub oversized_result_repeated: bool,
     pub declare_message_senders: bool,
     pub message_marks: Option<&'static str>,
+    pub notice_keep: Option<&'static str>,
+    pub tag_read: Option<&'static str>,
     pub message_senders_omit: bool,
     pub sender_read_missing: bool,
     pub send_id_missing: bool,
@@ -982,6 +985,8 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    tag_read_requests:
+        BTreeMap<String, BTreeMap<u64, cortexkit_role_llm_runner::read::TagReadAnswer>>,
     opened_by_adopt: bool,
     frozen_opener: Option<String>,
     number_offset: u64,
@@ -2101,8 +2106,15 @@ impl Module {
                     usage.record_step(FAKE_PROVIDER, FAKE_MODEL, None, step);
                 }
                 let mut keys = Vec::new();
+                let tag_snapshot = self
+                    .world
+                    .serves(groups::TAG_READ)
+                    .then(|| tag_read::snapshot(self, sess));
                 for call in record["calls"].as_array().into_iter().flatten() {
                     let key = call["call_key"].as_str().unwrap_or_default().to_owned();
+                    if let Some(snapshot) = &tag_snapshot {
+                        sess.tag_read_requests.insert(key.clone(), snapshot.clone());
+                    }
                     keys.push(key.clone());
                     sess.calls.insert(
                         key,
@@ -2301,6 +2313,19 @@ impl Module {
                         run.final_text = record["final_text"].as_str().map(str::to_owned);
                     }
                 }
+            }
+            "tag_read_person" => {
+                let marker = text("marker");
+                let ordinal = sess.push(
+                    json!({"role":"user","parts":[
+                        {"type":"text","text":"earlier person part"},
+                        {"type":"text","text":marker}
+                    ]}),
+                    "",
+                    vec![],
+                );
+                sess.at_mut(ordinal).client_message_id = Some(marker);
+                sess.at_mut(ordinal).written_at = record["at"].as_u64().unwrap_or(1);
             }
             "host_compact" | "revert" | "seed" => {
                 history::apply(sess, &kind, record, &self.world.defects);
@@ -3009,6 +3034,9 @@ impl Module {
         if !self.alive.load(Ordering::SeqCst) {
             return Err(RouteFailure::new("the module is not running"));
         }
+        if method == ops::SESSION_READ && params.get("tag").is_some() {
+            return Ok(tag_read::read(self, stamp, session, &params));
+        }
         if matches!(
             method,
             ops::SESSION_HEAD
@@ -3663,7 +3691,43 @@ impl Module {
                 return Ok(invalid(&field));
             }
         }
-        let marks = match request.message_marks(
+        let keep = match request.check_notice_keep(
+            self.world.serves(groups::NOTICE_KEEP),
+            stamp.scope.as_ref().map(|scope| scope.owner.as_str()),
+            &stamp.principal,
+        ) {
+            Ok(keep) => keep,
+            Err("keep")
+                if self.world.defects.notice_keep == Some("undeclared")
+                    && !self.world.serves(groups::NOTICE_KEEP) =>
+            {
+                false
+            }
+            Err("keep")
+                if self.world.defects.notice_keep == Some("notice")
+                    && request.runner_params.get("notice") != Some(&json!(true)) =>
+            {
+                true
+            }
+            Err("keep")
+                if self.world.defects.notice_keep == Some("owner")
+                    && request.runner_params.get("notice") == Some(&json!(true)) =>
+            {
+                true
+            }
+            Err("keep")
+                if self.world.defects.notice_keep == Some("owner_write")
+                    && request.runner_params.get("notice") == Some(&json!(true)) =>
+            {
+                self.commit(session, json!({"kind":"start", "owner":stamp.scope.as_ref().map(|scope| &scope.owner), "lineage":"refused-kept-notice-write"}))?;
+                return Ok(invalid("keep"));
+            }
+            Err("delivery") if self.world.defects.notice_keep == Some("ride") => {
+                return Ok(invalid("keep"))
+            }
+            Err(field) => return Ok(invalid(field)),
+        };
+        let mut marks = match request.message_marks(
             self.world.serves(groups::MESSAGE_MARKS),
             stamp.scope.as_ref().map(|scope| scope.owner.as_str()),
             &stamp.principal,
@@ -3675,6 +3739,9 @@ impl Module {
                 .unwrap(),
             Err(field) => return Ok(invalid(field)),
         };
+        marks.keep = keep
+            || (self.world.defects.notice_keep == Some("false")
+                && request.runner_params.get("keep") == Some(&json!(false)));
         let attachment_parts = match attachments::admit_send(self, session, &request) {
             Ok(parts) => parts,
             Err(reply) => return Ok(reply),
@@ -4563,6 +4630,7 @@ impl Module {
                 entry.send_id = None;
                 entry.speaks_for = None;
                 entry.notice = false;
+                entry.keep = false;
                 entry.attribution = None;
                 entry.rich_ui = self.read_stamp(sess, m, request.include_rich_ui);
                 if (request.include_display_facts
@@ -4575,6 +4643,7 @@ impl Module {
                     {
                         entry.speaks_for = m.marks.speaks_for.clone();
                         entry.notice = m.marks.notice;
+                        entry.keep = m.marks.keep && self.world.defects.notice_keep != Some("drop");
                     }
                     if self
                         .world
@@ -4761,6 +4830,7 @@ impl Module {
         {
             message.speaks_for = m.marks.speaks_for.clone();
             message.notice = m.marks.notice;
+            message.keep = m.marks.keep && self.world.defects.notice_keep != Some("drop");
         }
         if let Some(role) = m.body["role"].as_str() {
             message = message.with_role(role);
@@ -6295,6 +6365,24 @@ impl LlmRunnerSubject for FakeSubject {
             .map_err(|_| HarnessError::new("killed importing a historical output"))?;
         Ok(true)
     }
+    async fn seed_tag_read_person(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        marker: &str,
+    ) -> Result<Option<(String, u32)>, HarnessError> {
+        if self.defects.tag_read == Some("no_person_hook") {
+            return Ok(None);
+        }
+        handle
+            .0
+            .commit(session, json!({"kind":"tag_read_person","marker":marker}))
+            .map_err(|Killed| HarnessError::new("the module was killed"))?;
+        let sessions = handle.0.sessions.lock().unwrap();
+        let message = sessions[session].messages.last().unwrap();
+        Ok(Some((message.mid.clone(), 1)))
+    }
+
     fn shown_part_number(&self, session: &str, mid: &str, part: &str) -> Option<u64> {
         if self.defects.shown_part_numbers_missing {
             return None;
@@ -6919,6 +7007,7 @@ impl LlmRunnerSubject for FakeSubject {
         RouteStamp {
             principal: "reserved:owner".into(),
             scope: (self.capabilities.contains(&Capability::MessageMarks)
+                || self.capabilities.contains(&Capability::TagRead)
                 || self.capabilities.contains(&Capability::AdoptOpen))
             .then(|| cortexkit_role_harness::ScopeStamp {
                 owner: "reserved:owner".into(),
@@ -6984,11 +7073,15 @@ impl LlmRunnerSubject for FakeSubject {
         })
     }
 
-    fn send_fields(&self, _session: &str, first: bool) -> Map<String, Value> {
+    fn send_fields(&self, session: &str, first: bool) -> Map<String, Value> {
         let mut fields = Map::new();
         if first && !self.without_plans {
             fields.insert("plan".into(), json!({ "tools": [SCRIPTED_TOOL] }));
             fields.insert("model".into(), json!("fake-model"));
+            if self.capabilities.contains(&Capability::TagRead) && session.contains("tag_read_") {
+                fields["plan"]["compaction_item"] =
+                    json!({"provider":"fixture-compaction","preset":"identity"});
+            }
         }
         fields
     }

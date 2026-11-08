@@ -477,6 +477,7 @@ impl Module {
         if self.world.serves(groups::MESSAGE_MARKS) && defects.message_marks != Some("drop") {
             row.speaks_for = entry.speaks_for.clone();
             row.notice = entry.notice;
+            row.keep = entry.keep;
         }
         self.stamp_row(sess, &entry.mid, &mut row);
         if self.world.serves(groups::CALL_IDENTITY) {

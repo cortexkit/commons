@@ -23,6 +23,8 @@
 //! different pages.
 //!
 use serde::{Deserialize, Deserializer, Serialize};
+
+pub use crate::tag_read::{TagReadAnswer, TagReadRequest};
 use serde_json::{Map, Value};
 
 pub mod descriptors;
@@ -464,6 +466,9 @@ pub struct ReadMessage {
     /// Positive automatic-message mark; false is absent on the wire.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub notice: bool,
+    /// Owner-marked notice carrying a person's words; served with notice facts.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep: bool,
     /// The host's recorded creation timestamp for this message, in Unix epoch
     /// milliseconds, exactly as recorded, on any role. A send's entry carries
     /// the host's acceptance time, kept for queued sends and steers; an
@@ -769,6 +774,7 @@ impl ReadMessage {
             send_id: None,
             speaks_for: None,
             notice: false,
+            keep: false,
             created_at: None,
             completed_at: None,
             reasoning_summaries: Vec::new(),

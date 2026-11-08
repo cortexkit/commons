@@ -59,6 +59,8 @@ pub enum RideCause {
     /// touch's reported lifetime. Unknown until a touch arrives after start;
     /// never reported for an implicit cache. Stopping warms does not move the
     /// expiry deadline away from the last touch plus its lifetime (RD3).
+    /// A serving-model change clears the session's one cache clock; expiry stays
+    /// unknown until a touch on the model now serving, even after switching back.
     CacheExpired,
     /// The runner restarts its request chain (OpenAI chained requests).
     ChainReset,

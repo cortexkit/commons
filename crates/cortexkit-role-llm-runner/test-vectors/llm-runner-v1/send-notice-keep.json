@@ -1,0 +1,14 @@
+[
+  {"name":"owner keeps a notice", "declared":true, "scope_owner":"owner", "attested_sender":"owner", "request":{"prompt":"Person's words", "send_id":"keep-a", "notice":true, "keep":true}, "keep":true, "normalized":{"keep":true}},
+  {"name":"absent keep", "declared":false, "scope_owner":null, "attested_sender":"sender", "request":{"prompt":"ordinary", "send_id":"keep-b"}, "keep":false, "normalized":{}},
+  {"name":"false equals absent without notice or ownership", "declared":true, "scope_owner":null, "attested_sender":"sender", "request":{"prompt":"ordinary", "send_id":"keep-c", "keep":false}, "keep":false, "normalized":{}},
+  {"name":"keep requires notice", "declared":true, "scope_owner":"owner", "attested_sender":"owner", "request":{"prompt":"words", "send_id":"keep-d", "keep":true}, "field":"keep"},
+  {"name":"false notice is not a notice", "declared":true, "scope_owner":"owner", "attested_sender":"owner", "request":{"prompt":"words", "send_id":"keep-e", "notice":false, "keep":true}, "field":"keep"},
+  {"name":"non-owner cannot pin notices despite body claims", "declared":true, "scope_owner":"owner", "attested_sender":"sender", "request":{"prompt":"words", "send_id":"keep-f", "notice":true, "keep":true, "sender":"owner", "scope_owner":"sender"}, "field":"keep"},
+  {"name":"unscoped cannot keep", "declared":true, "scope_owner":null, "attested_sender":"owner", "request":{"prompt":"words", "send_id":"keep-g", "notice":true, "keep":true}, "field":"keep"},
+  {"name":"undeclared refuses true", "declared":false, "scope_owner":"owner", "attested_sender":"owner", "request":{"prompt":"words", "send_id":"keep-h", "notice":true, "keep":true}, "field":"keep"},
+  {"name":"undeclared refuses false", "declared":false, "scope_owner":"owner", "attested_sender":"owner", "request":{"prompt":"words", "send_id":"keep-i", "keep":false}, "field":"keep"},
+  {"name":"kept notices never ride", "declared":true, "scope_owner":"owner", "attested_sender":"owner", "request":{"prompt":"words", "send_id":"keep-j", "notice":true, "keep":true, "delivery":["steer", "tool_result"]}, "field":"delivery"},
+  {"name":"keep authority checked before riding delivery", "declared":true, "scope_owner":"owner", "attested_sender":"sender", "request":{"prompt":"words", "send_id":"keep-k", "notice":true, "keep":true, "delivery":["tool_result"]}, "field":"keep"},
+  {"name":"false keep may ride", "declared":true, "scope_owner":null, "attested_sender":"sender", "request":{"prompt":"words", "send_id":"keep-l", "keep":false, "delivery":["tool_result"]}, "keep":false, "normalized":{}}
+]

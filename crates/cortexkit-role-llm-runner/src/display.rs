@@ -132,6 +132,9 @@ pub struct DisplayRow {
     /// Positive automatic-message mark; false is absent on the wire.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub notice: bool,
+    /// Owner-marked notice carrying a person's words; outside bodies and checksums.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep: bool,
     /// For an assistant message a run wrote, on a runner declaring
     /// `rich_ui_stamp`: the rich UI stamp that run's frozen plan carries,
     /// copied verbatim (CONTRACT §9.17). Absent on an assistant row of a
@@ -176,6 +179,7 @@ impl DisplayRow {
             sender: None,
             speaks_for: None,
             notice: false,
+            keep: false,
             rich_ui: None,
         }
     }

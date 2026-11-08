@@ -66,6 +66,7 @@ pub mod step_events;
 pub mod stop_all;
 pub mod structured_output;
 pub mod subscribe;
+pub mod tag_read;
 pub mod tool_calls;
 pub mod tool_result_limit;
 pub mod upfront;
@@ -248,6 +249,13 @@ pub mod capabilities {
     /// Positive agent/notice marks on sends and their display facts.
     /// Requires [`READ_DISPLAY_FACTS`] and [`HISTORY_DISPLAY`].
     pub const MESSAGE_MARKS: &str = "message_marks";
+    /// Owner-marked notices carrying a person's words, protected from automatic drops.
+    /// Requires [`MESSAGE_MARKS`].
+    pub const NOTICE_KEEP: &str = "notice_keep";
+    /// Call-fixed model tag resolution on the session owner's route.
+    /// Requires [`MESSAGE_SENDERS`], [`MESSAGE_MARKS`], [`CLIENT_MESSAGE_ID`]
+    /// and [`READ_DISPLAY_FACTS`].
+    pub const TAG_READ: &str = "tag_read";
     /// Opt-in trusted relay headers and verified, header-free display facts.
     pub const SENDER_ATTRIBUTION: &str = "sender_attribution";
     /// Notice display facts and live delivery events, without transcript entries.
@@ -489,6 +497,11 @@ pub mod capabilities {
             MESSAGE_MARKS,
             &[ops::SESSION_SEND, ops::SESSION_READ, ops::SESSION_HISTORY],
         ),
+        (
+            NOTICE_KEEP,
+            &[ops::SESSION_SEND, ops::SESSION_READ, ops::SESSION_HISTORY],
+        ),
+        (TAG_READ, &[ops::SESSION_READ]),
         (
             NOTICES,
             &[

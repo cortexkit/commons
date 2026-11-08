@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.17.30
+
+- Add seven `tag_read` cases and named faulty-runner checks for call-fixed
+  person-message resolution, cut and undo retention, unknown calls/tags,
+  owner-route authority and undeclared selectors. Fixture hooks default to
+  inapplicable where the adapter cannot seed a person entry, cut or undo.
+
+- Pin runner `=0.8.26` and add six `notice_keep_*` cases: owner acceptance and
+  entry surfaces, required notice, owner-only admission before any write,
+  undeclared refusal (including false), false-as-absent, and kept-ride refusal
+  naming `delivery`. Each rejects a deliberately faulty runner by case name;
+  a write-before-refusal fault also exercises the owner's no-write check.
+- Cases are inapplicable without `notice_keep`, except the undeclared probe.
+  Roll out runners and providers that decode `keep` before core sends it; core
+  sends it only to runners declaring `notice_keep`.
+
 ## 0.17.29
 
 - Pin runner contract 0.8.25 and add `notice_yield` cases for urgent hand-back,

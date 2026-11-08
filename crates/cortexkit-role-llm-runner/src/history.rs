@@ -462,6 +462,9 @@ pub struct HistoryEntry {
     /// Positive automatic-message mark; false is absent on the wire.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub notice: bool,
+    /// Owner-marked notice carrying a person's words; outside bodies and checksums.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub keep: bool,
     /// Verified stored relay frame when `sender_attribution` is declared.
     /// Raw history has no display-facts request flag; message bytes stay whole.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -513,6 +516,7 @@ impl HistoryEntry {
             send_id: None,
             speaks_for: None,
             notice: false,
+            keep: false,
             attribution: None,
         }
     }
@@ -538,6 +542,7 @@ impl HistoryEntry {
             send_id: read.send_id,
             speaks_for: read.speaks_for,
             notice: read.notice,
+            keep: read.keep,
             attribution: read.attribution,
         })
     }
