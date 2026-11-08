@@ -253,7 +253,7 @@ pub(crate) async fn media_only_send<S: LlmRunnerSubject>(
 where
     S::Route: RunnerRoute,
 {
-    let s = case
+    let mut s = case
         .open(
             "media_only_send",
             Script {
@@ -268,7 +268,11 @@ where
             "the adapter cannot configure a committed-upload fixture".into(),
         ));
     };
-    let mut params = case.params(&s, "open upload session", &case.mint.next("send"), None);
+    let opening_id = case.mint.next("send");
+    let mut params = case.params(&s, "open upload session", &opening_id, None);
+    // The opening send created the session, so later sends are not first:
+    // they carry no `tools`, which a runner freezes at the creating send.
+    s.first = Some((opening_id, "open upload session".to_owned()));
     params.as_object_mut().unwrap().extend(fields);
     let reply: SendReply = decode(
         "open media-only session",
