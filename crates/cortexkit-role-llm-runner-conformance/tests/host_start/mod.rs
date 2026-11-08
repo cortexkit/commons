@@ -28,7 +28,7 @@ async fn host_start_faithful_runner_passes() {
     assert_none_failed_but(&report, &[]);
 }
 
-async fn rejects_only(behavior: &'static str, name: &str) {
+async fn rejects_only(behavior: &'static str, name: &str) -> String {
     let report = run(&subject(Some(behavior))).await;
     let reason = failed(&report, name);
     eprintln!("FAIL {name} ({behavior}): {reason}");
@@ -41,11 +41,23 @@ async fn rejects_only(behavior: &'static str, name: &str) {
             report.render()
         );
     }
+    reason
 }
 
 #[tokio::test]
-async fn host_start_rejects_refusal_that_creates_a_session() {
-    rejects_only("invalid_params_leaves_nothing", CASE_NAMES[0]).await;
+async fn host_start_rejects_unknown_session_after_refusal() {
+    let reason = rejects_only("invalid_params_unknown_session", CASE_NAMES[0]).await;
+    assert!(
+        reason.contains("the contract keeps empty success answers for a never-written session"),
+        "{reason}"
+    );
+    assert!(reason.contains("unknown_session"), "{reason}");
+}
+
+#[tokio::test]
+async fn host_start_rejects_refusal_that_leaves_a_plan_record() {
+    let reason = rejects_only("invalid_params_leaves_plan", CASE_NAMES[0]).await;
+    assert!(reason.contains("plan_drift"), "{reason}");
 }
 
 #[tokio::test]

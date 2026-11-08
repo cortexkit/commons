@@ -24,11 +24,12 @@ pub(super) fn handle(
         .insert(session.into());
     let defect = module.world.defects.host_start;
     if let Some(field) = unknown_field(&params, &["send_id", "plan", "model"]) {
-        if defect == Some("invalid_params_leaves_nothing") {
+        if defect == Some("invalid_params_leaves_plan") {
+            let plan = params["plan"].as_object().unwrap();
             module.commit(
                 session,
                 json!({"kind":"start", "owner":stamp.principal,
-                "lineage":format!("lin-{session}"), "plan_digest":"poisoned"}),
+                "lineage":format!("lin-{session}"), "plan_digest":plan_digest(plan)}),
             )?;
         }
         return Ok(invalid(&field));

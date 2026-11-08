@@ -1,11 +1,14 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.36** pins runner **0.8.31**. Four `host_start_*` cases run only
+Version **0.17.37** pins runner **0.8.31**. Four `host_start_*` cases run only
 when the live describe lists `harness.host_start` in its top-level `extensions`.
 Opt-in adapters provide `host_start_model`, both original and alternate
 `host_plan` fixtures, and an attested plain-scope owner from `owner_stamp`.
 The cases send the real operation; they do not use `start_host_session`.
-The refusal case also requires `session.head` to observe the unknown session.
+The refusal case requires `session.head` to keep the contract's empty success
+answer for a never-written session: `history_version` is 0 and `last_run_state`
+is absent. A new `send_id` with a different plan must then start the same session
+successfully, proving that the refusal left no plan record.
 
 Seven cleared-ride cases are skipped
 unless the adapter opts in with `turn_system_cleared_supported` and the runner

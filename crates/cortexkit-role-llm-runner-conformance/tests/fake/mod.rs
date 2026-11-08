@@ -4995,10 +4995,15 @@ impl Module {
         }
         let sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get(session) else {
-            if self.host_start_attempts.lock().unwrap().contains(session) {
+            let host_start_attempted = self.host_start_attempts.lock().unwrap().contains(session);
+            if self.world.defects.host_start == Some("invalid_params_unknown_session")
+                && host_start_attempted
+            {
                 return refuse(errors::UNKNOWN_SESSION, None);
             }
-            let mut head = if self.world.defects.alternate_empty_identity {
+            let mut head = if host_start_attempted {
+                HeadMeta::empty(0, "unwritten-host-start")
+            } else if self.world.defects.alternate_empty_identity {
                 HeadMeta::empty(73, "unwritten-placeholder")
             } else {
                 HeadMeta::empty(1, "log-1")

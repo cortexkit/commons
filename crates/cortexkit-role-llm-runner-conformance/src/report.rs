@@ -649,7 +649,7 @@ pub const CASES: &[CaseSpec] = &[
     case("adopt_binds_owner_without_a_run", ADOPT,
         "on a session the host started, with no message and after the person's first turn, session.adopt answers owner_bound with the plan's identity and session.head's last_ordinal, starts no run and writes no message; afterwards session.baseline answers the adopting owner ready and refuses another caller scope_owner_mismatch"),
     case("host_start_invalid_params_leaves_nothing", &[],
-        "when harness.host_start is advertised, an extra top-level field refuses invalid_params, session.head remains unknown, and a corrected start for the same session succeeds"),
+        "when harness.host_start is advertised, an extra top-level field refuses invalid_params, session.head returns empty success with history_version 0 and no last_run_state, and a new-id start with a different plan for the same session succeeds"),
     case("host_start_exact_repeat_replays", &[],
         "when harness.host_start is advertised, an exact repeat replays the identical success reply"),
     case("host_start_send_id_reuse_names_plan", &[],

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.37
+
+- Correct `host_start_invalid_params_leaves_nothing` to require the contract's
+  empty `session.head` success answer for a never-written session, not an
+  `unknown_session` refusal. A different-plan restart with a new `send_id` also
+  proves that the refused start left no plan record. Self-test fakes reject both
+  the wrong head refusal and a leftover plan record.
+
 ## 0.17.36
 
 - Pin runner `=0.8.31`. Add four `harness.host_start` cases, gated by the live

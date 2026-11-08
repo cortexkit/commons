@@ -4,6 +4,7 @@ use cortexkit_role_llm_runner::{
     errors,
     host_start::{advertises_host_start, HostStartReply, HostStartRequest},
     ops,
+    read::HeadMeta,
 };
 use serde_json::{json, Value};
 
@@ -26,6 +27,23 @@ async fn start<R: RunnerRoute>(route: &R, request: &Value) -> Result<Value, Stri
         ));
     }
     Ok(raw)
+}
+
+fn with_alternate_plan<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    session: &str,
+    request: &Value,
+) -> Result<Value, String> {
+    let alternate = case
+        .subject
+        .host_plan(session, true)
+        .ok_or("host_start advertised but adapter supplies no alternate plan")?;
+    if json!(alternate) == request["plan"] {
+        return Err("host-start alternate plan is identical to the original".into());
+    }
+    let mut changed = request.clone();
+    changed["plan"] = json!(alternate);
+    Ok(changed)
 }
 
 pub(crate) async fn run<S>(case: &Case<'_, S>, name: &str) -> Result<Ending, String>
@@ -75,16 +93,22 @@ where
             &error,
             errors::INVALID_PARAMS,
         )?;
-        let error = expect_error(
+        let head: HeadMeta = decode(
             "head after refused host start",
-            call(&session.route, ops::SESSION_HEAD, json!({})).await?,
+            expect_ok(
+                "head after refused host start: the contract keeps empty success answers for a never-written session",
+                call(&session.route, ops::SESSION_HEAD, json!({})).await?,
+            )?,
         )?;
-        expect_code(
-            "head after refused host start",
-            &error,
-            errors::UNKNOWN_SESSION,
-        )?;
-        start(&session.route, &request).await?;
+        if head.history_version != 0 || head.last_run_state.is_some() {
+            return Err(format!(
+                "head after refused host start is not empty: history_version={}, last_run_state={:?}",
+                head.history_version, head.last_run_state
+            ));
+        }
+        let mut changed = with_alternate_plan(case, &session.name, &request)?;
+        changed["send_id"] = json!(case.mint.next("host-start-new-id"));
+        start(&session.route, &changed).await?;
         return Ok(Ending::Passed);
     }
     let first = start(&session.route, &request).await?;
@@ -97,15 +121,7 @@ where
         }
         return Ok(Ending::Passed);
     }
-    let alternate = case
-        .subject
-        .host_plan(&session.name, true)
-        .ok_or("host_start advertised but adapter supplies no alternate plan")?;
-    if alternate == plan {
-        return Err("host-start alternate plan is identical to the original".into());
-    }
-    let mut changed = request.clone();
-    changed["plan"] = json!(alternate);
+    let mut changed = with_alternate_plan(case, &session.name, &request)?;
     match name {
         "host_start_send_id_reuse_names_plan" => {
             let error = expect_error(
