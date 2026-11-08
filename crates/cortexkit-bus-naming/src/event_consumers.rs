@@ -50,7 +50,11 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
     EventConsumer {
         module_id: "prefrontal-routing",
         durable: "m_prefrontal-routing",
-        filter_subjects: &["event.insula.>"],
+        filter_subjects: &[
+            "event.insula.>",
+            "event.broca.step.finished.v1",
+            "event.thalamus-harness.step.finished.v1",
+        ],
     },
     EventConsumer {
         module_id: "magic-context",

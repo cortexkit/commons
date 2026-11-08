@@ -60,7 +60,11 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
             .unwrap();
         assert_eq!(
             routing.consumer.filter_subjects,
-            [format!("ck.{account}.event.insula.>")]
+            [
+                format!("ck.{account}.event.insula.>"),
+                format!("ck.{account}.event.broca.step.finished.v1"),
+                format!("ck.{account}.event.thalamus-harness.step.finished.v1"),
+            ]
         );
         let mc = specs
             .iter()
@@ -104,6 +108,22 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
             ]
         );
     }
+}
+
+#[test]
+fn routing_step_hint_reader_filters_are_exact() {
+    let routing = EVENT_CONSUMERS
+        .iter()
+        .find(|reader| reader.module_id == "prefrontal-routing")
+        .unwrap();
+    assert_eq!(
+        routing.filter_subjects,
+        [
+            "event.insula.>",
+            "event.broca.step.finished.v1",
+            "event.thalamus-harness.step.finished.v1",
+        ]
+    );
 }
 
 #[test]

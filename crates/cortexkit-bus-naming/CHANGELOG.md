@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Add two exact runner `step.finished.v1` reader filters for routing's model
+  speed statistics, retaining its existing event-family filter. ck-bus derives
+  the subscription grants for non-stored live hints from these filters; this
+  crate's checked-in permission snapshot remains unchanged.
+
 ## 0.3.0
 
 - Add validated INBOX and closed-family CORE_WORK command subjects, streams and
