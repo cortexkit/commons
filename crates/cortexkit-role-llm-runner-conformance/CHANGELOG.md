@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.36
+
+- Pin runner `=0.8.31`. Add four `harness.host_start` cases, gated by the live
+  describe's extension advertisement: invalid-parameter refusal leaves the
+  session unknown and permits a corrected start, exact repeats replay, changed
+  plans under the same id refuse `send_id_reuse`, and new ids with changed
+  plans refuse `plan_drift`. Each rejects its own deliberately wrong fake.
+- Extend the fake runner with faithful host-start creation and replay support.
+
 ## 0.17.35
 
 - Pin runner `=0.8.30`, accepting unknown advertised delivery-order mode names

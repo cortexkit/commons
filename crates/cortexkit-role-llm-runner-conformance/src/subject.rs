@@ -1637,6 +1637,16 @@ pub trait LlmRunnerSubject: Harness {
         None
     }
 
+    /// The scripted model to select in `harness.host_start`. Required when
+    /// the live describe advertises that extension, together with `host_plan`
+    /// (both original and alternate) and a plain-scope owner from `owner_stamp`.
+    fn host_start_model(
+        &self,
+        _session: &str,
+    ) -> Option<cortexkit_role_llm_runner::host_start::HostStartModel> {
+        None
+    }
+
     /// Start `session` the way a person's own app starts one, outside the
     /// role: the runner applies `plan` at host start, and no role request has
     /// reached the session yet, so it has no recorded owner. With `prompt`,

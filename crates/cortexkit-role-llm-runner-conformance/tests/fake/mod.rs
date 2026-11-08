@@ -75,6 +75,7 @@ mod fork_answer;
 mod held_calls;
 mod history;
 mod history_intake;
+mod host_start;
 mod live_ids;
 mod media;
 mod message_senders;
@@ -417,6 +418,9 @@ pub struct Defects {
     pub adopt_writes_message: bool,
     /// A deliberately incorrect implementation of opening or replaying adoption.
     pub adopt_open: Option<&'static str>,
+    /// Opt in to host start; `faithful` serves the contract, other values
+    /// select one isolated host-start defect.
+    pub host_start: Option<&'static str>,
     /// `session.adopt` from a caller other than the recorded owner takes the
     /// session over instead of being refused `scope_owner_mismatch`.
     pub adopt_takes_over_owner: bool,
@@ -1025,6 +1029,7 @@ struct Sess {
     /// Every answered `session.adopt`, by `send_id`: the request and the
     /// reply an exact repeat replays.
     adopts: BTreeMap<String, (Value, Value)>,
+    host_starts: BTreeMap<String, (Value, Value)>,
     /// The session's admitted tool set, from the first send's plan.
     tools: Vec<String>,
     /// Whole-member JCS bytes fixed by the first admitted send, including
@@ -1240,6 +1245,9 @@ pub struct Module {
     kill_hook: Mutex<Option<String>>,
     hook_fired: AtomicBool,
     sessions: Arc<Mutex<BTreeMap<String, Sess>>>,
+    /// Request tracing, not session state: distinguish attempted explicit
+    /// starts from the legacy fixtures' implicitly existing host sessions.
+    host_start_attempts: Mutex<BTreeSet<String>>,
     sender_observer: Mutex<Option<message_senders::Observer>>,
     /// Serialize user-command reservation with forwarding so concurrent retries
     /// cannot both pass the durable lookup before the invocation key is recorded.
@@ -1402,6 +1410,7 @@ impl Module {
             kill_hook: Mutex::new(None),
             hook_fired: AtomicBool::new(false),
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            host_start_attempts: Mutex::new(BTreeSet::new()),
             sender_observer: Mutex::new(None),
             user_command_gate: Mutex::new(()),
             replayed: AtomicBool::new(false),
@@ -1723,6 +1732,7 @@ impl Module {
             return;
         };
         sess.events.push(kind.clone());
+        host_start::apply(sess, record);
         let messages_before: BTreeSet<String> =
             sess.messages.iter().map(|m| m.mid.clone()).collect();
         session_change::apply(sess, &kind, record);
@@ -3189,6 +3199,9 @@ impl Module {
                 self.user_command(stamp, session, method, params)
             }
             ops::SESSION_SEND => self.send(stamp, session, params),
+            ops::HARNESS_HOST_START if self.world.defects.host_start.is_some() => {
+                host_start::handle(self, stamp, session, params)
+            }
             ops::SESSION_REFRESH | ops::SESSION_REFRESH_POLICY | ops::SESSION_FLUSH_PREFIX
                 if self.world.serves(groups::SESSION_CHANGE) =>
             {
@@ -3433,6 +3446,9 @@ impl Module {
             describe = describe.with_steer_receipt("confirm");
         }
         describe.delivery_order_modes = self.world.delivery_order_modes.clone();
+        if self.world.defects.host_start.is_some() {
+            describe = describe.with_extensions(vec![ops::HARNESS_HOST_START.into()]);
+        }
         if self.world.serves(groups::RETENTION) {
             describe = describe.with_retention(RETENTION_MAX, self.world.retention_delete_ms);
         }
@@ -4979,6 +4995,9 @@ impl Module {
         }
         let sessions = self.sessions.lock().unwrap();
         let Some(sess) = sessions.get(session) else {
+            if self.host_start_attempts.lock().unwrap().contains(session) {
+                return refuse(errors::UNKNOWN_SESSION, None);
+            }
             let mut head = if self.world.defects.alternate_empty_identity {
                 HeadMeta::empty(73, "unwritten-placeholder")
             } else {
@@ -7145,7 +7164,8 @@ impl LlmRunnerSubject for FakeSubject {
             principal: "reserved:owner".into(),
             scope: (self.capabilities.contains(&Capability::MessageMarks)
                 || self.capabilities.contains(&Capability::TagRead)
-                || self.capabilities.contains(&Capability::AdoptOpen))
+                || self.capabilities.contains(&Capability::AdoptOpen)
+                || self.defects.host_start.is_some())
             .then(|| cortexkit_role_harness::ScopeStamp {
                 owner: "reserved:owner".into(),
                 scope_ref: "marks-scope".into(),
@@ -7465,6 +7485,15 @@ impl LlmRunnerSubject for FakeSubject {
             plan.insert("variant".into(), json!("alternate"));
         }
         Some(plan)
+    }
+
+    fn host_start_model(
+        &self,
+        _session: &str,
+    ) -> Option<cortexkit_role_llm_runner::host_start::HostStartModel> {
+        Some(cortexkit_role_llm_runner::host_start::HostStartModel::new(
+            "fake", "scripted",
+        ))
     }
 
     async fn start_host_session(

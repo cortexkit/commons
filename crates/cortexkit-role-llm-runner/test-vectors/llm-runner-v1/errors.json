@@ -210,6 +210,11 @@
       "retryable": true
     },
     {
+      "code": "host_unavailable",
+      "retryable": false,
+      "detail": { "host_error": "unsupported_version" }
+    },
+    {
       "code": "scope_not_synced",
       "retryable": true
     },

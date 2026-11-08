@@ -482,6 +482,11 @@ pub const PRE_USER_UNAVAILABLE: &str = "pre_user_unavailable";
 /// (a provider or store briefly unavailable). Retryable.
 pub const TRANSIENT: &str = "transient";
 
+/// The runner's host cannot start sessions until an operator fixes invalid
+/// configuration or an unsupported version. Not automatically retryable.
+/// `detail.host_error` carries the host's own code. Host start writes nothing.
+pub const HOST_UNAVAILABLE: &str = "host_unavailable";
+
 /// The scope's owner has not yet synced the scope after a daemon restart.
 /// Retryable, with backoff, within the caller's hold bound.
 pub const SCOPE_NOT_SYNCED: &str = "scope_not_synced";
@@ -619,6 +624,7 @@ pub const CODES: &[&str] = &[
     PLAN_DRIFT,
     PRE_USER_UNAVAILABLE,
     TRANSIENT,
+    HOST_UNAVAILABLE,
     SCOPE_NOT_SYNCED,
     RUNG_UNSUPPORTED,
     PENDING_SUPERSEDED,

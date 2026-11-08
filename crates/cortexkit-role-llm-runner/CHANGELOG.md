@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.31
+
+- Document optional `harness.host_start`: owner-only plain-scope head creation
+  with a frozen plan and model, no message or run, pre-write refusals that
+  create nothing, and replay/drift rules that never create a second head.
+- Add strict `HostStartRequest`, `HostStartModel` and `HostStartReply`, the op
+  constant and `advertises_host_start`. Add optional describe `extensions`
+  with a builder: unknown names are ignored, malformed lists and duplicates
+  are refused. Include request, reply and describe sample vectors.
+- Add non-retryable `host_unavailable` for a host whose invalid configuration
+  or unsupported version needs operator action, preserving its own error code
+  in `detail.host_error`. Host-start refusals create nothing.
+
 ## 0.8.30
 
 - Ignore unknown names in `role.describe.delivery_order_modes`, as with unknown

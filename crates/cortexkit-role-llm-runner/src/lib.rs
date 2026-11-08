@@ -42,6 +42,7 @@ pub mod finish;
 pub mod fork_answer;
 pub mod head_selection;
 pub mod history;
+pub mod host_start;
 pub mod live;
 pub mod message_marks;
 pub mod output_refs;
@@ -106,6 +107,9 @@ pub const TRANSPORT_FRAME_LIMIT: usize = 4_194_304;
 
 /// Names of the ops a runner serves.
 pub mod ops {
+    /// Start a head with a frozen plan and model, without a message or run.
+    /// Advertised only through `role.describe.extensions`.
+    pub const HARNESS_HOST_START: &str = "harness.host_start";
     /// Freeze the last served head request as a question-answering branch.
     pub const SESSION_FORK_PREPARE: &str = "session.fork_prepare";
     /// Ask on a prepared branch without running tools or changing the head.

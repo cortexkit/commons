@@ -26,6 +26,11 @@ release. `src/vectors.rs::FILES` is the exact ordered inventory and
 wire shapes and check the literal expectations. Enable the `test-vectors`
 feature to use the same inventory from another crate.
 
+`host-start.json` samples the strict host-start request and reply, a describe
+advertising the optional harness operation alongside an unknown extension,
+and a non-retryable `host_unavailable` refusal. `host_start` unit tests decode
+and round-trip these shapes; the conformance kit checks creation and repeats.
+
 ## Fork answer vectors
 
 `fork-answer.json` pins the fork prepare, ask and end wire shapes, per-ask

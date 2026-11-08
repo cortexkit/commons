@@ -3900,6 +3900,82 @@ without a prompt.
   (§12.1) concerns a scoped send into a session recorded without a scope,
   and is unchanged.
 
+### 9.5.1 Host start (optional)
+
+`harness.host_start` creates a head with a plan and model before any message.
+
+- [pinned] **Advertising.** The top-level `role.describe.extensions` array
+  names harness-level operations beyond the role's own ops. It is optional;
+  absent or empty declares none. Every entry is a string, duplicates are
+  refused, and readers ignore names they do not know. A non-array or a
+  non-string entry is malformed. This release defines `harness.host_start`:
+  a runner advertises it only by listing that exact name in `extensions`.
+  There is no capability group for it, and listing it among a major's ops or
+  among capability groups does not advertise it.
+- [pinned] **Request.** The request is exactly `{send_id, plan, model}`
+  (`host_start::HostStartRequest`). Any other top-level field is refused as
+  `invalid_params`. `send_id` is a non-empty string. `plan` is the session
+  plan object, the same shape `session.send` carries (§10.1), not its digest.
+  `model` is exactly `{provider, model, variant?}`: `provider` and `model`
+  are strings and `variant`, when present, is a string
+  (`host_start::HostStartModel`). The route supplies the session; the request
+  has no session field.
+- [pinned] **Caller.** The caller must be the session scope's owner on a
+  plain route, neither flow- nor run-stamped. Otherwise the runner refuses
+  `scope_owner_mismatch`.
+- [pinned] **Reply and effect.** The reply is
+  `{started: true, applied_plan_digest: "<plan identity>"}`
+  (`host_start::HostStartReply`). `started: true` means the head is recorded
+  with that plan applied and frozen, the caller is its owner, and its host
+  session exists or is ready to start at the first send. The digest is the
+  plan identity used by admission (§10.1). No message is written and no run
+  starts.
+- [pinned] **Every refusal leaves no runner session.** Every refusal is
+  decided before the runner writes the head's session or plan record, which
+  is one write. A refused start leaves no session or plan record, no message
+  and no run. A host-side resource created while launching, such as a native
+  host session, is either removed before the refusal is answered or is found
+  and reused by a later start for the same session through an id derived
+  from that session. It never becomes a second head. This is the host-start
+  counterpart of §9.5's **“A refusal writes nothing”** adoption rule: the
+  caller may drop a refused attempt and start again with different parameters.
+- [pinned] **Expected refusals.** A caller should expect `invalid_params`,
+  `scope_owner_mismatch`, `send_id_reuse`, `plan_drift`,
+  `transient`, `fetch_unavailable`, `tool_name_collision`, `plan_stale`,
+  and `host_unavailable`, with the existing codes retaining their meanings
+  (§9, §10.1, §13). `invalid_params` includes
+  `{field: "plan.model", reason: "unsupported_model"}` (the existing
+  `PlanModelProblem` detail; the same request gets the same answer) and
+  `{field: "scope", problem: "workdir_missing"}` (not retryable).
+  `transient` is retryable: the host is unavailable or still starting, its
+  model list is not known yet, a startup deadline passed, or the host
+  returned an error the runner does not recognise (its own code in
+  `detail.host_error`). `fetch_unavailable` covers a plan provider's catalog
+  or preset failing. `host_unavailable` means the runner's host cannot start
+  sessions until an operator acts because its configuration is invalid or
+  its version is unsupported; callers do not retry automatically, and
+  `detail.host_error` carries the host's own code.
+  The no-session guarantee applies to **every**
+  refusal, not just these expected codes. Refusing a request against an
+  already recorded head leaves that existing head unchanged; it creates
+  nothing.
+- [pinned] **Repeats.** Idempotency is keyed by the bound session and
+  `send_id`. An exact repeat of a succeeded request (same `send_id`, same
+  request) replays its stored reply unchanged. The same `send_id` with a
+  different request is `send_id_reuse` naming the differing field. A new
+  `send_id` once the head exists answers
+  `{started: true, applied_plan_digest}` when its plan is the applied plan,
+  and `plan_drift` otherwise, using §10.1's identities and detail.
+- [pinned] **Failure after the head write.** A failure after the head's
+  record write, such as failure to store the reply's replay record, returns
+  the store's error. This is not a pre-write refusal. A later repeat then
+  returns the same success, never a second head.
+
+Informatively, a caller should check the advertisement before calling and
+refuse locally by name when it is absent
+(`host_start::advertises_host_start`). When the runner declares `adopt`, a
+session-scope owner follows host start with `session.adopt` (§9.5).
+
 ### 9.6 Part numbers
 
 Part numbering, tag notation and reply cleaning are defined only by

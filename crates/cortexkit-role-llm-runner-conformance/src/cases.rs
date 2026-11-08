@@ -253,6 +253,7 @@ where
             "resend_steer_delivered_stable" => self.resend_steer_delivered_stable().await,
             name if name.starts_with("run_cancel_") => crate::cancel::run(self, name).await,
             name if name.starts_with("adopt_") => crate::adopt::run(self, name).await,
+            name if name.starts_with("host_start_") => crate::host_start::run(self, name).await,
             name if name.starts_with("run_tool_calls_") => crate::tool_calls::run(self, name)
                 .await
                 .map(|()| Ending::Passed),

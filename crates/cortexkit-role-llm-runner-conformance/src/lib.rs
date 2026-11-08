@@ -50,6 +50,7 @@ mod stop_all;
 pub use stop_all::StopAllObservation;
 mod history_intake;
 mod host_history;
+mod host_start;
 mod input_token_cap;
 mod interrupt_reason;
 mod last_run_error;

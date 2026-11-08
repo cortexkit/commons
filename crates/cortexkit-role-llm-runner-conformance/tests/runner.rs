@@ -6,6 +6,7 @@ mod adopt_open;
 mod cache_policy;
 mod fake;
 mod fixture_admission;
+mod host_start;
 
 const HEAD_SELECTION_CASES: &[&str] = &[
     "head_selection_absent_preserves_choice",
@@ -1125,6 +1126,12 @@ async fn media_refs_tool_output_hook_keeps_envelope_references_strict() {
 }
 
 fn assert_passed(report: &SuiteReport, case: &str) {
+    if case.starts_with("host_start_")
+        && matches!(report.outcome(case), Some(CaseOutcome::SkippedWithReason { reason, .. })
+            if reason == "role.describe.extensions does not list harness.host_start")
+    {
+        return;
+    }
     if case.starts_with("restart_survival_")
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason }) if reason == "adapter declares host_survives_restart: false")
     {

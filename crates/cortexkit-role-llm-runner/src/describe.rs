@@ -156,6 +156,10 @@ pub struct RoleDescribe {
     /// for every session.
     #[serde(default)]
     pub capabilities: Vec<String>,
+    /// Harness-level operations beyond the role's own ops. Unknown names
+    /// are ignored by readers; absent or empty declares no extension.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<Vec<String>>,
     /// Where session-level capabilities come from: `admission` or
     /// `baseline` ([`capabilities::source`]). Required by
     /// [`check_describe`]; optional in the type so an answer without it
@@ -394,6 +398,12 @@ impl RoleDescribe {
         self
     }
 
+    /// List the harness-level operations this runner serves.
+    pub fn with_extensions(mut self, extensions: Vec<String>) -> Self {
+        self.extensions = Some(extensions);
+        self
+    }
+
     pub fn with_service_tiers(mut self, tiers: crate::service_tier::ServiceTiers) -> Self {
         self.service_tiers = Some(tiers);
         self
@@ -579,6 +589,13 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     if !raw.is_object() {
         return Err(vec![DescribeProblem::NotAnObject]);
     }
+    if let Some(extensions) = raw.get("extensions") {
+        if serde_json::from_value::<Vec<String>>(extensions.clone()).is_err() {
+            return Err(vec![DescribeProblem::Undecodable(
+                "invalid_extensions".into(),
+            )]);
+        }
+    }
     if raw
         .get("fork_idle_s")
         .is_some_and(|value| value.as_u64().is_none_or(|seconds| seconds == 0))
@@ -619,6 +636,12 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         Err(error) => return Err(vec![DescribeProblem::Undecodable(error.to_string())]),
     };
     let mut problems = Vec::new();
+    if let Some(extensions) = &describe.extensions {
+        let mut seen = std::collections::HashSet::new();
+        if extensions.iter().any(|name| !seen.insert(name)) {
+            problems.push(DescribeProblem::Undecodable("duplicate_extension".into()));
+        }
+    }
     match (
         describe.declares(capabilities::FORK_ANSWER),
         describe.fork_idle_s,

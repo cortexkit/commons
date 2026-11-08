@@ -1,0 +1,32 @@
+{
+  "describe": {
+    "majors": [
+      {
+        "version": "llm-runner/v1",
+        "ops": ["role.describe", "session.baseline"],
+        "stability": "alpha"
+      }
+    ],
+    "implementation_version": "example-1",
+    "capabilities": [],
+    "session_capabilities_from": "baseline",
+    "extensions": ["harness.host_start", "example.future_op"]
+  },
+  "request": {
+    "send_id": "host-start:example-plan",
+    "plan": {
+      "items": [],
+      "composition": {"providers": []},
+      "composition_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "model": {"provider": "example", "model": "scripted"}
+  },
+  "reply": {
+    "started": true,
+    "applied_plan_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "refusal": {
+    "code": "host_unavailable",
+    "detail": {"host_error": "unsupported_version"}
+  }
+}
