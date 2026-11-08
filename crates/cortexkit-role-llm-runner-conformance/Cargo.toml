@@ -21,9 +21,9 @@ test-vectors = ["cortexkit-role-llm-runner/test-vectors"]
 [dependencies]
 base64 = "0.22"
 async-trait = "0.1"
-cortexkit-role-harness = { version = "0.1.0", path = "../cortexkit-role-harness" }
-cortexkit-role-llm-runner = { version = "=0.8.21", path = "../cortexkit-role-llm-runner", features = ["test-vectors"] }
-cortexkit-rich-ui-syntax = { version = "0.3.0", path = "../cortexkit-rich-ui-syntax", features = ["test-vectors"] }
+cortexkit-role-harness = "0.1.0"
+cortexkit-role-llm-runner = { version = "=0.8.21", features = ["test-vectors"] }
+cortexkit-rich-ui-syntax = { version = "0.3.0", features = ["test-vectors"] }
 futures-util = { version = "0.3", default-features = false }
 serde = "1"
 serde_json = "1"
