@@ -1677,6 +1677,25 @@ pub trait LlmRunnerSubject: Harness {
         None
     }
 
+    /// A valid opening plan with a `compaction_item` this runner can serve,
+    /// used only by the compaction-item plan-change cases. It must make
+    /// [`crate::SCRIPTED_TOOL`] available, like [`Self::send_fields`]' plan.
+    /// Returning `Some` replaces that plan for these cases without enrolling
+    /// other cases in compaction. With `None`, the cases fall back to the first
+    /// plan from [`Self::send_fields`] and are inapplicable if it has no item.
+    fn compaction_change_plan(&self, _session: &str) -> Option<Map<String, Value>> {
+        None
+    }
+
+    /// A valid replacement plan naming a different `compaction_item` from
+    /// the opening plan chosen by the compaction-item plan-change cases.
+    /// The switch case uses this ahead of [`Self::refresh_plan`] with
+    /// [`RefreshVariant::ChangedTools`]. With neither fixture supplying a
+    /// different item, that case is inapplicable. Other cases do not use it.
+    fn compaction_switch_plan(&self, _session: &str) -> Option<Map<String, Value>> {
+        None
+    }
+
     /// Configure a stable-prefix plan-note scenario; absence grades these
     /// optional cases not applicable. `model_requests` must observe note text
     /// at the model endpoint, not reconstruct it from this fixture.

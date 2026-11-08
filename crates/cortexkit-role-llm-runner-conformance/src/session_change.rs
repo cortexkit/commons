@@ -74,7 +74,10 @@ where
 }
 
 /// Send a prompt and wait for the run it starts to end.
-async fn run_once<S>(case: &Case<'_, S>, session: &mut Session<S::Route>) -> Result<(), String>
+pub(crate) async fn run_once<S>(
+    case: &Case<'_, S>,
+    session: &mut Session<S::Route>,
+) -> Result<(), String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
@@ -124,7 +127,7 @@ fn plan_for<S: LlmRunnerSubject>(
     case.subject.refresh_plan(session, variant)
 }
 
-async fn refresh<R: RunnerRoute>(
+pub(crate) async fn refresh<R: RunnerRoute>(
     route: &R,
     plan: &Map<String, Value>,
     policy: &str,
@@ -264,7 +267,7 @@ where
 }
 
 /// `session.baseline` shows `generation` applied and nothing pending.
-async fn applied<R: RunnerRoute>(route: &R, generation: u64) -> Result<(), String> {
+pub(crate) async fn applied<R: RunnerRoute>(route: &R, generation: u64) -> Result<(), String> {
     let after = baseline(route).await?;
     if after.applied_generation < generation
         || after.pending.is_some()

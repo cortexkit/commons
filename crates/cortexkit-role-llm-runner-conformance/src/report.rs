@@ -108,6 +108,13 @@ const READ_FACTS: &[Capability] = &[
 ];
 const ORDER_STEER: &[Capability] = &[Capability::DeliveryOrder, Queue, TranscriptReads, Steer];
 const SESSION_CHANGE: &[Capability] = &[Capability::SessionChange, Queue, RunOps];
+const COMPACTION_CHANGE: &[Capability] = &[
+    Capability::Plans,
+    Capability::SessionChange,
+    Queue,
+    RunOps,
+    TranscriptReads,
+];
 const DISPLAY: &[Capability] = &[
     Capability::HistoryDisplay,
     Capability::HostHistory,
@@ -512,6 +519,12 @@ pub const CASES: &[CaseSpec] = &[
         "unknown, non-array and duplicate directives are refused invalid_params naming directives"),
     case("max_steps_seals_pending_calls", &[Capability::MaxSteps, Queue, TranscriptReads, RunOps],
         "a tool-calling model ends at the response limit in max_steps, with every pending call sealed before the terminal is observable and none dispatched"),
+    case("compaction_add_takes_effect_next_run", COMPACTION_CHANGE,
+        "with an adapter compaction plan, adding its item is accepted and the next run's baseline shows the generation and manifest digest applied; raw plan contents, provider Setup and applied views are not observable"),
+    case("compaction_remove_is_refused", COMPACTION_CHANGE,
+        "with an adapter compaction plan, removing its item refuses invalid_params at plan.compaction_item without changing the baseline or head; raw applied plans and views are not observable"),
+    case("compaction_switch_accept_or_refuse", COMPACTION_CHANGE,
+        "with a second valid adapter plan naming a different compaction item, a switch either refuses invalid_params at plan.compaction_item without writes or applies at the next run; raw plans, provider Setup and retention of the prior applied view are not observable"),
     case("session_refresh_applies_from_next_run", SESSION_CHANGE,
         "on an idle session, a refresh with the immediately rung answers its generation as pending, no run in progress and applies_from_next_run; the next run offers the new plan's tools and session.baseline then shows it applied"),
     case("session_refresh_waits_for_its_rung", SESSION_CHANGE,

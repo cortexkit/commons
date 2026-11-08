@@ -31,6 +31,7 @@ pub mod call_identity;
 mod call_yield;
 mod cancel;
 mod cases;
+mod compaction_change;
 mod cost;
 mod crash;
 mod delivery_order;

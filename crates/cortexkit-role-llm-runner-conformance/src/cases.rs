@@ -118,6 +118,11 @@ where
             "tool_result_too_large_is_error" | "tool_result_too_large_not_repeated" => {
                 crate::tool_result_limit::run(self, name).await
             }
+            "compaction_add_takes_effect_next_run"
+            | "compaction_remove_is_refused"
+            | "compaction_switch_accept_or_refuse" => {
+                crate::compaction_change::run(self, name).await
+            }
             "history_version_on_read_pages"
             | "compaction_item_preset_required"
             | "stale_read_cursor_history_changed"
