@@ -4176,6 +4176,15 @@ async fn a_runner_advertising_only_steer_lists_passes() {
 }
 
 #[tokio::test]
+async fn a_runner_advertising_unknown_delivery_order_modes_passes() {
+    let mut subject = steer_only_lists(Defects::default());
+    subject.delivery_order_modes = Some(vec!["steer".into(), "future_mode".into()]);
+    let report = run(&subject).await;
+    assert_passed(&report, DECLARED_MODES_CASE);
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
 async fn ignoring_delivery_order_modes_fails_by_name() {
     let report = run(&steer_only_lists(Defects {
         order_modes_ignored: true,

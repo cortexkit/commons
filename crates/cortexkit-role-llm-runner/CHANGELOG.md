@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.30
+
+- Ignore unknown names in `role.describe.delivery_order_modes`, as with unknown
+  capability groups, instead of refusing the whole description. Unknown names
+  declare no known mode; duplicates, empty lists, wrong wire types and missing
+  required capability groups remain refused. Keep `UNKNOWN_DELIVERY_ORDER_MODE`
+  public, but `check_describe` no longer produces it.
+- Clarify that senders use only known modes the runner declared. Readers older
+  than 0.8.30 still need a contract upgrade or prior knowledge of every listed mode.
+
 ## 0.8.29
 
 - Add template-only `turn_system_cleared` to `delivery_order`, requiring an explicit

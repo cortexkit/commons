@@ -234,8 +234,15 @@ alias until the next breaking release.
 - [pinned] `delivery_order_modes` optionally lists the delivery list modes the
   runner can ever land (§9.7). Absent leaves the capability-group mapping for
   existing modes unchanged; present means only its listed modes count as
-  declared, still requiring their groups. `check_describe` refuses an unknown mode name, a
-  duplicate, an empty list, a listed `steer` without the `steer` group, a listed
+  declared, still requiring their groups. Readers ignore mode names they do not
+  know, just as they ignore unknown capability groups, so a runner may list a
+  mode newer than its readers. A list holding only unknown names declares no
+  known mode and passes `check_describe`. Readers older than 0.8.30 refuse unknown
+  names, so a runner listing a mode introduced after a reader's contract still
+  needs that reader on 0.8.30 or later, or on a contract that knows the mode.
+  A sender lists in a send's delivery order only modes it knows and the runner
+  declared. `check_describe` refuses a duplicate, an empty list, a listed
+  `steer` without the `steer` group, a listed
   `idle_start` without `queue`, or the member without the `delivery_order`
   group. The member is an array of strings (`Option<Vec<String>>` in
   `RoleDescribe`, built with `with_delivery_order_modes`).
@@ -3981,6 +3988,8 @@ say who may send and which texts are system text.
   is never declared. When the member is present, only its
   listed modes count as declared, still requiring the groups above
   (`Mode::is_declared_by`): the member only narrows, never adds a capability.
+  Readers ignore unknown names in this describe member; senders use only modes
+  they know and the runner declared in a send's delivery order.
   For example, a runner declaring `delivery_order` and `steer` with
   `delivery_order_modes: ["steer"]` declares only `steer` for lists, not
   `tool_result`, `turn_system`, `turn_system_cleared` or `idle_start`, even if it also declares `queue`.

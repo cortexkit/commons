@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.35
+
+- Pin runner `=0.8.30`, accepting unknown advertised delivery-order mode names
+  without treating them as known declarations. Add a self-test that the kit
+  accepts an unknown name alongside a declared known mode.
+
 ## 0.17.34
 
 - Pin runner `=0.8.29`. Add seven optional cleared-ride cases covering confirmed

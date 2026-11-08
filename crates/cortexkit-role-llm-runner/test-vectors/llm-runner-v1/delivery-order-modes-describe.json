@@ -14,11 +14,12 @@
     "describe": {
       "majors": [{"version": "llm-runner/v1", "ops": ["role.describe", "session.baseline", "session.send"], "stability": "alpha"}],
       "implementation_version": "unknown-mode-1",
-      "capabilities": ["delivery_order"],
+      "capabilities": ["delivery_order", "steer", "queue"],
       "session_capabilities_from": "baseline",
       "delivery_order_modes": ["interrupt"]
     },
-    "problem": "unknown_delivery_order_mode"
+    "declared": [],
+    "undeclared": ["tool_result", "turn_system", "turn_system_cleared", "steer", "idle_start"]
   },
   "duplicate": {
     "describe": {

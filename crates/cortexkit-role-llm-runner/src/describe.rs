@@ -91,6 +91,8 @@ pub mod problem_names {
     pub const DUPLICATE_RUN_CANCEL_AT: &str = "duplicate_run_cancel_at";
     pub const DELIVERY_ORDER_MODES_UNDECLARED: &str = "delivery_order_modes_undeclared";
     pub const EMPTY_DELIVERY_ORDER_MODES: &str = "empty_delivery_order_modes";
+    /// No longer produced by [`super::check_describe`] since 0.8.30;
+    /// readers ignore unknown delivery-order mode names.
     pub const UNKNOWN_DELIVERY_ORDER_MODE: &str = "unknown_delivery_order_mode";
     pub const DUPLICATE_DELIVERY_ORDER_MODE: &str = "duplicate_delivery_order_mode";
     pub const DELIVERY_ORDER_STEER_UNDECLARED: &str = "delivery_order_steer_undeclared";
@@ -173,6 +175,7 @@ pub struct RoleDescribe {
     /// List modes this runner can ever land. Absence uses the capability-group
     /// mapping for existing modes, never `turn_system_cleared`, which requires
     /// an explicit listing. Listed modes still need their capability groups.
+    /// Readers ignore mode names they do not know.
     /// Validated by [`check_describe`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery_order_modes: Option<Vec<String>>,
@@ -1014,7 +1017,7 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
                     Some(problem_names::DELIVERY_ORDER_IDLE_START_UNDECLARED)
                 }
                 names::STEER | names::IDLE_START => None,
-                _ => Some(problem_names::UNKNOWN_DELIVERY_ORDER_MODE),
+                _ => None,
             };
             if let Some(problem) = problem {
                 problems.push(DescribeProblem::Undecodable(problem.into()));
@@ -1328,16 +1331,47 @@ mod delivery_order_modes_tests {
     #[test]
     fn delivery_order_modes_require_delivery_order_group() {
         refused("without_delivery_order");
+        let mut raw = vectors()["unknown"]["describe"].clone();
+        raw["capabilities"] = json!(["steer", "queue"]);
+        assert_eq!(
+            check_describe(&raw),
+            Err(vec![DescribeProblem::Undecodable(
+                problem_names::DELIVERY_ORDER_MODES_UNDECLARED.into()
+            )])
+        );
     }
 
     #[test]
-    fn delivery_order_modes_reject_unknown_names() {
-        refused("unknown");
+    fn delivery_order_modes_ignore_unknown_names() {
+        let vector = &vectors()["unknown"];
+        let mut raw = vector["describe"].clone();
+        let describe = check_describe(&raw).unwrap();
+        let modes = serde_json::from_value::<Vec<Mode>>(vector["undeclared"].clone()).unwrap();
+        for mode in &modes {
+            assert!(!mode.is_declared_by(&describe), "{}", mode.as_str());
+        }
+
+        raw["delivery_order_modes"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("steer"));
+        let describe = check_describe(&raw).unwrap();
+        for mode in modes {
+            assert_eq!(mode.is_declared_by(&describe), mode == Mode::Steer);
+        }
     }
 
     #[test]
     fn delivery_order_modes_reject_duplicates() {
         refused("duplicate");
+        let mut raw = vectors()["unknown"]["describe"].clone();
+        raw["delivery_order_modes"] = json!(["interrupt", "interrupt"]);
+        assert_eq!(
+            check_describe(&raw),
+            Err(vec![DescribeProblem::Undecodable(
+                problem_names::DUPLICATE_DELIVERY_ORDER_MODE.into()
+            )])
+        );
     }
 
     #[test]
