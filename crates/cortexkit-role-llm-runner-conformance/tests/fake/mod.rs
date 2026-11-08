@@ -197,6 +197,8 @@ pub struct Defects {
     pub account_route_change_accepted: bool,
     pub head_selection: Option<&'static str>,
     pub compaction_preset_missing_accepted: bool,
+    pub compaction_change_fixture: bool,
+    pub compaction_change: Option<&'static str>,
     pub marker_hides_reads: bool,
     pub missing_history_version: bool,
     pub stale_cursor_accepted: bool,
@@ -1010,6 +1012,7 @@ struct Sess {
     output_refs: output_refs::State,
     output_refs_enabled: bool,
     has_compaction_item: bool,
+    compaction_item: Option<Value>,
     attachment_accepts: Option<bool>,
     ever_served: bool,
     standalone_handed_off: bool,
@@ -1699,6 +1702,10 @@ impl Module {
                         .map(|value| serde_json::from_value(value.clone()).unwrap()),
                     output_refs_enabled: record["output_refs_enabled"] == json!(true),
                     has_compaction_item: record["has_compaction_item"] == json!(true),
+                    compaction_item: record
+                        .get("compaction_item")
+                        .filter(|item| !item.is_null())
+                        .cloned(),
                     rich_ui_plan: record["rich_ui_plan"] == json!(true),
                     rich_ui: record
                         .get("rich_ui")
@@ -4295,6 +4302,7 @@ impl Module {
                         "selection": selection,
                         "output_refs_enabled": request.plan.as_ref().and_then(|p|p.get("tool_items")).and_then(Value::as_array).is_some_and(|items|items.iter().any(|item|item["output_refs"] == true)),
                         "has_compaction_item": request.plan.as_ref().and_then(|plan|plan.get("compaction_item")).is_some_and(|item| !item.is_null()),
+                        "compaction_item": request.plan.as_ref().and_then(|plan|plan.get("compaction_item")),
                         "senders": request.plan.as_ref().and_then(|plan| plan.get(order::PLAN_SENDERS)),
                         "readers": request.plan.as_ref().and_then(|plan| plan.get("readers")),
                         "rich_ui_plan": rich_ui_plan, "rich_ui": rich_ui,
@@ -7240,6 +7248,10 @@ impl LlmRunnerSubject for FakeSubject {
         if first && !self.without_plans {
             fields.insert("plan".into(), json!({ "tools": [SCRIPTED_TOOL] }));
             fields.insert("model".into(), json!("fake-model"));
+            if self.defects.compaction_change_fixture && session.contains("compaction_") {
+                fields["plan"]["compaction_item"] =
+                    json!({"provider":"fixture-compaction","preset":"identity","params":{}});
+            }
             if self.capabilities.contains(&Capability::TagRead) && session.contains("tag_read_") {
                 fields["plan"]["compaction_item"] =
                     json!({"provider":"fixture-compaction","preset":"identity"});
@@ -7477,10 +7489,15 @@ impl LlmRunnerSubject for FakeSubject {
 
     fn refresh_plan(
         &self,
-        _session: &str,
+        session: &str,
         variant: cortexkit_role_llm_runner_conformance::RefreshVariant,
     ) -> Option<cortexkit_role_llm_runner_conformance::RefreshPlan> {
-        session_change::refresh_plan(variant)
+        let mut plan = session_change::refresh_plan(variant)?;
+        if self.defects.compaction_change_fixture && session.contains("compaction_switch_") {
+            plan.plan.insert("compaction_item".into(),
+                json!({"provider":"fixture-compaction","preset":"identity","params":{"revision":2}}));
+        }
+        Some(plan)
     }
 
     fn host_plan(&self, _session: &str, alternate: bool) -> Option<Map<String, Value>> {

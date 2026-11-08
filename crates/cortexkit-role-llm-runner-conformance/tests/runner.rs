@@ -4,6 +4,7 @@
 mod account_route;
 mod adopt_open;
 mod cache_policy;
+mod compaction_change;
 mod fake;
 mod fixture_admission;
 mod host_start;

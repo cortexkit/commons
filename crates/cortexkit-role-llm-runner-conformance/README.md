@@ -1,6 +1,6 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.37** pins runner **0.8.31**. Four `host_start_*` cases run only
+Version **0.17.38** pins runner **0.8.31**. Four `host_start_*` cases run only
 when the live describe lists `harness.host_start` in its top-level `extensions`.
 Opt-in adapters provide `host_start_model`, both original and alternate
 `host_plan` fixtures, and an attested plain-scope owner from `owner_stamp`.
@@ -250,6 +250,9 @@ opaque part keys come from the served envelope, not a reader's invented index.
 
 | Case | What an incorrect runner must not do |
 |---|---|
+| `compaction_add_takes_effect_next_run` | Refuse addition of the adapter's valid compaction item, apply it before the next run, or fail to report its generation and manifest digest applied after that run. |
+| `compaction_remove_is_refused` | Accept removal, refuse with anything other than `invalid_params` at `plan.compaction_item`, or change the baseline or head on refusal. |
+| `compaction_switch_accept_or_refuse` | Refuse a valid item switch with anything other than `invalid_params` at `plan.compaction_item`, write on refusal, or fail to apply an accepted switch at the next run. Applied-view retention is not observable here. |
 | `live_attach_replays_step_controls` | Omit current-step controls, change their cursors/order, replay an earlier step, or send controls after the display snapshot while a tool call is held. |
 | `live_attach_idle_unchanged` | Replay any control event on an idle `"live"`, absent-from or null-from attach. |
 | `cache_policy_plan_key_accepted` | Reject a valid plan cache key, including the 1- and 128-byte boundaries. |
@@ -280,6 +283,21 @@ opaque part keys come from the served envelope, not a reader's invented index.
 | `scoped_session_start_owner_only` | Admit a non-owner carrier's session-creating send under a plain scope, or show a visible session after refusing `scope_owner_mismatch`: the owner must see an empty read and head, and no ready baseline. |
 | `display_without_limits_is_whole` | Cut arguments or a kept non-error tool result without requested limits; the fixture exceeds the app's 16,384-byte result bound but stays below the pre-render provider acceptance limit. Error-result truncation is not exercised. |
 | `read_display_facts_created_at` | Omit or change a recorded host creation time, substitute `written_at` or `completed_at`, or expose it without the opt-in. |
+
+The compaction-change cases require `Plans`, `SessionChange`, queued runs,
+run operations and transcript reads. They use only existing adapter fixtures:
+`send_fields(session, true)` must supply a valid plan with a compaction item,
+otherwise all three are inapplicable. Addition starts without that item and
+refreshes with the full plan; removal starts with it and refreshes without it.
+Switching additionally needs `refresh_plan(session, ChangedTools)` to provide a
+second valid plan with a different compaction item, otherwise that case is
+inapplicable. The replacement tool surface must support the `immediately` rung.
+`session.baseline` exposes generations and manifest digests, not the raw applied
+plan or its item, and these checks cannot observe provider Setup or the applied
+view. In particular they cannot prove the [compaction contract's W2.5
+rule](../cortexkit-role-compaction/CONTRACT.md) preserving the old view until the
+new provider applies its own; that requires the compaction protocol's kit.
+No compaction provider or runner protocol hooks are added here.
 
 Each new case is exercised against a deliberately faulty fake and verifies
 rejection under the case's name. The unnumbered-reference case has

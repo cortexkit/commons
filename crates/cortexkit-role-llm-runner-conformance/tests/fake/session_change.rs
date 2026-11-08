@@ -93,6 +93,7 @@ pub struct PendingRec {
     tools: Vec<String>,
     senders: Vec<super::order::PlanSender>,
     system_note: Option<String>,
+    compaction_item: Option<Value>,
 }
 
 /// What a session's `session_change` records built.
@@ -133,6 +134,10 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                 senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
                 system_note: record["system_note"].as_str().map(str::to_owned),
+                compaction_item: record
+                    .get("compaction_item")
+                    .filter(|item| !item.is_null())
+                    .cloned(),
             });
             if record["defer_senders"] != true {
                 sess.senders =
@@ -181,6 +186,8 @@ pub fn apply(sess: &mut Sess, kind: &str, record: &Value) {
                 }
                 sess.senders = pending.senders;
                 sess.plan_digest = Some(pending.digest);
+                sess.has_compaction_item = pending.compaction_item.is_some();
+                sess.compaction_item = pending.compaction_item;
             }
             sess.change.flush = false;
             if record["rewrite_history"] == true {
@@ -322,6 +329,33 @@ impl Module {
             return Ok(invalid(field));
         }
         let defects = &self.world.defects;
+        let next_item = request
+            .plan
+            .get("compaction_item")
+            .filter(|item| !item.is_null());
+        match (sess.compaction_item.as_ref(), next_item) {
+            (None, Some(_)) if defects.compaction_change == Some("refuse_add") => {
+                return Ok(invalid("plan.compaction_item"));
+            }
+            (Some(_), None) if defects.compaction_change != Some("accept_remove") => {
+                return Ok(invalid(
+                    if defects.compaction_change == Some("wrong_remove_field") {
+                        "plan"
+                    } else {
+                        "plan.compaction_item"
+                    },
+                ));
+            }
+            (Some(old), Some(new)) if old != new => {
+                if defects.compaction_change == Some("wrong_switch_field") {
+                    return Ok(invalid("plan"));
+                }
+                if defects.compaction_change == Some("refuse_switch") {
+                    return Ok(invalid("plan.compaction_item"));
+                }
+            }
+            _ => {}
+        }
         let change = &sess.change;
         let digest = plan_digest(&request.plan);
         let earlier = change
@@ -395,6 +429,7 @@ impl Module {
             session,
             json!({ "kind": "refresh", "generation": request.generation,
                     "selection": selection,
+                    "compaction_item": next_item,
                     "policy": request.policy, "digest": digest, "tools": names,
                     "senders": request.plan.get("senders").cloned().unwrap_or_else(|| json!([])),
                     "defer_senders": defects.refreshed_senders_wait_for_next_run,

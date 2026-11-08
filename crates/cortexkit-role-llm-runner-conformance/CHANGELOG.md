@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.38
+
+- Add compaction-item plan-refresh cases for mandatory addition, removal refused
+  with `invalid_params` at `plan.compaction_item` without changing the applied
+  plan, and optional provider/preset/params switches with the same refusal field.
+  Deliberately incorrect fakes are rejected by each case name.
+- These management-route checks do not observe provider Setup or applied-view
+  preservation across an accepted switch; those require the compaction protocol.
+  Keep the runner contract pin at `=0.8.31` without adding provider hooks.
+
 ## 0.17.37
 
 - Correct `host_start_invalid_params_leaves_nothing` to require the contract's
