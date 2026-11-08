@@ -16,6 +16,14 @@ fn delivered_rides_forms_are_optional_and_unknown_values_are_skipped() {
         ),
         (Some(json!(["future"])), vec![RideForm::ToolResult]),
         (Some(json!([])), vec![RideForm::ToolResult]),
+        (
+            Some(json!(["turn_system_cleared"])),
+            vec![RideForm::TurnSystemCleared],
+        ),
+        (
+            Some(json!(["future", "turn_system_cleared", "tool_result"])),
+            vec![RideForm::TurnSystemCleared, RideForm::ToolResult],
+        ),
     ] {
         let mut wire = json!({"sender":"example-notifier", "text":"note", "text_bytes":4});
         if let Some(forms) = forms {
@@ -26,6 +34,10 @@ fn delivered_rides_forms_are_optional_and_unknown_values_are_skipped() {
         assert_eq!(delivered.send_id, None);
         assert_eq!(delivered.tokens, None);
     }
+    assert_eq!(
+        serde_json::to_value(RideForm::TurnSystemCleared).unwrap(),
+        json!("turn_system_cleared")
+    );
     let legacy = serde_json::to_value(Delivered::new("example-notifier", "note")).unwrap();
     assert!(legacy.get("forms").is_none());
     assert!(legacy.get("send_id").is_none());

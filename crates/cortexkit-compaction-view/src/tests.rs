@@ -11,7 +11,10 @@ use cortexkit_role_compaction::view::{
 };
 use serde_json::json;
 
-use crate::render::{apply, apply_edits, check_carried, first_change, plan, FirstChange, Source};
+use crate::render::{
+    apply, apply_edits, check_carried, cleared_ride, first_change, plan, FirstChange, RideRender,
+    Source,
+};
 use crate::rules::{check, invalid_signed_parts};
 
 fn entry(
@@ -1014,6 +1017,25 @@ fn first_change_names_the_first_item_a_newer_plan_renders_differently() {
 }
 
 #[test]
+fn a_cleared_ride_renders_cleared_only_on_a_route_that_clears() {
+    use cortexkit_role_compaction::part::RideForm;
+    assert_eq!(
+        cleared_ride(RideForm::TurnSystemCleared, true),
+        RideRender::Cleared
+    );
+    // Never a persistent system message on a route that can't clear.
+    assert_eq!(
+        cleared_ride(RideForm::TurnSystemCleared, false),
+        RideRender::Omit
+    );
+    for form in [RideForm::ToolResult, RideForm::TurnSystem] {
+        for route_clears in [true, false] {
+            assert_eq!(cleared_ride(form, route_clears), RideRender::Form(form));
+        }
+    }
+}
+
+#[test]
 fn first_change_reports_where_a_shorter_plan_ends() {
     let entries = transcript();
     let edits = head("history", "recent");
@@ -1781,6 +1803,23 @@ mod vector_file {
                 "seal_view",
                 json!({"version": 1, "edits": []}),
             ),
+            // cleared_ride: a cleared ride renders cleared only on a route
+            // that clears, and is never a persistent system message.
+            (
+                "a cleared ride renders cleared on a route that clears",
+                "cleared_ride",
+                json!({"form": "turn_system_cleared", "route_clears": true}),
+            ),
+            (
+                "a cleared ride is omitted on a route that can't clear",
+                "cleared_ride",
+                json!({"form": "turn_system_cleared", "route_clears": false}),
+            ),
+            (
+                "a turn_system ride keeps its form on any route",
+                "cleared_ride",
+                json!({"form": "turn_system", "route_clears": false}),
+            ),
         ]
     }
 
@@ -1953,6 +1992,10 @@ mod vector_file {
                     86,
                     "6aef800fa9b8366d8531b6e76bc2fdc008aa5f4c9682133e221d7dfe7b6f7f36",
                 ),
+                (
+                    89,
+                    "90c3a6bfc3bd0877b95c11c76809b0712c1575776369a4fd96c23c4a2376994f",
+                ),
             ],
         ),
     ];
@@ -1968,6 +2011,7 @@ mod vector_file {
         "edits_for_transcript",
         "assign_tags",
         "clean_reply",
+        "cleared_ride",
     ];
 
     /// The rendering outputs in case order, and the checksum of the first

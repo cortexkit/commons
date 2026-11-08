@@ -67,6 +67,10 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
         "{before, after}: two render plans of the same transcript; where `after` first differs from `before`",
     ),
     (
+        "cleared_ride",
+        "{form, route_clears}: how a ride delivered in `form` renders on the session's current route",
+    ),
+    (
         "check_rules",
         "{entries, edits, rules}: whether every signed part the view keeps stays valid",
     ),
@@ -166,6 +170,10 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
         "first_change" => {
             let input: Plans = parse(input)?;
             ok(render::first_change(&input.before, &input.after))
+        }
+        "cleared_ride" => {
+            let input: RideRoute = parse(input)?;
+            ok(render::cleared_ride(input.form, input.route_clears))
         }
         "check_rules" => {
             let input: RulesInput = parse(input)?;
@@ -287,6 +295,12 @@ struct RulesInput {
 #[derive(Deserialize)]
 struct Model {
     model: String,
+}
+
+#[derive(Deserialize)]
+struct RideRoute {
+    form: cortexkit_role_compaction::part::RideForm,
+    route_clears: bool,
 }
 
 #[derive(Deserialize)]
