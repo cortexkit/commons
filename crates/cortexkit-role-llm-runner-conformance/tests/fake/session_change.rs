@@ -281,6 +281,9 @@ impl Module {
         request: RefreshRequest,
         system_note: Option<String>,
     ) -> Result<Reply, Killed> {
+        if let Err(field) = super::check_sender_modules(&request.plan) {
+            return Ok(invalid(&field));
+        }
         let selection = match self.selection(&request.plan) {
             Ok(model) => model,
             Err(reply) => return Ok(reply),
@@ -295,7 +298,7 @@ impl Module {
                     Err(field) => return Ok(invalid(field)),
                 };
             if let Err(field) = cortexkit_role_llm_runner::scope_admission::check_plan_senders(
-                sess.frozen_opener.as_deref(),
+                sess.frozen_opener.as_deref().map(super::sender_module),
                 &senders,
             ) {
                 if self.world.defects.frozen_plan_senders_accepted == Some("refresh_write") {

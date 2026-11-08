@@ -5,6 +5,7 @@ mod account_route;
 mod adopt_open;
 mod cache_policy;
 mod fake;
+mod fixture_admission;
 
 const HEAD_SELECTION_CASES: &[&str] = &[
     "head_selection_absent_preserves_choice",

@@ -919,11 +919,13 @@ where
         )
         .await?;
     let mut members = Map::new();
-    // Plan sender names match attested principals. Naming the stranger here
-    // admits a second non-owner without requiring another adapter fixture.
+    // Derive the stranger's bare module id from its attested principal to admit
+    // a second non-owner without requiring another adapter fixture.
+    let b_module =
+        crate::send_helpers::stamp_module("retract_own_send_shared_send_id_isolated", &b)?;
     members.insert(
         "senders".into(),
-        json!([PlanSender::new(&a.module), PlanSender::new(&b.principal)]),
+        json!([PlanSender::new(&a.module), PlanSender::new(b_module)]),
     );
     let fields = case
         .subject

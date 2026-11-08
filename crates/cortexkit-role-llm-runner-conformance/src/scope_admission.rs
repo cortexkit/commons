@@ -124,7 +124,7 @@ where
         .session_route(case.handle.inner(), &session.name, &owner)
         .await
         .map_err(|e| e.to_string())?;
-    let members = json!({"senders":[PlanSender::new(&opener.principal).with_idle_start()]})
+    let members = json!({"senders":[PlanSender::new(crate::send_helpers::stamp_module(name, &opener)?).with_idle_start()]})
         .as_object()
         .unwrap()
         .clone();
@@ -158,7 +158,7 @@ where
     let other = if opener.principal == owner.principal {
         "other-sender"
     } else {
-        &owner.principal
+        crate::send_helpers::stamp_module(name, &owner)?
     };
     plan.insert(
         "senders".into(),

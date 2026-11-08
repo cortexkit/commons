@@ -10,7 +10,7 @@ pub(super) fn selected(
 ) -> Option<String> {
     let enabled = senders
         .iter()
-        .any(|s| s.module == caller && s.attribution.is_some());
+        .any(|s| s.module == super::sender_module(caller) && s.attribution.is_some());
     if enabled && (!template || defects.attribution == Some("template_header"))
         || !enabled && defects.attribution == Some("other_sender_header")
     {

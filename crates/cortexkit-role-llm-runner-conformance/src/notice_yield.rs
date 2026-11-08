@@ -125,7 +125,8 @@ where
                 "adapter supplies no independent admission-state snapshot".into(),
             ));
         };
-        let owner = case.subject.owner_stamp().principal;
+        let owner_stamp = case.subject.owner_stamp();
+        let owner = crate::send_helpers::stamp_module(name, &owner_stamp)?;
         let sender_case = name == "notice_yield_sender_and_delivery_refused";
         let plan_case = name == "notice_yield_non_owner_plan_refused"
             || (name == "notice_yield_undeclared_members_refused" && index < 2);
@@ -212,11 +213,12 @@ where
             ));
         }
     }
-    let members =
-        json!({"senders":[{"module":case.subject.owner_stamp().principal,"yields":true}]})
-            .as_object()
-            .unwrap()
-            .clone();
+    let owner_stamp = case.subject.owner_stamp();
+    let owner = crate::send_helpers::stamp_module(name, &owner_stamp)?;
+    let members = json!({"senders":[{"module":owner,"yields":true}]})
+        .as_object()
+        .unwrap()
+        .clone();
     let Some(mut fields) = case
         .subject
         .send_fields_with_plan(&session.name, true, &members)

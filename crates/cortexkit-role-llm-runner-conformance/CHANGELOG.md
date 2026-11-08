@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.33
+
+- Use bare module ids, not route-stamp principals, in plan sender fixtures;
+  reject malformed fixture principals with a case-named error. The faithful
+  fake now refuses reserved-principal spellings in plan sender module ids.
+- Grant `idle_start` to the person sender in `call_yield_*` fixtures so legacy
+  `steer` and `queue` delivery requests reach the behavior under test. The fake
+  enforces the contract's delivery admission rules before accepting sends.
+- Keep the exact runner pin `=0.8.28`; runners need no change.
+
 ## 0.17.32
 
 - Accept missing tool-output media references only when that output is unchanged

@@ -134,7 +134,7 @@ pub fn handle(
                 || sess
                     .senders
                     .iter()
-                    .any(|s| s.module == stamp.principal.as_str());
+                    .any(|s| s.module == super::sender_module(&stamp.principal));
             if !admitted
                 || (fault(module, session, "attachments_plan_sender")
                     && stamp.principal.as_str() != sess.owner)

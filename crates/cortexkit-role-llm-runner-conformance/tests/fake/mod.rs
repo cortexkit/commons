@@ -1176,6 +1176,25 @@ fn invalid(field: &str) -> Reply {
     refuse(errors::INVALID_PARAMS, Some(json!({ "field": field })))
 }
 
+// Scope ownership uses principals; plan sender grants name bare module ids.
+fn sender_module(principal: &str) -> &str {
+    principal.strip_prefix("reserved:").unwrap_or(principal)
+}
+
+fn check_sender_modules(plan: &Map<String, Value>) -> Result<(), String> {
+    if let Some(senders) = plan.get("senders").and_then(Value::as_array) {
+        for (index, sender) in senders.iter().enumerate() {
+            if sender["module"]
+                .as_str()
+                .is_some_and(|module| module.starts_with("reserved:"))
+            {
+                return Err(format!("plan.senders[{index}].module"));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn respond<T: serde::Serialize>(value: T) -> Reply {
     Reply::Response(serde_json::to_value(value).expect("fake replies serialize"))
 }
@@ -3207,7 +3226,7 @@ impl Module {
         let sender = sess
             .senders
             .iter()
-            .find(|sender| sender.module == stamp.principal);
+            .find(|sender| sender.module == sender_module(&stamp.principal));
         let sender_allowed = self.world.serves(groups::RUN_CANCEL_BY_INTERRUPT)
             && ((sender.is_some_and(|sender| sender.interrupt)
                 || (sender.is_some() && self.world.defects.cancel_sender_without_interrupt))
@@ -3686,6 +3705,11 @@ impl Module {
             Err(_) if listed => return Ok(invalid(DELIVERY_FIELD)),
             Err(_) => return Ok(invalid("prompt")),
         };
+        if let Some(plan) = &request.plan {
+            if let Err(field) = check_sender_modules(plan) {
+                return Ok(invalid(&field));
+            }
+        }
         if request.account_route.is_some() && !self.world.serves(groups::ACCOUNT_ROUTE) {
             return Ok(invalid("account_route"));
         }
@@ -3803,7 +3827,7 @@ impl Module {
                     Err(field) => return Ok(invalid(field)),
                 };
                 if let Err(field) = cortexkit_role_llm_runner::scope_admission::check_plan_senders(
-                    frozen_opener.as_deref(),
+                    frozen_opener.as_deref().map(sender_module),
                     &senders,
                 ) {
                     if self.world.defects.frozen_plan_senders_accepted == Some("send_write") {
@@ -4053,7 +4077,7 @@ impl Module {
                 let named = sess
                     .senders
                     .iter()
-                    .any(|sender| sender.module == stamp.principal);
+                    .any(|sender| sender.module == sender_module(&stamp.principal));
                 let admitted = if interrupt && named && defects.order_interrupt_grant_ignored {
                     Ok(())
                 } else if interrupt && named && defects.order_interrupt_owner_only {
@@ -4062,8 +4086,8 @@ impl Module {
                     Err((errors::SCOPE_OWNER_MISMATCH, None))
                 } else {
                     order::admit_delivery(
-                        &stamp.principal,
-                        Some(&sess.owner),
+                        sender_module(&stamp.principal),
+                        Some(sender_module(&sess.owner)),
                         &sess.senders,
                         request.delivery(),
                     )
@@ -4359,9 +4383,12 @@ impl Module {
             };
         let caller = stamp.principal.as_str();
         if !self.world.defects.order_admits_any_sender {
-            if let Err((code, field)) =
-                order::admit(caller, Some(&sess.owner), &sess.senders, &wanted.modes)
-            {
+            if let Err((code, field)) = order::admit(
+                sender_module(caller),
+                Some(sender_module(&sess.owner)),
+                &sess.senders,
+                &wanted.modes,
+            ) {
                 return Ok(refuse(code, field.map(|field| json!({ "field": field }))));
             }
         }
@@ -4382,7 +4409,10 @@ impl Module {
         let predecessor = if self.world.defects.succession == Some("same_fresh") {
             None
         } else {
-            cortexkit_role_llm_runner::sender_succession::predecessor(&sess.senders, caller)
+            cortexkit_role_llm_runner::sender_succession::predecessor(
+                &sess.senders,
+                sender_module(caller),
+            )
         };
         let predecessor_key = predecessor.map(|p| format!("{p} {}", request.send_id));
         let earlier = predecessor_key
@@ -4446,7 +4476,7 @@ impl Module {
                 let templates = sess
                     .senders
                     .iter()
-                    .find(|sender| sender.module == caller)
+                    .find(|sender| sender.module == sender_module(caller))
                     .map(|sender| sender.templates.clone())
                     .unwrap_or_default();
                 let numbers = part_numbers(&sess);
@@ -4984,7 +5014,11 @@ impl Module {
                     supported,
                 ));
             }
-        } else if let Some(sender) = sess.senders.iter().find(|s| s.module == caller) {
+        } else if let Some(sender) = sess
+            .senders
+            .iter()
+            .find(|s| s.module == sender_module(caller))
+        {
             head = head.with_sender(cortexkit_role_llm_runner::read::HeadSender::new(
                 supported
                     .into_iter()
@@ -5341,7 +5375,7 @@ impl Module {
         } else {
             cortexkit_role_llm_runner::sender_succession::predecessor(
                 &sess.senders,
-                &stamp.principal,
+                sender_module(&stamp.principal),
             )
             .map(|p| format!("{p} {}", request.send_id))
         };
@@ -7089,7 +7123,7 @@ impl LlmRunnerSubject for FakeSubject {
             scope_epoch: 1,
         });
         let mut opener = owner.clone();
-        opener.principal = "flow-carrier".into();
+        opener.principal = "reserved:flow-carrier".into();
         Some((opener, owner))
     }
 

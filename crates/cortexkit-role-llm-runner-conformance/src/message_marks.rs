@@ -178,7 +178,10 @@ where
         if case.declared.contains(&Capability::DeliveryOrder) {
             let members = serde_json::Map::from_iter([(
                 "senders".into(),
-                json!([PlanSender::new(&carrier.principal).with_idle_start()]),
+                json!([
+                    PlanSender::new(crate::send_helpers::stamp_module(name, carrier)?)
+                        .with_idle_start()
+                ]),
             )]);
             params.as_object_mut().unwrap().extend(
                 case.subject

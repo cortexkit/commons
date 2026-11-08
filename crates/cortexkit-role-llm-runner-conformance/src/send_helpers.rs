@@ -6,9 +6,20 @@ use crate::{
     route::RunnerRoute,
     subject::LlmRunnerSubject,
 };
+use cortexkit_role_harness::RouteStamp;
 use cortexkit_role_llm_runner::{describe::RoleDescribe, ops, send::SendReply};
 use serde_json::{json, Map, Value};
 type Check = Result<(), String>;
+
+/// Plans name bare modules; route stamps attest the corresponding principals.
+pub(crate) fn stamp_module<'a>(case: &str, stamp: &'a RouteStamp) -> Result<&'a str, String> {
+    stamp.principal.strip_prefix("reserved:").ok_or_else(|| {
+        format!(
+            "{case}: fixture route principal {:?} lacks the reserved: prefix",
+            stamp.principal
+        )
+    })
+}
 
 /// Applicability follows the plan the kit sends, not numbers reported by the runner.
 /// Without a compaction item there is no compaction A3 numbering to test.
@@ -116,4 +127,38 @@ where
     )
     .await?;
     Ok(end.run_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stamp(principal: &str) -> RouteStamp {
+        RouteStamp {
+            principal: principal.into(),
+            scope: None,
+        }
+    }
+
+    #[test]
+    fn stamp_module_strips_exactly_one_reserved_prefix() {
+        assert_eq!(
+            stamp_module("sender-case", &stamp("reserved:owner")),
+            Ok("owner")
+        );
+        assert_eq!(
+            stamp_module("sender-case", &stamp("reserved:reserved:owner")),
+            Ok("reserved:owner")
+        );
+    }
+
+    #[test]
+    fn stamp_module_missing_reserved_prefix_is_a_case_named_fixture_error() {
+        for principal in ["owner", "other:owner", "prefix:reserved:owner"] {
+            let error = stamp_module("sender-case", &stamp(principal)).unwrap_err();
+            assert!(error.contains("sender-case"), "{error}");
+            assert!(error.contains("fixture"), "{error}");
+            assert!(error.contains(principal), "{error}");
+        }
+    }
 }

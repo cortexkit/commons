@@ -1,7 +1,7 @@
 //! Person-steer cases using a real scripted provider and independent store reads.
 
 use crate::{
-    cases::{Case, Ending},
+    cases::{Case, Ending, Session},
     drive::{call, decode, expect_ok, head, wait_run_end, MAX_POLLS},
     route::RunnerRoute,
     subject::{LlmRunnerSubject, ScriptedPart, ScriptedTurn},
@@ -102,6 +102,26 @@ pub(crate) fn check_stored_before_answer(observation: &CallYieldObservation) -> 
     Ok(())
 }
 
+async fn person_session<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    name: &str,
+    turns: Vec<ScriptedTurn>,
+) -> Result<(Session<S::Route>, S::Route), String>
+where
+    S::Route: RunnerRoute,
+{
+    // Legacy steer and queue include idle_start, even during a running call.
+    crate::delivery_order::sender_session_with_person(
+        case,
+        name,
+        turns,
+        true,
+        true,
+        name != "call_yield_unmarked_sender_does_not_yield",
+    )
+    .await
+}
+
 pub(crate) async fn run<S: LlmRunnerSubject>(
     case: &Case<'_, S>,
     name: &str,
@@ -131,16 +151,13 @@ where
     for mark in marks {
         let mut tool = case.mint.call(name);
         tool.hold = true;
-        let (session, sender) = crate::delivery_order::sender_session_with_person(
+        let (session, sender) = person_session(
             case,
             name,
             vec![
                 ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool.clone())]),
                 ScriptedTurn::new(vec![case.mint.text("after-yield").0]),
             ],
-            false,
-            true,
-            name != "call_yield_unmarked_sender_does_not_yield",
         )
         .await?;
         let blocked = name == "call_yield_steer_stored_before_waiting";
@@ -328,6 +345,55 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn call_yield_person_fixture_admits_legacy_steer_and_queue() {
+        use crate::{
+            drive::Mint,
+            fork_fake::{Defects, FakeSubject},
+            subject::Capability,
+            CASES,
+        };
+        use cortexkit_role_harness::CrashDriver;
+
+        let mut fake = FakeSubject::new(Defects::default());
+        fake.capabilities
+            .extend([Capability::Plans, Capability::DeliveryOrder]);
+        let declared = fake.capabilities();
+        let mint = Mint::default();
+        let root = tempfile::tempdir().unwrap();
+        let mut driver = CrashDriver::new(&fake);
+        let handle = driver.spawn(root.path()).await.unwrap();
+        let case = Case {
+            subject: &fake,
+            handle: &handle,
+            declared: &declared,
+            mint: &mint,
+        };
+        for spec in CASES
+            .iter()
+            .filter(|spec| spec.name.starts_with("call_yield_"))
+        {
+            for delivery in ["steer", "queue"] {
+                let (_session, sender) = person_session(
+                    &case,
+                    spec.name,
+                    vec![ScriptedTurn::new(vec![mint.text("answer").0])],
+                )
+                .await
+                .unwrap();
+                let reply = call(
+                    &sender,
+                    ops::SESSION_SEND,
+                    json!({"prompt":"person input", "send_id":mint.next("person-send"), "delivery":delivery}),
+                )
+                .await
+                .unwrap();
+                expect_ok(spec.name, reply).unwrap();
+            }
+        }
+    }
+
     #[derive(Clone, Copy, PartialEq)]
     enum Fault {
         None,

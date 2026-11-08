@@ -1,6 +1,8 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.32** pins runner **0.8.28**. The message-mark retry case checks
+Version **0.17.33** pins runner **0.8.28**. Plan sender fixtures use bare module
+ids, and call-yield person senders grant `idle_start`; runners need no change.
+The message-mark retry case checks
 refusal of changed marks and replay of identical marks. The optional
 `admission_reports` describe token has no capability prerequisites.
 
