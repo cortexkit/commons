@@ -10,10 +10,10 @@ pub mod vectors;
 
 pub use beta::{merge_beta_headers, remove_beta_token, InvalidBetaHeader};
 pub use limits::{
-    anthropic_credit_balance_too_low, classify_account_limit_exhausted,
-    classify_account_limit_exhausted_with_retry_after, credit_balance_exhausted,
-    AccountLimitExhausted, ResetSource, UNIFIED_REPRESENTATIVE_CLAIM, UNIFIED_RESET,
-    UNIFIED_STATUS,
+    anthropic_credit_balance_exhausted_exact, anthropic_credit_balance_too_low,
+    classify_account_limit_exhausted, classify_account_limit_exhausted_with_retry_after,
+    credit_balance_exhausted, AccountLimitExhausted, ResetSource, ANTHROPIC_CREDIT_BALANCE_MESSAGE,
+    UNIFIED_REPRESENTATIVE_CLAIM, UNIFIED_RESET, UNIFIED_STATUS,
 };
 
 use std::collections::BTreeMap;

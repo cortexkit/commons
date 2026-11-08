@@ -137,14 +137,32 @@ fn retry_after(headers: &BTreeMap<String, String>, now: SystemTime) -> Option<f6
     })
 }
 
-/// Anthropic's out-of-credit message for an API key whose prepaid balance is used up.
-/// The caller pairs this with `invalid_request_error` and the Anthropic family.
+/// The exact message seen verbatim in six real Anthropic refusals between
+/// 2026-10-16 and 2026-10-27, all HTTP 400 `invalid_request_error`, with only
+/// the response's request id varying.
+pub const ANTHROPIC_CREDIT_BALANCE_MESSAGE: &str = "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.";
+
+/// Matches the observed Anthropic credit-balance refusal for a blocking account
+/// observation (one used to block routing to the account). The HTTP status,
+/// structured error type, and entire message must match exactly; the message is
+/// case-sensitive and is not trimmed.
+pub fn anthropic_credit_balance_exhausted_exact(
+    status: u16,
+    error_type: &str,
+    message: &str,
+) -> bool {
+    status == 400
+        && error_type == "invalid_request_error"
+        && message == ANTHROPIC_CREDIT_BALANCE_MESSAGE
+}
+
+/// A loose, case-insensitive substring hint for logging or display.
+/// It must not decide a blocking account observation (one used to block routing
+/// to the account); use
+/// [`anthropic_credit_balance_exhausted_exact`] for that decision.
 ///
-/// Example HTTP 400 body (illustrative, not a captured provider response):
+/// Example HTTP 400 body whose message matches the observed refusal text:
 /// `{"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."}}`.
-/// The message phrase distinguishes billing exhaustion from other
-/// `invalid_request_error` cases, such as malformed requests. This is a billing
-/// classification, not an authentication failure.
 pub fn anthropic_credit_balance_too_low(message: &str) -> bool {
     message
         .to_ascii_lowercase()

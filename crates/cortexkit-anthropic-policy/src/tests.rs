@@ -247,6 +247,62 @@ fn retry_hints_dates_duplicates_and_saturation_keep_transport_semantics() {
 }
 
 #[test]
+fn anthropic_credit_balance_exact_matches_observed_refusal() {
+    assert!(anthropic_credit_balance_exhausted_exact(
+        400,
+        "invalid_request_error",
+        "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.",
+    ));
+}
+
+#[test]
+fn anthropic_credit_balance_exact_matches_fixture_message() {
+    let body: serde_json::Value = serde_json::from_str(CREDIT_BALANCE_BODY).unwrap();
+    let error_type = body["error"]["type"].as_str().unwrap();
+    let message = body["error"]["message"].as_str().unwrap();
+    assert!(anthropic_credit_balance_exhausted_exact(
+        400, error_type, message,
+    ));
+}
+
+#[test]
+fn anthropic_credit_balance_exact_rejects_unmatched_messages_and_metadata() {
+    for message in [
+        format!("prefix {ANTHROPIC_CREDIT_BALANCE_MESSAGE}"),
+        format!("{ANTHROPIC_CREDIT_BALANCE_MESSAGE} suffix"),
+        ANTHROPIC_CREDIT_BALANCE_MESSAGE.to_ascii_uppercase(),
+        format!("{ANTHROPIC_CREDIT_BALANCE_MESSAGE} "),
+    ] {
+        assert!(
+            !anthropic_credit_balance_exhausted_exact(400, "invalid_request_error", &message),
+            "unexpected exact match for {message:?}",
+        );
+    }
+    for status in [429, 401] {
+        assert!(
+            !anthropic_credit_balance_exhausted_exact(
+                status,
+                "invalid_request_error",
+                ANTHROPIC_CREDIT_BALANCE_MESSAGE,
+            ),
+            "unexpected exact match for HTTP {status}",
+        );
+    }
+    assert!(!anthropic_credit_balance_exhausted_exact(
+        400,
+        "rate_limit_error",
+        ANTHROPIC_CREDIT_BALANCE_MESSAGE,
+    ));
+}
+
+#[test]
+fn anthropic_credit_balance_substring_hint_accepts_prefixed_message() {
+    assert!(anthropic_credit_balance_too_low(&format!(
+        "prefix {ANTHROPIC_CREDIT_BALANCE_MESSAGE}",
+    )));
+}
+
+#[test]
 fn assumed_credit_balance_error_is_billing_not_generic_invalid_request() {
     assert!(credit_balance_exhausted(CREDIT_BALANCE_BODY));
     assert!(credit_balance_exhausted(&CREDIT_BALANCE_BODY.replace(

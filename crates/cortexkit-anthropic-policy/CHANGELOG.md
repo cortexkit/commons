@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.4
+
+- Add `anthropic_credit_balance_exhausted_exact` and the observed
+  `ANTHROPIC_CREDIT_BALANCE_MESSAGE` for blocking account observations that stop
+  routing to the account, requiring HTTP 400, `invalid_request_error`, and the
+  entire case-sensitive message.
+  Keep `anthropic_credit_balance_too_low` unchanged as a loose substring hint
+  for logging or display, and clarify the fixture message's provenance.
+
 ## 0.1.3
 
 - Correct the Claude Code 2.1.302 wire vectors' beta lists to match an

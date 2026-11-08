@@ -22,6 +22,7 @@ async runtime.
 - `credit_balance_exhausted` and `anthropic_credit_balance_too_low` classify the
   Anthropic out-of-credit message without treating unrelated invalid requests as
   billing exhaustion.
+  Only `anthropic_credit_balance_exhausted_exact` may decide a blocking account observation (one used to block routing to the account); `anthropic_credit_balance_too_low` is a loose hint for logging or display.
 - `collect_unified_quota_headers` keeps only the
   `anthropic-ratelimit-unified-*` header family, including future extensions.
 
