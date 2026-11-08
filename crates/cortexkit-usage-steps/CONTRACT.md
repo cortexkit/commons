@@ -159,7 +159,7 @@ Required members:
 | Member | Type | Meaning |
 |---|---|---|
 | `cursor` | string (cursor) | This row's feed position. |
-| `harness` | string | The producer: `claude-code`, `codex`, `gemini`, `kimi`, `omp`, `opencode`, `pi`, or a runner's module id. |
+| `harness` | string | The producer: a feed host name from this crate's `FEED_HOSTS`, or a runner's module id. |
 | `source` | string | `file` for a step read from a harness store or a runner's durable log; `runner` for a step known so far only from a runner's bus event. |
 | `step_ref` | string | The producer's own id for the step. For a step a runner announced, see [Runner steps](#runner-steps). |
 | `session` | string | The producer's session. |
@@ -264,10 +264,15 @@ event's §14.3 members:
 
 - **The event carries `harness_step_ref`.** The runner declared
   `step_events.history_key: "harness"`, and the host's own store is the
-  durable source. `harness` is the event's `harness` (the hosting program,
-  such as `opencode` or `claude-code`) and `step_ref` is the event's
-  `harness_step_ref` (the host's own record id). The provider's later read of
-  the host store replaces the live row.
+  durable source. The row's `harness` is the feed host name that this crate's
+  `feed_host_for_harness` table maps the event's `harness` to, and `step_ref`
+  is the event's `harness_step_ref` (the host's own record id). The closed
+  table maps every `FEED_HOSTS` name to itself and `opencode2` to `opencode`,
+  because both OpenCode stores record as `opencode`. An unmapped host yields
+  no live row; its durable row stands alone. Adding a host is a patch to
+  this table. The event's `harness` stays the runner binding's harness,
+  since the runner computes `session_ref` from it. The provider's later
+  read of the host store replaces the live row.
 - **The event carries no `harness_step_ref`.** `harness` is the event's
   `runner` (the runner's module id) and `step_ref` is the event's
   `attempt_id`: the id the runner gave that provider attempt, unique and never
@@ -285,6 +290,14 @@ event's §14.3 members:
   live-only row with `source: "runner"` and is never joined to a host row.
 
 `live_row_identity` in this crate computes the pair from those members.
+
+### Pi steps
+
+A Pi step's host record id is the key from this crate's `pi_step_ref`, which
+also merges fork copies of one call across session files. Runners publishing
+Pi steps under `history_key: "harness"` send that key as `harness_step_ref`,
+and providers record Pi rows under the same key. A bare journal entry id is
+only unique within one session file and is not a row identity.
 
 ### Readers and new members
 
@@ -345,3 +358,5 @@ contract's version: changing one is a new contract version.
 
 `test-vectors/usage-steps-v1/` holds the normative bytes, indexed by
 `cases.json` and pinned by `SHA256SUMS`; its README describes each case.
+`test-vectors/pi-step-ref-v1/` pins the shared Pi key derivation, including
+timestamp parsing and the distinction between absent and zero usage counts.

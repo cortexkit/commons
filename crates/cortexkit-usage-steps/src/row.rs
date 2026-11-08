@@ -168,6 +168,30 @@ impl std::fmt::Display for BadCounts {
 
 impl std::error::Error for BadCounts {}
 
+/// Host names used by durable feed rows. Runner module ids are a separate vocabulary.
+pub const FEED_HOSTS: &[&str] = &[
+    "claude-code",
+    "codex",
+    "gemini",
+    "kimi",
+    "omp",
+    "opencode",
+    "pi",
+];
+
+/// Map a runner binding's harness to the host name used by durable feed rows.
+///
+/// This is a closed table: each [`FEED_HOSTS`] name maps to itself, and
+/// `opencode2` maps to `opencode` because both OpenCode stores use that feed
+/// host name. Adding a host is a patch to this table; unknown harnesses have
+/// no live row, so their durable rows stand alone.
+pub fn feed_host_for_harness(harness: &str) -> Option<&'static str> {
+    match harness {
+        "opencode2" => Some("opencode"),
+        _ => FEED_HOSTS.iter().copied().find(|host| *host == harness),
+    }
+}
+
 /// The identity `(harness, step_ref)` of the row the provider serves for a step
 /// a runner announced on the bus (`step.finished.v1`), from that event's
 /// members. Plain strings, so it needs nothing from the runner contract crate.
@@ -177,8 +201,10 @@ impl std::error::Error for BadCounts {}
 ///
 /// - With a `harness_step_ref` (the runner declares `history_key: "harness"`
 ///   and the host's own store is the durable source): `harness` is the
-///   event's `harness`, the hosting program, and `step_ref` is the host's
-///   record id.
+///   feed host name from [`feed_host_for_harness`] applied to the event's
+///   `harness`, and `step_ref` is the host's record id. An unmapped harness
+///   gets no live row; its durable row stands alone. Adding a host is a patch
+///   to that closed table, not a rename of the event's binding harness.
 /// - Without one: `harness` is the event's `runner`, the runner's module id,
 ///   and `step_ref` is the event's `attempt_id`, the id the runner gave that
 ///   provider attempt and wrote in its own durable step record. Each attempt
@@ -200,7 +226,8 @@ pub fn live_row_identity(
     attempt_id: Option<&str>,
 ) -> Option<(String, String)> {
     match (harness_step_ref, attempt_id) {
-        (Some(host_record), _) => Some((harness.to_owned(), host_record.to_owned())),
+        (Some(host_record), _) => feed_host_for_harness(harness)
+            .map(|feed_host| (feed_host.to_owned(), host_record.to_owned())),
         (None, Some(attempt_id)) => Some((runner.to_owned(), attempt_id.to_owned())),
         (None, None) => None,
     }

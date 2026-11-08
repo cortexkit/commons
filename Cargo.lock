@@ -963,8 +963,9 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-usage-steps"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
+ "chrono",
  "cortexkit-role-llm-runner 0.8.31",
  "serde",
  "serde_json",

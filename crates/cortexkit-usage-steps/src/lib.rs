@@ -19,13 +19,17 @@ mod cursor;
 mod latest;
 mod open_set;
 mod ops;
+mod pi;
 mod row;
 
 pub use cursor::Cursor;
 pub use latest::{Applied, LatestRows};
 pub use open_set::{RequestSize, StepSource, Verdict};
 pub use ops::{Notice, ReadReply, ReadRequest, Refusal, SubscribeRequest};
-pub use row::{live_row_identity, BadCounts, NotClosed, StepRow};
+pub use pi::{pi_step_ref, PiEntry};
+pub use row::{
+    feed_host_for_harness, live_row_identity, BadCounts, NotClosed, StepRow, FEED_HOSTS,
+};
 
 /// The version of this contract. Changing a member's meaning or type, removing
 /// a member, or changing any threshold below makes a new version.

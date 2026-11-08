@@ -1,0 +1,109 @@
+{
+  "keys": [
+    {
+      "name": "real-message",
+      "entry": {"id": "b3aa00c0", "timestamp": "2026-11-08T19:02:08.423Z", "is_assistant_message": true, "provider": "anthropic", "model": "claude-opus-5-5", "input": 2, "output": 80, "cache_read": 402010, "cache_write": 370},
+      "expected": "pi:message:b3aa00c0:1794164528423:anthropic:claude-opus-5-5:Some(2):Some(80):Some(402010):Some(370)"
+    },
+    {
+      "name": "operation-before-response",
+      "entry": {"id": " op:1 ", "is_operation": true, "is_assistant_message": true, "response_id": "response-1", "provider": "anthropic"},
+      "expected": "pi:operation: op:1 "
+    },
+    {
+      "name": "operation-missing-id-does-not-fall-through",
+      "entry": {"is_operation": true, "is_assistant_message": true, "response_id": "response-1", "provider": "anthropic", "model": "model"},
+      "expected": null
+    },
+    {
+      "name": "operation-blank-id-does-not-fall-through",
+      "entry": {"id": " \t ", "is_operation": true, "is_assistant_message": true, "response_id": "response-1", "provider": "anthropic", "model": "model"},
+      "expected": null
+    },
+    {
+      "name": "response-id-verbatim-without-model-or-entry-id",
+      "entry": {"is_assistant_message": true, "response_id": " response:1 ", "provider": "anthropic"},
+      "expected": "pi:response: response:1 "
+    },
+    {
+      "name": "blank-response-falls-through",
+      "entry": {"id": "message-1", "is_assistant_message": true, "response_id": " \t ", "provider": "anthropic", "model": "model"},
+      "expected": "pi:message:message-1:missing:anthropic:model:None:None:None:None"
+    },
+    {
+      "name": "non-assistant-ignores-response-id",
+      "entry": {"id": "message-1", "response_id": "response-1", "provider": "anthropic", "model": "model"},
+      "expected": "pi:message:message-1:missing:anthropic:model:None:None:None:None"
+    },
+    {
+      "name": "missing-timestamp-and-verbatim-components",
+      "entry": {"id": " id:1 ", "provider": "provider:1", "model": " model:1 "},
+      "expected": "pi:message: id:1 :missing:provider:1: model:1 :None:None:None:None"
+    },
+    {
+      "name": "unparseable-timestamp",
+      "entry": {"id": "message-1", "timestamp": "not-a-timestamp", "provider": "anthropic", "model": "model"},
+      "expected": "pi:message:message-1:missing:anthropic:model:None:None:None:None"
+    },
+    {
+      "name": "reasoning-subtracted",
+      "entry": {"id": "message-1", "provider": "anthropic", "model": "model", "output": 80, "reasoning": 30},
+      "expected": "pi:message:message-1:missing:anthropic:model:None:Some(50):None:None"
+    },
+    {
+      "name": "reasoning-equals-output",
+      "entry": {"id": "message-1", "provider": "anthropic", "model": "model", "output": 80, "reasoning": 80},
+      "expected": "pi:message:message-1:missing:anthropic:model:None:Some(0):None:None"
+    },
+    {
+      "name": "reasoning-exceeds-output",
+      "entry": {"id": "message-1", "provider": "anthropic", "model": "model", "output": 80, "reasoning": 81},
+      "expected": "pi:message:message-1:missing:anthropic:model:None:None:None:None"
+    },
+    {
+      "name": "reasoning-without-output",
+      "entry": {"id": "message-1", "provider": "anthropic", "model": "model", "reasoning": 10},
+      "expected": "pi:message:message-1:missing:anthropic:model:None:None:None:None"
+    },
+    {
+      "name": "absent-count-versus-zero",
+      "entry": {"id": "message-1", "provider": "anthropic", "model": "model", "output": 0, "cache_write": 0},
+      "expected": "pi:message:message-1:missing:anthropic:model:None:Some(0):None:Some(0)"
+    },
+    {
+      "name": "maximum-counts",
+      "entry": {"id": "message-1", "provider": "anthropic", "model": "model", "input": 18446744073709551615, "output": 18446744073709551615, "cache_read": 18446744073709551615, "cache_write": 18446744073709551615, "reasoning": 0},
+      "expected": "pi:message:message-1:missing:anthropic:model:Some(18446744073709551615):Some(18446744073709551615):Some(18446744073709551615):Some(18446744073709551615)"
+    },
+    {
+      "name": "missing-model",
+      "entry": {"id": "message-1", "provider": "anthropic"},
+      "expected": null
+    },
+    {
+      "name": "blank-model-is-present",
+      "entry": {"id": "message-1", "provider": "anthropic", "model": ""},
+      "expected": "pi:message:message-1:missing:anthropic::None:None:None:None"
+    },
+    {
+      "name": "blank-message-id",
+      "entry": {"id": " \t\n", "provider": "anthropic", "model": "model"},
+      "expected": null
+    },
+    {
+      "name": "missing-message-id",
+      "entry": {"provider": "anthropic", "model": "model"},
+      "expected": null
+    }
+  ],
+  "chrono_timestamps": [
+    {"name": "lowercase-t", "timestamp": "2026-11-08t19:02:08.423Z", "canonical_timestamp": "2026-11-08T19:02:08.423Z"},
+    {"name": "lowercase-z", "timestamp": "2026-11-08T19:02:08.423z", "canonical_timestamp": "2026-11-08T19:02:08.423Z"},
+    {"name": "space-separator", "timestamp": "2026-11-08 19:02:08.423Z", "canonical_timestamp": "2026-11-08T19:02:08.423Z"},
+    {"name": "four-fractional-digits-truncate", "timestamp": "2026-11-08T19:02:08.1239Z", "canonical_timestamp": "2026-11-08T19:02:08.123Z"},
+    {"name": "nine-fractional-digits-truncate", "timestamp": "2026-11-08T19:02:08.123999999Z", "canonical_timestamp": "2026-11-08T19:02:08.123Z"},
+    {"name": "numeric-offset", "timestamp": "2026-11-08T21:02:08.423+02:00", "canonical_timestamp": "2026-11-08T19:02:08.423Z"},
+    {"name": "missing-zone-is-refused", "timestamp": "2026-11-08T19:02:08.423", "canonical_timestamp": null},
+    {"name": "before-epoch", "timestamp": "1969-12-31T23:59:59.999Z", "canonical_timestamp": "1969-12-31T23:59:59.999Z"}
+  ]
+}

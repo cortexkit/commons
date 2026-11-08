@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 
 use cortexkit_role_llm_runner::step_events::StepFinished;
-use cortexkit_usage_steps::{live_row_identity, StepRow};
+use cortexkit_usage_steps::{feed_host_for_harness, live_row_identity, StepRow, FEED_HOSTS};
 
 /// An event with every member present, optional ones included.
 fn full_event() -> StepFinished {
@@ -25,7 +25,7 @@ fn full_event() -> StepFinished {
         "terminal_status": "completed",
         "harness_step_ref": "hstep_ex",
         "provider_request_id": "preq_ex",
-        "harness": "example-harness",
+        "harness": "codex",
         "session": "ses_ex",
         "work_class": "interactive",
         "provider": "example-provider",
@@ -90,8 +90,8 @@ const EVENT_MEMBERS: &[&str] = &[
 const SAME_NAME: &[&str] = &["context_limit", "model", "provider", "run_id", "session"];
 
 /// Members both shapes carry under the same name but not always with the same
-/// meaning. The row's `harness` is the event's `harness` only when the event
-/// carries a host record; otherwise it is the event's `runner`. See
+/// meaning. With a host record the row's `harness` is the feed host mapped
+/// from the event's `harness`; otherwise it is the event's `runner`. See
 /// `live_row_identity`.
 const SAME_NAME_NOT_ALWAYS_SAME_MEANING: &[&str] = &["harness"];
 
@@ -193,7 +193,72 @@ fn live_row_identity_uses_the_host_record_when_the_event_carries_one() {
     assert_eq!(event.harness_step_ref.as_deref(), Some("hstep_ex"));
     assert_eq!(
         identity_of(&event),
-        Some(("example-harness".to_owned(), "hstep_ex".to_owned()))
+        Some(("codex".to_owned(), "hstep_ex".to_owned()))
+    );
+}
+
+#[test]
+fn live_row_identity_maps_opencode2_to_the_feed_host() {
+    assert_eq!(
+        live_row_identity("example-runner", "opencode2", Some("msg_1"), None),
+        Some(("opencode".to_owned(), "msg_1".to_owned()))
+    );
+}
+
+#[test]
+fn feed_host_table_is_closed_and_preserves_each_feed_host() {
+    assert_eq!(
+        FEED_HOSTS,
+        &[
+            "claude-code",
+            "codex",
+            "gemini",
+            "kimi",
+            "omp",
+            "opencode",
+            "pi"
+        ]
+    );
+    for host in FEED_HOSTS {
+        assert_eq!(feed_host_for_harness(host), Some(*host));
+        assert_eq!(
+            live_row_identity("example-runner", host, Some("msg_1"), None),
+            Some(((*host).to_owned(), "msg_1".to_owned()))
+        );
+    }
+    assert_eq!(feed_host_for_harness("opencode2"), Some("opencode"));
+    for unknown in ["", "future-host", "Pi", " opencode", "opencode2 "] {
+        assert_eq!(feed_host_for_harness(unknown), None);
+    }
+}
+
+#[test]
+fn live_row_identity_drops_unmapped_hosts_even_with_an_attempt_id() {
+    assert_eq!(
+        live_row_identity(
+            "example-runner",
+            "future-host",
+            Some("msg_1"),
+            Some("att_1")
+        ),
+        None
+    );
+}
+
+#[test]
+fn live_row_identity_keeps_runner_keyed_attempts_for_unmapped_hosts() {
+    assert_eq!(
+        live_row_identity("example-runner", "future-host", None, Some("att_1")),
+        Some(("example-runner".to_owned(), "att_1".to_owned()))
+    );
+}
+
+#[test]
+fn live_row_identity_passes_the_pi_key_through_unchanged() {
+    let key = "pi:message:b3aa00c0:1794164528423:anthropic:claude-opus-5-5:Some(2):Some(80):Some(402010):Some(370)";
+    assert_eq!(
+        live_row_identity("example-runner", "pi", Some(key), None),
+        Some(("pi".to_owned(), key.to_owned()))
     );
 }
 
@@ -270,8 +335,8 @@ fn shared_member_types_match_at_compile_time() {
     ))
     .unwrap();
     // Identity inputs (see live_row_identity): with `harness_step_ref`, the
-    // row's `harness` is the event's `harness` and its `step_ref` is
-    // `harness_step_ref`; without it, `harness` is the event's `runner` and
+    // row's `harness` is mapped from the event's `harness` and its `step_ref`
+    // is `harness_step_ref`; without it, `harness` is the event's `runner` and
     // `step_ref` is `attempt_id`.
     same(&row.harness, &event.harness);
     same(&row.harness, &event.runner);

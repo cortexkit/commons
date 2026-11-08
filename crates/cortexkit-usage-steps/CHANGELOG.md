@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.5
+
+- Map live host-keyed rows through the closed `feed_host_for_harness` table
+  and expose its `FEED_HOSTS` vocabulary. In particular, `opencode2` maps to
+  `opencode` so the durable row replaces the live row; unmapped hosts have no
+  live row. Runner-keyed attempt identities are unchanged.
+- Add `PiEntry` and `pi_step_ref` so runners and providers share Pi record
+  identities across session files, including fork copies of one call. Pin
+  operation, response and message keys in `pi-step-ref-v1` vectors, with
+  Chrono timestamp parsing and checked reasoning subtraction.
+
 ## 0.2.4
 
 - Add optional `sent_to_last_content_ms`, `first_to_last_content_ms` and

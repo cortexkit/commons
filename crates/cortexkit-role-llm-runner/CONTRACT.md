@@ -7127,7 +7127,11 @@ to the session's whole length.
   consumers; consumers never derive it. A live hint carries no folder path or project-root
   member: paths name user directories and do not belong in a content-free hint.
 - [pinned] With `history_key: "harness"`, `harness_step_ref` is the host's own
-  record id (for example a request id or message id). Its absence means the
+  record id (for example a request id or message id). It must be unique across
+  all of that host's records, not just one session; for Pi it is
+  `cortexkit_usage_steps::pi_step_ref`'s key. The event's `harness` stays the
+  binding's harness, and the usage provider maps it to its feed host name.
+  Its absence means the
   attempt has no host record, such as a refusal before forwarding; an app
   shows it as unmatched. With `history_key: "step_ref"`, the member is
   omitted. `provider_request_id` is absent when the provider gave none.
