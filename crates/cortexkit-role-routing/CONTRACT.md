@@ -1317,6 +1317,17 @@ What a runner saw on an account, so the provider's headroom stays current.
   counts as refused for any use. For a sign-in method such as OAuth, the same
   refusal means the sign-in must be renewed: the runner pauses for sign-in and
   does not send `credential_refused`.
+- [pinned] Blocking outcomes are reported by the party holding the admission.
+  A runner that holds an admission (through `routed_accounts`, or by calling
+  `route.account_for` itself) sends `transient_backoff` and
+  `account_limit_exhausted` for it, and `credential_refused` as above. When the
+  provider's structured error gives no retry time, `retry_at_ms` for
+  `transient_backoff` is the final attempt's receipt time plus 5,000 ms. The
+  runner contract's `admission_reports` describe group (llm-runner 0.8.28)
+  tells a session owner which runners do this. For their runs the session
+  owner sends no observation of the runner's outcome and keeps no local account
+  block of its own; the `DecisionOwner` arm (§9.2) remains for what only the
+  decision owner observes.
 - [pinned] For listed methods the runner forwards the select pool and
   credential hint as §5.2 specifies, loads the public-id credential answered by
   `account_for`, and sends with it. For unlisted methods, or without the group,

@@ -2054,7 +2054,10 @@ run.
   the scope stamp's `owner`, never from a request field. The check
   compares principals, not routes: an owner is admitted on any route,
   scoped or unscoped, and at any scope epoch, because cleanup cancels
-  often arrive after the scope has ended or reopened. Except for the
+  often arrive after the scope has ended or reopened. The one exception is a
+  route whose scope stamp carries a `flow_id` or `run_id`: it is never the
+  owner (§9, "A flow- or run-stamped route is never the owner"), so a cleanup
+  cancel goes over a plain-scoped or unscoped route. Except for the
   `run_cancel_by_interrupt` grant below, any other caller is
   refused `scope_owner_mismatch`. A local process presenting no consumer
   identity (`direct`) is not an owner, and no operator principal is
@@ -3063,7 +3066,8 @@ A runner that declares `retract` serves `session.retract`.
   A consumer treats any other answer as not confirming a retraction.
 - [pinned] Without `retract_own_send`, the rule is unchanged:
   Owner-only, exactly as for `run.cancel` (§6.2): the session's
-  owner principals on any route and at any epoch, `scope_owner_mismatch`
+  owner principals on any route except a flow- or run-stamped one, and at any
+  epoch, `scope_owner_mismatch`
   for anyone else, and no protection on a session with no recorded
   attested owner.
 - [pinned] Opt-in `retract_own_send` requires `retract`; `check_describe`
