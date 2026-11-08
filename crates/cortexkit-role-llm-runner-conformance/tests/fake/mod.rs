@@ -198,6 +198,7 @@ pub struct Defects {
     pub head_selection: Option<&'static str>,
     pub compaction_preset_missing_accepted: bool,
     pub compaction_change_fixture: bool,
+    pub compaction_change_send_fields_fixture: bool,
     pub compaction_change: Option<&'static str>,
     pub marker_hides_reads: bool,
     pub missing_history_version: bool,
@@ -7248,7 +7249,8 @@ impl LlmRunnerSubject for FakeSubject {
         if first && !self.without_plans {
             fields.insert("plan".into(), json!({ "tools": [SCRIPTED_TOOL] }));
             fields.insert("model".into(), json!("fake-model"));
-            if self.defects.compaction_change_fixture && session.contains("compaction_") {
+            if self.defects.compaction_change_send_fields_fixture && session.contains("compaction_")
+            {
                 fields["plan"]["compaction_item"] =
                     json!({"provider":"fixture-compaction","preset":"identity","params":{}});
             }
@@ -7493,11 +7495,36 @@ impl LlmRunnerSubject for FakeSubject {
         variant: cortexkit_role_llm_runner_conformance::RefreshVariant,
     ) -> Option<cortexkit_role_llm_runner_conformance::RefreshPlan> {
         let mut plan = session_change::refresh_plan(variant)?;
-        if self.defects.compaction_change_fixture && session.contains("compaction_switch_") {
+        if self.defects.compaction_change_send_fields_fixture
+            && session.contains("compaction_switch_")
+        {
             plan.plan.insert("compaction_item".into(),
                 json!({"provider":"fixture-compaction","preset":"identity","params":{"revision":2}}));
         }
         Some(plan)
+    }
+
+    fn compaction_change_plan(&self, _session: &str) -> Option<Map<String, Value>> {
+        self.defects.compaction_change_fixture.then(|| {
+            serde_json::from_value(json!({
+                "tools": [SCRIPTED_TOOL],
+                "compaction_item": {"provider":"fixture-compaction","preset":"identity","params":{}}
+            }))
+            .unwrap()
+        })
+    }
+
+    fn compaction_switch_plan(&self, _session: &str) -> Option<Map<String, Value>> {
+        if self.defects.compaction_change == Some("no_switch_fixture") {
+            return None;
+        }
+        self.defects.compaction_change_fixture.then(|| {
+            serde_json::from_value(json!({
+                "tools": [SCRIPTED_TOOL, session_change::EXTRA_TOOL],
+                "compaction_item": {"provider":"fixture-compaction","preset":"identity","params":{"revision":2}}
+            }))
+            .unwrap()
+        })
     }
 
     fn host_plan(&self, _session: &str, alternate: bool) -> Option<Map<String, Value>> {

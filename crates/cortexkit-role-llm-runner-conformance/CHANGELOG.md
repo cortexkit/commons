@@ -6,9 +6,13 @@
   with `invalid_params` at `plan.compaction_item` without changing the applied
   plan, and optional provider/preset/params switches with the same refusal field.
   Deliberately incorrect fakes are rejected by each case name.
-- These management-route checks do not observe provider Setup or applied-view
-  preservation across an accepted switch; those require the compaction protocol.
-  Keep the runner contract pin at `=0.8.31` without adding provider hooks.
+- These checks use only the runner's own management route, so they cannot see
+  provider Setup or whether an accepted switch keeps the applied view until the
+  new provider applies one; that needs a compaction provider. The runner contract
+  pin stays `=0.8.31`.
+- Add optional `compaction_change_plan` and `compaction_switch_plan` adapter hooks
+  for valid compaction plans used only by these cases, with defaults preserving
+  the existing `send_fields` and `refresh_plan(ChangedTools)` fixture fallbacks.
 
 ## 0.17.37
 

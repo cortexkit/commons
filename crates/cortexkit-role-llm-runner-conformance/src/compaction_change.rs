@@ -35,14 +35,17 @@ where
         )
         .await?;
     let fields = case.subject.send_fields(&session.name, true);
-    let Some(full) = fields.get("plan").and_then(Value::as_object) else {
-        return Ok(Ending::Inapplicable("the adapter supplies no plan".into()));
-    };
-    let Some(original_item) = item(full) else {
+    let full = case
+        .subject
+        .compaction_change_plan(&session.name)
+        .or_else(|| fields.get("plan").and_then(Value::as_object).cloned());
+    let Some(full) = full.filter(|plan| item(plan).is_some()) else {
         return Ok(Ending::Inapplicable(
-            "the adapter's opening plan has no compaction item".into(),
+            "neither compaction_change_plan nor its send_fields fallback supplies a compaction item"
+                .into(),
         ));
     };
+    let original_item = item(&full).unwrap();
     let adding = name == "compaction_add_takes_effect_next_run";
     let removing = name == "compaction_remove_is_refused";
     let mut opening = full.clone();
@@ -52,20 +55,24 @@ where
     } else if removing {
         replacement.remove("compaction_item");
     } else {
-        let Some(switched) = case
+        let switched = case
             .subject
-            .refresh_plan(&session.name, RefreshVariant::ChangedTools)
+            .compaction_switch_plan(&session.name)
+            .or_else(|| {
+                case.subject
+                    .refresh_plan(&session.name, RefreshVariant::ChangedTools)
+                    .map(|plan| plan.plan)
+            });
+        let Some(switched) =
+            switched.filter(|plan| item(plan).is_some_and(|other| other != original_item))
         else {
             return Ok(Ending::Inapplicable(
-                "the adapter supplies no second valid compaction plan".into(),
+                "neither compaction_switch_plan nor its refresh_plan(ChangedTools) fallback \
+                 supplies a different compaction item"
+                    .into(),
             ));
         };
-        if item(&switched.plan).is_none_or(|other| other == original_item) {
-            return Ok(Ending::Inapplicable(
-                "the adapter's second plan has no different compaction item".into(),
-            ));
-        }
-        replacement = switched.plan;
+        replacement = switched;
     }
     let send_id = case.mint.next("compaction-start");
     let mut params = case.params(&session, "before refresh", &send_id, None);

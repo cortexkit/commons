@@ -285,19 +285,27 @@ opaque part keys come from the served envelope, not a reader's invented index.
 | `read_display_facts_created_at` | Omit or change a recorded host creation time, substitute `written_at` or `completed_at`, or expose it without the opt-in. |
 
 The compaction-change cases require `Plans`, `SessionChange`, queued runs,
-run operations and transcript reads. They use only existing adapter fixtures:
-`send_fields(session, true)` must supply a valid plan with a compaction item,
-otherwise all three are inapplicable. Addition starts without that item and
-refreshes with the full plan; removal starts with it and refreshes without it.
-Switching additionally needs `refresh_plan(session, ChangedTools)` to provide a
-second valid plan with a different compaction item, otherwise that case is
-inapplicable. The replacement tool surface must support the `immediately` rung.
+run operations and transcript reads. An adapter can supply a valid opening plan
+with a compaction item its runner can serve through the optional
+`compaction_change_plan(session)` hook. Only these cases use that plan, so other
+cases need not run under compaction. The hook defaults to `None`, falling back to
+`send_fields(session, true)`'s plan. If neither source supplies a compaction item,
+all three are inapplicable, with both fixture sources named in the reason.
+Addition starts without that item and refreshes with the full plan; removal
+starts with it and refreshes without it.
+
+For switching, the optional `compaction_switch_plan(session)` hook supplies a
+second valid plan with a different compaction item. It defaults to `None`,
+falling back to `refresh_plan(session, ChangedTools)`. If neither provides a
+different item, that case is inapplicable and names both sources. The replacement
+tool surface must support the `immediately` rung. Both defaulted hooks preserve
+compatibility with existing adapters.
 `session.baseline` exposes generations and manifest digests, not the raw applied
 plan or its item, and these checks cannot observe provider Setup or the applied
 view. In particular they cannot prove the [compaction contract's W2.5
 rule](../cortexkit-role-compaction/CONTRACT.md) preserving the old view until the
-new provider applies its own; that requires the compaction protocol's kit.
-No compaction provider or runner protocol hooks are added here.
+new provider applies its own; that needs a compaction provider. The plan-fixture
+hooks add no compaction provider or runner protocol operations.
 
 Each new case is exercised against a deliberately faulty fake and verifies
 rejection under the case's name. The unnumbered-reference case has

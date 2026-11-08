@@ -1,4 +1,5 @@
 use super::*;
+use cortexkit_role_llm_runner_conformance::{LlmRunnerSubject, RefreshVariant};
 
 const NAMES: &[&str] = &[
     "compaction_add_takes_effect_next_run",
@@ -18,7 +19,16 @@ fn subject(fault: Option<&'static str>) -> FakeSubject {
 
 #[tokio::test]
 async fn compaction_changes_accepting_switch_pass_all_three_cases() {
-    let report = run(&subject(None)).await;
+    let subject = subject(None);
+    assert!(subject.send_fields("compaction_switch_probe", true)["plan"]
+        .get("compaction_item")
+        .is_none());
+    assert!(!subject
+        .refresh_plan("compaction_switch_probe", RefreshVariant::ChangedTools)
+        .unwrap()
+        .plan
+        .contains_key("compaction_item"));
+    let report = run(&subject).await;
     for name in NAMES {
         assert_eq!(
             report.outcome(name),
@@ -33,6 +43,23 @@ async fn compaction_changes_accepting_switch_pass_all_three_cases() {
 #[tokio::test]
 async fn compaction_changes_refusing_switch_pass_all_three_cases() {
     let report = run(&subject(Some("refuse_switch"))).await;
+    for name in NAMES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn compaction_changes_send_fields_fallback_passes_all_three_cases() {
+    let mut subject = subject(None);
+    subject.defects.compaction_change_fixture = false;
+    subject.defects.compaction_change_send_fields_fixture = true;
+    let report = run(&subject).await;
     for name in NAMES {
         assert_eq!(
             report.outcome(name),
@@ -89,7 +116,27 @@ async fn compaction_changes_without_item_fixture_are_inapplicable() {
     for name in NAMES {
         assert!(
             matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason })
-            if reason.contains("no compaction item")),
+            if reason.contains("compaction_change_plan") && reason.contains("send_fields")),
+            "{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn compaction_switch_without_second_fixture_is_inapplicable() {
+    let report = run(&subject(Some("no_switch_fixture"))).await;
+    assert!(
+        matches!(report.outcome(NAMES[2]), Some(CaseOutcome::Inapplicable { reason })
+        if reason.contains("compaction_switch_plan") && reason.contains("refresh_plan(ChangedTools)")),
+        "{}",
+        report.render()
+    );
+    for name in &NAMES[..2] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
             "{}",
             report.render()
         );
