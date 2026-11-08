@@ -10892,5 +10892,45 @@
         "version": 1
       }
     }
+  },
+  {
+    "name": "a cleared ride renders cleared on a route that clears",
+    "function": "cleared_ride",
+    "input": {
+      "form": "turn_system_cleared",
+      "route_clears": true
+    },
+    "output": {
+      "ok": {
+        "render": "cleared"
+      }
+    }
+  },
+  {
+    "name": "a cleared ride is omitted on a route that can't clear",
+    "function": "cleared_ride",
+    "input": {
+      "form": "turn_system_cleared",
+      "route_clears": false
+    },
+    "output": {
+      "ok": {
+        "render": "omit"
+      }
+    }
+  },
+  {
+    "name": "a turn_system ride keeps its form on any route",
+    "function": "cleared_ride",
+    "input": {
+      "form": "turn_system",
+      "route_clears": false
+    },
+    "output": {
+      "ok": {
+        "form": "turn_system",
+        "render": "form"
+      }
+    }
   }
 ]

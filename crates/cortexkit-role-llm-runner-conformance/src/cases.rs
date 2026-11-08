@@ -283,6 +283,26 @@ where
             | "max_output_tokens_caps_response"
             | "no_tools_offered_to_model"
             | "no_tools_later_plan_send_refused" => crate::run_parameters::run(self, name).await,
+            "cleared_ride_plan_notes_never_clear" => {
+                if !self.subject.turn_system_cleared_supported() {
+                    Ok(Ending::Inapplicable(
+                        "adapter declares no confirmed clearing route".into(),
+                    ))
+                } else if !cortexkit_role_llm_runner::delivery_order::Mode::TurnSystemCleared
+                    .is_declared_by(&self.checked_describe().await?)
+                {
+                    Ok(Ending::Inapplicable(
+                        "turn_system_cleared delivery is not explicitly declared".into(),
+                    ))
+                } else {
+                    self.subject
+                        .configure_turn_system_cleared_route(None, true)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    crate::plan_notes::run(self, name).await
+                }
+            }
+            name if name.starts_with("cleared_ride_") => crate::notices::run(self, name).await,
             name if name.starts_with("delivery_order_") => {
                 if name == "delivery_order_template_renders_as_system"
                     && !self.declares(Capability::Steer)

@@ -391,7 +391,7 @@ The field is absent while the entry is unfinished, including while a tool part i
 | `output_bytes` | integer, optional | The size of `output` in bytes, in both forms. Absent while running. |
 | `attachments` | array of `Attachment` | Files and opaque items the result carries besides its text; may be left out when empty. |
 | `approval` | object, optional | A provider-executed call's approval answer: `approved` (boolean) and `reason` (string, optional). |
-| `delivered` | array of `Delivered` | Rides delivered with `tool_result`, in delivery order; may be left out when empty. Each: `sender` (module id), `template` (string, optional), `text` (string; absent in compact form), `text_bytes` (integer), `send_id` (string, optional), `forms` (array of `tool_result` and `turn_system`, optional), `tokens` (`{count}`, optional; W4.11). |
+| `delivered` | array of `Delivered` | Rides delivered with a tool result, in delivery order; may be left out when empty. Each: `sender` (module id), `template` (string, optional), `text` (string; absent in compact form), `text_bytes` (integer), `send_id` (string, optional), `forms` (array of `tool_result`, `turn_system` and `turn_system_cleared`, optional), `tokens` (`{count}`, optional; W4.11). |
 | `tokens` | `{input, output}`, optional | Present only once the result exists; running tools omit it. Separate counts let the provider estimate the saving from replacing the tool's output, keeping the call/result structure (W4.11). |
 
 An `Attachment` is `id` (stable within its tool part) plus the fields of a `file` or an `opaque` item (W4.5), told apart by `kind`.
@@ -430,18 +430,38 @@ The prefix is the number between two section signs followed by one space: `§12�
 **W4.9 What may change.** A stored entry changes only when a tool part in it goes from `running` to a final status with its result (also when the host stores that result in a later message), or when a send is delivered with one of its results. The runner then sends the changed entry again in its next notice. Any other change to a stored entry is a transcript change (W5.2 `transcript_changed`).
 
 For rides delivered after adopting 0.2.6, the runner sets `send_id` and
-`forms`: the send's `delivery` list restricted to `tool_result` and
-`turn_system`, in list order. Both are omitted when absent, preserving older
+`forms`: the send's `delivery` list restricted to `tool_result`,
+`turn_system` and `turn_system_cleared`, in list order. Both are omitted when absent, preserving older
 bytes and checksums. The runner never adds them to a delivered item it has
 already served: that would be a transcript change. Absent `forms` means
-`[tool_result]`. Each ride takes the first form its model route supports at
+`[tool_result]`. Subject to the fixed delivered-form rules below, each ride
+takes the first form its model route supports at
 that position, under llm-runner §9.7's recorded per-session/model route
 decision and existing template-authority and provider-position rules.
-Unsupported system form falls back to append; old rides always append.
+Unsupported persistent system form falls back to append; old rides always append.
 Rendering uses llm-runner's shared `rides` module, also re-exported by this
 crate. A ride's optional `tokens` follows W4.11's per-part count and family
 rules, including later arrival without a transcript change, and enters no
 checksum (W7).
+
+A provider treats `turn_system_cleared` like `turn_system` for placement and
+selection, but delivers it only where the runner recorded it: the runner
+chooses the form, never the provider. A `turn_system_cleared` ride renders as a
+cleared turn-scoped system message on a route that clears at the next user-role
+message, and is omitted on any other route. It never renders as a persistent
+`turn_system`. A runner applies this rule whether or not it uses the view
+library; that library's `render::cleared_ride` is the reference implementation.
+The runner records once, at delivery, the form actually delivered, using the
+same value the notices fact serves as `delivered_as`. That record never changes.
+A ride delivered as `turn_system_cleared` follows the clearing-or-omission rule
+for its whole life. A ride delivered as `tool_result` or `turn_system` keeps the
+existing per-route selection rules on later routes, except that it never
+selects `turn_system_cleared`: persistent text never becomes transient after a
+route switch. The runner passes the recorded delivered form as the first
+argument to `render::cleared_ride`, not the first item in `forms`. This release
+adds no `Delivered` wire member for that runner-owned record.
+The ride's `tokens` retains W4.11's current meaning: a count of its full text,
+not a view-specific rendering.
 
 **Discarded rides: narrow content exception.** Only for tool parts in entries
 behind the session's applied cut, once that cut has passed the carrying part

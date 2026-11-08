@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.17.34
+
+- Pin runner `=0.8.29`. Add seven optional cleared-ride cases covering confirmed
+  recording, unconfirmed-route fallthrough, free-text pending and append-only
+  fallthrough, plan-note exclusion, route-switch omission and no persistent
+  upgrade. Each has a deliberately wrong fake rejected by case name.
+- Default adapters skip these cases. Opt-in adapters must explicitly list
+  `turn_system_cleared` in `delivery_order_modes`, as well as provide
+  `turn_system_cleared_supported`, `configure_turn_system_cleared_route`, and
+  model-ingress `cleared_system_text` observations alongside system text.
+  General delivery-mode probes also omit the new mode unless explicitly listed,
+  so older decoders never receive it.
+- Let the call-yield queue case script and wait for the queued idle-start run.
+  In the blocked store-before-yield case, poll for the yield request after
+  durable staging before releasing the call; staging and yielding need not
+  complete together. Keep the store-before-yield assertion unchanged.
+
+- Record the media-only fixture's creating send before its follow-ups, so
+  absent/empty-prompt media sends do not resend frozen tool configuration.
+
 ## 0.17.33
 
 - Use bare module ids, not route-stamp principals, in plan sender fixtures;

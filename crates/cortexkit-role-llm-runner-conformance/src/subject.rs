@@ -490,6 +490,10 @@ pub struct ModelRequestObservation {
     /// provider. Required for `Notices`, not inferred from delivery modes.
     /// `None` means not observed, distinct from an observed empty list.
     pub system_text: Option<Vec<String>>,
+    /// System texts bearing the provider's next-user-message clearing marker,
+    /// observed at model ingress, not inferred from send modes. Required when
+    /// `turn_system_cleared_supported` opts into the cleared-ride cases.
+    pub cleared_system_text: Option<Vec<String>>,
 }
 
 /// A raw request captured by the scripted model, outside the runner's state.
@@ -1761,6 +1765,27 @@ pub trait LlmRunnerSubject: Harness {
     /// delivery-order template case is inapplicable.
     fn turn_system_supported(&self) -> bool {
         false
+    }
+
+    /// Opt into cleared-ride cases only with a route confirmed to clear a
+    /// system message at the next user-role message. Defaults to skipped.
+    fn turn_system_cleared_supported(&self) -> bool {
+        false
+    }
+
+    /// Configure the scripted model's confirmed or unconfirmed clearing route.
+    /// With no session, select the route for the next fixture; otherwise switch
+    /// that session's model/provider route through the runner's real plan path,
+    /// rebuilding its prompt before its next request. Required by the opt-in
+    /// cleared-ride cases; observations must still come from provider ingress.
+    async fn configure_turn_system_cleared_route(
+        &self,
+        _session: Option<&str>,
+        _confirmed: bool,
+    ) -> Result<(), HarnessError> {
+        Err(HarnessError::new(
+            "cleared-ride route configuration is not implemented",
+        ))
     }
 
     /// Hold `session`'s next model request at the context ceiling, as a

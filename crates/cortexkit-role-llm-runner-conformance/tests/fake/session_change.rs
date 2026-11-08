@@ -618,7 +618,13 @@ pub fn observe_notes(
         observation
             .system_text
             .get_or_insert_with(Vec::new)
-            .push(text);
+            .push(text.clone());
+        if defects.cleared_ride == Some("plan_note") {
+            observation
+                .cleared_system_text
+                .get_or_insert_with(Vec::new)
+                .push(text);
+        }
     }
 }
 

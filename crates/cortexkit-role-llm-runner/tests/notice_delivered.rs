@@ -14,7 +14,7 @@ fn notice_delivered_forms_round_trip_and_omit_absent_form() {
         serde_json::to_value(LiveEvent::NoticeDelivered(event.clone())).unwrap(),
         legacy
     );
-    for form in ["turn_system", "future_form"] {
+    for form in ["turn_system", "turn_system_cleared", "future_form"] {
         let event = LiveEvent::NoticeDelivered(event.clone().with_delivered_as(form));
         let mut expected = legacy.clone();
         expected["delivered_as"] = json!(form);

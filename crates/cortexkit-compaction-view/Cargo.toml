@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-compaction-view"
-version = "0.1.8"
+version = "0.2.0"
 edition.workspace = true
 repository.workspace = true
 readme = "README.md"
@@ -11,6 +11,6 @@ license.workspace = true
 name = "cortexkit_compaction_view"
 
 [dependencies]
-cortexkit-role-compaction = { version = "0.2.10", path = "../cortexkit-role-compaction" }
+cortexkit-role-compaction = { version = "0.3.0", path = "../cortexkit-role-compaction" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"

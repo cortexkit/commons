@@ -41,6 +41,7 @@ const QUIET_POLLS: usize = 5;
 const ALL_MODES: &[Mode] = &[
     Mode::ToolResult,
     Mode::TurnSystem,
+    Mode::TurnSystemCleared,
     Mode::Steer,
     Mode::IdleStart,
 ];
@@ -147,13 +148,26 @@ fn mode_lists(remaining: &[Mode]) -> Vec<Vec<Mode>> {
     lists
 }
 
+fn decoder_safe_mode_lists(
+    describe: &cortexkit_role_llm_runner::describe::RoleDescribe,
+) -> Vec<Vec<Mode>> {
+    // Keep undeclared-mode probes for the original modes, whose decoders are
+    // already deployed. Never send the new mode without its explicit listing.
+    let modes: Vec<_> = ALL_MODES
+        .iter()
+        .copied()
+        .filter(|mode| *mode != Mode::TurnSystemCleared || mode.is_declared_by(describe))
+        .collect();
+    mode_lists(&modes)
+}
+
 async fn declared_modes_respected<S>(case: &Case<'_, S>) -> Check
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
 {
     let describe = case.checked_describe().await?;
-    let lists = mode_lists(ALL_MODES);
+    let lists = decoder_safe_mode_lists(&describe);
     let turns = lists
         .iter()
         .map(|_| ScriptedTurn::new(vec![case.mint.text("listed-mode-answer").0]))
@@ -222,7 +236,7 @@ fn template() -> Template {
     Template::new("ceiling_note", "Context is {pct}% full.", slots)
 }
 
-fn template_use(pct: Value) -> TemplateUse {
+pub(crate) fn template_use(pct: Value) -> TemplateUse {
     let mut slots = Map::new();
     slots.insert("pct".into(), pct);
     TemplateUse::new("ceiling_note", template_digest(&template()), slots)
@@ -1977,5 +1991,36 @@ where
         _ => Err(
             "send landed on an already-sent result instead of the next result after staging".into(),
         ),
+    }
+}
+
+#[cfg(test)]
+mod declaration_tests {
+    use super::*;
+
+    #[test]
+    fn cleared_ride_mode_probes_require_explicit_advertisement() {
+        use cortexkit_role_llm_runner::describe::RoleDescribe;
+
+        for modes in [None, Some(vec!["tool_result".into()])] {
+            let mut describe =
+                RoleDescribe::default().with_capabilities(vec![groups::DELIVERY_ORDER.into()]);
+            describe.delivery_order_modes = modes;
+            let lists = decoder_safe_mode_lists(&describe);
+            assert_eq!(
+                lists.len(),
+                64,
+                "all ordered nonempty lists of the four original modes"
+            );
+            assert!(lists
+                .iter()
+                .all(|list| !list.contains(&Mode::TurnSystemCleared)));
+        }
+        let explicit = RoleDescribe::default()
+            .with_capabilities(vec![groups::DELIVERY_ORDER.into()])
+            .with_delivery_order_modes(vec!["turn_system_cleared".into()]);
+        let lists = decoder_safe_mode_lists(&explicit);
+        assert_eq!(lists.len(), 325, "all ordered nonempty lists of five modes");
+        assert!(lists.iter().any(|list| list == &[Mode::TurnSystemCleared]));
     }
 }

@@ -33,10 +33,47 @@ fn delivered_rides_forms_are_optional_and_unknown_values_are_skipped() {
 }
 
 #[test]
+fn delivered_rides_cleared_form_round_trips_and_keeps_unknown_fallback() {
+    let wire = json!({
+        "sender": "example-notifier", "text": "note", "text_bytes": 4,
+        "forms": ["future", "turn_system_cleared", "turn_system", "tool_result"]
+    });
+    let delivered: Delivered = serde_json::from_value(wire).unwrap();
+    assert_eq!(
+        delivered.forms(),
+        &[
+            RideForm::TurnSystemCleared,
+            RideForm::TurnSystem,
+            RideForm::ToolResult
+        ]
+    );
+    assert_eq!(
+        serde_json::to_value(&delivered).unwrap()["forms"],
+        json!(["turn_system_cleared", "turn_system", "tool_result"])
+    );
+    let cleared: Delivered = serde_json::from_value(json!({
+        "sender": "example-notifier", "text": "note", "text_bytes": 4,
+        "forms": ["turn_system_cleared"]
+    }))
+    .unwrap();
+    assert_eq!(cleared.forms(), &[RideForm::TurnSystemCleared]);
+    let unknown: Delivered = serde_json::from_value(json!({
+        "sender": "example-notifier", "text": "note", "text_bytes": 4,
+        "forms": ["still_unknown"]
+    }))
+    .unwrap();
+    assert_eq!(unknown.forms(), &[RideForm::ToolResult]);
+}
+
+#[test]
 fn delivered_rides_tokens_are_metadata_not_content() {
     let delivered = Delivered::new("example-notifier", "note")
         .with_send_id("send-a")
-        .with_forms(vec![RideForm::TurnSystem, RideForm::ToolResult])
+        .with_forms(vec![
+            RideForm::TurnSystemCleared,
+            RideForm::TurnSystem,
+            RideForm::ToolResult,
+        ])
         .with_tokens(TokenCount::new(2));
     let part = Part::new(
         "p",
@@ -93,4 +130,12 @@ fn delivered_rides_tokens_are_metadata_not_content() {
     assert_eq!(compact.delivered[0].tokens, Some(TokenCount::new(2)));
     assert_eq!(compact.delivered[0].text, None);
     assert_eq!(compact.delivered[0].send_id.as_deref(), Some("send-a"));
+    assert_eq!(
+        compact.delivered[0].forms(),
+        &[
+            RideForm::TurnSystemCleared,
+            RideForm::TurnSystem,
+            RideForm::ToolResult
+        ]
+    );
 }

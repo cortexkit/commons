@@ -151,15 +151,15 @@ where
     for mark in marks {
         let mut tool = case.mint.call(name);
         tool.hold = true;
-        let (session, sender) = person_session(
-            case,
-            name,
-            vec![
-                ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool.clone())]),
-                ScriptedTurn::new(vec![case.mint.text("after-yield").0]),
-            ],
-        )
-        .await?;
+        let queued = name == "call_yield_queue_does_not_yield";
+        let mut turns = vec![
+            ScriptedTurn::new(vec![ScriptedPart::ToolCall(tool.clone())]),
+            ScriptedTurn::new(vec![case.mint.text("after-yield").0]),
+        ];
+        if queued {
+            turns.push(ScriptedTurn::new(vec![case.mint.text("after-queue").0]));
+        }
+        let (session, sender) = person_session(case, name, turns).await?;
         let blocked = name == "call_yield_steer_stored_before_waiting";
         if !case
             .subject
@@ -209,7 +209,7 @@ where
         let mut fields = Map::new();
         fields.insert(
             "delivery".into(),
-            if name == "call_yield_queue_does_not_yield" {
+            if queued {
                 json!("queue")
             } else {
                 json!("steer")
@@ -232,22 +232,32 @@ where
         );
         let inspect = async {
             if blocked {
-                let stored = tokio::time::timeout(
-                    std::time::Duration::from_secs(5),
-                    case.subject.send_staged(&session.name, &send_id),
-                )
-                .await;
-                let observation = case
-                    .subject
-                    .observe_call_yield(&session.name, &tool.arguments, &send_id)
+                let observation = async {
+                    tokio::time::timeout(
+                        std::time::Duration::from_secs(5),
+                        case.subject.send_staged(&session.name, &send_id),
+                    )
                     .await
-                    .map_err(|e| e.to_string());
+                    .map_err(|_| "durable steer storage waited behind a blocked yield")?
+                    .map_err(|e| e.to_string())?;
+                    let mut observation = CallYieldObservation::default();
+                    for _ in 0..MAX_POLLS {
+                        observation = case
+                            .subject
+                            .observe_call_yield(&session.name, &tool.arguments, &send_id)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        if !observation.yield_requests.is_empty() {
+                            break;
+                        }
+                        case.subject.pause().await;
+                    }
+                    Ok::<_, String>(observation)
+                }
+                .await;
                 case.subject
                     .release_call_yield(&tool.arguments)
                     .await
-                    .map_err(|e| e.to_string())?;
-                stored
-                    .map_err(|_| "durable steer storage waited behind a blocked yield")?
                     .map_err(|e| e.to_string())?;
                 return observation;
             }
@@ -258,9 +268,17 @@ where
                 .map_err(|e| e.to_string())
         };
         let (sent, observed) = futures_util::future::join(send, inspect).await;
-        if mark != &Some("speaks_for") {
+        let queued_reply: Option<SendReply> = if queued {
+            Some(decode(
+                "queued person send",
+                expect_ok("person send", sent?)?,
+            )?)
+        } else if mark != &Some("speaks_for") {
             expect_ok("person send", sent?)?;
-        }
+            None
+        } else {
+            None
+        };
         let mut observed = observed?;
         let negative = name.contains("does_not_yield");
         if negative {
@@ -327,7 +345,18 @@ where
             }
         }
         if name != "call_yield_stop_never_withdraws" {
-            wait_run_end(case.subject, &session.route, case.declared, None, &start).await?;
+            if let Some(reply) = &queued_reply {
+                wait_run_end(
+                    case.subject,
+                    &session.route,
+                    case.declared,
+                    Some(&run_id),
+                    reply,
+                )
+                .await?;
+            } else {
+                wait_run_end(case.subject, &session.route, case.declared, None, &start).await?;
+            }
         }
         if negative {
             observed = case
@@ -345,6 +374,110 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn operational_case(
+        name: &str,
+        mode: crate::fork_fake::CallYieldFixture,
+    ) -> (Result<(), String>, crate::fork_fake::CallYieldSnapshot) {
+        use crate::{
+            drive::Mint,
+            fork_fake::{Defects, FakeSubject},
+            subject::Capability,
+        };
+        use cortexkit_role_harness::CrashDriver;
+
+        let mut fake = FakeSubject::new(Defects::default());
+        fake.call_yield_fixture = Some(mode);
+        fake.advertise_status = true;
+        fake.capabilities.extend([
+            Capability::Plans,
+            Capability::DeliveryOrder,
+            Capability::Notices,
+            Capability::MessageMarks,
+            Capability::RunStatus,
+            Capability::ReadDisplayFacts,
+            Capability::HistoryDisplay,
+            Capability::LiveEvents,
+        ]);
+        let declared = fake.capabilities();
+        let mint = Mint::default();
+        let root = tempfile::tempdir().unwrap();
+        let mut driver = CrashDriver::new(&fake);
+        let handle = driver.spawn(root.path()).await.unwrap();
+        let case = Case {
+            subject: &fake,
+            handle: &handle,
+            declared: &declared,
+            mint: &mint,
+        };
+        let outcome = case.run(name).await.and_then(|ending| {
+            matches!(ending, Ending::Passed)
+                .then_some(())
+                .ok_or_else(|| format!("{name} did not pass"))
+        });
+        (outcome, fake.call_yield_fixture_snapshot())
+    }
+
+    #[tokio::test]
+    async fn call_yield_queue_case_scripts_and_waits_for_queued_run() {
+        let (outcome, snapshot) = operational_case(
+            "call_yield_queue_does_not_yield",
+            crate::fork_fake::CallYieldFixture::OnePollLate,
+        )
+        .await;
+        assert!(outcome.is_ok(), "{outcome:?}");
+        assert_eq!(
+            snapshot.model_requests, 4,
+            "opening, held call, continuation, queued run"
+        );
+        assert_eq!(
+            snapshot.run_states.len(),
+            3,
+            "opening, held run, queued run"
+        );
+        assert!(
+            !snapshot.run_states.iter().any(|state| state == "error"),
+            "{:?}",
+            snapshot.run_states
+        );
+        assert_eq!(snapshot.requests, 0);
+    }
+
+    #[tokio::test]
+    async fn call_yield_blocked_case_accepts_one_poll_late_yield() {
+        let (outcome, snapshot) = operational_case(
+            "call_yield_steer_stored_before_waiting",
+            crate::fork_fake::CallYieldFixture::OnePollLate,
+        )
+        .await;
+        assert!(outcome.is_ok(), "{outcome:?}");
+        assert_eq!(snapshot.polls, 2);
+        assert_eq!(snapshot.requests, 1);
+    }
+
+    #[tokio::test]
+    async fn call_yield_blocked_case_still_rejects_never_stored_steer() {
+        let (outcome, snapshot) = operational_case(
+            "call_yield_steer_stored_before_waiting",
+            crate::fork_fake::CallYieldFixture::NeverStored,
+        )
+        .await;
+        let error = outcome.unwrap_err();
+        assert!(error.contains("call_yield_steer_stored_before_waiting: steer storage waited behind the yield answer"), "{error}");
+        assert_eq!(snapshot.requests, 1);
+    }
+
+    #[tokio::test]
+    async fn call_yield_queue_case_still_rejects_a_yield_request() {
+        let (outcome, snapshot) = operational_case(
+            "call_yield_queue_does_not_yield",
+            crate::fork_fake::CallYieldFixture::QueueYields,
+        )
+        .await;
+        let error = outcome.unwrap_err();
+        assert!(error.contains("call_yield_queue_does_not_yield: message that is not the person's steer triggered a yield"), "{error}");
+        assert_eq!(snapshot.requests, 1);
+    }
 
     #[tokio::test]
     async fn call_yield_person_fixture_admits_legacy_steer_and_queue() {
@@ -403,6 +536,7 @@ mod tests {
         Pause,
         DropLate,
         StoreLate,
+        StoreMissing,
         Withdraw,
     }
     struct FakeRunner {
@@ -418,7 +552,8 @@ mod tests {
                 && (person || self.fault == Fault::Sender);
             let mut observed = CallYieldObservation {
                 call_key: "call-1".into(),
-                steer_stored_sequence: Some(if self.fault == Fault::StoreLate { 3 } else { 1 }),
+                steer_stored_sequence: (self.fault != Fault::StoreMissing)
+                    .then_some(if self.fault == Fault::StoreLate { 3 } else { 1 }),
                 ..Default::default()
             };
             if yield_call {
@@ -447,6 +582,10 @@ mod tests {
             ("call_yield_held_reply_never_pauses", Fault::Pause),
             ("call_yield_late_result_is_notice", Fault::DropLate),
             ("call_yield_steer_stored_before_waiting", Fault::StoreLate),
+            (
+                "call_yield_steer_stored_before_waiting",
+                Fault::StoreMissing,
+            ),
             ("call_yield_stop_never_withdraws", Fault::Withdraw),
         ] {
             let (observed, paused) = FakeRunner { fault: Fault::None }.execute(name);

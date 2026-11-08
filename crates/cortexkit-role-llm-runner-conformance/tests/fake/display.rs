@@ -173,6 +173,9 @@ pub(super) fn live_events(
                         )
                         .with_text(&ride.text);
                         delivered.speaks_for = ride.speaks_for.clone();
+                        if ride.delivered_as != "tool_result" {
+                            delivered.delivered_as = Some(ride.delivered_as.clone());
+                        }
                         out.push(event(LiveEvent::NoticeDelivered(delivered)));
                     }
                 }

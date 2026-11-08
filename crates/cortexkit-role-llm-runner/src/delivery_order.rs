@@ -23,7 +23,7 @@
 //! runner renders from that template and the send's typed slots
 //! ([`render`]). A template that cannot render refuses the send.
 //! `tool_result`, `steer` and `idle_start` deliver at user authority;
-//! `turn_system` delivers a turn-scoped system message, possible only for a
+//! `turn_system` and `turn_system_cleared` deliver turn-scoped system text, only for a
 //! rendered template, and otherwise the runner falls through to the next
 //! mode, carrying the same text at user authority.
 
@@ -43,7 +43,7 @@ pub const FIELD: &str = crate::send::DELIVERY_FIELD;
 pub const DEDUPE_KEY_FIELD: &str = "dedupe_key";
 /// The send member giving the time after which a queued send is dropped.
 pub const EXPIRES_AT_FIELD: &str = "expires_at_ms";
-/// The send member naming the plan template a `turn_system` delivery renders.
+/// The send member naming the plan template either system form renders.
 pub const TEMPLATE_FIELD: &str = "template";
 /// The members valid only beside a list in `delivery`.
 pub const MEMBERS: &[&str] = &[DEDUPE_KEY_FIELD, EXPIRES_AT_FIELD, TEMPLATE_FIELD];
@@ -60,6 +60,9 @@ pub enum Mode {
     /// A turn-scoped system entry for a plan template's rendering only.
     /// Stored bytes stay fixed; a later route may render it at user authority.
     TurnSystem,
+    /// A template-only ride after a tool result, on a route confirmed to
+    /// clear the system message at the next user-role message. Never an entry.
+    TurnSystemCleared,
     /// A user message into the run in progress, at its next step boundary.
     Steer,
     /// A user message that starts a run on an idle session.
@@ -71,24 +74,26 @@ impl Mode {
         match self {
             Self::ToolResult => modes::TOOL_RESULT,
             Self::TurnSystem => modes::TURN_SYSTEM,
+            Self::TurnSystemCleared => modes::TURN_SYSTEM_CLEARED,
             Self::Steer => modes::STEER,
             Self::IdleStart => modes::IDLE_START,
         }
     }
 
-    /// Whether the mode delivers at user authority: every mode but
-    /// `turn_system`.
+    /// Whether the mode delivers at user authority, excluding both system forms.
     pub fn is_user_authority(self) -> bool {
-        self != Self::TurnSystem
+        !matches!(self, Self::TurnSystem | Self::TurnSystemCleared)
     }
 
     /// The absent-`delivery_order_modes` mapping from module-level capability
     /// groups. Use [`Self::is_declared_by`] when a describe answer is available.
-    /// `delivery_order` declares the list-only modes;
+    /// `delivery_order` declares the original list-only modes. The cleared
+    /// system form requires an explicit `delivery_order_modes` listing.
     /// `steer` and `idle_start` reuse the legacy `steer` and `queue` groups.
     pub fn is_declared<S: AsRef<str>>(self, declared: &[S]) -> bool {
         let group = match self {
             Self::ToolResult | Self::TurnSystem => crate::capabilities::DELIVERY_ORDER,
+            Self::TurnSystemCleared => return false,
             Self::Steer => crate::capabilities::STEER,
             Self::IdleStart => crate::capabilities::QUEUE,
         };
@@ -96,9 +101,17 @@ impl Mode {
     }
 
     /// Whether the runner declares this list mode after optional narrowing.
+    /// The cleared system form always needs an explicit modes-list entry.
     /// A listed mode never bypasses its capability group. Validate the answer
     /// with [`crate::describe::check_describe`] before relying on it.
     pub fn is_declared_by(self, describe: &crate::describe::RoleDescribe) -> bool {
+        if self == Self::TurnSystemCleared {
+            return describe.declares(crate::capabilities::DELIVERY_ORDER)
+                && describe
+                    .delivery_order_modes
+                    .as_ref()
+                    .is_some_and(|modes| modes.iter().any(|mode| mode == self.as_str()));
+        }
         self.is_declared(&describe.capabilities)
             && describe.delivery_order_modes.as_ref().is_none_or(|modes| {
                 describe.declares(crate::capabilities::DELIVERY_ORDER)
@@ -107,11 +120,12 @@ impl Mode {
     }
 }
 
-/// The modes' spellings, as a read entry's `delivered_as.mode` names them.
-/// That member is an open string: a consumer keeps a mode it does not know.
+/// The modes' spellings for delivery records. `turn_system_cleared` is a ride,
+/// never a read entry's `delivered_as.mode`. Notice facts keep unknown forms.
 pub mod modes {
     pub const TOOL_RESULT: &str = "tool_result";
     pub const TURN_SYSTEM: &str = "turn_system";
+    pub const TURN_SYSTEM_CLEARED: &str = "turn_system_cleared";
     pub const STEER: &str = "steer";
     pub const IDLE_START: &str = "idle_start";
 }
@@ -175,7 +189,7 @@ pub struct DeliveryOrder {
     /// Milliseconds since the Unix epoch after which the send, if still
     /// undelivered, is dropped durably and ends `expired`.
     pub expires_at_ms: Option<u64>,
-    /// The plan template a `turn_system` delivery renders.
+    /// The plan template either system form renders.
     pub template: Option<TemplateUse>,
 }
 
@@ -297,6 +311,10 @@ pub struct Boundary {
     /// The provider supports a turn-scoped system message, the runner owns
     /// the request, and the send's template rendered with valid slots.
     pub turn_system: bool,
+    /// The route is confirmed to clear at the next user-role message, the
+    /// position is legal, the runner owns the request and typed slots rendered.
+    /// This form also requires a tool result about to be sent for the first time.
+    pub turn_system_cleared: bool,
     /// A run is in progress and at its next step.
     pub run_in_progress: bool,
     /// The session is idle: no run in progress.
@@ -312,6 +330,10 @@ impl Boundary {
         self.turn_system = true;
         self
     }
+    pub fn with_turn_system_cleared(mut self) -> Self {
+        self.turn_system_cleared = true;
+        self
+    }
     pub fn with_run_in_progress(mut self) -> Self {
         self.run_in_progress = true;
         self
@@ -325,6 +347,7 @@ impl Boundary {
         match mode {
             Mode::ToolResult => self.tool_result,
             Mode::TurnSystem => self.turn_system,
+            Mode::TurnSystemCleared => self.tool_result && self.turn_system_cleared,
             Mode::Steer => self.run_in_progress,
             Mode::IdleStart => self.idle,
         }
@@ -904,6 +927,29 @@ mod tests {
 
         assert!(Mode::Steer.is_declared(&[crate::capabilities::STEER]));
         assert!(Mode::IdleStart.is_declared(&[crate::capabilities::QUEUE]));
+    }
+
+    #[test]
+    fn turn_system_cleared_requires_explicit_mode_declaration() {
+        let absent = crate::describe::RoleDescribe::default()
+            .with_capabilities(vec![crate::capabilities::DELIVERY_ORDER.into()]);
+        assert!(
+            !Mode::TurnSystemCleared.is_declared(&absent.capabilities),
+            "capability-group fallback must not declare turn_system_cleared"
+        );
+        assert!(!Mode::TurnSystemCleared.is_declared_by(&absent));
+
+        let excluded = absent
+            .clone()
+            .with_delivery_order_modes(vec!["tool_result".into()]);
+        assert!(!Mode::TurnSystemCleared.is_declared_by(&excluded));
+
+        let explicit = absent.with_delivery_order_modes(vec!["turn_system_cleared".into()]);
+        assert!(Mode::TurnSystemCleared.is_declared_by(&explicit));
+
+        let missing_group = crate::describe::RoleDescribe::default()
+            .with_delivery_order_modes(vec!["turn_system_cleared".into()]);
+        assert!(!Mode::TurnSystemCleared.is_declared_by(&missing_group));
     }
 
     #[test]

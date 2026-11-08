@@ -452,6 +452,7 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
             || spec.name.starts_with("media_refs_")
             || spec.name.starts_with("sender_attribution_")
             || spec.name.starts_with("notices_")
+            || spec.name.starts_with("cleared_ride_")
             || spec.name.starts_with("message_marks_")
             || spec.name.starts_with("notice_keep_")
             || spec.name.starts_with("tag_read_")
@@ -496,6 +497,25 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
         });
     }
     None
+}
+
+#[cfg(test)]
+mod cleared_ride_gate_tests {
+    use super::*;
+
+    #[test]
+    fn cleared_ride_cases_do_not_add_missing_groups_to_the_verdict() {
+        let cases: Vec<_> = CASES
+            .iter()
+            .filter(|spec| spec.name.starts_with("cleared_ride_"))
+            .collect();
+        assert_eq!(cases.len(), 7);
+        for spec in cases {
+            assert!(matches!(gate(spec, &BTreeSet::new()),
+                Some(CaseOutcome::Inapplicable { reason }) if reason.starts_with("missing groups: ")));
+            assert!(gate(spec, &spec.requires.iter().copied().collect()).is_none());
+        }
+    }
 }
 
 #[cfg(test)]

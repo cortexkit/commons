@@ -67,6 +67,9 @@ use subc_protocol::ErrorBody;
 mod attachments;
 mod attribution;
 mod cache_policy;
+mod call_yield;
+pub use call_yield::Mode as CallYieldFixture;
+pub type CallYieldSnapshot = call_yield::Snapshot;
 mod display;
 mod fork_answer;
 mod held_calls;
@@ -186,6 +189,7 @@ pub struct Defects {
     /// Deliberate plan-note contract violation, selected by the kit self-tests.
     pub plan_notes: Option<&'static str>,
     pub notices: Option<&'static str>,
+    pub cleared_ride: Option<&'static str>,
     pub attribution: Option<&'static str>,
     pub routed_accounts_no_call: Option<&'static str>,
     pub account_route_vendor_names: bool,
@@ -674,6 +678,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    call_yield: call_yield::State,
     fork_ingress: Mutex<fork_answer::Ingress>,
     intakes: Mutex<BTreeMap<String, history_intake::Intake>>,
     routing_peers:
@@ -741,6 +746,7 @@ struct World {
     adopt_calls: AtomicUsize,
     /// Whether the scripted route supports a turn-scoped system message.
     turn_system: bool,
+    turn_system_cleared: Mutex<bool>,
     /// Sessions whose next model request waits at the context ceiling.
     ceiling_holds: Mutex<BTreeSet<String>>,
     /// The model each session's requests go to, when switched from the
@@ -2625,7 +2631,7 @@ impl Module {
                 };
                 let mut observation =
                     observe_request(tools, frozen.as_ref()).with_rendered(rendered_texts(&sess));
-                notices::observe(&mut observation, &sess, &self.world.defects);
+                notices::observe(&mut observation, &sess, &self.world);
                 session_change::observe_notes(&mut observation, &sess, &self.world.defects);
                 observation.max_output_tokens = output_cap;
                 self.tier_model_ingress(session, &mut observation);
@@ -2944,6 +2950,13 @@ impl Module {
             if queued.system && self.world.turn_system {
                 boundary = boundary.with_turn_system();
             }
+            let cleared = self.world.defects.cleared_ride;
+            if (queued.system || cleared == Some("free_text"))
+                && (*self.world.turn_system_cleared.lock().unwrap()
+                    || cleared == Some("unconfirmed"))
+            {
+                boundary = boundary.with_turn_system_cleared();
+            }
             let Some(mode) = self.choose(
                 &queued.modes,
                 &boundary,
@@ -2952,7 +2965,7 @@ impl Module {
                 continue;
             };
             let mut delivered_as = json!({ "mode": mode.as_str() });
-            if mode == Mode::ToolResult {
+            if matches!(mode, Mode::ToolResult | Mode::TurnSystemCleared) {
                 delivered_as["call_key"] = json!(result_key);
             }
             self.commit(
@@ -3645,6 +3658,20 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        // This fixture freezes tools at creation, including tools nested in a plan.
+        if self.world.defects.attachments == "media_only_send_frozen_tools"
+            && self.sessions.lock().unwrap().contains_key(session)
+            && (params.get("tools").is_some()
+                || params
+                    .get("plan")
+                    .and_then(|plan| plan.get("tools"))
+                    .is_some())
+        {
+            return Ok(invalid("tools"));
+        }
+        if let Some(reply) = call_yield::intercept(self, session, &params) {
+            return Ok(reply);
+        }
         if params.get("send_id").is_none() {
             return self.unkeyed_send(stamp, session, params);
         }
@@ -5176,6 +5203,7 @@ impl Module {
         [
             Mode::ToolResult,
             Mode::TurnSystem,
+            Mode::TurnSystemCleared,
             Mode::Steer,
             Mode::IdleStart,
         ]
@@ -5910,6 +5938,7 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    pub call_yield_fixture: Option<CallYieldFixture>,
     pub fork_peer_errors: bool,
     pub fork_head_key_fixture: bool,
     pub routed_methods: Vec<String>,
@@ -5983,6 +6012,7 @@ pub struct FakeSubject {
     pub pause_for: Option<Duration>,
     /// Whether the scripted route supports a turn-scoped system message.
     pub turn_system: bool,
+    pub turn_system_cleared: bool,
     pub cache_policy_zone: String,
     /// This adapter cannot create fetch-plan sessions.
     pub without_plans: bool,
@@ -6052,6 +6082,7 @@ pub const KILL_POINTS: &[&str] = &[
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            call_yield_fixture: None,
             fork_peer_errors: true,
             fork_head_key_fixture: true,
             routed_methods: vec!["apikey".into(), "oauth".into()],
@@ -6102,6 +6133,7 @@ impl FakeSubject {
             early_held_steer_receipt: None,
             pause_for: None,
             turn_system: true,
+            turn_system_cleared: false,
             cache_policy_zone: "Etc/UTC".into(),
             host_prefix_hook: false,
             seed_hook: false,
@@ -6213,7 +6245,13 @@ impl FakeSubject {
                             self.structured_output_per_session_group
                                 .then(|| groups::STRUCTURED_OUTPUT_PER_SESSION.to_owned()),
                         )
+                        .chain(
+                            self.call_yield_fixture
+                                .is_some()
+                                .then(|| groups::CALL_YIELD.to_owned()),
+                        )
                         .collect(),
+                    call_yield: call_yield::State::new(self.call_yield_fixture),
                     delivery_order_modes: self.delivery_order_modes.clone(),
                     scripts: Mutex::new(BTreeMap::new()),
                     model_calls: Mutex::new(BTreeSet::new()),
@@ -6232,6 +6270,7 @@ impl FakeSubject {
                     run_result_calls: AtomicUsize::new(0),
                     adopt_calls: AtomicUsize::new(0),
                     turn_system: self.turn_system,
+                    turn_system_cleared: Mutex::new(false),
                     ceiling_holds: Mutex::new(BTreeSet::new()),
                     models: Mutex::new(BTreeMap::new()),
                     observed_cache_lifetimes: Mutex::new(BTreeMap::new()),
@@ -6758,6 +6797,31 @@ impl LlmRunnerSubject for FakeSubject {
     async fn send_staged(&self, session: &str, _send_id: &str) -> Result<(), HarnessError> {
         self.world().staging_holds.lock().unwrap().remove(session);
         Ok(())
+    }
+    async fn install_call_yield(
+        &self,
+        session: &str,
+        arguments: &Value,
+        _block_answer: bool,
+    ) -> Result<bool, HarnessError> {
+        Ok(self.world().call_yield.install(session, arguments))
+    }
+    async fn observe_call_yield(
+        &self,
+        session: &str,
+        _arguments: &Value,
+        send_id: &str,
+    ) -> Result<cortexkit_role_llm_runner_conformance::CallYieldObservation, HarnessError> {
+        let modules = self.modules.lock().unwrap();
+        let module = modules
+            .iter()
+            .find(|module| module.alive.load(Ordering::SeqCst))
+            .ok_or_else(|| HarnessError::new("no live fake module"))?;
+        self.world().call_yield.observe(module, session, send_id)
+    }
+    async fn release_call_yield(&self, arguments: &Value) -> Result<(), HarnessError> {
+        self.world().call_yield.release(arguments);
+        self.release_tool_call(arguments).await
     }
     fn output_refs_fields(&self, session: &str) -> Result<Map<String, Value>, HarnessError> {
         let mut fields = self.send_fields(session, true);
@@ -7305,6 +7369,19 @@ impl LlmRunnerSubject for FakeSubject {
 
     fn turn_system_supported(&self) -> bool {
         self.turn_system
+    }
+
+    fn turn_system_cleared_supported(&self) -> bool {
+        self.turn_system_cleared
+    }
+
+    async fn configure_turn_system_cleared_route(
+        &self,
+        _session: Option<&str>,
+        confirmed: bool,
+    ) -> Result<(), HarnessError> {
+        *self.world().turn_system_cleared.lock().unwrap() = confirmed;
+        Ok(())
     }
 
     async fn hold_context_ceiling(&self, session: &str) -> Result<(), HarnessError> {

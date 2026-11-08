@@ -16,7 +16,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use cortexkit_role_compaction::part::{
-    Delivered, FileMedia, OutputFormat, Part, PartBody, ToolStatus,
+    Delivered, FileMedia, OutputFormat, Part, PartBody, RideForm, ToolStatus,
 };
 use cortexkit_role_compaction::read::{Entry, NoticeOrigin, Role};
 use cortexkit_role_compaction::rules::{ProviderRules, RuleBreak};
@@ -183,6 +183,48 @@ pub struct PlanRide {
     pub index: u64,
     #[serde(flatten)]
     pub delivered: Delivered,
+}
+
+/// How a runner renders one ride, given the form it was delivered as
+/// ([`cleared_ride`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "render", content = "form")]
+pub enum RideRender {
+    /// As a turn-scoped system message the provider clears at the next
+    /// user-role message.
+    Cleared,
+    /// Not at all.
+    Omit,
+    /// In this form, as before cleared delivery existed.
+    Form(RideForm),
+}
+
+/// The rule for a ride delivered as [`RideForm::TurnSystemCleared`], which
+/// every runner applies whether or not it uses this library.
+///
+/// On a route that clears a turn-scoped system message at the next user-role
+/// message, the ride renders cleared, with the same bytes on every later
+/// request. On any other route it's omitted. It never renders as a persistent
+/// `turn_system`, because that would keep every old reminder in the prompt
+/// for good. A session only meets a cleared ride on a route that can't clear
+/// after a model or provider switch, which rebuilds the provider's cache
+/// anyway. Omitting it then means no byte a runner already sent changes
+/// later: the only cost is the reminders of the turn that was open at the
+/// switch, never sent on the new route.
+///
+/// `form` is the form the ride was actually delivered in, as the runner
+/// recorded it at delivery (`delivered_as`). It's never taken from the
+/// send's `forms` list: that list is only what the send allowed, and a send
+/// allowing `turn_system_cleared` that went out as `tool_result` on a route
+/// that can't clear must keep rendering as `tool_result`. `route_clears` is
+/// whether the session's current route clears. Every other form renders
+/// unchanged.
+pub fn cleared_ride(form: RideForm, route_clears: bool) -> RideRender {
+    match form {
+        RideForm::TurnSystemCleared if route_clears => RideRender::Cleared,
+        RideForm::TurnSystemCleared => RideRender::Omit,
+        other => RideRender::Form(other),
+    }
 }
 
 /// What happens to a tool result's rides when a view replaces its output.

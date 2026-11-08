@@ -253,7 +253,7 @@ pub(crate) async fn media_only_send<S: LlmRunnerSubject>(
 where
     S::Route: RunnerRoute,
 {
-    let s = case
+    let mut s = case
         .open(
             "media_only_send",
             Script {
@@ -268,12 +268,15 @@ where
             "the adapter cannot configure a committed-upload fixture".into(),
         ));
     };
-    let mut params = case.params(&s, "open upload session", &case.mint.next("send"), None);
+    let opening_id = case.mint.next("send");
+    let prompt = "open upload session";
+    let mut params = case.params(&s, prompt, &opening_id, None);
     params.as_object_mut().unwrap().extend(fields);
     let reply: SendReply = decode(
         "open media-only session",
         ok(&s.route, ops::SESSION_SEND, params).await?,
     )?;
+    s.first = Some((opening_id, prompt.into()));
     wait_run_end(case.subject, &s.route, case.declared, None, &reply).await?;
     let bytes = png();
     let id = upload(&s.route, &bytes).await?;
@@ -893,4 +896,48 @@ where
     };
     send(case, &sender_session, &id).await?;
     media(&s.route, &sha256_hex(&bytes), &bytes).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn media_only_send_does_not_resend_frozen_tools() {
+        use crate::{
+            drive::Mint,
+            fork_fake::{Defects, FakeSubject},
+            subject::Capability,
+        };
+        use cortexkit_role_harness::CrashDriver;
+
+        let mut fake = FakeSubject::new(Defects {
+            attachments: "media_only_send_frozen_tools",
+            ..Defects::default()
+        });
+        fake.capabilities.extend([
+            Capability::Attachments,
+            Capability::MediaOnlySend,
+            Capability::DeliveryOrder,
+        ]);
+        let declared = fake.capabilities();
+        let mint = Mint::default();
+        let root = tempfile::tempdir().unwrap();
+        let mut driver = CrashDriver::new(&fake);
+        let handle = driver.spawn(root.path()).await.unwrap();
+        let case = Case {
+            subject: &fake,
+            handle: &handle,
+            declared: &declared,
+            mint: &mint,
+        };
+        let outcome = case
+            .run("media_only_send")
+            .await
+            .unwrap_or_else(|error| panic!("{error}"));
+        assert!(
+            matches!(outcome, Ending::Passed),
+            "media-only case did not pass"
+        );
+    }
 }

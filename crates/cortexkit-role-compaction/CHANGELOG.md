@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Add the `turn_system_cleared` ride form for confirmed clearing routes and
+  define omission on other routes. `RideForm` is now `#[non_exhaustive]`, a
+  breaking source change: downstream matches must add a wildcard arm. Unknown
+  form strings still decode by skipping them, falling back to `ToolResult`
+  when no known form remains. Ride token-count semantics are unchanged.
+- Require llm-runner 0.8.29 for the coordinated delivery contract.
+
 ## 0.2.12
 
 - Align the runner dependency with 0.8.28.

@@ -151,6 +151,22 @@ where
         return Err("note-delivery request did not contain the system note".into());
     }
     match name {
+        "cleared_ride_plan_notes_never_clear" => {
+            let cleared = next
+                .cleared_system_text
+                .as_ref()
+                .ok_or("plan-note request did not observe clearing markers")?;
+            if !cleared.is_empty() {
+                return Err("plan note used turn_system_cleared".into());
+            }
+            if !next
+                .system_text
+                .as_ref()
+                .is_some_and(|texts| texts.iter().any(|text| text.contains(&fixture.system_note)))
+            {
+                return Err("plan note did not retain persistent system authority".into());
+            }
+        }
         "plan_notes_pending_until_reconcile" => {
             let pending = baseline(&session.route).await?;
             if pending.applied_generation != before.applied_generation

@@ -5,7 +5,7 @@ compaction provider use the same implementation to compute render plans, apply
 views, check provider rules, clean replies, and number tags.
 
 ```sh
-cargo add cortexkit-compaction-view@0.1
+cargo add cortexkit-compaction-view@0.2
 ```
 
 The wire types come from

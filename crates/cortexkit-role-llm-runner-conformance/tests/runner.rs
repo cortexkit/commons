@@ -509,6 +509,7 @@ async fn mode3_user_commands_are_bound_only_by_the_route() {
         .render()
         .contains("FAIL user_commands_without_session_ref"));
 }
+mod cleared_ride;
 mod finish_reason;
 mod message_marks;
 mod message_senders;
@@ -1413,6 +1414,19 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    // Older fixtures have no confirmed clearing route. Keep their explicit
+    // skip separate from the opt-in fixture's required passing coverage.
+    if case.starts_with("cleared_ride_") {
+        match report.outcome(case) {
+            Some(CaseOutcome::Inapplicable { reason })
+                if reason == "adapter declares no confirmed clearing route"
+                    || reason.starts_with("missing groups: ") =>
+            {
+                return
+            }
+            _ => {}
+        }
+    }
     // Legacy fixtures do not opt into these groups or supply their optional
     // metadata/clock hooks. Inapplicable cases are not counted as passing coverage.
     if (case.starts_with("cache_policy_")
@@ -2027,6 +2041,7 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             || spec.name.starts_with("adopt_open_")
             || spec.name.starts_with("sender_attribution_")
             || spec.name.starts_with("notices_")
+            || spec.name.starts_with("cleared_ride_")
             || spec.name.starts_with("sender_succession_")
             || spec.name.starts_with("live_ids_")
             || spec.name.starts_with("message_senders_")

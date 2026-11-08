@@ -268,11 +268,19 @@ pub struct Approval {
 }
 
 /// A supported rendering form for a send delivered with a tool result.
+/// More forms may be added; the `forms` list decoder skips strings it doesn't
+/// know.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum RideForm {
     ToolResult,
     TurnSystem,
+    /// A turn-scoped system message the provider clears at the next
+    /// user-role message. A ride delivered this way renders only on a route
+    /// that clears and is omitted on any other (the view library's
+    /// `cleared_ride`).
+    TurnSystemCleared,
 }
 
 fn ride_forms<'de, D: serde::Deserializer<'de>>(
@@ -285,6 +293,7 @@ fn ride_forms<'de, D: serde::Deserializer<'de>>(
             .filter_map(|form| match form.as_str() {
                 "tool_result" => Some(RideForm::ToolResult),
                 "turn_system" => Some(RideForm::TurnSystem),
+                "turn_system_cleared" => Some(RideForm::TurnSystemCleared),
                 _ => None,
             })
             .collect();

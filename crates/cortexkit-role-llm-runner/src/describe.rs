@@ -171,7 +171,9 @@ pub struct RoleDescribe {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steer_receipt: Option<String>,
     /// List modes this runner can ever land. Absence uses the capability-group
-    /// mapping; presence narrows it. Validated by [`check_describe`].
+    /// mapping for existing modes, never `turn_system_cleared`, which requires
+    /// an explicit listing. Listed modes still need their capability groups.
+    /// Validated by [`check_describe`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery_order_modes: Option<Vec<String>>,
     /// Limits required when the `retention` capability group is declared.
@@ -1004,7 +1006,7 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         let mut seen = std::collections::HashSet::new();
         for mode in modes {
             let problem = match mode.as_str() {
-                names::TOOL_RESULT | names::TURN_SYSTEM => None,
+                names::TOOL_RESULT | names::TURN_SYSTEM | names::TURN_SYSTEM_CLEARED => None,
                 names::STEER if !describe.declares(capabilities::STEER) => {
                     Some(problem_names::DELIVERY_ORDER_STEER_UNDECLARED)
                 }

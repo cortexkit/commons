@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+- Take compaction 0.3.0; the minor bump reflects the compaction types exposed
+  by the public render-plan API. Existing plans and vectors are byte-identical.
+- Added `render::cleared_ride(form, route_clears)`, the reference rule for
+  `turn_system_cleared` rides: rendered cleared on a route that clears at the
+  next user-role message, omitted on any other route, never as a persistent
+  `turn_system`. Also available as the `cleared_ride` dispatcher function with
+  vectors.
+
 ## 0.1.8
 
 - Require compaction 0.2.10. Add view-aware `plan_view`, `plan_view_at`,

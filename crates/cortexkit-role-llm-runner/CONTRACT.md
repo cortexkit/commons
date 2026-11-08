@@ -232,13 +232,16 @@ alias until the next breaking release.
   declared, optional cancellation-point metadata (§3), and optional delivery
   list mode metadata (§9.7).
 - [pinned] `delivery_order_modes` optionally lists the delivery list modes the
-  runner can ever land (§9.7). Absent means the capability-group mapping is
-  unchanged; present means only its listed modes count as declared, still
-  requiring their groups. `check_describe` refuses an unknown mode name, a
+  runner can ever land (§9.7). Absent leaves the capability-group mapping for
+  existing modes unchanged; present means only its listed modes count as
+  declared, still requiring their groups. `check_describe` refuses an unknown mode name, a
   duplicate, an empty list, a listed `steer` without the `steer` group, a listed
   `idle_start` without `queue`, or the member without the `delivery_order`
   group. The member is an array of strings (`Option<Vec<String>>` in
   `RoleDescribe`, built with `with_delivery_order_modes`).
+  A runner advertises `turn_system_cleared` only by explicitly listing it in
+  this member; an absent member never implies the new mode. It still requires
+  `delivery_order`, not a new capability group.
 - [pinned] The answer describes the runner build, never a session. A consumer
   may cache it for as long as it talks to the same module incarnation.
 - [pinned] Stability is data, never part of a capability name. Each major
@@ -3960,24 +3963,27 @@ say who may send and which texts are system text.
     result is sent;
   - `turn_system`: turn-scoped system text, rendered for its provider route
     by the rules below, for template text only;
+  - `turn_system_cleared`: template-only system text riding a tool result,
+    only on a route confirmed to clear it at the next user-role message;
   - `steer`: a user message into the run in progress, at its next step;
   - `idle_start`: a user message that starts a run on an idle session.
 - [pinned] `delivery` is decoded once, as a string or a list
   (`SendRequest`): a list that is not of these modes, empty, or naming a
   mode twice is refused `invalid_params {field: "delivery"}`, writing
   nothing, as an unknown string is.
-- [pinned] For a list, `tool_result` and `turn_system` are modes of the
+- [pinned] For a list, `tool_result`, `turn_system` and `turn_system_cleared` are modes of the
   `delivery_order` group; `steer` requires the `steer` group, and `idle_start`
   requires the `queue` group (§3). The `steer` group does not require `run_ops`,
   since a runner may land steers into turns it does not own (the delivered-steer
   rule in §9).
-  Without `role.describe.delivery_order_modes`, this is the unchanged mapping
-  (`delivery_order::Mode::is_declared`). When the member is present, only its
+  Without `role.describe.delivery_order_modes`, the mapping for existing modes
+  is unchanged (`delivery_order::Mode::is_declared`), but `turn_system_cleared`
+  is never declared. When the member is present, only its
   listed modes count as declared, still requiring the groups above
   (`Mode::is_declared_by`): the member only narrows, never adds a capability.
   For example, a runner declaring `delivery_order` and `steer` with
   `delivery_order_modes: ["steer"]` declares only `steer` for lists, not
-  `tool_result`, `turn_system` or `idle_start`, even if it also declares `queue`.
+  `tool_result`, `turn_system`, `turn_system_cleared` or `idle_start`, even if it also declares `queue`.
   This member does not narrow legacy string delivery modes.
   `interrupt` has no list form. A structurally valid list with no declared
   member after this narrowing is refused at once as `delivery_unsupported`, with
@@ -3990,7 +3996,9 @@ say who may send and which texts are system text.
   `delivery_order::Boundary`): `tool_result` needs a tool result about to be
   sent for the first time; `turn_system` needs a supported provider route
   and a legal position under the rendering rules below, a runner that owns
-  the request, and the authority rule below; `steer`
+  the request, and the authority rule below; `turn_system_cleared` needs all
+  those authority and position conditions, a tool result about to be sent for
+  the first time, and confirmed next-user-message clearing on that route; `steer`
   needs a run in progress; `idle_start` needs an idle session. When none is
   possible, the send stays queued, durably, for the next boundary.
   Without `delivery_order_modes`, `turn_system` counts as declared wherever
@@ -3999,6 +4007,13 @@ say who may send and which texts are system text.
   of `turn_system` alone can wait on such a runner until the send expires. A
   runner that can never land `turn_system` should advertise
   `delivery_order_modes` without it, so such a list is refused at once.
+  A sender lists `turn_system_cleared` only to a runner whose
+  `delivery_order_modes` explicitly names it. A runner that supports the new
+  mode must send that member; absence never implies support, because older
+  runners' delivery-list decoders do not know the mode. An explicit declaration
+  is not proof that a route clears messages. If clearing is unconfirmed, the
+  runner skips this mode in
+  list order, or leaves the send queued when no mode is possible.
 - [pinned] A send participates only in boundaries rendered after the
   request-rendering component has staged it. For a runner beside its host, this is when the
   host-side component has staged the send, which may be later than acceptance;
@@ -4070,7 +4085,8 @@ say who may send and which texts are system text.
 
 **What is written.**
 
-- [pinned] A send delivered in `tool_result` mode, a **ride**, is not a
+- [pinned] A send delivered in `tool_result` or `turn_system_cleared` mode,
+  a **ride**, is not a
   transcript entry. The runner keeps a record of `{send_id, sender,
   call_key, call_carrier?, text}` (`rides::Ride`), where `call_key` identifies
   the carrying tool result and `call_carrier` follows §9.16.
@@ -4080,7 +4096,10 @@ say who may send and which texts are system text.
   The send's receipt (`session.send_status`, §9.8) still names the carrying
   `call_key`.
   The runner also retains the send's ordered ride `forms` so later requests
-  and model switches can render from the durable record.
+  and model switches can render from the durable record. At delivery it also
+  records the form actually delivered, the same value the notices fact serves
+  as `delivered_as`; that record never changes. A cleared ride is recorded on
+  the tool part it follows, never as a standalone system transcript entry.
 - [pinned] At delivery, the runner picks a carrying result among results
   about to be sent to the model for the first time and records its
   `call_key`. It may skip a result it cannot extend with text, such as a
@@ -4098,18 +4117,30 @@ say who may send and which texts are system text.
   `delivered_as` never change. Provider rendering may change on a later
   route as the `turn_system` authority fall-through below specifies.
 - [pinned] A ride's `forms` are the send's `delivery` list restricted to
-  `tool_result` and `turn_system`, in list order. Old rides without `forms`
+  `tool_result`, `turn_system` and `turn_system_cleared`, in list order. Old rides without `forms`
   use `[tool_result]`. At rendering, the first supported form wins:
   `tool_result` is the append form, always supported; `turn_system` is a
   turn-scoped system message right after the user turn carrying the tool
   results, only under the existing provider-route, position and authority
-  rules below. Unsupported system form falls back to append. Admission
-  already restricts `turn_system` to templates passing the authority rule;
+  rules below. Unsupported persistent system form falls back to append. Both
+  system forms require templates passing the authority rule;
   free-form filled-in text can never reach system authority. A ride whose
-  send did not list `turn_system` never renders as system text. This does
+  send did not list either system form never renders as system text. This does
   not change boundary delivery selection (`delivery_order::choose`).
+- [pinned] A `turn_system_cleared` ride renders as a cleared turn-scoped system
+  message on a route that clears at the next user-role message, and is omitted
+  on any other route. It never renders as a persistent `turn_system`.
+  This class is fixed by the recorded delivered form, not by the first item
+  in `forms`: a ride delivered cleared follows this rule for its whole life.
+  A ride delivered as `tool_result` or `turn_system` keeps the existing
+  per-route selection rules but never selects `turn_system_cleared` later.
+  A reminder already delivered as persistent text never becomes transient.
+  Every runner applies this rule, whether or not it uses the view library;
+  `render::cleared_ride` is the reference implementation, with the recorded
+  delivered form as its first argument.
 - [pinned] Per session and model, the runner decides once whether the route
-  supports system form and durably records that decision. Each ride takes
+  supports each system form and durably records that decision. Except for
+  the fixed cleared-ride class above, each ride takes
   the first form in its own `forms` that this recorded decision and the
   position rules allow. Thus mixed rides may use different forms, but each
   ride renders the same bytes on every request while the session stays on
@@ -4194,11 +4225,25 @@ say who may send and which texts are system text.
   later provider rendering follows the authority rules below.
 - [pinned] `tool_result` append form, `steer` and `idle_start` deliver at user
   authority. A ride's system form follows the same authority restrictions
-  as `turn_system`. `turn_system` is possible only for a rendered template, and
+  as `turn_system`. Both `turn_system` and `turn_system_cleared` are possible
+  only for a rendered plan template with validated typed slots, and
   only where the provider route and position support it under the rules
   below and the runner owns the request. Where it is not, the runner falls
   through to the next mode in the list, carrying the same rendered text at
-  user authority. A send without a template never goes out as `turn_system`.
+  user authority. A send without a template never goes out in either system
+  form. A free-text list naming only `turn_system_cleared`, like one naming
+  only `turn_system`, stays queued until expiry or retraction, never delivered
+  at system authority. Free text with `[turn_system_cleared, tool_result]`
+  falls through to `tool_result` at a tool-result boundary.
+- [pinned] The runner uses `turn_system_cleared` only after confirming that
+  its provider route clears that message at the next user-role message, such
+  as Anthropic's `clear_at: next_user_message`. Neither the provider name,
+  model version arithmetic nor support for persistent `turn_system` confirms
+  clearing. Placement follows `turn_system`'s route rules below, directly
+  after the carrying tool-result turn; no tool call/result pair is split.
+  Unconfirmed clearing falls through the send's delivery list exactly as an
+  unsupported `turn_system` does. The runner chooses and records the form,
+  never the provider.
 - [pinned] On OpenAI Responses routes where the provider supports it,
   including subscription routes that speak the Responses protocol,
   `turn_system` renders as a `developer`-role
@@ -4465,7 +4510,8 @@ never less. This is the safe fallback because nothing gets hidden.
   in `reasoning_summaries`, never a projected display index or opaque key.
   `call_key` is the carrying call's recorded key. `call_carrier` follows
   §9.16, on both `read::NoticeFact` and display-row notice facts.
-  `delivered_as` is an open string, currently `"tool_result"` for every entry this fact serves; a
+  `delivered_as` is an open string, including `"tool_result"`, `"turn_system"`
+  and `"turn_system_cleared"`; a
   later delivery mode can use the same shape. Readers place a `tool_result`
   notice under the call whose key it names.
 - [pinned] `send_id` on a notice joins it to the send that the tool result
@@ -4494,7 +4540,8 @@ never less. This is the safe fallback because nothing gets hidden.
   (`live::NoticeDelivered`), with `call_carrier` following §9.16, identifying the
   carrying message and part, not a new entry. The optional `delivered_as` is an
   open string with the same values as the notices read fact's `delivered_as`;
-  absent means `tool_result`. The runner carries it when it knows a form other
+  `"turn_system_cleared"` identifies a cleared-system ride.
+  Absent means `tool_result`. The runner carries it when it knows a form other
   than `tool_result`, so live readers can tell forms apart without waiting for
   a read. Neither delivery nor the fact
   moves `history_version`. Neither the live event nor the read/display fact
@@ -6170,7 +6217,9 @@ every request, answer and refusal.
   history, and never counted as the head's steps. Their form is chosen once
   per session and model (including route), and recorded. The notice form
   vocabulary gains `tool_addition` and `tool_removal` for native provider
-  forms; text uses the supported turn-scoped form. The runner confirms each
+  forms; text uses persistent `turn_system`, never `turn_system_cleared`.
+  System-text and tool add/remove/change plan notes never use the cleared
+  form. The runner confirms each
   form on its own transport before enabling it. A system-role form is
   allowed for a system-text change because it is the plan owner's own
   text. A sent note is never edited; a correction is a new note.

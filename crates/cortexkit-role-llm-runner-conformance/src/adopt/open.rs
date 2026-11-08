@@ -131,6 +131,7 @@ where
         let supported: Vec<String> = [
             Mode::ToolResult,
             Mode::TurnSystem,
+            Mode::TurnSystemCleared,
             Mode::Steer,
             Mode::IdleStart,
         ]

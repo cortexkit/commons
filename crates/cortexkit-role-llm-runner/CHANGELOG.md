@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.29
+
+- Add template-only `turn_system_cleared` to `delivery_order`, requiring an explicit
+  `delivery_order_modes` listing: absence never advertises it, so older decoders
+  are not sent the new mode. It needs a tool-result boundary and a
+  route confirmed to clear at the next user-role message; otherwise selection
+  falls through in list order. Free text never gains system authority.
+- Record the chosen form once on the tool-part ride, notices fact and live
+  `notice_delivered` event, never as a transcript entry. A cleared ride is omitted
+  on a later non-clearing route; a persistent ride never upgrades to cleared.
+  Plan notes retain persistent `turn_system` and never use the cleared form.
+
 ## 0.8.28
 
 - Clarify that `media_refs` preserves flattened inline tool-result text; only

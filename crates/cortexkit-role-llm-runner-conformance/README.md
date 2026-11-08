@@ -1,7 +1,20 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.33** pins runner **0.8.28**. Plan sender fixtures use bare module
-ids, and call-yield person senders grant `idle_start`; runners need no change.
+Version **0.17.34** pins runner **0.8.29**. Seven cleared-ride cases are skipped
+unless the adapter opts in with `turn_system_cleared_supported` and the runner
+explicitly lists `turn_system_cleared` in `delivery_order_modes`. Opt-in adapters
+implement `configure_turn_system_cleared_route`: select a confirmed or
+unconfirmed route for a new fixture, or switch an existing session's route
+through its real plan path with a prompt rebuild. They observe
+`ModelRequestObservation::cleared_system_text` from provider clearing markers,
+not delivery modes, alongside `system_text`. The plan-note case additionally
+uses `plan_notes_fixture`. The cases cover recorded cleared rides, fallback,
+free-text authority, plan-note exclusion and fixed delivery classes across
+route switches.
+
+Plan sender fixtures use bare module ids. Fixtures for a person sending during
+a yielded tool call (`call_yield`) grant that sender `idle_start`; those
+fixtures need no runner change.
 The message-mark retry case checks
 refusal of changed marks and replay of identical marks. The optional
 `admission_reports` describe token has no capability prerequisites.
