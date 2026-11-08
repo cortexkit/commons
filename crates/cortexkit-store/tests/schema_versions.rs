@@ -112,8 +112,23 @@ fn expected() -> BTreeMap<String, u64> {
 
 #[derive(Debug, PartialEq, Eq)]
 struct FileState {
-    bytes: Vec<u8>,
+    /// `None` when another process holds a byte-range lock on the file, which
+    /// only Windows enforces against reads; size and time are compared then.
+    bytes: Option<Vec<u8>>,
+    len: u64,
     modified: Option<SystemTime>,
+}
+
+/// Windows `ERROR_LOCK_VIOLATION`: a region of the file is locked by another
+/// process, here the store holder's lease or database lock.
+const LOCK_VIOLATION: i32 = 33;
+
+fn read_unless_locked(path: &Path) -> Option<Vec<u8>> {
+    match fs::read(path) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if cfg!(windows) && error.raw_os_error() == Some(LOCK_VIOLATION) => None,
+        Err(error) => panic!("reading {}: {error}", path.display()),
+    }
 }
 
 // File names include directories. The shared-memory file may change during a
@@ -125,7 +140,8 @@ fn folder_state(root: &Path) -> BTreeMap<PathBuf, Option<FileState>> {
             let metadata = fs::metadata(&path).unwrap();
             let contents = if metadata.is_file() && !path.to_string_lossy().ends_with("-shm") {
                 Some(FileState {
-                    bytes: fs::read(&path).unwrap(),
+                    bytes: read_unless_locked(&path),
+                    len: metadata.len(),
                     modified: metadata.modified().ok(),
                 })
             } else {
