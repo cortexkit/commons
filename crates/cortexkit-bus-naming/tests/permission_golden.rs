@@ -683,9 +683,9 @@ fn event_consumer_grant_is_participant_plus_exactly_three_durable_permissions() 
     for module_id in [
         "prefrontal-core",
         "astrocyte",
+        "prefrontal-routing",
         "thalamus-harness",
         "thalamus",
-        "thalamus-pi",
         "cerebellum",
     ] {
         let baseline = participant_permissions(&account, "UPFC", "ordinary", &[])

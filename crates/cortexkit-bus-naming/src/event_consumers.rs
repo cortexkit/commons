@@ -3,7 +3,10 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
-use crate::{validate_consumer, AccountNames, ConsumerSpec, LimitError, NamingError};
+use crate::{
+    validate_consumer, validate_event_version, validate_token, AccountNames, ConsumerSpec,
+    LimitError, NamingError, TokenKind,
+};
 
 /// One entry of the event-consumer table: a module allowed to read a filtered
 /// slice of other modules' events through its own durable. Filters are relative
@@ -44,17 +47,12 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.broca.step.finished.v1",
             "event.thalamus-harness.step.finished.v1",
             "event.thalamus.step.finished.v1",
-            "event.thalamus-pi.step.finished.v1",
         ],
     },
     EventConsumer {
         module_id: "prefrontal-routing",
         durable: "m_prefrontal-routing",
-        filter_subjects: &[
-            "event.insula.>",
-            "event.broca.step.finished.v1",
-            "event.thalamus-harness.step.finished.v1",
-        ],
+        filter_subjects: &["event.insula.>"],
     },
     EventConsumer {
         module_id: "magic-context",
@@ -62,7 +60,6 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         filter_subjects: &[
             "event.thalamus-harness.compaction.>",
             "event.thalamus.compaction.>",
-            "event.thalamus-pi.compaction.>",
             "event.broca.compaction.>",
         ],
     },
@@ -74,11 +71,6 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
     EventConsumer {
         module_id: "thalamus",
         durable: "m_thalamus",
-        filter_subjects: &["event.magic-context.compaction.>"],
-    },
-    EventConsumer {
-        module_id: "thalamus-pi",
-        durable: "m_thalamus-pi",
         filter_subjects: &["event.magic-context.compaction.>"],
     },
     EventConsumer {
@@ -97,11 +89,147 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         filter_subjects: &[
             "event.thalamus-harness.turn_started.v1",
             "event.thalamus-harness.turn_ended.v1",
-            "event.thalamus-pi.turn_started.v1",
-            "event.thalamus-pi.turn_ended.v1",
         ],
     },
 ];
+
+/// A module allowed to subscribe to exact live hints without gaining an EVENT
+/// durable, EVENT-stream reads, or consumer create/info permissions. Subjects
+/// use relative `event.{module}.{name}.v{version}` spelling to identify the hint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LiveHintReader {
+    pub module_id: &'static str,
+    pub subjects: &'static [&'static str],
+}
+
+impl LiveHintReader {
+    pub const fn new(module_id: &'static str, subjects: &'static [&'static str]) -> Self {
+        Self {
+            module_id,
+            subjects,
+        }
+    }
+}
+
+/// Who may observe another module's hints is a security decision reviewed in
+/// code. Runtime configuration cannot extend this closed table. Entries grant
+/// live-hint subscribe permission only, independently of event durables.
+pub const LIVE_HINT_READERS: &[LiveHintReader] = &[LiveHintReader::new(
+    "prefrontal-routing",
+    &[
+        "event.broca.step.finished.v1",
+        "event.thalamus-harness.step.finished.v1",
+    ],
+)];
+
+/// Sorted, deduplicated live subscriptions from both reviewed reader tables.
+/// EVENT filters retain their wildcard scope under `ck.{account}.live.`; the
+/// live-only table adds exact hints without changing any durable or EVENT grant.
+/// A valid module absent from both tables has no live subscriptions.
+pub fn live_hint_subscriptions(
+    account: &AccountNames,
+    module_id: &str,
+) -> Result<Vec<String>, NamingError> {
+    validate_token(TokenKind::ModuleId, module_id)?;
+    validate_live_hint_readers(LIVE_HINT_READERS, EVENT_CONSUMERS)?;
+    let subjects = EVENT_CONSUMERS
+        .iter()
+        .filter(|entry| entry.module_id == module_id)
+        .flat_map(|entry| entry.filter_subjects)
+        .chain(
+            LIVE_HINT_READERS
+                .iter()
+                .filter(|entry| entry.module_id == module_id)
+                .flat_map(|entry| entry.subjects),
+        )
+        .map(|subject| {
+            let suffix = subject.strip_prefix("event.").ok_or_else(|| {
+                NamingError::new(
+                    TokenKind::EventName,
+                    subject,
+                    "expected relative event subject",
+                )
+            })?;
+            Ok(format!("ck.{}.live.{suffix}", account.account()))
+        })
+        .collect::<Result<BTreeSet<_>, NamingError>>()?;
+    Ok(subjects.into_iter().collect())
+}
+
+fn validate_live_hint_readers(
+    entries: &[LiveHintReader],
+    event_consumers: &[EventConsumer],
+) -> Result<(), NamingError> {
+    let mut modules = BTreeSet::new();
+    for entry in entries {
+        validate_token(TokenKind::ModuleId, entry.module_id)?;
+        if !modules.insert(entry.module_id) {
+            return Err(NamingError::new(
+                TokenKind::ModuleId,
+                entry.module_id,
+                "duplicate live-hint reader module",
+            ));
+        }
+        if entry.subjects.is_empty() {
+            return Err(NamingError::new(
+                TokenKind::EventName,
+                entry.module_id,
+                "live-hint reader needs at least one subject",
+            ));
+        }
+        let mut subjects = BTreeSet::new();
+        for subject in entry.subjects {
+            validate_live_hint_subject(subject)?;
+            if !subjects.insert(subject) {
+                return Err(NamingError::new(
+                    TokenKind::EventName,
+                    subject,
+                    "duplicate live-hint reader subject",
+                ));
+            }
+            for filter in event_consumers
+                .iter()
+                .filter(|consumer| consumer.module_id == entry.module_id)
+                .flat_map(|consumer| consumer.filter_subjects)
+            {
+                let overlaps =
+                    crate::limits::subject_filters_overlap(subject, filter).map_err(|_| {
+                        NamingError::new(
+                            TokenKind::EventName,
+                            filter,
+                            "invalid event-consumer filter",
+                        )
+                    })?;
+                if overlaps {
+                    return Err(NamingError::new(
+                        TokenKind::EventName,
+                        subject,
+                        "live-hint subject is already covered by the module's EVENT filters",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_live_hint_subject(subject: &str) -> Result<(), NamingError> {
+    let refuse = || {
+        NamingError::new(
+            TokenKind::EventName,
+            subject,
+            "expected exact event.{module}.{name}.v{version} subject",
+        )
+    };
+    let relative = subject.strip_prefix("event.").ok_or_else(refuse)?;
+    let (module, event_version) = relative.split_once('.').ok_or_else(refuse)?;
+    let (event, version) = event_version.rsplit_once('.').ok_or_else(refuse)?;
+    validate_token(TokenKind::ModuleId, module)?;
+    validate_token(TokenKind::EventName, event)?;
+    validate_event_version(version)?;
+    Ok(())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AckPolicy {
@@ -329,6 +457,71 @@ fn module_event_spec(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_hint_reader_table_rejects_duplicate_modules() {
+        let reader = LIVE_HINT_READERS[0];
+        let error = validate_live_hint_readers(&[reader, reader], EVENT_CONSUMERS).unwrap_err();
+        assert_eq!(error.kind(), TokenKind::ModuleId);
+        assert_eq!(error.token(), "prefrontal-routing");
+        assert_eq!(error.reason(), "duplicate live-hint reader module");
+    }
+
+    #[test]
+    fn live_hint_reader_table_rejects_cross_module_wildcards() {
+        for subjects in [&["event.*.step.finished.v1"][..], &["event.>"][..]] {
+            let reader = LiveHintReader::new("reader", subjects);
+            assert!(validate_live_hint_readers(&[reader], EVENT_CONSUMERS).is_err());
+        }
+    }
+
+    #[test]
+    fn live_hint_reader_table_rejects_overlap_with_own_event_filters() {
+        for reader in [
+            LiveHintReader::new("astrocyte", &["event.broca.step.finished.v1"]),
+            LiveHintReader::new("prefrontal-routing", &["event.insula.quota_sampled.v1"]),
+        ] {
+            let error = validate_live_hint_readers(&[reader], EVENT_CONSUMERS).unwrap_err();
+            assert_eq!(error.token(), reader.subjects[0]);
+            assert_eq!(
+                error.reason(),
+                "live-hint subject is already covered by the module's EVENT filters"
+            );
+        }
+    }
+
+    #[test]
+    fn live_hint_reader_table_requires_nonempty_unique_exact_subjects() {
+        for subjects in [
+            &[][..],
+            &["live.broca.step.finished.v1"][..],
+            &["event.broca.>"][..],
+            &["event.broca.step.*.v1"][..],
+            &["event.broca.step.finished.v0"][..],
+            &["event.broca.step.finished.v01"][..],
+            &["event.broca.step.finished"][..],
+            &["event.broca.step.v1.finished.v1"][..],
+            &[
+                "event.broca.step.finished.v1",
+                "event.broca.step.finished.v1",
+            ][..],
+        ] {
+            let reader = LiveHintReader::new("reader", subjects);
+            assert!(
+                validate_live_hint_readers(&[reader], EVENT_CONSUMERS).is_err(),
+                "{subjects:?}"
+            );
+        }
+        let reader = LiveHintReader::new("reader", &["event.broca.step.finished.v1"]);
+        validate_live_hint_readers(&[reader], EVENT_CONSUMERS).unwrap();
+        let invalid_module = LiveHintReader::new("*", reader.subjects);
+        assert_eq!(
+            validate_live_hint_readers(&[invalid_module], EVENT_CONSUMERS)
+                .unwrap_err()
+                .kind(),
+            TokenKind::ModuleId
+        );
+    }
 
     #[test]
     fn event_consumer_table_rejects_duplicate_modules() {

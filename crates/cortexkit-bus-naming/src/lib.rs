@@ -7,9 +7,10 @@ mod names;
 mod token;
 
 pub use event_consumers::{
-    delivery_consumer_specs, event_consumer_specs, flow_engine_consumer_spec, AckPolicy,
-    DeliverPolicy, DeliveryConsumerSpec, EventConsumer, EventConsumerError,
-    ModuleEventConsumerSpec, EVENT_CONSUMERS,
+    delivery_consumer_specs, event_consumer_specs, flow_engine_consumer_spec,
+    live_hint_subscriptions, AckPolicy, DeliverPolicy, DeliveryConsumerSpec, EventConsumer,
+    EventConsumerError, LiveHintReader, ModuleEventConsumerSpec, EVENT_CONSUMERS,
+    LIVE_HINT_READERS,
 };
 pub use grants::{
     bus_permissions, delivery_authority_permissions, flow_engine_permissions,

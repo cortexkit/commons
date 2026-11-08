@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.2
+
+- Separate live-hint readers from event durables with the closed
+  `LIVE_HINT_READERS` table and `live_hint_subscriptions` API. The bus module
+  should derive live permissions from this function, not rewrite EVENT filters.
+- Narrow `prefrontal-routing`'s durable back to exactly `event.insula.>` while
+  retaining its two runner step hints as live-only subscriptions. Bootstrap
+  should narrow `m_prefrontal-routing` in place.
+- Remove `thalamus-pi` and its filters from the reviewed readers. Bootstrap
+  should leave the now-unlisted `m_thalamus-pi` durable alone.
+
 ## 0.3.1
 
 - Add two exact runner `step.finished.v1` reader filters for routing's model

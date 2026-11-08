@@ -63,7 +63,7 @@ impl NamingError {
         self.reason
     }
 
-    fn new(kind: TokenKind, token: &str, reason: &'static str) -> Self {
+    pub(crate) fn new(kind: TokenKind, token: &str, reason: &'static str) -> Self {
         Self {
             kind,
             token: token.to_owned(),
