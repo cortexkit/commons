@@ -1,5 +1,6 @@
 use super::*;
 use cortexkit_role_routing_conformance::fixture;
+use cortexkit_role_routing_conformance::wire::engine_measurements as measurements;
 use cortexkit_role_routing_conformance::{wire::select_engine as engine, EngineFacts};
 
 #[derive(Default)]
@@ -9,7 +10,9 @@ pub(super) struct EngineState {
     pub facts: Vec<EngineFacts>,
     pub elapsed: u64,
     decisions: HashMap<String, (String, engine::SelectEngineAnswer)>,
+    decision_kinds: HashMap<String, engine::Kind>,
     admissions: HashMap<(String, String), (Value, Value)>,
+    evaluations: Vec<measurements::EngineEvalRequest>,
 }
 
 impl EngineState {
@@ -67,6 +70,9 @@ impl FakeRoute {
             .cloned();
         match method {
             ops::ROUTE_SELECT_ENGINE => Some(self.select_media(state, params)),
+            ops::ROUTE_ENGINE_EVAL | ops::ROUTE_ENGINE_REPORT => {
+                Some(self.measure_engine(state, method, params))
+            }
             ops::ROUTE_REPORT if decision.is_some() => {
                 let (principal, _) = decision.unwrap();
                 Some(
@@ -131,7 +137,7 @@ impl FakeRoute {
             requirements.as_object_mut().unwrap().remove(member);
             request.requirements = serde_json::from_value(requirements).unwrap();
         }
-        let mut candidates: Vec<engine::EngineCandidate<u64, u64>> = state
+        let mut candidates: Vec<engine::EngineCandidate<measurements::EvalScore, u64>> = state
             .engine
             .modules
             .iter()
@@ -152,7 +158,6 @@ impl FakeRoute {
                         && fact.provider == candidate.engine.provider
                         && fact.model == candidate.engine.model
                 }) {
-                    candidate.accuracy = facts.accuracy;
                     candidate.cost = facts.cost;
                 }
             }
@@ -165,6 +170,36 @@ impl FakeRoute {
                     ))
                     .is_some_and(|until| *until > now_ms() + state.engine.elapsed);
         }
+        let mut evaluations = state.engine.evaluations.clone();
+        match fault {
+            "select_engine_eval_measured" => evaluations.clear(),
+            "select_engine_eval_higher_score" => {
+                for eval in &mut evaluations {
+                    eval.score = 1.0 - eval.score;
+                }
+            }
+            "select_engine_eval_different_set" => {
+                for eval in &mut evaluations {
+                    eval.set.id = "all-sets".into();
+                }
+            }
+            "select_engine_eval_new_model" => {
+                for eval in &mut evaluations {
+                    if eval.engine.model == "a-old" {
+                        eval.engine.model = "a-new".into();
+                    }
+                }
+            }
+            "select_engine_eval_default_metric" if request.requirements.metric.is_none() => {
+                request.requirements.metric = Some("named_term_recall".into())
+            }
+            "select_engine_eval_requested_metric" => request.requirements.metric = None,
+            "select_engine_eval_newest_set" => {
+                evaluations.retain(|eval| eval.set.id == "old");
+            }
+            _ => {}
+        }
+        measurements::apply_evaluations(&request, &mut candidates, &evaluations);
         let selected = engine::select_engine(&request, &candidates)
             .map_err(|mut refusal| {
                 if fault == "select_engine_filters" {
@@ -189,6 +224,7 @@ impl FakeRoute {
                 },
             selected,
         );
+        state.engine.decision_kinds.insert(id.clone(), request.kind);
         state
             .engine
             .decisions
@@ -253,7 +289,12 @@ impl FakeRoute {
         let answer = AccountForAnswer::new(
             Admission {
                 id: key.1.clone(),
-                state: "admitted".into(),
+                state: if fault == "reserved_admission_state" {
+                    "reserved"
+                } else {
+                    "admitted"
+                }
+                .into(),
             },
             Account {
                 provider: chosen.provider.clone(),
@@ -287,5 +328,56 @@ impl FakeRoute {
             .admissions
             .insert(key, (params.clone(), value.clone()));
         Ok(value)
+    }
+
+    fn measure_engine(
+        &self,
+        state: &mut State,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value, Refusal> {
+        let fault = self.defects.engine_fault;
+        if method == ops::ROUTE_ENGINE_EVAL {
+            let request = if fault == "select_engine_eval_score_range" {
+                let mut body = params.clone();
+                body["score"] = json!(0.5);
+                measurements::parse_engine_eval_request(&body)?
+            } else {
+                measurements::parse_engine_eval_request(params)?
+            };
+            if fault != "select_engine_eval_authorization" {
+                measurements::check_engine_authorization(
+                    self.principal(),
+                    &request.kind,
+                    &request.engine,
+                    state.engine.modules.iter().map(|(p, e)| (p.as_str(), e)),
+                )?;
+            }
+            state.engine.evaluations.push(request);
+        } else {
+            let request = measurements::parse_engine_report_request(params)?;
+            if fault != "select_engine_speed_authorization" {
+                measurements::check_engine_authorization(
+                    self.principal(),
+                    &request.kind,
+                    &request.engine,
+                    state.engine.modules.iter().map(|(p, e)| (p.as_str(), e)),
+                )?;
+            }
+            let (_, decision) = state
+                .engine
+                .decisions
+                .get(&request.decision_id)
+                .ok_or_else(Refusal::unknown_decision)?;
+            if decision.engine.caller_local
+                || decision.engine.module.as_deref() != Some(self.principal())
+                || state.engine.decision_kinds.get(&request.decision_id) != Some(&request.kind)
+                || decision.engine.provider != request.engine.provider
+                || decision.engine.model != request.engine.model
+            {
+                return Err(Refusal::unknown_decision());
+            }
+        }
+        Ok(json!({}))
     }
 }

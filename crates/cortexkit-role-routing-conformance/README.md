@@ -115,7 +115,7 @@ addition to an exhaustive fixture type; adapters must supply it.
 
 ## Checks
 
-### Media engine selection (routing 0.7.3)
+### Media engine selection (routing 0.7.7)
 
 All `select_engine_*` checks are not applicable when the router does not
 declare `select_engine`. Engine slots are installed through
@@ -127,13 +127,13 @@ routing learns engines only from a module whose declaration the daemon verified.
 
 Two additional hooks are required by the cases that need them:
 
-- `configure_engine_facts(facts)` replaces the accuracy and cost measurements
+- `configure_engine_facts(facts)` replaces the cost measurements
   for each `(kind, provider, model)`, including caller-local engines. Each
   `EngineFacts::new(kind, provider, model)` starts with both measurements absent;
-  `with_accuracy(n)` and `with_cost(n)` supply integer fixture units. Larger
-  accuracy is better, smaller cost is better, and absence sorts below a measured
-  value. These are relative ranking facts, not monetary amounts or a prescribed
-  production measurement scale.
+  `with_cost(n)` supplies integer fixture units. Smaller cost is better, and
+  absence sorts below a known value. These are relative ranking costs, not
+  monetary amounts. The legacy `accuracy` member is retained for compatibility
+  but ignored; accuracy is supplied only through `route.engine_eval`.
 - `advance_clock(ms)` advances the provider's clock, firing every timer due in
   the interval before returning, while retaining decisions and admission replay
   state. The expiry cases advance ten minutes without sleeping.
@@ -153,8 +153,22 @@ restricts engine selection (§13). `select_engine_filters`, `select_engine_priva
 `select_engine_reachability` and `select_engine_match_requirements` check every
 filter and all eleven requirements, including absent optional facts and exact
 limits. `select_engine_answer` checks module/caller-local members and ten-minute
-expiry; `select_engine_ranking` uses explicit accuracy/cost fixtures and stable
+expiry; `select_engine_ranking` uses explicit cost fixtures and stable
 module/provider/model ties with mixed caller-local and module engines.
+
+The `select_engine_eval_*` cases require `engine_evals`; the
+`select_engine_speed_authorization` case requires `engine_reports`. Each is
+inapplicable without its own group, even when `select_engine` is declared.
+They submit reference evaluations as the declaring module, check measured over
+unmeasured ranking, newest scores on the same set, unrelated sets, new model
+identities, the `transcribe` default `wer` metric, explicit metric overrides,
+newest-set selection, score bounds, and attested-caller admission. Scores are
+normalized to `0..=1`, including `1 - wer` for WER. Adapters must retain accepted
+evaluations when catalog declarations are replaced. No accuracy fixture hook
+or production reference text is needed.
+
+Account admission checks match identifiers, not the router's open-string log
+state. A router reporting `reserved` instead of `admitted` is conforming.
 
 `select_engine_report` joins a report using only `decision_id` and `outcome` and
 rejects another principal; `select_engine_explain` requires `unknown_decision`

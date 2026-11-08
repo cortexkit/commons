@@ -1,5 +1,15 @@
 [
   {
+    "id": "select_engine.metric",
+    "cases": ["select_engine_eval_default_metric", "select_engine_eval_requested_metric"],
+    "bug_shaped": false
+  },
+  {
+    "id": "select_engine.comparison_set",
+    "cases": ["select_engine_eval_measured", "select_engine_eval_higher_score", "select_engine_eval_different_set", "select_engine_eval_new_model", "select_engine_eval_newest_set"],
+    "bug_shaped": false
+  },
+  {
     "id": "select_engine.media_admission",
     "cases": [
       "select_engine_media_admission"
@@ -95,7 +105,10 @@
   {
     "id": "select_engine.ranking",
     "cases": [
-      "select_engine_ranking"
+      "select_engine_ranking",
+      "select_engine_eval_authorization",
+      "select_engine_eval_score_range",
+      "select_engine_speed_authorization"
     ],
     "bug_shaped": false
   },

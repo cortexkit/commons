@@ -826,6 +826,15 @@ impl FakeRoute {
         );
         if self.extensions {
             describe = describe.with_capability("select_engine");
+            if self.defects.engine_fault != "without_measurements" {
+                describe = describe
+                    .with_capability("engine_reports")
+                    .with_capability("engine_evals");
+                describe.ops.extend([
+                    ops::ROUTE_ENGINE_REPORT.into(),
+                    ops::ROUTE_ENGINE_EVAL.into(),
+                ]);
+            }
             if self.defects.engine_fault != "select_engine_opt_in" {
                 describe.ops.push(ops::ROUTE_SELECT_ENGINE.into());
             }

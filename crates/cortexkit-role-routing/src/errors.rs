@@ -41,6 +41,8 @@ open_set! {
         /// `route.select_engine`: no engine remains after `detail.filter`.
         /// Never timed.
         NoEngine => "no_engine",
+        /// Engine measurements: the attested caller did not declare the engine.
+        EngineNotDeclaredByCaller => "engine_not_declared_by_caller",
         /// `route.report` or `route.account_for`: no decision with that id is
         /// visible to this caller. Answered the same way whether or not the
         /// decision exists.

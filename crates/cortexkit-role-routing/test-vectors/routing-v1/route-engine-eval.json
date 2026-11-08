@@ -1,0 +1,13 @@
+{
+  "about": "Reference-set accuracy; wer scores are 1 - wer. Admission uses the attested declaring principal.",
+  "requests": [
+    {"name":"reference_accuracy","params":{"kind":"transcribe","engine":{"provider":"example-provider","model":"model-a"},"metric":"wer","score":0.92,"set":{"id":"speech-reference-v1","items":100},"measured_at_ms":1767225600000}},
+    {"name":"open_metric_and_kind","params":{"kind":"future_kind","engine":{"provider":"example-provider","model":"model-b"},"metric":"future_metric","score":1.0,"set":{"id":"reference-v2","items":12},"measured_at_ms":1767225600001}}
+  ],
+  "refused": [
+    {"name":"score_too_high","params":{"kind":"transcribe","engine":{"provider":"example-provider","model":"model-a"},"metric":"wer","score":1.01,"set":{"id":"speech-reference-v1","items":100},"measured_at_ms":1767225600000},"refusal":{"code":"invalid_request","detail":{"field":"score"}}},
+    {"name":"score_negative","params":{"kind":"transcribe","engine":{"provider":"example-provider","model":"model-a"},"metric":"wer","score":-0.01,"set":{"id":"speech-reference-v1","items":100},"measured_at_ms":1767225600000},"refusal":{"code":"invalid_request","detail":{"field":"score"}}},
+    {"name":"bad_item_count","params":{"kind":"transcribe","engine":{"provider":"example-provider","model":"model-a"},"metric":"wer","score":0.9,"set":{"id":"speech-reference-v1","items":-1},"measured_at_ms":1767225600000},"refusal":{"code":"invalid_request","detail":{"field":"set.items"}}}
+  ],
+  "answers": [{"name":"accepted","answer":{}}]
+}

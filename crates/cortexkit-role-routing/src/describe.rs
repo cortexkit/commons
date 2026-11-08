@@ -168,6 +168,17 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
             requires: crate::capabilities::OBSERVE_BACKOFF,
         });
     }
+    for group in [
+        crate::capabilities::ENGINE_REPORTS,
+        crate::capabilities::ENGINE_EVALS,
+    ] {
+        if describe.serves(group) && !describe.serves(crate::capabilities::SELECT_ENGINE) {
+            return Err(DescribeProblem::MissingCapabilityDependency {
+                group,
+                requires: crate::capabilities::SELECT_ENGINE,
+            });
+        }
+    }
     let mut seen = std::collections::BTreeSet::new();
     for entry in &describe.consumers {
         if !seen.insert(entry.id.as_str()) {
@@ -213,6 +224,17 @@ mod tests {
                 Err(DescribeProblem::OpGroupMismatch { group })
             );
             describe.capabilities.push(group.into());
+            if [
+                crate::capabilities::ENGINE_REPORTS,
+                crate::capabilities::ENGINE_EVALS,
+            ]
+            .contains(&group)
+            {
+                describe
+                    .capabilities
+                    .push(crate::capabilities::SELECT_ENGINE.into());
+                describe.ops.push(crate::ops::ROUTE_SELECT_ENGINE.into());
+            }
             assert_eq!(check_describe(&describe), Ok(()));
             describe.ops.retain(|listed| listed != op);
             assert_eq!(

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.7
+
+- Add opt-in `engine_reports` and `engine_evals`, requiring `select_engine`,
+  for attested engine owners to report job speed and reference-set accuracy.
+  Pin score validation, comparison-set selection, exact model identity, and
+  metric defaults and overrides; speed never ranks engines.
+- Clarify that account admission state is an open string for logging, not an
+  authorization or success discriminator.
+
 ## 0.7.6
 
 - Add the pure `refusals::retry_class` helper and non-exhaustive `RetryClass`.

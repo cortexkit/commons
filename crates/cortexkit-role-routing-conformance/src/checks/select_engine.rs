@@ -11,6 +11,8 @@ mod fake;
 const MEDIA: &str = "example-media";
 const OTHER_MEDIA: &str = "other-media";
 
+mod measurements;
+
 fn entry(model: &str, local: bool) -> Value {
     json!({"kind":"transcribe", "provider":fixture::SUBSCRIPTION_PROVIDER,
         "model":model,"local":local,"formats":["audio/wav"],"latency_class":"interactive"})
@@ -87,9 +89,11 @@ async fn no_engine<R: RoutingRoute>(route: &R, params: &Value, filter: &str) -> 
 async fn admitted<R: RoutingRoute>(route: &R, params: &Value) -> Result<AccountForAnswer, String> {
     let value: AccountForAnswer =
         answer(route, ops::ROUTE_ACCOUNT_FOR, params, "media admission").await?;
-    if value.admission.state != "admitted"
-        || params["admission_id"] != value.admission.id
+    if params["admission_id"] != value.admission.id
         || params["provider"] != value.account.provider
+        || params
+            .get("decision_id")
+            .is_some_and(|id| id != &value.reason.decision_id)
     {
         return Err(format!(
             "media admission did not honour the request: {value:?}"
@@ -110,6 +114,9 @@ impl<S: RoutingSubject> Suite<'_, S> {
         }
         if !describe.ops.iter().any(|op| op == ops::ROUTE_SELECT_ENGINE) {
             return Err("select_engine must declare route.select_engine".into());
+        }
+        if name.starts_with("select_engine_eval_") || name.starts_with("select_engine_speed_") {
+            return self.engine_measurement_check(name, &route, &describe).await;
         }
         let remote = entry("model-c", false);
         self.subject
@@ -554,28 +561,22 @@ impl<S: RoutingSubject> Suite<'_, S> {
         };
         for (fixtures, model, owner, index) in [
             (
-                vec![
-                    facts("z-model").with_accuracy(90).with_cost(100),
-                    facts("a-model").with_accuracy(80).with_cost(1),
-                ],
+                vec![facts("z-model").with_cost(100), facts("a-model")],
                 "z-model",
                 Some("a-media"),
                 None,
             ),
             (
                 vec![
-                    facts("z-model").with_accuracy(90).with_cost(1),
-                    facts("a-model").with_accuracy(90).with_cost(100),
+                    facts("z-model").with_cost(1),
+                    facts("a-model").with_cost(100),
                 ],
                 "z-model",
                 Some("a-media"),
                 None,
             ),
             (
-                vec![
-                    facts("a-model").with_accuracy(90),
-                    facts("caller").with_accuracy(90).with_cost(1),
-                ],
+                vec![facts("a-model"), facts("caller").with_cost(1)],
                 "caller",
                 None,
                 Some(0),
@@ -752,6 +753,26 @@ mod tests {
     use super::*;
     use fake::{Defects, FakeSubject};
     use std::collections::BTreeSet;
+
+    #[tokio::test]
+    async fn select_engine_reserved_admission_state_passes() {
+        for name in [
+            "select_engine_media_admission",
+            "select_engine_admission_before_expiry",
+            "select_engine_admission_expiry",
+            "select_engine_admission_replay",
+        ] {
+            let subject = FakeSubject::new(Defects {
+                engine_fault: "reserved_admission_state",
+                ..Defects::default()
+            });
+            assert_eq!(
+                Suite::new(&subject).run(name).await,
+                Ok(Ending::Passed),
+                "{name}"
+            );
+        }
+    }
 
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]

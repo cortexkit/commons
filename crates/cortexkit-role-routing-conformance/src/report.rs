@@ -14,6 +14,16 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("select_engine_eval_measured", "engine_evals: measured engines outrank unmeasured engines and cost"),
+    check("select_engine_eval_higher_score", "engine_evals: newest score on the same set ranks higher first"),
+    check("select_engine_eval_different_set", "engine_evals: scores from another set are not comparable"),
+    check("select_engine_eval_new_model", "engine_evals: a new model id starts unmeasured"),
+    check("select_engine_eval_default_metric", "engine_evals: transcription defaults to wer regardless of arrival order"),
+    check("select_engine_eval_requested_metric", "engine_evals: the requested metric overrides the kind default"),
+    check("select_engine_eval_newest_set", "engine_evals: the newest reference set decides ranking"),
+    check("select_engine_eval_authorization", "engine_evals: refuse non-declaring callers"),
+    check("select_engine_eval_score_range", "engine_evals: refuse out-of-range scores naming score"),
+    check("select_engine_speed_authorization", "engine_reports: refuse non-declaring callers"),
     check("select_engine_opt_in", "select_engine: declare the operation with its group"),
     check("select_engine_slot_malformed", "select_engine: reject the whole malformed slot"),
     check("select_engine_slot_duplicate", "select_engine: reject a duplicate kind/model atomically"),
@@ -27,7 +37,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("select_engine_privacy", "select_engine: keep local engines and admit remote engines only when allowed"),
     check("select_engine_reachability", "select_engine: fence remote but not local or caller-local engines"),
     check("select_engine_answer", "select_engine: check module/index matrix and ten-minute expiry"),
-    check("select_engine_ranking", "select_engine: rank measured accuracy, cost and deterministic ties across caller and module engines"),
+    check("select_engine_ranking", "select_engine: rank unmeasured engines by known cost and deterministic ties"),
     check("select_engine_report", "select_engine: join by decision_id and outcome and refuse foreign reports"),
     check("select_engine_explain", "select_engine: refuse engine decisions as unknown_decision"),
     check("select_engine_media_admission", "select_engine: admit attested remote slot pairs only, without requiring a decision"),
@@ -291,6 +301,7 @@ pub const CHECKS: &[CheckSpec] = &[
 /// Where the kit checks less than the contract says, and why. Every report
 /// prints these.
 pub const NARROWINGS: &[&str] = &[
+    "engine_reports: attested owner admission is checked, but rolling speed-window retention, latency inspection and realtime filtering are provider policy and are not observable through these hooks",
     "select_engine: malformed slot health diagnostics, retained consumer attribution and scope isolation are not inspected. Remote reachability is exercised with a cooldown, not separate backoff, quota or recorded-failure fixtures. Accuracy and cost are supplied fixture units, not real billing or engine measurements.",
     "report_usage_run_id: the hooks expose no usage counts, so the kit checks acceptance of distinct runs and repeated pairs with changed usage, not deduplicated totals",
     "consumer_models: the kit checks answer shape and unknown consumers, not stored score/exclusion policy or ownership admission; head_choices billing is checked by decoding, not billing policy or pin_only selection",

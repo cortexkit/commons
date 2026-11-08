@@ -1,0 +1,12 @@
+{
+  "about": "Job speed measurements, never reference accuracy or an account lease release.",
+  "requests": [
+    {"name":"completed_job","params":{"decision_id":"engine-decision-a","kind":"transcribe","engine":{"provider":"example-provider","model":"model-a"},"outcome":"done","input":{"duration_ms":1000,"bytes":4096,"chars":50},"wall_ms":250,"first_output_ms":20}},
+    {"name":"open_outcome","params":{"decision_id":"engine-decision-b","kind":"future_kind","engine":{"provider":"example-provider","model":"model-b"},"outcome":"future_outcome","input":{},"wall_ms":1}}
+  ],
+  "refused": [
+    {"name":"negative_wall_time","params":{"decision_id":"engine-decision-a","kind":"transcribe","engine":{"provider":"example-provider","model":"model-a"},"outcome":"done","input":{},"wall_ms":-1},"refusal":{"code":"invalid_request","detail":{"field":"wall_ms"}}},
+    {"name":"bad_duration","params":{"decision_id":"engine-decision-a","kind":"transcribe","engine":{"provider":"example-provider","model":"model-a"},"outcome":"done","input":{"duration_ms":"1000"},"wall_ms":1},"refusal":{"code":"invalid_request","detail":{"field":"input.duration_ms"}}}
+  ],
+  "answers": [{"name":"accepted","answer":{}}]
+}

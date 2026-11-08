@@ -73,6 +73,8 @@ pub struct EngineRequirements {
     pub quality: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latency_class: Option<LatencyClass>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metric: Option<String>,
 }
 
 macro_rules! requirement_builders {
@@ -97,6 +99,7 @@ impl EngineRequirements {
         bias: bool => with_bias, size: String => with_size,
         resolution: String => with_resolution, quality: String => with_quality,
         latency_class: LatencyClass => with_latency_class,
+        metric: String => with_metric,
     }
 }
 
@@ -254,6 +257,7 @@ fn parse_requirements(value: Option<&Value>, kind: &Kind) -> Result<EngineRequir
             "resolution",
             "quality",
             "latency_class",
+            "metric",
         ],
     )?;
     let requirements = EngineRequirements {
@@ -268,6 +272,7 @@ fn parse_requirements(value: Option<&Value>, kind: &Kind) -> Result<EngineRequir
         resolution: members.optional("resolution")?,
         quality: members.optional("quality")?,
         latency_class: members.optional("latency_class")?,
+        metric: members.optional("metric")?,
     };
     if *kind == Kind::Realtime && requirements.format.is_some() {
         return Err(members.refuse("format", "realtime formats are not matched"));
@@ -387,9 +392,10 @@ pub fn check_answer(
     Ok(())
 }
 
-/// One catalog or caller-local candidate, with comparable catalog facts.
-/// Generic ordered facts avoid rounding the catalog's accuracy or cost values.
-/// Accuracy must be for this candidate's kind. `fenced` is the router's current
+/// One catalog or caller-local candidate, with comparable evaluation and cost facts.
+/// Generic ordered facts avoid rounding accuracy or cost values.
+/// Accuracy must be for this candidate's kind, metric and comparison set (§13).
+/// Caller-local engines have no accuracy. `fenced` is the router's current
 /// route-health judgment; it never excludes a local engine.
 #[derive(Clone, Debug, PartialEq)]
 #[non_exhaustive]
@@ -438,7 +444,7 @@ impl<Accuracy, Cost> EngineCandidate<Accuracy, Cost> {
     }
 }
 
-/// Apply the four filters to whole sets, then the exact catalog-fact ranking.
+/// Apply the four filters to whole sets, then accuracy, cost and name ranking.
 /// Candidates must come from validated, nonce-verified slots and the request's
 /// caller-local list. Consumer ownership is checked by the provider separately.
 /// The provider mints and retains the decision only after this function succeeds.

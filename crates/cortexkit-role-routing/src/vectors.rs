@@ -7,6 +7,16 @@
 /// The vectors' directory name, inside `test-vectors/`.
 pub const DIR: &str = "routing-v1";
 
+/// Reference-set accuracy requests and field-specific refusals.
+pub const ROUTE_ENGINE_EVAL_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-engine-eval.json");
+/// Per-job speed requests and field-specific refusals.
+pub const ROUTE_ENGINE_REPORT_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-engine-report.json");
+/// Engine metric requirements, including the default and explicit override.
+pub const ROUTE_SELECT_ENGINE_JSON: &str =
+    include_str!("../test-vectors/routing-v1/route-select-engine.json");
+
 /// Valid and invalid catalog consumer declarations, including canonical bytes.
 pub const CONSUMER_DECLARATIONS_JSON: &str =
     include_str!("../test-vectors/routing-v1/consumer-declarations.json");
@@ -132,6 +142,8 @@ pub const FILES: &[(&str, &str)] = &[
     ("route-account-status.json", ROUTE_ACCOUNT_STATUS_JSON),
     ("route-budget-quote.json", ROUTE_BUDGET_QUOTE_JSON),
     ("route-consumer-models.json", ROUTE_CONSUMER_MODELS_JSON),
+    ("route-engine-eval.json", ROUTE_ENGINE_EVAL_JSON),
+    ("route-engine-report.json", ROUTE_ENGINE_REPORT_JSON),
     ("route-explain.json", ROUTE_EXPLAIN_JSON),
     ("route-head-choices.json", ROUTE_HEAD_CHOICES_JSON),
     ("route-observe-backoff.json", ROUTE_OBSERVE_BACKOFF_JSON),
@@ -150,6 +162,7 @@ pub const FILES: &[(&str, &str)] = &[
         "route-select-available-routes.json",
         ROUTE_SELECT_AVAILABLE_ROUTES_JSON,
     ),
+    ("route-select-engine.json", ROUTE_SELECT_ENGINE_JSON),
     (
         "route-select-exclude-providers.json",
         ROUTE_SELECT_EXCLUDE_PROVIDERS_JSON,

@@ -53,6 +53,7 @@ pub mod consumer_models;
 pub mod declarations;
 pub mod describe;
 pub mod engine_declarations;
+pub mod engine_measurements;
 pub mod errors;
 pub mod explain;
 pub mod head_choices;
@@ -101,6 +102,10 @@ pub mod ops {
     pub const ROUTE_SELECT: &str = "route.select";
     /// Choose a media engine for one piece of work.
     pub const ROUTE_SELECT_ENGINE: &str = "route.select_engine";
+    /// Report a completed media job's speed measurements.
+    pub const ROUTE_ENGINE_REPORT: &str = "route.engine_report";
+    /// Report an engine's accuracy on a reference set.
+    pub const ROUTE_ENGINE_EVAL: &str = "route.engine_eval";
     /// Choose a multi-model panel or replace one of its seats.
     pub const ROUTE_SELECT_PANEL: &str = "route.select_panel";
     /// Quote package and output limits from retained decision capacities.
@@ -140,6 +145,10 @@ pub const RUNNER_OPS: &[&str] = &[ops::ROUTE_ACCOUNT_FOR, ops::ROUTE_ACCOUNT_OBS
 pub mod capabilities {
     /// Media engine selection through `route.select_engine`.
     pub const SELECT_ENGINE: &str = "select_engine";
+    /// Per-job engine speed reports. Requires `SELECT_ENGINE`.
+    pub const ENGINE_REPORTS: &str = "engine_reports";
+    /// Reference-set engine accuracy evaluations. Requires `SELECT_ENGINE`.
+    pub const ENGINE_EVALS: &str = "engine_evals";
     /// Switch a durably paused run to a compatible account via `route.account_for`.
     pub const ACCOUNT_CONTINUE: &str = "account_continue";
     /// Tier-aware selection and tier metadata in report usage. A caller must
@@ -193,6 +202,8 @@ pub mod capabilities {
     /// Optional operations and their groups. Each pair must be declared together.
     pub const OP_GROUPS: &[(&str, &str)] = &[
         (super::ops::ROUTE_SELECT_ENGINE, SELECT_ENGINE),
+        (super::ops::ROUTE_ENGINE_REPORT, ENGINE_REPORTS),
+        (super::ops::ROUTE_ENGINE_EVAL, ENGINE_EVALS),
         (super::ops::ROUTE_SELECT_PANEL, SELECT_PANEL),
         (super::ops::ROUTE_BUDGET_QUOTE, BUDGET_QUOTE),
         (super::ops::ROUTE_EXPLAIN, EXPLAIN),
@@ -204,6 +215,8 @@ pub mod capabilities {
     /// Every group this version defines.
     pub const KNOWN: &[&str] = &[
         SELECT_ENGINE,
+        ENGINE_REPORTS,
+        ENGINE_EVALS,
         ACCOUNT_CONTINUE,
         SERVICE_TIER,
         SELECT_HOLD_CONTROL,

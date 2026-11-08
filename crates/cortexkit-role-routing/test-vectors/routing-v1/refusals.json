@@ -2,6 +2,12 @@
   "about": "One refusal body for every refusal code, with the ops that answer it and when its cause ends (wait_until_ms, null when the refusal is not timed). A body is {code, message, detail}; detail is always an object. The last cases decode an unknown code, which a reader keeps and never treats as timed, and unknown open-set reasons.",
   "refusals": [
     {
+      "name": "engine_not_declared_by_caller",
+      "ops": ["route.engine_report", "route.engine_eval"],
+      "body": {"code":"engine_not_declared_by_caller", "message":"engine not declared by attested caller", "detail":{}},
+      "wait_until_ms": null
+    },
+    {
       "name": "no_engine",
       "ops": ["route.select_engine"],
       "body": {

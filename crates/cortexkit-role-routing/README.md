@@ -19,14 +19,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.7.4"
+cortexkit-role-routing = "0.7.7"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.7.4", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.7.7", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -46,6 +46,9 @@ What the crate holds:
   `meets_requirements`, ordered filtering/ranking with `select_engine`, and
   answer location checks; attestation, consumer admission and retained decision
   state remain the provider's responsibility;
+- `engine_measurements`: per-job speed reports, reference-set accuracy evals,
+  strict parsing, attested engine-owner validation, realtime-factor derivation,
+  and comparable evaluation scores with `apply_evaluations`;
 - `describe`: the `role.describe` answer, its optional `capabilities`
   groups, and `check_describe`;
 - `capabilities`: the optional groups this version defines
@@ -55,7 +58,7 @@ What the crate holds:
   `account_status`, `head_choices`, `select_pin_slot`, `select_available_routes`,
   `select_prefer_prompt_cache`, `select_settings`, `observe_backoff`,
   `observe_credential_refused`,
-  `report_outcomes`, `select_engine`);
+   `report_outcomes`, `select_engine`, `engine_reports`, `engine_evals`);
 - `select`: the `route.select` request, `parse_select_request` and
   `parse_select_request_serving` (which reads the members of the groups a
   provider declares), the answer and `check_answer`;
@@ -70,6 +73,22 @@ What the crate holds:
   `read_reply`).
 
 ## Optional operations and checks in 0.7.3
+
+Since 0.7.7, `engine_reports` and `engine_evals` each require `select_engine`.
+Call `route.engine_report` once after a module job ends; speed feeds a router's
+rolling latency/realtime window, never accuracy ranking. Accuracy comes only
+from `route.engine_eval` on a reference set; scores are in `0..=1`, with WER
+reported as `1 - wer`. Both operations accept only the engine's attested
+declaring principal. They do not release an account lease.
+
+Apply evaluations after filtering candidates, before `select_engine` ranks
+them. `requirements.metric` overrides the per-kind default (`transcribe` →
+`wer`; no default for other kinds). Choose the set whose newest evaluation
+has the latest measurement time, with bytewise ascending set-id ties, and
+compare only that set's scores. A new model id and every caller-local engine
+stay unmeasured. The engine-declaring media provider reporting evaluations keeps
+one canonical set per kind and
+re-runs every engine when the set changes. Cost remains a catalog fact.
 
 Each new operation is listed in `ops` exactly when its same-named group
 (without `route.`) is declared. `check_describe` names a mismatch as

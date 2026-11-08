@@ -302,7 +302,7 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines twenty-two
+  does not know is kept and means nothing to it. This version defines twenty-four
   groups:
   - `service_tier`: tier-aware selection and tier metadata in report usage
     (§5.5). A caller sends these members only to a declaring provider.
@@ -338,6 +338,8 @@ a module plays.
   - `head_choices`: `route.head_choices` (§11.5).
   - `consumer_models`: `route.consumer_models` (§11.6).
   - `select_engine`: `route.select_engine` (§13).
+  - `engine_reports`: `route.engine_report` (§14); requires `select_engine`.
+  - `engine_evals`: `route.engine_eval` (§15); requires `select_engine`.
   - `select_pin_slot`: operator-policy slot pins (§5.6).
   - `select_available_routes`: caller-reachable route restriction (§5.6).
   - `select_prefer_prompt_cache`: prompt-cache tie-breaking (§5.6).
@@ -348,7 +350,7 @@ a module plays.
     requires `observe_backoff`.
   - `report_outcomes`: additional report outcomes and their effects (§8).
   - `report_usage_run_id`: run-attributed report usage (§8).
-- [pinned] Each of the seven optional op groups is declared exactly when its op is
+- [pinned] Each of the nine optional op groups is declared exactly when its op is
   in `ops` (`capabilities::OP_GROUPS`). `describe::check_describe` refuses
   either mismatch as `DescribeProblem::OpGroupMismatch {group}`. The five
   `REQUIRED_OPS` are unchanged; a 0.6.0 describe answer still passes. A caller
@@ -360,6 +362,8 @@ a module plays.
 - [pinned] Declaring `observe_credential_refused` without `observe_backoff` is
   `DescribeProblem::MissingCapabilityDependency {group: "observe_credential_refused",
   requires: "observe_backoff"}`.
+- [pinned] Declaring `engine_reports` or `engine_evals` without `select_engine`
+  is `DescribeProblem::MissingCapabilityDependency {group, requires: "select_engine"}`.
 
 ## 5. `route.select`
 
@@ -1029,6 +1033,10 @@ The answer (`account::AccountForAnswer`):
 }
 ```
 
+- [pinned] `admission.state` is an open string for logs, chosen by the router;
+  neither `admitted` nor any other state word is required. Successful admissions
+  are identified by the matching admission id, account provider, and decision id
+  when the request carries one.
 - [pinned] The runner renews before `lease_valid_until_ms`, and reassigns
   after the account fails.
 - [pinned] Top-level `service_tier_chosen` records the admitted tier, as an
@@ -1326,6 +1334,7 @@ What a runner saw on an account, so the provider's headroom stays current.
 | `pin_unavailable` | `route.select` (§5.3) | `{pin, reason, reset_at_ms?}` | when `reset_at_ms` is present |
 | `no_route` | `route.select` (§5.3) | `{reason, reset_at_ms?}` | when `reset_at_ms` is present |
 | `no_engine` | `route.select_engine` (§13) | `{filter}` | no |
+| `engine_not_declared_by_caller` | `route.engine_report`, `route.engine_eval` | `{}` | no |
 | `unknown_decision` | `route.report` (§6), `route.account_for` (§9.1), panel replacement (§11.1), `route.budget_quote`, `route.explain` (§11) | `{}` | no |
 | `report_conflict` | `route.report` (§8) | `{}` | no |
 | `account_not_authorized` | `route.account_for`, `route.account_observe` (§9) | `{}` | no |
@@ -1624,7 +1633,7 @@ Replacement params and answer:
 - [pinned] `select_engine.requirements_valid`: `requirements` is an object
   with optional `language`, `voice`, `format`, `duration_ms`, `input_bytes`,
   `reference_formats`, `bias`, `size`, `resolution`, `quality`, and
-  `latency_class`. Strings, unsigned integer byte/duration counts, a MIME
+  `latency_class`, and `metric`. Strings, unsigned integer byte/duration counts, a MIME
   string list and a boolean bias flag respectively are required. An unknown
   member or malformed value, including an unknown latency class, is
   `invalid_requirements {field}`. `format` for `realtime` is also
@@ -1668,9 +1677,32 @@ Replacement params and answer:
   under §7.
 - [pinned] `select_engine.ranking`: Rank by measured accuracy for the kind,
   descending, with unmeasured engines below measured ones; then catalog cost,
-  ascending, with engines lacking cost facts below costed engines; then `(module, provider,
-  model)` ascending, absent strings read as empty; then index ascending.
-  Accuracy and cost are model catalog facts, supplied as fixtures by the kit.
+  ascending, with engines lacking cost facts below costed engines; then `(module,
+  provider, model)` ascending, absent strings read as empty; then index ascending.
+  Speed reports never rank engines. Accuracy comes only from §15's reference-set
+  evaluations, never production jobs or catalog accuracy fixtures. Without
+  `engine_evals`, every engine ranks as unmeasured. Cost remains a catalog fact.
+- [pinned] `select_engine.metric`: `requirements.metric` is an optional open
+  string overriding the kind's default metric. The default table is:
+
+  | Kind | Metric |
+  |---|---|
+  | `transcribe` | `wer` |
+
+  A kind with no default and no requested metric ranks every engine as
+  unmeasured. Arrival order of evaluations never supplies a default.
+- [pinned] `select_engine.comparison_set`: For the remaining candidate engines'
+  evaluations of `(kind, metric)`, choose the `set.id` whose newest evaluation
+  has the latest `measured_at_ms`; ties choose the bytewise ascending `set.id`.
+  Compare only scores on that `(metric, set.id)`. An engine without an evaluation
+  on the chosen set ranks as unmeasured. For each `(kind, provider, model, metric,
+  set.id)`, use the newest `measured_at_ms`; an equal timestamp replaces the
+  previous score with the last accepted evaluation. Provider and model match
+  the selection answer exactly: a new model id starts unmeasured. Caller-local
+  engines receive no evaluations and remain unmeasured.
+- [informative] The engine-declaring media provider reporting evaluations keeps
+  one canonical set per kind and
+  re-runs every engine when it changes the set, so the newest set is canonical.
 - [pinned] `select_engine.report`: A decision records its consumer and is bound
   to the selecting principal. Only that principal may `route.report` it,
   joined by `decision_id` and required `outcome`; report needs no consumer or
@@ -1684,3 +1716,50 @@ Replacement params and answer:
   even after expiry; §9.1's admission conflict rule is unchanged.
 - [pinned] `select_engine.explain`: `route.explain` returns `unknown_decision`
   for every engine decision in this version. Scope follows §3.
+
+## 14. `route.engine_report` — group `engine_reports`
+
+- [pinned] `engine_report.request`: Params are `{decision_id, kind, engine:
+  {provider, model}, outcome, input: {duration_ms?, bytes?, chars?}, wall_ms,
+  first_output_ms?}`. Counts and times are unsigned integers in milliseconds
+  where named. `kind` and `outcome` are open strings; known outcomes are
+  `done`, `failed`, `cancelled`, `ended`, matching media usage outcomes. Unknown members or malformed values are
+  `invalid_request {field}`, naming the member (including nested paths).
+- [pinned] `engine_report.authorization`: Only the module that declared the
+  exact `(kind, provider, model)` in its nonce-verified media-provider describe
+  may report it, matched by attested principal, not a caller-supplied module
+  name. Refuse every other caller with `engine_not_declared_by_caller`.
+  The decision must have selected that module's engine for that kind;
+  otherwise it is `unknown_decision`. The reporting module need not be the selecting principal.
+- [pinned] `engine_report.speed`: Send once when the job ends. Routing retains
+  a rolling window per `(kind, provider, model)` of wall and first-output latency
+  and derives realtime factor as `wall_ms / input.duration_ms` when duration is
+  positive. Missing or zero duration has no realtime factor. The router
+  documents its bounded window and exposes samples to apps through its own
+  inspection interface; this version adds no inspection op. These measurements
+  feed realtime filtering, never accuracy ranking. With no speed samples, the
+  declared latency class remains the filter's only evidence; samples may exclude
+  an engine that cannot meet the requested realtime latency. Outcome is retained
+  with each sample; failed or cancelled jobs never establish successful speed.
+- [pinned] `engine_report.answer`: The success answer is `{}`. Repeated reports
+  for the same decision apply no additional sample. They do not release account
+  leases: §9.3 still requires `route.account_observe {kind: "run_finished"}`.
+
+## 15. `route.engine_eval` — group `engine_evals`
+
+- [pinned] `engine_eval.request`: Params are `{kind, engine: {provider, model},
+  metric, score, set: {id, items}, measured_at_ms}`. `kind` and `metric` are open
+  strings. `set.id` identifies the reference set and `items` is its unsigned
+  item count. `measured_at_ms` is unsigned Unix milliseconds. Unknown members
+  or malformed values are `invalid_request {field}`, naming nested paths too.
+  `score` must be a finite number in `0..=1`, higher is better; refuse an
+  out-of-range score as `invalid_request {field: "score"}`. Report a WER-style
+  metric as `1 - wer`, not raw word error rate.
+- [pinned] `engine_eval.authorization`: Apply §14's attested declaration rule
+  independently of decisions. A non-declaring caller is refused with
+  `engine_not_declared_by_caller`. Caller-local entries confer no authority.
+- [pinned] `engine_eval.reference`: Accuracy comes only from evaluation on a
+  reference set: production transcription has no reference text. Keep the
+  newest evaluation per `(kind, provider, model, metric, set.id)` as §13 says;
+  neither speed reports nor reports of job success supply accuracy. The success
+  answer is `{}`.

@@ -215,9 +215,10 @@ impl ContinueCredential {
     }
 }
 
-/// Relative catalog measurements for one media kind and provider/model pair.
-/// Larger accuracy ranks first; smaller cost ranks first. Missing measurements
-/// rank below measured engines. Values are fixture units, not billing amounts.
+/// Relative catalog costs for one media kind and provider/model pair.
+/// Smaller known cost ranks first. Values are fixture units, not billing amounts.
+/// The legacy accuracy member is retained for source compatibility but no longer
+/// supplies accuracy: send reference evaluations through `route.engine_eval`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct EngineFacts {
@@ -365,7 +366,7 @@ pub trait RoutingSubject: Send + Sync {
         }
     }
 
-    /// Replace media accuracy and cost fixtures, including facts for caller-local
+    /// Replace media cost fixtures, including facts for caller-local
     /// engines. Required only by the `select_engine` ranking checks.
     async fn configure_engine_facts(&self, _facts: &[EngineFacts]) -> Result<(), String> {
         Err("configure_engine_facts is not supported by this subject".into())

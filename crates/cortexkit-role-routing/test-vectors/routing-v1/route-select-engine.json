@@ -1,0 +1,11 @@
+{
+  "about": "Engine accuracy metric requirement: an explicit metric overrides the per-kind default.",
+  "requests": [
+    {"name":"default_metric","params":{"consumer":"example.transcribe","kind":"transcribe","requirements":{},"privacy":"remote_allowed"}},
+    {"name":"requested_metric","params":{"consumer":"example.transcribe","kind":"transcribe","requirements":{"metric":"named_term_recall"},"privacy":"remote_allowed"}}
+  ],
+  "refused": [
+    {"name":"metric_not_a_string","params":{"consumer":"example.transcribe","kind":"transcribe","requirements":{"metric":7},"privacy":"remote_allowed"},"refusal":{"code":"invalid_requirements","detail":{"field":"metric"}}}
+  ],
+  "answers": []
+}

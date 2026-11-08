@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.7
+
+- Pin routing 0.7.7 and check engine measurement authorization, score bounds,
+  measured ranking, comparable reference sets, metric defaults and overrides,
+  newest-set selection, and fresh model identities behind their describe groups.
+- Recognize successful engine account admissions by their bound identifiers,
+  not an unpinned state word; cover a router that logs `reserved`.
+
 ## 0.10.6
 
 - Pin routing 0.7.6, including its shared answered-refusal retry classifier.

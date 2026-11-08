@@ -48,6 +48,7 @@ mod tests {
             ("pin_unavailable", RetryClass::RetryAt(200)),
             ("no_route", RetryClass::RetryAt(200)),
             ("no_engine", RetryClass::Permanent),
+            ("engine_not_declared_by_caller", RetryClass::Permanent),
             ("unknown_decision", RetryClass::Permanent),
             ("report_conflict", RetryClass::Permanent),
             ("account_not_authorized", RetryClass::Permanent),

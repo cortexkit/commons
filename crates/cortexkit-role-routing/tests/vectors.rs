@@ -49,6 +49,8 @@ const FILES: &[&str] = &[
     "route-account-status.json",
     "route-budget-quote.json",
     "route-consumer-models.json",
+    "route-engine-eval.json",
+    "route-engine-report.json",
     "route-explain.json",
     "route-head-choices.json",
     "route-observe-backoff.json",
@@ -58,6 +60,7 @@ const FILES: &[&str] = &[
     "route-report-usage-run-id.json",
     "route-report.json",
     "route-select-available-routes.json",
+    "route-select-engine.json",
     "route-select-exclude-providers.json",
     "route-select-harness.json",
     "route-select-hold-control.json",
@@ -137,6 +140,26 @@ fn every_file_is_read() {
     let mut shipped: Vec<&str> = vectors::FILES.iter().map(|(name, _)| *name).collect();
     shipped.sort_unstable();
     assert_eq!(shipped, FILES);
+}
+
+#[test]
+fn engine_measurement_vectors_validate_and_round_trip() {
+    use cortexkit_role_routing::engine_measurements::*;
+    check_op::<EngineEvalRequest, EngineMeasurementAnswer>(
+        "route-engine-eval.json",
+        parse_engine_eval_request,
+    );
+    check_op::<EngineReportRequest, EngineMeasurementAnswer>(
+        "route-engine-report.json",
+        parse_engine_report_request,
+    );
+    check_op::<
+        cortexkit_role_routing::select_engine::SelectEngineRequest,
+        cortexkit_role_routing::select_engine::SelectEngineAnswer,
+    >(
+        "route-select-engine.json",
+        cortexkit_role_routing::select_engine::parse_select_engine_request,
+    );
 }
 
 #[test]
