@@ -79,22 +79,57 @@ pub fn is_bound_signed_model(model: &str) -> bool {
     })
 }
 
+/// The runner's signed floor (compaction contract W3.5): the message it goes
+/// through. After a tool-set change on a route whose model binds signed
+/// reasoning to the request prefix, the runner strips every signed part at or
+/// before that message from each request. Those parts are never sent, so the
+/// checks treat them as an already-removed oldest run: never invalid, and
+/// never the earlier side of a gap between kept signed parts (contract rule
+/// PR2). Dropping one is not an edit to later parts. Edits before the floor
+/// still invalidate the signed parts after it. A floor that names no message
+/// in the entries covers nothing, which keeps the checks strict, never looser.
+///
+/// The floor decides validity only: covered parts stay in render plans, and
+/// removing them from the request is the runner's strip. It enters no
+/// checksum. Every check takes one, so a caller can't give it to one check
+/// and forget another; [`Floor::none`] behaves as before the floor existed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Floor<'a> {
+    through: Option<&'a str>,
+}
+
+impl<'a> Floor<'a> {
+    /// No signed floor: every signed part is checked.
+    pub const fn none() -> Self {
+        Self { through: None }
+    }
+
+    /// A signed floor through the message `mid`.
+    pub const fn through(mid: &'a str) -> Self {
+        Self { through: Some(mid) }
+    }
+
+    /// The message the floor goes through, when there is one.
+    pub const fn mid(&self) -> Option<&'a str> {
+        self.through
+    }
+}
+
 /// Check a view's edits against the rules.
 ///
 /// An edit already in the view a signed part was generated under (its
 /// `since` is not later than that view's version) was part of the history the
 /// part was signed against, so it does not invalidate the part.
-/// `signed_floor` is the runner's signed floor (compaction contract W3.5),
-/// see
-/// [`invalid_signed_parts`].
+/// `floor` is the runner's signed floor; see [`Floor`].
 /// Use [`crate::render::plan_view`] to honor a view's newer-signature policy.
 pub fn check(
     entries: &[Entry],
     edits: &[Edit],
     rules: &ProviderRules,
-    signed_floor: Option<&str>,
+    floor: Floor<'_>,
 ) -> Result<(), RuleBreak> {
-    match invalid_signed_parts(entries, edits, rules, signed_floor)
+    match invalid_signed_parts(entries, edits, rules, floor)
         .into_iter()
         .next()
     {
@@ -108,25 +143,19 @@ pub fn check(
 /// itself an edit, it repeats until this returns nothing.
 /// [`crate::render::plan_view`] also handles authorized newer-signature drops.
 ///
-/// `signed_floor` is the message the runner's signed floor goes through
-/// (compaction contract W3.5): after a tool-set change on a bound route, the runner strips every
-/// signed part at or before it from each request. Those parts are never sent,
-/// so they are an already-removed oldest run: never invalid, and never the
-/// earlier side of a gap between kept signed parts (contract rule PR2). Edits before the floor still invalidate the
-/// signed parts after it. A floor that names no message in `entries` covers
-/// nothing, which keeps the check strict, never looser. This only decides what
-/// is valid; removing the covered parts from a request is the runner's strip.
+/// `floor` is the runner's signed floor; see [`Floor`]. Signed parts it
+/// covers are never invalid.
 pub fn invalid_signed_parts(
     entries: &[Entry],
     edits: &[Edit],
     rules: &ProviderRules,
-    signed_floor: Option<&str>,
+    floor: Floor<'_>,
 ) -> Vec<(String, String)> {
     // An unknown `signed_parts` value is treated as `bound` (W1.5).
     if rules.signed_parts == SignedParts::None {
         return Vec::new();
     }
-    let layout = Layout::new(entries, signed_floor);
+    let layout = Layout::new(entries, floor);
 
     // Positions of edits other than leaving out a signed part, with the
     // version that introduced each.
@@ -243,7 +272,7 @@ pub(crate) fn edits_for_view<'a>(
     entries: &[Entry],
     view: &'a View,
     rules: &ProviderRules,
-    signed_floor: Option<&str>,
+    floor: Floor<'_>,
 ) -> Result<std::borrow::Cow<'a, [Edit]>, RuleBreak> {
     let anchor = view
         .built_through
@@ -251,7 +280,7 @@ pub(crate) fn edits_for_view<'a>(
         .and_then(|mid| entries.iter().position(|entry| &entry.mid == mid));
     let mut edits = std::borrow::Cow::Borrowed(view.edits.as_slice());
     loop {
-        let invalid = invalid_signed_parts(entries, &edits, rules, signed_floor);
+        let invalid = invalid_signed_parts(entries, &edits, rules, floor);
         if invalid.is_empty() {
             return Ok(edits);
         }
@@ -311,13 +340,13 @@ struct Layout<'a> {
 }
 
 impl<'a> Layout<'a> {
-    fn new(entries: &'a [Entry], signed_floor: Option<&str>) -> Self {
+    fn new(entries: &'a [Entry], floor: Floor<'_>) -> Self {
         let by_mid: std::collections::HashMap<&'a str, usize> = entries
             .iter()
             .enumerate()
             .map(|(index, entry)| (entry.mid.as_str(), index))
             .collect();
-        let floor = signed_floor.and_then(|mid| by_mid.get(mid).copied());
+        let floor = floor.through.and_then(|mid| by_mid.get(mid).copied());
         Self {
             entries,
             by_mid,

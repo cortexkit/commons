@@ -17,6 +17,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::rules::Floor;
 use crate::{clean, render, rules, tags};
 
 /// One test vector.
@@ -122,7 +123,7 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
     Ok(match function {
         "plan_view" | "apply_with_rules" => {
             let input: ViewRules = parse(input)?;
-            let floor = input.signed_floor.as_deref();
+            let floor = floor_of(&input.signed_floor);
             if function == "plan_view" {
                 refusable(render::plan_view(
                     &input.entries,
@@ -146,7 +147,7 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
                 &input.input.entries,
                 &input.input.view,
                 &input.input.rules,
-                input.input.signed_floor.as_deref(),
+                floor_of(&input.input.signed_floor),
             ) {
                 Some(result) => refusable(result),
                 None => return Err(format!("unsupported plan version {}", input.version)),
@@ -189,7 +190,7 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
                 &input.entries,
                 &input.edits,
                 &input.rules,
-                input.signed_floor.as_deref(),
+                floor_of(&input.signed_floor),
             ))
         }
         "rules_defaults" => {
@@ -263,6 +264,14 @@ struct VersionedEdits {
     version: u32,
     entries: Vec<Entry>,
     edits: Vec<Edit>,
+}
+
+/// The JSON `signed_floor` member: the message the runner's signed floor goes
+/// through, absent when the session has none.
+fn floor_of(signed_floor: &Option<String>) -> Floor<'_> {
+    signed_floor
+        .as_deref()
+        .map_or(Floor::none(), Floor::through)
 }
 
 #[derive(Deserialize)]

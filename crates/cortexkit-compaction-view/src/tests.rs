@@ -15,7 +15,7 @@ use crate::render::{
     apply, apply_edits, check_carried, cleared_ride, first_change, plan, FirstChange, RideRender,
     Source,
 };
-use crate::rules::{check, invalid_signed_parts};
+use crate::rules::{check, invalid_signed_parts, Floor};
 
 fn entry(
     ordinal: u64,
@@ -100,7 +100,7 @@ fn strip_vector_drops_newer_thinking_and_keeps_the_final_tool() {
     );
     let entries = strip_entries();
     let view = strip_view(Some("anchor"), Some("strip"));
-    let planned = crate::render::plan_view(&entries, &view, &bound(), None).unwrap();
+    let planned = crate::render::plan_view(&entries, &view, &bound(), Floor::none()).unwrap();
     let crate::render::PlanItem::Entry { mid, parts, .. } = planned.items.last().unwrap() else {
         panic!("the reply must remain");
     };
@@ -116,13 +116,14 @@ fn strip_vector_drops_newer_thinking_and_keeps_the_final_tool() {
     assert_eq!(parts[0].tag, Some(2));
     assert!(view.verify());
     assert_eq!(view.edits.len(), 1, "temporary drops never change the view");
-    let rendered = crate::render::apply_with_rules(&entries, &view, &bound(), None).unwrap();
+    let rendered =
+        crate::render::apply_with_rules(&entries, &view, &bound(), Floor::none()).unwrap();
     assert_eq!(
         rendered.last().unwrap().parts,
         vec![entries[1].parts[1].clone()]
     );
     assert!(
-        check(&entries, &view.edits, &bound(), None).is_err(),
+        check(&entries, &view.edits, &bound(), Floor::none()).is_err(),
         "the edit-only checker remains strict"
     );
 }
@@ -132,7 +133,7 @@ fn anchor_vector_refuses_a_signature_at_the_anchor() {
     assert_policy_vector("a signed part at the anchor is never stripped");
     let view = strip_view(Some("reply"), Some("strip"));
     assert_eq!(
-        crate::render::plan_view(&strip_entries(), &view, &bound(), None),
+        crate::render::plan_view(&strip_entries(), &view, &bound(), Floor::none()),
         Err(ViewRefusal::Rule(RuleBreak::SignedPartInvalid {
             mid: "reply".into(),
             part: "thinking".into(),
@@ -154,7 +155,7 @@ fn stripping_requires_a_known_policy_and_an_active_earlier_anchor() {
                     &strip_entries(),
                     &strip_view(anchor, policy),
                     &bound(),
-                    None,
+                    Floor::none(),
                 ),
                 Err(ViewRefusal::Rule(RuleBreak::SignedPartInvalid { .. }))
             ),
@@ -164,7 +165,7 @@ fn stripping_requires_a_known_policy_and_an_active_earlier_anchor() {
     let mut entries = strip_entries();
     let view = strip_view(Some("anchor"), Some("strip"));
     entries[0].mid = "another-message-at-the-same-ordinal".into();
-    assert!(crate::render::plan_view(&entries, &view, &bound(), None).is_err());
+    assert!(crate::render::plan_view(&entries, &view, &bound(), Floor::none()).is_err());
 }
 
 #[test]
@@ -172,13 +173,14 @@ fn stripping_never_drops_a_protected_last_part_or_tool_or_encrypted_part() {
     let view = strip_view(Some("anchor"), Some("strip"));
     let mut entries = strip_entries();
     entries[1].parts.pop();
-    assert!(crate::render::plan_view(&entries, &view, &bound(), None).is_err());
+    assert!(crate::render::plan_view(&entries, &view, &bound(), Floor::none()).is_err());
     entries = strip_entries();
     entries[1].parts[1].seal = Seal::Signed;
-    assert!(crate::render::plan_view(&entries, &view, &bound(), None).is_err());
+    assert!(crate::render::plan_view(&entries, &view, &bound(), Floor::none()).is_err());
     entries = strip_entries();
     entries[1].parts[0].seal = Seal::Encrypted;
-    let rendered = crate::render::apply_with_rules(&entries, &view, &bound(), None).unwrap();
+    let rendered =
+        crate::render::apply_with_rules(&entries, &view, &bound(), Floor::none()).unwrap();
     assert_eq!(rendered.last().unwrap().parts, entries[1].parts);
 }
 
@@ -567,7 +569,7 @@ fn signed_transcript(generated: [u64; 3]) -> Vec<Entry> {
 }
 
 fn invalid(entries: &[Entry], edits: &[Edit]) -> Vec<String> {
-    invalid_signed_parts(entries, edits, &bound(), None)
+    invalid_signed_parts(entries, edits, &bound(), Floor::none())
         .into_iter()
         .map(|(_, part)| part)
         .collect()
@@ -579,7 +581,7 @@ fn an_edit_before_a_signed_part_invalidates_it_only_if_it_came_later() {
     let edits = vec![drop_part(1, "a1", "k1")];
     assert_eq!(invalid(&entries, &edits), ["r3", "r5"]);
     assert_eq!(
-        check(&entries, &edits, &bound(), None),
+        check(&entries, &edits, &bound(), Floor::none()),
         Err(RuleBreak::SignedPartInvalid {
             mid: "a3".into(),
             part: "r3".into()
@@ -596,7 +598,7 @@ fn an_edit_before_a_signed_part_invalidates_it_only_if_it_came_later() {
 
     // The same rules with no signature binding never object.
     let free = ProviderRules::new(SignedParts::None, EditCost::Suffix);
-    assert!(check(&entries, &edits, &free, None).is_ok());
+    assert!(check(&entries, &edits, &free, Floor::none()).is_ok());
 }
 
 #[test]
@@ -640,7 +642,7 @@ fn signed_parts_may_be_left_out_only_at_the_ends() {
 }
 
 fn invalid_under_floor(entries: &[Entry], edits: &[Edit], floor: &str) -> Vec<String> {
-    invalid_signed_parts(entries, edits, &bound(), Some(floor))
+    invalid_signed_parts(entries, edits, &bound(), Floor::through(floor))
         .into_iter()
         .map(|(_, part)| part)
         .collect()
@@ -655,7 +657,10 @@ fn a_signed_floor_covers_the_signed_parts_at_or_before_it() {
     assert_eq!(invalid_under_floor(&entries, &head, "a3"), ["r5"]);
     // A floor at the newest message covers every signed part.
     assert!(invalid_under_floor(&entries, &head, "a5").is_empty());
-    assert_eq!(check(&entries, &head, &bound(), Some("a5")), Ok(()));
+    assert_eq!(
+        check(&entries, &head, &bound(), Floor::through("a5")),
+        Ok(())
+    );
 }
 
 #[test]
@@ -664,7 +669,7 @@ fn an_edit_before_the_floor_still_invalidates_signed_parts_after_it() {
     let edits = vec![drop_part(1, "a1", "k1")];
     assert_eq!(invalid_under_floor(&entries, &edits, "a1"), ["r3", "r5"]);
     assert_eq!(
-        check(&entries, &edits, &bound(), Some("a1")),
+        check(&entries, &edits, &bound(), Floor::through("a1")),
         Err(RuleBreak::SignedPartInvalid {
             mid: "a3".into(),
             part: "r3".into()
@@ -700,10 +705,11 @@ fn plan_view_accepts_a_view_whose_edits_precede_only_covered_signed_parts() {
     // view, because its start insert precedes the signed part.
     let view = strip_view(None, None);
     assert!(matches!(
-        crate::render::plan_view(&entries, &view, &bound(), None),
+        crate::render::plan_view(&entries, &view, &bound(), Floor::none()),
         Err(ViewRefusal::Rule(RuleBreak::SignedPartInvalid { .. }))
     ));
-    let planned = crate::render::plan_view(&entries, &view, &bound(), Some("reply")).unwrap();
+    let planned =
+        crate::render::plan_view(&entries, &view, &bound(), Floor::through("reply")).unwrap();
     let crate::render::PlanItem::Entry { parts, .. } = planned.items.last().unwrap() else {
         panic!("the reply must remain");
     };
@@ -716,7 +722,7 @@ fn plan_view_accepts_a_view_whose_edits_precede_only_covered_signed_parts() {
         ["thinking", "call"]
     );
     assert_eq!(
-        crate::render::plan_view(&entries, &view, &bound(), Some("reply")),
+        crate::render::plan_view(&entries, &view, &bound(), Floor::through("reply")),
         crate::render::plan(&entries, &view.edits),
         "a covered part draws no temporary drop"
     );
@@ -763,8 +769,8 @@ fn edits_computed_from_the_compact_form_apply_to_the_full_one_and_back() {
     assert_eq!(tool.output.as_deref(), Some("[dropped §3§]"));
     assert_eq!(tool.output_bytes, Some("[dropped §3§]".len() as u64));
     assert_eq!(
-        invalid_signed_parts(&full, &edits, &bound(), None),
-        invalid_signed_parts(&short, &edits, &bound(), None)
+        invalid_signed_parts(&full, &edits, &bound(), Floor::none()),
+        invalid_signed_parts(&short, &edits, &bound(), Floor::none())
     );
 }
 
@@ -1036,7 +1042,12 @@ fn a_signed_text_part_is_bound_like_signed_reasoning() {
             text: "go on".into(),
         },
     );
-    let invalid = invalid_signed_parts(&entries, &[drop_part(1, "u1", "t1")], &bound(), None);
+    let invalid = invalid_signed_parts(
+        &entries,
+        &[drop_part(1, "u1", "t1")],
+        &bound(),
+        Floor::none(),
+    );
     assert!(invalid.contains(&("u2".to_owned(), "t3".to_owned())));
 }
 

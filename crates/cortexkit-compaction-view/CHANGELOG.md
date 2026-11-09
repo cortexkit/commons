@@ -1,12 +1,14 @@
 # Changelog
 
-## Unreleased (proposed 0.3.0)
+## 0.3.0
 
 - Signed floor input for compaction contract rule W3.5 (tool-set changes strip
-  earlier signed reasoning). `rules::invalid_signed_parts`, `rules::check`,
-  `render::plan_view`, `plan_view_at`, `plan_view_with` and `apply_with_rules`
-  take `signed_floor: Option<&str>`, the message the runner's signed floor
-  goes through. The JSON operations take an optional `signed_floor` member.
+  earlier signed reasoning). New `rules::Floor` (`Floor::none()`,
+  `Floor::through(mid)`), a required parameter of `rules::invalid_signed_parts`,
+  `rules::check`, `render::plan_view`, `plan_view_at`, `plan_view_with` and
+  `apply_with_rules`, so a caller can't give the floor to one check and forget
+  another. The JSON operations take an optional `signed_floor` member, the
+  message the floor goes through.
   Signed parts at or before the floor count as an already-stripped oldest
   run: never invalid, never one side of a gap between kept signed parts
   (contract rule PR2), and a drop of one is not an edit to later parts. Edits
@@ -17,8 +19,8 @@
 - Checks only: covered parts stay in the plan and the rendered messages, and
   the runner's own strip removes them. Every earlier vector and plan output is
   byte-identical; six vectors are added and the rendering pin covers 91 cases.
-- Breaking: the Rust functions gain a parameter. Pass `None` for today's
-  behavior.
+- Breaking: the Rust functions gain a parameter. `Floor::none()` behaves
+  exactly as 0.2.2.
 
 ## 0.2.2
 
