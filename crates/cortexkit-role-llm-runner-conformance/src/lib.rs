@@ -86,6 +86,8 @@ mod service_tier;
 mod session_change;
 mod session_retention;
 mod session_usage;
+mod signed_tool_change;
+pub use signed_tool_change::{SignedToolChange, SignedToolChangeObservation};
 pub mod step_events;
 mod structured_output;
 mod subject;

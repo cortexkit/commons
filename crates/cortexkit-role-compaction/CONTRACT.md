@@ -188,6 +188,14 @@ Codes and what the caller does next:
 
 **W1.4 Unknown fields.** A receiver ignores fields it does not know. A sender sends a field whose meaning the receiver must understand only when the receiver declared the capability that defines it. The same holds for a value added to one of the open sets in W1.5: a sender uses it only when the receiver declared the capability that defines it.
 
+For `signed_floor` in Setup and `Conditions`, the provider declares the additional
+manifest capability `compaction-signed-floor/v1`
+(`COMPACTION_SIGNED_FLOOR_PROVIDES`; `provides_signed_floor`). The runner sends
+the member only to a provider declaring that capability. Older readers ignore
+unknown members; this does not authorize sending the member without the
+declaration. The floor remains authoritative in the runner even when the
+provider does not declare it (W3.5).
+
 For `Entry.speaks_for`, the provider declares the additional manifest capability
 `compaction-entry-speaks-for/v1` alongside `compaction-provider/v2`
 (`COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES`; `provides_entry_speaks_for`). The runner
@@ -316,12 +324,28 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 | `context_window` | integer | W3.4. |
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | For the current model and account. |
+| `signed_floor` | `{through: string}`, optional | Runner-authoritative signed reasoning boundary, by stable entry id, with the semantics below. Only for providers declaring `compaction-signed-floor/v1`. |
 | `last_prompt_tokens` | integer, optional | The prompt size the model provider reported for the session's newest model request: uncached input plus cache reads plus cache writes. Absent before the first request, or when the provider reported none. Requests of child sessions do not count. |
 | `last_prompt_view` | integer, optional | The applied view version the request measured by `last_prompt_tokens` was rendered with when the runner built it. At least 1 names an applied view (view versions start at 1, W6.1); `0` means no view was applied. Absent means unknown, for example after a runner restart when it cannot tie the reading to a request it answered; providers may use the reading for compaction without checking a view version. The runner sends it only with `last_prompt_tokens`; the provider ignores it when `last_prompt_tokens` is absent. |
 | `system_tokens` | `{count, exact}`, optional | Count of the runner's own system text for the next request under these conditions, excluding system entries; in notices only, never rides (W4.11). |
 | `tools_tokens` | `{count, exact}`, optional | Count of the tool definitions for the next request under these conditions; in notices only, never rides (W4.11). |
 
 Informative for providers: when `last_prompt_view` is present, a reading counts toward a compaction decision only when `last_prompt_view` equals the newest view the runner accepted and has not since refused; a lower version, or `0` once any view is accepted, is stale. This holds even while the runner's `applied_view` still names an older view: `applied_view` names the view in force, and an accepted view takes force only at the next step boundary, so a reading can arrive between acceptance and the first request rendered with the new view. A reading that is stale only against an accepted view that hasn't yet taken force is normal runner behaviour, not a fault. The provider should wait for a reading under the current view rather than base a compaction decision on a stale reading. W6.5's `stale_version` means a runner refuses any view whose version is not greater than the latest it accepted, so a version a runner reports names exactly one view in that session. Over-limit rides still act on their own estimate.
+
+**Signed floor.** The runner contract's tool-set-change rule records a durable,
+monotonic floor at the session's newest entry when a tool change invalidates
+earlier signed reasoning. `through` is that entry's stable id, not an ordinal.
+A provider declaring `compaction-signed-floor/v1` treats signed parts in entries
+at or before `through` as already gone: it does not count them, hold for them,
+or plan them. Setup and subsequent conditions report the same runner state.
+
+A view that keeps a signed part at or before the floor MUST NOT be refused for
+keeping that part, even if the view would otherwise invalidate its signature.
+The runner strips it at render using the signed-part strip defined for
+`new_signed: "strip"` (W6.1); the floor itself authorizes that strip, independently
+of the view's `built_through` or `new_signed`. This applies even to providers
+that predate the floor, so an old view cannot wedge a session. The floor is not
+a view field and does not enter or change any view checksum (W7).
 
 **W3.6 `Cursor`:** where an entry sits. `ordinal` (W4.1), `mid` (the message id) and `digest` (the entry checksum, W7). A provider holding an entry with the same three values is caught up to it.
 
@@ -562,6 +586,7 @@ Request:
 | `context_window` | integer | W3.4. |
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | W3.3. |
+| `signed_floor` | `{through: string}`, optional | W3.5. Send only to providers declaring `compaction-signed-floor/v1`. |
 | `detects` | array of cause names | The ride causes (W5.3) the runner can detect (RD5). |
 | `applied_view` | `AppliedView`, optional | The view the runner applies now: after its restart, the one it reloaded; for a session moved in, the installed first view. |
 | `newest` | `Cursor`, optional | The newest entry; absent for an empty transcript. |

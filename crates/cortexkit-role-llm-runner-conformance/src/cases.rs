@@ -281,6 +281,9 @@ where
                     .await
                     .map(|()| Ending::Passed)
             }
+            name if name.starts_with("signed_tool_") => {
+                crate::signed_tool_change::run(self, name).await
+            }
             name if name.starts_with("session_refresh_")
                 || name == "flush_prefix_applies_pending" =>
             {

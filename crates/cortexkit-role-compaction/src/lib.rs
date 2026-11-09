@@ -48,9 +48,12 @@ pub mod read;
 pub mod ride;
 pub mod rules;
 pub mod setup;
+pub mod signed_floor;
 pub mod tokens;
 pub mod view;
 pub mod wire;
+
+pub use signed_floor::SignedFloor;
 
 /// The capability a compaction provider lists in its manifest. The major is
 /// new because every op below changed shape incompatibly.
@@ -61,6 +64,17 @@ pub const COMPACTION_PROVIDES: &str = "compaction-provider/v2";
 /// declaration until the next Setup. Providers must not withdraw it while
 /// serving a session without restarting.
 pub const COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES: &str = "compaction-entry-speaks-for/v1";
+
+/// Additional provider manifest capability enabling Setup and Conditions
+/// `signed_floor`. Runners send the boundary only to declaring providers.
+pub const COMPACTION_SIGNED_FLOOR_PROVIDES: &str = "compaction-signed-floor/v1";
+
+/// Whether a provider declares support for the runner's signed floor.
+pub fn provides_signed_floor(provides: &[String]) -> bool {
+    provides
+        .iter()
+        .any(|capability| capability == COMPACTION_SIGNED_FLOOR_PROVIDES)
+}
 
 /// Whether a provider's catalog capabilities declare agent attribution.
 /// Evaluate at Setup, not from the runner's own Setup request fields.

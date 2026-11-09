@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.35
+
+- Require a durable, monotonic signed floor when a session's tool set changes
+  on a route with prefix-bound signed reasoning, even without compaction and
+  across host relaunches. Record it atomically with the tool change and strip
+  earlier signed reasoning using the compaction contract's existing strip.
+- Define tool-set identity by name, description and RFC 8785 canonical input
+  schema, not ordering, tool choice or cache control. Exempt additions consisting
+  only of unreferenced deferred-loading tools. Require identical request bytes
+  across retry, resume and offline rebuild. No public wire type changes.
+
 ## 0.8.34
 
 - Add optional display-only `SpeaksFor.name` (1–64 printable ASCII bytes) and

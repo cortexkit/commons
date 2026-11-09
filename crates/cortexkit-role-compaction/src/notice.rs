@@ -67,6 +67,10 @@ pub struct NoticeRequest {
 #[non_exhaustive]
 pub struct Conditions {
     pub model: ModelRef,
+    /// Runner-authoritative signed reasoning boundary. Send only to providers
+    /// declaring `compaction-signed-floor/v1`; see [`crate::SignedFloor`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_floor: Option<crate::SignedFloor>,
     /// Whether the session's model reads images. Set only when known; absent
     /// means unknown. A provider inserts images only when this is `true`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -201,6 +205,7 @@ impl Conditions {
     ) -> Self {
         Self {
             model,
+            signed_floor: None,
             accepts_images: None,
             context_window,
             output_reserve,
@@ -214,6 +219,12 @@ impl Conditions {
 
     pub fn with_accepts_images(mut self, accepts_images: bool) -> Self {
         self.accepts_images = Some(accepts_images);
+        self
+    }
+
+    /// Project the boundary only when the provider declares its capability.
+    pub fn with_signed_floor(mut self, floor: crate::SignedFloor, declared: bool) -> Self {
+        self.signed_floor = declared.then_some(floor);
         self
     }
 

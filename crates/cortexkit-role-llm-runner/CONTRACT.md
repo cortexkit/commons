@@ -6681,6 +6681,40 @@ The plan's `compaction_item {provider, preset, params}` names the provider.
 The run reasons `compaction_wait` and `context_ceiling_wait` report waiting
 on the rides and usable-window ceiling defined by that contract (§6).
 
+#### 11.1.1 Tool-set changes and signed reasoning
+
+- [pinned] On a route whose model binds signed reasoning to the request prefix
+  (`cortexkit_compaction_view::rules` reports `signed_parts: bound`), a change to
+  the session's tool set invalidates earlier signed reasoning. This rule applies
+  whether or not the session has a compaction provider.
+- [pinned] When the runner applies such a tool-set change, it records a **signed
+  floor** at the session's newest entry, durably in the same write that installs
+  the change. The floor identifies that entry by its stable entry id, not an
+  ordinal. With an empty transcript there is no earlier reasoning to strip.
+  A host relaunch with a changed tool set counts as a change too; relaunch does
+  not bypass the comparison or reset the stored floor.
+- [pinned] Compare tool sets as sets of `(name, description, input schema)`;
+  compare schemas as RFC 8785 canonical JSON. Adding, removing or renaming a
+  tool, or changing its description or schema, counts. Reordering tools or keys
+  inside a schema never counts. `tool_choice` and `cache_control` are outside
+  this comparison. Exception: an addition consisting only of tools with
+  `defer_loading: true` that nothing in the request references does not move
+  the floor.
+- [pinned] Starting with the first request carrying the changed tool set, every
+  request leaves out signed reasoning in entries at or before the newest signed
+  floor. Use exactly the signed-part strip defined for `new_signed: "strip"` in
+  `cortexkit-role-compaction/CONTRACT.md` W6.1, not another removal or replacement
+  scheme. The floor itself authorizes the strip; it does not require a view,
+  `built_through`, or `new_signed`. A view keeping a covered signed part is not
+  refused for keeping it: the runner strips it at render because the floor is
+  authoritative, including with providers that predate this rule.
+- [pinned] The signed floor only moves forward. Retry, resume and offline rebuild
+  render identical request bytes from the same durable session state; none may
+  resurrect reasoning stripped by the newest floor. The floor is runner state,
+  not a view field, and does not change any view checksum. Send it in compaction
+  Setup and Conditions only to providers declaring `compaction-signed-floor/v1`
+  (the compaction contract W1.4 and W3.5).
+
 ### 11.2 Hook call sites
 
 - [pinned] These call sites bind a runner only for the hooks it lists in

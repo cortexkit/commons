@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.43
+
+- Pin runner `=0.8.35`. Add four signed-tool-change cases: a tool edit strips
+  earlier signed reasoning, reordering alone keeps it, an unreferenced
+  deferred-loading-only addition keeps it, and resume renders identical bytes.
+- Add the optional `signed_tool_change_observation` adapter hook, defaulting to
+  `Ok(None)` (not applicable). Document live refresh, signed fixture and restart
+  steps; the kit judges raw model-ingress bytes, canonical tool triples and
+  markers itself, never adapter verdicts. Existing adapters keep passing.
+- Reject deliberately incorrect fixture runners by each check's name, and test
+  canonical schema equivalence and invalid fixture refusal.
+
 ## 0.17.42
 
 - Pin runner `=0.8.34`. Add declared combined-mark and name round-trip checks,

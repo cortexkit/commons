@@ -20,6 +20,10 @@ use crate::view::AppliedView;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SetupRequest {
+    /// Runner-authoritative signed reasoning boundary. Send only to providers
+    /// declaring `compaction-signed-floor/v1`; see [`crate::SignedFloor`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_floor: Option<crate::SignedFloor>,
     /// The session's preset, for example `head`, `worker` or `reader`. The
     /// provider decides what each preset enables.
     pub preset: String,
@@ -101,6 +105,7 @@ impl SetupRequest {
         now: u64,
     ) -> Self {
         Self {
+            signed_floor: None,
             preset: preset.into(),
             child_harness: None,
             model,
@@ -118,6 +123,12 @@ impl SetupRequest {
 
     pub fn with_child_harness(mut self, child_harness: impl Into<String>) -> Self {
         self.child_harness = Some(child_harness.into());
+        self
+    }
+
+    /// Project the boundary only when the provider declares its capability.
+    pub fn with_signed_floor(mut self, floor: crate::SignedFloor, declared: bool) -> Self {
+        self.signed_floor = declared.then_some(floor);
         self
     }
 

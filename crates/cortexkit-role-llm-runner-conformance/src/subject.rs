@@ -1592,6 +1592,39 @@ pub trait LlmRunnerSubject: Harness {
         Err(HarnessError::new("raw_model_requests is not implemented"))
     }
 
+    /// Optional raw-ingress fixture for the tool-set signed floor (§11.1.1).
+    /// Return `Ok(None)` if unavailable; the case is not applicable, not failed.
+    /// For the unique `session` label and requested `change`, perform these steps:
+    ///
+    /// 1. Start an isolated live session on a route where the view library reports
+    ///    `signed_parts: bound`, using a scripted model with Messages-shaped JSON
+    ///    requests (see [`crate::SignedToolChangeObservation`]).
+    /// 2. Emit signed reasoning with unique literal text and signature markers,
+    ///    plus ordinary transcript text with a separate marker. Capture a later
+    ///    request carrying all markers as `before`, outside the runner's store.
+    /// 3. Through the real `session.refresh` route, apply an accepted plan at a
+    ///    run boundary: `Edit` changes a tool description or schema; `Reorder`
+    ///    only reverses at least two tool definitions; `DeferredAddition` only
+    ///    adds new `defer_loading: true` tools referenced nowhere in the request;
+    ///    `Resume` performs the same edit as `Edit`. Keep the earlier transcript.
+    /// 4. Capture the first request carrying that tool set as `after`, before
+    ///    committing its model response. Do not create a compaction view that
+    ///    independently strips the fixture's signed parts.
+    /// 5. For `Resume`, restart the host from its durable state and render that
+    ///    same pending request without new input or a committed response. Capture
+    ///    its bytes as `resumed`; do not copy `after` or reserialize either body.
+    ///
+    /// Return raw bodies and markers only, never a synthesized verdict or a body
+    /// reconstructed from configuration. The kit compares canonical tool triples,
+    /// marker retention and exact resume bytes itself. Clean up the live fixture.
+    async fn signed_tool_change_observation(
+        &self,
+        _session: &str,
+        _change: crate::SignedToolChange,
+    ) -> Result<Option<crate::SignedToolChangeObservation>, HarnessError> {
+        Ok(None)
+    }
+
     /// The part's actual model-visible number. The "Tag numbers" chapter (A3)
     /// of cortexkit-role-compaction's CONTRACT.md owns the calculation. Capture
     /// the request's mapping from native part identity to the number shown;

@@ -531,6 +531,30 @@ The stepped-down-tier scenario starts the head at `fast` through the existing
 credential and tier mismatch checks still run, while the stepped-down scenario
 is reported as an inapplicable rule rather than a plain pass.
 
+## Signed tool-set-change fixtures (0.17.43)
+
+`signed_tool_change_observation(session, change)` is optional and defaults to
+`Ok(None)`: all four checks are then not applicable, never failed. It enables
+`signed_tool_edit_strips`, `signed_tool_reorder_keeps`,
+`signed_tool_deferred_addition_keeps`, and `signed_tool_resume_identical`.
+
+Implement the hook against a live prefix-bound route and scripted model. Its
+Rust documentation lists the exact refresh and restart steps. Capture raw
+Messages-shaped request JSON at model ingress, not from runner state, preserving
+the original bytes. Return the requests before and after the change, and for
+resume the same pending request after a host restart without new input. Include
+unique ASCII markers for the earlier signed reasoning, its signature and ordinary
+transcript text. Do not apply a compaction view that independently strips those
+signed parts. Adapters without that wire shape or replay control return `None`.
+
+The kit, not the adapter, decides the result: it compares sets of tool name,
+description and RFC 8785 canonical input schema, verifies signed markers are
+stripped for edits but retained for reorders and unreferenced deferred additions,
+keeps the ordinary-text control, and compares resume bytes exactly. Each check
+has an intentionally incorrect fixture runner rejected by name. This seam does
+not claim executable coverage of durable-write atomicity, every relaunch path,
+offline rebuild, or compaction capability negotiation.
+
 ## Scope and verdicts
 
 The kit tests behavior through public routes and genuinely independent

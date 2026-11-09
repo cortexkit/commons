@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.4
+
+- Add optional `signed_floor: {through}` to Setup and Conditions, with the
+  `SignedFloor` type, constructors and capability-gated builders. Both request
+  types are already non-exhaustive; existing constructors and wire messages stay
+  compatible. Require runner 0.8.35 for its tool-set-change rule.
+- Add `COMPACTION_SIGNED_FLOOR_PROVIDES` (`compaction-signed-floor/v1`) and a
+  declaration helper. Only declaring providers receive the member; they treat
+  covered signed parts as already gone for counting, holding and planning.
+- Make the runner's render-time floor authoritative even for views retaining
+  covered signed parts. Such views are not refused for retaining them. Keep
+  the floor outside views and all view checksums.
+
 ## 0.3.3
 
 - Add optional `Entry.speaks_for` with agent identity and an optional display-only

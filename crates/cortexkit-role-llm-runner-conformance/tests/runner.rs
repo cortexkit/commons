@@ -892,6 +892,24 @@ async fn run(subject: &FakeSubject) -> SuiteReport {
     run_suite(subject, dir.path()).await.unwrap()
 }
 
+#[tokio::test]
+async fn signed_tool_change_default_hook_is_inapplicable_never_failed() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in [
+        "signed_tool_edit_strips",
+        "signed_tool_reorder_keeps",
+        "signed_tool_deferred_addition_keeps",
+        "signed_tool_resume_identical",
+    ] {
+        assert!(
+            matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason })
+                if reason.contains("no prefix-bound signed-tool-change fixture")),
+            "{name}: {}",
+            report.render()
+        );
+    }
+}
+
 const PLAN_NOTE_CASES: &[&str] = &[
     "plan_notes_requires_session_change",
     "plan_notes_pending_until_reconcile",
@@ -1483,6 +1501,12 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason == "role.describe does not declare service_tier"
                 || reason == "configure_service_tier cannot script this tier fixture")
+    {
+        return;
+    }
+    if case.starts_with("signed_tool_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "adapter supplies no prefix-bound signed-tool-change fixture")
     {
         return;
     }
