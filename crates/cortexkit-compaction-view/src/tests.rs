@@ -100,7 +100,7 @@ fn strip_vector_drops_newer_thinking_and_keeps_the_final_tool() {
     );
     let entries = strip_entries();
     let view = strip_view(Some("anchor"), Some("strip"));
-    let planned = crate::render::plan_view(&entries, &view, &bound()).unwrap();
+    let planned = crate::render::plan_view(&entries, &view, &bound(), None).unwrap();
     let crate::render::PlanItem::Entry { mid, parts, .. } = planned.items.last().unwrap() else {
         panic!("the reply must remain");
     };
@@ -116,13 +116,13 @@ fn strip_vector_drops_newer_thinking_and_keeps_the_final_tool() {
     assert_eq!(parts[0].tag, Some(2));
     assert!(view.verify());
     assert_eq!(view.edits.len(), 1, "temporary drops never change the view");
-    let rendered = crate::render::apply_with_rules(&entries, &view, &bound()).unwrap();
+    let rendered = crate::render::apply_with_rules(&entries, &view, &bound(), None).unwrap();
     assert_eq!(
         rendered.last().unwrap().parts,
         vec![entries[1].parts[1].clone()]
     );
     assert!(
-        check(&entries, &view.edits, &bound()).is_err(),
+        check(&entries, &view.edits, &bound(), None).is_err(),
         "the edit-only checker remains strict"
     );
 }
@@ -132,7 +132,7 @@ fn anchor_vector_refuses_a_signature_at_the_anchor() {
     assert_policy_vector("a signed part at the anchor is never stripped");
     let view = strip_view(Some("reply"), Some("strip"));
     assert_eq!(
-        crate::render::plan_view(&strip_entries(), &view, &bound()),
+        crate::render::plan_view(&strip_entries(), &view, &bound(), None),
         Err(ViewRefusal::Rule(RuleBreak::SignedPartInvalid {
             mid: "reply".into(),
             part: "thinking".into(),
@@ -150,7 +150,12 @@ fn stripping_requires_a_known_policy_and_an_active_earlier_anchor() {
     ] {
         assert!(
             matches!(
-                crate::render::plan_view(&strip_entries(), &strip_view(anchor, policy), &bound()),
+                crate::render::plan_view(
+                    &strip_entries(),
+                    &strip_view(anchor, policy),
+                    &bound(),
+                    None,
+                ),
                 Err(ViewRefusal::Rule(RuleBreak::SignedPartInvalid { .. }))
             ),
             "{anchor:?} {policy:?}"
@@ -159,7 +164,7 @@ fn stripping_requires_a_known_policy_and_an_active_earlier_anchor() {
     let mut entries = strip_entries();
     let view = strip_view(Some("anchor"), Some("strip"));
     entries[0].mid = "another-message-at-the-same-ordinal".into();
-    assert!(crate::render::plan_view(&entries, &view, &bound()).is_err());
+    assert!(crate::render::plan_view(&entries, &view, &bound(), None).is_err());
 }
 
 #[test]
@@ -167,13 +172,13 @@ fn stripping_never_drops_a_protected_last_part_or_tool_or_encrypted_part() {
     let view = strip_view(Some("anchor"), Some("strip"));
     let mut entries = strip_entries();
     entries[1].parts.pop();
-    assert!(crate::render::plan_view(&entries, &view, &bound()).is_err());
+    assert!(crate::render::plan_view(&entries, &view, &bound(), None).is_err());
     entries = strip_entries();
     entries[1].parts[1].seal = Seal::Signed;
-    assert!(crate::render::plan_view(&entries, &view, &bound()).is_err());
+    assert!(crate::render::plan_view(&entries, &view, &bound(), None).is_err());
     entries = strip_entries();
     entries[1].parts[0].seal = Seal::Encrypted;
-    let rendered = crate::render::apply_with_rules(&entries, &view, &bound()).unwrap();
+    let rendered = crate::render::apply_with_rules(&entries, &view, &bound(), None).unwrap();
     assert_eq!(rendered.last().unwrap().parts, entries[1].parts);
 }
 
@@ -562,7 +567,7 @@ fn signed_transcript(generated: [u64; 3]) -> Vec<Entry> {
 }
 
 fn invalid(entries: &[Entry], edits: &[Edit]) -> Vec<String> {
-    invalid_signed_parts(entries, edits, &bound())
+    invalid_signed_parts(entries, edits, &bound(), None)
         .into_iter()
         .map(|(_, part)| part)
         .collect()
@@ -574,7 +579,7 @@ fn an_edit_before_a_signed_part_invalidates_it_only_if_it_came_later() {
     let edits = vec![drop_part(1, "a1", "k1")];
     assert_eq!(invalid(&entries, &edits), ["r3", "r5"]);
     assert_eq!(
-        check(&entries, &edits, &bound()),
+        check(&entries, &edits, &bound(), None),
         Err(RuleBreak::SignedPartInvalid {
             mid: "a3".into(),
             part: "r3".into()
@@ -591,7 +596,7 @@ fn an_edit_before_a_signed_part_invalidates_it_only_if_it_came_later() {
 
     // The same rules with no signature binding never object.
     let free = ProviderRules::new(SignedParts::None, EditCost::Suffix);
-    assert!(check(&entries, &edits, &free).is_ok());
+    assert!(check(&entries, &edits, &free, None).is_ok());
 }
 
 #[test]
@@ -632,6 +637,89 @@ fn signed_parts_may_be_left_out_only_at_the_ends() {
     // A gap made before r5 was generated was already part of its history.
     let entries = signed_transcript([0, 0, 1]);
     assert!(invalid(&entries, &[drop_part(1, "a3", "r3")]).is_empty());
+}
+
+fn invalid_under_floor(entries: &[Entry], edits: &[Edit], floor: &str) -> Vec<String> {
+    invalid_signed_parts(entries, edits, &bound(), Some(floor))
+        .into_iter()
+        .map(|(_, part)| part)
+        .collect()
+}
+
+#[test]
+fn a_signed_floor_covers_the_signed_parts_at_or_before_it() {
+    let entries = signed_transcript([0, 0, 0]);
+    let head = vec![insert(1, InsertAt::Start, "m0")];
+    assert_eq!(invalid(&entries, &head), ["r1", "r3", "r5"]);
+    // The runner strips r1 and r3, so the head can invalidate only r5.
+    assert_eq!(invalid_under_floor(&entries, &head, "a3"), ["r5"]);
+    // A floor at the newest message covers every signed part.
+    assert!(invalid_under_floor(&entries, &head, "a5").is_empty());
+    assert_eq!(check(&entries, &head, &bound(), Some("a5")), Ok(()));
+}
+
+#[test]
+fn an_edit_before_the_floor_still_invalidates_signed_parts_after_it() {
+    let entries = signed_transcript([0, 0, 0]);
+    let edits = vec![drop_part(1, "a1", "k1")];
+    assert_eq!(invalid_under_floor(&entries, &edits, "a1"), ["r3", "r5"]);
+    assert_eq!(
+        check(&entries, &edits, &bound(), Some("a1")),
+        Err(RuleBreak::SignedPartInvalid {
+            mid: "a3".into(),
+            part: "r3".into()
+        })
+    );
+}
+
+#[test]
+fn covered_signed_parts_never_open_a_gap() {
+    let entries = signed_transcript([0, 0, 0]);
+    // Without a floor, leaving out r3 between kept r1 and r5 invalidates r5.
+    assert_eq!(invalid(&entries, &[drop_part(1, "a3", "r3")]), ["r5"]);
+    // With r1 covered, r1 and r3 are one oldest run that is left out.
+    assert!(invalid_under_floor(&entries, &[drop_part(1, "a3", "r3")], "a1").is_empty());
+    // Dropping a covered signed part is not an edit that changes later parts.
+    assert!(invalid_under_floor(&entries, &[drop_part(1, "a1", "r1")], "a3").is_empty());
+}
+
+#[test]
+fn a_floor_naming_no_message_covers_nothing() {
+    let entries = signed_transcript([0, 0, 0]);
+    let head = vec![insert(1, InsertAt::Start, "m0")];
+    assert_eq!(
+        invalid_under_floor(&entries, &head, "another-branch"),
+        invalid(&entries, &head)
+    );
+}
+
+#[test]
+fn plan_view_accepts_a_view_whose_edits_precede_only_covered_signed_parts() {
+    let entries = strip_entries();
+    // No anchor and no strip policy: without a floor, `plan_view` refuses the
+    // view, because its start insert precedes the signed part.
+    let view = strip_view(None, None);
+    assert!(matches!(
+        crate::render::plan_view(&entries, &view, &bound(), None),
+        Err(ViewRefusal::Rule(RuleBreak::SignedPartInvalid { .. }))
+    ));
+    let planned = crate::render::plan_view(&entries, &view, &bound(), Some("reply")).unwrap();
+    let crate::render::PlanItem::Entry { parts, .. } = planned.items.last().unwrap() else {
+        panic!("the reply must remain");
+    };
+    // Checks only: the covered part stays in the plan for the runner's strip.
+    assert_eq!(
+        parts
+            .iter()
+            .map(|part| part.id.as_str())
+            .collect::<Vec<_>>(),
+        ["thinking", "call"]
+    );
+    assert_eq!(
+        crate::render::plan_view(&entries, &view, &bound(), Some("reply")),
+        crate::render::plan(&entries, &view.edits),
+        "a covered part draws no temporary drop"
+    );
 }
 
 /// The same transcript in compact form, as a notice carries it.
@@ -675,8 +763,8 @@ fn edits_computed_from_the_compact_form_apply_to_the_full_one_and_back() {
     assert_eq!(tool.output.as_deref(), Some("[dropped §3§]"));
     assert_eq!(tool.output_bytes, Some("[dropped §3§]".len() as u64));
     assert_eq!(
-        invalid_signed_parts(&full, &edits, &bound()),
-        invalid_signed_parts(&short, &edits, &bound())
+        invalid_signed_parts(&full, &edits, &bound(), None),
+        invalid_signed_parts(&short, &edits, &bound(), None)
     );
 }
 
@@ -948,7 +1036,7 @@ fn a_signed_text_part_is_bound_like_signed_reasoning() {
             text: "go on".into(),
         },
     );
-    let invalid = invalid_signed_parts(&entries, &[drop_part(1, "u1", "t1")], &bound());
+    let invalid = invalid_signed_parts(&entries, &[drop_part(1, "u1", "t1")], &bound(), None);
     assert!(invalid.contains(&("u2".to_owned(), "t3".to_owned())));
 }
 
@@ -1404,6 +1492,26 @@ mod vector_file {
                 json!({"entries": t, "edits": [drop_part(1, "a1", "k1")], "rules": free()}),
             ),
             (
+                "a signed floor at the newest message covers every signed part",
+                "check_rules",
+                json!({"entries": t, "edits": [head(1)], "rules": bound(), "signed_floor": "a2"}),
+            ),
+            (
+                "a history head still invalidates a signed part after the floor",
+                "check_rules",
+                json!({"entries": t, "edits": [head(1)], "rules": bound(), "signed_floor": "a1"}),
+            ),
+            (
+                "an edit before the floor invalidates a signed part after it",
+                "check_rules",
+                json!({"entries": t, "edits": [drop_part(1, "a1", "k1")], "rules": bound(), "signed_floor": "a1"}),
+            ),
+            (
+                "a signed floor naming no message covers nothing",
+                "check_rules",
+                json!({"entries": t, "edits": [head(1)], "rules": bound(), "signed_floor": "another-branch"}),
+            ),
+            (
                 "current Claude families are bound",
                 "rules_defaults",
                 json!({"model": "claude-opus-5-5"}),
@@ -1773,6 +1881,7 @@ mod vector_file {
                 "plan_view",
                 json!({"entries": strip_entries(), "view": strip_view(Some("anchor"), None), "rules": bound()}),
             ),
+
             (
                 "versioned view-aware planning strips newer signatures",
                 "plan_view_at",
@@ -1819,6 +1928,18 @@ mod vector_file {
                 "a turn_system ride keeps its form on any route",
                 "cleared_ride",
                 json!({"form": "turn_system", "route_clears": false}),
+            ),
+            // A signed floor decides validity only: the covered part stays in
+            // the plan and the rendered messages for the runner's own strip.
+            (
+                "a signed floor accepts a view that edits before covered signed parts and keeps them in the plan",
+                "plan_view",
+                json!({"entries": strip_entries(), "view": strip_view(None, None), "rules": bound(), "signed_floor": "reply"}),
+            ),
+            (
+                "apply_with_rules under a signed floor keeps the covered part for the runner's strip",
+                "apply_with_rules",
+                json!({"entries": strip_entries(), "view": strip_view(None, None), "rules": bound(), "signed_floor": "reply"}),
             ),
         ]
     }
@@ -1995,6 +2116,12 @@ mod vector_file {
                 (
                     89,
                     "90c3a6bfc3bd0877b95c11c76809b0712c1575776369a4fd96c23c4a2376994f",
+                ),
+                // Two signed-floor cases: the floor changes which views are
+                // valid, never what a valid view renders.
+                (
+                    91,
+                    "b693d469d500e61575c1736fc58d30139cd4c0fa9b5fd7c0b3648ba161fca415",
                 ),
             ],
         ),

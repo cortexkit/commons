@@ -35,15 +35,15 @@ pub struct Vector {
 pub const FUNCTIONS: &[(&str, &str)] = &[
     (
         "plan_view",
-        "{entries, view, rules}: the view-aware render plan with authorized newer-signature stripping",
+        "{entries, view, rules, signed_floor?}: the view-aware render plan with authorized newer-signature stripping",
     ),
     (
         "plan_view_at",
-        "{version, entries, view, rules}: the view-aware plan at a supported plan version",
+        "{version, entries, view, rules, signed_floor?}: the view-aware plan at a supported plan version",
     ),
     (
         "apply_with_rules",
-        "{entries, view, rules}: rendered messages with provider rules and newer-signature stripping",
+        "{entries, view, rules, signed_floor?}: rendered messages with provider rules and newer-signature stripping",
     ),
     ("plan", "{entries, edits}: the render plan, or the refusal"),
     (
@@ -72,7 +72,7 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
     ),
     (
         "check_rules",
-        "{entries, edits, rules}: whether every signed part the view keeps stays valid",
+        "{entries, edits, rules, signed_floor?}: whether every signed part the view keeps stays valid",
     ),
     (
         "rules_defaults",
@@ -122,13 +122,20 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
     Ok(match function {
         "plan_view" | "apply_with_rules" => {
             let input: ViewRules = parse(input)?;
+            let floor = input.signed_floor.as_deref();
             if function == "plan_view" {
-                refusable(render::plan_view(&input.entries, &input.view, &input.rules))
+                refusable(render::plan_view(
+                    &input.entries,
+                    &input.view,
+                    &input.rules,
+                    floor,
+                ))
             } else {
                 refusable(render::apply_with_rules(
                     &input.entries,
                     &input.view,
                     &input.rules,
+                    floor,
                 ))
             }
         }
@@ -139,6 +146,7 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
                 &input.input.entries,
                 &input.input.view,
                 &input.input.rules,
+                input.input.signed_floor.as_deref(),
             ) {
                 Some(result) => refusable(result),
                 None => return Err(format!("unsupported plan version {}", input.version)),
@@ -177,7 +185,12 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
         }
         "check_rules" => {
             let input: RulesInput = parse(input)?;
-            refusable(rules::check(&input.entries, &input.edits, &input.rules))
+            refusable(rules::check(
+                &input.entries,
+                &input.edits,
+                &input.rules,
+                input.signed_floor.as_deref(),
+            ))
         }
         "rules_defaults" => {
             let input: Model = parse(input)?;
@@ -263,6 +276,8 @@ struct ViewRules {
     entries: Vec<Entry>,
     view: View,
     rules: ProviderRules,
+    #[serde(default)]
+    signed_floor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -290,6 +305,8 @@ struct RulesInput {
     entries: Vec<Entry>,
     edits: Vec<Edit>,
     rules: ProviderRules,
+    #[serde(default)]
+    signed_floor: Option<String>,
 }
 
 #[derive(Deserialize)]

@@ -84,9 +84,17 @@ pub fn is_bound_signed_model(model: &str) -> bool {
 /// An edit already in the view a signed part was generated under (its
 /// `since` is not later than that view's version) was part of the history the
 /// part was signed against, so it does not invalidate the part.
+/// `signed_floor` is the runner's signed floor (compaction contract W3.5),
+/// see
+/// [`invalid_signed_parts`].
 /// Use [`crate::render::plan_view`] to honor a view's newer-signature policy.
-pub fn check(entries: &[Entry], edits: &[Edit], rules: &ProviderRules) -> Result<(), RuleBreak> {
-    match invalid_signed_parts(entries, edits, rules)
+pub fn check(
+    entries: &[Entry],
+    edits: &[Edit],
+    rules: &ProviderRules,
+    signed_floor: Option<&str>,
+) -> Result<(), RuleBreak> {
+    match invalid_signed_parts(entries, edits, rules, signed_floor)
         .into_iter()
         .next()
     {
@@ -99,16 +107,26 @@ pub fn check(entries: &[Entry], edits: &[Edit], rules: &ProviderRules) -> Result
 /// transcript order. A provider adds a drop for each of them; since a drop is
 /// itself an edit, it repeats until this returns nothing.
 /// [`crate::render::plan_view`] also handles authorized newer-signature drops.
+///
+/// `signed_floor` is the message the runner's signed floor goes through
+/// (compaction contract W3.5): after a tool-set change on a bound route, the runner strips every
+/// signed part at or before it from each request. Those parts are never sent,
+/// so they are an already-removed oldest run: never invalid, and never the
+/// earlier side of a gap between kept signed parts (contract rule PR2). Edits before the floor still invalidate the
+/// signed parts after it. A floor that names no message in `entries` covers
+/// nothing, which keeps the check strict, never looser. This only decides what
+/// is valid; removing the covered parts from a request is the runner's strip.
 pub fn invalid_signed_parts(
     entries: &[Entry],
     edits: &[Edit],
     rules: &ProviderRules,
+    signed_floor: Option<&str>,
 ) -> Vec<(String, String)> {
     // An unknown `signed_parts` value is treated as `bound` (W1.5).
     if rules.signed_parts == SignedParts::None {
         return Vec::new();
     }
-    let layout = Layout::new(entries);
+    let layout = Layout::new(entries, signed_floor);
 
     // Positions of edits other than leaving out a signed part, with the
     // version that introduced each.
@@ -225,6 +243,7 @@ pub(crate) fn edits_for_view<'a>(
     entries: &[Entry],
     view: &'a View,
     rules: &ProviderRules,
+    signed_floor: Option<&str>,
 ) -> Result<std::borrow::Cow<'a, [Edit]>, RuleBreak> {
     let anchor = view
         .built_through
@@ -232,7 +251,7 @@ pub(crate) fn edits_for_view<'a>(
         .and_then(|mid| entries.iter().position(|entry| &entry.mid == mid));
     let mut edits = std::borrow::Cow::Borrowed(view.edits.as_slice());
     loop {
-        let invalid = invalid_signed_parts(entries, &edits, rules);
+        let invalid = invalid_signed_parts(entries, &edits, rules, signed_floor);
         if invalid.is_empty() {
             return Ok(edits);
         }
@@ -287,16 +306,23 @@ impl Position {
 struct Layout<'a> {
     entries: &'a [Entry],
     by_mid: std::collections::HashMap<&'a str, usize>,
+    /// The last entry the signed floor covers, when the floor names one.
+    floor: Option<usize>,
 }
 
 impl<'a> Layout<'a> {
-    fn new(entries: &'a [Entry]) -> Self {
-        let by_mid = entries
+    fn new(entries: &'a [Entry], signed_floor: Option<&str>) -> Self {
+        let by_mid: std::collections::HashMap<&'a str, usize> = entries
             .iter()
             .enumerate()
             .map(|(index, entry)| (entry.mid.as_str(), index))
             .collect();
-        Self { entries, by_mid }
+        let floor = signed_floor.and_then(|mid| by_mid.get(mid).copied());
+        Self {
+            entries,
+            by_mid,
+            floor,
+        }
     }
 
     fn message(&self, mid: &str) -> Option<Position> {
@@ -321,9 +347,16 @@ impl<'a> Layout<'a> {
         is_signed(&self.entries[position.entry].parts[position.slot - 1].seal)
     }
 
+    /// Every signed part the request can still carry, in transcript order.
+    /// Parts the signed floor covers are left out: the runner strips them. A
+    /// drop of one still counts as leaving out a signed part, not as an edit
+    /// that changes what later parts were signed after.
     fn signed(&self) -> Vec<Position> {
         let mut out = Vec::new();
         for (entry, message) in self.entries.iter().enumerate() {
+            if self.floor.is_some_and(|floor| entry <= floor) {
+                continue;
+            }
             for (part, candidate) in message.parts.iter().enumerate() {
                 if is_signed(&candidate.seal) {
                     out.push(Position {
