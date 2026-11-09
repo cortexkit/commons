@@ -110,7 +110,9 @@ where
                 crate::attribution::run(self, name).await
             }
             name if name.starts_with("notices_") => crate::notices::run(self, name).await,
-            name if name.starts_with("message_marks_") => {
+            name if name.starts_with("message_marks_")
+                || name.starts_with("notice_with_speaks_for_") =>
+            {
                 crate::message_marks::run(self, name).await
             }
             name if name.starts_with("notice_keep_") => crate::notice_keep::run(self, name).await,

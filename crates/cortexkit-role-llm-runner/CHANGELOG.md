@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.34
+
+- Add optional display-only `SpeaksFor.name` (1–64 printable ASCII bytes) and
+  `with_name`. Preserve it on stored marks, riding notice facts and delivery
+  events, and include it in whole-object retry identity.
+- Add `notice_with_speaks_for`, requiring `message_marks`. Only declaring
+  runners accept both `notice: true` and `speaks_for`, or an optional name.
+  Older request admission explicitly rejects extra speaker members, so callers
+  gate names on this group as well as using a version that accepts them.
+- Add group-aware admission helpers without changing the legacy helpers;
+  legacy combination refusal still names `notice`. Require compaction providers
+  to declare attribution before runners project stored marks into entries.
+- Add validation, round-trip and retry vectors and tests. Patch bump because
+  `SpeaksFor` is non-exhaustive, constructors and helper signatures remain
+  compatible, and new behaviour is opt-in. The operator approved the carried-agent
+  attribution contract for release.
+- Readers first: Magic Context deploys reading `Entry.speaks_for` and declares
+  `compaction-entry-speaks-for/v1` before any runner sends the member. Core sends
+  `notice` with `speaks_for` only to runners declaring `notice_with_speaks_for`.
+
 ## 0.8.33
 
 - Add optional open-vocabulary `host_code` on display parts and `TagReadAnswer`,

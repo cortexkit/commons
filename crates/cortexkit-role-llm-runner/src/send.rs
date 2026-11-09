@@ -577,7 +577,8 @@ impl SendRequest {
         self
     }
 
-    /// Mark the module's own automatic message. False is serialized as absent.
+    /// Mark an automatic message. Combining it with agent words requires
+    /// `notice_with_speaks_for`. False is serialized as absent.
     pub fn with_notice(mut self, notice: bool) -> Self {
         self.runner_params
             .insert("notice".into(), Value::Bool(notice));
@@ -593,6 +594,23 @@ impl SendRequest {
         sender: &str,
     ) -> Result<crate::message_marks::MessageMarks, &'static str> {
         crate::message_marks::check(&self.runner_params, advertised, scope_owner, sender)
+    }
+
+    /// Validate marks using both describe groups before writing any state.
+    pub fn message_marks_with_notice_speaks_for(
+        &self,
+        advertised: bool,
+        notice_with_speaks_for: bool,
+        scope_owner: Option<&str>,
+        sender: &str,
+    ) -> Result<crate::message_marks::MessageMarks, &'static str> {
+        crate::message_marks::check_with_notice_speaks_for(
+            &self.runner_params,
+            advertised,
+            notice_with_speaks_for,
+            scope_owner,
+            sender,
+        )
     }
 
     pub fn check_compaction_item(&self) -> Result<(), &'static str> {

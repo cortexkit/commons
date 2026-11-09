@@ -29,6 +29,7 @@ use serde_json::Value;
 use crate::tags::tag_notation_in;
 
 /// One message as the model sees it after a view is applied.
+/// It carries what the request needs; attribution lives on the transcript entry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RenderedMessage {
     /// The transcript message it comes from, or the inserted message's id.

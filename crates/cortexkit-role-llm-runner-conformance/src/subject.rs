@@ -137,6 +137,8 @@ pub enum Capability {
     Notices,
     /// Positive agent/automatic-notice marks on sends and display facts.
     MessageMarks,
+    /// Agent display names and notice marks on carried agent words.
+    NoticeWithSpeaksFor,
     /// Owner-only protection for notices carrying a person's words.
     NoticeKeep,
     /// Resolve model-visible part numbers in the request that produced a call.
@@ -255,6 +257,7 @@ impl Capability {
         Self::SenderAttribution,
         Self::Notices,
         Self::MessageMarks,
+        Self::NoticeWithSpeaksFor,
         Self::NoticeKeep,
         Self::TagRead,
         Self::ReadDisplayFacts,
@@ -337,6 +340,7 @@ impl Capability {
             Self::SenderAttribution => groups::SENDER_ATTRIBUTION,
             Self::Notices => groups::NOTICES,
             Self::MessageMarks => groups::MESSAGE_MARKS,
+            Self::NoticeWithSpeaksFor => groups::NOTICE_WITH_SPEAKS_FOR,
             Self::NoticeKeep => groups::NOTICE_KEEP,
             Self::TagRead => groups::TAG_READ,
             Self::ReadDisplayFacts => groups::READ_DISPLAY_FACTS,
@@ -1442,7 +1446,7 @@ pub trait LlmRunnerSubject: Harness {
     fn capabilities(&self) -> BTreeSet<Capability>;
 
     /// The owner identity cases use to start and manage their sessions.
-    /// With `MessageMarks`, `NoticeKeep`, `TagRead` or `AdoptOpen`, this must be a daemon-attested
+    /// With `MessageMarks`, `NoticeWithSpeaksFor`, `NoticeKeep`, `TagRead` or `AdoptOpen`, this must be a daemon-attested
     /// plain-scope route whose principal owns the scope, so cases can mark
     /// messages with `speaks_for` or open a session without a message.
     fn owner_stamp(&self) -> RouteStamp;

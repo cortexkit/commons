@@ -1,4 +1,4 @@
-# llm-runner/v1 vectors for runner 0.8.33
+# llm-runner/v1 vectors for runner 0.8.34
 
 `display-host-codes.json` pins both exact interrupt codes, an unknown code
 retained verbatim with text fallback, and an uncoded host part. Each opted-in

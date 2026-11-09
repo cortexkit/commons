@@ -34,7 +34,10 @@ where
     S::Route: RunnerRoute,
 {
     if name == "message_marks_retry_changed" {
-        return retry_changed(case).await;
+        return retry_changed(case, false).await;
+    }
+    if name == "notice_with_speaks_for_retry" {
+        return retry_changed(case, true).await;
     }
     let owner_only = name == "message_marks_speaks_for_owner_only";
     let stamps = if owner_only {
@@ -76,12 +79,24 @@ where
             .map_err(|e| e.to_string())?;
     }
 
-    if name == "message_marks_served" {
-        for marks in [
-            json!({"notice":true}),
-            json!({"speaks_for":{"agent_id":"agent-a"}}),
-            json!({}),
-        ] {
+    if matches!(
+        name,
+        "message_marks_served" | "notice_with_speaks_for_served"
+    ) {
+        let probes = if name == "notice_with_speaks_for_served" {
+            vec![
+                json!({"notice":true,"speaks_for":{"agent_id":"agent-a","name":"Ada"}}),
+                json!({"notice":true,"speaks_for":{"agent_id":"agent-a"}}),
+                json!({"speaks_for":{"agent_id":"agent-a","name":"Ada"}}),
+            ]
+        } else {
+            vec![
+                json!({"notice":true}),
+                json!({"speaks_for":{"agent_id":"agent-a"}}),
+                json!({}),
+            ]
+        };
+        for marks in probes {
             let before = read_all(&session.route).await?.1;
             let prompt = case.mint.next("marked-prompt");
             let send_id = case.mint.next("marked-send");
@@ -217,7 +232,10 @@ where
         None,
     );
     params["speaks_for"] = json!({"agent_id":"agent-a"});
-    if !owner_only {
+    let name_undeclared = name == "notice_with_speaks_for_name_undeclared";
+    if name_undeclared {
+        params["speaks_for"]["name"] = json!("Ada");
+    } else if !owner_only {
         params["notice"] = json!(true);
     }
     let route = carrier_route.as_ref().unwrap_or(&session.route);
@@ -229,7 +247,13 @@ where
         name,
         &error,
         errors::INVALID_PARAMS,
-        if owner_only { "speaks_for" } else { "notice" },
+        if owner_only {
+            "speaks_for"
+        } else if name_undeclared {
+            "speaks_for.name"
+        } else {
+            "notice"
+        },
     )?;
     if read_all(&session.route).await? != before
         || head(&session.route).await? != before_head
@@ -243,20 +267,43 @@ where
     Ok(Ending::Passed)
 }
 
-async fn retry_changed<S: LlmRunnerSubject>(case: &Case<'_, S>) -> Result<Ending, String>
+async fn retry_changed<S: LlmRunnerSubject>(
+    case: &Case<'_, S>,
+    named: bool,
+) -> Result<Ending, String>
 where
     S::Route: RunnerRoute,
 {
-    let mut probes = vec![
-        (json!({"notice": true}), json!({}), Some("notice")),
-        (
-            json!({"speaks_for": {"agent_id": "agent-a"}}),
-            json!({"speaks_for": {"agent_id": "agent-b"}}),
-            Some("speaks_for"),
-        ),
-        (json!({"notice": false}), json!({}), None),
-    ];
-    if case.declared.contains(&Capability::NoticeKeep) {
+    let mut probes = if named {
+        vec![
+            (
+                json!({"speaks_for":{"agent_id":"agent-a","name":"Ada"}}),
+                json!({"speaks_for":{"agent_id":"agent-a","name":"Bea"}}),
+                Some("speaks_for"),
+            ),
+            (
+                json!({"speaks_for":{"agent_id":"agent-a"}}),
+                json!({"speaks_for":{"agent_id":"agent-a","name":"Ada"}}),
+                Some("speaks_for"),
+            ),
+            (
+                json!({"speaks_for":{"agent_id":"agent-a","name":"Ada"}}),
+                json!({"speaks_for":{"agent_id":"agent-a"}}),
+                Some("speaks_for"),
+            ),
+        ]
+    } else {
+        vec![
+            (json!({"notice": true}), json!({}), Some("notice")),
+            (
+                json!({"speaks_for": {"agent_id": "agent-a"}}),
+                json!({"speaks_for": {"agent_id": "agent-b"}}),
+                Some("speaks_for"),
+            ),
+            (json!({"notice": false}), json!({}), None),
+        ]
+    };
+    if !named && case.declared.contains(&Capability::NoticeKeep) {
         probes.extend([
             (
                 json!({"notice": true, "keep": true}),

@@ -108,6 +108,19 @@ Absent optional fixtures are graded not applicable, not passed. Faulty fake
 runners exercise every new check, including replacing the short system note
 with the entire new system text.
 
+Version **0.17.42** pins `cortexkit-role-llm-runner =0.8.34` for carried-agent
+attribution checks. With `notice_with_speaks_for`,
+`notice_with_speaks_for_served` checks named and unnamed agent notices plus a
+named non-notice brief across entry surfaces; `notice_with_speaks_for_retry`
+checks changed, added and removed names and exact replay without writes.
+Without the group, `message_marks_both_refused` still requires refusal naming
+`notice`, and `notice_with_speaks_for_name_undeclared` requires refusal naming
+`speaks_for.name`. All use a scope-owner route and need `message_marks`, `queue`
+and `transcript_reads`; the served case additionally needs `read_display_facts`,
+`history_display` and `host_history`. Each new check has an intentionally
+incorrect fake rejected by the check's name. Compaction-provider and
+compaction-runner protocol checks remain outside this kit.
+
 Version **0.17.31** pins `cortexkit-role-llm-runner =0.8.27`. The six
 `notice_keep_*` cases check owner acceptance and read/history/display marks,
 required `notice`, non-owner refusal before writes, undeclared refusal even for

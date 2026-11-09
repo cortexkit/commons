@@ -408,6 +408,20 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
             reason: "message_marks is not declared".into(),
         });
     }
+    if spec.name.starts_with("notice_with_speaks_for_") {
+        if !declared.contains(&Capability::MessageMarks) {
+            return Some(CaseOutcome::Inapplicable {
+                reason: "message_marks is not declared".into(),
+            });
+        }
+        if spec.name != "notice_with_speaks_for_name_undeclared"
+            && !declared.contains(&Capability::NoticeWithSpeaksFor)
+        {
+            return Some(CaseOutcome::Inapplicable {
+                reason: "notice_with_speaks_for is not declared".into(),
+            });
+        }
+    }
     if spec.name.starts_with("head_selection_") && !declared.contains(&Capability::HeadSelection) {
         return Some(CaseOutcome::Inapplicable {
             reason: "head_selection is not declared".into(),

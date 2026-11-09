@@ -1,0 +1,13 @@
+{
+  "cases": [
+    {"name":"named_notice_declared","declared":true,"params":{"notice":true,"speaks_for":{"agent_id":"agent-a","name":"Ada"}}},
+    {"name":"named_brief_declared","declared":true,"params":{"speaks_for":{"agent_id":"agent-a","name":"Ada"}}},
+    {"name":"unnamed_notice_declared","declared":true,"params":{"notice":true,"speaks_for":{"agent_id":"agent-a"}}},
+    {"name":"notice_undeclared","declared":false,"params":{"notice":true,"speaks_for":{"agent_id":"agent-a"}},"field":"notice"},
+    {"name":"name_undeclared","declared":false,"params":{"speaks_for":{"agent_id":"agent-a","name":"Ada"}},"field":"speaks_for.name"},
+    {"name":"empty_name","declared":true,"params":{"speaks_for":{"agent_id":"agent-a","name":""}},"field":"speaks_for.name"},
+    {"name":"non_printable_name","declared":true,"params":{"speaks_for":{"agent_id":"agent-a","name":"Ada\n"}},"field":"speaks_for.name"},
+    {"name":"null_name","declared":true,"params":{"speaks_for":{"agent_id":"agent-a","name":null}},"field":"speaks_for.name"},
+    {"name":"unknown_member","declared":true,"params":{"speaks_for":{"agent_id":"agent-a","extra":true}},"field":"speaks_for"}
+  ]
+}

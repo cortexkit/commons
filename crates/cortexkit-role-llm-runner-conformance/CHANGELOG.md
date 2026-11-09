@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.17.42
+
+- Pin runner `=0.8.34`. Add declared combined-mark and name round-trip checks,
+  name retry-identity checks, and undeclared name refusal. Keep combined-mark
+  refusal active only without `notice_with_speaks_for`, preserving its contract.
+- Each new check rejects an intentionally incorrect fake by check name: rejecting
+  the declared combination, dropping the name, ignoring changed-name retries,
+  or accepting an undeclared name. Existing undeclared combination coverage stays.
+- Patch bump: the new capability variant is on a non-exhaustive enum and no
+  adapter signature changes. The operator approved the carried-agent attribution
+  contract for release.
+- Readers first: Magic Context deploys reading `Entry.speaks_for` and declares
+  `compaction-entry-speaks-for/v1` before any runner sends the member. Core sends
+  `notice` with `speaks_for` only to runners declaring `notice_with_speaks_for`.
+
 ## 0.17.41
 
 - Pin the role contract to `=0.8.33`. Exclude `host_code` together with `host`

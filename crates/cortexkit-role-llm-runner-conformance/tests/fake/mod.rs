@@ -3834,8 +3834,21 @@ impl Module {
             }
             Err(field) => return Ok(invalid(field)),
         };
-        let mut marks = match request.message_marks(
+        if self.world.defects.message_marks == Some("named_both")
+            && request.runner_params.get("notice") == Some(&json!(true))
+            && request.runner_params.contains_key("speaks_for")
+        {
+            return Ok(invalid("notice"));
+        }
+        let mut marks = match request.message_marks_with_notice_speaks_for(
             self.world.serves(groups::MESSAGE_MARKS),
+            self.world.serves(groups::NOTICE_WITH_SPEAKS_FOR)
+                || (self.world.defects.message_marks == Some("name_undeclared")
+                    && request
+                        .runner_params
+                        .get("speaks_for")
+                        .and_then(|speaker| speaker.get("name"))
+                        .is_some()),
             stamp.scope.as_ref().map(|scope| scope.owner.as_str()),
             &stamp.principal,
         ) {
@@ -3846,6 +3859,11 @@ impl Module {
                 .unwrap(),
             Err(field) => return Ok(invalid(field)),
         };
+        if self.world.defects.message_marks == Some("name_drop") {
+            if let Some(speaker) = &mut marks.speaks_for {
+                speaker.name = None;
+            }
+        }
         marks.keep = keep
             || (self.world.defects.notice_keep == Some("false")
                 && request.runner_params.get("keep") == Some(&json!(false)));
@@ -4185,6 +4203,10 @@ impl Module {
                     if self.world.defects.message_marks != Some("retry")
                         && !(field == "keep"
                             && self.world.defects.message_marks == Some("retry_keep"))
+                        && !(field == "speaks_for"
+                            && self.world.defects.message_marks == Some("retry_name")
+                            && send.marks["speaks_for"]["agent_id"]
+                                == request.runner_params["speaks_for"]["agent_id"])
                     {
                         return Ok(refuse(errors::SEND_ID_REUSE, Some(json!({"field": field}))));
                     }

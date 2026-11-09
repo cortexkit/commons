@@ -116,6 +116,60 @@ fn message_marks_agent_ids_are_one_to_128_printable_ascii_bytes() {
 }
 
 #[test]
+fn notice_with_speaks_for_checks_names_and_keeps_owner_admission() {
+    for name in [" ".to_owned(), "Ada".to_owned(), "~".repeat(64)] {
+        let request =
+            request(json!({"speaks_for":{"agent_id":"agent-a", "name":name}, "notice":true}));
+        let marks = request
+            .message_marks_with_notice_speaks_for(true, true, Some("owner"), "owner")
+            .unwrap();
+        assert!(marks.notice);
+        assert_eq!(
+            marks.speaks_for,
+            Some(SpeaksFor::new("agent-a").with_name(name))
+        );
+        assert_eq!(
+            request.message_marks_with_notice_speaks_for(true, false, Some("owner"), "owner"),
+            Err("notice")
+        );
+        assert_eq!(
+            request.message_marks_with_notice_speaks_for(true, true, Some("owner"), "stranger"),
+            Err("speaks_for")
+        );
+        assert_eq!(
+            request.message_marks_with_notice_speaks_for(true, true, None, "owner"),
+            Err("speaks_for")
+        );
+        assert_eq!(
+            request.message_marks_with_notice_speaks_for(false, true, Some("owner"), "owner"),
+            Err("speaks_for")
+        );
+    }
+    for name in [
+        json!(""),
+        json!("a".repeat(65)),
+        json!("é"),
+        json!("\u{7f}"),
+        json!("a\t"),
+        json!(null),
+        json!(1),
+    ] {
+        assert_eq!(
+            request(json!({"speaks_for":{"agent_id":"agent-a", "name":name}}))
+                .message_marks_with_notice_speaks_for(true, true, Some("owner"), "owner"),
+            Err("speaks_for.name")
+        );
+    }
+    let named = request(json!({"speaks_for":{"agent_id":"agent-a", "name":"Ada"}}));
+    assert_eq!(
+        named.message_marks(true, Some("owner"), "owner"),
+        Err("speaks_for.name")
+    );
+    let unnamed = serde_json::to_value(SpeaksFor::new("agent-a")).unwrap();
+    assert!(unnamed.get("name").is_none());
+}
+
+#[test]
 fn message_marks_unmarked_send_bytes_are_unchanged_and_false_is_omitted() {
     let bytes =
         r#"{"prompt":"hello","send_id":"send-a","delivery":"queue","model":{"id":"model-a"}}"#;
@@ -196,6 +250,58 @@ fn message_marks_riding_facts_and_events_have_only_the_agent_label() {
     );
     assert_eq!(
         serde_json::from_value::<NoticeDelivered>(raw_event).unwrap(),
+        event
+    );
+}
+
+#[test]
+fn named_message_marks_round_trip_on_riding_and_stored_surfaces() {
+    let mark = SpeaksFor::new("agent-a").with_name("Ada");
+    let mut read = ReadMessage::new(
+        1,
+        "mid-a",
+        json!({"role":"user", "content":"carried words"}),
+    )
+    .with_written_at(10);
+    read.speaks_for = Some(mark.clone());
+    read.notice = true;
+    let mut row = DisplayRow::new("user", vec![]).with_notice(true);
+    row.speaks_for = Some(mark.clone());
+    let history = HistoryEntry::from_read(read.clone()).unwrap();
+    let fact =
+        NoticeFact::new(0, "send-a", "module-x", "carried words").with_speaks_for(mark.clone());
+    let event =
+        NoticeDelivered::new("mid-a", 0, "call-a", "send-a", "module-x").with_speaks_for(mark);
+    for surface in [
+        serde_json::to_value(&read).unwrap(),
+        serde_json::to_value(&history).unwrap(),
+        serde_json::to_value(&row).unwrap(),
+        serde_json::to_value(&fact).unwrap(),
+        serde_json::to_value(&event).unwrap(),
+    ] {
+        assert_eq!(
+            surface["speaks_for"],
+            json!({"agent_id":"agent-a", "name":"Ada"})
+        );
+    }
+    assert_eq!(
+        serde_json::from_value::<ReadMessage>(serde_json::to_value(&read).unwrap()).unwrap(),
+        read
+    );
+    assert_eq!(
+        serde_json::from_value::<HistoryEntry>(serde_json::to_value(&history).unwrap()).unwrap(),
+        history
+    );
+    assert_eq!(
+        serde_json::from_value::<DisplayRow>(serde_json::to_value(&row).unwrap()).unwrap(),
+        row
+    );
+    assert_eq!(
+        serde_json::from_value::<NoticeFact>(serde_json::to_value(&fact).unwrap()).unwrap(),
+        fact
+    );
+    assert_eq!(
+        serde_json::from_value::<NoticeDelivered>(serde_json::to_value(&event).unwrap()).unwrap(),
         event
     );
 }

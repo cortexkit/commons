@@ -253,6 +253,9 @@ pub mod capabilities {
     /// Positive agent/notice marks on sends and their display facts.
     /// Requires [`READ_DISPLAY_FACTS`] and [`HISTORY_DISPLAY`].
     pub const MESSAGE_MARKS: &str = "message_marks";
+    /// Combined notice/agent marks and optional display names on agent marks.
+    /// Requires [`MESSAGE_MARKS`].
+    pub const NOTICE_WITH_SPEAKS_FOR: &str = "notice_with_speaks_for";
     /// Owner-marked notices carrying a person's words, protected from automatic drops.
     /// Requires [`MESSAGE_MARKS`].
     pub const NOTICE_KEEP: &str = "notice_keep";
@@ -506,6 +509,10 @@ pub mod capabilities {
         ),
         (
             NOTICE_KEEP,
+            &[ops::SESSION_SEND, ops::SESSION_READ, ops::SESSION_HISTORY],
+        ),
+        (
+            NOTICE_WITH_SPEAKS_FOR,
             &[ops::SESSION_SEND, ops::SESSION_READ, ops::SESSION_HISTORY],
         ),
         (TAG_READ, &[ops::SESSION_READ]),

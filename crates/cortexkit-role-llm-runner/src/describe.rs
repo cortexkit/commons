@@ -47,6 +47,8 @@ pub mod problem_names {
         "message_marks_without_read_display_facts";
     pub const MESSAGE_MARKS_WITHOUT_HISTORY_DISPLAY: &str = "message_marks_without_history_display";
     pub const NOTICE_KEEP_WITHOUT_MESSAGE_MARKS: &str = "notice_keep_without_message_marks";
+    pub const NOTICE_WITH_SPEAKS_FOR_WITHOUT_MESSAGE_MARKS: &str =
+        "notice_with_speaks_for_without_message_marks";
     pub const TAG_READ_WITHOUT_MESSAGE_SENDERS: &str = "tag_read_without_message_senders";
     pub const TAG_READ_WITHOUT_MESSAGE_MARKS: &str = "tag_read_without_message_marks";
     pub const TAG_READ_WITHOUT_CLIENT_MESSAGE_ID: &str = "tag_read_without_client_message_id";
@@ -721,6 +723,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             problem_names::NOTICE_KEEP_WITHOUT_MESSAGE_MARKS,
         ),
         (
+            capabilities::NOTICE_WITH_SPEAKS_FOR,
+            capabilities::MESSAGE_MARKS,
+            problem_names::NOTICE_WITH_SPEAKS_FOR_WITHOUT_MESSAGE_MARKS,
+        ),
+        (
             capabilities::ACCOUNT_ROUTE,
             capabilities::ROUTED_ACCOUNTS,
             problem_names::ACCOUNT_ROUTE_WITHOUT_ROUTED_ACCOUNTS,
@@ -1186,6 +1193,45 @@ mod live_ids_tests {
 #[cfg(test)]
 mod opt_in_dependency_tests {
     use super::*;
+
+    #[test]
+    fn notice_with_speaks_for_requires_message_marks_by_name() {
+        let describe = RoleDescribe::new(
+            vec![Major::new(
+                crate::PROVIDES,
+                crate::REQUIRED_OPS
+                    .iter()
+                    .copied()
+                    .chain([
+                        crate::ops::SESSION_HISTORY,
+                        crate::ops::SESSION_READ,
+                        crate::ops::SESSION_SEND,
+                    ])
+                    .map(String::from)
+                    .collect(),
+                "alpha",
+            )],
+            "0.8.34",
+        )
+        .with_capabilities(vec![
+            capabilities::NOTICE_WITH_SPEAKS_FOR.into(),
+            capabilities::READ_DISPLAY_FACTS.into(),
+            capabilities::HISTORY_DISPLAY.into(),
+        ])
+        .with_session_capabilities_from("baseline");
+        assert_eq!(
+            check_describe(&serde_json::to_value(&describe).unwrap()).unwrap_err(),
+            vec![DescribeProblem::Undecodable(
+                problem_names::NOTICE_WITH_SPEAKS_FOR_WITHOUT_MESSAGE_MARKS.into()
+            )]
+        );
+        let mut groups = describe.capabilities.clone();
+        groups.push(capabilities::MESSAGE_MARKS.into());
+        assert!(
+            check_describe(&serde_json::to_value(describe.with_capabilities(groups)).unwrap())
+                .is_ok()
+        );
+    }
 
     #[test]
     fn opt_in_groups_require_their_dependencies() {

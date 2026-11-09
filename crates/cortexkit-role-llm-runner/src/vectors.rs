@@ -41,6 +41,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/message-marks-retry.json"),
     ),
     (
+        "message-marks-named.json",
+        include_str!("../test-vectors/llm-runner-v1/message-marks-named.json"),
+    ),
+    (
         "cache-policy.json",
         include_str!("../test-vectors/llm-runner-v1/cache-policy.json"),
     ),

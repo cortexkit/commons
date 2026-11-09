@@ -276,6 +276,7 @@ alias until the next breaking release.
 | `sender_attribution` | `session.send`, `session.read`, `session.history`; requires `delivery_order`, `read_display_facts` and `history_display` | §9.7.1 |
 | `notices` | `session.read`, `session.history`, live subscription; requires `read_display_facts`, `history_display` and `live_events` | §9.7.2 |
 | `message_marks` | `session.send`, `session.read`, `session.history`; requires `read_display_facts` and `history_display` | §9.7.3 |
+| `notice_with_speaks_for` | `session.send`, `session.read`, `session.history`; requires `message_marks`; combined notice/agent marks and optional agent display names | §9.7.3a |
 | `notice_keep` | `session.send`, `session.read`, `session.history`; requires `message_marks` | §9.7.4 |
 | `tag_read` | `session.read` with a call-fixed part tag; requires `message_senders`, `message_marks`, `client_message_id` and `read_display_facts` | §9.6.1 |
 | `live_events` | `session.subscribe` with typed events, `seq` and the attach replay | §7.1 |
@@ -654,7 +655,7 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   a present field. Like `sender`, `send_id` never enters stored message bodies
   or content digests, never moves `history_version`, and is absent from default
   `session.read` output.
-- [pinned] With `message_marks`, `speaks_for?: {agent_id: string}` and
+- [pinned] With `message_marks`, `speaks_for?: {agent_id: string, name?: string}` and
   `notice?: true` carry the send's positive marks beside `sender`, with the
   same storage-time guarantee. Raw history serves them without an opt-in flag;
   older unmarked entries prove nothing. See §9.7.3 for admission and storage.
@@ -4699,7 +4700,7 @@ never less. This is the safe fallback because nothing gets hidden.
 - [pinned] On `session.read` with `include_display_facts: true`, and on
   display rows, the message holding the carrying tool result serves
   `notices: [{part: u32, call_key: string, call_carrier?: string, send_id: string, sender: string,
-  text: string, delivered_as: string, speaks_for?: {agent_id: string}}]`
+  text: string, delivered_as: string, speaks_for?: {agent_id: string, name?: string}}]`
   beside its body, in delivery order. Default raw reads omit the fact.
   `part` is the zero-based stored top-level content-part index, counted as
   in `reasoning_summaries`, never a projected display index or opaque key.
@@ -4755,15 +4756,17 @@ never less. This is the safe fallback because nothing gets hidden.
   `read_display_facts` and `history_display`. Missing prerequisites refuse by
   name: `message_marks_without_read_display_facts` and
   `message_marks_without_history_display`.
-- [pinned] `session.send` accepts optional `speaks_for: {agent_id: string}`
+- [pinned] `session.send` accepts optional `speaks_for: {agent_id: string, name?: string}`
   and `notice: bool` only under this group. Callers send these fields only to
   runners declaring the group; request decoding remains strict for runners
   without it. `speaks_for` means the named agent's words carried by the module;
-  `notice: true` means the module's own automatic message. False is equivalent
+  `notice: true` means an automatic message (the module's own words, or the
+  carried agent's words when combined under §9.7.3a). False is equivalent
   to absent, is not stored, and is omitted when serialized.
 - [pinned] `speaks_for.agent_id` is 1–128 printable ASCII bytes. Invalid ids
   refuse `invalid_params {field: "speaks_for.agent_id"}`. Combining
-  `speaks_for` with `notice: true` refuses `invalid_params {field: "notice"}`.
+  `speaks_for` with `notice: true` refuses `invalid_params {field: "notice"}`
+  unless the runner declares `notice_with_speaks_for` (§9.7.3a).
   `speaks_for` requires a scoped session and the attested sender to be that
   scope's owner, as stamped by the daemon on the route (§10.1,
   `scope_admission`). Otherwise refuse
@@ -4783,10 +4786,48 @@ never less. This is the safe fallback because nothing gets hidden.
 - [pinned] Marks are part of a send's retry identity. A resend under the same
   `send_id` whose `speaks_for`, `notice` or `keep` differs from the accepted
   send is refused `send_id_reuse`, with `detail.field` naming any one of the
-  differing fields, before any write. Compare `speaks_for` as the whole object;
+  differing fields, before any write. Compare `speaks_for` as the whole object,
+  including `name`: adding, removing or changing the name changes retry identity;
   false `notice` and false `keep` equal absence. Identical marks replay the
   original answer. Marks stay outside every checksum: this is retry identity
   only (`message_marks::retry_difference`).
+
+### 9.7.3a `notice_with_speaks_for`: carried agent notices and display names
+
+- [pinned] This optional describe group requires `message_marks`; a missing
+  prerequisite refuses `notice_with_speaks_for_without_message_marks`.
+  Callers send `notice: true` with `speaks_for` only to runners declaring it.
+  Without the group the combination still refuses `invalid_params {field:
+  "notice"}` before any write. With the group it is accepted subject to all
+  ordinary admission checks, including scope-owner authority for `speaks_for`.
+- [pinned] `speaks_for.name` is optional, 1–64 printable ASCII bytes, using the
+  same printable-byte validation as `agent_id`. Invalid names refuse
+  `invalid_params {field: "speaks_for.name"}`. It is the agent's registry name
+  as known when sent, for display only, never identity. Omit an absent name,
+  never send null. Persist it unchanged beside `agent_id` on entries and rides;
+  all mark-bearing read/history/display surfaces, riding `notices` facts and
+  `notice_delivered` events carry it when sent.
+- [pinned] Name admission also requires this group, even without `notice`.
+  Callers send names only to runners declaring the group and using crate
+  0.8.34 or later. `SpeaksFor`'s serde response decoder ignores unknown fields,
+  but the request admission helper in older runners explicitly refuses every
+  member other than `agent_id`; names cannot safely be sent to them. A current
+  runner without the group refuses a supplied name as `invalid_params {field:
+  "speaks_for.name"}`. Runners use
+  `SendRequest::message_marks_with_notice_speaks_for` with both describe flags;
+  the legacy `message_marks` helper preserves legacy refusal behaviour.
+- [pinned] When serving compaction entries, a runner fills `Entry.speaks_for`
+  from every stored send's mark, copying the agent id and the name when sent,
+  but only for providers declaring `compaction-entry-speaks-for/v1` under the
+  compaction contract W1.4. The runner reads that declaration from the provider
+  catalog at every Setup and uses it until the next Setup. Without it, omit the
+  member. Deploy providers that understand attribution before runners emit it.
+  The entry text remains that agent's verbatim words, never the person's words;
+  summaries and context maps label that agent. The mark alone is not a notice
+  and cannot cause automatic sweeping; with `notice` it may be swept as a notice.
+  Attribution is frozen at write time and outside every checksum, including the
+  compaction entry digest. Previously stored marks may be projected without a
+  digest change, history-version change or view rewrite.
 
 ### 9.7.4 `notice_keep`: protect notices carrying a person's words
 

@@ -1173,6 +1173,13 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    if case.starts_with("notice_with_speaks_for_")
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "message_marks is not declared"
+                || reason == "notice_with_speaks_for is not declared")
+    {
+        return;
+    }
     if (case.starts_with("sender_attribution_") || case.starts_with("notices_"))
         && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
             if reason.starts_with("missing groups:") || reason.starts_with("the subject declares every one of"))
@@ -2004,7 +2011,9 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
             );
             continue;
         }
-        if spec.name.starts_with("message_marks_") {
+        if spec.name.starts_with("message_marks_")
+            || spec.name.starts_with("notice_with_speaks_for_")
+        {
             assert_eq!(
                 report.outcome(spec.name),
                 Some(&CaseOutcome::Inapplicable {

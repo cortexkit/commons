@@ -10,6 +10,10 @@
     {"name":"speaker_whole_object","accepted":{"speaks_for":{"agent_id":"agent-a"}},"resent":{"speaks_for":{"agent_id":"agent-a","future":"different"}},"field":"speaks_for"},
     {"name":"speaker_removed","accepted":{"speaks_for":{"agent_id":"agent-a"}},"resent":{},"field":"speaks_for"},
     {"name":"identical_marks","accepted":{"notice":true,"keep":true},"resent":{"notice":true,"keep":true},"field":null},
-    {"name":"identical_speaker","accepted":{"speaks_for":{"agent_id":"agent-a"}},"resent":{"speaks_for":{"agent_id":"agent-a"}},"field":null}
+    {"name":"identical_speaker","accepted":{"speaks_for":{"agent_id":"agent-a"}},"resent":{"speaks_for":{"agent_id":"agent-a"}},"field":null},
+    {"name":"speaker_name_changed","accepted":{"speaks_for":{"agent_id":"agent-a","name":"Ada"}},"resent":{"speaks_for":{"agent_id":"agent-a","name":"Bea"}},"field":"speaks_for"},
+    {"name":"speaker_name_added","accepted":{"speaks_for":{"agent_id":"agent-a"}},"resent":{"speaks_for":{"agent_id":"agent-a","name":"Ada"}},"field":"speaks_for"},
+    {"name":"speaker_name_removed","accepted":{"speaks_for":{"agent_id":"agent-a","name":"Ada"}},"resent":{"speaks_for":{"agent_id":"agent-a"}},"field":"speaks_for"},
+    {"name":"identical_named_notice","accepted":{"notice":true,"speaks_for":{"agent_id":"agent-a","name":"Ada"}},"resent":{"notice":true,"speaks_for":{"agent_id":"agent-a","name":"Ada"}},"field":null}
   ]
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.1
+
+- Require compaction 0.3.3 for optional entry-level agent attribution. Providers
+  read attribution from `Entry`; rendered messages carry only what the model
+  request needs. Model bytes, render plans and `PLAN_VERSION` stay unchanged.
+- Patch bump: the dependency's added member is on non-exhaustive `Entry`; this
+  library adds no public fields or signatures. The operator approved the
+  carried-agent attribution contract for release.
+- Readers first: Magic Context deploys reading `Entry.speaks_for` and declares
+  `compaction-entry-speaks-for/v1` before any runner sends the member. Core sends
+  `notice` with `speaks_for` only to runners declaring `notice_with_speaks_for`.
+
 ## 0.2.0
 
 - Take compaction 0.3.0; the minor bump reflects the compaction types exposed

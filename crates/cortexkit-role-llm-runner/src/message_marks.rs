@@ -11,6 +11,9 @@ use serde_json::{Map, Value};
 #[non_exhaustive]
 pub struct SpeaksFor {
     pub agent_id: String,
+    /// Registry name when sent, for display only; never an identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 
 impl SpeaksFor {
@@ -18,7 +21,15 @@ impl SpeaksFor {
     pub fn new(agent_id: impl Into<String>) -> Self {
         Self {
             agent_id: agent_id.into(),
+            name: None,
         }
+    }
+
+    /// Set the display name. Admission validates it and requires
+    /// `notice_with_speaks_for` even when no notice mark is sent.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
     }
 }
 
@@ -51,7 +62,21 @@ pub fn check(
     scope_owner: Option<&str>,
     sender: &str,
 ) -> Result<MessageMarks, &'static str> {
+    check_with_notice_speaks_for(params, advertised, false, scope_owner, sender)
+}
+
+/// Validate marks with the additive `notice_with_speaks_for` group. That group
+/// requires `message_marks` and enables both names and combined notice marks.
+/// The legacy [`check`] keeps refusing either extension.
+pub fn check_with_notice_speaks_for(
+    params: &Map<String, Value>,
+    advertised: bool,
+    notice_with_speaks_for: bool,
+    scope_owner: Option<&str>,
+    sender: &str,
+) -> Result<MessageMarks, &'static str> {
     if advertised
+        && !notice_with_speaks_for
         && params.contains_key("speaks_for")
         && params.get("notice") == Some(&Value::Bool(true))
     {
@@ -68,10 +93,24 @@ pub fn check(
             .and_then(Value::as_str)
             .filter(|id| agent_id_valid(id))
             .ok_or("speaks_for.agent_id")?;
-        if object.len() != 1 {
+        if object.keys().any(|key| key != "agent_id" && key != "name") {
             return Err("speaks_for");
         }
-        marks.speaks_for = Some(SpeaksFor::new(id));
+        let mut speaker = SpeaksFor::new(id);
+        if let Some(raw_name) = object.get("name") {
+            if !notice_with_speaks_for {
+                return Err("speaks_for.name");
+            }
+            let name = raw_name
+                .as_str()
+                .filter(|name| {
+                    (1..=64).contains(&name.len())
+                        && name.bytes().all(|byte| (0x20..=0x7e).contains(&byte))
+                })
+                .ok_or("speaks_for.name")?;
+            speaker.name = Some(name.into());
+        }
+        marks.speaks_for = Some(speaker);
     }
     if let Some(raw) = params.get("notice") {
         if !advertised {
@@ -105,6 +144,38 @@ pub fn retry_difference(
 #[cfg(all(test, feature = "test-vectors"))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speaks_for_name_round_trips() {
+        let wire = serde_json::json!({"agent_id":"agent-a", "name":"Ada"});
+        let mark: SpeaksFor = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(mark).unwrap(), wire);
+    }
+
+    #[test]
+    fn named_message_marks_vectors_validate_declarations() {
+        let file: Value =
+            serde_json::from_str(crate::vectors::file("message-marks-named.json").unwrap())
+                .unwrap();
+        for case in file["cases"].as_array().unwrap() {
+            let result = check_with_notice_speaks_for(
+                case["params"].as_object().unwrap(),
+                true,
+                case["declared"].as_bool().unwrap(),
+                Some("owner"),
+                "owner",
+            );
+            match case["field"].as_str() {
+                Some(field) => assert_eq!(result.unwrap_err(), field, "{}", case["name"]),
+                None => assert_eq!(
+                    serde_json::to_value(result.unwrap()).unwrap(),
+                    case["params"],
+                    "{}",
+                    case["name"]
+                ),
+            }
+        }
+    }
 
     #[test]
     fn marks_retry_identity_uses_whole_speaker_and_normalized_booleans() {

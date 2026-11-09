@@ -11,6 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub use cortexkit_role_llm_runner::message_marks::SpeaksFor;
+
 use crate::part::Part;
 use crate::view::AppliedView;
 
@@ -54,10 +56,16 @@ pub struct Entry {
     /// (P6). Nothing may derive it from the ordinal or the reverse.
     pub mid: String,
     pub role: Role,
-    /// Set when a user-role entry was delivered by a module or the runner
-    /// (a reminder, a wake, a notice) rather than typed or prompted.
+    /// Origin of a user-role notice (a reminder, a wake, an automatic message).
+    /// Independent of `speaks_for`; absence does not prove the person wrote it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notice: Option<NoticeOrigin>,
+    /// Verbatim words of another agent, never the person's words. Independent
+    /// of `notice`; this mark alone does not permit automatic notice sweeping.
+    /// Sent only to providers declaring `compaction-entry-speaks-for/v1`.
+    /// Frozen write-time attribution, excluded from every checksum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaks_for: Option<SpeaksFor>,
     /// When the host first stored the message, in milliseconds since the Unix
     /// epoch. It does not change when the entry is updated. For a message the
     /// runner did not store itself (history from before the runner, a moved
@@ -251,7 +259,7 @@ pub struct Head {
 /// parts, each part with its `id`, `tag` and `digest`, as [`Entry::digest`]
 /// carries it. The ordinal, `mid`, `written_at`, `completed_at`, usage and
 /// `generated_under`, reasoning counts, part `tokens` and delivered-item
-/// `tokens` are not hashed.
+/// `tokens` and entry `speaks_for` are not hashed.
 /// Pass full parts: compact parts hash to a
 /// different value.
 pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -> String {
@@ -294,6 +302,7 @@ impl Entry {
             mid: mid.into(),
             role,
             notice: None,
+            speaks_for: None,
             written_at,
             completed_at: None,
             digest,
@@ -309,6 +318,14 @@ impl Entry {
     pub fn with_notice(mut self, notice: NoticeOrigin) -> Self {
         self.notice = Some(notice);
         self.digest = entry_digest(self.role.clone(), self.notice.as_ref(), &self.parts);
+        self
+    }
+
+    /// Project a stored speaker mark for the provider's declaration captured
+    /// at Setup. Omit it without that declaration, even on previously marked
+    /// entries. Attribution never changes the digest or an applied view.
+    pub fn with_speaks_for(mut self, speaks_for: SpeaksFor, provider_declared: bool) -> Self {
+        self.speaks_for = provider_declared.then_some(speaks_for);
         self
     }
 
@@ -495,6 +512,14 @@ impl Default for Head {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn speaks_for_round_trips_without_becoming_a_notice() {
+        let mut wire = serde_json::to_value(Entry::new(1, "m1", Role::User, 1, vec![])).unwrap();
+        wire["speaks_for"] = serde_json::json!({"agent_id":"agent-a", "name":"Ada"});
+        let entry: Entry = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(serde_json::to_value(entry).unwrap(), wire);
+    }
     use serde_json::json;
 
     #[test]

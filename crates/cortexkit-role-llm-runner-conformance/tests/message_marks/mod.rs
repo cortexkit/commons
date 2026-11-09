@@ -20,6 +20,89 @@ fn subject(defect: Option<&'static str>, enabled: bool) -> FakeSubject {
 }
 
 #[tokio::test]
+async fn notice_with_speaks_for_faithful_runner_passes() {
+    let mut subject = subject(None, true);
+    subject.capabilities.insert(Capability::NoticeWithSpeaksFor);
+    let report = run(&subject).await;
+    for name in [
+        "notice_with_speaks_for_served",
+        "notice_with_speaks_for_retry",
+    ] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    assert!(
+        matches!(
+            report.outcome("message_marks_both_refused"),
+            Some(CaseOutcome::Inapplicable { .. })
+        ),
+        "{}",
+        report.render()
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn notice_with_speaks_for_undeclared_refuses_combination_and_name() {
+    let report = run(&subject(None, true)).await;
+    for name in [
+        "message_marks_both_refused",
+        "notice_with_speaks_for_name_undeclared",
+    ] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn notice_with_speaks_for_rejects_incorrect_implementations_by_check_name() {
+    for (defect, name, reason, declared) in [
+        (
+            "named_both",
+            "notice_with_speaks_for_served",
+            "was refused",
+            true,
+        ),
+        (
+            "name_drop",
+            "notice_with_speaks_for_served",
+            "incorrect speaks_for",
+            true,
+        ),
+        (
+            "retry_name",
+            "notice_with_speaks_for_retry",
+            "not refused",
+            true,
+        ),
+        (
+            "name_undeclared",
+            "notice_with_speaks_for_name_undeclared",
+            "not refused",
+            false,
+        ),
+    ] {
+        let mut subject = subject(Some(defect), true);
+        if declared {
+            subject.capabilities.insert(Capability::NoticeWithSpeaksFor);
+        }
+        let report = run(&subject).await;
+        let failure = failed(&report, name);
+        assert!(failure.contains(reason), "{name}: {failure}");
+        assert_none_failed_but(&report, &[name]);
+    }
+}
+
+#[tokio::test]
 async fn message_marks_faithful_runner_passes() {
     let report = run(&subject(None, true)).await;
     for name in cases_of(&["message_marks_"]) {

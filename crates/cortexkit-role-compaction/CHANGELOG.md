@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.3
+
+- Add optional `Entry.speaks_for` with agent identity and an optional display-only
+  registry name. Agent words stay attributed to that agent in summaries and
+  context maps; attribution alone is not a notice or automatically swept.
+- Gate projection on provider manifest `compaction-entry-speaks-for/v1`, read
+  from the catalog at every Setup and retained until the next Setup. Providers
+  deploy first and cannot withdraw the capability mid-session without restarting.
+  Add the capability constant, declaration helper and gated entry builder.
+- Exclude attribution from every checksum; stored marks can be backfilled with
+  no digest or view rewrite. Wire vectors cover marked entries with and without
+  notice, provider-declaration omission and digest preservation.
+- Patch bump: `Entry` and the shared `SpeaksFor` are non-exhaustive with
+  constructors. Require runner 0.8.34 for its optional name; no existing
+  constructor or checksum shape changes. The operator approved the carried-agent
+  attribution contract for release.
+- Readers first: Magic Context deploys reading `Entry.speaks_for` and declares
+  `compaction-entry-speaks-for/v1` before any runner sends the member. Core sends
+  `notice` with `speaks_for` only to runners declaring `notice_with_speaks_for`.
+
 ## 0.3.2
 
 - Add MV7: every accepted view of a moved-in session must cut through the

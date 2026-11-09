@@ -6,7 +6,8 @@ use cortexkit_role_compaction::{
         ToolPart, ToolStatus,
     },
     read::{
-        Cursor, Detail, Entry, Head, NoticeOrigin, ReadPage, ReadRequest, Role, Select, StepUsage,
+        Cursor, Detail, Entry, Head, NoticeOrigin, ReadPage, ReadRequest, Role, Select, SpeaksFor,
+        StepUsage,
     },
     ride::{RideAnswer, RideCause, RideRequest},
     rules::{EditCost, ProviderRules, RuleBreak, SignedParts},
@@ -156,6 +157,27 @@ fn samples() -> Vec<(&'static str, Value)> {
         ))
     };
     let mut samples = vec![
+        (
+            "speaks-for-entry.json",
+            value(
+                Entry::new(
+                    1,
+                    "message-a",
+                    Role::User,
+                    1_700_000_000_000,
+                    entry.parts.clone(),
+                )
+                .with_speaks_for(SpeaksFor::new("agent-a").with_name("Ada"), true),
+            ),
+        ),
+        (
+            "notice-speaks-for-entry.json",
+            value(
+                entry
+                    .clone()
+                    .with_speaks_for(SpeaksFor::new("agent-a").with_name("Ada"), true),
+            ),
+        ),
         (
             "notice-last-prompt-view-request.json",
             request(
@@ -614,6 +636,56 @@ fn request_round_trip<T: DeserializeOwned + Serialize>(
 }
 
 fn check(name: &str, json: Value) {
+    if matches!(
+        name,
+        "speaks-for-entry.json" | "notice-speaks-for-entry.json"
+    ) {
+        round_trip::<Entry>(json.clone());
+        let entry: Entry = serde_json::from_value(json).unwrap();
+        let mark = entry.speaks_for.clone().unwrap();
+        assert_eq!(mark, SpeaksFor::new("agent-a").with_name("Ada"));
+        assert_eq!(
+            entry.notice.is_some(),
+            name == "notice-speaks-for-entry.json"
+        );
+        let base = Entry::new(
+            entry.ordinal,
+            &entry.mid,
+            entry.role.clone(),
+            entry.written_at,
+            entry.parts.clone(),
+        );
+        let base = match entry.notice.clone() {
+            Some(notice) => base.with_notice(notice),
+            None => base,
+        };
+        // These pins predate attribution: adding it must not change entry identity.
+        assert_eq!(entry.digest, base.digest);
+        if entry.notice.is_some() {
+            assert_eq!(
+                entry.digest,
+                "e4565946a06648fa4ba6a87d56934d4506449a4e850ef6a5f588e3375f1e5ea7"
+            );
+        }
+        for declared in [false, true] {
+            let provides = if declared {
+                vec![
+                    cortexkit_role_compaction::COMPACTION_PROVIDES.into(),
+                    cortexkit_role_compaction::COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES.into(),
+                ]
+            } else {
+                vec![cortexkit_role_compaction::COMPACTION_PROVIDES.into()]
+            };
+            let projected = base.clone().with_speaks_for(
+                mark.clone(),
+                cortexkit_role_compaction::provides_entry_speaks_for(&provides),
+            );
+            assert_eq!(projected.speaks_for.as_ref(), declared.then_some(&mark));
+            assert_eq!(projected.digest, base.digest);
+            assert_eq!(value(projected).get("speaks_for").is_some(), declared);
+        }
+        return;
+    }
     if name == "notice-keep-entry.json" {
         round_trip::<Entry>(json.clone());
         let mut entry: Entry = serde_json::from_value(json.clone()).unwrap();

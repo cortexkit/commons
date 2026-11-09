@@ -56,6 +56,20 @@ pub mod wire;
 /// new because every op below changed shape incompatibly.
 pub const COMPACTION_PROVIDES: &str = "compaction-provider/v2";
 
+/// Additional provider manifest capability enabling `Entry.speaks_for`.
+/// Runners read the provider's catalog entry at every Setup and retain that
+/// declaration until the next Setup. Providers must not withdraw it while
+/// serving a session without restarting.
+pub const COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES: &str = "compaction-entry-speaks-for/v1";
+
+/// Whether a provider's catalog capabilities declare agent attribution.
+/// Evaluate at Setup, not from the runner's own Setup request fields.
+pub fn provides_entry_speaks_for(provides: &[String]) -> bool {
+    provides
+        .iter()
+        .any(|capability| capability == COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES)
+}
+
 /// The role and version a runner declares when it opens a route for this
 /// contract (`role_versions` on the route), so the provider knows which
 /// contract the route speaks. Routes are per session and per role: a runner
