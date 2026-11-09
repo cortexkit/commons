@@ -1437,6 +1437,13 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     }
     // Legacy fixtures do not opt into these groups or supply their optional
     // metadata/clock hooks. Inapplicable cases are not counted as passing coverage.
+    if case == "host_parts_agree_with_display_rows"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "host agreement needs both display history and read display facts"
+                || reason == "neither form serves host parts")
+    {
+        return;
+    }
     if (case.starts_with("cache_policy_")
         || case.starts_with("sender_succession_")
         || case.starts_with("history_intake_")
@@ -6325,6 +6332,7 @@ async fn live_ids_missing_groups_are_inapplicable_by_name() {
 
 /// A fake declaring the display, client-message-id and live-event groups.
 fn displaying(defects: Defects) -> FakeSubject {
+    let host = defects.display_host.is_some();
     let mut subject = FakeSubject::new(defects);
     subject.capabilities.extend([
         Capability::HostHistory,
@@ -6333,6 +6341,9 @@ fn displaying(defects: Defects) -> FakeSubject {
         Capability::ClientMessageId,
         Capability::RunCause,
     ]);
+    if host {
+        subject.capabilities.insert(Capability::ReadDisplayFacts);
+    }
     subject
 }
 
@@ -6372,6 +6383,143 @@ async fn host_parts_display_projection_accepts_explicit_user_marks() {
         "{}",
         report.render()
     );
+}
+
+#[tokio::test]
+async fn host_code_projection_strips_code_with_host() {
+    let report = run(&displaying(Defects {
+        display_host: Some("code"),
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.outcome("display_row_is_the_profile_projection"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert_eq!(
+        report.outcome("host_parts_agree_with_display_rows"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn host_code_without_host_fails_projection_by_name() {
+    let report = run(&displaying(Defects {
+        display_host: Some("code_without_host"),
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "display_row_is_the_profile_projection")
+        .contains("host_code requires host: true"));
+}
+
+#[tokio::test]
+async fn host_code_on_non_user_fails_projection_by_name() {
+    let report = run(&displaying(Defects {
+        display_host: Some("code_non_user"),
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "display_row_is_the_profile_projection")
+        .contains("host must be emitted only as true on a user part"));
+}
+
+#[tokio::test]
+async fn host_parts_mismatched_forms_fail_agreement_by_name() {
+    for mode in [
+        "missing_read_fact",
+        "read_only",
+        "code_mismatch",
+        "stray_read_key",
+        "non_user_read_fact",
+    ] {
+        let report = run(&displaying(Defects {
+            display_host: Some(mode),
+            ..Defects::default()
+        }))
+        .await;
+        assert!(
+            failed(&report, "host_parts_agree_with_display_rows").contains("host_parts"),
+            "{mode}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn host_parts_agreement_needs_no_shared_profile() {
+    for mode in ["user", "code"] {
+        let report = run(&displaying(Defects {
+            display_host: Some(mode),
+            display_no_profile: true,
+            ..Defects::default()
+        }))
+        .await;
+        assert_eq!(
+            report.outcome("host_parts_agree_with_display_rows"),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+        assert!(matches!(
+            report.outcome("display_row_is_the_profile_projection"),
+            Some(CaseOutcome::Inapplicable { .. })
+        ));
+    }
+    let report = run(&displaying(Defects {
+        display_host: Some("missing_read_fact"),
+        display_no_profile: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "host_parts_agree_with_display_rows").contains("host_parts"));
+}
+
+#[tokio::test]
+async fn host_parts_agreement_is_inapplicable_without_host_forms_or_counterpart() {
+    let mut subject = displaying(Defects::default());
+    subject.capabilities.insert(Capability::ReadDisplayFacts);
+    let report = run(&subject).await;
+    assert!(
+        matches!(report.outcome("host_parts_agree_with_display_rows"),
+        Some(CaseOutcome::Inapplicable { reason }) if reason.contains("neither form"))
+    );
+    subject.capabilities.remove(&Capability::HistoryDisplay);
+    subject.defects.display_host = Some("user");
+    let report = run(&subject).await;
+    assert!(matches!(
+        report.outcome("host_parts_agree_with_display_rows"),
+        Some(CaseOutcome::Inapplicable { .. })
+    ));
+    let mut subject = displaying(Defects {
+        display_host: Some("code"),
+        ..Defects::default()
+    });
+    subject.capabilities.remove(&Capability::ReadDisplayFacts);
+    let report = run(&subject).await;
+    assert!(matches!(
+        report.outcome("host_parts_agree_with_display_rows"),
+        Some(CaseOutcome::Inapplicable { .. })
+    ));
+    assert_eq!(
+        report.outcome("display_row_is_the_profile_projection"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    let mut subject = displaying(Defects {
+        display_host: Some("code"),
+        ..Defects::default()
+    });
+    subject.capabilities.remove(&Capability::HostHistory);
+    let report = run(&subject).await;
+    assert!(matches!(
+        report.outcome("host_parts_agree_with_display_rows"),
+        Some(CaseOutcome::Inapplicable { .. })
+    ));
 }
 
 #[tokio::test]
@@ -8623,6 +8771,42 @@ fn read_facts_subject(defect: Option<&'static str>) -> FakeSubject {
     );
     subject.capabilities.insert(Capability::ClientMessageId);
     subject
+}
+
+#[tokio::test]
+async fn host_parts_read_only_facts_validate_without_display_history() {
+    for (mode, valid) in [
+        ("code", true),
+        ("stray_read_key", false),
+        ("non_user_read_fact", false),
+        ("code_bad_shape", false),
+    ] {
+        let mut subject = read_facts_subject(None);
+        subject.defects.display_host = Some(mode);
+        let report = run(&subject).await;
+        if valid {
+            assert_eq!(
+                report.outcome("read_display_facts_opt_in_envelope"),
+                Some(&CaseOutcome::Passed),
+                "{}",
+                report.render()
+            );
+        } else {
+            let reason = failed(&report, "read_display_facts_opt_in_envelope");
+            assert!(
+                reason.contains("host_parts") || reason.contains("host_code"),
+                "{mode}: {reason}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn host_parts_default_read_leak_fails_by_name() {
+    let mut subject = read_facts_subject(None);
+    subject.defects.display_host = Some("default_fact_leak");
+    let report = run(&subject).await;
+    assert!(failed(&report, "read_display_facts_default_absent").contains("without opt-in"));
 }
 
 #[tokio::test]

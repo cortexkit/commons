@@ -350,7 +350,10 @@ where
             }
             name if name.starts_with("retention_") => self.retention_case(name).await,
             name if name.starts_with("history_") => crate::host_history::run(self, name).await,
-            name if name.starts_with("display_") || name.starts_with("client_message_id_") => {
+            name if name.starts_with("display_")
+                || name.starts_with("client_message_id_")
+                || name == "host_parts_agree_with_display_rows" =>
+            {
                 crate::display::run(self, name).await
             }
             name if name.starts_with("live_ids_") => crate::live_ids::run(self, name).await,

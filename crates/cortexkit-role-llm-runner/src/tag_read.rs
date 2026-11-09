@@ -69,6 +69,7 @@ impl TagReadRequest {
 /// The entry as shown in the call's model request, with ordinary read display
 /// facts, and the zero-based stored top-level part index the tag names.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(try_from = "AnswerWire")]
 #[non_exhaustive]
 pub struct TagReadAnswer {
     pub entry: ReadMessage,
@@ -77,6 +78,33 @@ pub struct TagReadAnswer {
     /// Emit only after citation readers support it; false is absent on the wire.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
+    /// Open presentation code for the resolved host part, never a text rewrite.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_code: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct AnswerWire {
+    entry: ReadMessage,
+    part: u32,
+    #[serde(default)]
+    host: bool,
+    #[serde(default, deserialize_with = "crate::display::host_codes::deserialize")]
+    host_code: Option<String>,
+}
+
+impl TryFrom<AnswerWire> for TagReadAnswer {
+    type Error = &'static str;
+
+    fn try_from(wire: AnswerWire) -> Result<Self, Self::Error> {
+        crate::display::host_codes::check(wire.host, wire.host_code.as_deref())?;
+        Ok(Self {
+            entry: wire.entry,
+            part: wire.part,
+            host: wire.host,
+            host_code: wire.host_code,
+        })
+    }
 }
 
 impl TagReadAnswer {
@@ -85,6 +113,7 @@ impl TagReadAnswer {
             entry,
             part,
             host: false,
+            host_code: None,
         }
     }
 
@@ -92,6 +121,17 @@ impl TagReadAnswer {
     /// used for display parts. Native `synthetic` rows are host-written too.
     pub fn with_host(mut self, host: bool) -> Self {
         self.host = host;
+        if !host {
+            self.host_code = None;
+        }
+        self
+    }
+
+    /// Set both `host` and its presentation code from the same exact match.
+    /// Native `synthetic` rows carry no code. Unknown codes fall back to text.
+    pub fn with_host_code(mut self, code: impl Into<String>) -> Self {
+        self.host = true;
+        self.host_code = Some(code.into());
         self
     }
 }

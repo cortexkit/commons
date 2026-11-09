@@ -241,6 +241,17 @@ pub enum DisplayPart {
 }
 
 impl DisplayPart {
+    /// The stored part key, shared with read display facts.
+    pub fn part(&self) -> &str {
+        match self {
+            Self::Text(part) | Self::Reasoning(part) => &part.part,
+            Self::ToolCall(part) => &part.part,
+            Self::ToolResult(part) => &part.part,
+            Self::File(part) => &part.part,
+            Self::Other(part) => &part.part,
+        }
+    }
+
     /// Mark a user-entry part the host wrote, from exact recorded knowledge.
     /// Emit this fact only after every reader has shipped support (CONTRACT §4.7).
     pub fn with_host(mut self, host: bool) -> Self {
@@ -251,7 +262,40 @@ impl DisplayPart {
             Self::File(part) => part.host = host,
             Self::Other(part) => part.host = host,
         }
+        if !host {
+            self.set_host_code(None);
+        }
         self
+    }
+
+    /// Set both the host mark and its optional presentation code. Use the same
+    /// exact recorded match for both; unknown codes remain valid (CONTRACT §4.7).
+    /// Invalid code shapes are refused when decoding or by [`host_codes::check`].
+    pub fn with_host_code(mut self, code: impl Into<String>) -> Self {
+        self = self.with_host(true);
+        self.set_host_code(Some(code.into()));
+        self
+    }
+
+    fn set_host_code(&mut self, code: Option<String>) {
+        match self {
+            Self::Text(part) | Self::Reasoning(part) => part.host_code = code,
+            Self::ToolCall(part) => part.host_code = code,
+            Self::ToolResult(part) => part.host_code = code,
+            Self::File(part) => part.host_code = code,
+            Self::Other(part) => part.host_code = code,
+        }
+    }
+
+    /// Optional open-vocabulary presentation code; fall back to the part's text.
+    pub fn host_code(&self) -> Option<&str> {
+        match self {
+            Self::Text(part) | Self::Reasoning(part) => part.host_code.as_deref(),
+            Self::ToolCall(part) => part.host_code.as_deref(),
+            Self::ToolResult(part) => part.host_code.as_deref(),
+            Self::File(part) => part.host_code.as_deref(),
+            Self::Other(part) => part.host_code.as_deref(),
+        }
     }
 
     /// Whether this part is marked as host-written. An absent mark is false.
@@ -264,6 +308,47 @@ impl DisplayPart {
             Self::File(part) => part.host,
             Self::Other(part) => part.host,
         }
+    }
+}
+
+/// Open presentation codes for exact whole host blocks, never model-byte edits.
+pub mod host_codes {
+    use serde::{Deserialize, Deserializer};
+
+    /// Claude Code's whole block `[Request interrupted by user]\n`.
+    pub const INTERRUPTED: &str = "interrupted";
+    /// The exact host text represented by [`INTERRUPTED`].
+    pub const INTERRUPTED_TEXT: &str = "[Request interrupted by user]\n";
+    /// Claude Code's whole block `[Request interrupted by user for tool use]\n`.
+    pub const INTERRUPTED_FOR_TOOL_USE: &str = "interrupted_for_tool_use";
+    /// The exact host text represented by [`INTERRUPTED_FOR_TOOL_USE`].
+    pub const INTERRUPTED_FOR_TOOL_USE_TEXT: &str = "[Request interrupted by user for tool use]\n";
+
+    /// Check display members constructed in memory, including concrete part
+    /// structs. The vocabulary is open; only shape and the host mark are checked.
+    pub fn check(host: bool, code: Option<&str>) -> Result<(), &'static str> {
+        if let Some(code) = code {
+            if !host {
+                return Err("host_code requires host: true");
+            }
+            if code.is_empty()
+                || code.len() > 64
+                || !code
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            {
+                return Err("host_code must be 1-64 bytes of lowercase ASCII letters, digits or _");
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<String>, D::Error> {
+        let code = String::deserialize(deserializer)?;
+        check(true, Some(&code)).map_err(serde::de::Error::custom)?;
+        Ok(Some(code))
     }
 }
 
@@ -280,6 +365,9 @@ pub mod part_types {
 impl<'de> Deserialize<'de> for DisplayPart {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
+        if value.get("host_code").is_some() && value.get("host") != Some(&Value::Bool(true)) {
+            return Err(serde::de::Error::custom("host_code requires host: true"));
+        }
         let kind = value
             .get("type")
             .and_then(Value::as_str)
@@ -303,6 +391,14 @@ impl<'de> Deserialize<'de> for DisplayPart {
             part_types::FILE => Self::File(typed::<_, D::Error>(value)?),
             part_types::OTHER => Self::Other(typed::<_, D::Error>(value)?),
             _ => Self::Other(OtherPart {
+                host_code: match value.get("host_code") {
+                    Some(code) => {
+                        let code: String = typed::<_, D::Error>(code.clone())?;
+                        host_codes::check(true, Some(&code)).map_err(serde::de::Error::custom)?;
+                        Some(code)
+                    }
+                    None => None,
+                },
                 host: typed::<_, D::Error>(
                     value.get("host").cloned().unwrap_or(Value::Bool(false)),
                 )?,
@@ -318,6 +414,13 @@ pub struct TextPart {
     /// Host-written on a user row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
+    /// Optional host presentation code; requires `host: true`. See [`host_codes`].
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "host_codes::deserialize"
+    )]
+    pub host_code: Option<String>,
     pub part: String,
     pub text: String,
 }
@@ -326,6 +429,7 @@ impl TextPart {
     pub fn new(part: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
             host: false,
+            host_code: None,
             part: part.into(),
             text: text.into(),
         }
@@ -340,6 +444,13 @@ pub struct ToolCallPart {
     /// Host-written on a user row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
+    /// Optional host presentation code; requires `host: true`. See [`host_codes`].
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "host_codes::deserialize"
+    )]
+    pub host_code: Option<String>,
     /// The opted-in plan call's references, separate from model arguments.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_refs: Option<crate::output_refs::Descriptor>,
@@ -401,6 +512,13 @@ pub struct ToolResultPart {
     /// Host-written on a user row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
+    /// Optional host presentation code; requires `host: true`. See [`host_codes`].
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "host_codes::deserialize"
+    )]
+    pub host_code: Option<String>,
     pub part: String,
     pub tool_call_id: String,
     /// The model provider ran this tool itself. Its result reaches the model
@@ -473,6 +591,13 @@ pub struct FilePart {
     /// Host-written on a user row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
+    /// Optional host presentation code; requires `host: true`. See [`host_codes`].
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "host_codes::deserialize"
+    )]
+    pub host_code: Option<String>,
     /// The key of the stored part, empty for a file nested in a tool result.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub part: String,
@@ -492,6 +617,13 @@ pub struct OtherPart {
     /// Host-written on a user row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
+    /// Optional host presentation code; requires `host: true`. See [`host_codes`].
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "host_codes::deserialize"
+    )]
+    pub host_code: Option<String>,
     #[serde(default)]
     pub part: String,
     /// The stored part's own type.
@@ -614,6 +746,7 @@ impl FilePart {
     pub fn media(part: impl Into<String>, media: Reference) -> Self {
         Self {
             host: false,
+            host_code: None,
             part: part.into(),
             media: Some(media),
             url: None,
@@ -626,6 +759,7 @@ impl FilePart {
     pub fn url(part: impl Into<String>, url: impl Into<String>, mime: Option<String>) -> Self {
         Self {
             host: false,
+            host_code: None,
             part: part.into(),
             media: None,
             url: Some(url.into()),
@@ -644,6 +778,7 @@ impl OtherPart {
     pub fn new(part: impl Into<String>, kind: impl Into<String>) -> Self {
         Self {
             host: false,
+            host_code: None,
             part: part.into(),
             kind: kind.into(),
             reason: None,
@@ -786,6 +921,7 @@ fn arguments_part(
     };
     DisplayPart::ToolCall(ToolCallPart {
         host: false,
+        host_code: None,
         output_refs: None,
         part,
         tool_call_id,
@@ -823,6 +959,7 @@ fn result_part(
     };
     DisplayPart::ToolResult(ToolResultPart {
         host: false,
+        host_code: None,
         part,
         tool_call_id,
         provider_executed: false,
@@ -880,6 +1017,7 @@ fn anthropic_file(block: &Value, part: String) -> Result<Option<FilePart>, Proje
             );
             Ok(Some(FilePart {
                 host: false,
+                host_code: None,
                 part,
                 media: Some(reference),
                 url: None,
@@ -889,6 +1027,7 @@ fn anthropic_file(block: &Value, part: String) -> Result<Option<FilePart>, Proje
         }
         "url" => Ok(Some(FilePart {
             host: false,
+            host_code: None,
             part,
             media: None,
             url: Some(str_of(source, "url").to_owned()),
@@ -1114,6 +1253,7 @@ fn opencode_file(value: &Value, part: String) -> Result<FilePart, ProjectionErro
         );
         return Ok(FilePart {
             host: false,
+            host_code: None,
             part,
             media: Some(reference),
             url: None,
@@ -1123,6 +1263,7 @@ fn opencode_file(value: &Value, part: String) -> Result<FilePart, ProjectionErro
     }
     Ok(FilePart {
         host: false,
+        host_code: None,
         part,
         media: None,
         url: Some(url.to_owned()),
@@ -2514,6 +2655,7 @@ mod tests {
             row.parts,
             vec![DisplayPart::Other(OtherPart {
                 host: false,
+                host_code: None,
                 part: "3".into(),
                 kind: "hologram".into(),
                 reason: None,

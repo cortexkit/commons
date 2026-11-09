@@ -1,4 +1,10 @@
-# llm-runner/v1 vectors for runner 0.8.32
+# llm-runner/v1 vectors for runner 0.8.33
+
+`display-host-codes.json` pins both exact interrupt codes, an unknown code
+retained verbatim with text fallback, and an uncoded host part. Each opted-in
+read entry's key-based `host_parts` agrees with its display row. Invalid cases
+cover a code without `host: true`, a stray host-part key, duplicate keys and a
+non-user entry. The `host_code` integration tests consume these cases.
 
 `display-host-parts.json` pins an Anthropic user body projected unchanged,
 then explicitly marked by its runner with a leading `host: true` part. Reader

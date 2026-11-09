@@ -12,6 +12,7 @@ use cortexkit_role_llm_runner::{
     errors,
     history::{HistoryEntry, HistoryForm, HistoryRequest},
     ops,
+    read::{HostPart, ReadMessage, ReadRequest},
     send::{SendReply, CLIENT_MESSAGE_ID_FIELD},
 };
 use serde_json::{json, Value};
@@ -20,7 +21,7 @@ use crate::{
     cases::{Case, Ending, Session},
     drive::{call, decode, expect_error, expect_field, expect_ok, head, send_params, wait_run_end},
     host_history::walk_older,
-    subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall, ScriptedTurn},
+    subject::{Capability, LlmRunnerSubject, Script, ScriptedPart, ScriptedToolCall, ScriptedTurn},
     RunnerRoute,
 };
 
@@ -39,6 +40,7 @@ where
 {
     match name {
         "display_row_is_the_profile_projection" => projection(case).await,
+        "host_parts_agree_with_display_rows" => host_parts_agree(case).await,
         "display_own_run_records_model" => own_run_model(case).await,
         "display_limits_cut_on_a_utf8_boundary" => limits(case).await.map(|()| Ending::Passed),
         "display_without_limits_is_whole" => whole(case).await.map(|()| Ending::Passed),
@@ -83,6 +85,9 @@ fn check_host_parts(page: &Value) -> Result<(), String> {
     for entry in page["messages"].as_array().into_iter().flatten() {
         let row = &entry["row"];
         for part in row["parts"].as_array().into_iter().flatten() {
+            if part.get("host_code").is_some() && part.get("host") != Some(&json!(true)) {
+                return Err("host_code requires host: true".into());
+            }
             if let Some(host) = part.get("host") {
                 if host != true || row["role"] != "user" {
                     return Err(format!(
@@ -94,6 +99,98 @@ fn check_host_parts(page: &Value) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+async fn host_read_facts<R: RunnerRoute>(route: &R) -> Result<Vec<ReadMessage>, String> {
+    let mut entries = Vec::new();
+    let mut from = 1;
+    for _ in 0..MAX_PAGES {
+        let page = crate::drive::read(
+            route,
+            &ReadRequest::range(from)
+                .with_limit(PAGE)
+                .with_include_display_facts(true),
+        )
+        .await?;
+        entries.extend(page.messages);
+        let Some(next) = page.next_from_ordinal else {
+            return Ok(entries);
+        };
+        if next <= from {
+            return Err("host_parts read cursor did not advance".into());
+        }
+        from = next;
+    }
+    Err("host_parts read did not finish".into())
+}
+
+fn host_agreement(read: &ReadMessage, shown: &DisplayEntry) -> Check {
+    let keys = read
+        .served_part_keys()
+        .unwrap_or_else(|| shown.row.parts.iter().map(DisplayPart::part).collect());
+    read.check_host_parts(&shown.row.role, &keys)
+        .map_err(str::to_owned)?;
+    let marked: Vec<HostPart> = shown
+        .row
+        .parts
+        .iter()
+        .filter(|part| part.host())
+        .map(|part| {
+            let fact = HostPart::new(part.part());
+            match part.host_code() {
+                Some(code) => fact.with_host_code(code),
+                None => fact,
+            }
+        })
+        .collect();
+    if read.host_parts != marked {
+        return Err(format!(
+            "host_parts disagree with display host marks or codes for {}",
+            read.mid
+        ));
+    }
+    Ok(())
+}
+
+async fn host_parts_agree<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    if !case.declared.contains(&Capability::HistoryDisplay)
+        || !case.declared.contains(&Capability::HostHistory)
+        || !case.declared.contains(&Capability::ReadDisplayFacts)
+    {
+        return Ok(Ending::Inapplicable(
+            "host agreement needs both display history and read display facts".into(),
+        ));
+    }
+    let session = written(case, case.mint.call("host-parts-call")).await?;
+    let facts = host_read_facts(&session.route).await?;
+    let shown = display_walk(&session.route, None).await?;
+    if !facts.iter().any(|entry| !entry.host_parts.is_empty())
+        && !shown
+            .iter()
+            .any(|entry| entry.row.parts.iter().any(DisplayPart::host))
+    {
+        return Ok(Ending::Inapplicable(
+            "neither form serves host parts".into(),
+        ));
+    }
+    for entry in &shown {
+        let read = facts
+            .iter()
+            .find(|read| read.mid == entry.mid)
+            .ok_or_else(|| format!("host_parts read omitted {}", entry.mid))?;
+        host_agreement(read, entry)?;
+    }
+    if facts
+        .iter()
+        .any(|read| !read.host_parts.is_empty() && !shown.iter().any(|entry| entry.mid == read.mid))
+    {
+        return Err("host_parts read entry is missing from display history".into());
+    }
+    Ok(Ending::Passed)
 }
 
 #[cfg(test)]
@@ -212,8 +309,8 @@ where
 /// body, with only the fields the runner fills (`model`,
 /// `client_message_id` and `sender`) taken from the served row. Imported rows
 /// may lack a recorded model. Checked without limits and with the apps' limits.
-/// Valid user-part host marks are checked separately and excluded from equality:
-/// they come from runner knowledge, not the shared profile projection.
+/// Valid host marks and codes are excluded from projection equality: they come
+/// from runner knowledge, not the shared profile projection.
 async fn projection<S>(case: &Case<'_, S>) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,

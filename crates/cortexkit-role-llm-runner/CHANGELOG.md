@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.33
+
+- Add optional open-vocabulary `host_code` on display parts and `TagReadAnswer`,
+  valid only with `host: true`, with 1–64-byte lowercase ASCII/digit/underscore
+  shape validation. Unknown or absent codes fall back to text. Publish constants
+  for the two exact Claude Code interrupt blocks; native `synthetic` rows have
+  no code. Builders set host and code together; clearing host clears the code.
+- Add opt-in `ReadMessage.host_parts`, keyed by stored part key in stored order,
+  with a builder and contextual role/key/order validator. Readers projecting raw
+  entries apply these runner facts themselves; read facts and display rows must
+  mark the same parts with the same optional codes. Neither member changes model
+  bytes, identity, digests, numbering, compaction, grants or message matching.
+- Extend the 0.8.32 readers-first rollout below to cover codes and raw-read facts.
+  Add coded/uncoded and invalid vectors, round-trip, shape, builder and older-reader
+  coverage. Shared projections still perform no marker detection.
+
 ## 0.8.32
 
 - Add optional display-part `host: true` for host-written parts of user entries,
@@ -16,10 +32,13 @@
 - Rollout: display parts, rows, history display entries/pages and live-event
   envelopes and `TagReadAnswer` accept unknown members; none of those response types uses
   `deny_unknown_fields`. Older readers can decode the new member but ignore its
-  meaning. Readers MUST update before runners emit `host: true`: Occipital,
+  meaning. Readers MUST update before runners emit `host: true`, `host_code` or
+  read `host_parts`: Occipital,
   core (verified words), the phone and desktop apps through Occipital, and
   Magic Context if its compaction views quote user text. Runners set the member
   only after each applicable reader has posted that its support is live.
+  Occipital's readiness depends on applying the read `host_parts` fact, not on
+  the display-row member, because its readers project raw entries themselves.
 - Add host-marked/unmarked projection and tag-read answer vectors, mixed and
   host-only citation examples, and a reader-side `host: false` case.
 

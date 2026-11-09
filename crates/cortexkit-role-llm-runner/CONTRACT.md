@@ -619,8 +619,9 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   Without the opt-in all display-fact members are absent and default replies
   keep their exact bytes.
 - [pinned] Display-part `host: true` (§4.7) identifies host-written content,
-  never the person's words. It is a display-row fact, not a member added to
-  `ReadMessage` or its opaque `message`. A reader quoting a user entry as the
+  never the person's words. Readers projecting raw entries learn it from
+  `ReadMessage.host_parts` below, never by detecting markers themselves or
+  adding members to the opaque `message`. A reader quoting a user entry as the
   person's words leaves host parts out; an entry containing only host parts
   is not the person's words. A native `synthetic` row is host text under the
   same rule. This applies to verified-word readers of `tag_read` (§9.6.1) too:
@@ -698,6 +699,28 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   in the message's call order. Times and outcomes follow §4.7.1: copy stored
   per-call facts, never invent a time, omit absent members, and decode
   `unanswered` as an open string. An entry with no calls omits `tool_times`.
+- [pinned] `host_parts?: [{part: string, host_code?: string}]`
+  (`read::HostPart`, added in 0.8.33) lists host-written parts of a `user`
+  entry in stored part order, served only with `include_display_facts`, like
+  `tool_times`. `part` is the stored part key, never an index. Each key occurs
+  once and must belong to that entry; a stray key is invalid, just as a
+  `tool_times` item naming a call outside the entry is invalid. A non-user
+  entry carries no host parts. No host parts means absent, not `null`; empty
+  lists decode as none and are omitted on serialization. The optional code
+  follows §4.7's shape and open-vocabulary rules; listing the key itself is
+  the host mark, so this item needs no `host` member. Attach facts with
+  `ReadMessage::with_host_parts`; `ReadMessage::check_host_parts` validates
+  role, membership, uniqueness and order against the entry's known part keys,
+  since its opaque body cannot be interpreted without a serializer profile.
+- [pinned] A runner serving read facts and display history marks the same
+  parts in both: a display part has `host: true`, with the same optional
+  `host_code`, exactly when `host_parts` lists its key. A reader projecting
+  raw entries itself applies the fact to the projected part with that key,
+  never by index. Shared projections cannot reproduce runner knowledge.
+  Native `synthetic` entries carry no `host_parts` and no code; their role
+  already identifies host text. These facts change neither body bytes nor
+  identity, digests, tag numbering, compaction, grants or `client_message_id`
+  matching.
 - [pinned] `call_key` and `schema_pin` (added in 0.7.43) appear only on a
   runner that also declares `call_identity`. They are copied from the
   call's stored facts under §9.16's presence rules, the same values that
@@ -1545,6 +1568,22 @@ display-ready row for an app's reader on a runner declaring
   A runner never sets the member on a non-user row. OpenCode 2's native
   `synthetic` row already identifies host text by role; it keeps that role
   and needs no `host` member. `system` and `skill` keep their native roles too.
+- [pinned] A host part may also carry `host_code?: string` (added in 0.8.33),
+  serialized only when set and valid only beside `host: true`. The string is
+  1–64 bytes of lowercase ASCII letters, digits and `_`. The vocabulary is
+  open: readers fall back to the part's text for an absent or unknown code,
+  and adding a code needs no contract release. A reader may render its own
+  sentence for a known code instead of the raw marker. `DisplayPart` and
+  `TagReadAnswer` decoding refuse a code without `host: true` or with an
+  invalid shape; `display::host_codes::check` validates members constructed
+  in memory, including concrete part structs. The first constants in
+  `display::host_codes` are `INTERRUPTED` (`interrupted`) for exactly
+  `[Request interrupted by user]\n`, and `INTERRUPTED_FOR_TOOL_USE`
+  (`interrupted_for_tool_use`) for exactly
+  `[Request interrupted by user for tool use]\n`. Here `\n` is one line feed;
+  the matching `*_TEXT` constants contain the exact bytes. These are Claude
+  Code's interrupt markers, matched as whole blocks, never substrings.
+  Native `synthetic` rows carry no code.
 - [pinned] Readers draw a host part as a host note or hide it, never as the
   sender's words. A reader quoting a user entry as the person's words MUST
   omit host parts; a host-only entry is not the person's words. A native
@@ -1554,19 +1593,26 @@ display-ready row for an app's reader on a runner declaring
   including when verifying words cited through `tag_read` (§9.6.1).
   Readers that do not render a host part ignore its presentation hint rather
   than interpreting it as an instruction or granting it authority.
-- [pinned] `host` never changes stored or model-bound bytes, identity, message
+- [pinned] Neither `host` nor `host_code` changes stored or model-bound bytes, identity, message
   or part digests, tag numbering, compaction, grants or `client_message_id`
   matching. It is not a sender or identity claim. A runner sets it only from
   exact knowledge: a host's documented marker strings matched as whole blocks,
   or the host's own synthetic flag, never guesses from content. The shared
   projections detect no markers or flags and never set `host`; a runner
-  explicitly marks its own parts with `DisplayPart::with_host`. Upgrading the
+  explicitly marks its own parts with `DisplayPart::with_host`, or
+  `DisplayPart::with_host_code`, which sets both `host: true` and the code.
+  A runner sets a code only from the same exact match that set `host`.
+  `with_host(false)` clears the code as well as the mark. Upgrading the
   crate alone therefore emits nothing new. Claude Code marker detection
   belongs to its runner, not this crate.
-- [pinned] **Readers first.** Runners emit `host: true` only after each
+- [pinned] **Readers first.** Runners emit `host: true`, `host_code` and the
+  corresponding read `host_parts` facts only after each
   applicable reader has posted that its support is live: Occipital, core
   (verified words), the phone and desktop apps through Occipital, and Magic
-  Context if its compaction views quote user text. Unknown-member tolerance
+  Context if its compaction views quote user text. Occipital's readiness
+  depends on applying the read `host_parts` fact, not on decoding the display
+  row member: its readers project raw entries themselves (§4.2.2).
+  Unknown-member tolerance
   alone is not support: an older reader may decode the fact but still draw
   or quote host text as the person's words.
 - [pinned] **Projection failures are carried, not hidden.** A file inside a
@@ -4055,7 +4101,7 @@ Opaque per-part identities are carried by `part_digests` or, for an
   this read. A tag not shown in the model request that produced that call, or
   never assigned by this runner, refuses `unknown_tag`. These are named
   refusals, not empty answers.
-- [pinned] Answer `{entry: ReadMessage, part: u32, host?: true}` (`read::TagReadAnswer`):
+- [pinned] Answer `{entry: ReadMessage, part: u32, host?: true, host_code?: string}` (`read::TagReadAnswer`):
   exactly one ordinary read row, with display facts always on (including
   sender, message marks and app `client_message_id` when present), plus the
   zero-based stored top-level part index the tag names. The meaning is fixed
@@ -4068,6 +4114,11 @@ Opaque per-part identities are carried by `part_digests` or, for an
   The runner sets answer-level `host: true` when the resolved part is
   host-written, using the same exact knowledge and readers-first rollout as
   display parts (§4.7), including when the entry's native role is `synthetic`.
+  The optional answer-level `host_code` follows the same shape, validity,
+  exact-match and text-fallback rules as a display part's code. It is absent
+  for native `synthetic` rows. `TagReadAnswer::with_host_code` sets both
+  `host: true` and the code; `with_host(false)` clears both. The code never
+  changes the resolved bytes or what the tag names.
   It is absent otherwise; readers accept `false` as absent, and runners emit
   it only when true. It changes no bytes in `entry.message` or tag resolution.
   A citation reader MUST refuse an answer with `host: true` as a citation of

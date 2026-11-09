@@ -505,6 +505,41 @@ pub struct ReadMessage {
     /// One item per tool call, in call order, only with `include_display_facts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_times: Vec<ToolTime>,
+    /// Host-written user parts in stored part order, only with
+    /// `include_display_facts`. Keys, never indices; absent means none.
+    /// Validate against the entry's role and keys with [`Self::check_host_parts`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_parts: Vec<HostPart>,
+}
+
+/// A host-written part of a user entry. Listing its key is the host mark;
+/// no separate `host` flag is needed. Outside stored bodies and all digests.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HostPart {
+    pub part: String,
+    /// Optional open presentation code, with the same shape as display parts.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::display::host_codes::deserialize"
+    )]
+    pub host_code: Option<String>,
+}
+
+impl HostPart {
+    pub fn new(part: impl Into<String>) -> Self {
+        Self {
+            part: part.into(),
+            host_code: None,
+        }
+    }
+
+    /// Record the code from the exact match that identified the host part.
+    pub fn with_host_code(mut self, code: impl Into<String>) -> Self {
+        self.host_code = Some(code.into());
+        self
+    }
 }
 
 /// A notice beside its carrying message, not a stored content part.
@@ -735,6 +770,35 @@ impl ReadMessage {
         self
     }
 
+    /// Attach stored host facts, in stored part order, beside the raw body.
+    pub fn with_host_parts(mut self, host_parts: Vec<HostPart>) -> Self {
+        self.host_parts = host_parts;
+        self
+    }
+
+    /// Validate host facts against the entry's known role and stored part keys.
+    /// The opaque raw body cannot supply those keys without its serializer profile.
+    pub fn check_host_parts(&self, role: &str, part_keys: &[&str]) -> Result<(), &'static str> {
+        if !self.host_parts.is_empty()
+            && (role != "user" || self.role.as_deref().is_some_and(|role| role != "user"))
+        {
+            return Err("host_parts are allowed only on a user entry");
+        }
+        let mut previous = None;
+        for fact in &self.host_parts {
+            crate::display::host_codes::check(true, fact.host_code.as_deref())?;
+            let index = part_keys
+                .iter()
+                .position(|key| *key == fact.part)
+                .ok_or("host_parts names a key not in the entry")?;
+            if previous.is_some_and(|previous| previous >= index) {
+                return Err("host_parts must be unique and in stored part order");
+            }
+            previous = Some(index);
+        }
+        Ok(())
+    }
+
     pub fn with_completed_at(mut self, completed_at: u64) -> Self {
         self.completed_at = Some(completed_at);
         self
@@ -781,6 +845,7 @@ impl ReadMessage {
             notices: Vec::new(),
             attribution: None,
             tool_times: Vec::new(),
+            host_parts: Vec::new(),
         }
     }
 

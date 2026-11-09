@@ -386,14 +386,25 @@ impl Module {
         };
         let mut row = project(limits);
         if let Some(mode) = defects.display_host {
-            let target = if mode == "assistant" {
+            let target = if matches!(mode, "assistant" | "code_non_user") {
                 "assistant"
             } else {
                 "user"
             };
-            if row.role == target {
+            if row.role == target && mode != "read_only" {
                 if let Some(part) = row.parts.first_mut() {
                     *part = part.clone().with_host(true);
+                    if matches!(
+                        mode,
+                        "code" | "code_without_host" | "code_non_user" | "code_mismatch"
+                    ) {
+                        *part = part.clone().with_host_code("interrupted");
+                    }
+                    if mode == "code_without_host" {
+                        if let DisplayPart::Text(text) = part {
+                            text.host = false;
+                        }
+                    }
                 }
                 if mode == "projection" {
                     row.text.push_str("not in the stored body");

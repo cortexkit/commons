@@ -556,9 +556,11 @@ pub struct Defects {
     pub display_opencode_v2_profile: bool,
     /// Incorrectly relabel OpenCode 2 system notices as user rows.
     pub display_opencode_v2_wrong_role: bool,
-    /// Host-marked user parts, invalid assistant marks, or an unrelated
-    /// projection mismatch accompanying an otherwise valid user host mark.
+    /// Host marks/codes with matching read facts, or deliberately invalid marks,
+    /// projection text, read-fact keys, roles or agreement between the two forms.
     pub display_host: Option<&'static str>,
+    /// Serve native bodies and display rows without naming a shared profile.
+    pub display_no_profile: bool,
     /// A cut keeps exactly its bound's bytes, splitting a character and
     /// patching the split with U+FFFD.
     pub display_cut_lossy: bool,
@@ -4750,6 +4752,9 @@ impl Module {
             .iter()
             .map(|m| {
                 let mut entry = self.read_message(sess, m);
+                if self.world.defects.display_host.is_some() && m.body["role"] == "user" {
+                    entry.part_keys = Some(vec!["0".into()]);
+                }
                 entry.sender = None;
                 entry.send_id = None;
                 entry.speaks_for = None;
@@ -4783,6 +4788,24 @@ impl Module {
                     }
                     entry.notices = notices::facts(m, &self.world.defects);
                     entry.attribution = attribution::fact(m, &self.world.defects);
+                    if let Some(mode) = self.world.defects.display_host {
+                        if (m.body["role"] == "user" && mode != "missing_read_fact")
+                            || (m.body["role"] == "assistant" && mode == "non_user_read_fact")
+                        {
+                            let key = if mode == "stray_read_key" {
+                                "missing"
+                            } else {
+                                "0"
+                            };
+                            let fact = cortexkit_role_llm_runner::read::HostPart::new(key);
+                            entry.host_parts = vec![match mode {
+                                "code" => fact.with_host_code("interrupted"),
+                                "code_mismatch" => fact.with_host_code("future_notice"),
+                                "code_bad_shape" => fact.with_host_code("Bad"),
+                                _ => fact,
+                            }];
+                        }
+                    }
                     entry.created_at = match self.world.defects.read_display_facts {
                         Some("creation_missing") => None,
                         Some("creation_from_written") => Some(m.written_at),
@@ -4834,6 +4857,12 @@ impl Module {
                     if self.world.defects.read_display_facts == Some("body_changed") {
                         entry.message["display_facts"] = json!(true);
                     }
+                }
+                if !request.include_display_facts
+                    && self.world.defects.display_host == Some("default_fact_leak")
+                    && m.body["role"] == "user"
+                {
+                    entry.host_parts = vec![cortexkit_role_llm_runner::read::HostPart::new("0")];
                 }
                 history::served_ordinal(sess, entry, &self.world.defects)
             })
@@ -7806,7 +7835,7 @@ impl LlmRunnerSubject for FakeSubject {
     }
 
     fn serializer_profile(&self, session: &str) -> Option<String> {
-        profiled(session).then(|| {
+        (profiled(session) && !self.defects.display_no_profile).then(|| {
             if self.defects.display_pi_profile {
                 cortexkit_role_llm_runner::serializer_profile::PI
             } else if self.defects.display_opencode_v2_profile {

@@ -8,8 +8,8 @@ use crate::{
     subject::{LlmRunnerSubject, Script, ScriptedPart, ScriptedTurn},
 };
 use cortexkit_role_llm_runner::{
-    capabilities as groups, errors, ops,
-    read::{ReadRequest, ToolTime},
+    capabilities as groups, display, errors, ops,
+    read::{ReadMessage, ReadRequest, ToolTime},
 };
 use serde_json::{json, Value};
 
@@ -116,6 +116,7 @@ where
                 || entry.get("sender").is_some()
                 || entry.get("send_id").is_some()
                 || entry.get("tool_times").is_some()
+                || entry.get("host_parts").is_some()
                 || entry.get("completed_at").is_some()
                 || entry.get("created_at").is_some()
                 || entry.get("reasoning_summaries").is_some()
@@ -133,7 +134,37 @@ where
     }
     let mut user_found = false;
     let mut calls_found = false;
+    let profile = case.subject.serializer_profile(&session.name);
+    let mut host_keys_unknown = false;
     for (plain, entry) in entries.iter().zip(shown) {
+        let read: ReadMessage = serde_json::from_value(entry.clone())
+            .map_err(|error| format!("read display facts do not decode: {error}"))?;
+        if !read.host_parts.is_empty() {
+            if read.role.as_deref().is_some_and(|role| role != "user") {
+                return Err("host_parts are allowed only on a user entry".into());
+            }
+            let projected = profile
+                .as_deref()
+                .filter(|profile| display::projects(profile))
+                .map(|profile| display::project(profile, &read.message, None))
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            let role = read
+                .role
+                .as_deref()
+                .or_else(|| projected.as_ref().map(|row| row.role.as_str()));
+            let keys = read.served_part_keys().or_else(|| {
+                projected
+                    .as_ref()
+                    .map(|row| row.parts.iter().map(display::DisplayPart::part).collect())
+            });
+            match (role, keys) {
+                (Some(role), Some(keys)) => {
+                    read.check_host_parts(role, &keys).map_err(str::to_owned)?
+                }
+                _ => host_keys_unknown = true,
+            }
+        }
         if plain["mid"] != entry["mid"]
             || serde_json::to_vec(&plain["message"]).unwrap()
                 != serde_json::to_vec(&entry["message"]).unwrap()
@@ -168,6 +199,7 @@ where
             .ok_or("read entry is not an object")?
             .remove("client_message_id");
         stripped.as_object_mut().unwrap().remove("tool_times");
+        stripped.as_object_mut().unwrap().remove("host_parts");
         stripped.as_object_mut().unwrap().remove("sender");
         stripped.as_object_mut().unwrap().remove("send_id");
         stripped.as_object_mut().unwrap().remove("completed_at");
@@ -182,6 +214,11 @@ where
     }
     if !user_found || !calls_found {
         return Err("fixture did not expose the sent user message and call batch".into());
+    }
+    if host_keys_unknown {
+        return Ok(Ending::Inapplicable(
+            "host_parts key membership needs a known role and stored keys or a shared serializer profile".into(),
+        ));
     }
     Ok(Ending::Passed)
 }

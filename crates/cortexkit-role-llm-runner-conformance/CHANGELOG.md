@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.41
+
+- Pin the role contract to `=0.8.33`. Exclude `host_code` together with `host`
+  from shared projection equality, reject code-without-host and non-user host
+  marks. The independent `host_parts_agree_with_display_rows` case requires
+  display marks/codes to agree with opted-in read `host_parts`, with no shared
+  serializer profile needed. It is not applicable without both surfaces or
+  when neither form serves host parts. Validate read-fact role, key membership,
+  uniqueness and stored order, and keep host facts out of default reads. Add
+  matching, mismatched, no-profile and read-only runner self-tests.
+
 ## 0.17.40
 
 - Update the runner contract dependency to `=0.8.32`. The display projection
