@@ -12,12 +12,15 @@ use cortexkit_role_compaction::view::{Edit, EditOp, InsertAt, View};
 
 /// Claude models whose signed thinking Anthropic binds to the request
 /// prefix, as family, major and minor. The source is Anthropic's
-/// preserved-thinking page ("Keeping the prefix unchanged"); add a row when
-/// it names a new model. Accounts created on or after 2026-08-31 enforce the
+/// preserved-thinking page ("Keeping the prefix unchanged"), which applies the
+/// check to "Claude 5.1 and later models"; add a row for each new model of
+/// that generation. Accounts created on or after 2026-08-31 enforce the
 /// binding on the Claude API, Vertex and Bedrock alike, so the route does not
-/// matter.
+/// matter, and Mythos 5.1 enforces it on every account.
 pub const BOUND_SIGNED_MODELS: &[(&str, u32, u32)] = &[
     ("fable", 5, 1),
+    ("fable", 5, 2),
+    ("mythos", 5, 1),
     ("opus", 5, 5),
     ("sonnet", 5, 5),
     ("haiku", 5, 5),
@@ -358,6 +361,10 @@ mod tests {
             "claude-opus-5-5",
             "claude-sonnet-5.5",
             "anthropic/claude-fable-5-1",
+            "claude-fable-5-2",
+            "anthropic/claude-fable-5.2",
+            "us.anthropic.claude-fable-5-2-v1:0",
+            "claude-mythos-5-1",
             "claude-haiku-5-5@20261001",
             "anthropic.claude-opus-5-5-v1:0",
             "CLAUDE-OPUS-5-5",
@@ -366,6 +373,8 @@ mod tests {
         }
         for model in [
             "claude-sonnet-5-50",
+            "claude-fable-5-20",
+            "claude-fable-5",
             "notsonnet-5-5",
             "claude-opus-4-8",
             "gpt-6.1-sol",
