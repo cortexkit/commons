@@ -224,6 +224,8 @@ impl DisplayRow {
 /// `part`, the runner-defined key of the stored part it comes from, so a live
 /// delta naming a part finds its place in the stored row. The projection helpers
 /// below choose default keys; they do not prescribe a serializer profile's keys.
+/// On a user row, `host: true` means host-written, never the sender's words.
+/// Shared projections never set it; runners opt in with [`Self::with_host`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -236,6 +238,33 @@ pub enum DisplayPart {
     /// A part of a type the projection does not show, named by its stored
     /// type. Also what a reader decodes a part type it does not know into.
     Other(OtherPart),
+}
+
+impl DisplayPart {
+    /// Mark a user-entry part the host wrote, from exact recorded knowledge.
+    /// Emit this fact only after every reader has shipped support (CONTRACT §4.7).
+    pub fn with_host(mut self, host: bool) -> Self {
+        match &mut self {
+            Self::Text(part) | Self::Reasoning(part) => part.host = host,
+            Self::ToolCall(part) => part.host = host,
+            Self::ToolResult(part) => part.host = host,
+            Self::File(part) => part.host = host,
+            Self::Other(part) => part.host = host,
+        }
+        self
+    }
+
+    /// Whether this part is marked as host-written. An absent mark is false.
+    /// A row with native role `synthetic` is host text even without this mark.
+    pub fn host(&self) -> bool {
+        match self {
+            Self::Text(part) | Self::Reasoning(part) => part.host,
+            Self::ToolCall(part) => part.host,
+            Self::ToolResult(part) => part.host,
+            Self::File(part) => part.host,
+            Self::Other(part) => part.host,
+        }
+    }
 }
 
 /// The known part types, as `type` spells them.
@@ -273,7 +302,12 @@ impl<'de> Deserialize<'de> for DisplayPart {
             part_types::TOOL_RESULT => Self::ToolResult(typed::<_, D::Error>(value)?),
             part_types::FILE => Self::File(typed::<_, D::Error>(value)?),
             part_types::OTHER => Self::Other(typed::<_, D::Error>(value)?),
-            _ => Self::Other(OtherPart::new(part, kind)),
+            _ => Self::Other(OtherPart {
+                host: typed::<_, D::Error>(
+                    value.get("host").cloned().unwrap_or(Value::Bool(false)),
+                )?,
+                ..OtherPart::new(part, kind)
+            }),
         })
     }
 }
@@ -281,6 +315,9 @@ impl<'de> Deserialize<'de> for DisplayPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct TextPart {
+    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host: bool,
     pub part: String,
     pub text: String,
 }
@@ -288,6 +325,7 @@ pub struct TextPart {
 impl TextPart {
     pub fn new(part: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
+            host: false,
             part: part.into(),
             text: text.into(),
         }
@@ -299,6 +337,9 @@ impl TextPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolCallPart {
+    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host: bool,
     /// The opted-in plan call's references, separate from model arguments.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_refs: Option<crate::output_refs::Descriptor>,
@@ -357,6 +398,9 @@ pub struct ToolCallPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolResultPart {
+    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host: bool,
     pub part: String,
     pub tool_call_id: String,
     /// The model provider ran this tool itself. Its result reaches the model
@@ -426,6 +470,9 @@ pub mod projection_reasons {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct FilePart {
+    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host: bool,
     /// The key of the stored part, empty for a file nested in a tool result.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub part: String,
@@ -442,6 +489,9 @@ pub struct FilePart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct OtherPart {
+    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host: bool,
     #[serde(default)]
     pub part: String,
     /// The stored part's own type.
@@ -563,6 +613,7 @@ impl FilePart {
     /// Byte-backed media, described by `media` (a `media_ref`).
     pub fn media(part: impl Into<String>, media: Reference) -> Self {
         Self {
+            host: false,
             part: part.into(),
             media: Some(media),
             url: None,
@@ -574,6 +625,7 @@ impl FilePart {
     /// A file the body names by URL, kept as written.
     pub fn url(part: impl Into<String>, url: impl Into<String>, mime: Option<String>) -> Self {
         Self {
+            host: false,
             part: part.into(),
             media: None,
             url: Some(url.into()),
@@ -591,6 +643,7 @@ impl FilePart {
 impl OtherPart {
     pub fn new(part: impl Into<String>, kind: impl Into<String>) -> Self {
         Self {
+            host: false,
             part: part.into(),
             kind: kind.into(),
             reason: None,
@@ -732,6 +785,7 @@ fn arguments_part(
         None => (text, false),
     };
     DisplayPart::ToolCall(ToolCallPart {
+        host: false,
         output_refs: None,
         part,
         tool_call_id,
@@ -768,6 +822,7 @@ fn result_part(
         None => (text.to_owned(), false),
     };
     DisplayPart::ToolResult(ToolResultPart {
+        host: false,
         part,
         tool_call_id,
         provider_executed: false,
@@ -824,6 +879,7 @@ fn anthropic_file(block: &Value, part: String) -> Result<Option<FilePart>, Proje
                 None,
             );
             Ok(Some(FilePart {
+                host: false,
                 part,
                 media: Some(reference),
                 url: None,
@@ -832,6 +888,7 @@ fn anthropic_file(block: &Value, part: String) -> Result<Option<FilePart>, Proje
             }))
         }
         "url" => Ok(Some(FilePart {
+            host: false,
             part,
             media: None,
             url: Some(str_of(source, "url").to_owned()),
@@ -1056,6 +1113,7 @@ fn opencode_file(value: &Value, part: String) -> Result<FilePart, ProjectionErro
             None,
         );
         return Ok(FilePart {
+            host: false,
             part,
             media: Some(reference),
             url: None,
@@ -1064,6 +1122,7 @@ fn opencode_file(value: &Value, part: String) -> Result<FilePart, ProjectionErro
         });
     }
     Ok(FilePart {
+        host: false,
         part,
         media: None,
         url: Some(url.to_owned()),
@@ -1723,6 +1782,168 @@ mod tests {
     use super::*;
 
     #[test]
+    fn host_parts_reader_vectors_preserve_host_members() {
+        let file = vectors::load("display-host-parts.json");
+        for case in file["readers"].as_array().unwrap() {
+            let entry: DisplayEntry = serde_json::from_value(case["entry"].clone()).unwrap();
+            let expected = case.get("canonical_entry").unwrap_or(&case["entry"]);
+            assert_eq!(
+                serde_json::to_value(&entry).unwrap(),
+                *expected,
+                "{}",
+                case["name"]
+            );
+            let person_words = if entry.row.role == "user" {
+                crate::run::join_text_parts(entry.row.parts.iter().filter_map(|part| match part {
+                    DisplayPart::Text(text) if !part.host() => Some(text.text.as_str()),
+                    _ => None,
+                }))
+            } else {
+                String::new()
+            };
+            assert_eq!(person_words, case["person_words"], "{}", case["name"]);
+
+            let page_value = serde_json::json!({
+                "messages": [case["entry"]], "incarnation": "host-fixture", "history_version": 0
+            });
+            let page: DisplayPage = serde_json::from_value(page_value).unwrap();
+            assert_eq!(page.messages, vec![entry]);
+        }
+    }
+
+    #[test]
+    fn host_parts_require_explicit_runner_marking() {
+        let file = vectors::load("display-host-parts.json");
+        let body = file["body"].clone();
+        for case in file["rows"].as_array().unwrap() {
+            let mut row = project(ANTHROPIC_MESSAGES, &body, None).unwrap();
+            assert!(row.parts.iter().all(|part| !part.host()));
+            if case["mark_host"] == true {
+                row.parts[0] = row.parts[0].clone().with_host(true);
+            }
+            assert_eq!(
+                serde_json::to_value(row).unwrap(),
+                case["row"],
+                "{}",
+                case["name"]
+            );
+        }
+        assert_eq!(body, file["body"], "display facts never modify model bytes");
+
+        for role in ["user", "synthetic", "system", "skill"] {
+            let native =
+                serde_json::json!({"type": role, "text": "Host-looking text", "synthetic": true});
+            let row = project(OPENCODE_V2, &native, None).unwrap();
+            assert_eq!(row.role, role);
+            assert!(row.parts.iter().all(|part| !part.host()));
+            assert!(serde_json::to_value(&row).unwrap()["parts"][0]
+                .get("host")
+                .is_none());
+            assert_eq!(
+                project_with_attribution(OPENCODE_V2, &native, None, None).unwrap(),
+                row
+            );
+        }
+    }
+
+    #[test]
+    fn host_parts_all_variants_default_false_and_round_trip_true() {
+        let parts = vec![
+            DisplayPart::Text(TextPart::new("0", "text")),
+            DisplayPart::Reasoning(TextPart::new("1", "reasoning")),
+            DisplayPart::ToolCall(ToolCallPart::new(
+                "2",
+                "call",
+                "tool",
+                &serde_json::json!({}),
+                None,
+            )),
+            DisplayPart::ToolResult(ToolResultPart::new(
+                "2",
+                "call",
+                false,
+                "result",
+                Vec::new(),
+                None,
+            )),
+            DisplayPart::File(FilePart::url("3", "https://example.com/file", None)),
+            DisplayPart::Other(OtherPart::new("4", "opaque")),
+        ];
+        for part in parts {
+            let unmarked = serde_json::to_value(&part).unwrap();
+            assert!(!part.host());
+            assert!(unmarked.get("host").is_none());
+            let marked = part.with_host(true);
+            let value = serde_json::to_value(&marked).unwrap();
+            assert_eq!(value["host"], true);
+            let decoded: DisplayPart = serde_json::from_value(value.clone()).unwrap();
+            assert!(decoded.host());
+            assert_eq!(decoded, marked);
+            assert_eq!(
+                serde_json::to_value(decoded.with_host(false)).unwrap(),
+                unmarked
+            );
+            let mut false_value = value.clone();
+            false_value["host"] = Value::Bool(false);
+            let decoded_false: DisplayPart = serde_json::from_value(false_value).unwrap();
+            assert_eq!(serde_json::to_value(decoded_false).unwrap(), unmarked);
+            let mut invalid = value;
+            invalid["host"] = Value::String("true".into());
+            assert!(serde_json::from_value::<DisplayPart>(invalid).is_err());
+        }
+        let unknown: DisplayPart = serde_json::from_value(serde_json::json!({
+            "type": "future_part", "part": "5", "host": true
+        }))
+        .unwrap();
+        assert!(matches!(&unknown, DisplayPart::Other(part) if part.kind == "future_part"));
+        assert!(
+            unknown.host(),
+            "an unknown part must not lose its host origin"
+        );
+    }
+
+    #[test]
+    fn host_parts_older_reader_accepts_the_new_member() {
+        // The pre-host required entry/row/text shape, with serde's existing
+        // unknown-member tolerance. Optional fields remain unknown to this reader.
+        #[derive(Deserialize)]
+        struct OlderTextPart {
+            part: String,
+            text: String,
+        }
+        #[derive(Deserialize)]
+        #[serde(tag = "type", rename_all = "snake_case")]
+        enum OlderPart {
+            Text(OlderTextPart),
+        }
+        #[derive(Deserialize)]
+        struct OlderRow {
+            role: String,
+            text: String,
+            parts: Vec<OlderPart>,
+        }
+        #[derive(Deserialize)]
+        struct OlderEntry {
+            ordinal: u64,
+            mid: String,
+            written_at: u64,
+            row: OlderRow,
+        }
+        let file = vectors::load("display-host-parts.json");
+        let mixed = &file["readers"][0]["entry"];
+        let older: OlderEntry = serde_json::from_value(mixed.clone()).unwrap();
+        assert_eq!(older.ordinal, 7);
+        assert_eq!(older.mid, "mixed-user-entry");
+        assert_eq!(older.written_at, 1_700_000_000_000);
+        assert_eq!(older.row.role, "user");
+        assert_eq!(older.row.text, mixed["row"]["text"]);
+        assert_eq!(older.row.parts.len(), 2);
+        let OlderPart::Text(first) = &older.row.parts[0];
+        assert_eq!(first.part, "0");
+        assert_eq!(first.text, "[Request interrupted by user]\n");
+    }
+
+    #[test]
     fn reasoning_summary_reads_only_responses_summary_texts() {
         use serde_json::json;
         let mut part = json!({"type":"redacted_reasoning",
@@ -2292,6 +2513,7 @@ mod tests {
         assert_eq!(
             row.parts,
             vec![DisplayPart::Other(OtherPart {
+                host: false,
                 part: "3".into(),
                 kind: "hologram".into(),
                 reason: None,

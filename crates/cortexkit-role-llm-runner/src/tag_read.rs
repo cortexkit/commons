@@ -73,10 +73,25 @@ impl TagReadRequest {
 pub struct TagReadAnswer {
     pub entry: ReadMessage,
     pub part: u32,
+    /// The resolved part is host-written, never a citation of the person's words.
+    /// Emit only after citation readers support it; false is absent on the wire.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub host: bool,
 }
 
 impl TagReadAnswer {
     pub fn new(entry: ReadMessage, part: u32) -> Self {
-        Self { entry, part }
+        Self {
+            entry,
+            part,
+            host: false,
+        }
+    }
+
+    /// Record the resolved part's host origin from the same exact knowledge
+    /// used for display parts. Native `synthetic` rows are host-written too.
+    pub fn with_host(mut self, host: bool) -> Self {
+        self.host = host;
+        self
     }
 }

@@ -1,0 +1,163 @@
+{
+  "profile": "anthropic-messages",
+  "body": {
+    "role": "user",
+    "content": [
+      {"type": "text", "text": "[Request interrupted by user]\n"},
+      {"type": "text", "text": "Please continue with the summary."}
+    ]
+  },
+  "rows": [
+    {
+      "name": "runner explicitly marks the leading host block",
+      "mark_host": true,
+      "row": {
+        "role": "user",
+        "text": "[Request interrupted by user]\nPlease continue with the summary.",
+        "parts": [
+          {"type": "text", "part": "0", "text": "[Request interrupted by user]\n", "host": true},
+          {"type": "text", "part": "1", "text": "Please continue with the summary."}
+        ]
+      }
+    },
+    {
+      "name": "upgrading the projection alone emits no host member",
+      "mark_host": false,
+      "row": {
+        "role": "user",
+        "text": "[Request interrupted by user]\nPlease continue with the summary.",
+        "parts": [
+          {"type": "text", "part": "0", "text": "[Request interrupted by user]\n"},
+          {"type": "text", "part": "1", "text": "Please continue with the summary."}
+        ]
+      }
+    }
+  ],
+  "tag_read_answers": [
+    {
+      "name": "a resolved host part is not a citation of the person",
+      "answer": {
+        "entry": {
+          "ordinal": 7,
+          "mid": "mixed-user-entry",
+          "message": {
+            "role": "user",
+            "content": [
+              {"type": "text", "text": "[Request interrupted by user]\n"},
+              {"type": "text", "text": "Please continue with the summary."}
+            ]
+          }
+        },
+        "part": 0,
+        "host": true
+      },
+      "person_words": null
+    },
+    {
+      "name": "a sender citation quotes the resolved part only",
+      "answer": {
+        "entry": {
+          "ordinal": 7,
+          "mid": "mixed-user-entry",
+          "message": {
+            "role": "user",
+            "content": [
+              {"type": "text", "text": "[Request interrupted by user]\n"},
+              {"type": "text", "text": "Please continue with the summary."}
+            ]
+          }
+        },
+        "part": 1
+      },
+      "person_words": "Please continue with the summary."
+    },
+    {
+      "name": "native synthetic content is never a citation of the person",
+      "answer": {
+        "entry": {
+          "ordinal": 10,
+          "mid": "native-synthetic-entry",
+          "role": "synthetic",
+          "message": {"type": "synthetic", "text": "Host continuation note."}
+        },
+        "part": 0,
+        "host": true
+      },
+      "person_words": null
+    }
+  ],
+  "readers": [
+    {
+      "name": "mixed entry quotes only the sender's text",
+      "entry": {
+        "ordinal": 7,
+        "mid": "mixed-user-entry",
+        "written_at": 1700000000000,
+        "part_keys": ["0", "1"],
+        "row": {
+          "role": "user",
+          "text": "[Request interrupted by user]\nPlease continue with the summary.",
+          "parts": [
+            {"type": "text", "part": "0", "text": "[Request interrupted by user]\n", "host": true},
+            {"type": "text", "part": "1", "text": "Please continue with the summary."}
+          ]
+        }
+      },
+      "person_words": "Please continue with the summary.",
+      "host_part": "0",
+      "sender_part": "1"
+    },
+    {
+      "name": "false is accepted as absent",
+      "entry": {
+        "ordinal": 8,
+        "mid": "sender-entry",
+        "written_at": 1700000000001,
+        "row": {
+          "role": "user",
+          "text": "Typed text.",
+          "parts": [{"type": "text", "part": "0", "text": "Typed text.", "host": false}]
+        }
+      },
+      "canonical_entry": {
+        "ordinal": 8,
+        "mid": "sender-entry",
+        "written_at": 1700000000001,
+        "row": {
+          "role": "user",
+          "text": "Typed text.",
+          "parts": [{"type": "text", "part": "0", "text": "Typed text."}]
+        }
+      },
+      "person_words": "Typed text."
+    },
+    {
+      "name": "host-only user entry is not the person's words",
+      "entry": {
+        "ordinal": 9,
+        "mid": "host-only-entry",
+        "written_at": 1700000000002,
+        "row": {
+          "role": "user",
+          "text": "[Request interrupted by user]\n",
+          "parts": [{"type": "text", "part": "0", "text": "[Request interrupted by user]\n", "host": true}]
+        }
+      },
+      "person_words": ""
+    },
+    {
+      "name": "native synthetic row is never the person's words",
+      "entry": {
+        "ordinal": 10,
+        "mid": "native-synthetic-entry",
+        "written_at": 1700000000003,
+        "row": {
+          "role": "synthetic",
+          "text": "Host continuation note.",
+          "parts": [{"type": "text", "part": "0", "text": "Host continuation note."}]
+        }
+      },
+      "person_words": ""
+    }
+  ]
+}

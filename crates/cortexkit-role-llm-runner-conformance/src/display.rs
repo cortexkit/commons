@@ -70,10 +70,55 @@ async fn display_page<R: RunnerRoute>(
         )
         .await?,
     )?;
+    check_host_parts(&body)?;
     let page: DisplayPage = decode("a display session.history", body)?;
     page.check()
         .map_err(|problem| format!("a display page breaks a history page's rules: {problem:?}"))?;
     Ok(page)
+}
+
+/// Check emitted marks before decoding: readers accept false as absent, but
+/// runners emit only true, and only on parts of user rows.
+fn check_host_parts(page: &Value) -> Result<(), String> {
+    for entry in page["messages"].as_array().into_iter().flatten() {
+        let row = &entry["row"];
+        for part in row["parts"].as_array().into_iter().flatten() {
+            if let Some(host) = part.get("host") {
+                if host != true || row["role"] != "user" {
+                    return Err(format!(
+                        "host must be emitted only as true on a user part, not on {} in {}",
+                        part["part"], entry["mid"]
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod host_parts_tests {
+    use super::*;
+
+    #[test]
+    fn host_parts_wire_marks_are_positive_and_user_only() {
+        for role in ["user", "assistant", "synthetic", "system", "skill"] {
+            for host in [json!(true), json!(false), json!(null), json!("true")] {
+                let page = json!({"messages":[{"mid":"fixture", "row":{
+                    "role":role, "parts":[{"type":"text", "part":"0", "text":"text", "host":host}]
+                }}]});
+                assert_eq!(
+                    check_host_parts(&page).is_ok(),
+                    role == "user" && host == true,
+                    "role={role}, host={host}"
+                );
+            }
+            let unmarked = json!({"messages":[{"mid":"fixture", "row":{
+                "role":role, "parts":[{"type":"text", "part":"0", "text":"text"}]
+            }}]});
+            assert!(check_host_parts(&unmarked).is_ok());
+        }
+    }
 }
 
 /// Every display entry, oldest first, from the newest page back through
@@ -167,6 +212,8 @@ where
 /// body, with only the fields the runner fills (`model`,
 /// `client_message_id` and `sender`) taken from the served row. Imported rows
 /// may lack a recorded model. Checked without limits and with the apps' limits.
+/// Valid user-part host marks are checked separately and excluded from equality:
+/// they come from runner knowledge, not the shared profile projection.
 async fn projection<S>(case: &Case<'_, S>) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
@@ -233,7 +280,13 @@ where
                 call.unanswered = served.unanswered.clone();
                 call.output_refs = served.output_refs.clone();
             }
-            if shown.row != expected {
+            let mut unmarked = shown.row.clone();
+            unmarked.parts = unmarked
+                .parts
+                .into_iter()
+                .map(|part| part.with_host(false))
+                .collect();
+            if unmarked != expected {
                 return Err(format!(
                     "{what}, the display row of {} is {:?}, but {profile}'s projection of its raw \
                      body is {expected:?}",

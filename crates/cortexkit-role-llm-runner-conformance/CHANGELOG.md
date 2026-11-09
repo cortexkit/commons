@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.40
+
+- Update the runner contract dependency to `=0.8.32`. The display projection
+  check validates that host marks are emitted only as true on user parts, then
+  excludes those marks from profile equality. All other differences still fail.
+- Self-tests accept a host-marked user part and reject both host-marked assistant
+  parts and unrelated projection differences by the projection check's name.
+
 ## 0.17.39
 
 - Media cases never put an oversize argument on the image call; a runner that caps tool input before dispatch passes them.

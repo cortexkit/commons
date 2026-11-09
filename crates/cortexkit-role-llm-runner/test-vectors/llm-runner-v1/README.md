@@ -1,4 +1,12 @@
-# llm-runner/v1 vectors for runner 0.8.28
+# llm-runner/v1 vectors for runner 0.8.32
+
+`display-host-parts.json` pins an Anthropic user body projected unchanged,
+then explicitly marked by its runner with a leading `host: true` part. Reader
+cases cover false-as-absent, mixed host/sender text, host-only entries and native
+`synthetic` rows. Tag-read answers carry `host: true` for a resolved host part;
+a sender citation quotes only its resolved part, never its host neighbour.
+The `display::tests::host_parts_` and `host_parts_tag_read_` tests consume these
+cases; shared projections perform no marker detection.
 
 `message-marks-retry.json` pins whole-object speaker comparison, changed notice
 and keep refusal fields, identical marks, and false/absent retry equivalence.

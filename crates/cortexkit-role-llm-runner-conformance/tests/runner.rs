@@ -6360,6 +6360,43 @@ async fn a_faithful_runner_passes_the_display_live_and_cache_ttl_cases() {
 }
 
 #[tokio::test]
+async fn host_parts_display_projection_accepts_explicit_user_marks() {
+    let report = run(&displaying(Defects {
+        display_host: Some("user"),
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.outcome("display_row_is_the_profile_projection"),
+        Some(&CaseOutcome::Passed),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn host_parts_display_projection_rejects_assistant_marks_by_name() {
+    let report = run(&displaying(Defects {
+        display_host: Some("assistant"),
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "display_row_is_the_profile_projection")
+        .contains("host must be emitted only as true on a user part"));
+}
+
+#[tokio::test]
+async fn host_parts_display_projection_still_rejects_other_differences_by_name() {
+    let report = run(&displaying(Defects {
+        display_host: Some("projection"),
+        ..Defects::default()
+    }))
+    .await;
+    assert!(failed(&report, "display_row_is_the_profile_projection")
+        .contains("anthropic-messages's projection"));
+}
+
+#[tokio::test]
 async fn pi_display_projection_accepts_runtime_roles_and_rejects_user_relabeling() {
     let report = run(&displaying(Defects {
         display_pi_profile: true,

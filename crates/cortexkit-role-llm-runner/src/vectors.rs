@@ -25,6 +25,10 @@ pub const STOP_ALL_JSON: &str = include_str!("../test-vectors/llm-runner-v1/stop
 /// [`SHA256SUMS`] lists them.
 pub const FILES: &[(&str, &str)] = &[
     (
+        "display-host-parts.json",
+        include_str!("../test-vectors/llm-runner-v1/display-host-parts.json"),
+    ),
+    (
         "host-start.json",
         include_str!("../test-vectors/llm-runner-v1/host-start.json"),
     ),

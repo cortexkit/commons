@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.32
+
+- Add optional display-part `host: true` for host-written parts of user entries,
+  with an explicit `DisplayPart::with_host` builder. False decodes as absent and
+  is omitted on serialization. Shared projections never set it, so upgrading
+  alone emits nothing new; runners identify host parts from exact host facts,
+  never content guesses. Model bytes and identity remain unchanged.
+- Readers show host parts as host notes or hide them, never as the sender's
+  words. Native `synthetic` rows follow the same rule without a part flag.
+  Verified-word citations omit host parts; a host-only entry is not the person's
+  words, even when `tag_read` resolves its tag. Add answer-level `host: true`
+  and `TagReadAnswer::with_host` so citation readers can refuse a host part
+  without a second read. Citations quote the resolved part, not the whole entry.
+- Rollout: display parts, rows, history display entries/pages and live-event
+  envelopes and `TagReadAnswer` accept unknown members; none of those response types uses
+  `deny_unknown_fields`. Older readers can decode the new member but ignore its
+  meaning. Readers MUST update before runners emit `host: true`: Occipital,
+  core (verified words), the phone and desktop apps through Occipital, and
+  Magic Context if its compaction views quote user text. Runners set the member
+  only after each applicable reader has posted that its support is live.
+- Add host-marked/unmarked projection and tag-read answer vectors, mixed and
+  host-only citation examples, and a reader-side `host: false` case.
+
 ## 0.8.31
 
 - Document optional `harness.host_start`: owner-only plain-scope head creation

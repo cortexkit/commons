@@ -12,6 +12,50 @@ fn vector() -> Value {
 }
 
 #[test]
+fn host_parts_tag_read_answers_preserve_host_origin() {
+    let file: Value = serde_json::from_str(include_str!(
+        "../test-vectors/llm-runner-v1/display-host-parts.json"
+    ))
+    .unwrap();
+    for case in file["tag_read_answers"].as_array().unwrap() {
+        let answer: TagReadAnswer = serde_json::from_value(case["answer"].clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&answer).unwrap(),
+            case["answer"],
+            "{}",
+            case["name"]
+        );
+        let constructed =
+            TagReadAnswer::new(answer.entry.clone(), answer.part).with_host(answer.host);
+        assert_eq!(constructed, answer);
+        let person_words = if answer.host || answer.entry.role.as_deref() == Some("synthetic") {
+            Value::Null
+        } else {
+            answer.entry.message["content"][answer.part as usize]["text"].clone()
+        };
+        assert_eq!(person_words, case["person_words"]);
+        let mut false_value = case["answer"].clone();
+        false_value["host"] = json!(false);
+        let false_answer: TagReadAnswer = serde_json::from_value(false_value).unwrap();
+        assert!(!false_answer.host);
+        assert!(serde_json::to_value(false_answer)
+            .unwrap()
+            .get("host")
+            .is_none());
+    }
+
+    #[derive(serde::Deserialize)]
+    struct OlderAnswer {
+        entry: cortexkit_role_llm_runner::read::ReadMessage,
+        part: u32,
+    }
+    let older: OlderAnswer =
+        serde_json::from_value(file["tag_read_answers"][0]["answer"].clone()).unwrap();
+    assert_eq!(older.part, 0);
+    assert_eq!(older.entry.mid, "mixed-user-entry");
+}
+
+#[test]
 fn tag_read_vectors_pin_requests_answers_and_named_refusals() {
     let vector = vector();
     let request = TagReadRequest::decode(&vector["request"]).unwrap();

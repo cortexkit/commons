@@ -618,6 +618,14 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   summary inside it, is unchanged and stays part of the normal digest input.
   Without the opt-in all display-fact members are absent and default replies
   keep their exact bytes.
+- [pinned] Display-part `host: true` (§4.7) identifies host-written content,
+  never the person's words. It is a display-row fact, not a member added to
+  `ReadMessage` or its opaque `message`. A reader quoting a user entry as the
+  person's words leaves host parts out; an entry containing only host parts
+  is not the person's words. A native `synthetic` row is host text under the
+  same rule. This applies to verified-word readers of `tag_read` (§9.6.1) too:
+  its answer carries the resolved part's host fact beside `entry` and `part`;
+  resolving a tag identifies content, not who authored it.
 - [pinned] `client_message_id?: string` is present on an entry written by a
   send carrying that id, with exactly the value on its display row (§9.11).
   A host-typed entry or a send without that id carries none.
@@ -1528,6 +1536,39 @@ display-ready row for an app's reader on a runner declaring
   text parts as `run.result` does (§6). Media is described by the
   `media_ref` descriptors mode serves (§4.2), never inlined; a URL stays a
   URL.
+- [pinned] **Host-written user parts (added in 0.8.32).** Any display part of
+  a `user` entry may carry `host: true`: the host wrote that part, not the
+  sender. Absent means the sender's part; readers accept `false` as absent,
+  and runners serialize the member only when true. It is per part, never a
+  list of indices: projection can replace or drop stored parts. The fact
+  follows the stored part's key even when its display representation changes.
+  A runner never sets the member on a non-user row. OpenCode 2's native
+  `synthetic` row already identifies host text by role; it keeps that role
+  and needs no `host` member. `system` and `skill` keep their native roles too.
+- [pinned] Readers draw a host part as a host note or hide it, never as the
+  sender's words. A reader quoting a user entry as the person's words MUST
+  omit host parts; a host-only entry is not the person's words. A native
+  `synthetic` row is likewise never drawn or quoted as the person's words.
+  `row.text` still joins all text parts, including host text: it is not a
+  ready-made quote of the person. A quoting reader uses the part-level facts,
+  including when verifying words cited through `tag_read` (§9.6.1).
+  Readers that do not render a host part ignore its presentation hint rather
+  than interpreting it as an instruction or granting it authority.
+- [pinned] `host` never changes stored or model-bound bytes, identity, message
+  or part digests, tag numbering, compaction, grants or `client_message_id`
+  matching. It is not a sender or identity claim. A runner sets it only from
+  exact knowledge: a host's documented marker strings matched as whole blocks,
+  or the host's own synthetic flag, never guesses from content. The shared
+  projections detect no markers or flags and never set `host`; a runner
+  explicitly marks its own parts with `DisplayPart::with_host`. Upgrading the
+  crate alone therefore emits nothing new. Claude Code marker detection
+  belongs to its runner, not this crate.
+- [pinned] **Readers first.** Runners emit `host: true` only after each
+  applicable reader has posted that its support is live: Occipital, core
+  (verified words), the phone and desktop apps through Occipital, and Magic
+  Context if its compaction views quote user text. Unknown-member tolerance
+  alone is not support: an older reader may decode the fact but still draw
+  or quote host text as the person's words.
 - [pinned] **Projection failures are carried, not hidden.** A file inside a
   tool result that cannot be projected is omitted from `files` and recorded
   in `unprojected: [{kind, reason}]`, in native order. `kind` is the item's
@@ -1592,9 +1633,11 @@ display-ready row for an app's reader on a runner declaring
   `client_message_id` (§9.11) and `sender` (below), and on a runner
   declaring `call_identity` each tool call's `call_key`, `call_carrier` and `schema_pin`
   (§9.16), and each tool call's stored times and unanswered outcome (§4.7.1).
+  A runner may explicitly add user-part `host` facts under the rules above.
   The conformance kit
   checks that a served row equals the function applied to the same entry's
-  raw form, with only those members taken from the served row. This applies
+  raw form, with only those members taken from the served row and valid
+  user-part `host` facts excluded from the projection comparison. This applies
   to the profiles for which `display::projects(profile)` is true:
   `anthropic-messages`, `opencode-aisdk`, `opencode-v2` and `pi`. For
   another profile, such as the runner-owned profile, the runner supplies its
@@ -4012,7 +4055,7 @@ Opaque per-part identities are carried by `part_digests` or, for an
   this read. A tag not shown in the model request that produced that call, or
   never assigned by this runner, refuses `unknown_tag`. These are named
   refusals, not empty answers.
-- [pinned] Answer `{entry: ReadMessage, part: u32}` (`read::TagReadAnswer`):
+- [pinned] Answer `{entry: ReadMessage, part: u32, host?: true}` (`read::TagReadAnswer`):
   exactly one ordinary read row, with display facts always on (including
   sender, message marks and app `client_message_id` when present), plus the
   zero-based stored top-level part index the tag names. The meaning is fixed
@@ -4020,6 +4063,19 @@ Opaque per-part identities are carried by `part_digests` or, for an
   as an opted-in `session.read` row does (§9.11); `send_id` is not the app's
   message identity and never substitutes for it. Resolve against that request,
   never today's numbering.
+- [pinned] A tag CAN resolve to a host-written part: `host` does not change
+  numbering or lookup. Such an answer is not a citation of the person's words.
+  The runner sets answer-level `host: true` when the resolved part is
+  host-written, using the same exact knowledge and readers-first rollout as
+  display parts (§4.7), including when the entry's native role is `synthetic`.
+  It is absent otherwise; readers accept `false` as absent, and runners emit
+  it only when true. It changes no bytes in `entry.message` or tag resolution.
+  A citation reader MUST refuse an answer with `host: true` as a citation of
+  the person. A citation quotes only the resolved part, never the entry's
+  concatenated text, so a sender part in a mixed entry never quotes its host
+  neighbour. A native `synthetic` row is never a citation of the person,
+  even without the new answer member. Neither a successful lookup nor a
+  matching `client_message_id` overrides these rules.
 - [pinned] For calls that remain in the session, retain resolution for every tag
   this runner ever assigned in the session, including after compaction cuts.
   A tag cited by a call that survives an undo still resolves as that call's

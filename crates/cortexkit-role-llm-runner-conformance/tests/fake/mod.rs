@@ -556,6 +556,9 @@ pub struct Defects {
     pub display_opencode_v2_profile: bool,
     /// Incorrectly relabel OpenCode 2 system notices as user rows.
     pub display_opencode_v2_wrong_role: bool,
+    /// Host-marked user parts, invalid assistant marks, or an unrelated
+    /// projection mismatch accompanying an otherwise valid user host mark.
+    pub display_host: Option<&'static str>,
     /// A cut keeps exactly its bound's bytes, splitting a character and
     /// patching the split with U+FFFD.
     pub display_cut_lossy: bool,

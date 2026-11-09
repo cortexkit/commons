@@ -385,6 +385,21 @@ impl Module {
             }
         };
         let mut row = project(limits);
+        if let Some(mode) = defects.display_host {
+            let target = if mode == "assistant" {
+                "assistant"
+            } else {
+                "user"
+            };
+            if row.role == target {
+                if let Some(part) = row.parts.first_mut() {
+                    *part = part.clone().with_host(true);
+                }
+                if mode == "projection" {
+                    row.text.push_str("not in the stored body");
+                }
+            }
+        }
         if let Some(message) = sess
             .messages
             .iter()
