@@ -1,6 +1,6 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.38** pins runner **0.8.31**. Four `host_start_*` cases run only
+Version **0.17.39** pins runner **0.8.31**. Four `host_start_*` cases run only
 when the live describe lists `harness.host_start` in its top-level `extensions`.
 Opt-in adapters provide `host_start_model`, both original and alternate
 `host_plan` fixtures, and an attested plain-scope owner from `owner_stamp`.

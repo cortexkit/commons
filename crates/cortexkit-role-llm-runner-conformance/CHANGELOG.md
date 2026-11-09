@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.39
+
+- Media cases never put an oversize argument on the image call; a runner that caps tool input before dispatch passes them.
+
 ## 0.17.38
 
 - Add compaction-item plan-refresh cases for mandatory addition, removal refused
