@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-compaction-view"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "cortexkit-role-compaction",
  "serde",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-compaction-view-wasm"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "cortexkit-compaction-view",
  "serde_json",

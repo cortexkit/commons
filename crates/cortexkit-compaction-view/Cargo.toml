@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-compaction-view"
-version = "0.2.2"
+version = "0.3.0"
 edition.workspace = true
 repository.workspace = true
 readme = "README.md"

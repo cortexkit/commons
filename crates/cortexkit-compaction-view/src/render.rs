@@ -26,6 +26,7 @@ use cortexkit_role_compaction::view::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::rules::Floor;
 use crate::tags::tag_notation_in;
 
 /// One message as the model sees it after a view is applied.
@@ -94,12 +95,16 @@ pub fn apply(entries: &[Entry], view: &View) -> Result<Vec<RenderedMessage>, Vie
 
 /// Apply a whole view with provider-rule checking and authorized stripping
 /// of invalidated signatures newer than its active-path anchor.
+/// `floor` is the runner's signed floor; see [`crate::rules::Floor`]. The
+/// parts it covers stay in the result: removing them from the request is the
+/// runner's own strip.
 pub fn apply_with_rules(
     entries: &[Entry],
     view: &View,
     rules: &ProviderRules,
+    floor: Floor<'_>,
 ) -> Result<Vec<RenderedMessage>, ViewRefusal> {
-    let plan = plan_view(entries, view, rules)?;
+    let plan = plan_view(entries, view, rules, floor)?;
     Ok(render_plan(entries, &plan))
 }
 
@@ -498,12 +503,17 @@ pub fn plan_with(
 /// permission to strip newer invalidated signatures. Call at acceptance and
 /// each step boundary: a revert can remove the anchor. Version ordering and
 /// honest `since` values still require the runner's own checks.
+///
+/// `floor` is the runner's signed floor; see [`crate::rules::Floor`]. Signed
+/// parts it covers never make the view invalid, and they stay in the plan:
+/// removing them from the request is the runner's own strip.
 pub fn plan_view(
     entries: &[Entry],
     view: &View,
     rules: &ProviderRules,
+    floor: Floor<'_>,
 ) -> Result<RenderPlan, ViewRefusal> {
-    plan_view_with(RideRule::FollowOutput, entries, view, rules)
+    plan_view_with(RideRule::FollowOutput, entries, view, rules, floor)
 }
 
 /// [`plan_view`] at a supported historical plan version.
@@ -512,8 +522,9 @@ pub fn plan_view_at(
     entries: &[Entry],
     view: &View,
     rules: &ProviderRules,
+    floor: Floor<'_>,
 ) -> Option<Result<RenderPlan, ViewRefusal>> {
-    RideRule::for_version(version).map(|rule| plan_view_with(rule, entries, view, rules))
+    RideRule::for_version(version).map(|rule| plan_view_with(rule, entries, view, rules, floor))
 }
 
 /// [`plan_view`] with an explicit ride rule. Temporary drops affect only the
@@ -523,6 +534,7 @@ pub fn plan_view_with(
     entries: &[Entry],
     view: &View,
     rules: &ProviderRules,
+    floor: Floor<'_>,
 ) -> Result<RenderPlan, ViewRefusal> {
     if !view.verify() {
         return Err(ViewRefusal::BadChecksum);
@@ -530,7 +542,8 @@ pub fn plan_view_with(
     // Validate explicit edits first, so stripping never hides a malformed
     // replacement, a running tool or a final-turn violation.
     let original = plan_with(rule, entries, &view.edits)?;
-    let edits = crate::rules::edits_for_view(entries, view, rules).map_err(ViewRefusal::Rule)?;
+    let edits =
+        crate::rules::edits_for_view(entries, view, rules, floor).map_err(ViewRefusal::Rule)?;
     if matches!(edits, std::borrow::Cow::Borrowed(_)) {
         Ok(original)
     } else {
