@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2
+
+- Bind signed thinking for Claude Fable 5.2, Mythos 5.1 and Mythos 5.2.
+  Anthropic's preserved-thinking page applies the prefix check to "Claude 5.1
+  and later models"; Mythos 5.1, Fable 5.2 and Mythos 5.2 enforce it on every
+  account, whatever its age. `rules::defaults` now declares
+  `signed_parts: bound` for all three. Without the rows a runner taking the
+  defaults declared `none`, and a provider could plan an edit that breaks the
+  signed thinking after it, which the API refuses with a 400. No plan bytes,
+  `PLAN_VERSION` or vectors change.
+
 ## 0.2.1
 
 - Require compaction 0.3.3 for optional entry-level agent attribution. Providers
