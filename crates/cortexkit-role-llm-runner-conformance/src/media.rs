@@ -23,9 +23,10 @@ type Check = Result<(), String>;
 const FRAME_IMAGE_BYTES: usize = 2_400_000;
 
 /// Size of the `oversize` argument of each of the frame-budget case's two
-/// sibling calls. Each call's request fits the daemon frame on its own, while
-/// the assistant message holding both calls is over the daemon's 4 MiB frame,
-/// so an inline read of that message must be refused.
+/// sibling calls, separate from the clean image call. The two payloads alone
+/// total 4,400,000 bytes, exceeding the daemon's 4,194,304-byte frame by 205,696
+/// bytes before call wrappers. Inline reads must refuse that assistant message;
+/// descriptors replace both arguments with small refs, so the message fits.
 const FRAME_ARGUMENT_BYTES: usize = 2_200_000;
 
 /// Number and size of the equal assistant text parts in the stable-across-pages
@@ -33,7 +34,7 @@ const FRAME_ARGUMENT_BYTES: usize = 2_200_000;
 const STABLE_PARTS: usize = 14;
 const STABLE_PART_BYTES: usize = 250 * 1024;
 
-/// Size of the `oversize` argument of the pairing case's call: over
+/// Size of the `oversize` argument of the pairing case's sibling call: over
 /// `PART_INLINE_MAX`, so a descriptors read describes the call's arguments
 /// as an `args_ref`, yet well within one daemon frame.
 const PAIRING_ARGUMENT_BYTES: usize = PART_INLINE_MAX + 4096;
@@ -125,14 +126,15 @@ struct Fixture {
     /// the descriptor budget without exceeding the tool-result text limit.
     assistant: Option<Vec<String>>,
     /// The `oversize` argument of each call in the image call's step whose
-    /// arguments are too large to stay inline in a descriptors read; the
-    /// first goes on the image call, each later one on a sibling call of its
-    /// own.
+    /// arguments are too large to stay inline in a descriptors read. Each
+    /// goes on a sibling call of its own, never on the image call: a runner
+    /// may refuse large tool inputs before dispatch without losing the image.
     oversize: Vec<Value>,
-    /// Top-level argument members of the image call besides `marker` and
-    /// `oversize`. The pairing case names them `id` and `name`, as tool
-    /// parameters often are: inside arguments a descriptors read replaces
-    /// whole with an `args_ref`, they are payload, not pairing fields.
+    /// Top-level argument members of the first oversize sibling besides
+    /// `marker` and `oversize`. The pairing case names them `id` and `name`, as
+    /// tool parameters often are. They are payload, not the outer fields that
+    /// identify a call and match its result, so descriptors may replace the
+    /// whole arguments object with an `args_ref`.
     arguments: Vec<(&'static str, Value)>,
 }
 
@@ -154,9 +156,9 @@ fn fixture(name: &str) -> Fixture {
             "media_descriptors_frame_budget" => Some(mixed_fallback_texts()),
             _ => None,
         },
-        // Two sibling calls in one step instead of one over-frame argument:
-        // each call's request to the tool provider fits the daemon frame,
-        // while the assistant message holding both does not.
+        // For frame_budget, use two oversized siblings in one step instead of
+        // one over-frame argument. Each provider request fits the daemon frame,
+        // while the assistant message holding both and the image call does not.
         oversize: if name.starts_with("media_refs_") {
             vec![json!("a".repeat(PART_INLINE_MAX + 1))]
         } else if frame {
@@ -305,13 +307,6 @@ where
     let text = format!("{}🦀{}", "a".repeat(4095), "z".repeat(PART_INLINE_MAX));
     let mut tool = case.mint.call("descriptor-tool");
     tool.result = image;
-    let mut oversize = fixture.oversize.into_iter();
-    if let Some(argument) = oversize.next() {
-        tool.arguments["oversize"] = argument;
-    }
-    for (key, value) in fixture.arguments {
-        tool.arguments[key] = value;
-    }
     let mut calls = vec![ScriptedPart::ToolCall(tool)];
     if matches!(
         name,
@@ -320,9 +315,14 @@ where
         calls.insert(0, ScriptedPart::Text("before the untagged call".into()));
         calls.push(ScriptedPart::Text("after the untagged call".into()));
     }
-    for argument in oversize {
-        let mut sibling = case.mint.call("descriptor-sibling-tool");
+    for (index, argument) in fixture.oversize.into_iter().enumerate() {
+        let mut sibling = case.mint.call(&format!("descriptor-sibling-tool-{index}"));
         sibling.arguments["oversize"] = argument;
+        if index == 0 {
+            for (key, value) in &fixture.arguments {
+                sibling.arguments[*key] = value.clone();
+            }
+        }
         calls.push(ScriptedPart::ToolCall(sibling));
     }
     // Fallback selection is per message, so keep the below-threshold payloads
@@ -426,6 +426,8 @@ where
             }
         }
         "media_descriptors_frame_budget" => {
+            // Stored call arguments must be described even when the runner
+            // refuses a sibling before dispatch and stores an error result.
             let described_arguments = |refs: &[Value]| {
                 refs.iter()
                     .filter(|r| {
@@ -779,6 +781,63 @@ where
 
 #[cfg(test)]
 mod tests {
+    async fn check_media_cases_with_tool_input_cap(cap: Option<usize>) {
+        use crate::{
+            drive::Mint,
+            fork_fake::{Defects, FakeSubject},
+        };
+        use cortexkit_role_harness::CrashDriver;
+        use std::sync::atomic::Ordering;
+
+        for (name, oversized_calls) in [
+            ("media_refs_media_are_refs", 1),
+            ("media_refs_large_payloads_inline", 1),
+            ("media_refs_descriptor_digests", 1),
+            ("media_descriptors_frame_budget", 2),
+            ("media_descriptors_pairing", 1),
+        ] {
+            let mut fake = FakeSubject::new(Defects::default());
+            fake.tool_input_cap = cap;
+            fake.descriptor_fixtures = true;
+            fake.capabilities
+                .extend([Capability::MediaRefs, Capability::HostHistory]);
+            let declared = fake.capabilities();
+            let mint = Mint::default();
+            let root = tempfile::tempdir().unwrap();
+            let mut driver = CrashDriver::new(&fake);
+            let handle = driver.spawn(root.path()).await.unwrap();
+            let case = Case {
+                subject: &fake,
+                handle: &handle,
+                declared: &declared,
+                mint: &mint,
+            };
+            let outcome = case
+                .run(name)
+                .await
+                .unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert!(
+                matches!(outcome, Ending::Passed),
+                "{name}: media case did not pass"
+            );
+            assert_eq!(
+                fake.tool_input_refusals.load(Ordering::SeqCst),
+                if cap.is_some() { oversized_calls } else { 0 },
+                "{name}: every oversized sibling must be refused before dispatch"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn media_cases_pass_with_capped_tool_inputs() {
+        check_media_cases_with_tool_input_cap(Some(256 * 1024)).await;
+    }
+
+    #[tokio::test]
+    async fn media_cases_pass_with_uncapped_tool_inputs() {
+        check_media_cases_with_tool_input_cap(None).await;
+    }
+
     use super::*;
     use base64::{engine::general_purpose::STANDARD, Engine};
 

@@ -674,6 +674,8 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    tool_input_cap: Option<usize>,
+    tool_input_refusals: Arc<AtomicUsize>,
     fork_ingress: Mutex<fork_answer::Ingress>,
     intakes: Mutex<BTreeMap<String, history_intake::Intake>>,
     routing_peers:
@@ -2434,6 +2436,23 @@ impl Module {
                 .filter(|(_, call)| call.run_id == run_id)
                 .collect();
             if let Some((key, call)) = mine.iter().find(|(_, call)| !call.intent && !call.result) {
+                if self
+                    .world
+                    .tool_input_cap
+                    .is_some_and(|cap| serde_json::to_vec(&call.arguments).unwrap().len() > cap)
+                {
+                    self.world
+                        .tool_input_refusals
+                        .fetch_add(1, Ordering::SeqCst);
+                    // Keep the written call, but never dispatch an input that
+                    // exceeds the runner's own tool-input limit.
+                    self.commit(
+                        session,
+                        json!({ "kind": "result", "call_key": key, "denied": true,
+                                "content": {"executed": false, "error": {"code": "tool_input_too_large"}} }),
+                    )?;
+                    continue;
+                }
                 if self
                     .world
                     .denied
@@ -5910,6 +5929,10 @@ impl RunnerRoute for FakeRoute {
 }
 
 pub struct FakeSubject {
+    /// Refuse serialized tool arguments over this many bytes before dispatch.
+    pub tool_input_cap: Option<usize>,
+    /// Number of calls refused by the tool-input cap, not sent to the provider.
+    pub tool_input_refusals: Arc<AtomicUsize>,
     pub fork_peer_errors: bool,
     pub fork_head_key_fixture: bool,
     pub routed_methods: Vec<String>,
@@ -6052,6 +6075,8 @@ pub const KILL_POINTS: &[&str] = &[
 impl FakeSubject {
     pub fn new(defects: Defects) -> Self {
         Self {
+            tool_input_cap: None,
+            tool_input_refusals: Arc::new(AtomicUsize::new(0)),
             fork_peer_errors: true,
             fork_head_key_fixture: true,
             routed_methods: vec!["apikey".into(), "oauth".into()],
@@ -6126,6 +6151,8 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    tool_input_cap: self.tool_input_cap,
+                    tool_input_refusals: self.tool_input_refusals.clone(),
                     fork_ingress: Mutex::new(fork_answer::Ingress::default()),
                     routing_peers: Mutex::new(BTreeMap::new()),
                     intakes: Mutex::new(BTreeMap::new()),
