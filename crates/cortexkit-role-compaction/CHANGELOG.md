@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.5
+
+- Add optional notice Conditions `notes_tokens: {count, exact}` for pending plan
+  and tool notes on the next request, not the last. Providers treat the notes as
+  fixed prompt and add their growth since the last measured request when sizing.
+- Add `COMPACTION_NOTES_TOKENS_PROVIDES` (`compaction-notes-tokens/v1`), its
+  declaration helper and a capability-gated builder. Separate notes from
+  `system_tokens` only for declaring providers; preserve legacy accounting for
+  others. Keep counts out of rides and checksums; add wire and rejection tests.
+
 ## 0.3.4
 
 - Add optional `signed_floor: {through}` to Setup and Conditions, with the

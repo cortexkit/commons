@@ -531,12 +531,13 @@ The stepped-down-tier scenario starts the head at `fast` through the existing
 credential and tier mismatch checks still run, while the stepped-down scenario
 is reported as an inapplicable rule rather than a plain pass.
 
-## Signed tool-set-change fixtures (0.17.43)
+## Signed tool-set-change fixtures (0.17.44)
 
 `signed_tool_change_observation(session, change)` is optional and defaults to
-`Ok(None)`: all four checks are then not applicable, never failed. It enables
+`Ok(None)`: all five checks are then not applicable, never failed. It enables
 `signed_tool_edit_strips`, `signed_tool_reorder_keeps`,
-`signed_tool_deferred_addition_keeps`, and `signed_tool_resume_identical`.
+`signed_tool_deferred_addition_strips`, `signed_tool_note_keeps`, and
+`signed_tool_resume_identical`.
 
 Implement the hook against a live prefix-bound route and scripted model. Its
 Rust documentation lists the exact refresh and restart steps. Capture raw
@@ -549,7 +550,8 @@ signed parts. Adapters without that wire shape or replay control return `None`.
 
 The kit, not the adapter, decides the result: it compares sets of tool name,
 description and RFC 8785 canonical input schema, verifies signed markers are
-stripped for edits but retained for reorders and unreferenced deferred additions,
+stripped for edits and unreferenced deferred additions but retained for reorders
+and appended system tool notes with byte-identical tools and earlier messages,
 keeps the ordinary-text control, and compares resume bytes exactly. Each check
 has an intentionally incorrect fixture runner rejected by name. This seam does
 not claim executable coverage of durable-write atomicity, every relaunch path,

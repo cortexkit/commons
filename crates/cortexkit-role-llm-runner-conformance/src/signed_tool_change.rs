@@ -17,6 +17,7 @@ pub enum SignedToolChange {
     Edit,
     Reorder,
     DeferredAddition,
+    ToolNote,
     Resume,
 }
 
@@ -41,6 +42,14 @@ pub struct SignedToolChangeObservation {
 }
 
 type Tool = (String, String, Vec<u8>);
+
+#[derive(serde::Deserialize)]
+struct RawPrefix<'a> {
+    #[serde(borrow)]
+    tools: &'a serde_json::value::RawValue,
+    #[serde(borrow)]
+    messages: Vec<&'a serde_json::value::RawValue>,
+}
 
 fn tools(body: &Value) -> Result<Vec<Tool>, String> {
     body["tools"]
@@ -143,6 +152,32 @@ fn check(
                 return Err("request references a newly added deferred tool".into());
             }
         }
+        SignedToolChange::ToolNote => {
+            let raw_before: RawPrefix<'_> =
+                serde_json::from_slice(&observation.before).map_err(|e| e.to_string())?;
+            let raw_after: RawPrefix<'_> =
+                serde_json::from_slice(&observation.after).map_err(|e| e.to_string())?;
+            if raw_before.tools.get() != raw_after.tools.get()
+                || raw_after.messages.len() != raw_before.messages.len() + 1
+                || raw_before
+                    .messages
+                    .iter()
+                    .zip(&raw_after.messages)
+                    .any(|(before, after)| before.get() != after.get())
+                || after["messages"].as_array().unwrap().last().unwrap()["role"] != "system"
+                || after["messages"].as_array().unwrap().last().unwrap()["content"]
+                    .as_array()
+                    .is_none_or(Vec::is_empty)
+            {
+                return Err("fixture must append a system tool note with byte-identical tools and earlier messages".into());
+            }
+            let note = &after["messages"].as_array().unwrap().last().unwrap()["content"];
+            if !before["tools"].as_array().unwrap().iter().any(|tool| {
+                tool["defer_loading"] == true && references(note, tool["name"].as_str().unwrap())
+            }) {
+                return Err("fixture must surface an already-declared deferred tool".into());
+            }
+        }
     }
     if observation.signed_markers.len() < 2
         || observation
@@ -165,13 +200,16 @@ fn check(
     {
         return Err("ordinary transcript text did not survive the tool change".into());
     }
-    let strip = matches!(change, SignedToolChange::Edit | SignedToolChange::Resume);
+    let strip = matches!(
+        change,
+        SignedToolChange::Edit | SignedToolChange::DeferredAddition | SignedToolChange::Resume
+    );
     for marker in &observation.signed_markers {
         if contains(&observation.after, marker) == strip {
             return Err(if strip {
-                "tool edit retained earlier signed reasoning or its signature".into()
+                "tool change retained earlier signed reasoning or its signature".into()
             } else {
-                "tool reorder or unreferenced deferred addition stripped signed reasoning".into()
+                "tool reorder or appended tool note stripped signed reasoning".into()
             });
         }
     }
@@ -193,7 +231,8 @@ where
     let change = match name {
         "signed_tool_edit_strips" => SignedToolChange::Edit,
         "signed_tool_reorder_keeps" => SignedToolChange::Reorder,
-        "signed_tool_deferred_addition_keeps" => SignedToolChange::DeferredAddition,
+        "signed_tool_deferred_addition_strips" => SignedToolChange::DeferredAddition,
+        "signed_tool_note_keeps" => SignedToolChange::ToolNote,
         "signed_tool_resume_identical" => SignedToolChange::Resume,
         _ => return Err(format!("unknown signed tool change case {name}")),
     };
@@ -224,7 +263,10 @@ mod tests {
         fn execute(&self, change: SignedToolChange) -> SignedToolChangeObservation {
             let first =
                 json!({"name":"first","description":"first tool","input_schema":{"type":"object"}});
-            let second = json!({"name":"second","description":"second tool","input_schema":{"type":"object"}});
+            let mut second = json!({"name":"second","description":"second tool","input_schema":{"type":"object"}});
+            if change == SignedToolChange::ToolNote {
+                second["defer_loading"] = json!(true);
+            }
             let before = json!({
                 "tools":[first,second],
                 "messages":[{"role":"assistant","content":[
@@ -246,8 +288,18 @@ mod tests {
                         "input_schema":{"type":"object"},"defer_loading":true
                     }));
                 }
+                SignedToolChange::ToolNote => {
+                    after["messages"].as_array_mut().unwrap().push(json!({
+                        "role":"system", "content":[{"type":"text","text":"Tool addition: second is now available."}]
+                    }));
+                }
             }
-            let strip = matches!(change, SignedToolChange::Edit | SignedToolChange::Resume);
+            let strip = matches!(
+                change,
+                SignedToolChange::Edit
+                    | SignedToolChange::DeferredAddition
+                    | SignedToolChange::Resume
+            );
             if strip != (self.faulty && change != SignedToolChange::Resume) {
                 after["messages"][0]["content"]
                     .as_array_mut()
@@ -286,9 +338,14 @@ mod tests {
                 "stripped signed",
             ),
             (
-                "signed_tool_deferred_addition_keeps",
+                "signed_tool_deferred_addition_strips",
                 SignedToolChange::DeferredAddition,
-                "stripped signed",
+                "retained earlier",
+            ),
+            (
+                "signed_tool_note_keeps",
+                SignedToolChange::ToolNote,
+                "byte-identical",
             ),
             (
                 "signed_tool_resume_identical",
@@ -305,6 +362,23 @@ mod tests {
                 "{failure}"
             );
         }
+    }
+
+    #[test]
+    fn signed_tool_change_deferred_addition_requires_stripping() {
+        let change = SignedToolChange::DeferredAddition;
+        let mut observed = FakeRunner { faulty: false }.execute(change);
+        let before: Value = serde_json::from_slice(&observed.before).unwrap();
+        let mut after: Value = serde_json::from_slice(&observed.after).unwrap();
+        after["messages"][0]["content"] = json!([{"type":"text","text":"ORDINARY_TEXT"}]);
+        observed.after = serde_json::to_vec(&after).unwrap();
+        check(change, &observed).expect("a deferred addition must strip earlier signed reasoning");
+
+        after["messages"] = before["messages"].clone();
+        observed.after = serde_json::to_vec(&after).unwrap();
+        assert!(check(change, &observed)
+            .unwrap_err()
+            .contains("retained earlier"));
     }
 
     #[test]
@@ -345,5 +419,31 @@ mod tests {
         assert!(check(SignedToolChange::Edit, &observed)
             .unwrap_err()
             .contains("markers"));
+    }
+
+    #[test]
+    fn signed_tool_change_note_requires_byte_identical_prefix() {
+        let change = SignedToolChange::ToolNote;
+        let observed = FakeRunner { faulty: false }.execute(change);
+        check(change, &observed).unwrap();
+        for original in ["\"tools\":[", "\"messages\":[{"] {
+            let mut changed = observed.clone();
+            changed.after = String::from_utf8(changed.after)
+                .unwrap()
+                .replacen(original, &format!("{original} "), 1)
+                .into_bytes();
+            // Whitespace inside a captured array or object still changes the prefix bytes.
+            assert!(check(change, &changed)
+                .unwrap_err()
+                .contains("byte-identical"));
+        }
+        let mut missing_tool = observed.clone();
+        missing_tool.after = String::from_utf8(missing_tool.after)
+            .unwrap()
+            .replace("Tool addition: second", "Tool addition: unknown")
+            .into_bytes();
+        assert!(check(change, &missing_tool)
+            .unwrap_err()
+            .contains("already-declared"));
     }
 }

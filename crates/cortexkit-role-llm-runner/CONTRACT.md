@@ -6714,11 +6714,12 @@ on the rides and usable-window ceiling defined by that contract (§6).
   compare schemas as RFC 8785 canonical JSON. Adding, removing or renaming a
   tool, or changing its description or schema, counts. Reordering tools or keys
   inside a schema never counts. `tool_choice` and `cache_control` are outside
-  this comparison. Exception: an addition consisting only of tools with
-  `defer_loading: true` that nothing in the request references does not move
-  the floor, and neither does surfacing such a tool later through an appended
-  tool note. Removing a deferred tool, or changing its description or schema,
-  counts like any other tool.
+  this comparison. Adding a `defer_loading: true` tool to the rendered `tools`
+  array counts like any other addition, even when nothing in the request
+  references it. Surfacing an already-declared deferred tool through an appended
+  system tool note leaves `tools` byte-identical and does not move the floor.
+  Removing a deferred tool, or changing its description or schema, counts like
+  any other tool.
 - [pinned] Starting with the first request carrying the changed tool set, every
   request leaves out signed reasoning in entries at or before the newest signed
   floor. Use exactly the signed-part strip defined for `new_signed: "strip"` in
@@ -6733,6 +6734,22 @@ on the rides and usable-window ceiling defined by that contract (§6).
   not a view field, and does not change any view checksum. Send it in compaction
   Setup and Conditions only to providers declaring `compaction-signed-floor/v1`
   (the compaction contract W1.4 and W3.5).
+- [pinned] Compaction notice Conditions may carry `notes_tokens: {count, exact}`
+  only to providers declaring `compaction-notes-tokens/v1`. Count the pending
+  runner-rendered plan and tool notes that the **next request** will carry, not
+  those the last request carried: notes that are not entries and ride every
+  request until the next prefix rebuild. Exclude one-request notes such as
+  clearing turn reminders. For a declaring provider, exclude these notes from
+  `system_tokens`; otherwise omit `notes_tokens` and retain their count inside
+  `system_tokens` to avoid double-counting. Apply the same exactness, token-family
+  and integer rules as `system_tokens` and `tools_tokens` (compaction W4.11 and
+  W1.2). Send this count in notices only, never rides; it enters no checksum.
+  Providers treat notes as fixed prompt they cannot drop: a view's predicted
+  request size is its kept parts plus `system_tokens`, `tools_tokens` and
+  `notes_tokens`, estimating absent counts; non-declaring providers already count
+  notes inside `system_tokens` and MUST NOT add them again. When sizing from the
+  last measured request, providers use the next-request count to add note growth
+  since that measurement to the fixed prompt, without counting measured notes twice.
 
 ### 11.2 Hook call sites
 

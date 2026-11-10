@@ -86,7 +86,7 @@ impl ReasoningTokens {
     }
 }
 
-/// A notice's system-text or tool-definition count for the next request under
+/// A notice's system-text, tool-definition or persistent-note count for the next request under
 /// its conditions. The system count excludes system entries. Never sent in rides.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]

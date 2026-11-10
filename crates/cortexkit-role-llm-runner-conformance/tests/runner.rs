@@ -898,7 +898,8 @@ async fn signed_tool_change_default_hook_is_inapplicable_never_failed() {
     for name in [
         "signed_tool_edit_strips",
         "signed_tool_reorder_keeps",
-        "signed_tool_deferred_addition_keeps",
+        "signed_tool_deferred_addition_strips",
+        "signed_tool_note_keeps",
         "signed_tool_resume_identical",
     ] {
         assert!(

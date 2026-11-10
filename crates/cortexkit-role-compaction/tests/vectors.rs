@@ -158,6 +158,50 @@ fn samples() -> Vec<(&'static str, Value)> {
     };
     let mut samples = vec![
         (
+            "notice-notes-declared-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(
+                    5,
+                    conditions
+                        .clone()
+                        .with_system_tokens(cortexkit_role_compaction::tokens::SurfaceTokens::new(
+                            100, true,
+                        ))
+                        .with_tools_tokens(cortexkit_role_compaction::tokens::SurfaceTokens::new(
+                            50, true,
+                        ))
+                        .with_notes_tokens(
+                            cortexkit_role_compaction::tokens::SurfaceTokens::new(25, true),
+                            true,
+                        ),
+                )
+                .with_token_family("example-family/1"),
+            ),
+        ),
+        (
+            "notice-notes-legacy-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(
+                    5,
+                    conditions
+                        .clone()
+                        .with_system_tokens(cortexkit_role_compaction::tokens::SurfaceTokens::new(
+                            125, true,
+                        ))
+                        .with_tools_tokens(cortexkit_role_compaction::tokens::SurfaceTokens::new(
+                            50, true,
+                        ))
+                        .with_notes_tokens(
+                            cortexkit_role_compaction::tokens::SurfaceTokens::new(25, true),
+                            false,
+                        ),
+                )
+                .with_token_family("example-family/1"),
+            ),
+        ),
+        (
             "speaks-for-entry.json",
             value(
                 Entry::new(

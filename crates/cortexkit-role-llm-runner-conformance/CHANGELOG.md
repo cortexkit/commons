@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.44
+
+- Pin runner `=0.8.36`. Replace `signed_tool_deferred_addition_keeps` with
+  `signed_tool_deferred_addition_strips`: even an unreferenced deferred addition
+  must record a floor and strip earlier signed reasoning. Keep the adapter hook
+  name and observation shape; update its contract and faulty-runner controls.
+- Add `SignedToolChange::ToolNote` and `signed_tool_note_keeps` using the existing
+  raw-ingress fixture. Appended system tool notes preserve signed reasoning only
+  with byte-identical tools and earlier messages. Check raw JSON prefix bytes,
+  reject a deliberately stripping fixture by name, and keep the default hook
+  not applicable.
+
 ## 0.17.43
 
 - Pin runner `=0.8.35`. Add four signed-tool-change cases: a tool edit strips

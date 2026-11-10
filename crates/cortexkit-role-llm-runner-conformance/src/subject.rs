@@ -1606,6 +1606,9 @@ pub trait LlmRunnerSubject: Harness {
     ///    run boundary: `Edit` changes a tool description or schema; `Reorder`
     ///    only reverses at least two tool definitions; `DeferredAddition` only
     ///    adds new `defer_loading: true` tools referenced nowhere in the request;
+    ///    `ToolNote` surfaces an already-declared deferred tool by appending one
+    ///    system message with a nonempty content array, keeping `tools` and every
+    ///    earlier message byte-identical;
     ///    `Resume` performs the same edit as `Edit`. Keep the earlier transcript.
     /// 4. Capture the first request carrying that tool set as `after`, before
     ///    committing its model response. Do not create a compaction view that
@@ -1617,6 +1620,8 @@ pub trait LlmRunnerSubject: Harness {
     /// Return raw bodies and markers only, never a synthesized verdict or a body
     /// reconstructed from configuration. The kit compares canonical tool triples,
     /// marker retention and exact resume bytes itself. Clean up the live fixture.
+    /// Edits and deferred additions must record the floor and strip earlier
+    /// signed reasoning; reorders and appended tool notes must preserve it.
     async fn signed_tool_change_observation(
         &self,
         _session: &str,

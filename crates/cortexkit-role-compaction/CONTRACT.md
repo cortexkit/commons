@@ -196,6 +196,13 @@ unknown members; this does not authorize sending the member without the
 declaration. The floor remains authoritative in the runner even when the
 provider does not declare it (W3.5).
 
+For `Conditions.notes_tokens`, the provider declares the additional manifest
+capability `compaction-notes-tokens/v1` (`COMPACTION_NOTES_TOKENS_PROVIDES`;
+`provides_notes_tokens`). Send the member only to declaring providers and
+exclude those notes from `system_tokens` only for them. Non-declaring providers
+keep notes inside `system_tokens`, so a separate count would double-count them
+(W4.11).
+
 For `Entry.speaks_for`, the provider declares the additional manifest capability
 `compaction-entry-speaks-for/v1` alongside `compaction-provider/v2`
 (`COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES`; `provides_entry_speaks_for`). The runner
@@ -329,6 +336,7 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 | `last_prompt_view` | integer, optional | The applied view version the request measured by `last_prompt_tokens` was rendered with when the runner built it. At least 1 names an applied view (view versions start at 1, W6.1); `0` means no view was applied. Absent means unknown, for example after a runner restart when it cannot tie the reading to a request it answered; providers may use the reading for compaction without checking a view version. The runner sends it only with `last_prompt_tokens`; the provider ignores it when `last_prompt_tokens` is absent. |
 | `system_tokens` | `{count, exact}`, optional | Count of the runner's own system text for the next request under these conditions, excluding system entries; in notices only, never rides (W4.11). |
 | `tools_tokens` | `{count, exact}`, optional | Count of the tool definitions for the next request under these conditions; in notices only, never rides (W4.11). |
+| `notes_tokens` | `{count, exact}`, optional | Count of pending runner-rendered plan and tool notes on the next request, not the last request; only for providers declaring `compaction-notes-tokens/v1`. In notices only, never rides (W4.11). |
 
 Informative for providers: when `last_prompt_view` is present, a reading counts toward a compaction decision only when `last_prompt_view` equals the newest view the runner accepted and has not since refused; a lower version, or `0` once any view is accepted, is stale. This holds even while the runner's `applied_view` still names an older view: `applied_view` names the view in force, and an accepted view takes force only at the next step boundary, so a reading can arrive between acceptance and the first request rendered with the new view. A reading that is stale only against an accepted view that hasn't yet taken force is normal runner behaviour, not a fault. The provider should wait for a reading under the current view rather than base a compaction decision on a stale reading. W6.5's `stale_version` means a runner refuses any view whose version is not greater than the latest it accepted, so a version a runner reports names exactly one view in that session. Over-limit rides still act on their own estimate.
 
@@ -542,7 +550,7 @@ Count metadata updates alone (W4.11) are not entry changes, never divergence, an
 
 Provider options a host keeps on a part (cache control, citations) are the runner's: it renders them with the part as it is, and decides which stay valid for a replaced field.
 
-**W4.11 Optional token counts.** These additive fields require no new capability. A runner may send part `tokens`, each `delivered` item's `tokens`, and assistant-entry `reasoning_tokens` in `session.entries` pages and notices, including compact parts. Reasoning parts have no per-part count. An absent count means the provider keeps its own estimate, never zero.
+**W4.11 Optional token counts.** Except for the capability-gated `notes_tokens` below, these additive fields require no new capability. A runner may send part `tokens`, each `delivered` item's `tokens`, and assistant-entry `reasoning_tokens` in `session.entries` pages and notices, including compact parts. Reasoning parts have no per-part count. An absent count means the provider keeps its own estimate, never zero.
 
 **Coverage.** Part counts cover full content as the runner renders it to the model provider, without message framing, using that family's counter. They describe full content, not a view's rendering.
 
@@ -567,6 +575,31 @@ Alongside `token_family`, a page or notice may carry `token_family_exact` (boole
 **Reasoning stability.** Once sent with `measured: true`, the runner MUST freeze the value within its entry and family: no later page in that family may change it; providers may rely on that. On a family change, the runner sends a new value only if it can measure again, otherwise it omits it.
 
 **Surface counts.** Notice conditions may carry `system_tokens` and `tools_tokens`, each `{count, exact}`, for the request the runner sends next under these conditions. They never go in rides. `system_tokens` covers the runner's own system text, not system entries (those are parts); `tools_tokens` covers tool definitions. `exact: true` means the counted bytes are the bytes the model provider receives; `exact: false` means the runner counted what it handed the host, which rendered the final format. Providers may use inexact counts for reporting but SHOULD NOT use them for drop decisions. All `count`, `input` and `output` values follow W1.2; `measured` and `exact` are booleans.
+
+Notice conditions may also carry optional `notes_tokens: {count, exact}`. It
+counts the runner-rendered notes pending now that the runner will put on its
+**next request** under these conditions, not the notes the last request carried.
+These notes are not entries and ride every request until the next prefix
+rebuild: plan notes and tool notes, including `tool_addition` and `tool_removal`
+system messages. A note scoped to one request, such as a turn reminder that
+clears, is not counted. The same `exact` semantics, token-family rules and W1.2
+count bounds as `system_tokens` and `tools_tokens` apply. Like those counts,
+`notes_tokens` is notices only, never rides, and is count metadata outside every
+checksum.
+
+Send `notes_tokens` only to providers declaring `compaction-notes-tokens/v1`.
+For a declaring provider, `system_tokens` excludes these notes. For any other
+provider, omit `notes_tokens` and keep the notes counted inside `system_tokens`;
+sending a separate count to such a provider would double-count them. Readers
+accept an absent `notes_tokens`; absence is not a zero count.
+
+A view's predicted request size is its kept parts plus `system_tokens`,
+`tools_tokens` and `notes_tokens`, using estimates for absent counts. For a
+non-declaring provider, notes are already inside `system_tokens` and MUST NOT be
+added again. Providers treat the notes as fixed prompt they cannot drop. When
+sizing from the last measured request, the provider uses the next-request count to add note growth
+since that measured request to the fixed part of the prompt, rather than
+lagging one pending note behind or counting previously measured notes twice.
 
 **Notice budget.** The W5.2 budget is on the serialized compact `entries` array. Drop entry counts (`tokens`, `reasoning_tokens`) first, then the entries if still over budget. Condition counts stay, and `token_family` stays whenever any count remains. Providers may read omitted entries and their counts with `session.entries`; condition counts are not returned there. Counts, `token_family` and `token_family_exact` sit outside every W7 checksum.
 
@@ -812,7 +845,7 @@ notices include it only under W1.4's provider declaration.
 absent before hashing, so every entry predating the field keeps its digest.
 Deploy runners and providers that decode `keep` before core sends it; core sends
 it only to runners declaring llm-runner's `notice_keep` group.
-Count metadata (`tokens`, including each `delivered` item's count, assistant-entry `reasoning_tokens`, condition `system_tokens` and `tools_tokens`), `token_family` and `token_family_exact` also enter none of these checksums. `tokens` is reserved in the Part envelope even for unknown kinds; the remaining unknown-kind payload is preserved under W1.5. Opaque payload fields with the same names are content, not count metadata, and remain in checksums.
+Count metadata (`tokens`, including each `delivered` item's count, assistant-entry `reasoning_tokens`, condition `system_tokens`, `tools_tokens` and `notes_tokens`), `token_family` and `token_family_exact` also enter none of these checksums. `tokens` is reserved in the Part envelope even for unknown kinds; the remaining unknown-kind payload is preserved under W1.5. Opaque payload fields with the same names are content, not count metadata, and remain in checksums.
 
 # Open points
 

@@ -105,6 +105,15 @@ pub struct Conditions {
     /// Notices only, never rides (W4.11).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools_tokens: Option<crate::tokens::SurfaceTokens>,
+    /// Count of pending runner-rendered plan and tool notes on the next request,
+    /// not the last request. Only notes that are not entries and persist until
+    /// the next prefix rebuild count; one-request reminders do not. Providers
+    /// add note growth since the last measured request to the fixed prompt.
+    /// Notices only, never rides. Send only to providers declaring
+    /// `compaction-notes-tokens/v1`, excluding notes from `system_tokens` then;
+    /// otherwise keep notes inside `system_tokens` to avoid double-counting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notes_tokens: Option<crate::tokens::SurfaceTokens>,
 }
 
 open_tagged! {
@@ -214,6 +223,7 @@ impl Conditions {
             last_prompt_view: None,
             system_tokens: None,
             tools_tokens: None,
+            notes_tokens: None,
         }
     }
 
@@ -245,6 +255,16 @@ impl Conditions {
 
     pub fn with_tools_tokens(mut self, tokens: crate::tokens::SurfaceTokens) -> Self {
         self.tools_tokens = Some(tokens);
+        self
+    }
+
+    /// Project the count only when the provider declares its capability.
+    pub fn with_notes_tokens(
+        mut self,
+        tokens: crate::tokens::SurfaceTokens,
+        declared: bool,
+    ) -> Self {
+        self.notes_tokens = declared.then_some(tokens);
         self
     }
 }

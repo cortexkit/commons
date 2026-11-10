@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.36
+
+- Count an unreferenced `defer_loading: true` addition to the rendered `tools`
+  array like any other addition for the signed floor. Appending a system tool
+  note, including surfacing an already-declared deferred tool, still preserves
+  the floor when `tools` and earlier messages stay byte-identical.
+- Mirror compaction's capability-gated `notes_tokens` obligation: count pending
+  persistent plan and tool notes on the next request, separate them from
+  `system_tokens` only for declaring providers, and account for note growth
+  since the last measured request. No public runner wire type changes.
+
 ## 0.8.35
 
 - Require a durable, monotonic signed floor when a session's tool set changes

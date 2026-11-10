@@ -69,6 +69,17 @@ pub const COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES: &str = "compaction-entry-speaks-
 /// `signed_floor`. Runners send the boundary only to declaring providers.
 pub const COMPACTION_SIGNED_FLOOR_PROVIDES: &str = "compaction-signed-floor/v1";
 
+/// Additional provider manifest capability enabling Conditions `notes_tokens`.
+/// Runners separate notes from `system_tokens` only for declaring providers.
+pub const COMPACTION_NOTES_TOKENS_PROVIDES: &str = "compaction-notes-tokens/v1";
+
+/// Whether a provider declares support for the next request's note count.
+pub fn provides_notes_tokens(provides: &[String]) -> bool {
+    provides
+        .iter()
+        .any(|capability| capability == COMPACTION_NOTES_TOKENS_PROVIDES)
+}
+
 /// Whether a provider declares support for the runner's signed floor.
 pub fn provides_signed_floor(provides: &[String]) -> bool {
     provides

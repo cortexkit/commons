@@ -25,6 +25,11 @@ module id; the older applied-view examples omit it. The signed-policy apply
 request carries both optional view members inside its checksum; older views
 omit them and retain their checksums.
 
+`notice-notes-declared-request.json` separates pending next-request plan and tool
+notes from system text for `compaction-notes-tokens/v1` providers.
+`notice-notes-legacy-request.json` omits the separate note count and keeps those
+notes inside `system_tokens` for non-declaring providers.
+
 Regenerate JSON from the repository root after an intentional wire change:
 
 ```sh
