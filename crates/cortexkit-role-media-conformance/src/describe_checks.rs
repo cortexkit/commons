@@ -6,6 +6,12 @@ pub(crate) fn checker_codes() -> Result<(), String> {
         "kind":"transcribe","provider":"fixture","model":"model","local":false,
         "formats":["audio/wav"],"latency_class":"batch"
     }]});
+    let mut providers = base.clone();
+    let mut gateway = providers["engines"][0].clone();
+    gateway["provider"] = json!("gateway");
+    providers["engines"].as_array_mut().unwrap().push(gateway);
+    check_describe_value(&providers)
+        .map_err(|e| format!("describe checker rejected distinct providers: {e:?}"))?;
     for code in [
         "usage_without_usage_feed",
         "stream_without_jobs",

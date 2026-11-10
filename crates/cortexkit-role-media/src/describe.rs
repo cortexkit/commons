@@ -110,7 +110,7 @@ pub fn check_describe_value(value: &serde_json::Value) -> CheckResult {
                 return Err(CheckError::new("usage_without_usage_feed"));
             }
         }
-        if !keys.insert((&engine.kind, &engine.model)) {
+        if !keys.insert((&engine.kind, &engine.provider, &engine.model)) {
             return Err(CheckError::new("duplicate_engine"));
         }
         let lists = [

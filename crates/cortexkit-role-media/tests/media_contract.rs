@@ -96,11 +96,21 @@ fn media_contract_describe_group_fact_invalid() {
     }
 }
 #[test]
+fn media_contract_describe_same_kind_model_different_providers() {
+    let cases = vector("describe.json");
+    let d = &cases[0]["describe"];
+    check_describe_value(d).unwrap();
+    let typed: Describe = round_trip(d);
+    check_describe(&typed).unwrap();
+}
+#[test]
 fn media_contract_describe_duplicate_engine() {
     let mut d = describe();
     let engine = d["engines"][0].clone();
     d["engines"].as_array_mut().unwrap().push(engine);
     describe_code(d, "duplicate_engine");
+    let cases = vector("describe.json");
+    describe_code(cases[1]["describe"].clone(), "duplicate_engine");
 }
 #[test]
 fn media_contract_describe_fact_too_long() {

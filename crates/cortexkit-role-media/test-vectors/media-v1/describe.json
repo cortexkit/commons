@@ -1,0 +1,4 @@
+[
+  {"name":"same_kind_model_different_providers","describe":{"groups":["jobs","usage_feed"],"jobs_survive_restart":false,"engines":[{"kind":"transcribe","provider":"vendor","model":"speech","local":false,"formats":["audio/wav"],"latency_class":"batch"},{"kind":"transcribe","provider":"gateway","model":"speech","local":false,"formats":["audio/wav"],"latency_class":"batch"}]},"valid":true},
+  {"name":"duplicate_full_identity","describe":{"groups":["jobs","usage_feed"],"jobs_survive_restart":false,"engines":[{"kind":"transcribe","provider":"vendor","model":"speech","local":false,"formats":["audio/wav"],"latency_class":"batch"},{"kind":"transcribe","provider":"gateway","model":"speech","local":false,"formats":["audio/wav"],"latency_class":"batch"},{"kind":"transcribe","provider":"gateway","model":"speech","local":false,"formats":["audio/wav"],"latency_class":"batch"}]},"valid":false,"code":"duplicate_engine"}
+]

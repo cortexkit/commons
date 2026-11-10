@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.12
+
+- `parse_engine_declarations` keys `duplicate_engine` by `(kind, provider, model)`,
+  matching `cortexkit-role-media` 0.1.4: one media provider may declare the same
+  kind and model served through two providers (a vendor and a gateway). A
+  repeated full identity is still refused. Requires media 0.1.4.
+- Readers first: a router before 0.7.12 refuses such a declaration as a whole,
+  so a media provider must not declare a shared `(kind, model)` until its router
+  runs 0.7.12.
+
 ## 0.7.11
 
 - Add narrow-only per-harness pairs and provider allow-lists. Keep the member

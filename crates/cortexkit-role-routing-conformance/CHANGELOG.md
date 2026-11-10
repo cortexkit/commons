@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.14
+
+- Pin `cortexkit-role-routing` `=0.7.12` (media engine identity includes the
+  provider). No check changes.
+
 ## 0.10.13
 
 - The harness-limits cases declare runner pairs with the shared spellings

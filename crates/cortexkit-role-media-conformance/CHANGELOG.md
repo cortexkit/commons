@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+- Pin media `=0.1.4`, whose engine identity is `(kind, provider, model)` and whose
+  engine set may change at runtime with describe and the declaration kept equal.
+- Compare describe/declaration sets by the full identity. Exercise the same
+  kind and model under two providers, declaration order independence, missing
+  providers and duplicated provider identities with focused faulty subjects.
+- Routers must run `cortexkit-role-routing` 0.7.12 or later before providers
+  declare the same `(kind, model)` under two providers; older parsers reject the
+  pair and refuse the whole declaration.
+
 ## 0.2.0
 
 Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.

@@ -49,6 +49,25 @@ async fn media_kit_reply_envelope_extra_keys_are_rejected() {
     }
 }
 
+#[tokio::test]
+async fn media_kit_describe_declaration_distinguishes_providers() {
+    let case = "describe_matches_engine_declaration";
+    assert_eq!(
+        run_case(&Fake::new(None, true, true), case).await,
+        Outcome::Passed
+    );
+    for fault in [
+        "describe_declaration_omits_provider",
+        "describe_declaration_duplicates_provider",
+    ] {
+        let bad = run_case(&Fake::new(Some(fault), true, true), case).await;
+        assert!(
+            matches!(bad, Outcome::Failed(ref reason) if reason.starts_with(&format!("{case}:")) && reason.contains("describe/declaration facts differ")),
+            "{fault}: {bad:?}"
+        );
+    }
+}
+
 macro_rules! case_tests {
     ($($name:ident),* $(,)?) => {$(
         #[tokio::test]

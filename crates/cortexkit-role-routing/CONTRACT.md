@@ -1757,7 +1757,7 @@ Replacement params and answer:
   rejects the whole slot when `engines` is absent or an engine entry is
   malformed, including an unknown member of an engine, applying none and
   reporting the problem on health. It applies the media checker's per-engine
-  checks: `duplicate_engine` for repeated `(kind, model)`, `fact_too_long` for
+  checks: `duplicate_engine` for repeated `(kind, provider, model)`, `fact_too_long` for
   provider, model or list entries over 256 Unicode scalar values,
   `local_realtime_engine`, `bias_limit_invalid` for a max below 1, and
   `formats_empty`. Group-level

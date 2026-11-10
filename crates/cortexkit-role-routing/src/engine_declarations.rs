@@ -174,7 +174,11 @@ pub(crate) fn parse_engines(
         if engine.local && engine.kind == Kind::Realtime {
             return Err(error("local_realtime_engine", "local"));
         }
-        if !keys.insert((engine.kind.clone(), engine.model.clone())) {
+        if !keys.insert((
+            engine.kind.clone(),
+            engine.provider.clone(),
+            engine.model.clone(),
+        )) {
             return Err(error("duplicate_engine", "model"));
         }
         engines.push(engine);

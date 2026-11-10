@@ -874,6 +874,14 @@ impl MediaSubject for Fake {
         if st.fault("describe_matches_engine_declaration") {
             es[0].formats.reverse();
         }
+        if st.fault("describe_declaration_omits_provider") {
+            es.pop();
+        }
+        if st.fault("describe_declaration_duplicates_provider") {
+            let last = es.len() - 1;
+            es[last] = es[0].clone();
+        }
+        es.reverse();
         Ok(es)
     }
     async fn configure_peers(

@@ -114,7 +114,15 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
     let routing = RecordingRoutingPeer::new();
     let vendor = RecordingVendor::new();
     let result = async {
-        subject.configure_engines(engines()).await.map_err(err)?;
+        let configured = if matches!(
+            name,
+            "describe_matches_engine_declaration" | "describe_checker_codes"
+        ) {
+            describe_engines()
+        } else {
+            engines()
+        };
+        subject.configure_engines(configured).await.map_err(err)?;
         subject
             .configure_peers(routing.clone(), vendor.clone())
             .await
@@ -142,6 +150,14 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
         Ok(()) => Outcome::Passed,
         Err(reason) => Outcome::Failed(format!("{name}: {reason}")),
     }
+}
+
+fn describe_engines() -> Vec<Engine> {
+    let mut engines = engines();
+    let mut gateway = engines[0].clone();
+    gateway.provider = "gateway".into();
+    engines.push(gateway);
+    engines
 }
 
 pub(crate) fn engines() -> Vec<Engine> {
@@ -556,10 +572,10 @@ async fn run<S: MediaSubject>(s: &S, r: &RecordingRoutingPeer, name: &str) -> Re
             check_describe(&d).map_err(err)?;
             let mut actual = d.engines.clone();
             let mut manifest = s.engine_declaration().await.map_err(err)?;
-            let key = |e: &Engine| format!("{}:{}", e.kind.as_str(), e.model);
+            let key = |e: &Engine| (e.kind.clone(), e.provider.clone(), e.model.clone());
             actual.sort_by_key(&key);
             manifest.sort_by_key(&key);
-            let mut expected = engines();
+            let mut expected = describe_engines();
             expected.sort_by_key(key);
             require(
                 actual == manifest && actual == expected,

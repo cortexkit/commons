@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.4
+
+- Key engine identity and describe/declaration set equality by
+  `(kind, provider, model)`. The same kind and model may be served through
+  different providers; a repeated full identity remains `duplicate_engine`.
+- Allow the engine set to change while a provider runs, keeping describe and
+  the declaration equal and listing only engines it can run right now. Update
+  the declaration through `catalog.update_role_declarations` when the daemon
+  advertises it in `HELLO_ACK`; otherwise change it only at start. Remove a lost
+  engine before refusing its jobs where possible; accepted jobs keep their rules.
+- Readers first: media 0.1.3 readers, and routing's declaration parser before
+  `cortexkit-role-routing` 0.7.12, reject the same `(kind, model)` under two
+  providers as `duplicate_engine`. Do not declare such a pair until the router
+  runs routing 0.7.12 or later.
+- Add shared describe identity vectors without changing existing vector bytes.
+
 ## 0.1.3
 
 - Pin every successful reply, including a streamed call's terminal reply, to a

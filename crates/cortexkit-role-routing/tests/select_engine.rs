@@ -55,6 +55,17 @@ fn select_engine_declarations_are_atomic_and_use_every_per_engine_check() {
             .engines,
         vec![engine()]
     );
+    // Engine identity includes the provider: one module may declare the same
+    // kind and model served by a vendor and by a gateway.
+    let mut gateway = good.clone();
+    gateway["provider"] = json!("gateway");
+    assert_eq!(
+        parse_engine_declarations(&json!({"engines":[good.clone(), gateway]}))
+            .unwrap()
+            .engines
+            .len(),
+        2
+    );
     let missing = parse_engine_declarations(&json!({
         "groups": ["jobs"],
         "jobs_survive_restart": false,

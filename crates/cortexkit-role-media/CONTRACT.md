@@ -71,18 +71,31 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   namesake group); `group_fact_invalid {fact}` for missing or invalid
   `jobs_survive_restart` (boolean with jobs), `token_max_ttl_ms` or
   `call_silence_timeout_s` (integer from 1 with realtime); `duplicate_engine`
-  for repeated `(kind, model)`; `fact_too_long`; `bias_limit_invalid`;
+  for repeated `(kind, provider, model)`; `fact_too_long`; `bias_limit_invalid`;
   `formats_empty`; `local_realtime_engine`; `describe_too_large`.
 - [pinned] `media.describe.declaration`: The manifest slot
   `role_declarations["media-provider/v1"]` is an object whose `engines` member
   is required and lists the engines. A provider may also carry describe's other
   members. Readers use `engines` and ignore any other member. The slot declares
-  the same engines as describe, equal as sets keyed by `(kind, model)` with
+  the same engines as describe, equal as sets keyed by `(kind, provider, model)` with
   each member, including list order, equal. Both list only the engines the
-  provider can run on this machine, decided when it starts (for example, no GPU
-  engines on a machine without a supported GPU). An engine it can't run is left
-  out, never declared and then refused. Realtime engines are remote and can
-  confirm the token opening a vendor session.
+  provider can run on this machine right now (for example, no GPU engines on a
+  machine without a supported GPU). The engine set may change while the provider
+  runs, for example when a key is added or removed, or a price becomes available.
+  Describe and the declaration change together; they are never intentionally
+  unequal. A provider updates its declaration through the daemon's live
+  `catalog.update_role_declarations` operation when advertised in `HELLO_ACK`;
+  otherwise it changes its declaration only at start. An engine it can't run is
+  left out, never declared and then refused. A provider losing an engine removes
+  it from describe and the declaration before refusing jobs for it where it can.
+  Jobs already accepted keep their own rules. Realtime engines are remote and
+  can confirm the token opening a vendor session.
+
+  Readers first: a reader built on media 0.1.3, and routing's declaration parser
+  before `cortexkit-role-routing` 0.7.12, reject the same `(kind, model)` listed
+  under two providers as `duplicate_engine`, refusing the whole slot. A provider
+  must not declare such a pair until the router it relies on runs routing 0.7.12
+  or later.
 - [pinned] `media.engine.matching`: Submit matches its job kind; streams match
   stream_transcribe; tokens match realtime. MIME type/subtype compare ignoring
   case and every declared parameter must equal the request's parameter. PCM
