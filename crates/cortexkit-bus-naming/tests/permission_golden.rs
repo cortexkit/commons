@@ -870,3 +870,36 @@ fn event_consumer_reads_but_cannot_publish_broca_events() {
         ));
     }
 }
+
+#[test]
+fn rescheduled_flows_are_read_through_core_durable_not_direct_subscriptions() {
+    use cortexkit_bus_naming::{
+        event_consumer_specs, flow_engine_permissions, participant_permissions, Operation,
+    };
+
+    let account = AccountNames::derive("box_readers").unwrap();
+    let subject = account
+        .event_subject("basal", "flow_instance_rescheduled", 1)
+        .unwrap();
+    let reader = event_consumer_specs(&account)
+        .unwrap()
+        .into_iter()
+        .find(|spec| spec.consumer.durable == "m_prefrontal-core")
+        .unwrap();
+    assert!(reader.consumer.filter_subjects.contains(&subject));
+
+    let core = participant_permissions(&account, "UPFC", "prefrontal-core", &[]).unwrap();
+    assert!(!allowed(
+        &core,
+        Principal::Participant,
+        Operation::Subscribe,
+        &subject
+    ));
+    let basal = flow_engine_permissions(&account, "UBASALKEY", "basal").unwrap();
+    assert!(allowed(
+        &basal,
+        Principal::FlowEngine,
+        Operation::Publish,
+        &subject
+    ));
+}

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3
+
+- `m_prefrontal-core` also reads `event.basal.flow_instance_rescheduled.v1`.
+  At bootstrap, the ck-bus service adds the subject to the existing durable's
+  filter in place, so the durable keeps its position in the stream.
+
 ## 0.3.2
 
 - Separate live-hint readers from event durables with the closed

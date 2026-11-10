@@ -38,6 +38,7 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
                 format!("ck.{account}.event.basal.flow_instance_extended.v1"),
                 format!("ck.{account}.event.basal.flow_instance_ended.v1"),
                 format!("ck.{account}.event.basal.flow_instance_expired.v1"),
+                format!("ck.{account}.event.basal.flow_instance_rescheduled.v1"),
             ]
         );
         let astrocyte = specs

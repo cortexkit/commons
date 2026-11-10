@@ -37,6 +37,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.basal.flow_instance_extended.v1",
             "event.basal.flow_instance_ended.v1",
             "event.basal.flow_instance_expired.v1",
+            "event.basal.flow_instance_rescheduled.v1",
         ],
     },
     EventConsumer {
@@ -630,6 +631,7 @@ mod tests {
                 "ck.box_readers.event.basal.flow_instance_extended.v1",
                 "ck.box_readers.event.basal.flow_instance_ended.v1",
                 "ck.box_readers.event.basal.flow_instance_expired.v1",
+                "ck.box_readers.event.basal.flow_instance_rescheduled.v1",
             ]
         );
     }
