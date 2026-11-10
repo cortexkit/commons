@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.4
+
+- Add `striatum` (the routing module's new id) with the same reads as
+  `prefrontal-routing`: Insula's quota events through its own durable
+  `m_striatum`, and the runners' content-free `step.finished.v1` live hints, plus
+  the standard participant grants for its own id. The old id is unchanged.
+
 ## 0.3.3
 
 - `m_prefrontal-core` also reads `event.basal.flow_instance_rescheduled.v1`.

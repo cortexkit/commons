@@ -684,6 +684,7 @@ fn event_consumer_grant_is_participant_plus_exactly_three_durable_permissions() 
         "prefrontal-core",
         "astrocyte",
         "prefrontal-routing",
+        "striatum",
         "thalamus-harness",
         "thalamus",
         "cerebellum",

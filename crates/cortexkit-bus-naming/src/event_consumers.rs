@@ -56,6 +56,11 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         filter_subjects: &["event.insula.>"],
     },
     EventConsumer {
+        module_id: "striatum",
+        durable: "m_striatum",
+        filter_subjects: &["event.insula.>"],
+    },
+    EventConsumer {
         module_id: "magic-context",
         durable: "m_magic-context",
         filter_subjects: &[
@@ -116,13 +121,22 @@ impl LiveHintReader {
 /// Who may observe another module's hints is a security decision reviewed in
 /// code. Runtime configuration cannot extend this closed table. Entries grant
 /// live-hint subscribe permission only, independently of event durables.
-pub const LIVE_HINT_READERS: &[LiveHintReader] = &[LiveHintReader::new(
-    "prefrontal-routing",
-    &[
-        "event.broca.step.finished.v1",
-        "event.thalamus-harness.step.finished.v1",
-    ],
-)];
+pub const LIVE_HINT_READERS: &[LiveHintReader] = &[
+    LiveHintReader::new(
+        "prefrontal-routing",
+        &[
+            "event.broca.step.finished.v1",
+            "event.thalamus-harness.step.finished.v1",
+        ],
+    ),
+    LiveHintReader::new(
+        "striatum",
+        &[
+            "event.broca.step.finished.v1",
+            "event.thalamus-harness.step.finished.v1",
+        ],
+    ),
+];
 
 /// Sorted, deduplicated live subscriptions from both reviewed reader tables.
 /// EVENT filters retain their wildcard scope under `ck.{account}.live.`; the

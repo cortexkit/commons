@@ -54,14 +54,16 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
                 format!("ck.{account}.event.thalamus.step.finished.v1"),
             ]
         );
-        let routing = specs
-            .iter()
-            .find(|spec| spec.consumer.durable == "m_prefrontal-routing")
-            .unwrap();
-        assert_eq!(
-            routing.consumer.filter_subjects,
-            [format!("ck.{account}.event.insula.>")]
-        );
+        for durable in ["m_prefrontal-routing", "m_striatum"] {
+            let routing = specs
+                .iter()
+                .find(|spec| spec.consumer.durable == durable)
+                .unwrap();
+            assert_eq!(
+                routing.consumer.filter_subjects,
+                [format!("ck.{account}.event.insula.>")]
+            );
+        }
         let mc = specs
             .iter()
             .find(|spec| spec.consumer.durable == "m_magic-context")
@@ -100,36 +102,67 @@ fn reviewed_readers_and_basal_share_the_bootstrap_pull_configuration() {
 
 #[test]
 fn routing_durable_filters_are_only_insula() {
-    let routing = EVENT_CONSUMERS
-        .iter()
-        .find(|reader| reader.module_id == "prefrontal-routing")
-        .unwrap();
-    assert_eq!(routing.filter_subjects, ["event.insula.>"]);
+    for module_id in ["prefrontal-routing", "striatum"] {
+        let routing = EVENT_CONSUMERS
+            .iter()
+            .find(|reader| reader.module_id == module_id)
+            .unwrap();
+        assert_eq!(routing.filter_subjects, ["event.insula.>"]);
+    }
 }
 
 #[test]
 fn routing_live_hint_subscriptions_include_insula_and_exact_step_hints() {
     use cortexkit_bus_naming::{live_hint_subscriptions, LIVE_HINT_READERS};
     let account = AccountNames::derive("box_hints").unwrap();
-    assert_eq!(
-        live_hint_subscriptions(&account, "prefrontal-routing").unwrap(),
-        [
-            "ck.box_hints.live.broca.step.finished.v1",
-            "ck.box_hints.live.insula.>",
-            "ck.box_hints.live.thalamus-harness.step.finished.v1",
-        ]
-    );
-    let routing = LIVE_HINT_READERS
+    for module_id in ["prefrontal-routing", "striatum"] {
+        assert_eq!(
+            live_hint_subscriptions(&account, module_id).unwrap(),
+            [
+                "ck.box_hints.live.broca.step.finished.v1",
+                "ck.box_hints.live.insula.>",
+                "ck.box_hints.live.thalamus-harness.step.finished.v1",
+            ]
+        );
+        let routing = LIVE_HINT_READERS
+            .iter()
+            .find(|reader| reader.module_id == module_id)
+            .unwrap();
+        assert_eq!(
+            routing.subjects,
+            [
+                "event.broca.step.finished.v1",
+                "event.thalamus-harness.step.finished.v1",
+            ]
+        );
+    }
+}
+
+#[test]
+fn striatum_readers_match_prefrontal_routing_exactly() {
+    use cortexkit_bus_naming::LIVE_HINT_READERS;
+    let routing_events = EVENT_CONSUMERS
         .iter()
         .find(|reader| reader.module_id == "prefrontal-routing")
         .unwrap();
+    let striatum_events = EVENT_CONSUMERS
+        .iter()
+        .find(|reader| reader.module_id == "striatum")
+        .unwrap();
+    assert_eq!(striatum_events.durable, "m_striatum");
     assert_eq!(
-        routing.subjects,
-        [
-            "event.broca.step.finished.v1",
-            "event.thalamus-harness.step.finished.v1",
-        ]
+        striatum_events.filter_subjects,
+        routing_events.filter_subjects
     );
+    let routing_hints = LIVE_HINT_READERS
+        .iter()
+        .find(|reader| reader.module_id == "prefrontal-routing")
+        .unwrap();
+    let striatum_hints = LIVE_HINT_READERS
+        .iter()
+        .find(|reader| reader.module_id == "striatum")
+        .unwrap();
+    assert_eq!(striatum_hints.subjects, routing_hints.subjects);
 }
 
 #[test]
