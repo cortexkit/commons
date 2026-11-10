@@ -5631,6 +5631,12 @@ its key. From 0.8.16, `call_carrier` names that runner on reader call facts.
   Absent means the serving runner is the carrier. The runner preserves both
   the original key and carrier unchanged; it never re-mints an imported key
   or rewrites its carrier.
+- [pinned] An imported call keeps every fact the minting runner recorded for
+  it: its `schema_pin`, and on `tool_times` its `started_at`, `finished_at`
+  and `unanswered`. The importing runner stores them with the call and serves
+  them unchanged, as it does the key and carrier. It never fills a missing pin
+  from its own catalog, and never takes a missing time from the moment of
+  import. A fact the source never recorded stays absent, which means unknown.
 - [pinned] `call_carrier` follows `call_key` on `display::ToolCallPart`,
   `read::ToolTime`, `read::ToolCallAttribution`, `live::ToolStarted`,
   `live::ToolFinished`, `read::NoticeFact` (including its `RideFact` alias),
