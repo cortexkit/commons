@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.8
+
+- Type panel shortfall evidence, candidate rejection reasons, optional reset
+  times, and package-fit calculations without changing the existing JSON detail
+  slot. Keep unknown evidence fields and reason strings forward-compatible,
+  including prose package detail from older providers.
+- Add optional replacement detail only for unseated causes; reject seated
+  replacements carrying detail. Publish typed, legacy-prose, and replacement
+  evidence vectors.
+
 ## 0.7.7
 
 - Add opt-in `engine_reports` and `engine_evals`, requiring `select_engine`,

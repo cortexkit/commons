@@ -107,6 +107,8 @@ async fn routing_070_faulty_routers_fail_each_case_by_name() {
                 .failing()
                 .iter()
                 .all(|failed| ROUTING_070_CASES.contains(failed)
+                    || (*failed == "panel_replacement_detail_requires_cause"
+                        && name.starts_with("panel_"))
                     // An invalid role.describe also fails the checks that
                     // validate role.describe before testing anything else.
                     || (*name == "observe_credential_refused_requires_backoff"
@@ -122,6 +124,43 @@ async fn routing_070_faulty_routers_fail_each_case_by_name() {
             report.outcome(name)
         );
     }
+}
+
+#[tokio::test]
+async fn routing_078_panel_replacement_detail_requires_cause() {
+    let check = "panel_replacement_detail_requires_cause";
+    for declared in [true, false] {
+        let subject = if declared {
+            FakeSubject::new(Defects::default())
+        } else {
+            FakeSubject::without_extensions(Defects::default())
+        };
+        let report = run_suite(&subject).await;
+        assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+        match report.outcome(check) {
+            Some(CheckOutcome::Passed) if declared => {}
+            Some(CheckOutcome::NotApplicable { reason }) if !declared => {
+                assert!(!reason.is_empty())
+            }
+            other => panic!("{check} with declared={declared}: {other:?}"),
+        }
+    }
+    let subject = FakeSubject::new(Defects {
+        extension: Some(check),
+        ..Defects::default()
+    });
+    let report = run_suite(&subject).await;
+    assert!(
+        matches!(report.outcome(check), Some(CheckOutcome::Failed { .. })),
+        "faulty seated reply must fail {check}: {}",
+        report.render()
+    );
+    assert_eq!(
+        report.failing(),
+        vec!["panel_replacement_preserves_slot", check],
+        "{}",
+        report.render()
+    );
 }
 
 #[tokio::test]

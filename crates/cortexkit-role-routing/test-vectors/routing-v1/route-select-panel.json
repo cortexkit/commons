@@ -250,6 +250,61 @@
           "code": "package_unmeetable"
         }
       }
+    },
+    {
+      "name": "shortfall_typed_detail",
+      "answer": {
+        "panel_id": "panel-3",
+        "policy": {
+          "size": 1,
+          "top": 1,
+          "extra": 0
+        },
+        "seats": [],
+        "shortfall": {
+          "code": "package_unmeetable",
+          "detail": {
+            "message": "One route cannot fit the package and another requires authentication.",
+            "package_tokens": 10000,
+            "causes": [
+              {
+                "model": "example-provider/small-model",
+                "reason": "package_exceeds_ceiling",
+                "detail": {
+                  "package_tokens": 10000,
+                  "budget_tokens": 6000,
+                  "context_window": 60000,
+                  "context_window_known": true,
+                  "catalog_max_output_tokens": 32000,
+                  "output_reserve_tokens": 32000,
+                  "prompt_reserve_tokens": 16000
+                }
+              },
+              {
+                "model": "example-provider/model-c",
+                "reason": "auth_required",
+                "detail": {
+                  "code": "auth_required",
+                  "message": "Authentication is required.",
+                  "detail": {
+                    "provider": "example-provider"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "rejected_candidates": [
+    {
+      "name": "legacy_prose_package",
+      "candidate": {
+        "model": "example-provider/small-model",
+        "reason": "package_too_large",
+        "detail": "package 10000 tokens exceeds example-provider/small-model ceiling 6000 tokens (window 60000; output reserve 32000; prompt reserve 16000; half of remaining window reserved for discussion)"
+      }
     }
   ],
   "refused": [
@@ -359,6 +414,76 @@
         "slot": 0,
         "cause": "no_candidate"
       }
+    },
+    {
+      "name": "unseated_with_detail",
+      "params": {
+        "replace": {
+          "panel_id": "panel-1",
+          "slot": 0
+        }
+      },
+      "answer": {
+        "panel_id": "panel-1",
+        "slot": 0,
+        "cause": "no_candidate",
+        "detail": {
+          "message": "The only spare route is in backoff.",
+          "package_tokens": 10000,
+          "causes": [
+            {
+              "model": "example-provider/model-b",
+              "reason": "backoff_active",
+              "detail": "Retry after the provider backoff ends.",
+              "reset_at_ms": 1767225900000
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "invalid_replacements": [
+    {
+      "name": "seat_with_detail",
+      "params": {
+        "replace": {
+          "panel_id": "panel-1",
+          "slot": 0
+        }
+      },
+      "answer": {
+        "panel_id": "panel-1",
+        "slot": 0,
+        "seat": {
+          "slot": 0,
+          "phase": "top",
+          "answer": {
+            "decision_id": "decision-2",
+            "route": {
+              "provider": "example-provider",
+              "model": "model-b"
+            },
+            "runner": {
+              "module": "runner-one",
+              "model": {
+                "provider": "example-provider",
+                "model": "model-b"
+              }
+            },
+            "context_window": 200000,
+            "max_output_tokens": 32000,
+            "expires_at_ms": 1767225900000,
+            "explanation": "The spare route meets the panel constraints."
+          },
+          "family": "family-b",
+          "temperature": 0.4
+        },
+        "detail": {
+          "message": "No spare route is available.",
+          "causes": []
+        }
+      },
+      "problem": "SeatOrCause"
     }
   ],
   "refusals": [

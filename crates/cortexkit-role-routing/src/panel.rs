@@ -226,6 +226,110 @@ impl PanelSeat {
     }
 }
 
+/// Diagnostic evidence for an incomplete panel or an unseated replacement.
+/// Unknown fields are ignored so providers can extend their evidence.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct PanelShortfallDetail {
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub package_tokens: Option<u64>,
+    pub causes: Vec<PanelRejectedCandidate>,
+}
+
+impl PanelShortfallDetail {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            package_tokens: None,
+            causes: Vec::new(),
+        }
+    }
+}
+
+/// One rejected route or model pin, with an open reason string and optional
+/// evidence. Availability and final admission retain their refusal code and
+/// payload rather than being relabeled as a diversity failure.
+/// Known reasons are documented in CONTRACT.md §11.1; unknown reasons and
+/// unknown fields remain readable. Quota and backoff causes may name a reset.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct PanelRejectedCandidate {
+    pub model: String,
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_at_ms: Option<u64>,
+}
+
+impl PanelRejectedCandidate {
+    pub fn new(model: impl Into<String>, reason: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+            reason: reason.into(),
+            detail: None,
+            reset_at_ms: None,
+        }
+    }
+
+    /// Attach package-fit evidence to a package rejection.
+    pub fn with_typed_detail(mut self, detail: PanelPackageFit) -> Self {
+        self.detail = Some(serde_json::to_value(detail).expect("package fit is JSON"));
+        self
+    }
+
+    /// Decode package-fit evidence without discarding absent or malformed data.
+    /// Older providers use prose detail for package causes; treat a decoding
+    /// error as no typed fit, not as an invalid candidate. Other reasons may
+    /// carry a different diagnostic shape, including a full refusal object.
+    pub fn typed_detail(&self) -> Option<Result<PanelPackageFit, serde_json::Error>> {
+        self.detail.clone().map(serde_json::from_value)
+    }
+}
+
+/// Package-fit evidence for a rejected candidate. Unknown fields are ignored.
+/// The package budget is
+/// `context_window.saturating_sub(output_reserve_tokens + prompt_reserve_tokens) / 2`;
+/// the other half is for panel discussion.
+/// An unknown window uses 128,000 tokens, output reserves are
+/// `min(catalog_max_output_tokens.unwrap_or(32_000), 64_000)`, and the prompt
+/// reserve is 16,000 tokens.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct PanelPackageFit {
+    pub package_tokens: u64,
+    pub budget_tokens: u64,
+    pub context_window: u64,
+    pub context_window_known: bool,
+    #[serde(default)]
+    pub catalog_max_output_tokens: Option<u64>,
+    pub output_reserve_tokens: u64,
+    pub prompt_reserve_tokens: u64,
+}
+
+impl PanelPackageFit {
+    pub fn new(
+        package_tokens: u64,
+        budget_tokens: u64,
+        context_window: u64,
+        context_window_known: bool,
+        catalog_max_output_tokens: Option<u64>,
+        output_reserve_tokens: u64,
+        prompt_reserve_tokens: u64,
+    ) -> Self {
+        Self {
+            package_tokens,
+            budget_tokens,
+            context_window,
+            context_window_known,
+            catalog_max_output_tokens,
+            output_reserve_tokens,
+            prompt_reserve_tokens,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct PanelShortfall {
@@ -237,6 +341,15 @@ pub struct PanelShortfall {
 impl PanelShortfall {
     pub fn new(code: ShortfallCode) -> Self {
         Self { code, detail: None }
+    }
+
+    pub fn with_typed_detail(mut self, detail: PanelShortfallDetail) -> Self {
+        self.detail = Some(serde_json::to_value(detail).expect("shortfall detail is JSON"));
+        self
+    }
+
+    pub fn typed_detail(&self) -> Option<Result<PanelShortfallDetail, serde_json::Error>> {
+        self.detail.clone().map(serde_json::from_value)
     }
 }
 
@@ -306,6 +419,9 @@ pub struct PanelReplacement {
     pub seat: Option<PanelSeat>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<ReplacementCause>,
+    /// Diagnostic evidence is allowed only with a cause, never with a seat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Value>,
 }
 
 impl PanelReplacement {
@@ -315,6 +431,7 @@ impl PanelReplacement {
             slot: seat.slot,
             seat: Some(seat),
             cause: None,
+            detail: None,
         }
     }
 
@@ -324,6 +441,7 @@ impl PanelReplacement {
             slot,
             seat: None,
             cause: Some(cause),
+            detail: None,
         }
     }
 }
@@ -675,7 +793,9 @@ pub fn check_panel_replacement(
     if replace.replace.slot >= state.policy.size || answer.slot != replace.replace.slot {
         return Err(PanelProblem::ReplacementSlot);
     }
-    if answer.seat.is_some() == answer.cause.is_some() {
+    if answer.seat.is_some() == answer.cause.is_some()
+        || (answer.detail.is_some() && answer.cause.is_none())
+    {
         return Err(PanelProblem::SeatOrCause);
     }
     if let Some(seat) = &answer.seat {
@@ -1324,6 +1444,93 @@ mod tests {
             check_panel_replacement(&state, &replace, &replacement),
             Err(PanelProblem::SeatOrCause)
         );
+    }
+
+    #[test]
+    fn replacement_rejects_detail_with_seat() {
+        let (state, replace, mut replacement) = replacement();
+        replacement.detail = Some(json!({"message":"No spare route", "causes":[]}));
+        assert_eq!(
+            check_panel_replacement(&state, &replace, &replacement),
+            Err(PanelProblem::SeatOrCause)
+        );
+        replacement.seat = None;
+        replacement.cause = Some(ReplacementCause::NoCandidate);
+        assert_eq!(
+            check_panel_replacement(&state, &replace, &replacement),
+            Ok(())
+        );
+        replacement.cause = None;
+        assert_eq!(
+            check_panel_replacement(&state, &replace, &replacement),
+            Err(PanelProblem::SeatOrCause)
+        );
+    }
+
+    #[test]
+    fn panel_typed_evidence_helpers_preserve_json_and_report_decode_errors() {
+        let fit = PanelPackageFit::new(46_960, 40_000, 128_000, false, None, 32_000, 16_000);
+        let package = PanelRejectedCandidate::new("p/small", "package_exceeds_ceiling")
+            .with_typed_detail(fit.clone());
+        assert_eq!(package.typed_detail().unwrap().unwrap(), fit);
+        assert_eq!(json!(fit)["catalog_max_output_tokens"], Value::Null);
+        let mut detail = PanelShortfallDetail::new("One candidate did not fit");
+        detail.package_tokens = Some(46_960);
+        detail.causes.push(package);
+        let shortfall =
+            PanelShortfall::new(ShortfallCode::PackageUnmeetable).with_typed_detail(detail.clone());
+        assert_eq!(shortfall.typed_detail().unwrap().unwrap(), detail);
+        assert_eq!(shortfall.detail, Some(json!(detail)));
+        assert!(PanelShortfall::new(ShortfallCode::SizeReduced)
+            .typed_detail()
+            .is_none());
+        assert!(PanelRejectedCandidate::new("p/model", "future")
+            .typed_detail()
+            .is_none());
+        let mut malformed = shortfall;
+        malformed.detail = Some(json!({"message":5}));
+        assert!(malformed.typed_detail().unwrap().is_err());
+        let mut legacy = PanelRejectedCandidate::new("p/small", "package_too_large");
+        legacy.detail = Some(json!("package exceeds ceiling"));
+        assert!(legacy.typed_detail().unwrap().is_err());
+        legacy.detail = Some(json!({"budget_tokens": "not unsigned"}));
+        assert!(legacy.typed_detail().unwrap().is_err());
+    }
+
+    #[test]
+    fn panel_evidence_and_replacement_readers_ignore_unknown_fields() {
+        let value = json!({
+            "message":"No candidate", "package_tokens":null, "future":true,
+            "causes":[{"model":"p/model", "reason":"future_reason", "future":true,
+                "reset_at_ms":1234, "detail":{
+                    "package_tokens":46_960, "budget_tokens":40_000,
+                    "context_window":128_000, "context_window_known":false,
+                    "catalog_max_output_tokens":null, "output_reserve_tokens":32_000,
+                    "prompt_reserve_tokens":16_000, "future":true}}]
+        });
+        let detail: PanelShortfallDetail = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(detail.causes[0].reason, "future_reason");
+        assert_eq!(detail.causes[0].reset_at_ms, Some(1234));
+        assert_eq!(
+            detail.causes[0]
+                .typed_detail()
+                .unwrap()
+                .unwrap()
+                .budget_tokens,
+            40_000
+        );
+        let replacement: PanelReplacement = serde_json::from_value(json!({
+            "panel_id":"p", "slot":0, "cause":"no_candidate", "detail":value,
+            "future":true
+        }))
+        .unwrap();
+        assert!(replacement.detail.is_some());
+        let legacy: PanelReplacement = serde_json::from_value(json!({
+            "panel_id":"p", "slot":0, "cause":"no_candidate"
+        }))
+        .unwrap();
+        assert!(legacy.detail.is_none());
+        assert!(json!(legacy).get("detail").is_none());
     }
 
     #[test]

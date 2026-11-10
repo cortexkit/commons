@@ -128,6 +128,20 @@ fn new_group_vectors_panel() {
         let answer: panel::SelectPanelAnswer =
             serde_json::from_value(case["answer"].clone()).unwrap();
         assert_eq!(panel::check_panel_answer(&request, &answer), Ok(()));
+        if name(case) == "shortfall_typed_detail" {
+            let detail = answer.shortfall.unwrap().typed_detail().unwrap().unwrap();
+            assert_eq!(json!(detail), case["answer"]["shortfall"]["detail"]);
+            assert_eq!(detail.causes[0].reason, "package_exceeds_ceiling");
+            let fit = detail.causes[0].typed_detail().unwrap().unwrap();
+            assert_eq!(fit.package_tokens, 10_000);
+            assert_eq!(fit.budget_tokens, 6_000);
+            assert_eq!(json!(fit), detail.causes[0].detail.clone().unwrap());
+            assert_eq!(detail.causes[1].reason, "auth_required");
+            assert_eq!(
+                detail.causes[1].detail.as_ref().unwrap()["code"],
+                "auth_required"
+            );
+        }
     }
     let answer = serde_json::from_value(file["answers"][0]["answer"].clone()).unwrap();
     let state = panel::PanelState::new(request, answer);
@@ -140,6 +154,29 @@ fn new_group_vectors_panel() {
             panel::check_panel_replacement(&state, &request, &answer),
             Ok(())
         );
+        if let Some(detail) = answer.detail {
+            let typed: panel::PanelShortfallDetail =
+                serde_json::from_value(detail.clone()).unwrap();
+            assert_eq!(json!(typed), detail);
+            assert_eq!(typed.causes[0].reset_at_ms, Some(1_767_225_900_000));
+        }
+    }
+    for case in cases(&file, "invalid_replacements") {
+        let request = panel::parse_panel_replacement_request(&case["params"]).unwrap();
+        let answer: panel::PanelReplacement =
+            round_trip(name(case), &case["answer"], &case["answer"]);
+        assert_eq!(case["problem"], "SeatOrCause");
+        assert_eq!(
+            panel::check_panel_replacement(&state, &request, &answer),
+            Err(panel::PanelProblem::SeatOrCause),
+            "{}",
+            name(case)
+        );
+    }
+    for case in cases(&file, "rejected_candidates") {
+        let candidate: panel::PanelRejectedCandidate =
+            round_trip(name(case), &case["candidate"], &case["candidate"]);
+        assert!(candidate.typed_detail().unwrap().is_err(), "{}", name(case));
     }
 }
 

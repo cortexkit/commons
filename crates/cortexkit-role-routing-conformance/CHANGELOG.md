@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.8
+
+- Pin routing 0.7.8 and check that replacement detail accompanies only a cause,
+  with a deliberately invalid seated reply rejected by
+  `panel_replacement_detail_requires_cause`.
+- Read the shared typed shortfall, legacy prose package cause, and replacement
+  detail vectors, including rejection of a seat carrying detail.
+
 ## 0.10.7
 
 - Pin routing 0.7.7 and check engine measurement authorization, score bounds,

@@ -53,6 +53,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("panel_temperatures_by_slot", "select_panel: temperatures follow slot indices, absent past the list"),
     check("panel_same_seed", "select_panel: reset and reconfigure, then compare deterministic panel members for the same seed"),
     check("panel_replacement_preserves_slot", "select_panel: replacements preserve phase and temperature in top and extra slots"),
+    check("panel_replacement_detail_requires_cause", "select_panel: a seated replacement must not carry diagnostic detail"),
     check("panel_foreign_replacement_unknown", "select_panel: a foreign panel replacement is unknown_decision"),
     check("panel_replacement_invalid_slot", "select_panel: replace.slot at policy.size is invalid_request naming replace.slot"),
     check("budget_quote_matches_helper", "budget_quote: the answer equals budget::quote over retained selection capacities"),

@@ -1427,13 +1427,66 @@ Answer (`SelectPanelAnswer`):
 | `seats` | `[{slot, phase, answer, family?, temperature?}]`, ascending distinct slots below size, gaps allowed. `phase` is open (`top`, `extra`). `answer` is a full `SelectAnswer` with its own decision and report. Temperature equals `temperatures[slot]`, absent beyond that list. |
 | `shortfall?` | `{code, detail?}`, present exactly when fewer than size seats were seated, including zero seats (an answer, not a refusal). Open code: `package_unmeetable`, `floor_unmeetable`, `diversity_unmeetable`, otherwise `size_reduced`. |
 
+- [pinned] Shortfall `detail` remains arbitrary JSON on the wire and
+  `Option<serde_json::Value>` in Rust for compatibility. The typed evidence
+  shape is `PanelShortfallDetail {message, package_tokens?, causes}`: `message`
+  is prose, `package_tokens` is an unsigned request package size (absent or null
+  when unconstrained), and `causes` is an array of `PanelRejectedCandidate
+  {model, reason, detail?, reset_at_ms?}`. `model` names a route or model pin;
+  `reason` is an open string, not a decision discriminator. `reset_at_ms` is an
+  optional unsigned Unix timestamp in milliseconds for quota/backoff causes.
+  Readers ignore unknown fields in all typed evidence records.
+- [pinned] Known candidate reasons emitted today are `package_too_large`,
+  `package_exceeds_ceiling`, `excluded` (caller exclusion),
+  `excluded_by_operator`, `unscored_awaiting_placement`, `unavailable`,
+  `quota_exhausted`, `backoff_active`, `capability`, `below_iq_floor`,
+  `missing_fact`, `family_unlabeled`, `family_duplicate`, and
+  `deprecated_upstream`. `below_iq_floor` means the route's quality grade is
+  under the router policy's quality floor for the seat (see the policy rule
+  above). `family_duplicate` also covers a family held by a standing seat, and
+  sibling collapse: two routes serving the same canonical model (one model
+  offered by several providers or accounts) count once, and the others are
+  rejected with this reason. `capability` covers context
+  window or modality requirements; `unavailable` also covers routes absent from
+  `available_routes` or unserved by the requested runners. Availability and
+  final admission retain the exact refusal code as the reason, including
+  `accounts_blocked`, `account_hold`, `auth_required`, or any other route
+  refusal code, and retain its diagnostic payload; they must not be relabeled
+  as diversity failures. Shortfall codes
+  summarize the panel; they are not a closed vocabulary for candidate reasons.
+- [pinned] Candidate `detail` remains arbitrary JSON: older package causes use
+  prose strings, typed package causes use `PanelPackageFit`, and final admission
+  may carry a full refusal object `{code, message, detail}`. `PanelPackageFit`
+  has unsigned `package_tokens`, `budget_tokens`, `context_window`,
+  `output_reserve_tokens`, `prompt_reserve_tokens`, boolean
+  `context_window_known`, and nullable unsigned `catalog_max_output_tokens`.
+  The window is the effective window, including the conservative 128,000-token
+  default when not known. A missing or zero catalog output ceiling is unknown
+  (`null`); output reserve is `min(catalog_max_output_tokens or 32,000, 64,000)`
+  and prompt reserve is 16,000. The existing half-window rule is
+  `budget_tokens = context_window.saturating_sub(output_reserve_tokens +
+  prompt_reserve_tokens) / 2`, using integer division: the other half of the
+  remaining window is reserved for panel discussion. Evidence reports the
+  package calculation; it does not change seat eligibility.
+- [pinned] `PanelShortfall::with_typed_detail(PanelShortfallDetail)` stores typed
+  evidence in the existing JSON slot. `typed_detail()` returns
+  `Option<Result<PanelShortfallDetail, serde_json::Error>>`, distinguishing
+  absence from malformed or differently shaped evidence. The same pair on
+  `PanelRejectedCandidate` stores/reads `PanelPackageFit`. Prose package detail
+  from older providers decodes as a candidate but returns an error from the
+  fit accessor; readers must treat that as no typed fit, not an invalid cause.
+  All three typed records are non-exhaustive and have constructors.
+
 Replacement params and answer:
 
 | Body | Shape |
 |---|---|
 | Request (`PanelReplacementRequest`) | `{replace: {panel_id, slot}, exclude?}`, where `exclude` holds route keys as in `route.select`'s `exclude` (§5.1), never with a variant; any other member is `invalid_request {field}`. |
-| Answer (`PanelReplacement`) | `{panel_id, slot, seat?, cause?}`, exactly one of seat or cause. Seat is the same shape as above with a decision id never answered by this panel. Cause is open: `no_candidate`, `package_unmeetable`. |
+| Answer (`PanelReplacement`) | `{panel_id, slot, seat?, cause?, detail?}`, exactly one of seat or cause. Seat is the same shape as above with a decision id never answered by this panel. Cause is open: `no_candidate`, `package_unmeetable`. `detail` is allowed only with a cause and uses the same `PanelShortfallDetail` evidence shape; its Rust slot is `Option<serde_json::Value>`, omitted when absent. A replacement either seats a member or explains why not, never both. |
 
+- [pinned] A replacement with a seat and non-null detail is invalid even without
+  a cause. Older replies without detail decode unchanged; replacement readers
+  ignore unknown fields so older readers can ignore the added detail member.
 - [pinned] Unknown, foreign and past-retention panels all get `unknown_decision`.
   `replace.slot >= policy.size` is `invalid_request {field: "replace.slot"}`.
   Any lower slot may be replaced, even if never seated or last answered a cause.
@@ -1462,7 +1515,8 @@ Replacement params and answer:
   was sent, both panel helpers require non-zero seat windows at least that
   floor; modalities cannot be checked from answers.
 - [pinned] `check_panel_replacement(state, replace, answer)` checks the echoed
-  panel and slot, exclusive seat/cause, phase/temperature, combined exclusions,
+  panel and slot, exclusive seat/cause and detail only with cause,
+  phase/temperature, combined exclusions,
   no historically seated route or decision id, family diversity with other
   standing slots, and the seat answer against `seat_request(replace.exclude)`,
   window floor and package ceiling.

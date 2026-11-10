@@ -78,7 +78,7 @@ impl FakeRoute {
                 .models
                 .iter()
                 .find(|m| !excluded.contains(&m.route_key()) && !families.contains(&m.family));
-            let replacement = if let Some(model) = candidate {
+            let mut replacement = if let Some(model) = candidate {
                 let mut seat_request =
                     serde_json::to_value(panel.request().seat_request(&excluded)).unwrap();
                 seat_request["pin"] = json!(model.route_key());
@@ -106,6 +106,9 @@ impl FakeRoute {
                     panel::ReplacementCause::parse("no_candidate"),
                 )
             };
+            if self.fault("panel_replacement_detail_requires_cause") {
+                replacement.detail = Some(json!({"message":"No spare route", "causes":[]}));
+            }
             panel.apply(&replacement);
             state.panels.insert(panel.panel_id().into(), (owner, panel));
             return to_value(replacement);

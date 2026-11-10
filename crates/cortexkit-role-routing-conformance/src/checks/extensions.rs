@@ -19,6 +19,11 @@ pub(super) const CASES: &[(&str, &str, bool)] = &[
     ("panel_temperatures_by_slot", "select_panel", false),
     ("panel_same_seed", "select_panel", false),
     ("panel_replacement_preserves_slot", "select_panel", false),
+    (
+        "panel_replacement_detail_requires_cause",
+        "select_panel",
+        false,
+    ),
     ("panel_foreign_replacement_unknown", "select_panel", false),
     ("panel_replacement_invalid_slot", "select_panel", false),
     ("budget_quote_matches_helper", "budget_quote", false),
@@ -338,7 +343,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
                     return Err("same seed changed the panel".into());
                 }
             }
-            "panel_replacement_preserves_slot" => {
+            "panel_replacement_preserves_slot" | "panel_replacement_detail_requires_cause" => {
                 // Exercise both phases, including a temperature absent beyond the list.
                 for slot in [0, 1, 2] {
                     self.fresh().await?;
