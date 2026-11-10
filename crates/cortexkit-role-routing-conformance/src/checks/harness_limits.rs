@@ -25,8 +25,8 @@ impl<S: RoutingSubject> Suite<'_, S> {
             && !self
                 .subject
                 .configure_runner_route_facts(&[
-                    RunnerRouteFacts::new(&keys[0], "example.responses", "apikey"),
-                    RunnerRouteFacts::new(&keys[1], "example.messages", "oauth"),
+                    RunnerRouteFacts::new(&keys[0], "openai.responses", "apikey"),
+                    RunnerRouteFacts::new(&keys[1], "anthropic.messages", "oauth"),
                 ])
                 .await?
         {
@@ -35,7 +35,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
             ));
         }
         let mut limits = if pairs {
-            json!({"alpha": {"pairs": [{"wire_api": "example.messages", "auth_method": "oauth"}]}})
+            json!({"alpha": {"pairs": [{"wire_api": "anthropic.messages", "auth_method": "oauth"}]}})
         } else {
             json!({"alpha": {"explicit_providers": ["other-provider"]}})
         };
@@ -46,8 +46,15 @@ impl<S: RoutingSubject> Suite<'_, S> {
             principal: fixture::RUNNER_ONE.into(),
             nonce_verified: true,
             role_declarations: [(crate::wire::ROLE_DECLARATIONS_KEY.into(), json!({"runner": {
-                "pairs": [{"wire_api": "example.responses", "auth_method": "apikey"},
-                          {"wire_api": "example.messages", "auth_method": "oauth"}],
+                // Shared spellings only: a router may drop pair tokens outside
+                // `spellings::WIRE_APIS` / `AUTH_METHODS`, so example tokens would leave
+                // the runner with no usable pair. All four combinations are declared so
+                // the provider case matches whichever pair the subject's own catalog
+                // routes carry; the pair case narrows `alpha` to one of them.
+                "pairs": [{"wire_api": "openai.responses", "auth_method": "apikey"},
+                          {"wire_api": "openai.responses", "auth_method": "oauth"},
+                          {"wire_api": "anthropic.messages", "auth_method": "apikey"},
+                          {"wire_api": "anthropic.messages", "auth_method": "oauth"}],
                 "standing_limits": {"explicit_providers": [fixture::PRICED_PROVIDER, "other-provider"]},
                 "harnesses": ["alpha", "beta"], "default_harness": "alpha",
                 "harness_limits": limits

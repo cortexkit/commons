@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.13
+
+- The harness-limits cases declare runner pairs with the shared spellings
+  (`anthropic.messages`, `openai.responses`; `apikey`, `oauth`) instead of
+  example tokens. A router that drops pairs outside `spellings::WIRE_APIS` and
+  `AUTH_METHODS` was left with no usable pair, so the narrowing and fallback
+  cases couldn't reach their assertions. The runner now declares all four
+  combinations, so the provider case matches the subject's own catalog routes.
+
 ## 0.10.12
 
 - `account_observe_credit_without_reset_accepted` admits
