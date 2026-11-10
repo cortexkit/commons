@@ -6691,11 +6691,22 @@ on the rides and usable-window ceiling defined by that contract (§6).
 
 - [pinned] On a route whose model binds signed reasoning to the request prefix
   (`cortexkit_compaction_view::rules` reports `signed_parts: bound`), a change to
-  the session's tool set invalidates earlier signed reasoning. This rule applies
-  whether or not the session has a compaction provider.
-- [pinned] When the runner applies such a tool-set change, it records a **signed
-  floor** at the session's newest entry, durably in the same write that installs
-  the change. The floor identifies that entry by its stable entry id, not an
+  the tool definitions the provider receives in the request's `tools` array
+  invalidates earlier signed reasoning. This rule applies whether or not the
+  session has a compaction provider. What counts is the rendered array, not the
+  session's logical tool set: a plan change the runner has accepted but not yet
+  rendered into `tools` changes nothing yet.
+- [pinned] A tool change delivered as an appended mid-conversation system message
+  (for example Anthropic's `tool_addition` and `tool_removal` blocks in a new
+  `role: "system"` message) leaves `tools` and every earlier message
+  byte-identical, so it does not move the floor. Editing or removing a system
+  message that an earlier request already sent does invalidate earlier signed
+  reasoning, and counts as a tool-set change for the next bullet. This covers
+  dropping an earlier tool note when its tool is folded into `tools` at a rewrite;
+  that request records the floor anyway, because `tools` changed.
+- [pinned] When the runner sends the first request with such a change, it records
+  a **signed floor** at the session's newest entry, durably in the same write that
+  installs the change. The floor identifies that entry by its stable entry id, not an
   ordinal. With an empty transcript there is no earlier reasoning to strip.
   A host relaunch with a changed tool set counts as a change too; relaunch does
   not bypass the comparison or reset the stored floor.
@@ -6705,7 +6716,9 @@ on the rides and usable-window ceiling defined by that contract (§6).
   inside a schema never counts. `tool_choice` and `cache_control` are outside
   this comparison. Exception: an addition consisting only of tools with
   `defer_loading: true` that nothing in the request references does not move
-  the floor.
+  the floor, and neither does surfacing such a tool later through an appended
+  tool note. Removing a deferred tool, or changing its description or schema,
+  counts like any other tool.
 - [pinned] Starting with the first request carrying the changed tool set, every
   request leaves out signed reasoning in entries at or before the newest signed
   floor. Use exactly the signed-part strip defined for `new_signed: "strip"` in
