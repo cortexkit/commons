@@ -220,6 +220,7 @@ fn published_member_lists_match_what_the_row_encodes() {
             cortexkit_role_llm_runner::service_tier::ServiceTier::Fast.as_str(),
         )
         .with_service_tier_served("fast");
+    full.message_id = Some("msg_ex_0001".to_owned());
     full.route_decision_id = Some("decision_ex".to_owned());
     full.sent_to_last_content_ms = Some(500);
     full.first_to_last_content_ms = Some(400);

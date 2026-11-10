@@ -1,0 +1,1 @@
+{"cursor":"c0000111","harness":"pi","source":"file","step_ref":"pi:message:entry_ex_1:1792880033000:example-provider:example-model:Some(10):Some(2):None:None","session":"ses_ex_pi","message_id":"entry_ex_1","occurred_at_ms":1792880033000,"prompt":10,"verdict":"unknown","prompt_dropped":false}

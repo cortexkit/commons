@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.6
+
+- Add optional `message_id` to step rows for the host's own content-free
+  message identifier. Consumers join on session identity together with this
+  id, never the id alone; `step_ref` remains the step identity. Producers omit
+  it when the host has no such id and never invent one. Existing rows without
+  it keep their bytes, and readers still ignore unknown members.
+
 ## 0.2.5
 
 - Map live host-keyed rows through the closed `feed_host_for_harness` table

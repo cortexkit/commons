@@ -172,6 +172,7 @@ Optional members, omitted when unknown and never zero for unknown:
 
 | Member | Type | Meaning |
 |---|---|---|
+| `message_id` | string | The host's own content-free identifier for the message within its session, when the host has one; see below. |
 | `run_id` | string | Runner steps only. |
 | `route_decision_id` | string | The run's routing decision id, absent when the run had none. |
 | `provider` | string | |
@@ -190,6 +191,14 @@ Optional members, omitted when unknown and never zero for unknown:
 | `first_to_last_content_ms` | unsigned integer, ms | From the first to the last content of the same model call. |
 | `retention` | number | Non-negative; never rounded or clamped. See [Verdict](#verdict). |
 | `request_size` | string | `smaller` or `not_smaller`; see [Verdict](#verdict). |
+
+`message_id` is the host's own message identifier (OpenCode's message id or
+Pi's entry id), present only when the host has such an id. A producer never
+invents one. It is unique only within its session: a consumer joins a row to
+its message using the session identity (`harness` plus `session`) together
+with `message_id`, never `message_id` alone. It is not a step identity:
+`harness` plus `step_ref` remains the row's identity. Consumers must not parse
+`step_ref` to recover a message id; its format is not promised.
 
 `input` excludes both `cache_read` and `cache_write`: the three counts are
 disjoint. When all three components are known, `prompt` equals their sum;

@@ -37,6 +37,13 @@ pub struct StepRow {
     /// [`live_row_identity`].
     pub step_ref: String,
     pub session: String,
+    /// The host's own content-free message id: an OpenCode message id or a Pi
+    /// entry id, for example. Unique only within its session; consumers join on
+    /// `harness`, `session` and `message_id` together, never this id alone.
+    /// Present only when the host has such an id; producers never invent one.
+    /// This is not a step identity: `step_ref` remains the row's step identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
     /// Runner steps only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
@@ -306,6 +313,7 @@ impl StepRow {
 
     /// Members omitted when unknown.
     pub const OPTIONAL_MEMBERS: &'static [&'static str] = &[
+        "message_id",
         "run_id",
         "route_decision_id",
         "provider",
@@ -347,6 +355,7 @@ impl StepRow {
             source,
             step_ref: step_ref.into(),
             session: session.into(),
+            message_id: None,
             run_id: None,
             route_decision_id: None,
             occurred_at_ms,

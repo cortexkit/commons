@@ -33,7 +33,7 @@ language can drive them:
 
 - `subscribe/`: the subscribe requests, `{}` and one session's, and one
   notice.
-- `read/`: four read requests, four replies and two standalone rows. A read
+- `read/`: four read requests, four replies and three standalone rows. A read
   request either takes every session or names one with `harness` plus
   `session`; `read/request-session.json` is the latter.
   `read/reply-session-empty.json` answers a session-filtered read that found no
@@ -43,6 +43,8 @@ language can drive them:
   reader keeps seven rows. `next` is set because more pages remain.
   `reply-last-page.json` holds a row with every member and a row with only
   the required members, and `next` is null. `reply-empty.json` has no rows.
+  `row-message-id.json` carries a Pi entry id as `message_id`, separate from
+  the opaque `step_ref`; join it only within the row's harness and session.
 - `values/`: each verdict, request size and source value, plus one value
   per set that this version does not know, which a reader keeps as `Other`.
 - `refusals/`: one error body per refusal code of either operation.

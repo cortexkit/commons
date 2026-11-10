@@ -135,6 +135,7 @@ fn shared_member_names_match_the_runner_step_event() {
             cortexkit_role_llm_runner::service_tier::ServiceTier::Fast.as_str(),
         )
         .with_service_tier_served("fast");
+    full_row.message_id = Some("msg_ex_0001".to_owned());
     full_row.route_decision_id = Some("decision_ex".to_owned());
     full_row.sent_to_last_content_ms = Some(500);
     full_row.first_to_last_content_ms = Some(400);

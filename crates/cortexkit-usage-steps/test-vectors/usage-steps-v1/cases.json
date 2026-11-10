@@ -45,6 +45,10 @@
       "type": "StepRow"
     },
     {
+      "file": "read/row-message-id.json",
+      "type": "StepRow"
+    },
+    {
       "file": "read/row-required-only.json",
       "type": "StepRow"
     },
