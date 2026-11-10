@@ -1,16 +1,24 @@
 # media-provider/v1 conformance kit
 
-Version 0.1.2 pins `cortexkit-role-media` exactly. Implement `MediaSubject` in an
-adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
+Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.
+`StreamObservation::answer` also returns the raw terminal RESPONSE body, not the
+decoded answer. STREAM_DATA event bodies and referenced output-object contents
+stay unwrapped.
+
+Version 0.2.0 pins `cortexkit-role-media` exactly to 0.1.3. Implement `MediaSubject`
+in an adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
 Each case needs an isolated, empty provider store and a Tokio runtime with time
 enabled. `Outcome::Failed` includes the case name; `NotApplicable` names an
 unsupported optional capability. Default setup/observation hooks return explicit
 errors naming the hook. They never silently skip coverage.
 
 `call_as` sends a real request under the supplied route principal. It returns the
-decoded result on success, or `SubjectError::refused` with the complete ERROR
-body on refusal; transport/setup failures use `SubjectError::new`. Never return a
-fabricated result from the adapter. `configure_engines` installs exactly the
+unmodified RESPONSE-body JSON value on success, including `{"result": <answer>}`,
+or `SubjectError::refused` with the complete ERROR body on refusal;
+transport/setup failures use `SubjectError::new`. The runner uses
+`cortexkit_role_media::wire::read_reply` and reports `bare_answer` or `extra_keys`
+when the provider omits the envelope or adds top-level keys. Never unwrap or
+fabricate an envelope in the adapter. `configure_engines` installs exactly the
 supplied facts in describe and the manifest declaration. `engine_inputs` records
 each engine attempt, including the actual forwarded bias. A script's failure
 ends one attempt, and its remaining steps are available to the next attempt.
@@ -22,8 +30,9 @@ accuracy. Engine output scripts may intentionally be malformed or oversized.
 principal and returns only after acceptance or first-frame ERROR. Subsequent
 `send_stream_frame` calls feed that transport, not unary requests. `poll_stream`
 drains events without blocking and reports whether the transport has closed and
-its terminal answer, if any. A restart closes an accepted stream without an
-answer. `close_stream` closes the caller's transport. These are adapter hooks,
+its raw terminal RESPONSE body, if any, including the `result` envelope. A restart
+closes an accepted stream without an answer. `close_stream` closes the caller's
+transport. These are adapter hooks,
 not additional wire methods. The stream cases use the same 30-second polling
 ceiling as job cases.
 
@@ -56,7 +65,9 @@ synthetic session ids to the token references opening them and scripted usage.
 ## Current coverage
 
 This kit covers job, object, usage/feed, stream, bias/pack, realtime token/call/watch
-and wire-extension cases. The rule map lists every `[pinned]` rule id from the
+and reply-envelope/wire-extension cases. Unary and terminal-stream envelope cases
+reject bare answers and extra top-level keys by name. The rule map lists every
+`[pinned]` rule id from the
 [media contract](../cortexkit-role-media/CONTRACT.md). Its completeness test rejects
 missing or extra ids, unknown cases, pinned rules lacking marker-position ids and
 exemptions that differ between the contract and the rule map. The four exemptions

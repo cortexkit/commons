@@ -2,6 +2,7 @@ use super::*;
 use crate::subject::StreamObservation;
 
 pub const CASES: &[&str] = &[
+    "stream_reply_envelope",
     "realtime_watch",
     "stream_input_limits",
     "stream_id_reuse_refused",
@@ -156,7 +157,7 @@ async fn wait_started(r: &RecordingRoutingPeer, count: usize) -> Result<(), Stri
     }
 }
 async fn answer<S: MediaSubject>(s: &S, observation: &StreamObservation) -> Result<Value, String> {
-    let v = observation.answer.clone().ok_or("stream missing answer")?;
+    let v = decode_reply(observation.answer.clone().ok_or("stream missing answer")?)?;
     if let Some(object) = v.get("output_object") {
         require(object["mime"] == "application/json", "stream output MIME")?;
         let bytes = read_all(s, object).await?;
@@ -225,6 +226,17 @@ async fn streams<S: MediaSubject>(
     mut es: Vec<Engine>,
 ) -> Result<(), String> {
     match name {
+        "stream_reply_envelope" => {
+            script(s, "stream", vec![ScriptStep::Final(segment(0, "words"))]).await?;
+            open(s, "envelope").await?;
+            audio(s, "envelope", 0, 32).await?;
+            let observation = finish(s, "envelope", 1).await?;
+            require(
+                answer(s, &observation).await?
+                    == json!({"segments":[segment(0,"words")],"no_speech":false}),
+                "stream answer changed",
+            )
+        }
         "stream_input_limits" => {
             for (i, limit) in ["max_input_bytes", "max_duration_ms"]
                 .into_iter()
@@ -474,9 +486,9 @@ async fn oversize<S: MediaSubject>(s: &S) -> Result<(), String> {
         "split lost/repeated text or word timing",
     )?;
     require(
-        o.answer
-            .as_ref()
-            .is_some_and(|v| v.get("output_object").is_some()),
+        decode_reply(o.answer.clone().ok_or("stream missing answer")?)?
+            .get("output_object")
+            .is_some(),
         "oversize stream answer not stored as object",
     )?;
     let out = answer(s, &o).await?;

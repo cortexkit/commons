@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0
+
+Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.
+`StreamObservation::answer` now returns the raw terminal RESPONSE body too.
+Both include `{"result": <answer>}`; STREAM_DATA event bodies and referenced
+output-object contents stay unwrapped. Refusals still carry the complete ERROR
+body through `SubjectError::refused`.
+
+- Pin media `=0.1.3` and check success bodies centrally with `wire::read_reply`.
+- Add `reply_envelope` and `stream_reply_envelope` cases with independent bare
+  and extra-key faulty providers, mapped to the pinned reply-envelope rule.
+- Bump the kit's minor version because existing adapters returning decoded
+  answers must change to preserve the provider's RESPONSE body.
+
 ## 0.1.2
 
 - Pin media `=0.1.2`, which newly refuses quantities whose coefficient (all

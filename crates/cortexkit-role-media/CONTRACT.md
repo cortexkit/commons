@@ -5,6 +5,13 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 
 ## Shared rules
 
+- [pinned] `media.wire.reply`: Every reply is a `RESPONSE` frame whose body is
+  exactly `{"result": <answer>}` (`wire::reply_body`). A reader refuses a bare
+  answer, and a body with any other top-level key, by name
+  (`wire::read_reply`, `ReplyShapeError`). This includes a streamed call's
+  terminal reply; `STREAM_DATA` event bodies and referenced output-object
+  contents stay unwrapped. Refusals stay `ERROR` frames `{code, message, detail}`
+  as specified below, never wrapped in `result`.
 - [pinned] `media.identity.scope`: Caller identity is the route's principal,
   never a body member. Uploads, reads, jobs and streams admit every principal
   routed to the provider, but ids are looked up by `(principal, id)`; foreign ids

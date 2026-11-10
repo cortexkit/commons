@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.3
+
+- Pin every successful reply, including a streamed call's terminal reply, to a
+  RESPONSE body exactly `{"result": <answer>}`. STREAM_DATA event bodies and
+  referenced output-object contents stay unwrapped; refusals remain ERROR
+  frames `{code, message, detail}`.
+- Add `wire::reply_body`, `wire::read_reply` and `wire::ReplyShapeError`, parallel
+  to routing's helpers, refusing bare answers and extra top-level keys by name.
+
 ## 0.1.2
 
 - Newly refuse usage quantities whose coefficient (all digits with the decimal

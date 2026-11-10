@@ -1,6 +1,7 @@
 {
   "version": 1,
   "rules": [
+    {"id":"media.wire.reply","cases":["reply_envelope","stream_reply_envelope"],"bug_shaped":true},
     {"id":"media.identity.scope","cases":["foreign_job_is_unknown","client_job_id_bounds","stream_id_bounds","call_id_bounds","calls_scoped_by_principal"],"bug_shaped":false},
     {"id":"media.refusal.class","cases":["refusal_class_decides_retry"],"bug_shaped":false},
     {"id":"media.refusal.codes","cases":["deadline_counts_queue_time","empty_output_is_a_failure"],"bug_shaped":false},

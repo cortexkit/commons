@@ -527,6 +527,8 @@ impl State {
         Ok(())
     }
     pub(super) fn stream_poll(&mut self, p: &str, id: &str) -> SubjectResult<StreamObservation> {
+        let bare = self.fault("stream_reply_envelope");
+        let extra_keys = self.fault("stream_reply_envelope_extra_keys");
         let st = self
             .extra
             .streams
@@ -535,7 +537,15 @@ impl State {
         let mut out = StreamObservation::new()
             .with_events(std::mem::take(&mut st.events))
             .with_closed(st.closed);
-        out.answer = st.answer.clone();
+        out.answer = st.answer.clone().map(|answer| {
+            if bare {
+                answer
+            } else if extra_keys {
+                json!({"result":answer,"extra":true})
+            } else {
+                json!({"result":answer})
+            }
+        });
         Ok(out)
     }
     pub(super) fn stream_frame(&mut self, p: &str, id: &str, frame: Value) -> SubjectResult<()> {

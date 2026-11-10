@@ -891,10 +891,15 @@ impl MediaSubject for Fake {
         Ok(())
     }
     async fn call_as(&self, principal: &str, request: Request) -> SubjectResult<Value> {
-        self.state
-            .lock()
-            .unwrap()
-            .call(principal, &request.method, request.params)
+        let mut st = self.state.lock().unwrap();
+        let answer = st.call(principal, &request.method, request.params)?;
+        if st.fault("reply_envelope") {
+            Ok(answer)
+        } else if st.fault("reply_envelope_extra_keys") {
+            Ok(json!({"result":answer,"extra":true}))
+        } else {
+            Ok(json!({"result":answer}))
+        }
     }
     async fn configure_pack(
         &self,

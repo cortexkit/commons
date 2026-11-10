@@ -13,6 +13,42 @@ use fake::Fake;
 use serde_json::{json, Value};
 const CONTRACT: &str = include_str!("../../cortexkit-role-media/CONTRACT.md");
 
+#[tokio::test]
+async fn media_kit_wrapped_reply_envelope_passes() {
+    for case in ["reply_envelope", "stream_reply_envelope"] {
+        assert_eq!(
+            run_case(&Fake::new(None, true, true), case).await,
+            Outcome::Passed,
+            "{case}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn media_kit_bare_reply_envelope_is_rejected() {
+    for case in ["reply_envelope", "stream_reply_envelope"] {
+        let bad = run_case(&Fake::new(Some(case), true, true), case).await;
+        assert!(
+            matches!(bad, Outcome::Failed(ref reason) if reason.starts_with(&format!("{case}:")) && reason.contains("bare_answer")),
+            "{case}: {bad:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn media_kit_reply_envelope_extra_keys_are_rejected() {
+    for (case, fault) in [
+        ("reply_envelope", "reply_envelope_extra_keys"),
+        ("stream_reply_envelope", "stream_reply_envelope_extra_keys"),
+    ] {
+        let bad = run_case(&Fake::new(Some(fault), true, true), case).await;
+        assert!(
+            matches!(bad, Outcome::Failed(ref reason) if reason.starts_with(&format!("{case}:")) && reason.contains("extra_keys")),
+            "{case}: {bad:?}"
+        );
+    }
+}
+
 macro_rules! case_tests {
     ($($name:ident),* $(,)?) => {$(
         #[tokio::test]
@@ -103,6 +139,8 @@ fn media_kit_rule_map_covers_all_pinned_ids() {
     assert_eq!(mapped, CASES.iter().copied().collect());
     // These rules use focused incorrect behavior, not an adapter that fails setup.
     for (id, case) in [
+        ("media.wire.reply", "reply_envelope"),
+        ("media.wire.reply", "stream_reply_envelope"),
         ("media.objects.read", "chunked_result_checksum"),
         ("media.output.nonempty", "empty_transcript_is_a_failure"),
         ("media.usage.decimal", "usage_no_rounding"),
@@ -373,7 +411,7 @@ impl MediaSubject for Delayed {
                 .polls
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if n < 2 {
-                return Ok(json!({"status":if n==0 {"queued"} else {"running"}}));
+                return Ok(json!({"result":{"status":if n==0 {"queued"} else {"running"}}}));
             }
         }
         self.inner.call_as(principal, request).await

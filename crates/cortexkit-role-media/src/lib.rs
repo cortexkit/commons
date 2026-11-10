@@ -63,6 +63,7 @@ pub mod streams;
 pub mod usage;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
+pub mod wire;
 
 pub use errors::{CheckError, CheckResult};
 pub use handoff::{hand_off_message, hand_off_send_id};

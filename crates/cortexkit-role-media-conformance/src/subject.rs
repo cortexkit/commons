@@ -168,6 +168,8 @@ impl Script {
 #[non_exhaustive]
 pub struct StreamObservation {
     pub events: Vec<Value>,
+    /// The unmodified terminal RESPONSE body, including the `result` envelope.
+    /// STREAM_DATA events and referenced output-object contents stay unwrapped.
     pub answer: Option<Value>,
     pub closed: bool,
 }
@@ -246,6 +248,9 @@ pub trait MediaSubject: Send + Sync {
     async fn configure_principals(&self, _principals: Principals) -> SubjectResult<()> {
         Err(SubjectError::unsupported("configure_principals"))
     }
+    /// Send a real request and return the unmodified RESPONSE body on success.
+    /// Keep the `result` envelope; the runner checks it with `wire::read_reply`.
+    /// Refusals use `SubjectError::refused` with the complete ERROR body.
     async fn call_as(&self, _principal: &str, _request: Request) -> SubjectResult<Value> {
         Err(SubjectError::unsupported("call_as"))
     }

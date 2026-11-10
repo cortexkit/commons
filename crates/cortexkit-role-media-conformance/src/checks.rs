@@ -22,6 +22,8 @@ use crate::{
 };
 
 pub const CASES: &[&str] = &[
+    "reply_envelope",
+    "stream_reply_envelope",
     "wire_extension",
     "realtime_watch",
     "submit_idempotent_on_client_job_id",
@@ -124,7 +126,10 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
             ))
             .await
             .map_err(err)?;
-        if name == "wire_extension" {
+        if name == "reply_envelope" {
+            let describe = call(subject, "alice", "role.describe", json!({})).await?;
+            require(describe["engines"].is_array(), "describe omitted engines")
+        } else if name == "wire_extension" {
             wire::run(subject).await
         } else if STREAM_REALTIME_CASES.contains(&name) {
             stream_realtime::run(subject, &routing, &vendor, name).await
@@ -187,9 +192,15 @@ async fn call<S: MediaSubject>(
     method: &str,
     params: Value,
 ) -> Result<Value, String> {
-    s.call_as(principal, Request::new(method, params))
+    let body = s
+        .call_as(principal, Request::new(method, params))
         .await
-        .map_err(|e| format!("{method}: {e}; {:?}", e.refusal))
+        .map_err(|e| format!("{method}: {e}; {:?}", e.refusal))?;
+    decode_reply(body).map_err(|e| format!("{method}: {e}"))
+}
+fn decode_reply(body: Value) -> Result<Value, String> {
+    let bytes = serde_json::to_vec(&body).map_err(err)?;
+    cortexkit_role_media::wire::read_reply(&bytes).map_err(|e| format!("{}: {e}", e.name()))
 }
 async fn refusal<S: MediaSubject>(
     s: &S,
