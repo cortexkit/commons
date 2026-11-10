@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.12
+
+- `account_observe_credit_without_reset_accepted` admits
+  `example-subscription/model-c`, a pair the kit's fixture catalog defines. It
+  named `model-a`, which the catalog lists only under `example-provider`, so a
+  router that checks the catalog refused the admission with `auth_required`
+  before the credit observation was sent.
+
 ## 0.10.11
 
 - Pin routing `=0.7.11`. Check harness-specific pair and provider narrowing

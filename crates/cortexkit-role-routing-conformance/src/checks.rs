@@ -1730,7 +1730,7 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         let admitted: AccountForAnswer = answer(
             &runner,
             ops::ROUTE_ACCOUNT_FOR,
-            &Self::account_for(admission, "credit-wall-conversation", "model-a"),
+            &Self::account_for(admission, "credit-wall-conversation", "model-c"),
             "admission before a credit wall",
         )
         .await?;
