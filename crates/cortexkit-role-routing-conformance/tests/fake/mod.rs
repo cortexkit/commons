@@ -62,6 +62,7 @@ const DECISION_TTL_MS: u64 = 600_000;
 /// check must catch.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub runner_route_facts_unsupported: bool,
     pub ignore_questions: bool,
     pub ignore_max_cost_usd: bool,
     pub engine_fault: &'static str,
@@ -262,6 +263,9 @@ struct ConversationPin {
 
 #[derive(Default)]
 struct State {
+    runner_declarations:
+        BTreeMap<String, cortexkit_role_routing_conformance::wire::RunnerDeclaration>,
+    runner_route_facts: Vec<cortexkit_role_routing_conformance::RunnerRouteFacts>,
     model_input_facts: HashMap<String, cortexkit_role_routing_conformance::ModelInputFacts>,
     engine: select_engine::EngineState,
     extension_answers: HashMap<String, Value>,
@@ -580,6 +584,7 @@ impl RoutingSubject for FakeSubject {
     ) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
         state.declarations.clear();
+        state.runner_declarations.clear();
         state.engine.configure(modules, self.defects.engine_fault);
         for module in modules
             .iter()
@@ -591,6 +596,11 @@ impl RoutingSubject for FakeSubject {
             let Ok(declaration) = parse_consumer_declarations(raw) else {
                 continue;
             };
+            if let Some(runner) = declaration.runner {
+                state
+                    .runner_declarations
+                    .insert(module.principal.clone(), runner);
+            }
             for consumer in declaration.consumers {
                 let entry = state
                     .declarations
@@ -604,6 +614,17 @@ impl RoutingSubject for FakeSubject {
             }
         }
         Ok(())
+    }
+
+    async fn configure_runner_route_facts(
+        &self,
+        facts: &[cortexkit_role_routing_conformance::RunnerRouteFacts],
+    ) -> Result<bool, String> {
+        if self.defects.runner_route_facts_unsupported {
+            return Ok(false);
+        }
+        self.state.lock().unwrap().runner_route_facts = facts.to_vec();
+        Ok(true)
     }
 
     async fn configure_engine_facts(
@@ -887,6 +908,111 @@ impl FakeRoute {
         })
     }
 
+    fn check_harness<'a>(
+        &self,
+        mut runners: impl Iterator<Item = &'a CatalogRunner>,
+        harness: Option<&str>,
+    ) -> Result<(), Refusal> {
+        if let Some(harness) = harness {
+            if !self.defects.ignores_harness_filter
+                && !runners.any(|runner| {
+                    runner.starts_sessions
+                        && runner
+                            .harnesses
+                            .as_ref()
+                            .is_some_and(|values| values.iter().any(|value| value == harness))
+                })
+            {
+                let mut refusal = Refusal::no_route(
+                    if self.defects.wrong_harness_refusal {
+                        NoRouteReason::MissingCapability
+                    } else {
+                        NoRouteReason::HarnessUnavailable
+                    },
+                    None,
+                );
+                refusal.message = format!("no runner hosts harness {harness}");
+                return Err(refusal);
+            }
+        }
+        Ok(())
+    }
+
+    fn resolved_harness(&self, runner: &CatalogRunner, requested: Option<&str>) -> Option<String> {
+        requested
+            .filter(|_| !self.defects.echoes_default_harness)
+            .map(str::to_owned)
+            .or_else(|| {
+                if self.defects.chooses_first_harness {
+                    runner
+                        .harnesses
+                        .as_ref()
+                        .and_then(|values| values.first().cloned())
+                } else {
+                    runner.default_harness.clone()
+                }
+            })
+            .or_else(|| {
+                runner
+                    .harnesses
+                    .as_ref()
+                    .filter(|values| {
+                        (values.len() == 1 && !self.defects.ignores_single_harness)
+                            || (self.defects.chooses_first_without_default
+                                && requested.is_none()
+                                && runner.default_harness.is_none()
+                                && values.len() > 1)
+                    })
+                    .map(|values| values[0].clone())
+            })
+    }
+
+    fn runner_accepts_model(
+        &self,
+        state: &State,
+        module: &str,
+        model: &CatalogModel,
+        harness: Option<&str>,
+    ) -> bool {
+        let Some(declaration) = state.runner_declarations.get(module) else {
+            return true;
+        };
+        let mut declaration = declaration.clone();
+        if self.fault("harness_limits_pairs_narrow")
+            || self.fault("harness_limits_providers_narrow")
+        {
+            declaration.harness_limits = None;
+        }
+        let limits = match declaration.limits_for_harness(harness) {
+            Ok(limits) => limits,
+            Err(error) => {
+                eprintln!("runner {module}: {error}; using runner-level values");
+                if self.fault("harness_limits_invalid_falls_back") {
+                    return false;
+                }
+                declaration.harness_limits = None;
+                declaration
+                    .limits_for_harness(None)
+                    .expect("no harness limits")
+            }
+        };
+        limits
+            .explicit_providers
+            .as_ref()
+            .is_none_or(|providers| providers.contains(&model.provider))
+            && state
+                .runner_route_facts
+                .iter()
+                .find(|facts| facts.route_key == model.route_key())
+                .is_none_or(|facts| {
+                    limits.pairs.as_ref().is_some_and(|pairs| {
+                        pairs.iter().any(|pair| {
+                            pair.wire_api == facts.wire_api && pair.auth_method == facts.auth_method
+                        })
+                    })
+                })
+    }
+
     fn select(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
         if !params.is_object() {
             return Err(Refusal::invalid_request("params", "expected an object"));
@@ -1010,27 +1136,20 @@ impl FakeRoute {
         if defects.task_ref_changes_selection && request.task_ref.is_some() {
             catalog.models.reverse();
         }
-        if let Some(harness) = &request.harness {
-            if !defects.ignores_harness_filter
-                && !catalog.runners.iter().any(|runner| {
-                    runner.starts_sessions
-                        && runner
-                            .harnesses
-                            .as_ref()
-                            .is_some_and(|values| values.contains(harness))
+        self.check_harness(catalog.runners.iter(), request.harness.as_deref())?;
+        for runner in &mut catalog.runners {
+            let harness = self.resolved_harness(runner, request.harness.as_deref());
+            runner.route_keys.retain(|key| {
+                catalog.models.iter().any(|model| {
+                    model.route_key() == *key
+                        && self.runner_accepts_model(
+                            state,
+                            &runner.module,
+                            model,
+                            harness.as_deref(),
+                        )
                 })
-            {
-                let mut refusal = Refusal::no_route(
-                    if defects.wrong_harness_refusal {
-                        NoRouteReason::MissingCapability
-                    } else {
-                        NoRouteReason::HarnessUnavailable
-                    },
-                    None,
-                );
-                refusal.message = format!("no runner hosts harness {harness}");
-                return Err(refusal);
-            }
+            });
         }
         let project = match params.get("project_id").and_then(Value::as_str) {
             Some(project) if defects.reads_scope_from_body => Some(project.to_owned()),
@@ -1368,37 +1487,7 @@ impl FakeRoute {
                                     .iter()
                                     .find(|candidate| candidate.module == *runner)
                                     .and_then(|candidate| {
-                                        request
-                                            .harness
-                                            .clone()
-                                            .filter(|_| !defects.echoes_default_harness)
-                                            .or_else(|| {
-                                                if defects.chooses_first_harness {
-                                                    candidate
-                                                        .harnesses
-                                                        .as_ref()
-                                                        .and_then(|values| values.first().cloned())
-                                                } else {
-                                                    candidate.default_harness.clone()
-                                                }
-                                            })
-                                            .or_else(|| {
-                                                candidate
-                                                    .harnesses
-                                                    .as_ref()
-                                                    .filter(|values| {
-                                                        (values.len() == 1
-                                                            && !defects.ignores_single_harness)
-                                                            || (defects
-                                                                .chooses_first_without_default
-                                                                && request.harness.is_none()
-                                                                && candidate
-                                                                    .default_harness
-                                                                    .is_none()
-                                                                && values.len() > 1)
-                                                    })
-                                                    .map(|values| values[0].clone())
-                                            })
+                                        self.resolved_harness(candidate, request.harness.as_deref())
                                     });
                                 let harness = match declared {
                                     Some(_) if defects.drops_harness => None,
@@ -1553,35 +1642,7 @@ impl FakeRoute {
             .runners
             .iter()
             .find(|candidate| candidate.module == runner)
-            .and_then(|candidate| {
-                request
-                    .harness
-                    .clone()
-                    .filter(|_| !defects.echoes_default_harness)
-                    .or_else(|| {
-                        if defects.chooses_first_harness {
-                            candidate
-                                .harnesses
-                                .as_ref()
-                                .and_then(|values| values.first().cloned())
-                        } else {
-                            candidate.default_harness.clone()
-                        }
-                    })
-                    .or_else(|| {
-                        candidate
-                            .harnesses
-                            .as_ref()
-                            .filter(|values| {
-                                (values.len() == 1 && !defects.ignores_single_harness)
-                                    || (defects.chooses_first_without_default
-                                        && request.harness.is_none()
-                                        && candidate.default_harness.is_none()
-                                        && values.len() > 1)
-                            })
-                            .map(|values| values[0].clone())
-                    })
-            });
+            .and_then(|candidate| self.resolved_harness(candidate, request.harness.as_deref()));
         let harness = match declared {
             Some(_) if defects.drops_harness => None,
             None if defects.invents_harness => Some("default-harness".to_owned()),

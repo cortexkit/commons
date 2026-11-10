@@ -152,6 +152,71 @@ pub struct StandingLimits {
     pub unknown: BTreeMap<String, Value>,
 }
 
+/// Optional restrictions for one harness; absent fields inherit runner values.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct HarnessLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pairs: Option<Vec<RunnerPair>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explicit_providers: Option<Vec<String>>,
+    #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unknown: BTreeMap<String, Value>,
+}
+
+impl HarnessLimits {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_pairs(mut self, pairs: Vec<RunnerPair>) -> Self {
+        self.pairs = Some(pairs);
+        self
+    }
+
+    pub fn with_explicit_providers(mut self, providers: Vec<String>) -> Self {
+        self.explicit_providers = Some(providers);
+        self
+    }
+}
+
+/// A refused harness-limits member does not invalidate its runner declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum HarnessLimitsError {
+    InvalidField { field: String },
+    MissingHarnesses,
+    UnknownHarness { harness: String },
+    EmptyPairs { harness: String },
+    PairOutsideRunner { harness: String, index: usize },
+    ProviderOutsideRunner { harness: String, index: usize },
+}
+
+impl std::fmt::Display for HarnessLimitsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidField { field } => write!(f, "invalid declaration field {field}"),
+            Self::MissingHarnesses => write!(f, "runner.harness_limits requires runner.harnesses"),
+            Self::UnknownHarness { harness } => {
+                write!(f, "runner.harness_limits.{harness} is not in runner.harnesses")
+            }
+            Self::EmptyPairs { harness } => {
+                write!(f, "runner.harness_limits.{harness}.pairs is empty")
+            }
+            Self::PairOutsideRunner { harness, index } => write!(
+                f,
+                "runner.harness_limits.{harness}.pairs[{index}] is outside runner.pairs"
+            ),
+            Self::ProviderOutsideRunner { harness, index } => write!(
+                f,
+                "runner.harness_limits.{harness}.explicit_providers[{index}] is outside runner.standing_limits.explicit_providers"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for HarnessLimitsError {}
+
 /// Matching inputs supplied by a runner module, not a credential or a route.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -175,6 +240,9 @@ pub struct RunnerDeclaration {
     /// Exact programs this runner hosts sessions in, independently of its pairs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harnesses: Option<Vec<String>>,
+    /// Raw restrictions are decoded separately so a typo cannot remove a runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness_limits: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_harness: Option<String>,
     /// False excludes the runner from selection, not from account operations.
@@ -210,6 +278,7 @@ impl Default for RunnerDeclaration {
             tool_capabilities: Vec::new(),
             standing_limits: None,
             harnesses: None,
+            harness_limits: None,
             default_harness: None,
             starts_sessions: true,
             unknown: BTreeMap::new(),
@@ -228,6 +297,120 @@ impl RunnerDeclaration {
     pub fn with_harnesses(mut self, harnesses: Vec<String>) -> Self {
         self.harnesses = Some(harnesses);
         self
+    }
+
+    pub fn with_harness_limits(mut self, limits: BTreeMap<String, HarnessLimits>) -> Self {
+        self.harness_limits = Some(serde_json::to_value(limits).expect("harness limits are JSON"));
+        self
+    }
+
+    /// Decode and validate the entire member independently of the declaration.
+    /// On error, selection must warn and use runner-level values for all harnesses.
+    pub fn typed_harness_limits(
+        &self,
+    ) -> Option<Result<BTreeMap<String, HarnessLimits>, HarnessLimitsError>> {
+        self.harness_limits.as_ref().map(|value| {
+            let invalid = |field: String| HarnessLimitsError::InvalidField { field };
+            let object = value
+                .as_object()
+                .ok_or_else(|| invalid("runner.harness_limits".into()))?;
+            let harnesses = self
+                .harnesses
+                .as_ref()
+                .ok_or(HarnessLimitsError::MissingHarnesses)?;
+            let mut result = BTreeMap::new();
+            for (harness, value) in object {
+                if !harnesses.contains(harness) {
+                    return Err(HarnessLimitsError::UnknownHarness {
+                        harness: harness.clone(),
+                    });
+                }
+                let path = format!("runner.harness_limits.{harness}");
+                let fields = value.as_object().ok_or_else(|| invalid(path.clone()))?;
+                let limits: HarnessLimits =
+                    serde_json::from_value(value.clone()).map_err(|_| invalid(path.clone()))?;
+                if let Some(pairs) = &limits.pairs {
+                    if pairs.is_empty() {
+                        return Err(HarnessLimitsError::EmptyPairs {
+                            harness: harness.clone(),
+                        });
+                    }
+                    let mut seen = BTreeSet::new();
+                    for (index, pair) in pairs.iter().enumerate() {
+                        let field = format!("{path}.pairs[{index}]");
+                        if !is_runner_token(&pair.wire_api)
+                            || !is_runner_token(&pair.auth_method)
+                            || !seen.insert((&pair.wire_api, &pair.auth_method))
+                        {
+                            return Err(invalid(field));
+                        }
+                        if !self.pairs.iter().any(|runner_pair| {
+                            runner_pair.wire_api == pair.wire_api
+                                && runner_pair.auth_method == pair.auth_method
+                        }) {
+                            return Err(HarnessLimitsError::PairOutsideRunner {
+                                harness: harness.clone(),
+                                index,
+                            });
+                        }
+                    }
+                }
+                if let Some(value) = fields.get("explicit_providers").filter(|v| !v.is_null()) {
+                    validate_unique_list(
+                        value,
+                        &format!("{path}.explicit_providers"),
+                        true,
+                        is_runner_token,
+                    )
+                    .map_err(|error| match error {
+                        DeclarationError::InvalidField { field } => invalid(field),
+                        _ => invalid(path.clone()),
+                    })?;
+                }
+                if let (Some(providers), Some(runner_providers)) = (
+                    &limits.explicit_providers,
+                    self.standing_limits
+                        .as_ref()
+                        .and_then(|limits| limits.explicit_providers.as_ref()),
+                ) {
+                    for (index, provider) in providers.iter().enumerate() {
+                        if !runner_providers.contains(provider) {
+                            return Err(HarnessLimitsError::ProviderOutsideRunner {
+                                harness: harness.clone(),
+                                index,
+                            });
+                        }
+                    }
+                }
+                result.insert(harness.clone(), limits);
+            }
+            Ok(result)
+        })
+    }
+
+    /// Resolve inheritance, returning an error rather than partially applying a
+    /// malformed map. Callers log that error and use runner-level values instead.
+    pub fn limits_for_harness(
+        &self,
+        harness: Option<&str>,
+    ) -> Result<HarnessLimits, HarnessLimitsError> {
+        let limits = self.typed_harness_limits().transpose()?.unwrap_or_default();
+        let entry = harness.and_then(|harness| limits.get(harness));
+        Ok(HarnessLimits {
+            pairs: Some(
+                entry
+                    .and_then(|limits| limits.pairs.clone())
+                    .unwrap_or_else(|| self.pairs.clone()),
+            ),
+            explicit_providers: entry
+                .and_then(|limits| limits.explicit_providers.clone())
+                .or_else(|| {
+                    self.standing_limits
+                        .as_ref()
+                        .and_then(|limits| limits.explicit_providers.clone())
+                }),
+            ..HarnessLimits::default()
+        })
     }
 
     pub fn with_default_harness(mut self, harness: impl Into<String>) -> Self {
@@ -287,7 +470,8 @@ impl std::fmt::Display for DeclarationError {
 impl std::error::Error for DeclarationError {}
 
 /// Validate and decode a catalog declaration. No partially valid declaration
-/// is returned. Demand validation is shared with `route.select`, but `iq`
+/// is returned, except that `runner.harness_limits` is validated independently
+/// by its typed accessor. Demand validation is shared with `route.select`, but `iq`
 /// is an unknown member here: it can never act as a declared default.
 pub fn parse_consumer_declarations(
     value: &Value,
@@ -414,6 +598,7 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
             "tool_capabilities",
             "standing_limits",
             "harnesses",
+            "harness_limits",
             "default_harness",
             "starts_sessions",
         ],
@@ -509,6 +694,167 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn harness_runner(limits: Value) -> RunnerDeclaration {
+        parse_consumer_declarations(&json!({"runner": {
+            "pairs": [{"wire_api": "example.messages", "auth_method": "oauth"},
+                      {"wire_api": "example.responses", "auth_method": "apikey"}],
+            "standing_limits": {"explicit_providers": ["example", "other"]},
+            "harnesses": ["alpha", "beta"],
+            "harness_limits": limits
+        }}))
+        .unwrap()
+        .runner
+        .unwrap()
+    }
+
+    #[test]
+    fn harness_limits_parser_accepts_and_accessor_names_refusals() {
+        for (value, expected) in [
+            (
+                json!({"typo": {}}),
+                HarnessLimitsError::UnknownHarness {
+                    harness: "typo".into(),
+                },
+            ),
+            (
+                json!({"alpha": {"pairs": []}}),
+                HarnessLimitsError::EmptyPairs {
+                    harness: "alpha".into(),
+                },
+            ),
+            (
+                json!({"alpha": {"pairs": [{"wire_api": "other.api", "auth_method": "oauth"}]}}),
+                HarnessLimitsError::PairOutsideRunner {
+                    harness: "alpha".into(),
+                    index: 0,
+                },
+            ),
+            (
+                json!({"alpha": {"explicit_providers": ["outside"]}}),
+                HarnessLimitsError::ProviderOutsideRunner {
+                    harness: "alpha".into(),
+                    index: 0,
+                },
+            ),
+        ] {
+            let runner = harness_runner(value.clone());
+            assert_eq!(runner.harness_limits, Some(value));
+            assert_eq!(runner.typed_harness_limits(), Some(Err(expected.clone())));
+            assert_eq!(
+                runner.limits_for_harness(Some("beta")),
+                Err(expected.clone())
+            );
+            assert!(expected.to_string().contains("runner.harness_limits"));
+        }
+        let mut runner = harness_runner(json!({"alpha": {}}));
+        runner.harnesses = None;
+        let declaration = ConsumerDeclarations::new().with_runner(runner.clone());
+        declaration.validate().unwrap();
+        assert_eq!(
+            runner.typed_harness_limits(),
+            Some(Err(HarnessLimitsError::MissingHarnesses))
+        );
+    }
+
+    #[test]
+    fn harness_limits_malformed_member_is_retained_not_a_declaration_error() {
+        for value in [
+            json!(false),
+            json!([]),
+            json!({"alpha": false}),
+            json!({"alpha": {"pairs": "wrong"}}),
+            json!({"alpha": {"explicit_providers": []}}),
+            json!({"alpha": {"explicit_providers": ["example", "example"]}}),
+            json!({"alpha": {"explicit_providers": ["Bad token"]}}),
+            json!({"alpha": {"pairs": [
+                {"wire_api": "example.messages", "auth_method": "oauth"},
+                {"wire_api": "example.messages", "auth_method": "oauth"}
+            ]}}),
+        ] {
+            let runner = harness_runner(value.clone());
+            assert_eq!(runner.harness_limits, Some(value));
+            assert!(matches!(
+                runner.typed_harness_limits(),
+                Some(Err(HarnessLimitsError::InvalidField { .. }))
+            ));
+            ConsumerDeclarations::new()
+                .with_runner(runner)
+                .validate()
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn harness_limits_inherit_and_only_narrow() {
+        let mut runner = harness_runner(json!({"alpha": {
+            "pairs": [{"wire_api": "example.messages", "auth_method": "oauth", "future": true}],
+            "explicit_providers": ["example"]
+        }, "beta": {}}));
+        // Pair matching uses wire API and auth method, not retained unknown data.
+        let alpha = runner.limits_for_harness(Some("alpha")).unwrap();
+        assert_eq!(alpha.pairs.unwrap().len(), 1);
+        assert_eq!(alpha.explicit_providers.unwrap(), ["example"]);
+        for harness in [None, Some("beta"), Some("unlisted")] {
+            let inherited = runner.limits_for_harness(harness).unwrap();
+            assert_eq!(inherited.pairs.as_ref(), Some(&runner.pairs));
+            assert_eq!(inherited.explicit_providers.unwrap(), ["example", "other"]);
+        }
+        runner.harness_limits = Some(json!({"alpha": {"pairs": null, "explicit_providers": null}}));
+        assert_eq!(
+            runner.limits_for_harness(Some("alpha")).unwrap().pairs,
+            Some(runner.pairs.clone())
+        );
+        runner.standing_limits = None;
+        runner.harness_limits = Some(json!({"alpha": {"explicit_providers": ["new-provider"]}}));
+        assert_eq!(
+            runner
+                .limits_for_harness(Some("alpha"))
+                .unwrap()
+                .explicit_providers
+                .unwrap(),
+            ["new-provider"]
+        );
+        assert_eq!(
+            runner
+                .limits_for_harness(Some("beta"))
+                .unwrap()
+                .explicit_providers,
+            None
+        );
+        runner.harness_limits = None;
+        assert_eq!(runner.typed_harness_limits(), None);
+        assert_eq!(
+            runner.limits_for_harness(Some("alpha")).unwrap().pairs,
+            Some(runner.pairs.clone())
+        );
+        assert!(serde_json::to_value(&runner)
+            .unwrap()
+            .get("harness_limits")
+            .is_none());
+    }
+
+    #[test]
+    fn harness_limits_builder_round_trips() {
+        let pair = RunnerPair::new("example.messages", "oauth");
+        let runner = RunnerDeclaration::new(vec![pair.clone()])
+            .with_harnesses(vec!["alpha".into()])
+            .with_harness_limits(BTreeMap::from([(
+                "alpha".into(),
+                HarnessLimits::new()
+                    .with_pairs(vec![pair])
+                    .with_explicit_providers(vec!["example".into()]),
+            )]));
+        let parsed = parse_consumer_declarations(
+            &serde_json::to_value(ConsumerDeclarations::new().with_runner(runner.clone())).unwrap(),
+        )
+        .unwrap()
+        .runner
+        .unwrap();
+        assert_eq!(parsed, runner);
+        assert!(parsed.typed_harness_limits().unwrap().is_ok());
+        assert!(harness_runner(Value::Null).harness_limits.is_none());
+    }
 
     #[test]
     fn runner_harness_builders_and_legacy_bytes() {

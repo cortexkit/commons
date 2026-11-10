@@ -362,14 +362,18 @@ impl FakeRoute {
                 Ok(value)
             }
             ops::ROUTE_HEAD_CHOICES => {
+                let request = cortexkit_role_routing_conformance::wire::head_choices::parse_head_choices_request(params)?;
                 let catalog = Self::catalog(state);
                 let runner = catalog
                     .runners
                     .iter()
                     .find(|r| json!(r.module) == params["runner_module"]);
+                self.check_harness(runner.into_iter(), request.harness.as_deref())?;
                 let mut models = catalog.models.iter().filter(|m| runner.is_some_and(|r|
-                    (r.starts_sessions || self.fault("head_choices_non_starting_empty")) &&
-                    (r.route_keys.contains(&m.route_key()) || self.fault("head_choices_runner_routes"))))
+                     (r.starts_sessions || self.fault("head_choices_non_starting_empty")) &&
+                     !(self.fault("harness_limits_baseline_omits_excluded") && m.model == "model-a") &&
+                     (self.fault("harness_limits_head_choices_ignored") || self.runner_accepts_model(state, &r.module, m, request.harness.as_deref())) &&
+                     (r.route_keys.contains(&m.route_key()) || self.fault("head_choices_runner_routes"))))
                     .map(|m| json!({"provider":m.provider,"model":m.model,"variants":[],"service_tiers":[]})).collect::<Vec<_>>();
                 models.sort_by_key(|m| {
                     (

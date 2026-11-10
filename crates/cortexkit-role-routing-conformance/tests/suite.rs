@@ -109,6 +109,9 @@ async fn routing_070_faulty_routers_fail_each_case_by_name() {
                 .all(|failed| ROUTING_070_CASES.contains(failed)
                     || (*failed == "panel_replacement_detail_requires_cause"
                         && name.starts_with("panel_"))
+                    || (*name == "head_choices_billing_valid"
+                        && matches!(*failed,
+                            "harness_limits_pairs_narrow" | "harness_limits_providers_narrow" | "harness_limits_invalid_falls_back"))
                     // An invalid role.describe also fails the checks that
                     // validate role.describe before testing anything else.
                     || (*name == "observe_credential_refused_requires_backoff"
@@ -598,12 +601,17 @@ async fn dropping_a_declared_harness_fails() {
 
 #[tokio::test]
 async fn ignoring_requested_harness_membership_fails() {
-    breaks(
+    breaks_all(
         Defects {
             ignores_harness_filter: true,
             ..Defects::default()
         },
-        "requested_harness_is_hosted_and_echoed",
+        &[
+            "requested_harness_is_hosted_and_echoed",
+            "harness_limits_pairs_narrow",
+            "harness_limits_providers_narrow",
+            "harness_limits_invalid_falls_back",
+        ],
         "requested solo must be hosted and echoed",
     )
     .await;
@@ -611,12 +619,16 @@ async fn ignoring_requested_harness_membership_fails() {
 
 #[tokio::test]
 async fn not_echoing_requested_harness_fails() {
-    breaks(
+    breaks_all(
         Defects {
             echoes_default_harness: true,
             ..Defects::default()
         },
-        "requested_harness_is_hosted_and_echoed",
+        &[
+            "requested_harness_is_hosted_and_echoed",
+            "harness_limits_pairs_narrow",
+            "harness_limits_providers_narrow",
+        ],
         "requested beta must be hosted and echoed",
     )
     .await;
@@ -624,12 +636,17 @@ async fn not_echoing_requested_harness_fails() {
 
 #[tokio::test]
 async fn wrong_unhosted_harness_reason_fails() {
-    breaks(
+    breaks_all(
         Defects {
             wrong_harness_refusal: true,
             ..Defects::default()
         },
-        "requested_harness_is_hosted_and_echoed",
+        &[
+            "requested_harness_is_hosted_and_echoed",
+            "harness_limits_pairs_narrow",
+            "harness_limits_providers_narrow",
+            "harness_limits_invalid_falls_back",
+        ],
         "unhosted harness needs reason harness_unavailable",
     )
     .await;

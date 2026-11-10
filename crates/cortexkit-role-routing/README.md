@@ -180,6 +180,16 @@ host several programs through one pair. A gateway runner sets
 `starts_sessions: false` and never answers select, but account allocation for
 its own turns, observations, reports and describe are unchanged.
 
+`with_harness_limits` attaches a map of `HarnessLimits` constructed with
+`with_pairs` and/or `with_explicit_providers`. Restrictions only narrow the
+runner-level values; omitted entries and fields inherit them. The declaration
+retains this member raw: `typed_harness_limits` validates it independently,
+and `limits_for_harness` resolves inheritance. An error means warn with the
+runner name and use runner-level values for every harness, not drop the runner.
+Upgrade routing to 0.7.11 or later before declaring the member: older strict
+declaration parsers reject it. `HeadChoicesRequest::with_harness` requests
+harness-specific choices; without it head choices keep the runner-level union.
+
 With the `select_harness` describe group, a caller may request `harness` using
 `SelectRequest::with_harness`. Only a runner listing that program is a
 candidate, and `runner.harness` echoes it. No hosting runner is `no_route`

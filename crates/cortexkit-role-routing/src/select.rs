@@ -798,23 +798,19 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         return Err(members.refuse("runners", "a runner id must not be empty"));
     }
     let hold_ok: Option<bool> = members.optional("hold_ok")?;
-    let harness = members.optional_text("harness", None)?;
-    if let Some(harness) = &harness {
-        if !crate::declarations::is_runner_token(harness) {
-            return Err(members.refuse("harness", "harness must be a runner token"));
-        }
-        if !capabilities
+    let harness = parse_harness(&members)?;
+    if harness.is_some()
+        && !capabilities
             .iter()
             .any(|capability| capability.as_ref() == crate::capabilities::SELECT_HARNESS)
-        {
-            return Err(members.refuse(
-                "harness",
-                format!(
-                    "harness is read only by a provider declaring {}",
-                    crate::capabilities::SELECT_HARNESS
-                ),
-            ));
-        }
+    {
+        return Err(members.refuse(
+            "harness",
+            format!(
+                "harness is read only by a provider declaring {}",
+                crate::capabilities::SELECT_HARNESS
+            ),
+        ));
     }
     let task_ref = members.optional_text("task_ref", None)?;
     if let Some(task_ref) = &task_ref {
@@ -927,6 +923,17 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         prefer_prompt_cache,
         settings,
     })
+}
+
+pub(crate) fn parse_harness(members: &Members<'_>) -> Result<Option<String>, Refusal> {
+    let harness = members.optional_text("harness", None)?;
+    if harness
+        .as_ref()
+        .is_some_and(|harness| !crate::declarations::is_runner_token(harness))
+    {
+        return Err(members.refuse("harness", "harness must be a runner token"));
+    }
+    Ok(harness)
 }
 
 pub(crate) fn parse_settings(value: Option<&Value>) -> Result<Option<SelectSettings>, Refusal> {

@@ -98,10 +98,13 @@ a module plays.
 - [pinned] `runner` has the shape `{pairs: [{wire_api, auth_method}],
   follows_account_choice?: bool, tool_capabilities?: [string],
   standing_limits?: {explicit_providers?: [string]}, harnesses?: [token],
+  harness_limits?: {<harness>: {pairs?: [{wire_api, auth_method}], explicit_providers?: [token]}},
   default_harness?: token, starts_sessions?: bool}` (`RunnerDeclaration`).
   Unknown members in the slot, `runner`, any pair, or `standing_limits`
   invalidate the whole declaration. A refusal names the offending field
   path, such as `runner.pairs[0].wire_api`; no part is applied.
+  The known `harness_limits` member is the exception: it is retained raw and
+  validated independently, so a malformed value does not discard the runner.
 - [pinned] `pairs` is required, non-empty, and has at most 64 entries.
   Each `(wire_api, auth_method)` pair is unique. Both values are tokens
   matching `^[a-z][a-z0-9._-]{0,63}$`. These are open sets: validation
@@ -170,6 +173,33 @@ a module plays.
   program, never merely relabel a session.
 - [pinned] `default_harness`, when present, is a token listed in `harnesses`;
   without that list or membership it is refused as `runner.default_harness`.
+- [pinned] `harness_limits` optionally narrows the runner's offers for each
+  named harness. `HarnessLimits` has optional `pairs` and `explicit_providers`;
+  `RunnerDeclaration::with_harness_limits` writes the typed map, while
+  `typed_harness_limits` reads and validates the raw member. A missing map,
+  missing harness entry, or absent/null field inherits the runner-level value.
+  Runner-level `pairs` remains the union of what the runner can run. Harness
+  pairs must be a non-empty, unique subset, comparing only `wire_api` and
+  `auth_method`. Harness `explicit_providers` is a non-empty, unique provider
+  allow-list with the standing-limit token grammar and 64-entry bound. When
+  a runner-level allow-list exists, every harness provider must be in it;
+  when absent, a harness may introduce an allow-list. Neither field may broaden
+  what the runner offers. The union remains safe for readers that ignore the
+  restrictions: they over-offer for a harness, never beyond the runner's ability.
+- [pinned] The harness-limits accessor returns `HarnessLimitsError`, naming a
+  missing `harnesses` list, a key outside that list, empty pairs, a pair outside
+  the runner-level set, a provider outside the standing allow-list, or malformed
+  fields. Unknown fields inside a harness entry or its pairs are retained and
+  ignored. A refused value means **use the runner-level values for every
+  harness**, even entries that would be valid alone. Selection and head-choice
+  construction log a warning naming the runner and the error; they do not
+  remove the runner or apply part of the map. `limits_for_harness` resolves
+  inheritance and returns the same error for callers to log and fall back.
+- [pinned] For `route.select`, resolve the session harness from the request,
+  declared default, or sole declared harness before matching models, then use
+  that harness's effective pairs and provider allow-list. If no harness is
+  resolved, use runner-level values. This applies to pins and reused choices
+  as well as ordinary model selection; a pin cannot bypass the limits.
 - [pinned] `starts_sessions` defaults to `true`. When `false`, the runner is
   never answered by `route.select`, with or without a requested harness,
   including pinned requests and requests whose `runners` list only it. A
@@ -199,7 +229,7 @@ a module plays.
   when serialized.
 - [pinned] Optional runner members follow §2's null-as-absence rule.
   Absent `runner`, false `follows_account_choice`, and empty
-  `tool_capabilities` are omitted when serialized. Absent `harnesses` and
+  `tool_capabilities` are omitted when serialized. Absent `harness_limits`, `harnesses` and
   `default_harness`, and true `starts_sessions`, are omitted too. Slots without
   the new program members retain their exact 0.4.0 bytes, including an
   explicit `consumers: []`.
@@ -212,6 +242,10 @@ a module plays.
   `starts_sessions`. A runner declares these members only after its routing
   provider serves 0.4.1 or later. A caller sends `harness` only when
   `role.describe` declares `select_harness`.
+- [pinned] Harness limits also roll out **readers first**: routing must run
+  contract 0.7.11 or later before a runner declares `harness_limits`.
+  `parse_consumer_declarations` in 0.7.10 and earlier refuses this unknown
+  member, discarding the whole runner declaration rather than ignoring it.
 
 ## 2. Wire
 
@@ -1614,12 +1648,21 @@ Replacement params and answer:
 
 | Body | Members |
 |---|---|
-| Request (`HeadChoicesRequest`) | `{runner_module}` |
+| Request (`HeadChoicesRequest`) | `{runner_module, harness?}` |
 | Answer (`HeadChoicesAnswer`) | `{catalog_version, runner_module, models: [{provider, model, variants, default_variant?, service_tiers, pin_only?, billing?}]}` |
 
 - [pinned] Any caller may ask. Malformed params are `invalid_request {field}`;
   unknown runners and runners declaring `starts_sessions: false` get empty
-  models, not a refusal. The answer is unranked; empty models is valid.
+  models, not a refusal, unless a harness was explicitly requested as below.
+  The answer is unranked; empty models is valid.
+- [pinned] Optional `harness` uses the same token validation and hosted-program
+  check as `route.select`. A named harness not hosted by the requested
+  session-starting runner is `no_route` with reason `harness_unavailable`, and
+  the refusal message names the harness. A known harness uses its effective
+  `harness_limits` pairs and provider allow-list. Absent/null `harness` means
+  the runner-level union, not its default harness. Use routing 0.7.11 or later
+  when relying on harness-specific choices; earlier parsers ignore the member
+  and continue to return runner-level choices.
 - [pinned] Models are bytewise sorted by `(provider, model)`, each pair unique.
   Variants and tiers are bytewise sorted and unique; a default variant must be
   in variants. Every pair is a route the named runner runs. Listing once under

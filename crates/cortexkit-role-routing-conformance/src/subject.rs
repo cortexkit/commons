@@ -92,6 +92,29 @@ pub struct CatalogModule {
     pub role_declarations: BTreeMap<String, Value>,
 }
 
+/// Route transport facts used to intersect runner declarations with the catalog.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct RunnerRouteFacts {
+    pub route_key: String,
+    pub wire_api: String,
+    pub auth_method: String,
+}
+
+impl RunnerRouteFacts {
+    pub fn new(
+        route_key: impl Into<String>,
+        wire_api: impl Into<String>,
+        auth_method: impl Into<String>,
+    ) -> Self {
+        Self {
+            route_key: route_key.into(),
+            wire_api: wire_api.into(),
+            auth_method: auth_method.into(),
+        }
+    }
+}
+
 /// A model in the provider's catalog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatalogModel {
@@ -304,6 +327,17 @@ pub trait RoutingSubject: Send + Sync {
     /// daemon verified, and the provider knows it as a runner); every other
     /// principal is not.
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String>;
+
+    /// Configure the wire API and credential method for runner route matching.
+    /// Unsupported adapters skip pair-specific checks, not provider-limit checks.
+    /// Provider-only fixtures retain configured runnable keys with any mapping
+    /// compatible with their runner-level pairs; only provider limits vary.
+    async fn configure_runner_route_facts(
+        &self,
+        _facts: &[RunnerRouteFacts],
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
 
     /// Replace question-limit and input-price facts for the current catalog.
     /// Return false when this fixture hook is unavailable; the checks then

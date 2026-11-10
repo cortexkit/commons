@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.11
+
+- Pin routing `=0.7.11`. Check harness-specific pair and provider narrowing
+  in head choices and selection, inheritance, and whole-member fallback for
+  invalid restrictions without dropping the runner.
+- Add optional `configure_runner_route_facts` with constructed route facts;
+  unsupported adapters skip pair checks, not provider-only checks. Exercise
+  both through the kit's own in-repository test router (`tests/fake`) and reject incorrect implementations by
+  check name.
+- Respect head-choice admission subsets: require the excluded model in the
+  runner-level baseline to prove narrowing; otherwise report the case as
+  inconclusive, not passed.
+- Runner declarations carrying `harness_limits` require routing 0.7.11 or
+  later first; older strict parsers reject the entire runner declaration.
+
 ## 0.10.10
 
 - Pin routing 0.7.10. Check that a credit exhaustion observation needs no

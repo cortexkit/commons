@@ -255,6 +255,35 @@ fn runner_declarations() {
         let parsed = parse_consumer_declarations(&case["declaration"])
             .unwrap_or_else(|problem| panic!("{}: {problem}", name(case)));
         parsed.validate().unwrap();
+        let runner = parsed.runner.as_ref().unwrap();
+        if let Some(expected) = case.get("harness_limits_error") {
+            let error = runner.typed_harness_limits().unwrap().unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                expected.as_str().unwrap(),
+                "{}",
+                name(case)
+            );
+        } else if let Some(limits) = runner.typed_harness_limits() {
+            limits.unwrap();
+            assert_eq!(
+                runner
+                    .limits_for_harness(Some("alpha"))
+                    .unwrap()
+                    .pairs
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(
+                runner
+                    .limits_for_harness(Some("beta"))
+                    .unwrap()
+                    .pairs
+                    .as_ref(),
+                Some(&runner.pairs)
+            );
+        }
         assert_eq!(
             serde_json::to_string(&parsed).unwrap(),
             case["wire"],

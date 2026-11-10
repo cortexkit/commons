@@ -71,7 +71,8 @@ pub mod wire;
 
 pub use declarations::{
     parse_consumer_declarations, ConsumerDeclaration, ConsumerDeclarations, DeclarationError,
-    DemandDefaults, RunnerDeclaration, RunnerPair, StandingLimits,
+    DemandDefaults, HarnessLimits, HarnessLimitsError, RunnerDeclaration, RunnerPair,
+    StandingLimits,
 };
 pub use engine_declarations::{
     parse_engine_declarations, EngineDeclarationError, EngineDeclarations,

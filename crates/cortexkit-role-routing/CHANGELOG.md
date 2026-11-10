@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.11
+
+- Add narrow-only per-harness pairs and provider allow-lists. Keep the member
+  raw with typed accessors; invalid restrictions warn and fall back to
+  runner-level values for every harness without discarding the declaration.
+- Add optional `harness` to head choices; selection resolves the session
+  harness before applying restrictions. Omitted head-choice harness keeps
+  the runner-level union.
+- Deploy readers first: routing must run 0.7.11 or later before runners
+  declare `harness_limits`. Parsers in 0.7.10 and earlier reject the unknown
+  member and discard the whole runner declaration.
+
 ## 0.7.10
 
 - Define observation `limit_window: "credit"` for a subscription account's

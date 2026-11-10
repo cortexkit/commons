@@ -65,6 +65,23 @@ preserving existing adapters.
   - `configure_catalog_declarations(modules)`: raw `role_declarations` slots
     from daemon catalog entries, with each module's attested `principal` and
     `nonce_verified` status. Feed these through the catalog, never a call.
+    Runner slots also supply raw `harness_limits`; invalid restrictions must
+    leave the runner selectable with runner-level values.
+    Provider-only fixtures preserve `configure_catalog`'s runnable route keys:
+    supply a compatible transport/credential mapping from the runner-level
+    pairs and vary only the provider allow-list. They do not depend on a
+    particular pair mapping; pair-specific fixtures use the facts hook below.
+  - Optional `configure_runner_route_facts(facts)`: route keys with their wire
+    API and credential method, constructed with `RunnerRouteFacts::new`.
+    Return `Ok(false)` when unsupported; pair-narrowing checks are then
+    reported as not applicable, never passed. Provider-only narrowing and
+    invalid-member fallback checks still run for every adapter. Head-choice
+    assertions run when the provider declares `head_choices`.
+    Narrowing first requires a runner-level offer of the model the harness
+    excludes. Without that baseline offer the case is inconclusive and
+    reported as not applicable, not passed. With it, harness offers must
+    exclude that model and be a subset of the effective allowed set; the kit
+    does not require the router to offer every otherwise runnable model.
     The default hook returns an unsupported error for non-empty input, so
     older adapters must implement it to pass the new declaration checks;
   - `pin_for_project(project, consumer, pin)`: an operator pin that applies

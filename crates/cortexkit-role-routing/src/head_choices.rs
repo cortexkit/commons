@@ -16,13 +16,22 @@ use crate::members::Members;
 #[non_exhaustive]
 pub struct HeadChoicesRequest {
     pub runner_module: String,
+    /// Exact program, when known. Absence requests the runner-level union.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness: Option<String>,
 }
 
 impl HeadChoicesRequest {
     pub fn new(runner_module: impl Into<String>) -> Self {
         Self {
             runner_module: runner_module.into(),
+            harness: None,
         }
+    }
+
+    pub fn with_harness(mut self, harness: impl Into<String>) -> Self {
+        self.harness = Some(harness.into());
+        self
     }
 }
 
@@ -90,9 +99,9 @@ impl HeadChoicesAnswer {
 /// Decode a request after discovery has declared `head_choices`.
 pub fn parse_head_choices_request(params: &Value) -> Result<HeadChoicesRequest, Refusal> {
     let members = Members::of(params)?;
-    Ok(HeadChoicesRequest::new(
-        members.text("runner_module", None)?,
-    ))
+    let mut request = HeadChoicesRequest::new(members.text("runner_module", None)?);
+    request.harness = crate::select::parse_harness(&members)?;
+    Ok(request)
 }
 
 /// A violation visible from the request and answer alone.
@@ -181,6 +190,37 @@ mod tests {
         model.service_tiers = vec!["future".into(), "standard".into()];
         answer.models = vec![model, HeadChoice::new("b", "model")];
         (request, answer)
+    }
+
+    #[test]
+    fn head_choices_harness_parser_matches_select_grammar() {
+        let request = HeadChoicesRequest::new("runner").with_harness("alpha");
+        let value = serde_json::to_value(&request).unwrap();
+        assert_eq!(parse_head_choices_request(&value).unwrap(), request);
+        assert_eq!(
+            parse_head_choices_request(
+                &serde_json::json!({"runner_module": "runner", "harness": null})
+            )
+            .unwrap()
+            .harness,
+            None
+        );
+        assert_eq!(
+            serde_json::to_value(HeadChoicesRequest::new("runner")).unwrap(),
+            serde_json::json!({"runner_module": "runner"})
+        );
+        for harness in [
+            serde_json::json!(""),
+            serde_json::json!("Bad"),
+            serde_json::json!("a/b"),
+            serde_json::json!(false),
+        ] {
+            let refusal = parse_head_choices_request(
+                &serde_json::json!({"runner_module": "runner", "harness": harness}),
+            )
+            .unwrap_err();
+            assert_eq!(refusal.detail["field"], "harness");
+        }
     }
 
     #[test]
