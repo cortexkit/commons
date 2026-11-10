@@ -47,18 +47,28 @@ fn select_engine_declarations_are_atomic_and_use_every_per_engine_check() {
         .unwrap()
         .engines
         .is_empty());
-    let mut cases = vec![
-        (
-            json!({"engines":[good.clone(), good.clone()]}),
-            "duplicate_engine",
-            "engines[1].model".to_owned(),
-        ),
-        (
-            json!({"engines":[good.clone()], "runner":{}}),
-            "unknown_member",
-            "runner".to_owned(),
-        ),
-    ];
+    // The slot may carry members besides engines. Those are ignored; a missing
+    // engines member is still invalid_params at that path.
+    assert_eq!(
+        parse_engine_declarations(&json!({"engines":[good.clone()], "runner":{}}))
+            .unwrap()
+            .engines,
+        vec![engine()]
+    );
+    let missing = parse_engine_declarations(&json!({
+        "groups": ["jobs"],
+        "jobs_survive_restart": false,
+    }))
+    .unwrap_err();
+    assert_eq!(
+        (missing.code.as_str(), missing.field.as_str()),
+        ("invalid_params", "engines")
+    );
+    let mut cases = vec![(
+        json!({"engines":[good.clone(), good.clone()]}),
+        "duplicate_engine",
+        "engines[1].model".to_owned(),
+    )];
     for (field, value, code, path) in [
         ("formats", json!([]), "formats_empty", "formats"),
         (
@@ -135,6 +145,31 @@ fn select_engine_declarations_are_atomic_and_use_every_per_engine_check() {
     boundary["kind"] = json!("future_kind");
     boundary["latency_class"] = json!("future_latency");
     assert!(parse_engine_declarations(&json!({"engines":[boundary]})).is_ok());
+}
+
+#[test]
+fn describe_shaped_media_slot_decodes_every_engine() {
+    let speech = engine();
+    let picture = Engine::new(
+        Kind::Image,
+        "studio".into(),
+        "canvas".into(),
+        false,
+        vec!["image/png".into()],
+        LatencyClass::Batch,
+    );
+    let slot = json!({
+        "groups": ["jobs", "usage_feed"],
+        "jobs_survive_restart": false,
+        "engines": [
+            serde_json::to_value(&speech).unwrap(),
+            serde_json::to_value(&picture).unwrap(),
+        ],
+    });
+    assert_eq!(
+        parse_engine_declarations(&slot).unwrap().engines,
+        vec![speech, picture]
+    );
 }
 
 #[test]

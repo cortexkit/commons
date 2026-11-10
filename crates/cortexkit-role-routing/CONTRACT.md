@@ -1681,18 +1681,23 @@ Replacement params and answer:
   together with `select_engine`. It does not add fields to `route.select` or
   to the `routing/v1` declaration slot.
 - [pinned] `select_engine.declarations`: Engines are learned only from the
-  daemon catalog's `role_declarations["media-provider/v1"]` slot, whose shape
-  is `{engines: [...]}` using `cortexkit-role-media` 0.1's per-engine type.
-  Only nonce-verified entries count. The daemon relays slots unread. A valid,
-  nonce-verified slot identifies a media provider; older routers never read
-  this slot and retain that module's separate routing declaration.
+  daemon catalog's `role_declarations["media-provider/v1"]` slot, using
+  `cortexkit-role-media` 0.1's per-engine type. The slot is an object whose
+  `engines` member is required and lists the engines; a provider may also
+  carry describe's other members, and readers use `engines` and ignore any
+  other member. Only nonce-verified entries count. The daemon relays slots
+  unread. A valid, nonce-verified slot identifies a media provider; older
+  routers never read this slot and retain that module's separate routing
+  declaration.
 - [pinned] `select_engine.declarations_atomic`: `parse_engine_declarations`
-  rejects the whole slot on an unknown member or malformed entry, applying
-  none and reporting the problem on health. It applies the media checker's
-  per-engine checks: `duplicate_engine` for repeated `(kind, model)`,
-  `fact_too_long` for provider, model or list entries over 256 Unicode scalar
-  values, `local_realtime_engine`, `bias_limit_invalid` for a max below 1,
-  and `formats_empty`. Group-level describe checks do not apply to a slot.
+  rejects the whole slot when `engines` is absent or an engine entry is
+  malformed, including an unknown member of an engine, applying none and
+  reporting the problem on health. It applies the media checker's per-engine
+  checks: `duplicate_engine` for repeated `(kind, model)`, `fact_too_long` for
+  provider, model or list entries over 256 Unicode scalar values,
+  `local_realtime_engine`, `bias_limit_invalid` for a max below 1, and
+  `formats_empty`. Group-level
+  describe checks do not apply to a slot.
 - [pinned] `select_engine.request`: Params are `{consumer, kind, requirements,
   privacy, caller_local?}`. `consumer` follows §5.1's ownership rules:
   `unknown_consumer` and `consumer_not_owned` apply. No consumer `priced_only`,

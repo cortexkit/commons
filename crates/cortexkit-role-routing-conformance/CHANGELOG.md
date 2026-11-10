@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.9
+
+- Pin routing 0.7.9. `select_engine_slot_malformed` now expects a slot whose
+  members other than `engines` (such as describe's group facts) keep their
+  engines, and still expects a slot without `engines` to be refused whole.
+
 ## 0.10.8
 
 - Pin routing 0.7.8 and check that replacement detail accompanies only a cause,

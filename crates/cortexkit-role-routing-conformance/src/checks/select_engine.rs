@@ -169,10 +169,25 @@ impl<S: RoutingSubject> Suite<'_, S> {
                         .configure_catalog_declarations(&[module(MEDIA, vec![remote.clone(), bad])])
                         .await?;
                     no_engine(&route, &request(), "kind").await?;
-                    let mut slot = module(MEDIA, vec![remote]);
-                    slot.role_declarations
+                    // The slot belongs to the media contract. Members other
+                    // than `engines` are ignored, so describe's group facts
+                    // (or any later member) keep the engines; a slot without
+                    // `engines` is refused whole.
+                    let mut slot = module(MEDIA, vec![remote.clone()]);
+                    let raw = slot
+                        .role_declarations
                         .get_mut(engine::ROLE_DECLARATIONS_KEY)
-                        .unwrap()["unknown"] = json!(true);
+                        .unwrap();
+                    raw["groups"] = json!(["jobs"]);
+                    raw["jobs_survive_restart"] = json!(true);
+                    raw["unknown"] = json!(true);
+                    self.subject.configure_catalog_declarations(&[slot]).await?;
+                    selected(&route, &request()).await?;
+                    let mut slot = module(MEDIA, vec![remote]);
+                    slot.role_declarations.insert(
+                        engine::ROLE_DECLARATIONS_KEY.into(),
+                        json!({"groups": ["jobs"]}),
+                    );
                     self.subject.configure_catalog_declarations(&[slot]).await?;
                     no_engine(&route, &request(), "kind").await?;
                 }

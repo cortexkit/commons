@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.9
+
+- Read only `engines` from the `media-provider/v1` catalog slot and ignore
+  every other member. A provider can carry describe's group facts in that
+  slot without its engines being dropped. `engines` stays required, and each
+  engine is still validated strictly.
+- Contract: the media slot is an object whose required `engines` member lists
+  the engines; readers use `engines` and ignore any other member.
+
 ## 0.7.8
 
 - Type panel shortfall evidence, candidate rejection reasons, optional reset

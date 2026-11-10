@@ -74,13 +74,15 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   for repeated `(kind, model)`; `fact_too_long`; `bias_limit_invalid`;
   `formats_empty`; `local_realtime_engine`; `describe_too_large`.
 - [pinned] `media.describe.declaration`: The manifest slot
-  `role_declarations["media-provider/v1"]` declares the same engines as describe,
-  equal as sets keyed by `(kind, model)` with each member, including list order,
-  equal. Both list only the engines the provider can run on this machine, decided
-  when it starts (for example, no GPU engines on a machine without a supported
-  GPU). An engine it can't run is left out, never declared and then refused.
-  Realtime engines are remote and can confirm the token opening a vendor
-  session.
+  `role_declarations["media-provider/v1"]` is an object whose `engines` member
+  is required and lists the engines. A provider may also carry describe's other
+  members. Readers use `engines` and ignore any other member. The slot declares
+  the same engines as describe, equal as sets keyed by `(kind, model)` with
+  each member, including list order, equal. Both list only the engines the
+  provider can run on this machine, decided when it starts (for example, no GPU
+  engines on a machine without a supported GPU). An engine it can't run is left
+  out, never declared and then refused. Realtime engines are remote and can
+  confirm the token opening a vendor session.
 - [pinned] `media.engine.matching`: Submit matches its job kind; streams match
   stream_transcribe; tokens match realtime. MIME type/subtype compare ignoring
   case and every declared parameter must equal the request's parameter. PCM

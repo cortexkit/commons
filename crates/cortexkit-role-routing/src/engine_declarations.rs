@@ -46,15 +46,18 @@ impl std::fmt::Display for EngineDeclarationError {
 
 impl std::error::Error for EngineDeclarationError {}
 
+/// Read engines from the media contract's `media-provider/v1` catalog slot.
+///
+/// The slot belongs to the media contract. Routing reads only `engines`, which
+/// is required. The media provider may carry other members, including
+/// describe's group facts; those members are ignored. One malformed engine
+/// still rejects the whole slot.
 pub fn parse_engine_declarations(
     value: &Value,
 ) -> Result<EngineDeclarations, EngineDeclarationError> {
     let object = value
         .as_object()
         .ok_or_else(|| EngineDeclarationError::new("invalid_params", "$"))?;
-    if let Some(key) = object.keys().find(|key| key.as_str() != "engines") {
-        return Err(EngineDeclarationError::new("unknown_member", key));
-    }
     let engines = object
         .get("engines")
         .ok_or_else(|| EngineDeclarationError::new("invalid_params", "engines"))?;
