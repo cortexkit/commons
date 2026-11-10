@@ -100,6 +100,24 @@ impl<S: RoutingSubject> Suite<'_, S> {
             now_ms(),
         )
         .with_resets_at_ms(now_ms() + 300_000);
+        if name == "continue_credit_window_refused" {
+            request.exhausted.limit_window = "credit".into();
+            request.exhausted.resets_at_ms = None;
+            let refusal = refused(
+                &runner,
+                ops::ROUTE_ACCOUNT_FOR,
+                &serde_json::to_value(&request).unwrap(),
+                RefusalCode::InvalidRequest,
+                "credit is not a continuation quota window",
+            )
+            .await?;
+            if refusal.detail.get("field") != Some(&json!("exhausted.limit_window")) {
+                return Err(format!(
+                    "credit refusal did not name exhausted.limit_window: {refusal}"
+                ));
+            }
+            return Ok(Ending::Passed);
+        }
         self.subject
             .configure_continue_credentials(&credentials)
             .await?;

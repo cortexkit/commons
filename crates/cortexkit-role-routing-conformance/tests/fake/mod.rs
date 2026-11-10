@@ -2168,6 +2168,15 @@ impl FakeRoute {
             ));
         }
         let request = parse_account_observe_request(params)?;
+        if self.fault("account_observe_credit_without_reset_accepted")
+            && request.kind == ObserveKind::AccountLimitExhausted
+            && request.limit_window.as_deref() == Some("credit")
+        {
+            return Err(Refusal::invalid_request(
+                "resets_at_source",
+                "credit incorrectly requires a reset source",
+            ));
+        }
         let key = (self.principal().to_owned(), request.event_id.clone());
         if let Some(first) = state.observations.get(&key) {
             if !self.defects.observe_never_duplicate {

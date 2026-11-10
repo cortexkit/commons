@@ -2,6 +2,8 @@
 //! from a freshly reset and configured provider.
 
 mod continuation;
+#[cfg(test)]
+mod credit;
 mod decision_inputs;
 mod extensions;
 mod select_engine;
@@ -370,6 +372,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             }
             "account_observe_idempotent_per_event_id" => {
                 self.account_observe_idempotent_per_event_id().await
+            }
+            "account_observe_credit_without_reset_accepted" => {
+                self.account_observe_credit_without_reset_accepted().await
             }
             "tool_capabilities_matched_by_tag" => self.tool_capabilities_matched_by_tag().await,
             "parent_account_preference" => self.parent_account_preference(false).await,
@@ -1711,6 +1716,37 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 "the same event_id sent again answered observation {}, the first was {}",
                 again.observation.id, first.observation.id
             ));
+        }
+        Ok(())
+    }
+
+    async fn account_observe_credit_without_reset_accepted(&self) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let admission = "credit-wall-admission";
+        let admitted: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &Self::account_for(admission, "credit-wall-conversation", "model-a"),
+            "admission before a credit wall",
+        )
+        .await?;
+        let observed: AccountObserveAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_OBSERVE,
+            &json!({
+                "event_id": "credit-wall-event",
+                "kind": "account_limit_exhausted",
+                "admission_id": admission,
+                "served_account_id": admitted.account.account_id,
+                "credential_id": admitted.account.credential_id,
+                "observed_at_ms": now_ms(),
+                "limit_window": "credit"
+            }),
+            "credit wall without reset evidence or retry hint",
+        )
+        .await?;
+        if observed.observation.duplicate {
+            return Err("the first credit observation answered duplicate true".into());
         }
         Ok(())
     }

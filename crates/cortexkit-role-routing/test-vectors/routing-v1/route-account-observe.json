@@ -31,6 +31,16 @@
       }
     },
     {
+      "name": "credit_wall_without_reset_evidence",
+      "params": {
+        "event_id": "credit-wall-1",
+        "kind": "account_limit_exhausted",
+        "served_account_id": "account-copper",
+        "credential_id": "credential-copper",
+        "limit_window": "credit"
+      }
+    },
+    {
       "name": "unknown_kind_kept_as_advisory",
       "params": {
         "event_id": "runner-log-3:120",

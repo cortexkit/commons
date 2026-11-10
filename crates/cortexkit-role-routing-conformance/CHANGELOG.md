@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.10
+
+- Pin routing 0.7.10. Check that a credit exhaustion observation needs no
+  reset evidence or retry hint, while continuation still refuses `credit`
+  by `exhausted.limit_window`.
+- Reject deliberately faulty routers for both checks by name.
+
 ## 0.10.9
 
 - Pin routing 0.7.9. `select_engine_slot_malformed` now expects a slot whose

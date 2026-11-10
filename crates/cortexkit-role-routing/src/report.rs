@@ -237,9 +237,9 @@ pub enum EligibilityScope {
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RefusalClass {
-    /// The provider refused this credential for any use: an entitlement or
-    /// attestation refusal, or billing, credit or quota exhausted on the
-    /// account. The router blocks the credential.
+    /// The provider refused this credential for any use, such as an entitlement
+    /// or attestation refusal. The router blocks the credential. A credit wall
+    /// with a still-valid credential is an account exhaustion observation instead.
     CredentialRefused,
     /// The request was over a size limit. Requires `request_input_tokens`;
     /// the router records a refusal for that request size, not for the

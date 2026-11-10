@@ -92,6 +92,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("account_for_tier_available", "account_for records fast and pins an account whose plan includes it"),
     check("account_for_tier_fallback", "account_for steps ultrafast down to fast then standard, recording each choice"),
     check("account_for_tier_undeclared", "a caller sends no tier to a non-declaring router and receives standard admission"),
+    check("continue_credit_window_refused", "account_continue: credit is refused by exhausted.limit_window because continuation is quota-only"),
     check("continue_offer_excludes_exhausted_account", "account_continue: an offer never names the exhausted account"),
     check("continue_offer_preserves_provider", "account_continue: the offered credential has the previous provider"),
     check("continue_offer_preserves_auth_method", "account_continue: the offered credential has the previous auth method"),
@@ -200,6 +201,10 @@ pub const CHECKS: &[CheckSpec] = &[
     check(
         "account_observe_idempotent_per_event_id",
         "route.account_observe sent twice with one event_id answers duplicate false then duplicate true, with the same observation id",
+    ),
+    check(
+        "account_observe_credit_without_reset_accepted",
+        "route.account_observe accepts account_limit_exhausted with limit_window credit and no reset evidence or retry hint",
     ),
     check(
         "tool_capabilities_matched_by_tag",
@@ -316,7 +321,8 @@ pub const NARROWINGS: &[&str] = &[
     "Tool provider reachability is configured for every project at once, so the kit does not check that reachability is read for the scoped project.",
     "Affinity is checked with one failure outcome (failed); the other failure outcomes, and the rule that a cancelled or completed report keeps the preference, are not checked.",
     "account_observe idempotency is checked for one runner; the kit does not check that another runner's equal event_id is a separate event.",
-    "The kit does not check that the runner ops refuse a caller that is not a runner module, nor the account_for refusals other than admission_conflict, unknown_decision and invalid_request for malformed pools, undeclared continuation mode (field: mode), and a changed continuation question under a reused selection id (field: selection_id).",
+    "Credit checks cover observation acceptance without reset evidence and refusal as a continuation window, not the one-hour fence cap, single probe, quota-reading isolation, or continued credential validity.",
+    "The kit does not check that the runner ops refuse a caller that is not a runner module, nor the account_for refusals other than admission_conflict, unknown_decision and invalid_request for malformed pools, undeclared continuation mode (field: mode), credit continuation windows (field: exhausted.limit_window), and a changed continuation question under a reused selection id (field: selection_id).",
     "Eligibility is checked with model scope and another model on the same account. Account scope cannot distinguish a legitimate account-wide eligibility fence from an incorrect exhaustion/hold with the current hooks, so that distinction is not checked.",
     "Parent preference and fallback are checked on fresh admit requests; priority against an existing child pin, requested_account, renew or reassign is not checked.",
     "Pool isolation, disabled-window omission by runners, and request-size fencing policy are not exercised by the current catalog and provider hooks; vectors check the wire members only.",

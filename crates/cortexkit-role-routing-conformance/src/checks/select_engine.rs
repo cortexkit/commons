@@ -6,7 +6,7 @@ use crate::{wire::select_engine as engine, EngineFacts};
 #[cfg(test)]
 #[allow(dead_code)]
 #[path = "../../tests/fake/mod.rs"]
-mod fake;
+pub(super) mod fake;
 
 const MEDIA: &str = "example-media";
 const OTHER_MEDIA: &str = "other-media";

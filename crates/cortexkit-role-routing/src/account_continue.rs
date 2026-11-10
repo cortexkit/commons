@@ -267,3 +267,39 @@ fn parse_exhausted(value: &Value) -> Result<ExhaustedAccount, Refusal> {
         observed_at_ms: members.required("observed_at_ms")?,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::errors::RefusalCode;
+    use serde_json::json;
+
+    #[test]
+    fn exhausted_credit_is_not_a_continuation_quota_window() {
+        let refusal = parse_exhausted(&json!({
+            "credential_id": "credential-copper",
+            "account": "account-copper",
+            "limit_window": "credit",
+            "observed_at_ms": 100
+        }))
+        .unwrap_err();
+        assert_eq!(refusal.code, RefusalCode::InvalidRequest);
+        assert_eq!(refusal.detail["field"], "limit_window");
+    }
+
+    #[test]
+    fn exhausted_quota_windows_keep_optional_reset_evidence() {
+        for window in ["five_hour", "seven_day"] {
+            let exhausted = parse_exhausted(&json!({
+                "credential_id": "credential-copper",
+                "account": "account-copper",
+                "limit_window": window,
+                "observed_at_ms": 100
+            }))
+            .unwrap();
+            assert_eq!(exhausted.limit_window, window);
+            assert_eq!(exhausted.resets_at_ms, None);
+            assert_eq!(exhausted.retry_after_s, None);
+        }
+    }
+}

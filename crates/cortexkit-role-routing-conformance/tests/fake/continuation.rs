@@ -19,6 +19,14 @@ impl FakeRoute {
         if self.defects.continue_undeclared {
             describe = describe.with_capability("account_continue");
         }
+        if self.fault("continue_credit_window_refused")
+            && params["exhausted"]["limit_window"] == "credit"
+        {
+            return to_value(ContinueAnswer::Hold(ContinueHold::new(
+                "account_pool_exhausted",
+                json!({}),
+            )));
+        }
         let request = parse_continue_request(params, &describe)?;
         if !self.continue_control && self.defects.continue_undeclared {
             return to_value(ContinueAnswer::Hold(ContinueHold::new(

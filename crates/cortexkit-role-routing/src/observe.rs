@@ -129,6 +129,8 @@ pub struct AccountObserveRequest {
     /// unknown names included. Absent means none were received.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub headers: Option<BTreeMap<String, String>>,
+    /// The quota window, or `credit` for an account-level spending or credit wall
+    /// on a still-valid credential. Credit observations need no reset evidence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limit_window: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -495,6 +497,50 @@ mod tests {
         let refusal = result.unwrap_err();
         assert_eq!(refusal.code, RefusalCode::InvalidRequest);
         assert_eq!(refusal.detail["field"], field);
+    }
+
+    #[test]
+    fn account_limit_exhausted_credit_accepts_no_reset_fields() {
+        let params = json!({
+            "event_id": "credit-wall-1",
+            "kind": "account_limit_exhausted",
+            "served_account_id": "account-copper",
+            "credential_id": "credential-copper",
+            "limit_window": "credit"
+        });
+        for groups in [&[][..], &["observe_backoff"][..]] {
+            let request = parse_account_observe_request_serving(&params, groups).unwrap();
+            assert_eq!(request.kind, ObserveKind::AccountLimitExhausted);
+            assert_eq!(request.limit_window.as_deref(), Some("credit"));
+            assert_eq!(request.resets_at_ms, None);
+            assert_eq!(request.resets_at_source, None);
+            assert_eq!(request.retry_at_ms, None);
+            assert_eq!(serde_json::to_value(request).unwrap(), params);
+        }
+        assert_eq!(
+            serde_json::to_value(parse_account_observe_request(&params).unwrap()).unwrap(),
+            params
+        );
+    }
+
+    #[test]
+    fn account_limit_exhausted_quota_reset_evidence_stays_optional() {
+        for window in ["five_hour", "seven_day"] {
+            for reset in [None, Some(1_900_000_000_000_u64)] {
+                let mut params = json!({
+                    "event_id": "quota-wall-1",
+                    "kind": "account_limit_exhausted",
+                    "limit_window": window
+                });
+                if let Some(reset) = reset {
+                    params["resets_at_ms"] = json!(reset);
+                }
+                let request = parse_account_observe_request(&params).unwrap();
+                assert_eq!(request.limit_window.as_deref(), Some(window));
+                assert_eq!(request.resets_at_ms, reset);
+                assert_eq!(request.resets_at_source, None);
+            }
+        }
     }
 
     #[test]

@@ -825,7 +825,7 @@ pool?, eligibility?, request_input_tokens?, refusal_class?}`.
 
   | Value | Meaning | Router use |
   |---|---|---|
-  | `credential_refused` | The provider refused this credential for any use: an entitlement or attestation refusal, or billing, credit or quota exhausted on the account. | Blocks the credential. |
+  | `credential_refused` | The provider refused this credential for any use: an entitlement or attestation refusal, or billing, credit or quota exhausted on the account. A subscription's spending wall reported as §9.3's `credit` is not this. | Blocks the credential. |
   | `request_too_large` | The request was over the provider's size limit. Requires `request_input_tokens`. | Records a refusal for that request size, not for the account. |
 
   It goes only with outcome `refused` or `failed`, and never with
@@ -1103,6 +1103,8 @@ The answer (`account::AccountForAnswer`):
   is the original observation time in Unix milliseconds. `resets_at_ms` is
   Unix milliseconds, and `retry_after_s` is a duration in seconds. The router
   records this exhaustion evidence too, not merely the selection request.
+  This runner-supplied record is only for quota exhaustion, not arbitrary
+  observations: a `credit` wall (§9.3) does not trigger continuation.
 - [pinned] Required ids are non-empty opaque strings. `selection_id` has
   the same syntax as `admission_id`: at most 128 characters, no parsing or
   case folding. `admission_id` and `conversation_key` retain §9.1's bounds.
@@ -1180,6 +1182,13 @@ What a runner saw on an account, so the provider's headroom stays current.
   `credential_id`, `view_digest`, `observed_at_ms` (the original
   observation time, never a forwarding time), `upstream_origin`,
   `limit_window`, `resets_at_ms`, `resets_at_source`.
+- [pinned] For `account_limit_exhausted`, `limit_window` can name a quota
+  window (for example, `five_hour` or `seven_day`) or `credit`, an
+  account-level spending or credit wall (§9.3). For `credit`,
+  `resets_at_ms`, `resets_at_source` and
+  retry hints (such as Retry-After) remain optional; quota-window reset
+  evidence rules are unchanged. Observation readers must accept `credit`
+  before runners send it (readers first); it is not a continuation window.
 - [pinned] `upstream_origin` (`observe::UpstreamOrigin`) is a closed set
   naming where the observation's headers came from. The router uses it for
   one decision: whether a header reading counts as evidence that the account
@@ -1261,8 +1270,11 @@ What a runner saw on an account, so the provider's headroom stays current.
   a router-chosen, bounded re-probe horizon passes. The router documents the
   horizon; the next selection after it may try the credential again. A later
   `credential_refused` for the same credential extends the block and never
-  shortens it. A refusal such as an exhausted prepaid balance or a revoked key does not
-  clear by waiting, so it is never treated as a resettable limit.
+  shortens it. A refusal such as an exhausted prepaid balance or a revoked
+  key does not clear by waiting, so it is never treated as a resettable
+  limit. A subscription's spending or credit wall, which renews on the same
+  credential, uses `account_limit_exhausted` with `limit_window: "credit"`
+  instead (§9.3).
 - [pinned] On a declaring router, resolve `ObserveArm` from trusted state and
   call `observe::check_observe_authorization(arm, request)`:
   - `Runner`: the caller holds the admission or is otherwise authorized by
@@ -1299,6 +1311,15 @@ What a runner saw on an account, so the provider's headroom stays current.
   | release | `route.account_observe`, `kind: "run_finished"` |
   | block (stop allocating an account or credential) | `route.account_observe`, `account_limit_exhausted` or, with their groups, `transient_backoff` or `credential_refused` |
 
+- [pinned] `account_limit_exhausted` with `limit_window: "credit"` reports
+  a subscription account's spending or credit wall with no known reset. It
+  clears when credits renew or the user tops up, using the same valid
+  credential. An exhausted prepaid API-key balance is not this; it stays
+  `credential_refused`. Routing treats it as a non-quota account fence for at most one hour, then
+  allows one probe. A quota reading never lifts this fence: a credit wall
+  can coexist with an unused quota window. It is never a credential refusal,
+  since the credential remains valid. Readers must accept `credit` before
+  runners send it (readers first).
 - [pinned] A runner declaring `routed_accounts` in its runner-role describe
   lists the sign-in methods it admits, renews and releases itself. Entries
   use §1.2's `auth_method` spelling and token grammar. The list is non-empty,

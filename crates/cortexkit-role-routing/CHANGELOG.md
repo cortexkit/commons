@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.10
+
+- Define observation `limit_window: "credit"` for a subscription account's
+  spending or credit wall on a still-valid credential: a non-quota fence for at most
+  one hour, then one probe, never lifted by quota readings. Deploy readers
+  before runners send it.
+- Keep observation reset evidence optional and continuation quota-only.
+  Pin credit observations without reset fields with unit coverage and a vector.
+
 ## 0.7.9
 
 - Read only `engines` from the `media-provider/v1` catalog slot and ignore
