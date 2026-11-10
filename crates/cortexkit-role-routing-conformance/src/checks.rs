@@ -7,6 +7,7 @@ mod credit;
 mod decision_inputs;
 mod extensions;
 mod harness_limits;
+mod requires_wire_api;
 mod select_engine;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -241,6 +242,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
     /// Run the check named `name` from a fresh provider.
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         self.fresh().await?;
+        if name == "runner_requires_wire_api" {
+            return self.requires_wire_api_check(name).await;
+        }
         if name.starts_with("harness_limits_") {
             return self.harness_limits_check(name).await;
         }

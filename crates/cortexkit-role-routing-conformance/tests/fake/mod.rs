@@ -63,6 +63,7 @@ const DECISION_TTL_MS: u64 = 600_000;
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
     pub runner_route_facts_unsupported: bool,
+    pub route_wire_api_unsupported: bool,
     pub ignore_questions: bool,
     pub ignore_max_cost_usd: bool,
     pub engine_fault: &'static str,
@@ -266,6 +267,7 @@ struct State {
     runner_declarations:
         BTreeMap<String, cortexkit_role_routing_conformance::wire::RunnerDeclaration>,
     runner_route_facts: Vec<cortexkit_role_routing_conformance::RunnerRouteFacts>,
+    route_wire_apis: HashMap<String, String>,
     model_input_facts: HashMap<String, cortexkit_role_routing_conformance::ModelInputFacts>,
     engine: select_engine::EngineState,
     extension_answers: HashMap<String, Value>,
@@ -627,6 +629,25 @@ impl RoutingSubject for FakeSubject {
         Ok(true)
     }
 
+    async fn configure_route_wire_api(
+        &self,
+        route_key: &str,
+        endpoint: Option<&str>,
+    ) -> Result<bool, String> {
+        if self.defects.route_wire_api_unsupported {
+            return Ok(false);
+        }
+        let mut state = self.state.lock().unwrap();
+        if let Some(endpoint) = endpoint {
+            state
+                .route_wire_apis
+                .insert(route_key.into(), endpoint.into());
+        } else {
+            state.route_wire_apis.remove(route_key);
+        }
+        Ok(true)
+    }
+
     async fn configure_engine_facts(
         &self,
         facts: &[cortexkit_role_routing_conformance::EngineFacts],
@@ -977,6 +998,14 @@ impl FakeRoute {
         let Some(declaration) = state.runner_declarations.get(module) else {
             return true;
         };
+        if !self.fault("runner_requires_wire_api")
+            && !declaration.admits_row(
+                state.route_wire_apis.contains_key(&model.route_key())
+                    && !(self.fault("requires_wire_api_stale") && model.model == "model-b"),
+            )
+        {
+            return false;
+        }
         let mut declaration = declaration.clone();
         if self.fault("harness_limits_pairs_narrow")
             || self.fault("harness_limits_providers_narrow")

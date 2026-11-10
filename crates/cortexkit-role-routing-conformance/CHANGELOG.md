@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.15
+
+- Pin routing `=0.7.13`. Add `runner_requires_wire_api`: select and served
+  head choices exclude a row without a served `wire.api` for a runner that
+  requires it, then serving the endpoint makes the row selectable.
+- Add optional `configure_route_wire_api`; adapters unable to set or remove
+  the fact report the case as not applicable, naming the missing hook. Pair
+  facts use shared wire API and authentication spellings.
+- Exercise the check against correct and deliberately incorrect routers,
+  including head-choice overoffers and stale endpoint availability.
+
 ## 0.10.14
 
 - Pin `cortexkit-role-routing` `=0.7.12` (media engine identity includes the

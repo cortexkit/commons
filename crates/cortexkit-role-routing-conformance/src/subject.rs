@@ -339,6 +339,16 @@ pub trait RoutingSubject: Send + Sync {
         Ok(false)
     }
 
+    /// Set or remove a catalog row's served `wire.api` endpoint fact, regardless
+    /// of its provenance. Return false if the adapter cannot configure that fact.
+    async fn configure_route_wire_api(
+        &self,
+        _route_key: &str,
+        _endpoint: Option<&str>,
+    ) -> Result<bool, String> {
+        Ok(false)
+    }
+
     /// Replace question-limit and input-price facts for the current catalog.
     /// Return false when this fixture hook is unavailable; the checks then
     /// report not applicable rather than passing without exercising a rule.

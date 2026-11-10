@@ -93,6 +93,59 @@ fn absent_account_choice_is_not_serialized_as_false() {
 }
 
 #[test]
+fn requires_wire_api_parses_true_false_absent_and_null() {
+    for value in [
+        Some(json!(true)),
+        Some(json!(false)),
+        None,
+        Some(Value::Null),
+    ] {
+        let mut runner = json!({"pairs": [pair()]});
+        if let Some(value) = &value {
+            runner["requires_wire_api"] = value.clone();
+        }
+        let parsed = parse_consumer_declarations(&slot(runner)).unwrap();
+        let runner = parsed.runner.unwrap();
+        assert_eq!(runner.requires_wire_api(), value == Some(json!(true)));
+        let encoded = serde_json::to_value(&runner).unwrap();
+        if runner.requires_wire_api() {
+            assert_eq!(encoded["requires_wire_api"], true);
+        } else {
+            assert!(encoded.get("requires_wire_api").is_none());
+        }
+    }
+}
+
+#[test]
+fn requires_wire_api_malformed_refuses_the_declaration_by_path() {
+    for value in [json!("true"), json!(1), json!([]), json!({})] {
+        invalid(
+            slot(json!({"pairs": [pair()], "requires_wire_api": value})),
+            "runner.requires_wire_api",
+        );
+    }
+}
+
+#[test]
+fn requires_wire_api_filters_only_rows_without_served_api() {
+    let runner = RunnerDeclaration::new(vec![RunnerPair::new("chat", "key")]);
+    assert!(!runner.requires_wire_api());
+    assert!(runner.admits_row(false));
+    assert!(runner.admits_row(true));
+
+    let runner = runner.with_requires_wire_api(true);
+    assert!(
+        !runner.admits_row(false),
+        "a missing served wire.api must exclude the row"
+    );
+    assert!(runner.admits_row(true));
+
+    let runner = runner.with_requires_wire_api(false);
+    assert!(runner.admits_row(false));
+    assert!(runner.admits_row(true));
+}
+
+#[test]
 fn runner_pair_shapes_are_rejected_by_path() {
     for (runner, field) in [
         (json!([]), "runner"),

@@ -170,6 +170,14 @@ restricts it to credentials for those providers; absence (including
 declarations with vault credentials and catalog routes; declarations grant no
 credential access. See contract §1.2 for validation and matching rules.
 
+`RunnerDeclaration::with_requires_wire_api(true)` declares that the runner
+opens rows only through their served `wire.api`. Routing excludes rows without
+that fact from select, panels and head choices; absence or false leaves matching
+unchanged. `requires_wire_api()` reads the flag, and `admits_row(bool)` checks
+one row's endpoint availability without reading the catalog. Upgrade the router
+to 0.7.13 or later before declaring the member: older strict parsers drop the
+runner. Malformed values refuse the declaration, except null means absence.
+
 Runners optionally declare `harnesses` (1–16 unique program tokens), a
 `default_harness` listed there, and `starts_sessions` (true by default and
 omitted when true). Use `RunnerDeclaration::with_harnesses`,

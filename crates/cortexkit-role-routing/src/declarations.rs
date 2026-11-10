@@ -229,6 +229,13 @@ pub struct RunnerDeclaration {
         skip_serializing_if = "std::ops::Not::not"
     )]
     pub follows_account_choice: bool,
+    /// True when the runner opens rows only through their served `wire.api`.
+    #[serde(
+        default,
+        deserialize_with = "null_default",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub requires_wire_api: bool,
     #[serde(
         default,
         deserialize_with = "null_default",
@@ -275,6 +282,7 @@ impl Default for RunnerDeclaration {
         Self {
             pairs: Vec::new(),
             follows_account_choice: false,
+            requires_wire_api: false,
             tool_capabilities: Vec::new(),
             standing_limits: None,
             harnesses: None,
@@ -292,6 +300,20 @@ impl RunnerDeclaration {
             pairs,
             ..Self::default()
         }
+    }
+
+    pub fn with_requires_wire_api(mut self, requires_wire_api: bool) -> Self {
+        self.requires_wire_api = requires_wire_api;
+        self
+    }
+
+    pub fn requires_wire_api(&self) -> bool {
+        self.requires_wire_api
+    }
+
+    /// Whether this runner admits one row's endpoint availability; reads no catalog.
+    pub fn admits_row(&self, row_serves_wire_api: bool) -> bool {
+        !self.requires_wire_api() || row_serves_wire_api
     }
 
     pub fn with_harnesses(mut self, harnesses: Vec<String>) -> Self {
@@ -595,6 +617,7 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
         &[
             "pairs",
             "follows_account_choice",
+            "requires_wire_api",
             "tool_capabilities",
             "standing_limits",
             "harnesses",
@@ -659,6 +682,12 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
         .is_some_and(|value| !value.is_null() && !value.is_boolean())
     {
         return Err(invalid("runner.follows_account_choice".into()));
+    }
+    if runner
+        .get("requires_wire_api")
+        .is_some_and(|value| !value.is_null() && !value.is_boolean())
+    {
+        return Err(invalid("runner.requires_wire_api".into()));
     }
     if let Some(value) = runner
         .get("tool_capabilities")

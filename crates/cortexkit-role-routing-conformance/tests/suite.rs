@@ -111,7 +111,7 @@ async fn routing_070_faulty_routers_fail_each_case_by_name() {
                         && name.starts_with("panel_"))
                     || (*name == "head_choices_billing_valid"
                         && matches!(*failed,
-                            "harness_limits_pairs_narrow" | "harness_limits_providers_narrow" | "harness_limits_invalid_falls_back"))
+                             "harness_limits_pairs_narrow" | "harness_limits_providers_narrow" | "harness_limits_invalid_falls_back" | "runner_requires_wire_api"))
                     // An invalid role.describe also fails the checks that
                     // validate role.describe before testing anything else.
                     || (*name == "observe_credential_refused_requires_backoff"

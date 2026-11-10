@@ -82,8 +82,16 @@ preserving existing adapters.
     reported as not applicable, not passed. With it, harness offers must
     exclude that model and be a subset of the effective allowed set; the kit
     does not require the router to offer every otherwise runnable model.
-    The default hook returns an unsupported error for non-empty input, so
-    older adapters must implement it to pass the new declaration checks;
+  - Optional `configure_route_wire_api(route_key, endpoint)`: set the catalog
+    row's served `wire.api` fact to `Some(endpoint)`, or remove it with `None`,
+    independently of `wire.family` and the fact's provenance. The default
+    returns `Ok(false)`. `runner_requires_wire_api` is not applicable and names
+    the missing hook if either this hook or `configure_runner_route_facts` is
+    unsupported. Otherwise it checks select and, when served, head choices
+    exclude the row without an endpoint, then serves that endpoint and checks
+    the row becomes selectable. Head choices may remain an admission subset.
+    Declare `requires_wire_api` only after the router runs routing 0.7.13 or
+    later; older strict parsers drop the runner;
   - `pin_for_project(project, consumer, pin)`: an operator pin that applies
     to the consumer's selects within the project;
   - `cool_down(route_key, until_ms)`: the route serves nothing before then.

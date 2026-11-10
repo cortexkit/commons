@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.13
+
+- Add runner-level `requires_wire_api`, defaulting to false, with a builder,
+  getter and `admits_row` helper. Routing must exclude rows without a served
+  `wire.api` at pair matching for select, panels and head choices when true.
+  Non-boolean, non-null values refuse the declaration by field path.
+- Readers first: runners declare the member only after routers run 0.7.13;
+  older parsers refuse unknown members and drop the runner.
+- Clarify that account quota and credit walls go through
+  `route.account_observe`, not `route.report`, which has no `limit_window`.
+
 ## 0.7.12
 
 - `parse_engine_declarations` keys `duplicate_engine` by `(kind, provider, model)`,

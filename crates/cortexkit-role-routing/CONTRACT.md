@@ -96,7 +96,7 @@ a module plays.
 ### 1.2 Runner matching declarations
 
 - [pinned] `runner` has the shape `{pairs: [{wire_api, auth_method}],
-  follows_account_choice?: bool, tool_capabilities?: [string],
+  follows_account_choice?: bool, requires_wire_api?: bool, tool_capabilities?: [string],
   standing_limits?: {explicit_providers?: [string]}, harnesses?: [token],
   harness_limits?: {<harness>: {pairs?: [{wire_api, auth_method}], explicit_providers?: [token]}},
   default_harness?: token, starts_sessions?: bool}` (`RunnerDeclaration`).
@@ -164,6 +164,19 @@ a module plays.
 - [pinned] `follows_account_choice` defaults to `false`. When `true`, the
   runner module calls `route.account_for` and uses its answer. Absence or
   `false` makes no such promise; a routing provider must not infer it.
+- [pinned] `requires_wire_api` defaults to `false`. When `true`, the runner
+  opens a catalog row only through its served `wire.api`, so routing excludes
+  rows without that fact at runner-pair matching for `route.select`, panel
+  selection and `route.head_choices`. A served fact is present with a value,
+  regardless of its `from`; `wire.family` and `wire.npm` do not substitute for
+  `wire.api`. Absent or `false` preserves matching without this requirement.
+  This is a runner-level requirement, independent of narrow-only
+  `harness_limits`. A non-boolean, non-null value refuses the whole declaration
+  as `runner.requires_wire_api`, like other boolean members; the raw
+  `harness_limits` fallback is a separate exception.
+- [pinned] Readers first: routers before 0.7.13 refuse unknown
+  runner-declaration members and drop the runner, so a runner declares
+  `requires_wire_api` only after its router runs 0.7.13 or later.
 - [pinned] `harnesses`, when present, lists the exact programs the runner
   hosts sessions in: 1–16 unique tokens using the pair token grammar above.
   Empty is refused as `runner.harnesses`, not read as "no program". Invalid
@@ -228,7 +241,7 @@ a module plays.
   `standing_limits: {}` also means no limit and retains its empty object
   when serialized.
 - [pinned] Optional runner members follow §2's null-as-absence rule.
-  Absent `runner`, false `follows_account_choice`, and empty
+  Absent `runner`, false `follows_account_choice` and `requires_wire_api`, and empty
   `tool_capabilities` are omitted when serialized. Absent `harness_limits`, `harnesses` and
   `default_harness`, and true `starts_sessions`, are omitted too. Slots without
   the new program members retain their exact 0.4.0 bytes, including an
@@ -822,6 +835,10 @@ This section binds a provider declaring `select_hold_control` (§4).
 `{decision_id, outcome, runner_code?, credential_id?, reset_at_ms?, usage?,
 pool?, eligibility?, request_input_tokens?, refusal_class?}`.
 
+- [pinned] `route.report` has no `limit_window` member: an account limit wall
+  (a quota window or a `credit` wall) is reported only through
+  `route.account_observe` with `account_limit_exhausted` (§9.3), and a runner
+  does not report it through `route.report`.
 - [pinned] `outcome` is an open set: `completed`, `refused`, `failed`,
   `timed_out`, `cancelled`. `refused`, `failed` and `timed_out` are
   failures; `completed` and `cancelled` are not. An unknown outcome is kept
