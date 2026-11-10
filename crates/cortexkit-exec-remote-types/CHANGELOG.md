@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.21
+
+- Add optional `Accepted.placement` with `with_placement` and an accessor, plus
+  `Placement` with an open `provider` string and optional server `host` name.
+  Placement is display-only, never an input to routing, retry or any decision.
+  Unknown providers are preserved verbatim; absent placement means not reported,
+  including every older runner. Absent placement and host fields are omitted.
+- Cover placement round-trips with both members, provider only and absent,
+  older-runner decoding, and unknown provider preservation.
+
 ## 0.2.20
 
 - Add optional `Progress.job_id` with `with_job_id` and an accessor, keeping

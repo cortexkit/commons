@@ -135,6 +135,17 @@ existing expired-replay and outcome rules apply unchanged, including
 below). There is no new gap mechanism. Expired job history is not a refusal and
 must never cause a caller to start the command again.
 
+## Placement display
+
+`Accepted.placement` is optional, display-only placement. Never use it as an
+input to routing, retry or any decision. `None` means the runner didn't report
+a placement, which includes every older runner. The field is omitted when absent.
+
+`Placement.provider` is an open string: the defined values are `"first_party"`
+(the fleet's own servers) and `"overflow"` (rented overflow capacity); readers
+show unknown values verbatim. `Placement.host` is the server's host name,
+absent and omitted when not reported (overflow placements don't report one).
+
 ## Progress before acceptance
 
 These types define the progress record's shape and check its `detail` syntax.

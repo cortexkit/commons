@@ -1520,6 +1520,86 @@ fn accepted_env_not_forwarded_is_optional_and_round_trips() {
 }
 
 #[test]
+fn accepted_placement_with_host_round_trips() {
+    let accepted = Accepted::new(job_id(), 3)
+        .with_placement(Placement::new("first_party").with_host("build-1.example"));
+    let raw = serde_json::to_value(&accepted).unwrap();
+    assert_eq!(
+        raw,
+        json!({
+            "job_id": job_id(), "queue_position": 3,
+            "placement": {"provider": "first_party", "host": "build-1.example"}
+        })
+    );
+    let back: Accepted = serde_json::from_value(raw).unwrap();
+    assert_eq!(back, accepted);
+    let placement = back.placement().unwrap();
+    assert_eq!(placement.provider(), "first_party");
+    assert_eq!(placement.host(), Some("build-1.example"));
+}
+
+#[test]
+fn accepted_placement_provider_only_round_trips() {
+    let accepted = Accepted::new(job_id(), 3).with_placement(Placement::new("overflow"));
+    let raw = serde_json::to_value(&accepted).unwrap();
+    assert_eq!(
+        raw,
+        json!({
+            "job_id": job_id(), "queue_position": 3,
+            "placement": {"provider": "overflow"}
+        })
+    );
+    let back: Accepted = serde_json::from_value(raw).unwrap();
+    assert_eq!(back, accepted);
+    let placement = back.placement().unwrap();
+    assert_eq!(placement.provider(), "overflow");
+    assert_eq!(placement.host(), None);
+}
+
+#[test]
+fn accepted_placement_absent_round_trips() {
+    let accepted = Accepted::new(job_id(), 3);
+    assert_eq!(accepted.placement(), None);
+    let raw = serde_json::to_value(&accepted).unwrap();
+    assert_eq!(raw, json!({"job_id": job_id(), "queue_position": 3}));
+    let back: Accepted = serde_json::from_value(raw).unwrap();
+    assert_eq!(back, accepted);
+    assert_eq!(back.placement(), None);
+}
+
+#[test]
+fn accepted_placement_from_older_runner_is_not_reported() {
+    let accepted: Accepted = serde_json::from_value(json!({
+        "job_id": job_id(), "queue_position": 3,
+        "env_not_forwarded": ["TOKEN"], "network": "outbound", "platform": "linux"
+    }))
+    .unwrap();
+    assert_eq!(accepted.placement(), None);
+    assert_eq!(accepted.network(), Some(&Network::Outbound));
+    assert_eq!(accepted.platform(), Some(&Platform::Linux));
+}
+
+#[test]
+fn accepted_placement_unknown_provider_is_preserved() {
+    let accepted: Accepted = serde_json::from_value(json!({
+        "job_id": job_id(), "queue_position": 3,
+        "placement": {"provider": "future_provider", "future_hint": true},
+        "future_field": true
+    }))
+    .unwrap();
+    let placement = accepted.placement().unwrap();
+    assert_eq!(placement.provider(), "future_provider");
+    assert_eq!(placement.host(), None);
+    assert_eq!(
+        serde_json::to_value(&accepted).unwrap(),
+        json!({
+            "job_id": job_id(), "queue_position": 3,
+            "placement": {"provider": "future_provider"}
+        })
+    );
+}
+
+#[test]
 fn refusal_hints_match_vectors_and_builders() {
     let terminal = TerminalRecord::new(
         job_id(),

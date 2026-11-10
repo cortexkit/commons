@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.16**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.21**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -162,6 +162,20 @@ must cancel the job and must not trust its result unless `Accepted.platform`
 exactly matches the request. Unknown or unavailable platforms are refused before
 start with `RefusalReason::PlatformUnsupported` (`"platform_unsupported"`); the
 requested platform's wire name is reported in `refusal_detail`.
+
+### Placement display
+
+`Accepted.placement` is optional, display-only placement. Never use it as an
+input to routing, retry or any decision. `None` means the runner didn't report
+a placement, which includes every older runner. The field is omitted when absent.
+Use `Accepted::with_placement(Placement::new(provider).with_host(host))` to report
+both members, or omit `with_host` when the host is not reported;
+`Accepted::placement` returns the optional report.
+
+`Placement.provider` is an open string: the defined values are `"first_party"`
+(the fleet's own servers) and `"overflow"` (rented overflow capacity); readers
+show unknown values verbatim. `Placement.host` is the server's host name,
+absent and omitted when not reported (overflow placements don't report one).
 
 ### Returned files
 

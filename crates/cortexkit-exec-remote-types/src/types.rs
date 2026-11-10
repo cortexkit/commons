@@ -2243,6 +2243,47 @@ impl Started {
     }
 }
 
+/// Display-only placement of a remote job. Never use placement as an input to
+/// routing, retry or any decision.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Placement {
+    /// Open provider string: `"first_party"` means the fleet's own servers and
+    /// `"overflow"` means rented overflow capacity. Readers show unknown values
+    /// verbatim.
+    pub provider: String,
+    /// Server's host name, absent when not reported. Overflow placements don't
+    /// report a host name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+}
+
+impl Placement {
+    /// Report a display-only provider without a host name.
+    pub fn new(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
+            host: None,
+        }
+    }
+
+    /// Report the server's host name for display only.
+    pub fn with_host(mut self, host: impl Into<String>) -> Self {
+        self.host = Some(host.into());
+        self
+    }
+
+    /// Read the open provider string for display only.
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+
+    /// Read the server's host name for display only, if reported.
+    pub fn host(&self) -> Option<&str> {
+        self.host.as_deref()
+    }
+}
+
 /// Durable acceptance of a run and its queue position.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
@@ -2265,6 +2306,11 @@ pub struct Accepted {
     /// request must fill this with the platform they will actually use.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<Platform>,
+    /// Display-only placement. Never use it as an input to routing, retry or
+    /// any decision. `None` means the runner didn't report a placement, which
+    /// includes every older runner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<Placement>,
     /// True when attaching to the existing job named by `job_id`, not starting
     /// another job. Omitted when false. Older runners never send this field, so
     /// absence means "started, or a runner that doesn't support keys". Rely on
@@ -2281,6 +2327,7 @@ impl Accepted {
             env_not_forwarded: None,
             network: None,
             platform: None,
+            placement: None,
             attached: false,
         }
     }
@@ -2323,6 +2370,20 @@ impl Accepted {
     /// Execution platform the runner will use, or `None` when not acknowledged.
     pub fn platform(&self) -> Option<&Platform> {
         self.platform.as_ref()
+    }
+
+    /// Report display-only placement, never an input to routing, retry or any
+    /// decision.
+    pub fn with_placement(mut self, placement: Placement) -> Self {
+        self.placement = Some(placement);
+        self
+    }
+
+    /// Display-only placement, or `None` when the runner didn't report one,
+    /// including every older runner. Never use it as an input to routing,
+    /// retry or any decision.
+    pub fn placement(&self) -> Option<&Placement> {
+        self.placement.as_ref()
     }
 }
 
