@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.5
+
+- Accept `subc-protocol >=0.34.1, <0.37` so consumers pinned to 0.36 can share
+  one protocol copy. Require tool-display 0.1.5 for the same compatibility.
+- Re-exported protocol types are whichever `subc-protocol` version the build
+  resolves. The same applies to protocol types in public APIs: `CallMode` in
+  catalog fields and helpers, `ToolCallRequest` in builders and validators,
+  `OpaqueFieldError` in `SchemaPinError`, `ScopeStamp` in user-command admission,
+  and `ErrorBody` in validation results, error helpers and withdraw verdicts.
+  No role wire-format or admission-policy change.
+
 ## 0.15.4
 
 - Add provider capability `session-notices/v1` for completion-only idle starts

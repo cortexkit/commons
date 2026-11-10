@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.15.5
+
+- Accept `subc-protocol >=0.34.1, <0.37` and pin `cortexkit-role-tool-provider`
+  to `=0.15.5`, allowing a consumer pinned to 0.36 to share one protocol copy.
+- Protocol types re-exported through `wire` are whichever `subc-protocol`
+  version the build resolves. Public `ObservedFrame::Error`, `CallModeProbe`
+  and `ToolProviderSubject::route_with_mode` likewise use that version's
+  `ErrorBody` and `CallMode`. No conformance-check or role wire-format change.
+
 ## 0.15.4
 
 - Check `session-notices/v1` describe shape only when the exact live token is

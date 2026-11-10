@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5
+
+- Accept `subc-protocol >=0.34.1, <0.37` so consumers pinned to 0.36 can share
+  one protocol copy. The re-exported `Principal`, principal-bearing display
+  and wake APIs, and `ErrorBody` results use whichever protocol version the
+  build resolves. No display wire-format or writer-admission change.
+
 ## 0.1.4
 
 - Add opt-in wake records on `display.write`, with verified writer identity,
