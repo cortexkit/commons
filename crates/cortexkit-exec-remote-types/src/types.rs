@@ -1184,6 +1184,24 @@ pub struct TerminalRecord {
     /// context for a failed write without proving its cause.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_read_only: Option<bool>,
+    /// The highest `seq` of any sequenced record the job emitted on its stream
+    /// before terminal: `started`, `output`, `return_result`, `return_chunk`,
+    /// `return_manifest`, and any unknown or future record carrying `seq`.
+    /// No numbering base is promised.
+    ///
+    /// A producer that reports `last_seq` sets it on every terminal of a job
+    /// that emitted at least one sequenced record. It omits the field only when
+    /// it does not know, or the job emitted none (the job never started and the
+    /// terminal carries `ran: none`). `None` means unknown, or never started,
+    /// never "ran with no output".
+    ///
+    /// With `Some(n)`, a reader that received every record with seq up to `n`
+    /// has the whole stream. Records below an output chunk's
+    /// `truncated_before_seq` were dropped by retention: known truncation, not
+    /// a gap. Apart from that known truncation, a reader whose highest received
+    /// seq is below `n` has missed records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seq: Option<u64>,
 }
 
 impl TerminalRecord {
@@ -1220,6 +1238,7 @@ impl TerminalRecord {
             memory_over_s: None,
             oom_kill: None,
             source_read_only: None,
+            last_seq: None,
         }
     }
 
@@ -1374,6 +1393,18 @@ impl TerminalRecord {
     /// field of the same name for the files covered.
     pub fn source_read_only(&self) -> Option<bool> {
         self.source_read_only
+    }
+
+    /// Report the highest sequence number emitted before terminal; see
+    /// [`TerminalRecord::last_seq`] for the producer and reader rules.
+    pub fn with_last_seq(mut self, last_seq: u64) -> Self {
+        self.last_seq = Some(last_seq);
+        self
+    }
+
+    /// Read the highest sequence number emitted before terminal, if known.
+    pub fn last_seq(&self) -> Option<u64> {
+        self.last_seq
     }
 }
 

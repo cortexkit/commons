@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.19
+
+- Add optional `TerminalRecord.last_seq` with `with_last_seq` and an accessor.
+  It reports the highest sequence number emitted before terminal, across all
+  sequenced record types, so readers can detect missing replayed records.
+  Absent means unknown or the job never started, not that a running job had no
+  output. Retention truncation remains distinct from a gap. Omitted when absent;
+  older readers ignore it, and existing sequence numbering is unchanged.
+
 ## 0.2.18
 
 - Add optional `TerminalRecord.source_read_only` with `with_source_read_only`

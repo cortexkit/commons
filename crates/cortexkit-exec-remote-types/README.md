@@ -239,6 +239,24 @@ the raw strings on serialization; all existing tags and wire shapes are unchange
 
 ### Terminal reports
 
+`TerminalRecord.last_seq: Option<u64>` (`with_last_seq` and an accessor) is
+omitted when absent. It reports the highest `seq` of any sequenced record the
+job emitted on its stream before terminal: `started`, `output`, `return_result`,
+`return_chunk`, `return_manifest`, and any unknown or future record carrying
+`seq`. No numbering base is promised.
+
+A producer that reports `last_seq` sets it on every terminal of a job
+that emitted at least one sequenced record. It omits the field only when
+it does not know, or the job emitted none (the job never started and the
+terminal carries `ran: none`). `None` means unknown, or never started,
+never "ran with no output".
+
+With `Some(n)`, a reader that received every record with seq up to `n`
+has the whole stream. Records below an output chunk's
+`truncated_before_seq` were dropped by retention: known truncation, not
+a gap. Apart from that known truncation, a reader whose highest received
+seq is below `n` has missed records.
+
 The terminal's `ran`, `tree_hash`, and `workspace_changes` are explicit `Option`s
 and always serialize, including as JSON null. `Some(Ran::None)` encodes the
 string `"none"`, not null. Null workspace changes mean unavailable information;

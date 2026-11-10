@@ -64,6 +64,7 @@ const LOCAL_OUTCOMES: &[&str] = &[
     "crate-local-execution-ended-true",
     "crate-local-execution-ended-absent",
     "crate-local-execution-ended-false",
+    "crate-local-last-seq",
 ];
 const COPIED_REPLIES: &[&str] = &[
     "prepare-prepared",
@@ -264,9 +265,9 @@ fn golden_vector_inventory_is_complete() {
     }
     assert_eq!(COPIED_OUTCOMES.len(), 20);
     assert_eq!(COPIED_REPLIES.len(), 14);
-    assert_eq!(LOCAL_OUTCOMES.len(), 37);
+    assert_eq!(LOCAL_OUTCOMES.len(), 38);
     assert_eq!(LOCAL_REPLIES.len(), 3);
-    assert_eq!(cases().len(), 74);
+    assert_eq!(cases().len(), 75);
 }
 
 #[test]
@@ -359,6 +360,69 @@ fn server_report(name: &str) -> TerminalRecord {
         panic!("expected one terminal in {name}")
     };
     terminal.clone()
+}
+
+#[test]
+fn terminal_last_seq_some_round_trips() {
+    let pinned = bytes("outcomes", "crate-local-last-seq");
+    assert_eq!(
+        value("outcomes", "crate-local-last-seq")["stream"][0]["last_seq"],
+        7
+    );
+    assert_eq!(round_trip::<OutcomeCase>(&pinned), pinned);
+}
+
+#[test]
+fn terminal_last_seq_builder_and_accessor_match_wire_value() {
+    let terminal = TerminalRecord::new(job_id(), Outcome::Exit { code: 0 }, 0, 0, 0)
+        .with_ran(Ran::Remote)
+        .with_workspace_changes(vec![]);
+    assert_eq!(
+        terminal.clone().with_last_seq(7),
+        server_report("crate-local-last-seq")
+    );
+    for seq in [0, 7, u64::MAX] {
+        let report = terminal.clone().with_last_seq(seq);
+        assert_eq!(report.last_seq, Some(seq));
+        assert_eq!(report.last_seq(), Some(seq));
+        let wire = serde_json::to_value(&report).unwrap();
+        assert_eq!(wire["last_seq"], seq);
+        assert_eq!(
+            serde_json::from_value::<TerminalRecord>(wire).unwrap(),
+            report
+        );
+    }
+}
+
+#[test]
+fn terminal_last_seq_none_is_omitted_and_defaults_on_decode() {
+    let report = TerminalRecord::new(job_id(), Outcome::Exit { code: 0 }, 0, 0, 0);
+    assert_eq!(report.last_seq, None);
+    assert_eq!(report.last_seq(), None);
+    let wire = serde_json::to_value(&report).unwrap();
+    assert!(wire.get("last_seq").is_none());
+    assert_eq!(
+        serde_json::from_value::<TerminalRecord>(wire).unwrap(),
+        report
+    );
+}
+
+#[test]
+fn terminal_last_seq_is_ignored_by_0_2_2_container_decoder() {
+    let pinned = bytes("outcomes", "crate-local-last-seq");
+    let old_reader = round_trip::<OutcomeCase022>(&pinned);
+    let mut expected = value("outcomes", "crate-local-last-seq");
+    assert_eq!(
+        expected["stream"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("last_seq"),
+        Some(json!(7))
+    );
+    assert_eq!(
+        old_reader,
+        serde_json_canonicalizer::to_vec(&expected).unwrap()
+    );
 }
 
 #[test]

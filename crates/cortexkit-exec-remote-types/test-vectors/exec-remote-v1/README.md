@@ -116,6 +116,10 @@ absent acknowledgement means the runner predates the field, not access granted.
   job is running but must not start their own timeout from it. Older runners may
   omit the record; it is progress, never terminal. A 0.2.3-shaped decoder sees
   it as an unknown record and retains seq 7 for the resume cursor.
+- `outcomes/crate-local-last-seq`: a terminal received on late attach reports
+  `last_seq: 7` even when no sequenced records were replayed. A reader whose
+  highest received seq is below 7 can detect missing records. Older terminal
+  decoders ignore the additive field.
 - `outcomes/crate-local-unknown-killed`: reason `future_kill`, decoded as
   `Killed::Unknown`. The command was killed for an unrecognised reason.
 - `outcomes/crate-local-unknown-ran`: location `future_location`, decoded as
