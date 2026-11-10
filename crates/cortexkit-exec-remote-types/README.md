@@ -38,6 +38,11 @@ after checking that capability, and never expects progress otherwise.
 on serialization, preserving today's request bytes; older runners ignore the
 unknown request field.
 
+`Progress::with_job_id` sets the optional runner ID assigned at submit (read by
+`job_id()`, omitted when absent, and matching the later `Accepted.job_id`), which
+a caller that has independently decided to stop may use for `exec.cancel`
+before acceptance.
+
 `Progress::new(phase, phase_elapsed_ms, detail)` returns a `Result<Progress,
 ProgressDetailError>`; `phase()`, `phase_elapsed_ms()` and `detail()` read its
 validated fields. `ProgressPhase` is open: `Upload`, `PlacementWait` and `Connect`
@@ -52,9 +57,14 @@ don't check that.
 
 Progress has no `seq` field and never advances the resume cursor. It is never
 terminal. As runner rules: it is never replayed by `exec.attach`, and it is sent
-at most once per 10 s per run, only after 2 s of waiting. It is display only: render `detail` as plain text;
-never start, extend or reset a timer from progress, and never retry or cancel
-because of it. See [`CONTRACT.md`](CONTRACT.md) for the runner/caller obligations.
+at most once per 10 s per run, only after 2 s of waiting, except that for an
+opted-in request the runner sends one record with the job ID immediately on
+assignment, exempt from both timing rules; later records keep carrying the ID.
+Without the opt-in, no progress is sent. Content and timing are display only:
+render `detail` as plain text; never start, extend or reset a timer from progress,
+and never retry or cancel because of its content or timing. See
+[`CONTRACT.md`](CONTRACT.md) for
+the runner/caller obligations.
 
 `return_result` carries returned files requested through `RunRequest.return_paths`
 or a file-collection failure. It appears immediately before `terminal` and only

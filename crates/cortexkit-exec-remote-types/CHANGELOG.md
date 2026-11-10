@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.20
+
+- Add optional `Progress.job_id` with `with_job_id` and an accessor, keeping
+  `Progress::new` unchanged. The runner's ID is assigned at submit and matches
+  the later `Accepted.job_id`. Omitted when absent; older readers ignore it.
+- For opted-in progress, send one record with the ID immediately on assignment,
+  exempt from the usual 2 s wait and 10 s interval; later records keep the ID
+  and follow those timing rules. A caller that independently decided to stop
+  may cancel with this ID before `Accepted`. If the command never started, the
+  existing terminal shape is `Outcome::Cancelled` with `ran: Some(Ran::None)`.
+- Add a canonical job-ID progress vector, optional-field round-trips and
+  older-reader compatibility coverage without changing existing vector bytes.
+
 ## 0.2.19
 
 - Add optional `TerminalRecord.last_seq` with `with_last_seq` and an accessor.

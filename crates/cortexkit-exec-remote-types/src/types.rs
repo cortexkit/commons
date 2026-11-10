@@ -2099,14 +2099,18 @@ impl std::fmt::Display for ProgressDetailError {
 
 impl std::error::Error for ProgressDetailError {}
 
-/// Display-only progress sent before [`Accepted`], never terminal or replayed.
+/// Progress sent before [`Accepted`], never terminal or replayed.
 ///
 /// The runner sends it only for an opted-in request with [`PROGRESS_CAPABILITY`],
-/// at most once per 10 seconds and only after 2 seconds of waiting. It carries no
-/// sequence number and never advances a resume cursor. Callers render detail as
-/// plain text, never start, extend or reset timers from progress, and never retry
-/// or cancel because of it. Producers must omit host names, network addresses,
-/// tenant or account identifiers, and job contents from detail.
+/// sending one record with the job ID immediately when it assigns the ID at
+/// submit. That record is exempt from the usual timing rules: later records come
+/// at most once per 10 seconds and only after 2 seconds of waiting, and keep the
+/// ID. It carries no sequence number and never advances a resume cursor. Callers
+/// render detail as plain text and never start, extend or reset timers, retry, or
+/// cancel because of progress content or timing. A caller that independently
+/// decided to stop may use the ID to cancel before acceptance. Producers must
+/// omit host names, network addresses, tenant or account identifiers, and job
+/// contents from detail; the job ID is an identifier, not detail.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Progress {
@@ -2114,6 +2118,8 @@ pub struct Progress {
     phase_elapsed_ms: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    job_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -2121,13 +2127,17 @@ struct ProgressInput {
     phase: ProgressPhase,
     phase_elapsed_ms: u64,
     detail: Option<String>,
+    #[serde(default)]
+    job_id: Option<Uuid>,
 }
 
 impl<'de> Deserialize<'de> for Progress {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let input = ProgressInput::deserialize(deserializer)?;
-        Self::new(input.phase, input.phase_elapsed_ms, input.detail)
-            .map_err(serde::de::Error::custom)
+        let mut progress = Self::new(input.phase, input.phase_elapsed_ms, input.detail)
+            .map_err(serde::de::Error::custom)?;
+        progress.job_id = input.job_id;
+        Ok(progress)
     }
 }
 
@@ -2154,7 +2164,19 @@ impl Progress {
             phase,
             phase_elapsed_ms,
             detail,
+            job_id: None,
         })
+    }
+
+    /// Set the runner's job ID, assigned at submit and later carried by [`Accepted`].
+    pub fn with_job_id(mut self, job_id: Uuid) -> Self {
+        self.job_id = Some(job_id);
+        self
+    }
+
+    /// The runner's job ID, or `None` when the runner has none to give.
+    pub fn job_id(&self) -> Option<Uuid> {
+        self.job_id
     }
 
     /// The current phase; show unknown phases generically.

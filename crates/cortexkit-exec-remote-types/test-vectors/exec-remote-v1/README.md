@@ -361,7 +361,7 @@ display-only progress opt-in differs.
 
 ## Pre-acceptance progress
 
-`progress/` contains ten invented-value cases in the same `.jcs`/`.sha256` format.
+`progress/` contains eleven invented-value cases in the same `.jcs`/`.sha256` format.
 `request-progress` is a `RunRequest`; all other files are individual stream
 records, not whole streams:
 
@@ -369,6 +369,8 @@ records, not whole streams:
 - `unknown-phase`: `future_phase` round-trips as `ProgressPhase::Unknown` and is
   shown generically, as display-only progress.
 - `no-detail`: optional detail omitted.
+- `with-job-id`: the runner's optional submit-time ID, matching the later
+  `Accepted.job_id` and usable for an independently decided cancellation.
 - `detail-120-bytes`: valid detail at exactly the 120-byte UTF-8 limit.
 - `request-progress`: an opt-in request with `progress: true`.
 - `malformed-detail-too-long`: 121-byte detail, refused on decode.
@@ -380,14 +382,16 @@ started, not since submission. Detail is at most 120 bytes, one line, with no
 control characters or line breaks; decoding refuses anything else. Runners must
 not put host names, network addresses, tenant or account identifiers, or job
 contents in it. A caller renders it as plain text and never starts, extends or
-resets timers or retries/cancels because of progress. A progress record has no
-`seq` field and is never terminal. The rest are runner rules these individual
-records can't show: progress needs the request opt-in and
+resets timers or retries/cancels because of progress content or timing. A progress
+record has no `seq` field and is never terminal. The rest are runner rules these
+individual records can't show: progress needs the request opt-in and
 `PROGRESS_CAPABILITY`, comes only before `Accepted`, is never replayed by
 `exec.attach`, and is sent at most once per 10 s per run, only after 2 s of
-waiting.
+waiting, except for one immediate record carrying the job ID when assigned.
+That record is exempt from both timing rules; later records keep the ID.
+Without the opt-in and capability advertisement, no progress is sent.
 
 The directory's `SHA256SUMS` covers every `.jcs` and `.sha256` file. Tests check
-the exact inventory and hashes, round-trip all seven valid cases through typed
+the exact inventory and hashes, round-trip all eight valid cases through typed
 values byte for byte, and require the three malformed known records to fail
 decoding rather than becoming `Unknown`.

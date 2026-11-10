@@ -9,6 +9,7 @@ const VALID_RECORDS: &[&str] = &[
     "connect",
     "unknown-phase",
     "no-detail",
+    "with-job-id",
     "detail-120-bytes",
 ];
 const INVALID_RECORDS: &[&str] = &[
@@ -119,6 +120,86 @@ fn progress_accessors_and_wire_shape_have_no_sequence() {
         .unwrap()
         .get("detail")
         .is_none());
+}
+
+#[test]
+fn progress_job_id_is_optional_and_round_trips() {
+    let progress = Progress::new(ProgressPhase::PlacementWait, 0, None).unwrap();
+    assert_eq!(progress.job_id(), None);
+    let without_id = json!({"phase":"placement_wait", "phase_elapsed_ms":0});
+    assert_eq!(serde_json::to_value(&progress).unwrap(), without_id);
+    assert_eq!(
+        serde_json::from_value::<Progress>(without_id).unwrap(),
+        progress
+    );
+    assert_eq!(
+        serde_json::from_value::<Progress>(json!({
+            "phase":"placement_wait", "phase_elapsed_ms":0, "job_id":null
+        }))
+        .unwrap(),
+        progress
+    );
+
+    let job_id = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let progress = progress.with_job_id(job_id);
+    assert_eq!(progress.job_id(), Some(job_id));
+    let record = StreamRecord::Progress(progress);
+    assert_eq!(
+        serde_json::to_value(&record).unwrap(),
+        json!({"type":"progress", "phase":"placement_wait", "phase_elapsed_ms":0,
+            "job_id":"00000000-0000-4000-8000-000000000001"})
+    );
+    assert_eq!(
+        serde_json::from_slice::<StreamRecord>(&vector("with-job-id")).unwrap(),
+        record
+    );
+}
+
+#[test]
+fn progress_job_id_is_ignored_by_older_readers() {
+    #[derive(serde::Deserialize)]
+    struct OlderProgressInput {
+        phase: ProgressPhase,
+        phase_elapsed_ms: u64,
+        detail: Option<String>,
+    }
+
+    let decoded: OlderProgressInput = serde_json::from_slice(&vector("with-job-id")).unwrap();
+    assert_eq!(decoded.phase, ProgressPhase::PlacementWait);
+    assert_eq!(decoded.phase_elapsed_ms, 0);
+    assert_eq!(decoded.detail, None);
+}
+
+#[test]
+fn progress_job_id_rejects_malformed_ids_as_known_record_errors() {
+    for invalid in [
+        json!("not-a-uuid"),
+        json!(1),
+        json!(true),
+        json!({}),
+        json!([]),
+    ] {
+        let raw = json!({"type":"progress", "phase":"placement_wait", "phase_elapsed_ms":0,
+            "job_id":invalid});
+        assert!(serde_json::from_value::<Progress>(raw.clone()).is_err());
+        let error = serde_json::from_value::<StreamRecord>(raw).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("known stream record tag progress"));
+    }
+}
+
+#[test]
+fn progress_cancel_before_start_uses_existing_terminal_shape() {
+    let job_id = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let terminal = TerminalRecord::new(job_id, Outcome::Cancelled, 0, 0, 0).with_ran(Ran::None);
+    let encoded = serde_json::to_value(&terminal).unwrap();
+    assert_eq!(encoded["outcome"], json!({"type":"cancelled"}));
+    assert_eq!(encoded["ran"], "none");
+    assert_eq!(
+        serde_json::from_value::<TerminalRecord>(encoded).unwrap(),
+        terminal
+    );
 }
 
 #[test]

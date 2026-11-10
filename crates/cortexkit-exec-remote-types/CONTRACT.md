@@ -154,10 +154,15 @@ takes runner capacity, covering the wait after acceptance; progress does not
 replace it. The progress record has no `seq` field: a runner never sends one, and
 a caller never advances the resume cursor from progress. An executor never
 replays progress on `exec.attach`. For each run, the runner sends progress at
-most once per 10 s, and only after 2 s of waiting.
+most once per 10 s, and only after 2 s of waiting, with one exception: for an
+opted-in request to a runner advertising the progress capability, a runner that
+assigns a job ID sends one progress record carrying it at once, when it assigns
+the ID. That record is exempt from both the 2 s wait and the 10 s interval.
+Later records follow the usual timing rules and keep carrying the ID. Without
+the opt-in and capability advertisement, no progress is sent.
 
 ```json
-{"type":"progress","phase":"placement_wait","phase_elapsed_ms":61200,"detail":"waiting for a host with 16 free vCPUs"}
+{"type":"progress","phase":"placement_wait","phase_elapsed_ms":61200,"detail":"waiting for a host with 16 free vCPUs","job_id":"00000000-0000-4000-8000-000000000001"}
 ```
 
 `phase` is an open `ProgressPhase`: `upload`, `placement_wait`, or `connect`.
@@ -165,17 +170,41 @@ Unknown phases retain their raw string and are shown generically, as display-onl
 progress. `phase_elapsed_ms` is a `u64`, which the runner sets to the milliseconds since the
 **current phase started**, not since it received `exec.run`.
 
+`job_id` is optional: it is the runner's ID for this job, assigned at submit,
+and the same ID that `Accepted` later carries. When the runner has one, it is
+present on every progress record. Absent means the runner has none to give;
+the field is omitted on serialization. Older readers ignore this unknown
+member. It is an identifier, not detail, so the detail privacy rule below does
+not cover it.
+
 `detail` is optional plain text. When present it is one line of at most 120 UTF-8
 bytes, with no control characters or line breaks (including Unicode line and
 paragraph separators). Both decoding and `Progress::new` reject violations.
 Detail must never carry host names, network addresses, tenant or account
 identifiers, or job contents. The runner is responsible for those privacy rules.
 
-Progress is display only: a caller renders `detail` as plain text, never starts,
-extends or resets a timer from progress, and never retries or cancels because of
-it. A progress record is never terminal, even for an unknown phase. Timing,
-ordering, capability and privacy requirements are runner/caller obligations;
-these types enforce only the record's shape and detail syntax.
+Progress content and timing are display only: a caller renders `detail` as plain
+text, never starts, extends or resets a timer from progress, and never retries or
+cancels because of its content or timing. A caller that has already decided to
+stop the job (for example, because the person stopped it) may send `exec.cancel`
+with the `job_id` from progress before `Accepted`. A progress record is never
+terminal, even for an unknown phase. Timing, ordering, capability and privacy
+requirements are runner/caller obligations; these types enforce only the record's
+shape and detail syntax.
+
+## Cancellation
+
+`exec.cancel` takes a `CancelRequest` carrying `job_id`. Cancellation is
+idempotent: `CancelReply { job_id }` acknowledges that the cancel is durable,
+including when the ID is unknown. The job's terminal record arrives separately
+on its `exec.run` or `exec.attach` stream.
+
+A cancel may arrive before `Accepted` when the caller obtained the job ID from
+progress. The caller receives the same `CancelReply` acknowledgement and a
+`TerminalRecord` with `outcome: Outcome::Cancelled` (wire tag `cancelled`) and
+`ran: Some(Ran::None)` (wire value `"none"`) when the command never started.
+No command runs in that case; cancellation must not turn into execution merely
+because placement was still pending.
 
 ## Stated job memory
 
