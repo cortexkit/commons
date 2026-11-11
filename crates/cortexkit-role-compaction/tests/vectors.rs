@@ -158,6 +158,71 @@ fn samples() -> Vec<(&'static str, Value)> {
     };
     let mut samples = vec![
         (
+            "setup-statement-seq-request.json",
+            request(
+                ops::COMPACTION_SETUP,
+                setup
+                    .clone()
+                    .with_statement_seq(42, true)
+                    .with_signed_floor(
+                        cortexkit_role_compaction::SignedFloor::new("message-a"),
+                        true,
+                    ),
+            ),
+        ),
+        (
+            "notice-statement-seq-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(
+                    5,
+                    conditions
+                        .clone()
+                        .with_statement_seq(42, true)
+                        .with_signed_floor(
+                            cortexkit_role_compaction::SignedFloor::new("message-a"),
+                            true,
+                        )
+                        .with_last_prompt_view(1)
+                        .with_system_tokens(cortexkit_role_compaction::tokens::SurfaceTokens::new(
+                            100, true,
+                        ))
+                        .with_tools_tokens(cortexkit_role_compaction::tokens::SurfaceTokens::new(
+                            50, true,
+                        ))
+                        .with_notes_tokens(
+                            cortexkit_role_compaction::tokens::SurfaceTokens::new(25, true),
+                            true,
+                        ),
+                ),
+            ),
+        ),
+        (
+            "ride-statement-seq-request.json",
+            request(
+                ops::COMPACTION_RIDE,
+                RideRequest::new(
+                    vec![RideCause::OverLimit],
+                    1_500,
+                    conditions
+                        .clone()
+                        .with_statement_seq(42, true)
+                        .with_signed_floor(
+                            cortexkit_role_compaction::SignedFloor::new("message-a"),
+                            true,
+                        )
+                        .with_last_prompt_view(1),
+                ),
+            ),
+        ),
+        (
+            "setup-statement-seq-restored-request.json",
+            request(
+                ops::COMPACTION_SETUP,
+                setup.clone().with_statement_seq(7, true),
+            ),
+        ),
+        (
             "notice-notes-declared-request.json",
             request(
                 ops::COMPACTION_NOTICE,

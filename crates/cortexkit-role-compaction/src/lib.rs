@@ -69,6 +69,10 @@ pub const COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES: &str = "compaction-entry-speaks-
 /// `signed_floor`. Runners send the boundary only to declaring providers.
 pub const COMPACTION_SIGNED_FLOOR_PROVIDES: &str = "compaction-signed-floor/v1";
 
+/// Additional provider manifest capability enabling Setup and Conditions
+/// `statement_seq`. Runners send the stamp only to declaring providers.
+pub const COMPACTION_STATEMENT_SEQ_PROVIDES: &str = "compaction-statement-seq/v1";
+
 /// Additional provider manifest capability enabling Conditions `notes_tokens`.
 /// Runners separate notes from `system_tokens` only for declaring providers.
 pub const COMPACTION_NOTES_TOKENS_PROVIDES: &str = "compaction-notes-tokens/v1";
@@ -85,6 +89,13 @@ pub fn provides_signed_floor(provides: &[String]) -> bool {
     provides
         .iter()
         .any(|capability| capability == COMPACTION_SIGNED_FLOOR_PROVIDES)
+}
+
+/// Whether a provider declares support for runner-state statement ordering.
+pub fn provides_statement_seq(provides: &[String]) -> bool {
+    provides
+        .iter()
+        .any(|capability| capability == COMPACTION_STATEMENT_SEQ_PROVIDES)
 }
 
 /// Whether a provider's catalog capabilities declare agent attribution.

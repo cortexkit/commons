@@ -67,6 +67,15 @@ pub struct NoticeRequest {
 #[non_exhaustive]
 pub struct Conditions {
     pub model: ModelRef,
+    /// Per-session runner-state stamp, nondecreasing across runner restarts.
+    /// Newer state never has a lower stamp; equal stamps describe the same
+    /// state and are processed normally. Providers ignore runner-state members
+    /// below their held stamp, but size readings keep their own staleness rule.
+    /// Setup resets the held stamp, even lower; see W3.5 for restore ordering.
+    /// Send only to providers declaring `compaction-statement-seq/v1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
+    pub statement_seq: Option<u64>,
     /// Runner-authoritative signed reasoning boundary. Send only to providers
     /// declaring `compaction-signed-floor/v1`; see [`crate::SignedFloor`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -214,6 +223,7 @@ impl Conditions {
     ) -> Self {
         Self {
             model,
+            statement_seq: None,
             signed_floor: None,
             accepts_images: None,
             context_window,
@@ -229,6 +239,12 @@ impl Conditions {
 
     pub fn with_accepts_images(mut self, accepts_images: bool) -> Self {
         self.accepts_images = Some(accepts_images);
+        self
+    }
+
+    /// Project the state stamp only when the provider declares its capability.
+    pub fn with_statement_seq(mut self, statement_seq: u64, declared: bool) -> Self {
+        self.statement_seq = declared.then_some(statement_seq);
         self
     }
 

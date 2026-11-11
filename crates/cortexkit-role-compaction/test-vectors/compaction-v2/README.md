@@ -30,6 +30,16 @@ notes from system text for `compaction-notes-tokens/v1` providers.
 `notice-notes-legacy-request.json` omits the separate note count and keeps those
 notes inside `system_tokens` for non-declaring providers.
 
+`setup-statement-seq-request.json`, `notice-statement-seq-request.json` and
+`ride-statement-seq-request.json` carry the same state stamp (`42`) and signed
+floor for `compaction-statement-seq/v1` providers. Equal stamps are processed
+normally; the notice also carries next-request surface counts, while size
+readings retain their separate staleness rule. The restored-session Setup in
+`setup-statement-seq-restored-request.json` authoritatively resets the held stamp
+to `7` and reports no floor. After a restore the runner sends Setup first and
+sends no more statements built before the restore. Older Setup, notice and ride
+vectors omit the stamp for non-declaring providers.
+
 Regenerate JSON from the repository root after an intentional wire change:
 
 ```sh

@@ -196,6 +196,12 @@ unknown members; this does not authorize sending the member without the
 declaration. The floor remains authoritative in the runner even when the
 provider does not declare it (W3.5).
 
+For `statement_seq` in Setup and `Conditions`, the provider declares the
+additional manifest capability `compaction-statement-seq/v1`
+(`COMPACTION_STATEMENT_SEQ_PROVIDES`; `provides_statement_seq`). The runner sends
+the member only to declaring providers. Existing Setup and Conditions decoders
+ignore unknown members; the declaration is still required (W3.5).
+
 For `Conditions.notes_tokens`, the provider declares the additional manifest
 capability `compaction-notes-tokens/v1` (`COMPACTION_NOTES_TOKENS_PROVIDES`;
 `provides_notes_tokens`). Send the member only to declaring providers and
@@ -332,6 +338,7 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | For the current model and account. |
 | `signed_floor` | `{through: string}`, optional | Runner-authoritative signed reasoning boundary, by stable entry id, with the semantics below. Only for providers declaring `compaction-signed-floor/v1`. |
+| `statement_seq` | integer, optional | Per-session `u64` runner-state stamp, bounded to `0..2^53-1` on the wire (W1.2), with the statement-order semantics below. Only for providers declaring `compaction-statement-seq/v1`; also sent in Setup. |
 | `last_prompt_tokens` | integer, optional | The prompt size the model provider reported for the session's newest model request: uncached input plus cache reads plus cache writes. Absent before the first request, or when the provider reported none. Requests of child sessions do not count. |
 | `last_prompt_view` | integer, optional | The applied view version the request measured by `last_prompt_tokens` was rendered with when the runner built it. At least 1 names an applied view (view versions start at 1, W6.1); `0` means no view was applied. The runner sends it whenever it can tie the reading to the request it measured; absent means it cannot, for example after a runner restart. Providers may use a reading without it for compaction without checking a view version. The runner sends it only with `last_prompt_tokens`; the provider ignores it when `last_prompt_tokens` is absent. |
 | `system_tokens` | `{count, exact}`, optional | Count of the runner's own system text for the next request under these conditions, excluding system entries; in notices only, never rides (W4.11). |
@@ -357,9 +364,37 @@ the floor cannot change the call: when the entry lies before every entry the
 call covers (so no signed part it covers is in any request), or when the
 serving model's rules bind no signed parts. It names the floor again once the
 condition that hid it stops holding. A provider follows the reported state
-in both directions: it drops its copy when the runner names no floor, and takes
+in both directions, in statement order (`statement_seq` when the runner sends it):
+it drops its copy when the runner names no floor, and takes
 the runner's floor when one is named again, even if it is not newer than the
 one it dropped.
+
+**Statement order.** A background notice can arrive after a ride built from
+newer session state, so arrival order alone can roll the provider's floor or
+other runner state back. `statement_seq` is a per-session `u64` that never
+decreases, including across the runner's restart. A statement built from newer
+session state never carries a lower stamp than one built from older state.
+Equal stamps are allowed and mean the statements were built from the same
+session state, so they state the same runner state. A runner may use a persisted
+counter or the position of the newest record in its session log when the
+statement was built; either satisfies the rule.
+
+A provider ignores every runner-state member of a `Conditions` whose stamp is
+below the highest it holds for that session: `signed_floor`, `notes_tokens`,
+`system_tokens`, `tools_tokens`, and any other current or later runner-state
+member. An equal stamp is processed normally. The size reading
+(`last_prompt_tokens` with `last_prompt_view`) keeps its own staleness rule above.
+Without the member, runner state is processed in arrival order. After a provider
+restart, the first stamped statement it receives establishes its held stamp.
+
+A Setup sets the provider's held stamp to the Setup's own value, even when
+lower, because Setup states what the session is now, for example after the
+runner restored the session from a backup. After restoring a session, a runner
+sends the session's Setup before any notice or ride, and sends nothing built
+from before the restore once that Setup has been sent. A statement already in
+flight from before the restore can still arrive after that Setup. The cost is
+bounded to a refused view or a held rebuild, because the runner checks every
+view against its own floor before applying it.
 
 A view that keeps a signed part at or before the floor MUST NOT be refused for
 keeping that part, even if the view would otherwise invalidate its signature.
@@ -634,6 +669,7 @@ Request:
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | W3.3. |
 | `signed_floor` | `{through: string}`, optional | W3.5. Send only to providers declaring `compaction-signed-floor/v1`. |
+| `statement_seq` | integer, optional | W3.5. Sets the provider's held stamp to this value, even when lower. Send only to providers declaring `compaction-statement-seq/v1`. |
 | `detects` | array of cause names | The ride causes (W5.3) the runner can detect (RD5). |
 | `applied_view` | `AppliedView`, optional | The view the runner applies now: after its restart, the one it reloaded; for a session moved in, the installed first view. |
 | `newest` | `Cursor`, optional | The newest entry; absent for an empty transcript. |

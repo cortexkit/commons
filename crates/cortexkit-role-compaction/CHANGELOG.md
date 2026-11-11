@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.6
+
+- Add optional Setup and Conditions `statement_seq`, the
+  `COMPACTION_STATEMENT_SEQ_PROVIDES` (`compaction-statement-seq/v1`) capability,
+  its declaration helper and capability-gated builders. Runners MUST send the
+  member only to declaring providers. Existing Setup and Conditions decoders
+  ignore unknown members rather than refusing them; this does not remove the
+  declaration requirement.
+- Order runner state by a per-session stamp that never decreases across runner
+  restarts; equal stamps describe the same state and are processed normally.
+  Ignore runner state below the held stamp, independently of size-reading
+  staleness. Setup authoritatively replaces the held stamp, even lower after a
+  restore. Require Setup before restored-session notices and rides, with no
+  subsequent sends built before the restore; document the bounded in-flight
+  residual. Add wire vectors, integer-boundary and compatibility tests.
+
 ## 0.3.5
 
 - Add optional notice Conditions `notes_tokens: {count, exact}` for pending plan

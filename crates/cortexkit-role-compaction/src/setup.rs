@@ -20,6 +20,12 @@ use crate::view::AppliedView;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SetupRequest {
+    /// Authoritative runner-state stamp: replaces the provider's held stamp,
+    /// even when lower after a session restore. See W3.5 for restore ordering.
+    /// Send only to providers declaring `compaction-statement-seq/v1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
+    pub statement_seq: Option<u64>,
     /// Runner-authoritative signed reasoning boundary. Send only to providers
     /// declaring `compaction-signed-floor/v1`; see [`crate::SignedFloor`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -105,6 +111,7 @@ impl SetupRequest {
         now: u64,
     ) -> Self {
         Self {
+            statement_seq: None,
             signed_floor: None,
             preset: preset.into(),
             child_harness: None,
@@ -123,6 +130,12 @@ impl SetupRequest {
 
     pub fn with_child_harness(mut self, child_harness: impl Into<String>) -> Self {
         self.child_harness = Some(child_harness.into());
+        self
+    }
+
+    /// Project the state stamp only when the provider declares its capability.
+    pub fn with_statement_seq(mut self, statement_seq: u64, declared: bool) -> Self {
+        self.statement_seq = declared.then_some(statement_seq);
         self
     }
 
