@@ -7293,9 +7293,13 @@ to the session's whole length.
   | `cache?` | Optional closed object: actual cache lifetime as `ttl_ms?` (u64 milliseconds) or `implicit?: true`, and optional session `warming?: {on: boolean, stop_reason?: string}` (§9.3.5). Missing members mean unknown, not zero or off. |
   | `started_at_ms`, `finished_at_ms` | Required unsigned 64-bit Unix epoch millisecond timestamps |
 
-- [pinned] A `cache_policy` runner records each model step's actual cache
-  lifetime as exactly one of `cache.ttl_ms` or `cache.implicit: true`, and
-  whether warming is on for the session in `cache.warming.on`. An implicit
+- [pinned] A `cache_policy` runner records a model step's actual cache
+  lifetime, when the step's route reports one, as exactly one of
+  `cache.ttl_ms` or `cache.implicit: true`, and whether warming is on for
+  the session in `cache.warming.on`. A step whose route does not report its
+  cache lifetime omits `cache` entirely, meaning unknown, even on a
+  `cache_policy` runner: one runner can host routes that report and routes
+  that do not. It never sends a `cache` object without a lifetime. An implicit
   cache has no provable lifetime. `implicit: false` and a report carrying
   both lifetime forms are invalid producer reports. A warming stop records
   `on: false` with one of §9.3.5's `stop_reason` values; an `off` policy that
