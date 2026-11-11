@@ -41,6 +41,10 @@ pub const CASES: &[&str] = &[
     "empty_output_is_a_failure",
     "usage_absent_is_not_zero",
     "usage_no_rounding",
+    "usage_input_image",
+    "usage_output_image",
+    "usage_output_video",
+    "usage_cache_read",
     "usage_quantity_bounds",
     "usage_quantity_coefficient_bounds",
     "usage_record_bounds",
@@ -706,14 +710,25 @@ async fn run_more<S: MediaSubject>(
     match name {
         "usage_absent_is_not_zero"
         | "usage_no_rounding"
+        | "usage_input_image"
+        | "usage_output_image"
+        | "usage_output_video"
+        | "usage_cache_read"
         | "usage_quantity_bounds"
         | "usage_quantity_coefficient_bounds"
         | "usage_record_bounds" => {
             let measurements = if name == "usage_absent_is_not_zero" {
                 vec![]
             } else {
+                let role = match name {
+                    "usage_input_image" => "input_image",
+                    "usage_output_image" => "output_image",
+                    "usage_output_video" => "output_video",
+                    "usage_cache_read" => "cache_read",
+                    _ => "output",
+                };
                 vec![
-                    json!({"role":"output", "unit":"token", "quantity":"9007199254740993.00", "measure":"billed", "source":"vendor_reply"}),
+                    json!({"role":role, "unit":"token", "quantity":"9007199254740993.00", "measure":"billed", "source":"vendor_reply"}),
                 ]
             };
             let vendor_id = "識".repeat(257);
@@ -754,7 +769,7 @@ async fn run_more<S: MediaSubject>(
             } else {
                 require(
                     rs[0]["measurements"] == json!(measurements),
-                    "vendor decimals changed",
+                    "vendor measurements changed",
                 )
             }
         }

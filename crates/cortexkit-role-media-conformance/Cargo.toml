@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-role-media-conformance"
-version = "0.2.1"
+version = "0.2.2"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -10,7 +10,7 @@ description = "Scripted conformance checks for the CortexKit media-provider/v1 r
 [dependencies]
 async-trait = "0.1"
 base64 = "0.22"
-cortexkit-role-media = { version = "=0.1.4", path = "../cortexkit-role-media" }
+cortexkit-role-media = { version = "=0.1.5", path = "../cortexkit-role-media" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

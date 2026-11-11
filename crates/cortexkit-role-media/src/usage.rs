@@ -11,7 +11,17 @@ use crate::{
 open_enum!(ChargeBasis { Vendor => "vendor", Local => "local" });
 open_enum!(AuthMethod { ApiKey => "api_key", Oauth => "oauth" });
 open_enum!(Unit { Second => "second", Character => "character", Image => "image", Request => "request", Token => "token" });
-open_enum!(MeasurementRole { InputAudio => "input_audio", OutputAudio => "output_audio", CachedInputAudio => "cached_input_audio", Input => "input", Output => "output" });
+open_enum!(MeasurementRole {
+    InputAudio => "input_audio",
+    OutputAudio => "output_audio",
+    CachedInputAudio => "cached_input_audio",
+    Input => "input",
+    Output => "output",
+    InputImage => "input_image",
+    OutputImage => "output_image",
+    OutputVideo => "output_video",
+    CacheRead => "cache_read"
+});
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]

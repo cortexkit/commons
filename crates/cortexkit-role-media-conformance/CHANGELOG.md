@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+- Pin media `=0.1.5` with the token measurement roles `input_image`,
+  `output_image`, `output_video` and `cache_read`.
+- Add one usage-preservation case per new role, with independent faulty
+  subjects that rewrite the role. Unknown roles remain accepted by the open
+  contract decoder.
+
 ## 0.2.1
 
 - Pin media `=0.1.4`, whose engine identity is `(kind, provider, model)` and whose

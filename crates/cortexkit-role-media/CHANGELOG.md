@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.5
+
+- Add open measurement roles `input_image`, `output_image`, `output_video` and
+  `cache_read`, all in tokens. `cache_read` reports text input tokens served
+  from the vendor's cache, including in media jobs.
+- Document exact same-named token billing rates and the unit-billed
+  `rate.<role>.per_<unit>` lookup. Unknown roles still round-trip unchanged;
+  readers do not need an upgrade before engines emit the new names.
+
 ## 0.1.4
 
 - Key engine identity and describe/declaration set equality by

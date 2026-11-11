@@ -312,11 +312,25 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   and a scale of at most 9. Out-of-range quantities are malformed: refuse with
   `invalid_usage_record` and field `quantity`, just as for a bad decimal shape.
   Unit is open second/character/image/request/token; role is open
-  input_audio/output_audio/cached_input_audio/input/output. Closed measure is
-  billed/observed; source is vendor_reply/provider_measured. Report the vendor's
-  raw billed quantities, or measured duration as observed only when absent;
-  observed stays unpriced. Bias tokens are reported only if in the vendor reply.
-  Missing is not zero, unpriced is not free; no rounding, floors or minimums.
+  input_audio/output_audio/cached_input_audio/input/output/input_image/output_image/
+  output_video/cache_read. The roles `input_image`, `output_image` and
+  `output_video` use unit `token`: report the vendor's image-input, image-output
+  and video-output token quantities, not image counts or video seconds.
+  `cache_read` uses unit `token` for text input tokens served from the vendor's
+  cache, including in media jobs; it is not named `cached_input`.
+  Token-billed usage maps each role to the same-named catalog rate:
+  `input_image` to `rate.input_image`, `output_image` to `rate.output_image`,
+  `output_video` to `rate.output_video`, and `cache_read` to `rate.cache_read`.
+  Unit-billed usage maps to `rate.<role>.per_<unit>`; for example,
+  `input_audio` with unit `second` maps to `rate.input_audio.per_second`.
+  Measurement roles are open: readers preserve unknown names unchanged, so
+  readers need not adopt 0.1.5 before engines emit these names. Pricing a name
+  still requires its matching catalog rate.
+  Closed measure is billed/observed; source is vendor_reply/provider_measured.
+  Report the vendor's raw billed quantities, or measured duration as observed
+  only when absent; observed stays unpriced. Bias tokens are reported only if
+  in the vendor reply. Missing is not zero, unpriced is not free; no rounding,
+  floors or minimums.
 - [pinned] `media.feed.admission`: Only configured usage_reader may read/ack;
   other principals receive feed_not_admitted.
 - [pinned] `media.feed.read`: usage.read `{after_seq?, limit}` returns

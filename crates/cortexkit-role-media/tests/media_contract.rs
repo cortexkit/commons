@@ -503,6 +503,62 @@ fn basic_record() -> UsageRecord {
     decode(&vector("usage.json")["records"][0])
 }
 
+fn usage_role_round_trip(role: &str) -> MeasurementRole {
+    let mut value = serde_json::to_value(basic_record()).unwrap();
+    value["measurements"] = json!([{
+        "role": role,
+        "unit": "token",
+        "quantity": "123.00",
+        "measure": "billed",
+        "source": "vendor_reply"
+    }]);
+    let record: UsageRecord = round_trip(&value);
+    check_usage_record(&record).unwrap();
+    assert_eq!(record.measurements[0].unit, Unit::Token);
+    assert_eq!(record.measurements[0].role.as_str(), role);
+    record.measurements.into_iter().next().unwrap().role
+}
+
+#[test]
+fn media_contract_usage_input_image_round_trip() {
+    assert!(!matches!(
+        usage_role_round_trip("input_image"),
+        MeasurementRole::Unknown(_)
+    ));
+}
+
+#[test]
+fn media_contract_usage_output_image_round_trip() {
+    assert!(!matches!(
+        usage_role_round_trip("output_image"),
+        MeasurementRole::Unknown(_)
+    ));
+}
+
+#[test]
+fn media_contract_usage_output_video_round_trip() {
+    assert!(!matches!(
+        usage_role_round_trip("output_video"),
+        MeasurementRole::Unknown(_)
+    ));
+}
+
+#[test]
+fn media_contract_usage_cache_read_round_trip() {
+    assert!(!matches!(
+        usage_role_round_trip("cache_read"),
+        MeasurementRole::Unknown(_)
+    ));
+}
+
+#[test]
+fn media_contract_usage_unknown_role_round_trip() {
+    assert_eq!(
+        usage_role_round_trip("future_usage_role"),
+        MeasurementRole::Unknown("future_usage_role".into())
+    );
+}
+
 #[test]
 fn media_contract_usage_vectors_exact_decimals_and_statuses() {
     let cases = vector("usage.json");

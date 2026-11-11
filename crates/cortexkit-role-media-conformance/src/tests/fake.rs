@@ -169,6 +169,15 @@ impl State {
                 m["quantity"] = json!("9007199254740993.0");
             }
         }
+        for role in ["input_image", "output_image", "output_video", "cache_read"] {
+            if self.fault(&format!("usage_{role}")) {
+                for m in &mut ms {
+                    if m["role"] == role {
+                        m["role"] = json!("output");
+                    }
+                }
+            }
+        }
         if self.fault("usage_quantity_bounds") {
             ms[0]["quantity"] = json!("0.1234567890");
         }
