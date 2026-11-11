@@ -7,7 +7,7 @@ use cortexkit_role_tool_provider_conformance::{
     harness::KillMechanism, run_suite, Capability, CaseOutcome, SetupError, SuiteReport,
     SuiteVerdict, CASES,
 };
-use fake::{Defects, FakeSubject, SystemTextDefect, REFUSED_LISTED_PRESET};
+use fake::{Defects, FakeSubject, LateCustodyDefect, SystemTextDefect, REFUSED_LISTED_PRESET};
 
 async fn run(subject: &FakeSubject) -> SuiteReport {
     let dir = tempfile::tempdir().unwrap();
@@ -86,6 +86,61 @@ async fn a_faithful_provider_passes_every_case_but_its_simulated_kills_fail_the_
         }
         other => panic!("expected the real-kill rule to fail the run, got {other:?}"),
     }
+}
+
+const CARRIER_CUSTODY_CASES: &[&str] = &[
+    "late_results_cursor_round_trip",
+    "late_results_ack",
+    "crash_after_prepared_not_started",
+    "crash_after_authorized_not_started",
+    "tool_result_held_reply_route_gating",
+];
+
+async fn rejects_late_custody_defect(defect: LateCustodyDefect, expected: &str) {
+    let subject = FakeSubject::new(Defects {
+        paginate_late_results: true,
+        ..Defects::default()
+    });
+    let principals =
+        cortexkit_role_tool_provider_conformance::ToolProviderSubject::scoped_principals(&subject)
+            .unwrap();
+    assert_ne!(principals.carrier, principals.scope.owner);
+    let faithful = run(&subject).await;
+    let failures: Vec<_> = CARRIER_CUSTODY_CASES
+        .iter()
+        .filter(|case| faithful.outcome(case) != Some(&CaseOutcome::Passed))
+        .map(|case| format!("{case}: {:?}", faithful.outcome(case)))
+        .collect();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+
+    let faulty = run(&FakeSubject::new(Defects {
+        late_custody: Some(defect),
+        paginate_late_results: true,
+        ..Defects::default()
+    }))
+    .await;
+    for case in CARRIER_CUSTODY_CASES {
+        let reason = failed(&faulty, case);
+        assert!(reason.contains(expected), "{case}: {reason}");
+        assert!(reason.contains("carrier"), "{case}: {reason}");
+        assert!(reason.contains("owner"), "{case}: {reason}");
+        println!("rejected {case}: {reason}");
+    }
+}
+
+#[tokio::test]
+async fn carrier_custody_rejects_owner_delivery() {
+    rejects_late_custody_defect(LateCustodyDefect::OwnerInsteadOfCarrier, "scope owner").await;
+}
+
+#[tokio::test]
+async fn carrier_custody_rejects_owner_feed_leakage() {
+    rejects_late_custody_defect(LateCustodyDefect::CopyToOwner, "scope owner").await;
+}
+
+#[tokio::test]
+async fn carrier_custody_rejects_duplicate_entries() {
+    rejects_late_custody_defect(LateCustodyDefect::DuplicateCarrierEntry, "found 2").await;
 }
 
 #[tokio::test]

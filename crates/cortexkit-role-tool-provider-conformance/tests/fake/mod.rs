@@ -109,8 +109,19 @@ pub enum SystemTextDefect {
 }
 
 /// Fixture variations and deliberate contract breaks for runner tests.
+#[derive(Clone, Copy, Debug)]
+pub enum LateCustodyDefect {
+    OwnerInsteadOfCarrier,
+    CopyToOwner,
+    DuplicateCarrierEntry,
+}
+
+/// Fixture variations and deliberate contract breaks for runner tests.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub late_custody: Option<LateCustodyDefect>,
+    /// Serve one entry per page so later pages exercise custody checks too.
+    pub paginate_late_results: bool,
     /// Optional provider capability, including unknown-token probes.
     pub session_notices_token: Option<&'static str>,
     /// Preserve the notice token but add a non-string capability member.
@@ -353,9 +364,17 @@ impl Module {
             return;
         }
         let scope = self.records.lock().unwrap()[key].scope.clone();
+        let custodian = if matches!(
+            self.defects.late_custody,
+            Some(LateCustodyDefect::OwnerInsteadOfCarrier)
+        ) {
+            &scope.owner
+        } else {
+            &key.0
+        };
         let mut entry = json!({
             "kind": kind, "owner": scope.owner, "ref": scope.scope_ref,
-            "scope_epoch": scope.scope_epoch, "custodian": scope.owner,
+            "scope_epoch": scope.scope_epoch, "custodian": custodian,
             "call_key": key.1, "event_id": event_id, "settled_at": 1_790_000_000_000u64,
             "reduced": false,
         });
@@ -366,7 +385,17 @@ impl Module {
         }
         let mut late = self.late.lock().unwrap();
         let seq = late.len() as u64 + 1;
-        late.push((seq, serde_json::from_value(entry).unwrap()));
+        late.push((seq, serde_json::from_value(entry.clone()).unwrap()));
+        match self.defects.late_custody {
+            Some(LateCustodyDefect::CopyToOwner) => {
+                entry["custodian"] = json!(scope.owner);
+                late.push((seq + 1, serde_json::from_value(entry).unwrap()));
+            }
+            Some(LateCustodyDefect::DuplicateCarrierEntry) => {
+                late.push((seq + 1, serde_json::from_value(entry).unwrap()));
+            }
+            _ => {}
+        }
     }
 
     /// Dispatch a held call: DispatchStarted, the action, Settled.
@@ -902,6 +931,11 @@ impl Module {
         check_since(&self.incarnation, self.head(), request.since.as_ref())?;
         let after = request.since.as_ref().map_or(0, |c| c.seq);
         let limit = request.limit.map_or(usize::MAX, |l| l as usize);
+        let limit = if self.defects.paginate_late_results {
+            limit.min(1)
+        } else {
+            limit
+        };
         let acked = self.acked.lock().unwrap().clone();
         let mine: Vec<(u64, LateEntry)> = self
             .late

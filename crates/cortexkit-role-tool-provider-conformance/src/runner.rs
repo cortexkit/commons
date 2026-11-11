@@ -688,7 +688,6 @@ where
     async fn held_reply_route_gating(&self, mint: &mut KeyMint) -> CaseResult {
         let principals = self.principals()?;
         let stamp = principals.stamp(&principals.carrier);
-        let owner = self.owner_route().await?;
         // Expected decisions are independent of the provider's gating helper.
         for (declarations, expected_held) in [
             (None, false),
@@ -763,18 +762,7 @@ where
                 .await
                 .map_err(|e| e.to_string())?;
             self.subject.settle().await;
-            let late = pull(&owner, Value::Null).await?;
-            if !late.entries.iter().any(|entry| {
-                entry.call_key == key
-                    && entry.custodian == principals.scope.owner
-                    && entry.scope_ref == principals.scope.scope_ref
-                    && entry.scope_epoch == principals.scope.scope_epoch
-                    && entry.kind == kinds::RESULT
-            }) {
-                return Err(format!(
-                    "{name}: no result late answer for approved held call {key}"
-                ));
-            }
+            self.carrier_late_results(&key, kinds::RESULT).await?;
         }
         Ok(())
     }
@@ -1769,31 +1757,35 @@ where
         Ok(())
     }
 
-    async fn owner_route(&self) -> Result<S::Route, String> {
+    async fn carrier_route(&self) -> Result<S::Route, String> {
         let principals = self.principals()?;
-        self.route(&principals.stamp(&principals.scope.owner)).await
+        self.route(&principals.stamp(&principals.carrier)).await
+    }
+
+    async fn carrier_late_results(
+        &self,
+        key: &str,
+        kind: &str,
+    ) -> Result<LateResultsReply, String> {
+        let principals = self.principals()?;
+        let carrier = self.carrier_route().await?;
+        let owner = if principals.carrier != principals.scope.owner {
+            Some(
+                self.route(&principals.stamp(&principals.scope.owner))
+                    .await?,
+            )
+        } else {
+            None
+        };
+        carrier_late_results(&carrier, owner.as_ref(), &principals, key, kind).await
     }
 
     async fn late_results_round_trip(&self, key: String) -> CaseResult {
         self.settle_a_call(&key).await?;
-        let owner = self.owner_route().await?;
-        let first = pull(&owner, Value::Null).await?;
-        let entry = first
-            .entries
-            .iter()
-            .find(|entry| entry.call_key == key)
-            .ok_or_else(|| format!("no late result for the settled call {key}"))?;
-        if entry.kind != kinds::RESULT {
-            return Err(format!(
-                "the settled call's entry is {:?}, not result",
-                entry.kind
-            ));
-        }
-        if entry.custodian != self.principals()?.scope.owner {
-            return Err(format!("the entry's custodian is {}", entry.custodian));
-        }
+        let carrier = self.carrier_route().await?;
+        let first = self.carrier_late_results(&key, kinds::RESULT).await?;
         let since = serde_json::to_value(&first.cursor).expect("cursor serializes");
-        let next = pull(&owner, since.clone()).await?;
+        let next = pull(&carrier, since.clone()).await?;
         let seen: BTreeSet<&str> = first.entries.iter().map(|e| e.event_id.as_str()).collect();
         if let Some(again) = next
             .entries
@@ -1805,7 +1797,7 @@ where
                 again.event_id
             ));
         }
-        let repeat = pull(&owner, since).await?;
+        let repeat = pull(&carrier, since).await?;
         if repeat != next {
             return Err("reading twice from one cursor gave different replies".to_owned());
         }
@@ -1814,8 +1806,8 @@ where
 
     async fn late_results_ack(&self, key: String) -> CaseResult {
         self.settle_a_call(&key).await?;
-        let owner = self.owner_route().await?;
-        let first = pull(&owner, Value::Null).await?;
+        let carrier = self.carrier_route().await?;
+        let first = self.carrier_late_results(&key, kinds::RESULT).await?;
         let event = first
             .entries
             .iter()
@@ -1826,12 +1818,12 @@ where
         expect_response(
             "late_results.ack",
             request(
-                &owner,
+                &carrier,
                 op_body(ops::LATE_RESULTS_ACK, json!({ "through": through })),
             )
             .await?,
         )?;
-        let after = pull(&owner, Value::Null).await?;
+        let after = pull_all(&carrier).await?;
         if after.entries.iter().any(|entry| entry.event_id == event) {
             return Err(format!("the acked entry {event} is still served"));
         }
@@ -1844,8 +1836,8 @@ where
         if !catalog.declares(session_capabilities::LATE_RESULTS) {
             return Err("the catalog does not declare late_results".to_owned());
         }
-        let owner = self.owner_route().await?;
-        let cursor = pull(&owner, Value::Null).await?.cursor;
+        let carrier = self.carrier_route().await?;
+        let cursor = pull(&carrier, Value::Null).await?.cursor;
         let foreign = json!({
             "provider_incarnation": format!("{}-another", cursor.provider_incarnation),
             "seq": cursor.seq,
@@ -1858,7 +1850,7 @@ where
             let error = expect_error(
                 &format!("a cursor from {what}"),
                 request(
-                    &owner,
+                    &carrier,
                     op_body(ops::LATE_RESULTS, json!({ "since": since })),
                 )
                 .await?,
@@ -1917,7 +1909,7 @@ fn marker_path(work_dir: &Path, key: &str) -> PathBuf {
 
 /// Kill the provider at `point` while it holds a call, restart it on the same
 /// root, and check that it never runs the call, that it reports the call to
-/// the owner as a `not_started` late result, and that its withdraw answer
+/// the carrier as a `not_started` late result, and that its withdraw answer
 /// guarantees the call will never run.
 async fn crash_case<S>(
     subject: &S,
@@ -1976,35 +1968,36 @@ where
         ));
     }
 
-    let owner = driver
-        .route(&handle, &owner_stamp)
-        .await
-        .map_err(|e| format!("opening the owner's route after restart: {e}"))?;
-    let entries = pull(&owner, Value::Null).await?.entries;
-    let mine: Vec<_> = entries.iter().filter(|e| e.call_key == key).collect();
-    let not_started = mine
-        .iter()
-        .find(|e| e.kind == kinds::NOT_STARTED)
-        .ok_or_else(|| {
-            format!(
-                "after restarting from {point} the owner's late results hold no not_started \
-                 entry for the call (its entries: {:?})",
-                mine.iter().map(|e| &e.kind).collect::<Vec<_>>()
-            )
-        })?;
-    if not_started.reason.as_deref().is_none_or(str::is_empty) {
-        return Err("the not_started entry carries no reason".to_owned());
-    }
-    if let Some(result) = mine.iter().find(|e| e.kind == kinds::RESULT) {
-        return Err(format!(
-            "the call cut at {point} also has a result entry: {result:?}"
-        ));
-    }
-
     let carrier = driver
         .route(&handle, &carrier_stamp)
         .await
         .map_err(|e| format!("opening the carrier's route after restart: {e}"))?;
+    let owner = if principals.carrier != principals.scope.owner {
+        Some(
+            driver
+                .route(&handle, &owner_stamp)
+                .await
+                .map_err(|e| format!("opening the owner's route after restart: {e}"))?,
+        )
+    } else {
+        None
+    };
+    let late = carrier_late_results(
+        &carrier,
+        owner.as_ref(),
+        &principals,
+        &key,
+        kinds::NOT_STARTED,
+    )
+    .await?;
+    let not_started = late
+        .entries
+        .iter()
+        .find(|e| e.call_key == key)
+        .expect("carrier_late_results checked the entry");
+    if not_started.reason.as_deref().is_none_or(str::is_empty) {
+        return Err("the not_started entry carries no reason".to_owned());
+    }
     let answer = decode_answer(withdraw(&carrier, json!({ "call_key": key })).await?)?;
     if !answer.guarantees_not_run() {
         return Err(format!(
@@ -2053,6 +2046,76 @@ async fn pull<R: ToolRoute>(route: &R, since: Value) -> Result<LateResultsReply,
     )?;
     serde_json::from_value(body.clone())
         .map_err(|e| format!("late_results reply {body} does not decode: {e}"))
+}
+
+/// Read the whole feed so pagination cannot hide duplicate or misrouted entries.
+async fn pull_all<R: ToolRoute>(route: &R) -> Result<LateResultsReply, String> {
+    let mut since = Value::Null;
+    let mut entries = Vec::new();
+    loop {
+        let mut page = pull(route, since.clone()).await?;
+        entries.append(&mut page.entries);
+        if !page.more {
+            page.entries = entries;
+            return Ok(page);
+        }
+        let next = serde_json::to_value(&page.cursor).expect("cursor serializes");
+        if next == since {
+            return Err("late-results pagination did not advance its cursor".into());
+        }
+        since = next;
+    }
+}
+
+async fn carrier_late_results<R: ToolRoute>(
+    carrier: &R,
+    owner: Option<&R>,
+    principals: &ScopedPrincipals,
+    key: &str,
+    kind: &str,
+) -> Result<LateResultsReply, String> {
+    if let Some(owner) = owner {
+        if pull_all(owner)
+            .await?
+            .entries
+            .iter()
+            .any(|entry| entry.call_key == key)
+        {
+            return Err(format!(
+                "scope owner {} received late entry for {key}; only carrier {} may receive it",
+                principals.scope.owner, principals.carrier
+            ));
+        }
+    }
+    let late = pull_all(carrier).await?;
+    let mine: Vec<_> = late.entries.iter().filter(|e| e.call_key == key).collect();
+    if mine.len() != 1 {
+        return Err(format!(
+            "carrier {} must receive exactly one {kind} entry for {key}, found {}; \
+             scope owner {} is not the custodian",
+            principals.carrier,
+            mine.len(),
+            principals.scope.owner
+        ));
+    }
+    let entry = mine[0];
+    if entry.custodian != principals.carrier {
+        return Err(format!(
+            "late entry for {key} names custodian {}, expected carrier {} (not scope owner {})",
+            entry.custodian, principals.carrier, principals.scope.owner
+        ));
+    }
+    if entry.kind != kind
+        || entry.owner != principals.scope.owner
+        || entry.scope_ref != principals.scope.scope_ref
+        || entry.scope_epoch != principals.scope.scope_epoch
+    {
+        return Err(format!(
+            "carrier {} expected a {kind} entry for {key} under scope owner {}: {entry:?}",
+            principals.carrier, principals.scope.owner
+        ));
+    }
+    Ok(late)
 }
 
 fn expect_response(what: &str, exchange: Exchange) -> Result<Value, String> {

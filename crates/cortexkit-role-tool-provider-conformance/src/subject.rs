@@ -129,8 +129,8 @@ impl Capability {
 
 /// The identities the withdraw, late-result and crash cases open routes as.
 /// Scoped routes are under `scope` unless a case says otherwise; the scope's
-/// owner is `scope.owner`, which is also the custodian of the late results of
-/// calls raised under it.
+/// owner is `scope.owner`, but the custodian of a call's late results is its
+/// carrier. Supply distinct principals so the cases can detect owner delivery.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScopedPrincipals {
     pub scope: ScopeIdentity,

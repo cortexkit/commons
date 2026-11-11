@@ -21,6 +21,28 @@ pairs with subc-protocol 0.32 and cortexkit-role-tool-provider 0.10.4; version
 subc-protocol 0.32; versions 0.7.x pair with protocol 0.31, and versions 0.6.x
 pair with protocol 0.30.
 
+## Late-result carrier custody (0.15.6)
+
+Version 0.15.6 retains the exact `cortexkit-role-tool-provider =0.15.5` pin
+and corrects 0.15.4's owner-custody assumptions to match contract §7. The
+custodian is the carrier that raised the keyed call, even inside another
+principal's scope. Late-result reads and acks use that carrier's verified
+principal, not the scope owner's.
+
+The existing `scoped_principals()` fixture and `Harness::route` stamps already
+support a carrier in another owner's scope; no additional adapter hook is
+needed. Supply distinct `carrier` and `scope.owner` identities so the kit can
+distinguish custody from scope ownership. The reference fake uses distinct
+identities and tests both carrier delivery and rejection of owner delivery.
+
+`late_results_cursor_round_trip`, `late_results_ack`, both
+`crash_after_*_not_started` cases and `tool_result_held_reply_route_gating`
+require exactly one matching entry in the carrier's feed, with the carrier
+as custodian and the original scope identity. When the owner differs, its
+entire feed must exclude the call. These checks follow pagination so a later
+page cannot hide duplicates or an owner leak. Probes that reject cursors from
+another provider incarnation or past the log's end also use the carrier's feed.
+
 ## Session notices (0.15.4)
 
 `session_notices_describe` runs only for the exact live module capability

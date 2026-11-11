@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.6
+
+- Correct 0.15.4's owner-custody assumptions to match the contract: late
+  results and pre-dispatch crash recovery belong to the carrier that raised
+  the call, not its scope owner. Poll and ack as the carrier, require exactly
+  one matching entry, and reject delivery to a distinct scope owner.
+- Apply carrier custody to held-reply gating and to probes that reject cursors
+  from another provider incarnation or past the log's end.
+  Keep the contract pin at `=0.15.5`. Existing scoped-principal fixtures
+  support distinct owners and carriers; no new adapter hook is required.
+
 ## 0.15.5
 
 - Accept `subc-protocol >=0.34.1, <0.37` and pin `cortexkit-role-tool-provider`
