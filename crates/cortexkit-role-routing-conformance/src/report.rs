@@ -218,7 +218,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("harness_limits_pairs_narrow", "per-harness pairs narrow choices and selection; absent fields inherit the runner union"),
     check("harness_limits_providers_narrow", "per-harness provider allow-lists narrow choices and selection"),
     check("harness_limits_invalid_falls_back", "a refused harness_limits member leaves every harness selectable with runner-level values"),
-    check("runner_requires_wire_api", "a runner requiring wire.api selects and offers only rows with a served endpoint; serving the endpoint admits the row"),
+    check("runner_requires_wire_api", "runner and pair wire.api requirements control selection and offers; serving the endpoint admits the row and pair overrides win in both directions"),
     check("unrequested_harness_uses_declaration", "without harness, answer the declared default, else singleton, else omit it without filtering candidates"),
     check("non_starting_runner_never_selected", "starts_sessions false runners never answer select, with or without harness"),
     check("undeclared_harness_group_refuses_member", "a provider without select_harness refuses harness as invalid_request naming the field"),

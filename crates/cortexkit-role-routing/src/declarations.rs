@@ -127,6 +127,9 @@ impl<'de> Deserialize<'de> for ConsumerDeclarations {
 pub struct RunnerPair {
     pub wire_api: String,
     pub auth_method: String,
+    /// Override the runner's endpoint requirement for this wire/auth pair.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub requires_wire_api: Option<bool>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub unknown: BTreeMap<String, Value>,
 }
@@ -136,8 +139,14 @@ impl RunnerPair {
         Self {
             wire_api: wire_api.into(),
             auth_method: auth_method.into(),
+            requires_wire_api: None,
             unknown: BTreeMap::new(),
         }
+    }
+
+    pub fn with_requires_wire_api(mut self, requires_wire_api: bool) -> Self {
+        self.requires_wire_api = Some(requires_wire_api);
+        self
     }
 }
 
@@ -156,12 +165,67 @@ pub struct StandingLimits {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct HarnessLimits {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        with = "harness_pairs",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub pairs: Option<Vec<RunnerPair>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explicit_providers: Option<Vec<String>>,
     #[serde(flatten, skip_serializing_if = "BTreeMap::is_empty")]
     pub unknown: BTreeMap<String, Value>,
+}
+
+// Harness pairs share the public pair type but only narrow identities. Keep
+// requirement members as unknown data here, including values that are not bools.
+mod harness_pairs {
+    use super::*;
+
+    #[derive(Serialize, Deserialize)]
+    struct Pair {
+        wire_api: String,
+        auth_method: String,
+        #[serde(flatten)]
+        unknown: BTreeMap<String, Value>,
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<Vec<RunnerPair>>, D::Error> {
+        Ok(
+            Option::<Vec<Pair>>::deserialize(deserializer)?.map(|pairs| {
+                pairs
+                    .into_iter()
+                    .map(|pair| RunnerPair {
+                        wire_api: pair.wire_api,
+                        auth_method: pair.auth_method,
+                        requires_wire_api: None,
+                        unknown: pair.unknown,
+                    })
+                    .collect()
+            }),
+        )
+    }
+
+    pub fn serialize<S: serde::Serializer>(
+        pairs: &Option<Vec<RunnerPair>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        pairs
+            .as_ref()
+            .map(|pairs| {
+                pairs
+                    .iter()
+                    .map(|pair| Pair {
+                        wire_api: pair.wire_api.clone(),
+                        auth_method: pair.auth_method.clone(),
+                        unknown: pair.unknown.clone(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .serialize(serializer)
+    }
 }
 
 impl HarnessLimits {
@@ -229,7 +293,7 @@ pub struct RunnerDeclaration {
         skip_serializing_if = "std::ops::Not::not"
     )]
     pub follows_account_choice: bool,
-    /// True when the runner opens rows only through their served `wire.api`.
+    /// Default endpoint requirement for pairs without their own override.
     #[serde(
         default,
         deserialize_with = "null_default",
@@ -311,7 +375,30 @@ impl RunnerDeclaration {
         self.requires_wire_api
     }
 
+    /// Read the requirement from the matching runner pair, then the runner.
+    /// Only the supplied pair's wire API and auth method are used, so a
+    /// harness-limit pair cannot change the runner pair's requirement.
+    pub fn requires_wire_api_for_pair(&self, pair: &RunnerPair) -> bool {
+        self.pairs
+            .iter()
+            .find(|declared| {
+                declared.wire_api == pair.wire_api && declared.auth_method == pair.auth_method
+            })
+            .and_then(|declared| declared.requires_wire_api)
+            .unwrap_or(self.requires_wire_api())
+    }
+
+    /// Whether the matching runner pair admits a row's endpoint availability.
+    /// Pair membership and other routing constraints must be checked separately.
+    pub fn admits_pair_row(&self, pair: &RunnerPair, row_serves_wire_api: bool) -> bool {
+        !self.requires_wire_api_for_pair(pair) || row_serves_wire_api
+    }
+
     /// Whether this runner admits one row's endpoint availability; reads no catalog.
+    ///
+    /// Deprecated for pair matching: this checks only the runner-level default.
+    /// Use [`Self::admits_pair_row`] to honor pair overrides. This helper retains
+    /// its original behavior for callers whose runners have no pair overrides.
     pub fn admits_row(&self, row_serves_wire_api: bool) -> bool {
         !self.requires_wire_api() || row_serves_wire_api
     }
@@ -636,7 +723,11 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
     let mut seen = BTreeSet::new();
     for (index, value) in pairs.iter().enumerate() {
         let path = format!("runner.pairs[{index}]");
-        let pair = declaration_object(value, &path, &["wire_api", "auth_method"])?;
+        let pair = declaration_object(
+            value,
+            &path,
+            &["wire_api", "auth_method", "requires_wire_api"],
+        )?;
         let token = |name: &str| {
             pair.get(name)
                 .and_then(Value::as_str)
@@ -645,6 +736,12 @@ fn validate_runner(value: &Value) -> Result<(), DeclarationError> {
         };
         let wire_api = token("wire_api")?;
         let auth_method = token("auth_method")?;
+        if pair
+            .get("requires_wire_api")
+            .is_some_and(|value| !value.is_null() && !value.is_boolean())
+        {
+            return Err(invalid(format!("{path}.requires_wire_api")));
+        }
         if !seen.insert((wire_api, auth_method)) {
             return Err(invalid(path));
         }

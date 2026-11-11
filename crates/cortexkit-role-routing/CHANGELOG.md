@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.14
+
+- Add optional per-pair `requires_wire_api`: a pair's value wins over the
+  runner-level value, which still defaults to false. Apply the effective value
+  to select, panels, head choices and the `runner_requires_wire_api` explanation.
+  Harness limits only narrow pairs; a requirement written there has no effect.
+- Readers first: a 0.7.13 or older reader refuses a pair carrying
+  `requires_wire_api` and drops the whole runner declaration. No runner declares
+  the member on a pair until routing runs 0.7.14 live.
+
 ## 0.7.13
 
 - Add runner-level `requires_wire_api`, defaulting to false, with a builder,

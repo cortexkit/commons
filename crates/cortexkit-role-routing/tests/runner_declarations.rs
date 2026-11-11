@@ -93,6 +93,122 @@ fn absent_account_choice_is_not_serialized_as_false() {
 }
 
 #[test]
+fn pair_requires_wire_api_false_overrides_runner_true_only_for_that_pair() {
+    let runner = RunnerDeclaration::new(vec![
+        RunnerPair::new("google.code_assist", "antigravity").with_requires_wire_api(false),
+        RunnerPair::new("google.generate_content", "apikey"),
+    ])
+    .with_requires_wire_api(true);
+    assert!(!runner.requires_wire_api_for_pair(&runner.pairs[0]));
+    assert!(runner.admits_pair_row(&runner.pairs[0], false));
+    assert!(runner.requires_wire_api_for_pair(&runner.pairs[1]));
+    assert!(!runner.admits_pair_row(&runner.pairs[1], false));
+    assert!(runner.admits_pair_row(&runner.pairs[0], true));
+    assert!(runner.admits_pair_row(&runner.pairs[1], true));
+}
+
+#[test]
+fn pair_requires_wire_api_true_overrides_runner_false_only_for_that_pair() {
+    for explicit_default in [false, true] {
+        let mut runner = RunnerDeclaration::new(vec![
+            RunnerPair::new("openai.responses", "apikey").with_requires_wire_api(true),
+            RunnerPair::new("google.code_assist", "antigravity"),
+        ]);
+        if explicit_default {
+            runner = runner.with_requires_wire_api(false);
+        }
+        assert!(runner.requires_wire_api_for_pair(&runner.pairs[0]));
+        assert!(!runner.admits_pair_row(&runner.pairs[0], false));
+        assert!(!runner.requires_wire_api_for_pair(&runner.pairs[1]));
+        assert!(runner.admits_pair_row(&runner.pairs[1], false));
+        assert!(runner.admits_pair_row(&runner.pairs[0], true));
+        assert!(runner.admits_pair_row(&runner.pairs[1], true));
+    }
+}
+
+#[test]
+fn pair_requires_wire_api_non_boolean_refuses_the_declaration_by_path() {
+    for value in [json!("false"), json!(0), json!([]), json!({})] {
+        invalid(
+            slot(json!({"pairs": [pair(), {
+                "wire_api": "openai.responses", "auth_method": "apikey",
+                "requires_wire_api": value
+            }]})),
+            "runner.pairs[1].requires_wire_api",
+        );
+    }
+}
+
+#[test]
+fn pair_requires_wire_api_harness_member_cannot_override_runner_pair() {
+    let mut runner = RunnerDeclaration::new(vec![
+        RunnerPair::new("openai.responses", "apikey").with_requires_wire_api(true)
+    ])
+    .with_harnesses(vec!["alpha".into()]);
+    for ignored in [json!(false), json!("ignored"), json!({}), Value::Null] {
+        runner.harness_limits = Some(json!({"alpha": {"pairs": [{
+            "wire_api": "openai.responses", "auth_method": "apikey", "requires_wire_api": ignored
+        }]}}));
+        let limits = runner.limits_for_harness(Some("alpha")).unwrap();
+        let harness_pair = &limits.pairs.as_ref().unwrap()[0];
+        assert_eq!(harness_pair.requires_wire_api, None);
+        assert_eq!(harness_pair.unknown["requires_wire_api"], ignored);
+        assert!(runner.requires_wire_api_for_pair(harness_pair));
+        assert!(!runner.admits_pair_row(harness_pair, false));
+        let encoded = serde_json::to_value(&limits).unwrap();
+        assert_eq!(encoded["pairs"][0]["requires_wire_api"], ignored);
+    }
+    let mut harness_pair = runner.pairs[0].clone().with_requires_wire_api(false);
+    harness_pair.unknown.clear();
+    assert!(runner.requires_wire_api_for_pair(&harness_pair));
+    let limits =
+        cortexkit_role_routing::declarations::HarnessLimits::new().with_pairs(vec![harness_pair]);
+    assert!(serde_json::to_value(limits).unwrap()["pairs"][0]
+        .get("requires_wire_api")
+        .is_none());
+}
+
+#[test]
+fn pair_requires_wire_api_parses_and_serializes_true_false_absent_and_null() {
+    for value in [
+        Some(json!(true)),
+        Some(json!(false)),
+        None,
+        Some(Value::Null),
+    ] {
+        for runner_default in [Some(true), Some(false), None] {
+            let mut declared_pair = pair();
+            if let Some(value) = &value {
+                declared_pair["requires_wire_api"] = value.clone();
+            }
+            let mut declaration = json!({"pairs": [declared_pair]});
+            if let Some(default) = runner_default {
+                declaration["requires_wire_api"] = json!(default);
+            }
+            let runner = parse_consumer_declarations(&slot(declaration))
+                .unwrap()
+                .runner
+                .unwrap();
+            let override_value = value.as_ref().and_then(Value::as_bool);
+            assert_eq!(runner.pairs[0].requires_wire_api, override_value);
+            assert_eq!(
+                runner.requires_wire_api_for_pair(&runner.pairs[0]),
+                override_value.or(runner_default).unwrap_or(false)
+            );
+            let encoded = serde_json::to_value(&runner).unwrap();
+            assert_eq!(
+                encoded["pairs"][0].get("requires_wire_api"),
+                override_value.map(|value| json!(value)).as_ref()
+            );
+            ConsumerDeclarations::new()
+                .with_runner(runner)
+                .validate()
+                .unwrap();
+        }
+    }
+}
+
+#[test]
 fn requires_wire_api_parses_true_false_absent_and_null() {
     for value in [
         Some(json!(true)),

@@ -89,9 +89,14 @@ preserving existing adapters.
     the missing hook if either this hook or `configure_runner_route_facts` is
     unsupported. Otherwise it checks select and, when served, head choices
     exclude the row without an endpoint, then serves that endpoint and checks
-    the row becomes selectable. Head choices may remain an admission subset.
-    Declare `requires_wire_api` only after the router runs routing 0.7.13 or
-    later; older strict parsers drop the runner;
+    the row becomes selectable. It also removes both endpoints and declares
+    two distinct pairs to check overrides in both directions: a pair can waive
+    a true runner default or require an endpoint despite a false default.
+    Select honors the override and head choices exclude the blocked pair.
+    Head choices may remain an admission subset. Declare runner-level
+    `requires_wire_api` only after the router runs routing 0.7.13 or later,
+    and pair-level values only once routing runs 0.7.14 live; older strict
+    parsers drop the whole runner declaration;
   - `pin_for_project(project, consumer, pin)`: an operator pin that applies
     to the consumer's selects within the project;
   - `cool_down(route_key, until_ms)`: the route serves nothing before then.

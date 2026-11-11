@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.16
+
+- Pin routing `=0.7.14`. Extend `runner_requires_wire_api` with per-pair
+  overrides in both directions and faulty routers that apply the runner-level
+  value to an overriding pair, including head choices.
+- Readers first: a 0.7.13 or older reader drops a runner declaration carrying
+  `requires_wire_api` on a pair. Declare pair overrides only once routing runs
+  0.7.14 live.
+
 ## 0.10.15
 
 - Pin routing `=0.7.13`. Add `runner_requires_wire_api`: select and served

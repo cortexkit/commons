@@ -998,14 +998,8 @@ impl FakeRoute {
         let Some(declaration) = state.runner_declarations.get(module) else {
             return true;
         };
-        if !self.fault("runner_requires_wire_api")
-            && !declaration.admits_row(
-                state.route_wire_apis.contains_key(&model.route_key())
-                    && !(self.fault("requires_wire_api_stale") && model.model == "model-b"),
-            )
-        {
-            return false;
-        }
+        let serves_wire_api = state.route_wire_apis.contains_key(&model.route_key())
+            && !(self.fault("requires_wire_api_stale") && model.model == "model-b");
         let mut declaration = declaration.clone();
         if self.fault("harness_limits_pairs_narrow")
             || self.fault("harness_limits_providers_narrow")
@@ -1033,13 +1027,30 @@ impl FakeRoute {
                 .runner_route_facts
                 .iter()
                 .find(|facts| facts.route_key == model.route_key())
-                .is_none_or(|facts| {
-                    limits.pairs.as_ref().is_some_and(|pairs| {
-                        pairs.iter().any(|pair| {
-                            pair.wire_api == facts.wire_api && pair.auth_method == facts.auth_method
+                .map_or_else(
+                    || {
+                        self.fault("runner_requires_wire_api")
+                            || declaration.admits_row(serves_wire_api)
+                    },
+                    |facts| {
+                        limits.pairs.as_ref().is_some_and(|pairs| {
+                            pairs.iter().any(|pair| {
+                                pair.wire_api == facts.wire_api
+                                    && pair.auth_method == facts.auth_method
+                                    && (self.fault("runner_requires_wire_api")
+                                        || if (self.fault("requires_wire_api_pair_false_ignored")
+                                            && pair.requires_wire_api == Some(false))
+                                            || (self.fault("requires_wire_api_pair_true_ignored")
+                                                && pair.requires_wire_api == Some(true))
+                                        {
+                                            declaration.admits_row(serves_wire_api)
+                                        } else {
+                                            declaration.admits_pair_row(pair, serves_wire_api)
+                                        })
+                            })
                         })
-                    })
-                })
+                    },
+                )
     }
 
     fn select(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {

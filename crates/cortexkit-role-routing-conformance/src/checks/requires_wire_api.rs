@@ -105,6 +105,86 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 keys[1]
             ));
         }
+        // Two endpoint-free rows distinguish a pair override from its runner's
+        // default in both directions; neither row can hide behind a served API.
+        if !self
+            .subject
+            .configure_runner_route_facts(&[
+                RunnerRouteFacts::new(&keys[0], wire_api, auth_method),
+                RunnerRouteFacts::new(&keys[1], spellings::WIRE_APIS[0], auth_method),
+            ])
+            .await?
+        {
+            return Ok(Ending::NotApplicable(
+                "configure_runner_route_facts is unsupported".into(),
+            ));
+        }
+        for key in &keys {
+            if !self.subject.configure_route_wire_api(key, None).await? {
+                return Ok(Ending::NotApplicable(
+                    "configure_route_wire_api is unsupported".into(),
+                ));
+            }
+        }
+        for runner_default in [true, false] {
+            self.subject
+                .configure_catalog_declarations(&[CatalogModule {
+                    principal: fixture::RUNNER_ONE.into(),
+                    nonce_verified: true,
+                    role_declarations: [(
+                        crate::wire::ROLE_DECLARATIONS_KEY.into(),
+                        json!({"runner": {
+                            "pairs": [
+                                {"wire_api": wire_api, "auth_method": auth_method,
+                                 "requires_wire_api": !runner_default},
+                                {"wire_api": spellings::WIRE_APIS[0], "auth_method": auth_method}
+                            ],
+                            "requires_wire_api": runner_default
+                        }}),
+                    )]
+                    .into(),
+                }])
+                .await?;
+            let (allowed, blocked) = if runner_default {
+                (&keys[0], &keys[1])
+            } else {
+                (&keys[1], &keys[0])
+            };
+            for request in [base(), with(base(), "pin", json!(allowed))] {
+                let selected = select(&route, &request, name).await?;
+                if selected.route.route_key() != *allowed
+                    || selected.runner.module != fixture::RUNNER_ONE
+                {
+                    return Err(format!(
+                        "{name}: pair override expected {allowed}, got {selected:?}"
+                    ));
+                }
+            }
+            refused(
+                &route,
+                ops::ROUTE_SELECT,
+                &with(base(), "pin", json!(blocked)),
+                RefusalCode::PinUnavailable,
+                name,
+            )
+            .await?;
+            if describe.serves(capabilities::HEAD_CHOICES) {
+                let choices: HeadChoicesAnswer = answer(
+                    &route,
+                    ops::ROUTE_HEAD_CHOICES,
+                    &json!({"runner_module": fixture::RUNNER_ONE}),
+                    name,
+                )
+                .await?;
+                if choices
+                    .models
+                    .iter()
+                    .any(|model| format!("{}/{}", model.provider, model.model) != *allowed)
+                {
+                    return Err(format!("{name}: pair override head choices expected only {allowed}, got {choices:?}"));
+                }
+            }
+        }
         Ok(Ending::Passed)
     }
 }
@@ -135,6 +215,8 @@ mod tests {
             name,
             "requires_wire_api_head_choices_ignored",
             "requires_wire_api_stale",
+            "requires_wire_api_pair_false_ignored",
+            "requires_wire_api_pair_true_ignored",
         ] {
             let subject = FakeSubject::new(Defects {
                 extension: Some(fault),

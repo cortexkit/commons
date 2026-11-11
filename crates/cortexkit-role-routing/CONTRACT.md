@@ -95,7 +95,7 @@ a module plays.
 
 ### 1.2 Runner matching declarations
 
-- [pinned] `runner` has the shape `{pairs: [{wire_api, auth_method}],
+- [pinned] `runner` has the shape `{pairs: [{wire_api, auth_method, requires_wire_api?: bool}],
   follows_account_choice?: bool, requires_wire_api?: bool, tool_capabilities?: [string],
   standing_limits?: {explicit_providers?: [string]}, harnesses?: [token],
   harness_limits?: {<harness>: {pairs?: [{wire_api, auth_method}], explicit_providers?: [token]}},
@@ -164,19 +164,25 @@ a module plays.
 - [pinned] `follows_account_choice` defaults to `false`. When `true`, the
   runner module calls `route.account_for` and uses its answer. Absence or
   `false` makes no such promise; a routing provider must not infer it.
-- [pinned] `requires_wire_api` defaults to `false`. When `true`, the runner
-  opens a catalog row only through its served `wire.api`, so routing excludes
-  rows without that fact at runner-pair matching for `route.select`, panel
-  selection and `route.head_choices`. A served fact is present with a value,
-  regardless of its `from`; `wire.family` and `wire.npm` do not substitute for
-  `wire.api`. Absent or `false` preserves matching without this requirement.
-  This is a runner-level requirement, independent of narrow-only
-  `harness_limits`. A non-boolean, non-null value refuses the whole declaration
-  as `runner.requires_wire_api`, like other boolean members; the raw
+- [pinned] A runner pair's effective `requires_wire_api` is its own value,
+  else the runner-level value, else `false`. When the effective value is
+  `true`, the runner opens a catalog row for that pair only through its served
+  `wire.api`, so routing excludes rows without that fact at runner-pair matching
+  for `route.select`, panel selection and `route.head_choices`, and uses the
+  same effective value for the `runner_requires_wire_api` explanation. A served
+  fact is present with a value, regardless of its source (`from`); `wire.family` and
+  `wire.npm` do not substitute for `wire.api`. An effective `false` preserves
+  matching without this requirement. A non-boolean, non-null value refuses the
+  whole declaration as `runner.requires_wire_api` or
+  `runner.pairs[index].requires_wire_api`, like other boolean members; the raw
   `harness_limits` fallback is a separate exception.
 - [pinned] Readers first: routers before 0.7.13 refuse unknown
   runner-declaration members and drop the runner, so a runner declares
   `requires_wire_api` only after its router runs 0.7.13 or later.
+- [pinned] Readers first for pair overrides: a 0.7.13 or older reader refuses
+  a pair carrying `requires_wire_api` as an unknown member and drops the whole
+  runner declaration. No runner declares the member on a pair until routing
+  runs 0.7.14 live.
 - [pinned] `harnesses`, when present, lists the exact programs the runner
   hosts sessions in: 1–16 unique tokens using the pair token grammar above.
   Empty is refused as `runner.harnesses`, not read as "no program". Invalid
@@ -193,7 +199,11 @@ a module plays.
   missing harness entry, or absent/null field inherits the runner-level value.
   Runner-level `pairs` remains the union of what the runner can run. Harness
   pairs must be a non-empty, unique subset, comparing only `wire_api` and
-  `auth_method`. Harness `explicit_providers` is a non-empty, unique provider
+  `auth_method`. Harness-limit pairs keep the `{wire_api, auth_method}` shape:
+  they only narrow the pair set and never change a pair's requirement, which
+  comes only from `runner.pairs` and the runner-level value. A
+  `requires_wire_api` member in a harness-limit pair is ignored like other
+  unknown members and has no effect. Harness `explicit_providers` is a non-empty, unique provider
   allow-list with the standing-limit token grammar and 64-entry bound. When
   a runner-level allow-list exists, every harness provider must be in it;
   when absent, a harness may introduce an allow-list. Neither field may broaden
