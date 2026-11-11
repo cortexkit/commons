@@ -474,6 +474,8 @@ fn gate(spec: &CaseSpec, declared: &BTreeSet<Capability>) -> Option<CaseOutcome>
             || spec.name.starts_with("sender_succession_")
             || spec.name.starts_with("head_selection_")
             || spec.name.starts_with("cache_policy_")
+            || spec.name.starts_with("session_class_")
+            || spec.name.starts_with("plan_view_")
             || spec.name.starts_with("keep_warm_")
             || spec.name.starts_with("live_ids_")
             || spec.name.starts_with("message_senders_")

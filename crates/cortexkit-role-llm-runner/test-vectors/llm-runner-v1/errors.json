@@ -1,5 +1,7 @@
 {
   "codes": [
+    {"code": "no_plan", "retryable": false},
+    {"code": "too_large", "retryable": false},
     {"code": "unknown_fork", "retryable": false},
     {"code": "fork_ended", "retryable": false},
     {"code": "fork_busy", "retryable": true},

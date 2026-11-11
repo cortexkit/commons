@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.47
+
+- Add opt-in `plan_view` cases for the closed validated reply, optional system
+  item byte ranges, and `no_plan` after planless admission. Reuse ordinary
+  scripted-session hooks; the no-plan case is not applicable when admission
+  requires a plan. Test each case against a runner that intentionally violates
+  its rule and require the kit to report the case's name.
+- Pin runner `=0.8.38`. Add opt-in `session_class` cases for malformed labels,
+  frozen-label changes, repeated or omitted labels, and later valid labels on
+  unlabelled sessions. Use existing scripted-session hooks, with no new adapter
+  hooks; runners without the group are not applicable.
+
 ## 0.17.46
 
 - Pin runner contract 0.8.37 for the optional step-event `message_id` member.

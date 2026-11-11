@@ -47,6 +47,7 @@ pub mod live;
 pub mod message_marks;
 pub mod output_refs;
 pub mod plan_notes;
+pub mod plan_view;
 pub mod points;
 pub mod read;
 pub mod retract;
@@ -137,6 +138,8 @@ pub mod ops {
     /// A page of the transcript. In `transcript_reads`, and in every group
     /// that adds fields to a page.
     pub const SESSION_READ: &str = "session.read";
+    /// Applied plan system text and tools, admitted like `session.read`.
+    pub const SESSION_PLAN_VIEW: &str = "session.plan_view";
     /// The transcript's head metadata, without message bodies. In
     /// `transcript_reads`.
     pub const SESSION_HEAD: &str = "session.head";
@@ -287,6 +290,10 @@ pub mod capabilities {
     /// and shown on its display row. A caller never sends the member to a
     /// runner without the group, whose strict decoding may refuse it.
     pub const CLIENT_MESSAGE_ID: &str = "client_message_id";
+    /// Opaque session storage/backup/cost labels with listed backup classes.
+    pub const SESSION_CLASS: &str = "session_class";
+    /// Read the system text and tools exactly as the session's plan built them.
+    pub const PLAN_VIEW: &str = "plan_view";
     /// `send_id` on the live `run_started` event: the send that started the
     /// run, left out only for a turn the host started with no send. On a
     /// runner declaring it, an absent `send_id` means no send started the
@@ -535,6 +542,8 @@ pub mod capabilities {
             &[ops::SESSION_HISTORY, ops::SESSION_SUBSCRIBE],
         ),
         (CLIENT_MESSAGE_ID, &[ops::SESSION_SEND]),
+        (SESSION_CLASS, &[ops::SESSION_SEND]),
+        (PLAN_VIEW, &[ops::SESSION_PLAN_VIEW]),
         (RUN_CAUSE, &[ops::SESSION_SUBSCRIBE]),
         (STEP_EVENTS, &[]),
         (ROUTED_ACCOUNTS, &[]),

@@ -48,6 +48,8 @@ const TAG_READ: &[Capability] = &[
     TranscriptReads,
 ];
 const CACHE: &[Capability] = &[Capability::CachePolicy, Queue, TranscriptReads];
+const SESSION_CLASS: &[Capability] = &[Capability::SessionClass, Queue, TranscriptReads];
+const PLAN_VIEW: &[Capability] = &[Capability::PlanView, Queue, TranscriptReads];
 const CACHE_PLAN: &[Capability] = &[
     Capability::CachePolicy,
     Capability::Plans,
@@ -379,6 +381,13 @@ pub const CASES: &[CaseSpec] = &[
     case("archive_pruning_no_provider", &[Capability::ArchivePrunesReasoning, TranscriptReads], "No-provider sessions may prune at rest."),
     case("archive_pruning_generation", &[Capability::ArchivePrunesReasoning, TranscriptReads, Queue], "The first prune sets reasoning_pruned generation 1 and a later effective prune increments it; through_ordinal names the highest touched ordinal and every raw session.read page repeats the head state."),
     case("session_retention_floor_describe", &[Capability::SessionRetention], "shared describe check refuses a floor above max_days"),
+    case("session_class_malformed", SESSION_CLASS, "malformed labels are invalid_params naming session_class"),
+    case("session_class_frozen", SESSION_CLASS, "a different label after a labelled creating send is invalid_params naming session_class"),
+    case("session_class_repeat_or_omit", SESSION_CLASS, "a labelled session accepts repeated and omitted labels"),
+    case("session_class_unlabelled", SESSION_CLASS, "an unlabelled session accepts a later valid label whether adopted or ignored"),
+    case("plan_view_reply", PLAN_VIEW, "the applied plan view decodes and validates as a closed as_planned reply"),
+    case("plan_view_items", PLAN_VIEW, "optional provider-item UTF-8 ranges are nonempty, bounded, ordered and non-overlapping"),
+    case("plan_view_no_plan", PLAN_VIEW, "a planless session refuses no_plan when planless admission is supported"),
     case("session_retention_floor", SESSION_RETAINED, "content survives the declared floor and expires at max(policy, floor), never their sum"),
     case("session_retention_release_hold", SESSION_RETAINED, "release stays visible and readable, refuses sends with its deadline and answers pending twice"),
     case("session_retention_release_after_idle", SESSION_RETAINED, "release after an idle gap anchors a keep-none session's floor and actual deletion to the later release time"),

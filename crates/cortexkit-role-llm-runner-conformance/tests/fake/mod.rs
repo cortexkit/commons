@@ -68,6 +68,7 @@ mod attachments;
 mod attribution;
 mod cache_policy;
 mod call_yield;
+mod plan_view;
 pub use call_yield::Mode as CallYieldFixture;
 pub type CallYieldSnapshot = call_yield::Snapshot;
 mod display;
@@ -183,6 +184,8 @@ const READ_FIELDS: &[&str] = &[
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
     pub cache_policy: Option<&'static str>,
+    pub session_class: Option<(&'static str, &'static str)>,
+    pub plan_view: Option<(&'static str, &'static str)>,
     pub keep_warm: Option<(&'static str, &'static str)>,
     pub fork: ForkDefect,
     pub history_intake_fixture: bool,
@@ -1050,6 +1053,7 @@ struct Sess {
     /// Whole-member JCS bytes fixed by the first admitted send, including
     /// the JCS bytes for JSON `null` when that send omitted structured output.
     session_structured_output_jcs: Option<Vec<u8>>,
+    session_class: Option<String>,
     messages: Vec<Msg>,
     sends: BTreeMap<String, SendRec>,
     runs: Vec<RunRec>,
@@ -1706,6 +1710,7 @@ impl Module {
                     base: 1,
                     first_ordinal: 1,
                     plan_digest: record["plan_digest"].as_str().map(str::to_owned),
+                    session_class: record["session_class"].as_str().map(str::to_owned),
                     tools: serde_json::from_value(record["tools"].clone()).unwrap_or_default(),
                     senders: serde_json::from_value(record["senders"].clone()).unwrap_or_default(),
                     readers: record
@@ -3128,6 +3133,7 @@ impl Module {
             method,
             ops::SESSION_HEAD
                 | ops::SESSION_READ
+                | ops::SESSION_PLAN_VIEW
                 | ops::SESSION_HISTORY
                 | ops::RUN_STATUS
                 | ops::ROLE_DESCRIBE
@@ -3229,6 +3235,9 @@ impl Module {
             }
             ops::SESSION_HISTORY if self.world.serves(groups::HOST_HISTORY) => {
                 Ok(self.history(session, &params))
+            }
+            ops::SESSION_PLAN_VIEW if self.world.serves(groups::PLAN_VIEW) => {
+                Ok(plan_view::read(self, session, &params))
             }
             ops::ROLE_DESCRIBE => Ok(self.describe()),
             ops::SESSION_BASELINE => Ok(self.baseline(stamp, session, &params)),
@@ -3504,6 +3513,11 @@ impl Module {
         if self.world.serves(groups::SERVICE_TIER) {
             describe = describe.with_service_tiers(service_tier::support());
         }
+        if self.world.serves(groups::SESSION_CLASS) {
+            describe = describe.with_session_class(
+                cortexkit_role_llm_runner::describe::SessionClass::new(vec![]),
+            );
+        }
         respond(describe)
     }
 
@@ -3711,6 +3725,9 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(reply) = plan_view::admit(self, &params) {
+            return Ok(reply);
+        }
         // This fixture freezes tools at creation, including tools nested in a plan.
         if self.world.defects.attachments == "media_only_send_frozen_tools"
             && self.sessions.lock().unwrap().contains_key(session)
@@ -3778,8 +3795,17 @@ impl Module {
             }
         }
         let listed = params.get(DELIVERY_FIELD).is_some_and(Value::is_array);
+        let class_fault = self.world.defects.session_class.and_then(|(case, fault)| {
+            (*self.world.current_case.lock().unwrap() == Some(case)).then_some(fault)
+        });
+        if class_fault == Some("accept_malformed") && params.get("session_class").is_some() {
+            return Ok(respond(json!({"state":"accepted"})));
+        }
         let mut request: SendRequest = match serde_json::from_value(params) {
             Ok(request) => request,
+            Err(error) if error.to_string().contains("session_class") => {
+                return Ok(invalid("session_class"));
+            }
             Err(error) if error.to_string().contains("account_route") => {
                 return Ok(invalid("account_route"));
             }
@@ -4323,6 +4349,24 @@ impl Module {
             ));
         }
         let admitted = existing.is_none();
+        let frozen_class = existing.as_ref().and_then(|s| s.session_class.as_deref());
+        if (class_fault == Some("reject_unlabelled") && !admitted && frozen_class.is_none())
+            || (class_fault == Some("reject_repeat")
+                && !admitted
+                && request.session_class.is_some())
+            || (class_fault == Some("reject_omitted")
+                && !admitted
+                && request.session_class.is_none())
+        {
+            return Ok(invalid("session_class"));
+        }
+        if class_fault != Some("accept_conflict") {
+            if let Err(field) =
+                request.check_session_class(self.world.serves(groups::SESSION_CLASS), frozen_class)
+            {
+                return Ok(invalid(field));
+            }
+        }
         if let Some(plan) = request.plan.as_ref().filter(|_| admitted) {
             for check in [
                 order::check_plan(plan, &self.world.groups),
@@ -4350,6 +4394,7 @@ impl Module {
             self.commit(
                 session,
                 json!({ "kind": "start", "owner": stamp.scope.as_ref().map_or(stamp.principal.as_str(), |scope| scope.owner.as_str()), "lineage": lineage,
+                        "session_class": self.world.serves(groups::SESSION_CLASS).then_some(request.session_class.as_deref()).flatten(),
                         "frozen_opener": frozen_opener,
                         "tools": tools,
                         "selection": selection,
@@ -6168,6 +6213,8 @@ pub struct FakeSubject {
 pub fn served() -> BTreeSet<Capability> {
     [
         Capability::TranscriptReads,
+        Capability::SessionClass,
+        Capability::PlanView,
         Capability::RunOps,
         Capability::RunCancel,
         Capability::DispatchAttribution,

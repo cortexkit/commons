@@ -9,6 +9,8 @@ mod fake;
 mod fixture_admission;
 mod host_start;
 mod keep_warm;
+mod plan_view;
+mod session_class;
 
 const HEAD_SELECTION_CASES: &[&str] = &[
     "head_selection_absent_preserves_choice",
@@ -2087,6 +2089,8 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
         }
         if spec.name == "media_only_send"
             || spec.name.starts_with("cache_policy_")
+            || spec.name.starts_with("session_class_")
+            || spec.name.starts_with("plan_view_")
             || spec.name.starts_with("keep_warm_")
             || spec.name.starts_with("media_refs_")
             || spec.name.starts_with("plan_notes_")

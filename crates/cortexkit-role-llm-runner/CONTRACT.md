@@ -289,6 +289,8 @@ alias until the next breaking release.
 | `service_tier` | `session.send`; supported levels in discovery, fixed per-run sends and applied/served usage | §9.3.2 |
 | `head_selection` | `session.send`, `session.head`; requires `plans`; selection through `session.refresh` additionally requires `session_change` | §9.3.4 |
 | `cache_policy` | `session.send`; flag accepting `cache`, no discovery metadata | §9.3.5 |
+| `session_class` | `session.send` with `session_class`; declares `backup_classes`, the labels the runner backs up | §9 |
+| `plan_view` | `session.plan_view`, the applied plan's system text and offered tools | §4.9 |
 | `call_identity` | No added op; `call_key`, `schema_pin` and `call_carrier` on reader call facts (it requires `history_display` or `live_events`) | §9.16 |
 | `read_display_facts` | `session.read` (`include_display_facts`, entry client ids, module senders, creation times, tool times, assistant completion times and reasoning summaries) | §4.2, §4.7.1 |
 | `sender_succession` | `session.send` (plan sender predecessors and keyed retry lookup); extends `session.send_status` where served | §9.7 |
@@ -1822,6 +1824,56 @@ An entry whose result belongs to an earlier call and a step that died before
 content are still entries, with no neutral parts (W4.1). The old dead-step
 exclusion no longer applies. An id and an ordinal never derive from each other.
 
+### 4.9 `plan_view`: `session.plan_view`
+
+- [pinned] A runner serving this read declares `plan_view` in
+  `role.describe.capabilities`. Its request is the strict empty object `{}`
+  (`plan_view::PlanViewRequest`). The management route binds its session,
+  exactly as for `session.read`; no request member names a session. Admission
+  is the same as `session.read`, including the session plan's `readers`
+  (§9.19). Apps consume the read through their app-facing relay, never by
+  calling runners directly.
+- [pinned] The closed reply (`plan_view::PlanView`) is
+  `{generation, applied_at_ms?, newest_step?, system, tools, pending?,
+  as_planned: true}`. `generation` is the `u64` plan generation in force.
+  `applied_at_ms` is the recorded application time as `u64` epoch milliseconds;
+  it is absent when no time was recorded, such as for a session converted
+  from older storage. The runner never invents a time.
+- [pinned] `newest_step?: {at_ms: u64, reply_mid?: string}` names the newest
+  request with a recorded send time built under the generation in force,
+  without claiming a copy of that request. It is absent when none exists
+  yet. `reply_mid`, when known, is the session read's assistant reply message id.
+- [pinned] `system: {text: string, items?: [{provider: string, preset?: string,
+  start: u64, end: u64}]}` contains the text exactly as the plan built it.
+  When `items` is present, each item names the UTF-8 byte range of one
+  provider's item: `start` is inclusive, `end` exclusive, and
+  `start < end <= text.len()`. Both endpoints are character boundaries;
+  ranges are ascending and non-overlapping. Text used to join provider items
+  belongs to no item.
+  Only items with bytes in `text` are listed: a provider that answered empty
+  text or did not answer has no item. Decoding refuses violating ranges.
+- [pinned] `tools` is the array of
+  `{name: string, description: string, input_schema: JSON value,
+  provider: string, tokens?: {count: u64, exact: bool}}`, in the order the
+  model is offered them. Per-tool counts are `exact: false` unless measured.
+- [pinned] `pending?: {generation: u64, note?: string}` describes a newer plan
+  not yet applied in full. A pending plan is always newer than the one in
+  force: `pending.generation > generation`, also checked at decode. The
+  optional `note` is what the model was told about the pending change; it is
+  absent when the runner has not told the model about it and keeps the old
+  text until rebuilding the prefix. A runner may tell the model through a
+  note before applying the full text, as OpenCode 2 does.
+- [pinned] `as_planned` is required and always `true`, enforced at decode.
+  The view describes the request as the plan built it, not a captured
+  provider request: a login plugin or gateway may put other text in front.
+  Magic Context's memories, summaries, profile and docs reach the model as
+  head messages served by Magic Context's own read, not by this read.
+- [pinned] A session with no applied plan is refused `no_plan`, never answered
+  with empty placeholder text. An unknown session is refused as for existing
+  session reads. If the complete encoded reply would exceed the daemon's
+  4,194,304-byte frame limit, including the 21-byte header, the runner refuses
+  `too_large` rather than truncating the system text, tools or item ranges.
+
 ## 5. `dispatch_attribution`
 
 - [pinned] The runner records the module each tool call was dispatched to.
@@ -2851,6 +2903,35 @@ Model-view reads and replacement-entry pages are not part of this contract.
   `SendRequest::check_prompt` keeps this strict behaviour.
   `session.adopt` (§9.5) is not a send: it carries a `send_id` and a plan,
   and no prompt.
+- [pinned] `session_class?` is an optional top-level string matching
+  `[a-z0-9_-]{1,32}`. An explicit `null`, a non-string, or a value outside
+  that grammar is refused `invalid_params` naming `session_class`.
+  A runner that reads the member declares the `session_class` group in
+  `role.describe.capabilities`, with `backup_classes: [string]` listing
+  the labels it backs up.
+- [pinned] For a runner declaring `session_class`, a label on the session's
+  creating send is frozen. Later sends may omit it or repeat the same value;
+  a different value is refused `invalid_params` naming `session_class`.
+  A session created without a label MUST accept a valid label on a later
+  send: senders cannot tell a creating send from a later one, and refusal
+  would strand pre-existing sessions. The runner MAY adopt the label, for
+  example when doing so does not change where the session is kept, and once
+  adopted it is frozen. Otherwise the runner ignores it.
+- [pinned] The label is opaque and caller-chosen. Runners MAY use it for
+  storage, backup and cost settings, such as idle cache warming. It is never
+  an authority or permission, never sent to a model provider, and never
+  shown as anyone's words. An unknown label is kept as the label, with the
+  runner's default storage and no backup unless the runner lists it in
+  `backup_classes`.
+- [pinned] Senders send `session_class` only to a runner declaring the group:
+  older contract crates may leave it in `runner_params`, where a runner
+  checking its declared parameters may refuse it as unknown. Runners adopt
+  0.8.38 before any sender sends the member to them. A runner on 0.8.38
+  or later that does not declare the group nevertheless accepts and ignores
+  a well-formed value if received: it stores nothing, freezes nothing, and
+  never refuses a later different value. Malformed values are still refused
+  `invalid_params` naming `session_class` by request decoding. This also
+  covers a declaration changing between discovery and send.
 - [pinned] One `send_id` namespace covers all three modes, and `delivery` is
   part of the send's identity:
   - the same key with the same payload and mode is answered with the
@@ -5812,7 +5893,7 @@ froze for a run to every assistant reply the run writes.
   admission. It does not require a runner to open or close anything it does
   not already admit.
 - [pinned] When the plan carries `readers`, even an empty list, the read-only
-  operations `session.head`, `session.read`, `session.history`, `run.status`,
+  operations `session.head`, `session.read`, `session.plan_view`, `session.history`, `run.status`,
   `role.describe` and `session.subscribe` admit only the listed principals
   and the implicit readers below. Matching uses the route's attested opener
   principal, never a request field. Every other principal is refused before
@@ -6861,6 +6942,8 @@ treats it as a terminal refusal of that one request.
 | `cursor_expired` | a `session.history` cursor whose entry, or an entry older than it, a revert or rewrite removed or changed, or one minted for another session (§4.6); a well-formed `session.subscribe` cursor the runner no longer holds, including one from before a store restore, past the high-water, expired by retention, or issued for another session (§7) | — | no: for history, page again from the newest page or a held `mid`; for subscribe, drop the cursor, reopen with `"live"` and read `session.head` (also on `invalid_params {field: "from"}`) |
 | `reply_too_large` | the complete encoded `session.read` reply, a `run.result` or `run.status` answer carrying a structured-output `value` (§9.4), or a `run.tool_calls` page holding one call (§6.3), exceeds the 4,194,304-byte transport frame limit (`TRANSPORT_FRAME_LIMIT`), including its 21-byte header | `{bytes, limit, subject}`; `bytes` is the whole encoded success frame length, and `limit` is `4194304`; `subject` is `{kind: "message", session, ordinal}`, `{kind: "run", run_id}` or `{kind: "tool_call", run_id, tool_call_id, call_key?}`; no message content, value or arguments | no: terminal for this request; lowering `max_bytes` or `limit` cannot shrink a message or call |
 | `unknown_run` | `run.result` or `run.tool_calls` names no run of the session | — | no |
+| `no_plan` | `session.plan_view` names a session with no applied plan (§4.9) | — | no |
+| `too_large` | the complete encoded `session.plan_view` reply exceeds the 4,194,304-byte transport frame limit, including its 21-byte header (§4.9) | — | no: never truncate the plan |
 | `template_part_gone` | a template send whose `part_tag` slot names a part the request that would carry it does not show (§9.7); a queued send meeting it later ends in the send state of the same name instead | `{slot}` (`errors::TemplatePartGoneDetail`) | no |
 | `unknown_send` | `session.send_status` names a `send_id` the session has no record of for the caller (§9.8) | — | no |
 | `unknown_session` | an upload into a session that does not exist (§9.12) | — | no |
@@ -6905,7 +6988,7 @@ treats it as a terminal refusal of that one request.
 | `user_commands_unsupported` | runner does not declare `user_commands` | — | no |
 | `plan_drift` | a later send's plan differs from the frozen one (while a change is pending, from both the effective and the latest accepted plan, which `frozen` then names, §10.2); a `session.adopt` plan differs from the one applied at host start (§9.5) | `frozen?`, `sent` (plan identities; `frozen` is the latest accepted plan, else the effective one, and is absent only when neither exists, or on `session.adopt` when no plan was applied) | no |
 | `pre_user_unavailable` | a steer or queue under an unavailable `refuse` PreUser | `provider` | no |
-| `transient` | a condition that may clear by itself; a host-dependent mutation before `restart_survival` reattach finishes (§14.4 R6) | `reason: "recovering"` for that recovery refusal | **yes** |
+| `transient` | a condition that may clear by itself; a host-dependent mutation before `restart_survival` reattach finishes (§14.4 R6) | `reason: "recovering"` for that recovery refusal. A runner may name its own cause in `detail.cause`; readers decide retries by `code` alone and treat `detail` as information. | **yes** |
 | `scope_not_synced` | the scope's owner has not re-synced after a daemon restart | — | **yes**, with backoff within the hold bound |
 | `rung_unsupported` | a `session.refresh` or `session.refresh_policy` whose policy names a rung the session does not support for a surface the change touches | `{surface, rung}` | no |
 | `pending_superseded` | a `session.refresh_policy` for a generation a later refresh superseded | `{generation, pending}` | no |

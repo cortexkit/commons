@@ -279,6 +279,12 @@ struct WireSendRequest {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_session_class"
+    )]
+    session_class: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
         deserialize_with = "deserialize_delivery"
     )]
     delivery: Option<WireDelivery>,
@@ -331,6 +337,7 @@ impl From<WireSendRequest> for SendRequest {
             prompt: wire.prompt,
             content: wire.content,
             send_id: wire.send_id,
+            session_class: wire.session_class,
             delivery,
             delivery_order,
             plan: wire.plan,
@@ -364,6 +371,7 @@ impl From<SendRequest> for WireSendRequest {
             prompt: request.prompt,
             content: request.content,
             send_id: request.send_id,
+            session_class: request.session_class,
             delivery,
             plan: request.plan,
             cache: request.cache,
@@ -375,6 +383,27 @@ impl From<SendRequest> for WireSendRequest {
             runner_params: request.runner_params,
         }
     }
+}
+
+fn valid_session_class(label: &str) -> bool {
+    (1..=32).contains(&label.len())
+        && label
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || b"_-".contains(&byte))
+}
+
+fn deserialize_session_class<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let label = String::deserialize(deserializer)
+        .map_err(|_| serde::de::Error::custom("invalid_params: session_class must be a string"))?;
+    if !valid_session_class(&label) {
+        return Err(serde::de::Error::custom(
+            "invalid_params: session_class must match [a-z0-9_-]{1,32}",
+        ));
+    }
+    Ok(Some(label))
 }
 
 fn deserialize_retention<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
@@ -483,6 +512,10 @@ pub struct SendRequest {
     /// The idempotency key. The owner derives it from what it delivers,
     /// never from the attempt.
     pub send_id: String,
+    /// Opaque storage/backup/cost label, never authority or model input.
+    /// Send only to a runner declaring `session_class`. See
+    /// [`Self::check_session_class`] for freezing and undeclared handling.
+    pub session_class: Option<String>,
     /// A legacy mode string. Absent means [`Delivery::Queue`], unless the
     /// wire `delivery` was a list, which is [`Self::delivery_order`].
     pub delivery: Option<Delivery>,
@@ -524,6 +557,32 @@ pub struct SendRequest {
 }
 
 impl SendRequest {
+    pub fn with_session_class(mut self, label: impl Into<String>) -> Self {
+        self.session_class = Some(label.into());
+        self
+    }
+
+    /// Validate syntax and, for a declaring runner, the session's frozen label.
+    /// Return `session_class` for an `invalid_params` refusal. An unlabelled
+    /// session always accepts a valid label; the runner may adopt and freeze it
+    /// or ignore it. A non-declaring runner ignores every valid label, stores
+    /// and freezes nothing, and never refuses a later different valid value.
+    /// This helper does not store or adopt a label.
+    pub fn check_session_class(
+        &self,
+        advertised: bool,
+        frozen: Option<&str>,
+    ) -> Result<(), &'static str> {
+        if let Some(label) = self.session_class.as_deref() {
+            if !valid_session_class(label)
+                || (advertised && frozen.is_some_and(|frozen| frozen != label))
+            {
+                return Err("session_class");
+            }
+        }
+        Ok(())
+    }
+
     /// Protect a notice carrying a person's words from automatic compaction drops.
     /// Send only to a runner declaring `notice_keep`; false serializes as absent.
     pub fn with_keep(mut self, keep: bool) -> Self {
@@ -701,6 +760,7 @@ impl SendRequest {
             prompt: Some(prompt.into()),
             content: None,
             send_id: send_id.into(),
+            session_class: None,
             delivery: None,
             delivery_order: None,
             plan: None,

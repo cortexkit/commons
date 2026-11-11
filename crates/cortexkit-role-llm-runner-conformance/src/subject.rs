@@ -44,6 +44,10 @@ impl LiveIdsObservation {
 pub enum Capability {
     /// Session cache lifetime and warming requests.
     CachePolicy,
+    /// Opaque session labels with frozen labelled-session admission.
+    SessionClass,
+    /// Applied plan system text and offered tools, admitted like session reads.
+    PlanView,
     /// Provider service levels; the kit checks omitted served metadata on unknown wires.
     ServiceTier,
     /// Durable plan-selected model and next-run tier.
@@ -215,6 +219,8 @@ impl Capability {
     /// `cortexkit_role_llm_runner::capabilities::GROUPS`.
     pub const GROUPS: &'static [Capability] = &[
         Self::CachePolicy,
+        Self::SessionClass,
+        Self::PlanView,
         Self::ServiceTier,
         Self::HeadSelection,
         Self::ArchivePrunesReasoning,
@@ -297,6 +303,8 @@ impl Capability {
     pub fn group(self) -> Option<&'static str> {
         Some(match self {
             Self::CachePolicy => groups::CACHE_POLICY,
+            Self::SessionClass => groups::SESSION_CLASS,
+            Self::PlanView => groups::PLAN_VIEW,
             Self::ServiceTier => groups::SERVICE_TIER,
             Self::HeadSelection => groups::HEAD_SELECTION,
             Self::ArchivePrunesReasoning => groups::ARCHIVE_PRUNES_REASONING,

@@ -103,6 +103,7 @@ pub fn admit(
         op,
         ops::SESSION_HEAD
             | ops::SESSION_READ
+            | ops::SESSION_PLAN_VIEW
             | ops::SESSION_HISTORY
             | ops::RUN_STATUS
             | ops::ROLE_DESCRIBE

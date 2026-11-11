@@ -176,6 +176,12 @@ pub const UNKNOWN_ORDINAL: &str = "unknown_ordinal";
 /// [`ReplyTooLargeDetail`].
 pub const REPLY_TOO_LARGE: &str = "reply_too_large";
 
+/// `session.plan_view` has no applied plan. Never answered with placeholder text.
+pub const NO_PLAN: &str = "no_plan";
+/// The complete `session.plan_view` reply exceeds the transport frame limit.
+/// The runner refuses the read instead of truncating the plan.
+pub const TOO_LARGE: &str = "too_large";
+
 /// Safe identity and size details for a `reply_too_large` refusal. The
 /// subject names a message, run or tool call without carrying its content.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -601,6 +607,8 @@ pub const CODES: &[&str] = &[
     CURSOR_EXPIRED,
     UNKNOWN_ORDINAL,
     REPLY_TOO_LARGE,
+    NO_PLAN,
+    TOO_LARGE,
     UNKNOWN_RUN,
     TEMPLATE_PART_GONE,
     UNKNOWN_SEND,

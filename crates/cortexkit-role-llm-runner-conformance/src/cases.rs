@@ -160,6 +160,10 @@ where
             name if name.starts_with("session_retention_") => {
                 crate::session_retention::run(self, name).await
             }
+            name if name.starts_with("session_class_") => {
+                crate::session_class::run(self, name).await
+            }
+            name if name.starts_with("plan_view_") => crate::plan_view::run(self, name).await,
             name if name.starts_with("step_events_") => crate::step_events::run(self, name).await,
             name if name.starts_with("routed_accounts_") => {
                 crate::routed_accounts::run(self, name).await

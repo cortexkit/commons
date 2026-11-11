@@ -214,6 +214,23 @@ pub struct RoleDescribe {
     /// Required with `service_tier`: non-standard levels supported per wire API.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tiers: Option<crate::service_tier::ServiceTiers>,
+    /// Backup labels required when the `session_class` group is declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_class: Option<SessionClass>,
+}
+
+/// Discovery metadata for the `session_class` capability group.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct SessionClass {
+    /// Labels the runner backs up. Other labels use default storage and no backup.
+    pub backup_classes: Vec<String>,
+}
+
+impl SessionClass {
+    pub fn new(backup_classes: Vec<String>) -> Self {
+        Self { backup_classes }
+    }
 }
 
 /// Hook names a runner lists in [`RoleDescribe::step_hooks`], spelled as the
@@ -408,6 +425,12 @@ impl RoleDescribe {
 
     pub fn with_service_tiers(mut self, tiers: crate::service_tier::ServiceTiers) -> Self {
         self.service_tiers = Some(tiers);
+        self
+    }
+
+    /// List backed-up labels (the capability must also be listed).
+    pub fn with_session_class(mut self, settings: SessionClass) -> Self {
+        self.session_class = Some(settings);
         self
     }
 
@@ -675,6 +698,9 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
     }
     if describe.declares(capabilities::SERVICE_TIER) && describe.service_tiers.is_none() {
         problems.push(DescribeProblem::Undecodable("service_tiers_missing".into()));
+    }
+    if describe.declares(capabilities::SESSION_CLASS) && describe.session_class.is_none() {
+        problems.push(DescribeProblem::Undecodable("session_class_missing".into()));
     }
     if let Some(tiers) = &describe.service_tiers {
         if let Err(reason) = crate::service_tier::check_service_tiers(tiers) {

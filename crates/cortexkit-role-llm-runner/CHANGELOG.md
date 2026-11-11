@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.8.38
+
+- Clarify that runner-specific `detail.cause` is informational: retry decisions
+  use the contract error `code` alone.
+- Add opt-in `plan_view` and the closed, validated `session.plan_view` reply:
+  exact planned system text with optional UTF-8 provider ranges, ordered tools
+  and optional token counts, generation and recorded-time facts, and a newer
+  pending generation with an optional note. Require `as_planned: true`; this
+  is not a captured provider request. Reuse session-read admission and
+  route-bound identity with strict empty params. Refuse `no_plan` or `too_large`
+  instead of placeholder text or truncation.
+- Add optional `session.send.session_class`, a typed opaque string matching
+  `[a-z0-9_-]{1,32}`, its builder and decode validation, and a freezing check.
+  Declaring runners freeze a labelled creating send, accept matching or omitted
+  labels, and never refuse a valid label on an unlabelled session. Non-declaring
+  runners accept and ignore valid labels without storing or freezing them.
+- Add the `session_class` discovery group and its `backup_classes` metadata.
+  Labels guide storage, backup and cost settings, never authority or model input.
+- Readers first: runners adopt 0.8.38 before any sender sends the member to them.
+  Older crates may leave it in `runner_params`, where runners checking declared
+  parameters may refuse it as unknown. Senders already gate on the declared group
+  and continue sending the member only to runners declaring `session_class`.
+
 ## 0.8.37
 
 - Add optional `message_id` to `step.finished.v1`, with a builder and
