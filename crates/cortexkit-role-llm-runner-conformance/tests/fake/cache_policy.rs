@@ -1,4 +1,4 @@
-//! The fake route has only implicit caching and cannot warm its scripted provider.
+//! Cache-policy admission; controlled warming is an independent opt-in fixture.
 
 use super::*;
 use cortexkit_role_llm_runner::cache;

@@ -54,6 +54,14 @@ const CACHE_PLAN: &[Capability] = &[
     Queue,
     TranscriptReads,
 ];
+const KEEP_WARM: &[Capability] = &[
+    Capability::CachePolicy,
+    Capability::Plans,
+    Capability::RunOps,
+    Capability::RunUsage,
+    Queue,
+    TranscriptReads,
+];
 const RUNS: &[Capability] = &[RunOps, Queue];
 const DISPATCH: &[Capability] = &[DispatchAttribution, Queue, TranscriptReads];
 const SENDS: &[Capability] = &[Queue, TranscriptReads];
@@ -157,6 +165,10 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("keep_warm_auto_warms_idle_session", KEEP_WARM, "auto touches the last real request before cache expiry without recording a step or changing the transcript"),
+    case("keep_warm_auto_stops_at_one_rewrite", KEEP_WARM, "auto sends exactly one rewrite's cost of idle warms, neither one fewer nor one more"),
+    case("keep_warm_auto_rearms_after_real_request", KEEP_WARM, "a real request resets auto's exhausted cost cap and warms resume with the new prefix"),
+    case("keep_warm_off_sends_no_warms", KEEP_WARM, "explicit off makes no idle provider requests"),
     case("cache_policy_plan_key_accepted", CACHE_PLAN, "valid routing keys, including length boundaries, are accepted on a plan"),
     case("cache_policy_send_key_accepted", CACHE, "valid routing keys, including length boundaries, are accepted on a planless creating send"),
     case("cache_policy_plan_key_empty_refused", CACHE_PLAN, "an empty plan cache key is refused before acceptance naming plan.cache.key"),
@@ -1090,7 +1102,7 @@ pub const CASES: &[CaseSpec] = &[
 /// every report. Section numbers refer to `CONTRACT.md` in
 /// `cortexkit-role-llm-runner`.
 pub const NARROWINGS: &[&str] = &[
-    "cache_policy cases check admission and model-step report shape, not provider routing-hint mapping, cache hits, real-time warming schedules, cost/count caps, local-time transitions or expiry",
+    "cache_policy checks admission and model-step report shape; optional keep_warm fixtures check controlled idle auto/off warming and its rewrite-cost cap, not tool waits, provider routing-hint mapping, actual cache hits, wall-clock schedules, always/hours count caps, local-time transitions or session-end expiry",
     "restart_survival relies on real-route captures and independent host/provider observations from an opted-in adapter; the in-process fake proves named rejection, not process survival. The cases cover held keyed reply custody, not the separate provider lost-reply/Pure retry protocol",
     "account_route checks verbatim admission names and run-fixed joining refusal without writing; pooled-key loading, automatic renewal and reassignment are not driven, and absent head.model leaves name distinctness to the unique kit-pool- prefix",
     "sender_attribution observes stored prefixes through reads, not the model's request; it does not exercise a plan refresh between intake and storage, and its photo-only case is inapplicable without media_only_send and an upload fixture",

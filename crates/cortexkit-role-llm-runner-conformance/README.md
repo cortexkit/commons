@@ -1,6 +1,6 @@
 # cortexkit-role-llm-runner-conformance
 
-Version **0.17.39** pins runner **0.8.31**. Four `host_start_*` cases run only
+Version **0.17.45** pins runner **0.8.36**. Four `host_start_*` cases run only
 when the live describe lists `harness.host_start` in its top-level `extensions`.
 Opt-in adapters provide `host_start_model`, both original and alternate
 `host_plan` fixtures, and an attested plain-scope owner from `owner_stamp`.
@@ -77,9 +77,34 @@ decoding, exact pre-acceptance refusals, continuation and both-location refusal,
 including routing-key length, printable-ASCII and string-type checks,
 and actual lifetime (`ttl_ms` or `implicit`) plus warming state on step hints
 where `step_events` is available. Plan cases additionally need a plan fixture.
-The kit does **not** test real-time warming: schedules, local-time windows,
-cost/count caps, session-end stopping and cache expiry need runner-specific
-tests. These cases make no claim to have exercised that behaviour.
+The four `keep_warm_*` cases additionally require an idle-warming fixture:
+
+- `keep_warm_auto_warms_idle_session`: a provider request arrives before the
+  cache lifetime ends, resending the last real request without changing the
+  transcript or counting another real step.
+- `keep_warm_auto_stops_at_one_rewrite`: exactly one rewrite's worth of cache
+  touches is sent, rejecting both early stopping and an extra warm.
+- `keep_warm_auto_rearms_after_real_request`: a second kit-driven real request
+  resets the exhausted budget and warming resumes with its new prefix.
+- `keep_warm_off_sends_no_warms`: explicit `off` sends no idle requests.
+
+The kit owns every real send and classifies requests received while it is idle;
+adapters never label a request warm or real. `configure_keep_warm_prices`
+installs the kit's cache-read/write prices and reports the rates actually used.
+`advance_warm_clock` moves the scheduler clock and settles due requests in
+chronological order. `keep_warm_requests` returns a cursor-based journal from
+the independent scripted provider, with clock times, exact request and cache
+prefix bytes, and response usage. All three hooks default to `Ok(None)` (not
+applicable). Opt in only when the fixture supports idle warming; declaring
+`cache_policy` alone promises admission, not provider warming support. The
+fixture uses an explicit lifetime and integral prices so three cache reads cost
+exactly one rewrite. The checks allow any cadence that touches before expiry;
+the recommended interval in §9.3.5 of the [runner contract](../cortexkit-role-llm-runner/CONTRACT.md)
+is informative, not a mandatory schedule.
+
+Local-time windows, the `always`/`hours` count cap, session-end stopping and real
+provider cache expiry still need runner-specific tests. Controlled scheduler
+time does not claim to exercise wall-clock scheduling or tool-wait warming.
 
 `LlmRunnerSubject::cache_policy_zone()` supplies an IANA zone the runner knows,
 defaulting to `Etc/UTC`; an adapter can override it. Zone knowledge is not

@@ -76,6 +76,7 @@ mod held_calls;
 mod history;
 mod history_intake;
 mod host_start;
+mod keep_warm;
 mod live_ids;
 mod media;
 mod message_senders;
@@ -182,6 +183,7 @@ const READ_FIELDS: &[&str] = &[
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
     pub cache_policy: Option<&'static str>,
+    pub keep_warm: Option<(&'static str, &'static str)>,
     pub fork: ForkDefect,
     pub history_intake_fixture: bool,
     pub history_intake: Option<&'static str>,
@@ -768,6 +770,8 @@ struct World {
     models: Mutex<BTreeMap<String, String>>,
     /// The prompt-cache lifetime each session's requests carry.
     observed_cache_lifetimes: Mutex<BTreeMap<String, Option<u64>>>,
+    warm_sessions: Mutex<BTreeMap<String, keep_warm::State>>,
+    warm_now: AtomicU64,
     cache_policy_zone: String,
     /// Sessions whose next model answer streams this many parts and holds.
     stream_holds: Mutex<BTreeMap<String, usize>>,
@@ -2677,6 +2681,7 @@ impl Module {
                 session_change::observe_notes(&mut observation, &sess, &self.world.defects);
                 observation.max_output_tokens = output_cap;
                 self.tier_model_ingress(session, &mut observation);
+                keep_warm::real_request(self, session, &observation, turn.usage.as_ref());
                 if self.world.serves(groups::FORK_ANSWER) {
                     fork_answer::capture_head(
                         self,
@@ -3726,6 +3731,7 @@ impl Module {
         if let Some(reply) = cache_policy::admit(self, session, &params) {
             return Ok(reply);
         }
+        keep_warm::admit(self, session, &params);
         if let Some(reply) = history_intake::intercept_send(self, stamp, session, &params) {
             return Ok(reply);
         }
@@ -6124,6 +6130,7 @@ pub struct FakeSubject {
     pub turn_system: bool,
     pub turn_system_cleared: bool,
     pub cache_policy_zone: String,
+    pub keep_warm_fixture: bool,
     /// This adapter cannot create fetch-plan sessions.
     pub without_plans: bool,
     /// The adapter can give a session host history before its first send
@@ -6247,6 +6254,7 @@ impl FakeSubject {
             turn_system: true,
             turn_system_cleared: false,
             cache_policy_zone: "Etc/UTC".into(),
+            keep_warm_fixture: false,
             host_prefix_hook: false,
             seed_hook: false,
             host_prefix_everywhere: 0,
@@ -6388,6 +6396,8 @@ impl FakeSubject {
                     ceiling_holds: Mutex::new(BTreeSet::new()),
                     models: Mutex::new(BTreeMap::new()),
                     observed_cache_lifetimes: Mutex::new(BTreeMap::new()),
+                    warm_sessions: Mutex::new(BTreeMap::new()),
+                    warm_now: AtomicU64::new(0),
                     cache_policy_zone: self.cache_policy_zone.clone(),
                     stream_holds: Mutex::new(BTreeMap::new()),
                     in_flight: Mutex::new(BTreeMap::new()),
@@ -7895,6 +7905,40 @@ impl LlmRunnerSubject for FakeSubject {
             .unwrap()
             .insert(session.into(), model.into());
         Ok(())
+    }
+
+    async fn configure_keep_warm_prices(
+        &self,
+        handle: &FakeHandle,
+        session: &str,
+        prices: &cortexkit_role_llm_runner_conformance::KeepWarmPrices,
+    ) -> Result<Option<cortexkit_role_llm_runner_conformance::KeepWarmPrices>, HarnessError> {
+        Ok(self
+            .keep_warm_fixture
+            .then(|| keep_warm::configure(&handle.0, session, prices)))
+    }
+
+    async fn advance_warm_clock(
+        &self,
+        handle: &FakeHandle,
+        by: std::time::Duration,
+    ) -> Result<Option<()>, HarnessError> {
+        if !self.keep_warm_fixture {
+            return Ok(None);
+        }
+        keep_warm::advance(&handle.0, by);
+        Ok(Some(()))
+    }
+
+    async fn keep_warm_requests(
+        &self,
+        session: &str,
+        cursor: u64,
+    ) -> Result<Option<cortexkit_role_llm_runner_conformance::KeepWarmRequests>, HarnessError> {
+        if !self.keep_warm_fixture {
+            return Ok(None);
+        }
+        Ok(Some(keep_warm::requests(&self.world(), session, cursor)))
     }
 
     async fn set_observed_cache_lifetime(

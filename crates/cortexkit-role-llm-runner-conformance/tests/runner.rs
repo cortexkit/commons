@@ -8,6 +8,7 @@ mod compaction_change;
 mod fake;
 mod fixture_admission;
 mod host_start;
+mod keep_warm;
 
 const HEAD_SELECTION_CASES: &[&str] = &[
     "head_selection_absent_preserves_choice",
@@ -1471,6 +1472,7 @@ fn assert_passed(report: &SuiteReport, case: &str) {
         return;
     }
     if (case.starts_with("cache_policy_")
+        || case.starts_with("keep_warm_")
         || case.starts_with("sender_succession_")
         || case.starts_with("history_intake_")
         || case.starts_with("plan_notes_")
@@ -2085,6 +2087,7 @@ async fn a_subject_declaring_nothing_is_skipped_or_inapplicable_and_never_passes
         }
         if spec.name == "media_only_send"
             || spec.name.starts_with("cache_policy_")
+            || spec.name.starts_with("keep_warm_")
             || spec.name.starts_with("media_refs_")
             || spec.name.starts_with("plan_notes_")
             || spec.name.starts_with("adopt_open_")

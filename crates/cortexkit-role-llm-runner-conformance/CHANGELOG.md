@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.45
+
+- Add four opt-in keep-warm cases for idle `auto` warming, an exact one-rewrite
+  budget, re-arming after a real request, and explicit `off`. Reject incorrect
+  fake runners by each check's name, including early and late budget stops.
+- Add defaulted price-fixture, scheduler-clock and raw provider-journal hooks.
+  The kit drives real sends and computes the budget itself; adapters report
+  requests and usage without classifying requests or deciding results. Missing
+  fixtures remain not applicable. Existing public types are unchanged.
+
 ## 0.17.44
 
 - Pin runner `=0.8.36`. Replace `signed_tool_deferred_addition_keeps` with

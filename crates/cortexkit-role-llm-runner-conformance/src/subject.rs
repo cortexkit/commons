@@ -2379,6 +2379,51 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
+    /// Install the supplied cache prices in the runner's scripted model fixture
+    /// before the session's first send. Return the prices actually used, read
+    /// back from the fixture, not an echo of the arguments. The fixture must
+    /// support idle warming with an explicit lifetime supplied through
+    /// `set_observed_cache_lifetime`; `cache_policy` alone does not promise that
+    /// support. Return `None` when this fixture is unavailable. Scripted cache
+    /// usage is returned on every request, including repeated request bytes,
+    /// without consuming a real assistant turn for a cache touch.
+    async fn configure_keep_warm_prices(
+        &self,
+        _handle: &Self::Handle,
+        _session: &str,
+        _prices: &crate::KeepWarmPrices,
+    ) -> Result<Option<crate::KeepWarmPrices>, HarnessError> {
+        Ok(None)
+    }
+
+    /// Move the clock governing keep-warm scheduling, processing due timers in
+    /// chronological order and settling provider requests and their usage before
+    /// returning. Advancing time must not itself send a real request. The same
+    /// clock timestamps the provider journal. Return `None` when unavailable;
+    /// release builds must not expose a controllable scheduler clock.
+    async fn advance_warm_clock(
+        &self,
+        _handle: &Self::Handle,
+        _by: std::time::Duration,
+    ) -> Result<Option<()>, HarnessError> {
+        Ok(None)
+    }
+
+    /// Requests actually received by the scripted provider for this session,
+    /// starting at the zero-based `cursor`, and the current scheduler time.
+    /// The cursor advances by the number of returned requests. Keep this journal
+    /// outside runner state. Record exact request and cache-prefix bytes plus
+    /// actual response usage; never infer requests from transcript entries or
+    /// label them warm/real. Settle in-flight responses before returning. Return
+    /// `None` when the independent provider journal is unavailable.
+    async fn keep_warm_requests(
+        &self,
+        _session: &str,
+        _cursor: u64,
+    ) -> Result<Option<crate::KeepWarmRequests>, HarnessError> {
+        Ok(None)
+    }
+
     /// Wait a short while between polls that check whether a run has ended.
     async fn pause(&self);
 }

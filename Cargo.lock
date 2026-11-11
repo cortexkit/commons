@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.17.44"
+version = "0.17.45"
 dependencies = [
  "async-trait",
  "base64",
