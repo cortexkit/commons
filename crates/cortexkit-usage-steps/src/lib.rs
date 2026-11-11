@@ -15,6 +15,7 @@
 //! [`LatestRows`] applies rows in the order reads return them and keeps the
 //! last row per identity (`harness` plus `step_ref`).
 
+mod claude_code;
 mod cursor;
 mod latest;
 mod open_set;
@@ -22,6 +23,7 @@ mod ops;
 mod pi;
 mod row;
 
+pub use claude_code::claude_code_step_ref;
 pub use cursor::Cursor;
 pub use latest::{Applied, LatestRows};
 pub use open_set::{RequestSize, StepSource, Verdict};

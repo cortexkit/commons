@@ -333,12 +333,12 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 | `rules` | `ProviderRules` | For the current model and account. |
 | `signed_floor` | `{through: string}`, optional | Runner-authoritative signed reasoning boundary, by stable entry id, with the semantics below. Only for providers declaring `compaction-signed-floor/v1`. |
 | `last_prompt_tokens` | integer, optional | The prompt size the model provider reported for the session's newest model request: uncached input plus cache reads plus cache writes. Absent before the first request, or when the provider reported none. Requests of child sessions do not count. |
-| `last_prompt_view` | integer, optional | The applied view version the request measured by `last_prompt_tokens` was rendered with when the runner built it. At least 1 names an applied view (view versions start at 1, W6.1); `0` means no view was applied. Absent means unknown, for example after a runner restart when it cannot tie the reading to a request it answered; providers may use the reading for compaction without checking a view version. The runner sends it only with `last_prompt_tokens`; the provider ignores it when `last_prompt_tokens` is absent. |
+| `last_prompt_view` | integer, optional | The applied view version the request measured by `last_prompt_tokens` was rendered with when the runner built it. At least 1 names an applied view (view versions start at 1, W6.1); `0` means no view was applied. The runner sends it whenever it can tie the reading to the request it measured; absent means it cannot, for example after a runner restart. Providers may use a reading without it for compaction without checking a view version. The runner sends it only with `last_prompt_tokens`; the provider ignores it when `last_prompt_tokens` is absent. |
 | `system_tokens` | `{count, exact}`, optional | Count of the runner's own system text for the next request under these conditions, excluding system entries; in notices only, never rides (W4.11). |
 | `tools_tokens` | `{count, exact}`, optional | Count of the tool definitions for the next request under these conditions; in notices only, never rides (W4.11). |
 | `notes_tokens` | `{count, exact}`, optional | Count of pending runner-rendered plan and tool notes on the next request, not the last request; only for providers declaring `compaction-notes-tokens/v1`. In notices only, never rides (W4.11). |
 
-Informative for providers: when `last_prompt_view` is present, a reading counts toward a compaction decision only when `last_prompt_view` equals the newest view the runner accepted and has not since refused; a lower version, or `0` once any view is accepted, is stale. This holds even while the runner's `applied_view` still names an older view: `applied_view` names the view in force, and an accepted view takes force only at the next step boundary, so a reading can arrive between acceptance and the first request rendered with the new view. A reading that is stale only against an accepted view that hasn't yet taken force is normal runner behaviour, not a fault. The provider should wait for a reading under the current view rather than base a compaction decision on a stale reading. W6.5's `stale_version` means a runner refuses any view whose version is not greater than the latest it accepted, so a version a runner reports names exactly one view in that session. Over-limit rides still act on their own estimate.
+Informative for providers: when `last_prompt_view` is present, a reading counts toward a compaction decision only when `last_prompt_view` equals the newest view the runner accepted and has not since refused; a lower version, or `0` once any view is accepted, is stale. This holds even while the runner's `applied_view` still names an older view: `applied_view` names the view in force, and an accepted view takes force only at the next step boundary, so a reading can arrive between acceptance and the first request rendered with the new view. A reading that is stale only against an accepted view that hasn't yet taken force is normal runner behaviour, not a fault. The provider should wait for a reading under the current view rather than base a compaction decision on a stale reading. When `last_prompt_view` is absent, a provider may treat a reading that repeats exactly the reading its newest accepted view was built from as already acted on, because a runner re-sends its last measurement until a new request is measured. W6.5's `stale_version` means a runner refuses any view whose version is not greater than the latest it accepted, so a version a runner reports names exactly one view in that session. Over-limit rides still act on their own estimate.
 
 **Signed floor.** The runner contract's tool-set-change rule records a durable,
 monotonic floor at the session's newest entry when a tool change invalidates
@@ -346,6 +346,20 @@ earlier signed reasoning. `through` is that entry's stable id, not an ordinal.
 A provider declaring `compaction-signed-floor/v1` treats signed parts in entries
 at or before `through` as already gone: it does not count them, hold for them,
 or plan them. Setup and subsequent conditions report the same runner state.
+
+The runner names the floor in Setup and in the conditions of every notice and
+ride while the session has one, never only when it changes, so a Setup or
+condition that names no floor means no floor affects that call. The runner
+keeps its floor but MUST report it absent while its `through` entry is not on
+the session's current line (after a revert or another history rewrite), because
+a provider cannot place an id it cannot find. It MAY also report it absent while
+the floor cannot change the call: when the entry lies before every entry the
+call covers (so no signed part it covers is in any request), or when the
+serving model's rules bind no signed parts. It names the floor again once the
+condition that hid it stops holding. A provider follows the reported state
+in both directions: it drops its copy when the runner names no floor, and takes
+the runner's floor when one is named again, even if it is not newer than the
+one it dropped.
 
 A view that keeps a signed part at or before the floor MUST NOT be refused for
 keeping that part, even if the view would otherwise invalidate its signature.

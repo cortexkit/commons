@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.7
+
+- Add `claude_code_step_ref` so runners and providers share Claude Code record
+  identities. The key is the API request id (the transcript's `requestId`)
+  verbatim; an empty id, or one with whitespace or a control character, gives
+  no key. Runners send it as `harness_step_ref`, with `session` set to the
+  session the apps know rather than Claude Code's own session id, so the
+  transcript row replaces the live one.
+
 ## 0.2.6
 
 - Add optional `message_id` to step rows for the host's own content-free

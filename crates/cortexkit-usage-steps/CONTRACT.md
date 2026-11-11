@@ -314,6 +314,21 @@ Pi steps under `history_key: "harness"` send that key as `harness_step_ref`,
 and providers record Pi rows under the same key. A bare journal entry id is
 only unique within one session file and is not a row identity.
 
+### Claude Code steps
+
+A Claude Code step's host record id is the API request id from this crate's
+`claude_code_step_ref`: the `requestId` Claude Code writes on the transcript
+entry for the call, kept verbatim. The runner reads the same request id from
+the response and sends it as `harness_step_ref` on `step.finished.v1`, and
+providers record Claude Code rows from the transcript under the same key, so
+the recorded row replaces the live one. On both rows `session` is the session
+id the apps know for that conversation, never Claude Code's own internal
+session id; a provider reading the transcript maps Claude Code's id to that
+session before recording the row. The Anthropic message id may still ride on
+the event as `step_id`, but it is not the row identity. An empty request id,
+or one containing whitespace or a control character, gives no key; such a
+step has no host record rather than a repaired one.
+
 ### Readers and new members
 
 The provider may add optional row members within v1. Any member it adds

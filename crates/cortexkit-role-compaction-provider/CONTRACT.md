@@ -1,5 +1,13 @@
 # `compaction-provider/v1` — role contract
 
+> **Superseded.** `cortexkit-role-compaction` (`compaction-provider/v2` and
+> `compaction-runner/v1`) replaces this contract, and no live runner or provider
+> speaks v1. Part numbering, tag notation and reply cleaning are defined only by
+> that crate's A3 and W4, as `cortexkit-role-llm-runner` §9.6 says. Where this
+> document names `render_tags` or runner tag settings, it describes v1 only and
+> binds nothing current. It stays here because the crate still builds against
+> the llm-runner 0.7 line.
+
 Stability: **alpha**. This document is the role
 definition; the Rust types in this crate are its wire
 shapes, `test-vectors/compaction-provider-v1/` inside this crate holds
