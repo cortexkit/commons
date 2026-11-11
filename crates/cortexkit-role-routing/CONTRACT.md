@@ -1067,6 +1067,15 @@ the routing provider allocates (subscription logins).
 - [pinned] `admission_id` (required, non-empty, at most 128 characters):
   the idempotency key. The same id and body from the same runner returns
   exactly the first answer; a different body is `admission_conflict`.
+  One exception, for a run moved by `account_continue` (§9.1.1), on a router
+  that declares `account_continue_resume` in `role.describe.capabilities`
+  (only together with `account_continue`): once an offer for that admission
+  is used, an `admit` repeating the started admission's id (a runner resuming
+  the paused run) answers the run's current account, the last used offer, not
+  the stored first answer, which names the original account the run paused
+  on. An admission never moved replays its first answer byte for byte. A
+  runner relies on this only with a router that declares it; against any other
+  router it keeps the moved account from its own durable record.
   Bodies are compared with defaults applied
   (`AccountForRequest::same_body`): a member left out and the same member
   sent with its default value are the same body.
@@ -1222,11 +1231,26 @@ The answer (`account::AccountForAnswer`):
   `previous_decision_id`, so pricing and per-task records follow the switch.
 - [pinned] The runner validates that `valid_until_ms` has not passed and
   that it can load the offered credential for the decision's provider and
-  auth method, then durably records the switch before any send. It uses the
-  offer by reporting its steps under the offered `decision_id` through
-  `route.report`. The router treats the reservation as used on the first
-  such report, and otherwise releases it at `valid_until_ms`. The runner
+  auth method, then durably records the switch before any send. The runner
   must not use an expired offer, and asks again with a new id instead.
+- [pinned] The runner marks the offer used in one of three ways, and the
+  router treats the first one it receives before `valid_until_ms` as use:
+  - a `route.report` under the offered `decision_id`;
+  - a `route.account_observe` `admission_started` under the run's original
+    `admission_id` and `run_id`, naming the offered `credential_id` and
+    `served_account_id`, sent after the switch is durably recorded and
+    before any `attempt` observation on the new account;
+  - as a backstop for a lost frame, the first `attempt` observation under
+    that admission and run naming the offered account.
+  Marking used is idempotent. An `admission_started` or `attempt` naming an
+  account with no open offer for that admission and run (expired, released
+  or superseded) is recorded as an observation only. It never creates or
+  revives a reservation, and never marks a released offer used. An offer
+  not used by `valid_until_ms` is released.
+- [pinned] Observations after a move stay under the original `admission_id`
+  and name the account in use; they carry no decision id. One `run_finished`
+  under the original admission ends the run's lease and every reservation
+  the run holds, the original one and each used offer alike.
 - [pinned] `hold` is not an error: no compatible account is available right
   now. It carries `{until_ms?, routing_code, detail}`. The run stays paused;
   the runner asks again at `until_ms` or on its own wake, with a new selection
