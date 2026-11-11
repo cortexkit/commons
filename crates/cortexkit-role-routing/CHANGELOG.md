@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.15
+
+- Add `gateway` as the fifth shared authentication spelling. One vault
+  credential supplies the endpoint and gateway credential; the gateway keeps
+  the upstream provider key. Gateway pairs normally do not require catalog
+  `wire.api`. The vault and runner permit HTTPS, or HTTP only to loopback.
+- Readers first for meaning: adopt routing 0.7.15 and gateway credential matching
+  before a runner declares a `gateway` pair. Older parsers keep the declaration:
+  `RunnerPair.auth_method` is a string and `validate_runner` checks token shape
+  only (`src/declarations.rs`). Exact matching can already select a credential
+  reported as `gateway`, but not one reported with another or no method;
+  decoding alone does not derive `gateway` from an `llm-gateway` credential.
+  Validation remains open-token and this release is non-breaking.
+
 ## 0.7.14
 
 - Add optional per-pair `requires_wire_api`: a pair's value wins over the

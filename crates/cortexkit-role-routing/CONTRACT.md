@@ -153,6 +153,23 @@ a module plays.
   | `oauth` | A provider's OAuth sign-in, such as a Claude subscription |
   | `chatgpt` | A ChatGPT subscription sign-in |
   | `antigravity` | A Google Antigravity sign-in |
+  | `gateway` | One vault credential supplies both the endpoint and its credential; the runner calls that endpoint, and the gateway holds the upstream provider key |
+
+- [pinned] A `gateway` pair normally has an effective `requires_wire_api` of
+  `false`: the runner uses the credential's own endpoint, not a catalog
+  `wire.api`. The runner sends only the gateway credential, not a second secret
+  for the upstream provider. Informatively, the vault and runner allow HTTPS,
+  or plain HTTP only to a loopback gateway; routing does not validate endpoints.
+- [pinned] Readers first for gateway meaning: deploy routing 0.7.15 before a
+  runner declares a `gateway` pair, with routing able to match the vault's
+  `llm-gateway` credential as `gateway`. Older parsers accept the token and keep
+  the whole declaration: `RunnerPair.auth_method` is a string and
+  `validate_runner` checks only its token shape (`src/declarations.rs`,
+  `RunnerPair` and `validate_runner`). Matching is by exact equality, so an
+  older router can match a credential already reported as `gateway`, but cannot
+  match a credential reported under a different method or without one. Parsing
+  the token does not give a router the gateway credential's meaning or derive
+  its method; the rollout rule is semantic, not a decoder compatibility rule.
 
 - [pinned] The provider is never part of an `auth_method`: routing matches
   a credential's provider separately, so a Claude subscription and another

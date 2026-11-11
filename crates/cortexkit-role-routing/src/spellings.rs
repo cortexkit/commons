@@ -20,7 +20,7 @@ pub const WIRE_APIS: &[&str] = &[
 
 /// `auth_method` values: the vault's names for its credential kinds, in the
 /// contract's table order.
-pub const AUTH_METHODS: &[&str] = &["apikey", "oauth", "chatgpt", "antigravity"];
+pub const AUTH_METHODS: &[&str] = &["apikey", "oauth", "chatgpt", "antigravity", "gateway"];
 
 #[cfg(test)]
 mod tests {
@@ -58,5 +58,24 @@ mod tests {
     fn the_constants_match_the_contract_tables() {
         assert_eq!(contract_column("`wire_api`"), WIRE_APIS);
         assert_eq!(contract_column("`auth_method`"), AUTH_METHODS);
+    }
+
+    #[test]
+    fn auth_methods_round_trip_as_runner_pairs() {
+        use crate::{parse_consumer_declarations, RunnerPair};
+        use serde_json::json;
+
+        assert_eq!(
+            AUTH_METHODS,
+            ["apikey", "oauth", "chatgpt", "antigravity", "gateway"]
+        );
+        let pairs: Vec<_> = AUTH_METHODS
+            .iter()
+            .map(|method| RunnerPair::new("anthropic.messages", *method))
+            .collect();
+        let wire = json!({"runner": {"pairs": pairs}});
+        let parsed = parse_consumer_declarations(&wire).unwrap();
+        assert_eq!(parsed.runner.as_ref().unwrap().pairs, pairs);
+        assert_eq!(serde_json::to_value(parsed).unwrap(), wire);
     }
 }

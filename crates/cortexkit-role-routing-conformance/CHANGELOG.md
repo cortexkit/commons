@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.17
+
+- Pin routing `=0.7.15`. Add `runner_gateway_credential`: a declared
+  `anthropic.messages/gateway` pair selects a gateway route without catalog
+  `wire.api` and admits the seeded gateway credential/account. Test correct
+  routers, routers that reject gateway pairs or return the wrong method, and
+  adapters missing the fixture hooks.
+- Readers first for meaning: routing adopts 0.7.15 and gateway credential
+  matching before runners declare gateway pairs. Older parsers accept the token
+  (`RunnerPair` and `validate_runner` in routing's `src/declarations.rs`);
+  exact matching needs the credential reported as `gateway`, not another or
+  absent method. Parsing does not derive a method from `llm-gateway` credentials.
+
 ## 0.10.16
 
 - Pin routing `=0.7.14`. Extend `runner_requires_wire_api` with per-pair

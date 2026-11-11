@@ -14,6 +14,7 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("runner_gateway_credential", "runner matching: anthropic.messages/gateway selects without catalog wire.api and admits the gateway credential/account"),
     check("select_engine_eval_measured", "engine_evals: measured engines outrank unmeasured engines and cost"),
     check("select_engine_eval_higher_score", "engine_evals: newest score on the same set ranks higher first"),
     check("select_engine_eval_different_set", "engine_evals: scores from another set are not comparable"),

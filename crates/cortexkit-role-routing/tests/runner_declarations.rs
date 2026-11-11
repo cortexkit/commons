@@ -48,6 +48,33 @@ fn pure_runner_accepts_open_set_tokens_and_defaults() {
 }
 
 #[test]
+fn gateway_pair_parses_without_requiring_a_catalog_endpoint() {
+    let parsed = round_trip(
+        r#"{"runner":{"pairs":[{"wire_api":"anthropic.messages","auth_method":"gateway"}]}}"#,
+    );
+    let runner = parsed.runner.unwrap();
+    assert_eq!(
+        runner.pairs[0],
+        RunnerPair::new("anthropic.messages", "gateway")
+    );
+    assert!(runner.admits_pair_row(&runner.pairs[0], false));
+}
+
+#[test]
+fn unknown_auth_method_keeps_the_whole_declaration() {
+    let parsed = round_trip(
+        r#"{"runner":{"pairs":[{"wire_api":"anthropic.messages","auth_method":"gateway"},{"wire_api":"anthropic.messages","auth_method":"future_auth"}]}}"#,
+    );
+    assert_eq!(
+        parsed.runner.unwrap().pairs,
+        [
+            RunnerPair::new("anthropic.messages", "gateway"),
+            RunnerPair::new("anthropic.messages", "future_auth"),
+        ]
+    );
+}
+
+#[test]
 fn consumers_and_runner_share_the_slot() {
     let parsed = round_trip(
         r#"{"consumers":[{"name":"example","eq":42}],"runner":{"pairs":[{"wire_api":"chat","auth_method":"api-key"}],"follows_account_choice":true,"tool_capabilities":["code.read/v1"],"standing_limits":{"explicit_providers":["example-provider"]}}}"#,

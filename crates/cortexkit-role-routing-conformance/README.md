@@ -97,6 +97,13 @@ preserving existing adapters.
     `requires_wire_api` only after the router runs routing 0.7.13 or later,
     and pair-level values only once routing runs 0.7.14 live; older strict
     parsers drop the whole runner declaration;
+  - `runner_gateway_credential` uses both optional hooks above: it configures an
+    `anthropic.messages/gateway` pair and an `anthropic-gw-example` account whose
+    method is `gateway`, removes catalog `wire.api`, then checks selection and
+    admission of that credential/account. Missing hooks make the check not
+    applicable. The fixture carries credential identity and method, not secrets
+    or endpoint contents; it does not test the vault's `llm-gateway` derivation,
+    the runner's HTTP loopback restriction, or upstream authentication;
   - `pin_for_project(project, consumer, pin)`: an operator pin that applies
     to the consumer's selects within the project;
   - `cool_down(route_key, until_ms)`: the route serves nothing before then.

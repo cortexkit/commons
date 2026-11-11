@@ -998,6 +998,14 @@ impl FakeRoute {
         let Some(declaration) = state.runner_declarations.get(module) else {
             return true;
         };
+        if self.fault("runner_gateway_credential")
+            && declaration
+                .pairs
+                .iter()
+                .any(|pair| pair.auth_method == "gateway")
+        {
+            return false;
+        }
         let serves_wire_api = state.route_wire_apis.contains_key(&model.route_key())
             && !(self.fault("requires_wire_api_stale") && model.model == "model-b");
         let mut declaration = declaration.clone();
@@ -2228,7 +2236,12 @@ impl FakeRoute {
                 provider: chosen.provider.clone(),
                 account_id: chosen.account_id.clone(),
                 credential_id: chosen.credential_id.clone(),
-                method: chosen.method.clone(),
+                method: if self.fault("gateway_wrong_account_method") && chosen.method == "gateway"
+                {
+                    "apikey".into()
+                } else {
+                    chosen.method.clone()
+                },
             },
             AccountPin::new(
                 pin_id,
