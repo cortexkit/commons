@@ -58,6 +58,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | S3 | A second Setup for a session the provider already holds keeps the provider's state; both sides restart the notice count (W5.2 `seq`). |
 | S4 | If the applied view differs from the one the provider holds (version or checksum), the provider reads the runner's with `session.applied_view` and adopts it unless it is foreign (W5.6). |
 | S5 | The provider sets no ceiling or percentage on the runner. |
+| S6 | A runner that has asked for Setup during a notice pass does not ask again in that pass; it waits out its existing backoff. This is runner-side scheduling, not a new provider obligation. |
 
 ## A5. Notices
 
@@ -68,6 +69,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | N3 | The runner sends a session's notices one at a time: the next only after the previous one was answered. Changes made while a notice is unanswered go into the next notice, so a slow provider never builds a queue. Before a ride, the runner sends any change not yet noticed. |
 | N4 | A notice is a convenience, not the source of truth. The provider keeps its own position, and reads any gap with `session.entries`. |
 | N5 | A notice whose `seq` is not greater than the last one handled since the latest Setup is ignored. |
+| N6 | The first notice after Setup carries only entries newer than the entry Setup named in `newest`, plus entries changed since that Setup, subject to the ordinary notice budget (W4.11). Like every later notice, it is a delta, not a replay. The provider pages with `session.entries` for older entries (N4); providers were already required to do so. No capability is needed. |
 
 ## A6. Reads
 
@@ -106,10 +108,10 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| RD1 | Before a model request that rewrites the model provider's cache anyway, or that would not fit, the runner calls `compaction.ride` (W5.3) with every cause that applies, and waits up to its deadline. |
+| RD1 | Before a model request that rewrites the model provider's cache anyway, or that would not fit, the runner calls `compaction.ride` (W5.3) with every cause that applies, and waits up to its deadline. For providers declaring `compaction-limits/v1`, it also rides on the soft window-budget schedule in W3.5; that cause does not imply a lost cache. |
 | RD2 | The answer is a view or nothing. A late or missing answer means the request goes out with the view the runner has. |
 | RD3 | Cache expiry is the runner's knowledge (W5.3), and `cache_expired` means proven expiry. A runner may report it only when it holds every cache touch for the session since its own start, warms included, and its own clock shows that the newest touch plus that touch's reported lifetime has passed. After a runner start, expiry is unknown until a touch arrives; an older durable request record alone is not proof. A cache touch proves nothing about another model's cache: the runner keeps one cache clock per session, touches recorded before the serving model changed do not count (even when switching away and back after a content-filter fallback), and after a change it reports no `cache_expired` until it records a touch on the model now serving. An `implicit` cache is never reported expired. When warming stops, expiry follows at the last touch plus its lifetime, not at the time warming stopped. A runner missing any touch or its reported lifetime, including behind a host that warms without reporting touches, sends no `cache_expired`: the cache may still be warm, and a compaction provider treats `cache_expired` as a rebuild that costs nothing extra. |
-| RD4 | The runner's only limit is its own usable window (W3.4). When the next request would exceed it, the runner rides with `over_limit`. If the request still does not fit, it refuses the turn with `context_ceiling`. It never sends over its limit. |
+| RD4 | The runner's hard model-request limit is its own usable window (W3.4). When the next request would exceed it, the runner rides with `over_limit`. If the request still does not fit, it refuses the turn with `context_ceiling`. It never sends over its limit. The separate runner-owned window budget (W3.5) is soft and never refuses or ends a step. |
 | RD5 | Setup lists the causes the runner can detect (`detects`). A cause the runner cannot detect is unknown to the provider, never "did not happen". A runner lists `cache_expired` only for routes where it can meet RD3; a route that cannot leaves it out. If `cache_expired` is absent from `detects`, the provider treats expiry as unknown. If it is listed but absent from a ride's causes, expiry was not proven for that ride; that does not certify the cache is warm. |
 | RD6 | A one-step fallback is not a model change: a resend to another model after a refusal, or a model provider's own server-side fallback. The session's model stays as it was in the conditions, and no ride happens. |
 
@@ -208,6 +210,13 @@ capability `compaction-notes-tokens/v1` (`COMPACTION_NOTES_TOKENS_PROVIDES`;
 exclude those notes from `system_tokens` only for them. Non-declaring providers
 keep notes inside `system_tokens`, so a separate count would double-count them
 (W4.11).
+
+For named-read caps and continuation, `Conditions.window_over_budget`, and the
+`window_over_budget` ride cause, the provider declares `compaction-limits/v1`
+(`COMPACTION_LIMITS_PROVIDES`; `provides_limits`). Deploy readers first, then
+runners that project these capability members and advertise the cause in Setup's
+`detects`. Setup's `limits` and the `after` page ceiling apply to all providers
+(W5.1, W5.4); the first-notice delta rule also needs no declaration (N6).
 
 For `Entry.speaks_for`, the provider declares the additional manifest capability
 `compaction-entry-speaks-for/v1` alongside `compaction-provider/v2`
@@ -344,6 +353,16 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 | `system_tokens` | `{count, exact}`, optional | Count of the runner's own system text for the next request under these conditions, excluding system entries; in notices only, never rides (W4.11). |
 | `tools_tokens` | `{count, exact}`, optional | Count of the tool definitions for the next request under these conditions; in notices only, never rides (W4.11). |
 | `notes_tokens` | `{count, exact}`, optional | Count of pending runner-rendered plan and tool notes on the next request, not the last request; only for providers declaring `compaction-notes-tokens/v1`. In notices only, never rides (W4.11). |
+| `window_over_budget` | boolean, optional | `true` when the session's window exceeds either entry or byte bound in Setup's `limits.window`; absent otherwise. Only for providers declaring `compaction-limits/v1`. |
+
+**Runner-owned window budget.** For a provider declaring `compaction-limits/v1`,
+the runner reports `window_over_budget: true` while either configured bound is
+exceeded. It rides for a view once when the budget is first crossed, and again
+only after the window has grown by another quarter, never at every step. The
+ride names the `window_over_budget` cause (W5.3); a runner that detects it lists
+it in Setup's `detects` (RD5). This budget is soft: the runner never refuses or
+ends a step for it, even when the provider returns no view. Non-declaring
+providers receive neither the flag nor the cause.
 
 Informative for providers: when `last_prompt_view` is present, a reading counts toward a compaction decision only when `last_prompt_view` equals the newest view the runner accepted and has not since refused; a lower version, or `0` once any view is accepted, is stale. This holds even while the runner's `applied_view` still names an older view: `applied_view` names the view in force, and an accepted view takes force only at the next step boundary, so a reading can arrive between acceptance and the first request rendered with the new view. A reading that is stale only against an accepted view that hasn't yet taken force is normal runner behaviour, not a fault. The provider should wait for a reading under the current view rather than base a compaction decision on a stale reading. When `last_prompt_view` is absent, a provider may treat a reading that repeats exactly the reading its newest accepted view was built from as already acted on, because a runner re-sends its last measurement until a new request is measured. W6.5's `stale_version` means a runner refuses any view whose version is not greater than the latest it accepted, so a version a runner reports names exactly one view in that session. Over-limit rides still act on their own estimate.
 
@@ -665,6 +684,7 @@ Request:
 | `model` | `ModelRef` | W3.1. |
 | `accepts_images` | boolean, optional | Whether the session's model reads images. The runner sends it only when known; absent means unknown. A provider inserts images only when it is `true`. |
 | `view_anchor` | boolean, optional | Runner opt-in to checksummed `View.built_through` and `View.new_signed`. Only `true` enables either member. |
+| `limits` | `Limits`, optional | The runner's own read ceilings and window budget, below. May be sent to every provider. |
 | `context_window` | integer | W3.4. |
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | W3.3. |
@@ -676,6 +696,20 @@ Request:
 | `now` | integer | The runner's clock. |
 
 The provider never derives `child_harness` from runner or host names. A Setup that changes it applies to the next child; a running child keeps the harness it was created with.
+
+`Limits` is `{page?: {max_entries?: integer, max_bytes?: integer},
+select_max?: integer, window?: {entries?: integer, bytes?: integer}}`. Every
+member is optional; absence states no bound for that dimension. All integers
+follow W1.2. `page.max_entries` must be at least 1, like a read's `limit`: this
+keeps "at most `limits.page`" consistent with "at least one entry when any
+matches". Other bounds may be 0. Typical values are a page of 512 entries and
+1 MiB, `select_max` of 256, and a window of 8,000 entries and 64 MiB; these are
+illustrations, not contract constants or defaults.
+
+The `after` page ceiling applies to all providers (W5.4). Named-read caps,
+named-read continuation and the window budget apply only to providers declaring
+`compaction-limits/v1`. A runner that asked for Setup during a notice pass does
+not ask again in that pass; it waits out its existing backoff (S6).
 
 The runner sends `view_anchor: true` only when it verifies `built_through` and
 `new_signed` in the view checksum and plans views through `render::plan_view`
@@ -702,7 +736,7 @@ Request:
 | `token_family` | string, optional | Required when the notice carries W4.11 counts; applies to all of them. |
 | `token_family_exact` | boolean, optional | Alongside `token_family`: the model's own tokenizer (`true`) or a stand-in (`false`); absent is unknown and treated as `false` (W4.11). |
 | `events` | array of `Event` | Below. Empty when nothing but entries changed; may be left out when empty. |
-| `entries` | array of `Entry` | In compact form, oldest first: every entry stored since the previous notice, plus every changed entry again. The serialized compact array's budget is 1,048,576 bytes. Drop entry counts first, then omit the entries if still over budget; condition counts stay, and `token_family` stays whenever any count remains (W4.11). The provider may read omitted entries with `session.entries`, which does not return condition counts. May be left out when empty. |
+| `entries` | array of `Entry` | In compact form, oldest first: every entry stored since the previous notice, plus every changed entry again. For the first notice after Setup, only entries newer than Setup's `newest`, plus entries changed since Setup (N6). The serialized compact array's budget is 1,048,576 bytes. Drop entry counts first, then omit the entries if still over budget; condition counts stay, and `token_family` stays whenever any count remains (W4.11). The provider pages for older or omitted entries with `session.entries`, as already required; it does not return condition counts. May be left out when empty. |
 
 Events, each an object with an `event` field:
 
@@ -737,8 +771,9 @@ Causes:
 | `account_change` | A different account. |
 | `surface_change` | A different system prompt or tool definitions. |
 | `over_limit` | Its estimate of the next request exceeds the usable window (W3.4). |
+| `window_over_budget` | The soft window-budget schedule in W3.5 asks for a view. Only to providers declaring `compaction-limits/v1`, and listed in `detects` when the runner can detect it. May accompany other causes; it does not imply a lost cache. |
 
-A cause says what changed at the runner, not what the provider must do. Only `over_limit` needs a smaller request. With every other cause, `nothing` is a valid answer, and a provider decides from its own policy whether that cause makes edits cheap to land.
+A cause says what changed at the runner, not what the provider must do. Only `over_limit` needs a smaller request. With every other cause, `nothing` is a valid answer, and a provider decides from its own policy whether that cause makes edits cheap to land. `window_over_budget` alone is a valid ride with no cache-loss cause; it never ends or refuses a step for exceeding the budget.
 
 Answer: `{"answer": "view", "view": View}` or `{"answer": "nothing"}`. The runner checks a returned view like one handed over with `session.apply_view` (W6.5). If accepted, it applies the view to this very request and stores it as its latest; if refused, it keeps its view and reports `view_refused` in its next notice. With `over_limit`, it then estimates again, and refuses the turn with `context_ceiling` if the request still does not fit.
 
@@ -750,7 +785,7 @@ Request:
 
 | Field | Type | Meaning |
 |---|---|---|
-| `select` | object, with `by` | `{"by": "after", "after_ordinal"?: integer, "limit"?: integer}`: entries with an ordinal greater than `after_ordinal` (from the first when absent), oldest first, at most `limit`, which must be at least 1 when present. `{"by": "mids", "mids": [string]}`: those messages in transcript order; ids not on the active path are left out. `{"by": "tags", "tags": [integer]}`: the messages holding parts with these numbers, in transcript order. |
+| `select` | object, with `by` | `{"by": "after", "after_ordinal"?: integer, "limit"?: integer}`: entries with an ordinal greater than `after_ordinal` (from the first when absent), oldest first, at most `limit`, which must be at least 1 when present. `{"by": "mids", "mids": [string]}`: those messages; ids not on the active path are left out. `{"by": "tags", "tags": [integer]}`: the messages holding parts with these numbers; tags not on the active path are left out. Named reads use request order for providers declaring `compaction-limits/v1`, transcript order otherwise. |
 | `detail` | `compact`, `full` | W4.8. |
 | `max_bytes` | integer, optional | Stop adding entries once the page's entries reach this many bytes of JSON. A page holds at least one entry when any matches. |
 
@@ -762,9 +797,30 @@ Answer:
 | `token_family` | string, optional | Required when the page carries W4.11 counts; applies to all of them. |
 | `token_family_exact` | boolean, optional | Alongside `token_family`: the model's own tokenizer (`true`) or a stand-in (`false`); absent is unknown and treated as `false` (W4.11). |
 | `next_after` | integer, optional | For `by: after`: the ordinal to continue after when more entries match than fit. Absent when the page reaches the end. |
+| `unanswered` | array of strings or integers, optional | For named reads, the remaining held mids or tags, in request order. Only to providers declaring `compaction-limits/v1`; the provider asks again for these names. Missing names are never listed. |
 | `head` | object | `newest` (`Cursor`, optional) and `applied_view` (`AppliedView`, optional) at the moment of the read. |
 
 Refusals: `invalid_params`. A read reaches the whole active path, including entries a cut leaves out.
+
+**Page ceiling, all providers.** An `after` read returns at most Setup's
+`limits.page`, whatever its `limit` and `max_bytes` ask for, and continues with
+`next_after`. Each stated bound and each requested bound applies; a missing
+bound adds no ceiling. A page still holds at least one entry when any matches,
+even one larger than the byte limit. This is safe for every provider: conforming
+providers were already required to page with `next_after` rather than assume a
+read returns the whole transcript.
+
+**Named reads, declaring providers only.** For `compaction-limits/v1`, a `mids`
+or `tags` read naming more than `limits.select_max` names is refused with
+`invalid_params` and detail `{"field": "select", "problem": "too_many", "max":
+<select_max>}`. Within that cap, answer in request order until the page byte
+limit (the read's `max_bytes` and Setup's `limits.page.max_bytes`, when stated),
+then list the remaining held names in `unanswered`. The minimum-one-entry rule
+still applies. A name the runner does not hold on the active path is left out,
+as before, and is never in `unanswered`. A named read is never cut short without
+`unanswered`. For providers that do not declare, named reads are answered in
+full, in transcript order as before, with no `unanswered`, regardless of these
+new bounds.
 
 ### W5.5 `session.apply_view` (runner, `compaction-runner/v1`)
 

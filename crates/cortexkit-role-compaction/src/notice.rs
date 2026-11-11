@@ -123,6 +123,11 @@ pub struct Conditions {
     /// otherwise keep notes inside `system_tokens` to avoid double-counting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_tokens: Option<crate::tokens::SurfaceTokens>,
+    /// The runner's window exceeds its Setup budget. Send only as `true`,
+    /// only to providers declaring `compaction-limits/v1`; absent otherwise.
+    /// This is a soft request for a view, not a reason to end a step.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_over_budget: Option<bool>,
 }
 
 open_tagged! {
@@ -234,11 +239,18 @@ impl Conditions {
             system_tokens: None,
             tools_tokens: None,
             notes_tokens: None,
+            window_over_budget: None,
         }
     }
 
     pub fn with_accepts_images(mut self, accepts_images: bool) -> Self {
         self.accepts_images = Some(accepts_images);
+        self
+    }
+
+    /// Project an exceeded budget only when the provider declares its capability.
+    pub fn with_window_over_budget(mut self, over_budget: bool, declared: bool) -> Self {
+        self.window_over_budget = (over_budget && declared).then_some(true);
         self
     }
 

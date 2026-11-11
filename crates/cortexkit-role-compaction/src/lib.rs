@@ -77,6 +77,19 @@ pub const COMPACTION_STATEMENT_SEQ_PROVIDES: &str = "compaction-statement-seq/v1
 /// Runners separate notes from `system_tokens` only for declaring providers.
 pub const COMPACTION_NOTES_TOKENS_PROVIDES: &str = "compaction-notes-tokens/v1";
 
+/// Additional provider manifest capability enabling named-read caps and
+/// continuation, Conditions `window_over_budget`, and the matching ride cause.
+/// Deploy readers first.
+/// After-read page ceilings and first-notice deltas need no declaration.
+pub const COMPACTION_LIMITS_PROVIDES: &str = "compaction-limits/v1";
+
+/// Whether a provider declares support for runner-owned named-read and window bounds.
+pub fn provides_limits(provides: &[String]) -> bool {
+    provides
+        .iter()
+        .any(|capability| capability == COMPACTION_LIMITS_PROVIDES)
+}
+
 /// Whether a provider declares support for the next request's note count.
 pub fn provides_notes_tokens(provides: &[String]) -> bool {
     provides

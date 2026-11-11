@@ -6,12 +6,12 @@ use cortexkit_role_compaction::{
         ToolPart, ToolStatus,
     },
     read::{
-        Cursor, Detail, Entry, Head, NoticeOrigin, ReadPage, ReadRequest, Role, Select, SpeaksFor,
-        StepUsage,
+        Cursor, Detail, Entry, Head, NoticeOrigin, ReadName, ReadPage, ReadRequest, Role, Select,
+        SpeaksFor, StepUsage,
     },
     ride::{RideAnswer, RideCause, RideRequest},
     rules::{EditCost, ProviderRules, RuleBreak, SignedParts},
-    setup::{ModelRef, SetupAnswer, SetupRequest},
+    setup::{Limits, ModelRef, PageLimits, SetupAnswer, SetupRequest, WindowLimits},
     view::{
         AppliedViewAnswer, AppliedViewRequest, ApplyViewAnswer, ApplyViewRequest, Edit, EditOp,
         InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
@@ -157,6 +157,85 @@ fn samples() -> Vec<(&'static str, Value)> {
         ))
     };
     let mut samples = vec![
+        (
+            "setup-limits-request.json",
+            request(
+                ops::COMPACTION_SETUP,
+                setup
+                    .clone()
+                    .with_limits(
+                        Limits::new()
+                            .with_page(
+                                PageLimits::new()
+                                    .with_max_entries(512)
+                                    .with_max_bytes(1_048_576),
+                            )
+                            .with_select_max(256)
+                            .with_window(
+                                WindowLimits::new()
+                                    .with_entries(8_000)
+                                    .with_bytes(67_108_864),
+                            ),
+                    )
+                    .with_window_over_budget_detection(true, true),
+            ),
+        ),
+        (
+            "setup-limits-legacy-request.json",
+            request(
+                ops::COMPACTION_SETUP,
+                setup
+                    .clone()
+                    .with_limits(
+                        Limits::new()
+                            .with_page(
+                                PageLimits::new()
+                                    .with_max_entries(512)
+                                    .with_max_bytes(1_048_576),
+                            )
+                            .with_select_max(256)
+                            .with_window(
+                                WindowLimits::new()
+                                    .with_entries(8_000)
+                                    .with_bytes(67_108_864),
+                            ),
+                    )
+                    .with_window_over_budget_detection(true, false),
+            ),
+        ),
+        (
+            "notice-window-over-budget-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(5, conditions.clone().with_window_over_budget(true, true)),
+            ),
+        ),
+        (
+            "ride-window-over-budget-request.json",
+            request(
+                ops::COMPACTION_RIDE,
+                RideRequest::new(vec![], 1_500, conditions.clone())
+                    .with_window_over_budget(true, true),
+            ),
+        ),
+        (
+            "entries-unanswered-mids.json",
+            value(
+                ReadPage::new(vec![entry.clone()], Head::new())
+                    .with_unanswered(vec![ReadName::Mid("message-b".into())], true),
+            ),
+        ),
+        (
+            "entries-unanswered-tags.json",
+            value(
+                ReadPage::new(vec![entry.clone()], Head::new())
+                    .with_unanswered(vec![ReadName::Tag(2)], true),
+            ),
+        ),
+        (
+            "refusal-select-too-many.json",
+            value(Refusal::select_too_many(256)),
+        ),
         (
             "setup-statement-seq-request.json",
             request(

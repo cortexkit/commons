@@ -40,6 +40,17 @@ to `7` and reports no floor. After a restore the runner sends Setup first and
 sends no more statements built before the restore. Older Setup, notice and ride
 vectors omit the stamp for non-declaring providers.
 
+`setup-limits-request.json` advertises runner-owned page, named-read and window
+bounds, plus `window_over_budget` detection for a `compaction-limits/v1`
+provider. `setup-limits-legacy-request.json` carries the same bounds but omits
+the capability-gated cause: the page ceiling applies to every provider.
+`notice-window-over-budget-request.json` reports the soft window state, and
+`ride-window-over-budget-request.json` asks for a view with that cause alone,
+without implying cache loss. `entries-unanswered-mids.json` and
+`entries-unanswered-tags.json` preserve the remaining held names for a declaring
+provider to read next. `refusal-select-too-many.json` pins the named-read cap's
+machine-readable detail. Legacy named reads stay full and omit `unanswered`.
+
 Regenerate JSON from the repository root after an intentional wire change:
 
 ```sh

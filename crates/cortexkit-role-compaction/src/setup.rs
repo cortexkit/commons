@@ -49,6 +49,11 @@ pub struct SetupRequest {
     /// (view library 0.1.8 or later). Changes apply to the next view.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub view_anchor: Option<bool>,
+    /// Runner-owned read ceilings and window budget (W5.1). The page ceiling
+    /// applies to every provider; named-read and window behaviour requires
+    /// `compaction-limits/v1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limits: Option<Limits>,
     /// The model's context window in tokens.
     #[serde(deserialize_with = "crate::integer::required")]
     pub context_window: u64,
@@ -89,6 +94,101 @@ pub struct ModelRef {
     pub service_tier: Option<String>,
 }
 
+/// Runner-owned bounds. An absent member states no bound for that dimension.
+/// All integers use the JSON-safe range 0..=9007199254740991; no bound is
+/// enabled by default.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct Limits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<PageLimits>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
+    pub select_max: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<WindowLimits>,
+}
+
+/// Read-page ceilings. A page still returns at least one matching entry,
+/// including an entry larger than the byte ceiling (W5.4).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct PageLimits {
+    /// At least 1 when present, so a matching page can always make progress.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::positive")]
+    pub max_entries: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
+    pub max_bytes: Option<u64>,
+}
+
+/// Soft budget for the session's window. Exceeding it requests a view, never
+/// refuses or ends a step (W3.5).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct WindowLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
+    pub entries: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::integer::optional")]
+    pub bytes: Option<u64>,
+}
+
+impl Limits {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_page(mut self, page: PageLimits) -> Self {
+        self.page = Some(page);
+        self
+    }
+
+    pub fn with_select_max(mut self, select_max: u64) -> Self {
+        self.select_max = Some(select_max);
+        self
+    }
+
+    pub fn with_window(mut self, window: WindowLimits) -> Self {
+        self.window = Some(window);
+        self
+    }
+}
+
+impl PageLimits {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_max_entries(mut self, max_entries: u64) -> Self {
+        self.max_entries = Some(max_entries);
+        self
+    }
+
+    pub fn with_max_bytes(mut self, max_bytes: u64) -> Self {
+        self.max_bytes = Some(max_bytes);
+        self
+    }
+}
+
+impl WindowLimits {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_entries(mut self, entries: u64) -> Self {
+        self.entries = Some(entries);
+        self
+    }
+
+    pub fn with_bytes(mut self, bytes: u64) -> Self {
+        self.bytes = Some(bytes);
+        self
+    }
+}
+
 open_tagged! {
 /// Setup either answers `ready` or fails with a refusal naming why
 /// ([`crate::wire::Refusal`], for example `unknown_preset`).
@@ -118,6 +218,7 @@ impl SetupRequest {
             model,
             accepts_images: None,
             view_anchor: None,
+            limits: None,
             context_window,
             output_reserve,
             rules,
@@ -130,6 +231,17 @@ impl SetupRequest {
 
     pub fn with_child_harness(mut self, child_harness: impl Into<String>) -> Self {
         self.child_harness = Some(child_harness.into());
+        self
+    }
+
+    pub fn with_limits(mut self, limits: Limits) -> Self {
+        self.limits = Some(limits);
+        self
+    }
+
+    /// Advertise budget detection only to providers declaring `compaction-limits/v1`.
+    pub fn with_window_over_budget_detection(mut self, detects: bool, declared: bool) -> Self {
+        crate::ride::project_window_over_budget(&mut self.detects, detects, declared);
         self
     }
 

@@ -211,9 +211,11 @@ pub enum Select, "by" {
         #[serde(deserialize_with = "crate::integer::positive")]
         limit: Option<u64>,
     },
-    /// Exactly these messages, in transcript order. Missing ids are left out.
+    /// These messages, in request order for `compaction-limits/v1` providers,
+    /// transcript order otherwise. Missing ids are left out.
     Mids => "mids" { mids: Vec<String> },
-    /// The messages holding these tag numbers, in transcript order.
+    /// Messages holding these tags, in request order for `compaction-limits/v1`
+    /// providers, transcript order otherwise. Missing tags are left out.
     Tags => "tags" {
         #[serde(deserialize_with = "crate::integer::list")]
         tags: Vec<u64>
@@ -240,7 +242,21 @@ pub struct ReadPage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::integer::optional")]
     pub next_after: Option<u64>,
+    /// Remaining held names from a byte-limited named read, in request order.
+    /// Missing names are omitted, never listed here. Send only to providers
+    /// declaring `compaction-limits/v1`; other named reads are answered in full.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unanswered: Option<Vec<ReadName>>,
     pub head: Head,
+}
+
+/// A message id or tag number still to read from a named selection (W5.4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+#[non_exhaustive]
+pub enum ReadName {
+    Mid(String),
+    Tag(#[serde(deserialize_with = "crate::integer::required")] u64),
 }
 
 /// Where the session stands at the moment of the read.
@@ -462,6 +478,7 @@ impl ReadPage {
             entries,
             head,
             next_after: None,
+            unanswered: None,
             token_family: None,
             token_family_exact: None,
         }
@@ -469,6 +486,12 @@ impl ReadPage {
 
     pub fn with_next_after(mut self, next_after: u64) -> Self {
         self.next_after = Some(next_after);
+        self
+    }
+
+    /// Project continuation only when the provider declares its capability.
+    pub fn with_unanswered(mut self, unanswered: Vec<ReadName>, declared: bool) -> Self {
+        self.unanswered = (declared && !unanswered.is_empty()).then_some(unanswered);
         self
     }
 

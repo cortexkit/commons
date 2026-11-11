@@ -1,8 +1,8 @@
 //! `compaction.ride`, served by the provider. The runner asks for a view now,
 //! just before a request that rewrites its prompt cache anyway, or that would
-//! not fit. The provider answers within the deadline with a view to apply, or
-//! with nothing. The wait only ever lands on a request that is already paying
-//! a full cache write, or that would otherwise be refused.
+//! not fit, or when the runner's window budget is crossed. The provider answers
+//! within the deadline with a view to apply, or with nothing. A budget ride is
+//! soft: it never refuses or ends a step, and does not imply a lost cache.
 
 use serde::{Deserialize, Serialize};
 
@@ -42,11 +42,11 @@ impl RideRequest {
     }
 
     /// Whether the model provider's cache is lost for this request: any cause
-    /// but `over_limit`.
+    /// but `over_limit` or `window_over_budget`.
     pub fn cache_lost(&self) -> bool {
         self.causes
             .iter()
-            .any(|cause| *cause != RideCause::OverLimit)
+            .any(|cause| !matches!(cause, RideCause::OverLimit | RideCause::WindowOverBudget))
     }
 }
 
@@ -71,6 +71,9 @@ pub enum RideCause {
     SurfaceChange,
     /// The next request would exceed `context_window - output_reserve`.
     OverLimit,
+    /// The runner's window exceeds its Setup budget. Only for providers
+    /// declaring `compaction-limits/v1`; unlike cache changes, this is soft.
+    WindowOverBudget,
     /// An unrecognised wire value, kept verbatim; handled as CONTRACT.md
     /// W1.5 says.
     Unknown(String),
@@ -84,7 +87,19 @@ open_string! { RideCause {
     AccountChange => "account_change",
     SurfaceChange => "surface_change",
     OverLimit => "over_limit",
+    WindowOverBudget => "window_over_budget",
 } }
+
+pub(crate) fn project_window_over_budget(
+    causes: &mut Vec<RideCause>,
+    enabled: bool,
+    declared: bool,
+) {
+    causes.retain(|cause| *cause != RideCause::WindowOverBudget);
+    if enabled && declared {
+        causes.push(RideCause::WindowOverBudget);
+    }
+}
 
 open_tagged! {
 #[derive(Clone, Debug, PartialEq)]
@@ -115,6 +130,14 @@ impl RideRequest {
 
     pub fn with_request_tokens(mut self, request_tokens: u64) -> Self {
         self.request_tokens = Some(request_tokens);
+        self
+    }
+
+    /// Project a budget cause only to declaring providers. The runner controls
+    /// first-crossing and quarter-growth scheduling (W3.5); this only sets the
+    /// cause. When disabled, another cause must still justify sending the ride.
+    pub fn with_window_over_budget(mut self, over_budget: bool, declared: bool) -> Self {
+        project_window_over_budget(&mut self.causes, over_budget, declared);
         self
     }
 }

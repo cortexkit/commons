@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.7
+
+- Add optional Setup `limits` with typed `Limits`, `PageLimits` and
+  `WindowLimits` builders and W1.2 integer validation. The `after` page ceiling
+  applies to every provider, continuing through the existing `next_after`.
+- Add `COMPACTION_LIMITS_PROVIDES` (`compaction-limits/v1`), `provides_limits`,
+  named-read `unanswered` continuation, the `select` / `too_many` refusal shape,
+  Conditions `window_over_budget` and the matching ride cause. Deploy readers
+  first; gate named-read caps, continuation, the flag and the cause on the
+  provider declaration. Non-declaring providers keep full named reads. Budget
+  rides do not imply cache loss and never refuse or end a step; ride once on
+  first crossing and again only after another quarter of window growth.
+- Clarify that the first notice after Setup is the same delta as later notices,
+  not a transcript replay; providers already page for older entries. Neither
+  this rule nor the page ceiling needs a capability. Allow only one Setup per
+  notice pass, respecting the runner's existing backoff. Add wire vectors and
+  decoding, boundary, refusal-shape and capability-projection tests.
+
 ## 0.3.6
 
 - Add optional Setup and Conditions `statement_seq`, the

@@ -126,6 +126,16 @@ impl Refusal {
         )
     }
 
+    /// A declaring provider named more mids or tags than Setup's `select_max`.
+    /// The runner checks the selection length before building this refusal.
+    pub fn select_too_many(max: u64) -> Self {
+        Self::new(
+            codes::INVALID_PARAMS,
+            "too many names in selection",
+            Some(json!({"field": "select", "problem": "too_many", "max": max})),
+        )
+    }
+
     /// The route's role does not serve this method. A bug in the caller.
     pub fn unknown_method(method: &str) -> Self {
         Self::new(
