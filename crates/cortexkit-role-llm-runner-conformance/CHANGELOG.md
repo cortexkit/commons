@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.46
+
+- Pin runner contract 0.8.37 for the optional step-event `message_id` member.
+  Step-event cases still use native-record and publication evidence; they do
+  not read session message ids, so no message-id matching case is added.
+
 ## 0.17.45
 
 - Add four opt-in keep-warm cases for idle `auto` warming, an exact one-rewrite

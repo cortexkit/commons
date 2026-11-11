@@ -113,6 +113,13 @@ pub struct StepFinished {
     /// without `harness_step_ref`; never reused, including after restore.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt_id: Option<String>,
+    /// The id the runner serves for the assistant message this attempt's reply
+    /// was placed as: the same `mid` returned by `session.read` and
+    /// `session.entries`. Absent when no message was placed, as for a failed or
+    /// cancelled attempt or a warm-up. Never invented or copied from
+    /// `harness_step_ref` or `attempt_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_request_id: Option<String>,
     pub harness: String,
@@ -194,6 +201,7 @@ impl StepFinished {
             finished_at_ms,
             harness_step_ref: None,
             attempt_id: None,
+            message_id: None,
             provider_request_id: None,
             work_class: None,
             input_tokens: None,
@@ -242,6 +250,10 @@ impl StepFinished {
         self.attempt_id = Some(value.into());
         self
     }
+    pub fn with_message_id(mut self, value: impl Into<String>) -> Self {
+        self.message_id = Some(value.into());
+        self
+    }
 
     /// Check only the identity rules, which a reader applies when decoding.
     /// A reader doesn't apply the timing rule: it keeps an event whose
@@ -255,6 +267,13 @@ impl StepFinished {
             || (self.attempt_id.is_none() && self.harness_step_ref.is_none())
         {
             return Err("attempt_id");
+        }
+        if self
+            .message_id
+            .as_deref()
+            .is_some_and(|id| !valid_message_id(id))
+        {
+            return Err("message_id");
         }
         Ok(())
     }
@@ -330,6 +349,12 @@ pub fn valid_attempt_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
+/// Whether an opaque assistant-message id has 1–256 visible ASCII bytes
+/// (0x21–0x7E). Equality with a served session message is the runner's to enforce.
+pub fn valid_message_id(value: &str) -> bool {
+    (1..=256).contains(&value.len()) && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
 }
 
 /// Why a live step hint must be dropped rather than used to update a view.
@@ -438,6 +463,84 @@ mod tests {
         zero["input_tokens"] = json!(0);
         let zero: StepFinished = serde_json::from_value(zero).unwrap();
         assert_eq!(zero.input_tokens, Some(0));
+    }
+
+    #[test]
+    fn step_event_message_id_round_trips_with_and_without_message() {
+        let subject = "ck.account_a.live.runner_a.step.finished.v1";
+        let body = vectors()["minimal"].clone();
+        let absent = decode_step_finished(subject, &serde_json::to_vec(&body).unwrap()).unwrap();
+        assert_eq!(absent.message_id, None);
+        assert_eq!(serde_json::to_value(&absent).unwrap(), body);
+        assert!(serde_json::to_value(&absent)
+            .unwrap()
+            .get("message_id")
+            .is_none());
+
+        let reported = absent.with_message_id("message-1");
+        let mut body_with_message = body.clone();
+        body_with_message["message_id"] = json!("message-1");
+        let decoded =
+            decode_step_finished(subject, &serde_json::to_vec(&body_with_message).unwrap())
+                .unwrap();
+        assert_eq!(decoded.message_id.as_deref(), Some("message-1"));
+        assert_eq!(decoded.attempt_id.as_deref(), body["attempt_id"].as_str());
+        assert_eq!(decoded, reported);
+        assert_eq!(decoded.check(), Ok(()));
+        assert_eq!(serde_json::to_value(&decoded).unwrap(), body_with_message);
+    }
+
+    #[test]
+    fn step_event_message_id_accepts_identifier_boundaries() {
+        let mut event: StepFinished = serde_json::from_value(vectors()["minimal"].clone()).unwrap();
+        for id in [
+            "m".to_owned(),
+            "ga2e91addeba364d6.16628".to_owned(),
+            "msg_01ABC".to_owned(),
+            "550e8400-e29b-41d4-a716-446655440000".to_owned(),
+            "!~".repeat(128),
+        ] {
+            assert!(valid_message_id(&id), "{id:?}");
+            event = event.with_message_id(&id);
+            assert_eq!(event.check(), Ok(()));
+            assert_eq!(event.message_id.as_deref(), Some(id.as_str()));
+            assert_eq!(
+                decode_step_finished(
+                    "ck.account_a.live.runner_a.step.finished.v1",
+                    &serde_json::to_vec(&event).unwrap(),
+                )
+                .unwrap(),
+                event
+            );
+        }
+    }
+
+    #[test]
+    fn step_event_message_id_rejects_non_identifiers() {
+        let event: StepFinished = serde_json::from_value(vectors()["minimal"].clone()).unwrap();
+        for id in [
+            "",
+            "reply text",
+            "a\nb",
+            "\x1f",
+            "\x7f",
+            "é",
+            &"m".repeat(257),
+        ] {
+            assert!(!valid_message_id(id), "{id:?}");
+            let event = event.clone().with_message_id(id);
+            assert_eq!(event.check(), Err("message_id"), "{id:?}");
+            assert!(
+                matches!(
+                    decode_step_finished(
+                        "ck.account_a.live.runner_a.step.finished.v1",
+                        &serde_json::to_vec(&event).unwrap(),
+                    ),
+                    Err(StepEventDecodeError::InvalidField("message_id"))
+                ),
+                "{id:?}"
+            );
+        }
     }
 
     #[test]

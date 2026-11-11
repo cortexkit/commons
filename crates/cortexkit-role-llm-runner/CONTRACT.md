@@ -7282,6 +7282,7 @@ to the session's whole length.
   | `run_id`, `step_id`, `attempt`, `terminal_status` | Required identifier strings, positive 64-bit integer attempt (1-based), and open status string (`completed`, `failed`, `cancelled`, `interrupted`, or a future value) |
   | `harness_step_ref?`, `provider_request_id?` | Optional host-record and vendor-request identifier strings |
   | `attempt_id?` | Opaque provider-attempt identifier string, required when `harness_step_ref` is absent; optional when it is present |
+  | `message_id?` | Optional identifier string: the assistant message's `mid` served by the runner in `session.read` and `session.entries` for this attempt's reply |
   | `harness`, `session` | Required strings: the harness and session the runner received |
   | `work_class?`, `provider`, `model` | Optional open work-class string, required provider identifier and the model actually sent |
   | `input_tokens?`, `cached_input_tokens?`, `cache_write_tokens?`, `output_tokens?`, `reasoning_tokens?` | Optional unsigned 64-bit per-step counters; the three input counters are disjoint as in §6.4 |
@@ -7293,6 +7294,22 @@ to the session's whole length.
   | `cache?` | Optional closed object: actual cache lifetime as `ttl_ms?` (u64 milliseconds) or `implicit?: true`, and optional session `warming?: {on: boolean, stop_reason?: string}` (§9.3.5). Missing members mean unknown, not zero or off. |
   | `started_at_ms`, `finished_at_ms` | Required unsigned 64-bit Unix epoch millisecond timestamps |
 
+- [pinned] `message_id` is the id the runner serves for the assistant message
+  this attempt's reply was placed as, the same `mid` that `session.read` and
+  `session.entries` return. It is absent when the attempt placed no message:
+  a failed or cancelled attempt, or a warm-up. The runner never invents one
+  and never reuses `harness_step_ref` or `attempt_id` for it. It is a
+  content-free opaque identifier, never text: 1–256 bytes of visible ASCII
+  (`0x21`–`0x7E`), excluding spaces, control characters and non-ASCII.
+  `step_events::valid_message_id` checks this grammar for both
+  `StepFinished::check` and `decode_step_finished`. It does not change the
+  attempt's identity or durable position.
+- [pinned] **Readers first for 0.8.37:** every reader of `step.finished.v1`
+  must run runner contract 0.8.37 or later before any runner emits
+  `message_id`. Today's readers are the event durables and live-hint readers
+  listed in `cortexkit-bus-naming`'s `EVENT_CONSUMERS` and `LIVE_HINT_READERS`.
+  `StepFinished` refuses unknown members, so older readers reject the new
+  member. When `message_id` is absent, existing bodies remain unchanged.
 - [pinned] A `cache_policy` runner records a model step's actual cache
   lifetime, when the step's route reports one, as exactly one of
   `cache.ttl_ms` or `cache.implicit: true`, and whether warming is on for

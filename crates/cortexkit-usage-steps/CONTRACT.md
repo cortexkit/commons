@@ -300,6 +300,12 @@ event's §14.3 members:
 
 `live_row_identity` in this crate computes the pair from those members.
 
+From runner contract 0.8.37, `step.finished.v1` carries optional `message_id`:
+the same assistant-message `mid` the runner serves in `session.read` and
+`session.entries`. The row's `message_id` copies that event member when
+present and stays absent when it is absent. It is not derived from
+`harness_step_ref` or `attempt_id` and does not change the row's identity.
+
 ### Pi steps
 
 A Pi step's host record id is the key from this crate's `pi_step_ref`, which

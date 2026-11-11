@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.37
+
+- Add optional `message_id` to `step.finished.v1`, with a builder and
+  validation for opaque ids of 1–256 visible ASCII bytes. It copies the
+  assistant-message `mid` served by `session.read` and `session.entries`
+  without changing attempt identity; attempts that placed no message omit it.
+- Require every step-event reader to use 0.8.37 or later before a runner
+  emits the new member, since the event body remains closed.
+
 ## 0.8.36
 
 - Count an unreferenced `defer_loading: true` addition to the rendered `tools`
