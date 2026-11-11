@@ -1,0 +1,35 @@
+{
+  "description": "Permanent participant faults and additive per-op refusal rows; driver actions use errors::driver_action_for(op, code).",
+  "op_additions": [
+    {"op": "prepare", "codes": ["participant_failed"]},
+    {"op": "export", "codes": ["participant_failed"]},
+    {"op": "import", "codes": ["participant_failed"]},
+    {"op": "activate", "codes": ["participant_failed"]}
+  ],
+  "refusals": [
+    {
+      "name": "prepare permanent fault",
+      "op": "prepare",
+      "driver": "abort",
+      "body": {"code": "participant_failed", "message": "storage fault"}
+    },
+    {
+      "name": "export permanent fault with diagnostic reason",
+      "op": "export",
+      "driver": "abort",
+      "body": {"code": "participant_failed", "message": "record too large", "detail": {"reason": "session_door:record_too_large"}}
+    },
+    {
+      "name": "import permanent fault without reason",
+      "op": "import",
+      "driver": "abort",
+      "body": {"code": "participant_failed", "message": "storage fault", "detail": {}}
+    },
+    {
+      "name": "activate permanent fault holds as a fork",
+      "op": "activate",
+      "driver": "terminal_for_step",
+      "body": {"code": "participant_failed", "message": "storage fault", "detail": {"reason": "store:corrupt"}}
+    }
+  ]
+}

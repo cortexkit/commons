@@ -9,7 +9,8 @@
 //! it: it aborts the move and shows the code.
 //!
 //! Five codes require a typed `detail` ([`Detail`]); `digest_mismatch` may
-//! carry an optional [`DigestMismatchDetail`], decoded separately so the
+//! carry an optional [`DigestMismatchDetail`], and `participant_failed` an
+//! optional [`ParticipantFailedDetail`], decoded separately so the
 //! existing exhaustive `Detail` enum stays source-compatible.
 //!
 //! The contract terms used here (source, receiver, cut, the door, driver
@@ -20,7 +21,7 @@ use serde_json::Value;
 
 use crate::{refs::Ref, step::Step, Op};
 
-/// The spellings of the closed refusal set: the thirteen codes in the table
+/// The spellings of the closed refusal set: the codes in the table
 /// of CONTRACT.md §6, in its order. No participant may answer with any
 /// other code; one that does gets the move aborted.
 pub mod codes {
@@ -69,6 +70,8 @@ pub mod codes {
     /// digest: the incoming cut on `import`, or its own staged bytes or undo
     /// images on `activate` and `abort`. See [`super::driver_action_for`].
     pub const DIGEST_MISMATCH: &str = "digest_mismatch";
+    /// A permanent fault in this participant's own data or storage.
+    pub const PARTICIPANT_FAILED: &str = "participant_failed";
     /// On the receiver, this Mac's copy of these refs gained data after
     /// `diverged` answered `at_cut`, so `import` or `activate` would
     /// overwrite it. Terminal for the step and never retried
@@ -99,6 +102,7 @@ pub mod codes {
         NOT_EXPORTABLE,
         INCOMPATIBLE_VERSION,
         DIGEST_MISMATCH,
+        PARTICIPANT_FAILED,
         LOCAL_ADVANCED,
         EXTERNAL_NOT_PRESENT,
         UNAVAILABLE,
@@ -108,6 +112,7 @@ pub mod codes {
 /// What the driver (entorhinal) does after a refusal. The op and refusal code
 /// determine its action ([`driver_action_for`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum DriverAction {
     /// Stop the move. Never retried.
     Abort,
@@ -147,6 +152,7 @@ impl DriverAction {
 /// The `code` of a refusal: the closed set of CONTRACT.md §6, plus
 /// [`RefusalCode::Unknown`] for a code outside it, kept as received.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum RefusalCode {
     CallerForbidden,
     InvalidRequest,
@@ -159,6 +165,7 @@ pub enum RefusalCode {
     NotExportable,
     IncompatibleVersion,
     DigestMismatch,
+    ParticipantFailed,
     LocalAdvanced,
     ExternalNotPresent,
     Unavailable,
@@ -169,7 +176,7 @@ pub enum RefusalCode {
 
 impl RefusalCode {
     /// Every code in the closed set, in the order of CONTRACT.md §6.
-    pub const KNOWN: [RefusalCode; 14] = [
+    pub const KNOWN: &'static [RefusalCode] = &[
         Self::CallerForbidden,
         Self::InvalidRequest,
         Self::UnknownRef,
@@ -181,6 +188,7 @@ impl RefusalCode {
         Self::NotExportable,
         Self::IncompatibleVersion,
         Self::DigestMismatch,
+        Self::ParticipantFailed,
         Self::LocalAdvanced,
         Self::ExternalNotPresent,
         Self::Unavailable,
@@ -199,6 +207,7 @@ impl RefusalCode {
             Self::NotExportable => codes::NOT_EXPORTABLE,
             Self::IncompatibleVersion => codes::INCOMPATIBLE_VERSION,
             Self::DigestMismatch => codes::DIGEST_MISMATCH,
+            Self::ParticipantFailed => codes::PARTICIPANT_FAILED,
             Self::LocalAdvanced => codes::LOCAL_ADVANCED,
             Self::ExternalNotPresent => codes::EXTERNAL_NOT_PRESENT,
             Self::Unavailable => codes::UNAVAILABLE,
@@ -210,14 +219,16 @@ impl RefusalCode {
     /// becomes [`RefusalCode::Unknown`].
     pub fn from_code(code: &str) -> Self {
         Self::KNOWN
-            .into_iter()
+            .iter()
             .find(|known| known.as_str() == code)
+            .cloned()
             .unwrap_or_else(|| Self::Unknown(code.to_owned()))
     }
 
     /// The code-only driver action, retained for existing callers. Use
     /// [`driver_action_for`] when the op is known: `digest_mismatch` needs a
-    /// different action on `activate` and `abort` (CONTRACT.md §6).
+    /// different actions on `activate` and `abort`, and `participant_failed`
+    /// needs a different action on `activate` (CONTRACT.md §6).
     pub fn driver_action(&self) -> DriverAction {
         match self {
             Self::CutNotReady => DriverAction::RetryWithinStep,
@@ -233,6 +244,7 @@ impl RefusalCode {
             | Self::NotExportable
             | Self::IncompatibleVersion
             | Self::DigestMismatch
+            | Self::ParticipantFailed
             | Self::Unknown(_) => DriverAction::Abort,
             Self::LocalAdvanced => DriverAction::TerminalForStep,
         }
@@ -273,7 +285,8 @@ impl<'de> Deserialize<'de> for RefusalCode {
 /// shape every role uses. Decoded leniently (unknown members are ignored),
 /// like the other roles' ERROR bodies, because the daemon owns this frame's
 /// shape; the `detail` objects CONTRACT.md §6.2 defines decode strictly
-/// ([`ErrorBody::typed_detail`], [`ErrorBody::digest_mismatch_detail`]).
+/// ([`ErrorBody::typed_detail`], [`ErrorBody::digest_mismatch_detail`],
+/// [`ErrorBody::participant_failed_detail`]).
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ErrorBody {
@@ -331,6 +344,39 @@ impl ErrorBody {
                 if !value.is_object() {
                     return Err(serde::de::Error::custom(
                         "digest_mismatch detail must be an object",
+                    ));
+                }
+                serde_json::from_value(value.clone())
+            })
+            .transpose()
+    }
+
+    /// A `participant_failed` refusal with an optional diagnostic reason.
+    pub fn with_participant_failed_detail(
+        detail: ParticipantFailedDetail,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            code: RefusalCode::ParticipantFailed,
+            message: message.into(),
+            detail: Some(serde_json::to_value(detail).expect("detail is JSON")),
+        }
+    }
+
+    /// Decode optional diagnostic detail for `participant_failed`.
+    /// Returns `Ok(None)` for another code or absent detail.
+    pub fn participant_failed_detail(
+        &self,
+    ) -> Result<Option<ParticipantFailedDetail>, serde_json::Error> {
+        if self.code != RefusalCode::ParticipantFailed {
+            return Ok(None);
+        }
+        self.detail
+            .as_ref()
+            .map(|value| {
+                if !value.is_object() {
+                    return Err(serde::de::Error::custom(
+                        "participant_failed detail must be an object",
                     ));
                 }
                 serde_json::from_value(value.clone())
@@ -547,6 +593,24 @@ impl DigestMismatchDetail {
     }
 }
 
+/// Optional diagnostic detail for a permanent participant fault. The open
+/// reason string is for logs and is never parsed to determine behavior.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct ParticipantFailedDetail {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl ParticipantFailedDetail {
+    pub fn new(reason: impl Into<String>) -> Self {
+        Self {
+            reason: Some(reason.into()),
+        }
+    }
+}
+
 /// Select the driver action for an op and code (CONTRACT.md §6). A digest
 /// failure on `activate` is terminal for the step and holds as a fork for the
 /// operator. It cannot return the claim: other participants may already be
@@ -555,7 +619,9 @@ impl DigestMismatchDetail {
 /// All other pairs retain [`RefusalCode::driver_action`].
 pub fn driver_action_for(op: Op, code: &RefusalCode) -> DriverAction {
     match (op, code) {
-        (Op::Activate, RefusalCode::DigestMismatch) => DriverAction::TerminalForStep,
+        (Op::Activate, RefusalCode::DigestMismatch | RefusalCode::ParticipantFailed) => {
+            DriverAction::TerminalForStep
+        }
         (Op::Abort, RefusalCode::DigestMismatch) => DriverAction::RetryAfterOperator,
         _ => code.driver_action(),
     }
@@ -593,8 +659,19 @@ pub fn allowed_refusals(op: Op) -> &'static [RefusalCode] {
             C::InvalidState,
             C::Busy,
             C::NotExportable,
+            C::ParticipantFailed,
         ],
-        Op::Export | Op::Release => &[
+        Op::Export => &[
+            C::CallerForbidden,
+            C::InvalidRequest,
+            C::Unavailable,
+            C::IdReused,
+            C::UnknownRef,
+            C::InvalidState,
+            C::CutUnknown,
+            C::ParticipantFailed,
+        ],
+        Op::Release => &[
             C::CallerForbidden,
             C::InvalidRequest,
             C::Unavailable,
@@ -614,6 +691,7 @@ pub fn allowed_refusals(op: Op) -> &'static [RefusalCode] {
             C::DigestMismatch,
             C::Busy,
             C::LocalAdvanced,
+            C::ParticipantFailed,
         ],
         Op::Activate => &[
             C::CallerForbidden,
@@ -626,6 +704,7 @@ pub fn allowed_refusals(op: Op) -> &'static [RefusalCode] {
             C::Busy,
             C::LocalAdvanced,
             C::DigestMismatch,
+            C::ParticipantFailed,
         ],
         Op::Abort => &[
             C::CallerForbidden,
@@ -697,6 +776,51 @@ mod tests {
     }
 
     #[test]
+    fn participant_failed_actions_and_allowed_ops() {
+        let code = RefusalCode::from_code("participant_failed");
+        for op in Op::ALL {
+            let allowed = matches!(op, Op::Prepare | Op::Export | Op::Import | Op::Activate);
+            assert_eq!(may_refuse(op, &code), allowed, "{op:?}");
+            if allowed {
+                let action = if op == Op::Activate {
+                    DriverAction::TerminalForStep
+                } else {
+                    DriverAction::Abort
+                };
+                assert_eq!(driver_action_for(op, &code), action, "{op:?}");
+            }
+        }
+        assert!(code.is_known());
+    }
+
+    #[test]
+    fn participant_failed_optional_detail_decodes_strictly() {
+        let detail = ParticipantFailedDetail::new("session_door:record_too_large");
+        let body = ErrorBody::with_participant_failed_detail(detail.clone(), "storage fault");
+        assert_eq!(body.participant_failed_detail().unwrap(), Some(detail));
+        assert_eq!(body.typed_detail().unwrap(), None);
+        let empty =
+            ErrorBody::with_participant_failed_detail(ParticipantFailedDetail::default(), "fault");
+        assert_eq!(empty.detail, Some(serde_json::json!({})));
+        assert_eq!(
+            empty.participant_failed_detail().unwrap(),
+            Some(ParticipantFailedDetail::default())
+        );
+        let mut absent = ErrorBody::new(RefusalCode::ParticipantFailed, "fault");
+        assert_eq!(absent.participant_failed_detail().unwrap(), None);
+        for invalid in [
+            serde_json::json!(null),
+            serde_json::json!({"reason": 1}),
+            serde_json::json!({"extra": true}),
+        ] {
+            absent.detail = Some(invalid);
+            assert!(absent.participant_failed_detail().is_err());
+        }
+        absent.code = RefusalCode::Unavailable;
+        assert_eq!(absent.participant_failed_detail().unwrap(), None);
+    }
+
+    #[test]
     fn refusal_table_matches_contract() {
         let table = contract_table();
         assert_eq!(table.len(), RefusalCode::KNOWN.len(), "{table:?}");
@@ -707,8 +831,8 @@ mod tests {
                 action_from_contract(driver),
                 "{code}"
             );
-            assert_eq!(RefusalCode::from_code(code), known);
-            assert_eq!(serde_json::to_value(&known).unwrap(), code.as_str());
+            assert_eq!(&RefusalCode::from_code(code), known);
+            assert_eq!(serde_json::to_value(known).unwrap(), code.as_str());
         }
         let listed: Vec<&str> = RefusalCode::KNOWN.iter().map(|c| c.as_str()).collect();
         assert_eq!(listed, codes::ALL);
@@ -754,14 +878,17 @@ mod tests {
     }
 
     #[test]
-    fn driver_action_for_preserves_legacy_actions_except_digest_overrides() {
+    fn driver_action_for_preserves_legacy_actions_except_step_overrides() {
         let mut codes = RefusalCode::KNOWN.to_vec();
         codes.push(RefusalCode::Unknown("future_code".into()));
         let mut checked = 0;
         for op in Op::ALL {
             for code in &codes {
                 let expected = match (op, code) {
-                    (Op::Activate, RefusalCode::DigestMismatch) => DriverAction::TerminalForStep,
+                    (
+                        Op::Activate,
+                        RefusalCode::DigestMismatch | RefusalCode::ParticipantFailed,
+                    ) => DriverAction::TerminalForStep,
                     (Op::Abort, RefusalCode::DigestMismatch) => DriverAction::RetryAfterOperator,
                     _ => code.driver_action(),
                 };
@@ -769,7 +896,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 150, "all ten ops and fourteen codes plus unknown");
+        assert_eq!(checked, 160, "all ten ops and fifteen codes plus unknown");
         assert_eq!(
             RefusalCode::DigestMismatch.driver_action(),
             DriverAction::Abort

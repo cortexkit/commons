@@ -325,9 +325,13 @@ the recorded row replaces the live one. On both rows `session` is the session
 id the apps know for that conversation, never Claude Code's own internal
 session id; a provider reading the transcript maps Claude Code's id to that
 session before recording the row. The Anthropic message id may still ride on
-the event as `step_id`, but it is not the row identity. An empty request id,
-or one containing whitespace or a control character, gives no key; such a
-step has no host record rather than a repaired one.
+the event as `step_id`, but it is not the row identity. When the upstream
+sent no request id (for example a gateway that strips the header), both sides
+pass the reply's Anthropic message id through `claude_code_step_ref` instead,
+so the live and recorded rows still share a key; with neither id there is no
+`harness_step_ref`. An empty id, or one containing whitespace or a control
+character, gives no key; such a step has no host record rather than a
+repaired one.
 
 ### Readers and new members
 

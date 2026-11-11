@@ -230,7 +230,7 @@ The crate's source files use these words as defined here.
 The closed set (`errors::RefusalCode`). The driver column is what entorhinal
 does next (`errors::DriverAction`, selected by `errors::driver_action_for(op,
 code)`). The code-only `RefusalCode::driver_action()` remains unchanged for
-existing callers; it returns Abort for `digest_mismatch`.
+existing callers; it returns Abort for `digest_mismatch` and `participant_failed`.
 
 | Code | Meaning | Driver |
 | --- | --- | --- |
@@ -245,6 +245,7 @@ existing callers; it returns Abort for `digest_mismatch`.
 | `not_exportable` | This data must never leave this Mac (for example, broca sessions with caller-chosen retention). | Abort; the move is refused |
 | `incompatible_version` | This participant's store can't accept this cut. `detail.found` and `detail.required` give both versions. | Abort; upgrade that Mac first |
 | `digest_mismatch` | Bytes this participant receives or holds don't hash to their recorded digest: on `import` the incoming cut; on `activate` and `abort` this participant's own staged bytes or undo images. Optional `detail.reason` identifies the failed bytes (§6.2). | Abort on `import`, never retry the same import; Terminal for the step on `activate`, never retry or return the claim, hold as a fork for the operator (§7.8); Retry after the operator repairs the participant's undo state on `abort`, holding the move stuck, not aborted (§7.9) |
+| `participant_failed` | This participant hit a permanent fault in its own data or storage that retrying the same request cannot overcome. `message` describes it for the operator; optional `detail.reason` names the cause for logs (§6.2). | Abort on `prepare`, `export`, and `import`; Terminal for the step on `activate`, never retry or return the claim, hold as a fork for the operator (§7.8) |
 | `local_advanced` | Receiver side: this Mac's copy of these refs gained data after `diverged` answered `at_cut`. | Terminal for the step, never retried. After `import` the driver aborts the move and offers the fork choice; after `activate` the move holds as a fork for the operator (§7.7, §7.8) |
 | `external_not_present` | The host's own data for a ref isn't on this Mac yet, or doesn't match the cut's check. `detail.note` repeats the `note` of that ref's `prepare.external` entry. | Retry after the operator copies it |
 | `unavailable` | Temporary failure. | Retry |
@@ -259,6 +260,11 @@ safe.
   makes the refusal undecodable.
 - A code outside the set is never retried. The driver aborts the move and
   shows the code.
+- A 0.2.x driver decodes `participant_failed` as `Unknown`, aborts and shows
+  the code, so participants may adopt 0.3.0 before or after the driver. On
+  `activate`, however, the old driver aborts instead of holding as a fork:
+  entorhinal should adopt 0.3.0 before any participant sends this code from
+  `activate`.
 
 ### 6.2 The refusal body
 
@@ -281,7 +287,13 @@ safe.
   are `staging_digest_mismatch` and `undo_digest_mismatch`
   (`errors::digest_mismatch_reason`). Use
   `ErrorBody::digest_mismatch_detail()` to decode it; `typed_detail()` keeps
-  its existing five-code behavior. The remaining codes carry no detail.
+  its existing five-code behavior.
+- `participant_failed` may optionally carry `{reason?}`
+  (`errors::ParticipantFailedDetail`). `reason` is an open string naming the
+  underlying cause for logs, never parsed for behavior. Use
+  `ErrorBody::participant_failed_detail()` to decode it; `typed_detail()`
+  still handles only the five required-detail codes. The remaining codes
+  carry no detail.
 
 ### 6.3 Which op may refuse with which code
 
@@ -294,11 +306,11 @@ code outside the closed set is in no row.
 | describe | `caller_forbidden`, `invalid_request`, `unavailable` |
 | busy | `caller_forbidden`, `invalid_request`, `unavailable`, `unknown_ref` |
 | status | `caller_forbidden`, `invalid_request`, `unavailable` |
-| prepare | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `unknown_ref`, `invalid_state`, `busy`, `not_exportable` |
-| export | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `unknown_ref`, `invalid_state`, `cut_unknown` |
+| prepare | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `unknown_ref`, `invalid_state`, `busy`, `not_exportable`, `participant_failed` |
+| export | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `unknown_ref`, `invalid_state`, `cut_unknown`, `participant_failed` |
 | diverged | `caller_forbidden`, `invalid_request`, `unavailable`, `external_not_present`, `cut_not_ready`, `incompatible_version` |
-| import | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state`, `cut_not_ready`, `incompatible_version`, `digest_mismatch`, `busy`, `local_advanced` |
-| activate | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state`, `cut_unknown`, `external_not_present`, `busy`, `local_advanced`, `digest_mismatch` |
+| import | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state`, `cut_not_ready`, `incompatible_version`, `digest_mismatch`, `busy`, `local_advanced`, `participant_failed` |
+| activate | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state`, `cut_unknown`, `external_not_present`, `busy`, `local_advanced`, `digest_mismatch`, `participant_failed` |
 | abort | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `invalid_state`, `digest_mismatch` |
 | release | `caller_forbidden`, `invalid_request`, `unavailable`, `id_reused`, `unknown_ref`, `invalid_state`, `cut_unknown` |
 

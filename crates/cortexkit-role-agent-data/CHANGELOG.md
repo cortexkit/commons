@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.0
+
+- Add `participant_failed` for permanent faults in a participant's own data or
+  storage, with optional open `reason` detail for logs. It aborts `prepare`,
+  `export`, and `import`; on `activate` it holds as a fork for the operator.
+- Breaking Rust API: mark `RefusalCode` and `DriverAction` non-exhaustive and
+  make `RefusalCode::KNOWN` a slice; later codes can be additive minor releases.
+- A 0.2.x driver decodes the new code as `Unknown`, aborts and shows it, so
+  participants may upgrade before or after the driver. On `activate`, the old
+  driver aborts rather than holding: entorhinal should upgrade to 0.3.0 before
+  any participant sends `participant_failed` from `activate`.
+- Add per-op refusal vectors; the wire version remains `agent-data/v1`.
+
 ## 0.2.4
 
 - Add optional per-item `dropped` counts and the validating `with_dropped`

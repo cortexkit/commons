@@ -60,6 +60,10 @@ pub const FILES: &[(&str, &str)] = &[
         "import-drops.json",
         include_str!("../test-vectors/agent-data-v1/import-drops.json"),
     ),
+    (
+        "participant-failed.json",
+        include_str!("../test-vectors/agent-data-v1/participant-failed.json"),
+    ),
 ];
 
 /// `sha256sum` output over [`FILES`]: one `<hex>  <name>` line per file.

@@ -42,6 +42,7 @@ const FILES: &[&str] = &[
     "digest-mismatch.json",
     "diverged-reasons.json",
     "import-drops.json",
+    "participant-failed.json",
 ];
 
 fn dir() -> String {
@@ -464,11 +465,47 @@ fn every_refusal_code_round_trips_with_its_driver_action() {
             assert_eq!(body.code, RefusalCode::Unknown(body.code.as_str().into()));
         }
     }
+    for case in cases(&load("participant-failed.json"), "refusals") {
+        let body: ErrorBody = round_trip(name(case), &case["body"]);
+        known.insert(body.code.as_str().to_owned());
+    }
     let all: BTreeSet<String> = RefusalCode::KNOWN
         .iter()
         .map(|code| code.as_str().to_owned())
         .collect();
     assert_eq!(known, all, "every refusal code has a vector");
+}
+
+#[test]
+fn participant_failed_refusal_vectors_round_trip_and_pin_actions() {
+    let file = load("participant-failed.json");
+    let refusals = cases(&file, "refusals");
+    assert_eq!(refusals.len(), 4);
+    for (case, op) in refusals
+        .iter()
+        .zip([Op::Prepare, Op::Export, Op::Import, Op::Activate])
+    {
+        let name = name(case);
+        let body: ErrorBody = round_trip(name, &case["body"]);
+        assert_eq!(body.code, RefusalCode::ParticipantFailed, "{name}");
+        assert_ne!(body.code, RefusalCode::Unknown("participant_failed".into()));
+        assert_eq!(
+            format!("agent_data.{}", case["op"].as_str().unwrap()),
+            op.method()
+        );
+        assert!(may_refuse(op, &body.code), "{name}");
+        assert_eq!(
+            driver_action_for(op, &body.code),
+            driver(case["driver"].as_str().unwrap()),
+            "{name}"
+        );
+        assert_eq!(body.typed_detail().unwrap(), None);
+        let detail = body.participant_failed_detail().unwrap();
+        assert_eq!(detail.is_some(), body.detail.is_some());
+        if let Some(detail) = detail {
+            assert_eq!(serde_json::to_value(detail).unwrap(), body.detail.unwrap());
+        }
+    }
 }
 
 #[test]
@@ -607,14 +644,18 @@ fn step_machine_matches_every_transition() {
     }
 }
 
-/// Each `op-refusals.json` row plus its `digest-mismatch.json` additions equals
+/// Each `op-refusals.json` row plus the additive vector rows equals
 /// `allowed_refusals`, and each case's answer equals `may_refuse`.
 #[test]
 fn per_op_refusals_match_every_case() {
     let file = load("op-refusals.json");
     let amendments = load("digest-mismatch.json");
-    let additions = cases(&amendments, "op_additions");
-    assert_eq!(additions.len(), 2);
+    let participant_amendments = load("participant-failed.json");
+    let additions: Vec<_> = cases(&amendments, "op_additions")
+        .iter()
+        .chain(cases(&participant_amendments, "op_additions"))
+        .collect();
+    assert_eq!(additions.len(), 6);
     let mut amended = BTreeSet::new();
     let rows = cases(&file, "ops");
     assert_eq!(rows.len(), Op::ALL.len());
@@ -629,7 +670,7 @@ fn per_op_refusals_match_every_case() {
             .filter(|addition| addition["op"] == row["op"])
         {
             assert!(
-                amended.insert(op.method()),
+                amended.insert((op.method(), addition["codes"].to_string())),
                 "duplicate amendment for {op:?}"
             );
             let extra: Vec<RefusalCode> =
