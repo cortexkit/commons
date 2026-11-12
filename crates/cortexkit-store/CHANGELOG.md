@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.3
+
+- Stop creating lease files or directories for in-memory and temporary SQLite
+  databases (`:memory:`, an empty path, or a memory `file:` URI). They now use
+  in-process lease handles with fence epochs, so fenced writes keep working.
+  Private memory databases with the same descriptor may open concurrently:
+  each connection has its own database. Shared-cache memory URIs retain
+  descriptor-keyed single-writer exclusivity within the process until the last
+  lease handle is dropped.
+- Disk-backed `file:` URIs still take the existing file lease derived from the
+  URI string's parent directory; URI syntax alone does not exempt a disk store.
+  Removals behavior is unchanged: memory/URI stores cannot adopt a removals
+  journal, and `remove` on a plain store returns `RemovalsHandlerRequired`
+  without writing a journal.
+
 ## 0.4.2
 
 - Add `read_schema_versions` to inspect recorded namespace versions without

@@ -1,8 +1,9 @@
 #![cfg(feature = "sqlite")]
 
 use cortexkit_store::{
-    acquire_store_lease, open_sqlite, open_sqlite_with, Isolation, SqliteOpenOptions, SqliteStore,
-    StorageBackend, StorageDescriptor, StoreError,
+    acquire_store_lease, open_sqlite, open_sqlite_with, open_sqlite_with_removals, Isolation,
+    RemovalRecord, RemovalsHandler, SqliteOpenOptions, SqliteStore, StorageBackend,
+    StorageDescriptor, StoreError,
 };
 use rusqlite::{Connection, OpenFlags};
 use std::{
@@ -388,34 +389,265 @@ fn legacy_wal_database_is_claimed_reopens_and_refuses_a_hard_link_alias() {
     drop(legacy);
 }
 
-/// Lease files in the working directory. An in-memory or URI store's path has no
-/// parent directory, so its lease lands there.
-fn working_dir_leases() -> std::collections::BTreeSet<PathBuf> {
-    std::fs::read_dir(".")
-        .map(|dir| {
-            dir.flatten()
-                .map(|entry| entry.path())
-                .filter(|path| path.extension().is_some_and(|ext| ext == "lease"))
-                .collect()
-        })
-        .unwrap_or_default()
+/// Run only this test in a child so changing its current directory cannot race
+/// the other tests. The parent lists the directory even if the child fails.
+fn in_temporary_working_directory(test: &str, expect_empty: bool) -> bool {
+    const CHILD: &str = "CORTEXKIT_STORE_MEMORY_CHILD";
+    if std::env::var(CHILD).as_deref() == Ok(test) {
+        return true;
+    }
+    let db = TestDb::new();
+    std::fs::create_dir(&db.root).unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", test, "--nocapture"])
+        .env(CHILD, test)
+        .current_dir(&db.root)
+        .output()
+        .unwrap();
+    let remaining = entries(&db.root);
+    eprintln!("{test}: temporary current directory contains {remaining:?}");
+    assert_child_passed(&output);
+    if expect_empty {
+        assert!(remaining.is_empty(), "created files: {remaining:?}");
+    }
+    false
 }
 
-/// Removes the working-directory leases a test created, even when it panics, so
-/// running the suite leaves no stray files in the crate folder.
-struct RemoveNewLeases(std::collections::BTreeSet<PathBuf>);
+fn memory_descriptor(path: &str) -> StorageDescriptor {
+    StorageDescriptor {
+        module_id: "memory-tests".into(),
+        storage_namespace: path.into(),
+        isolation: Isolation::Module,
+        backend: StorageBackend::Sqlite { path: path.into() },
+    }
+}
 
-impl Drop for RemoveNewLeases {
-    fn drop(&mut self) {
-        for lease in working_dir_leases().difference(&self.0) {
-            let _ = std::fs::remove_file(lease);
+#[test]
+fn in_memory_operations_create_no_files() {
+    if !in_temporary_working_directory("in_memory_operations_create_no_files", true) {
+        return;
+    }
+    struct NoRemovals;
+    impl RemovalsHandler for NoRemovals {
+        fn replay(&self, _: &rusqlite::Transaction<'_>, _: &RemovalRecord) -> rusqlite::Result<()> {
+            panic!("memory stores cannot adopt a disk journal")
         }
+    }
+    let absolute_memory_uri = format!(
+        "file:{}/absolute/missing/memory?mode=memory",
+        std::env::current_dir()
+            .unwrap()
+            .display()
+            .to_string()
+            .replace('\\', "/")
+    );
+    for path in [
+        "",
+        ":memory:",
+        "file::memory:",
+        "file::memory:?cache=shared",
+        "file:private?mode=memory",
+        "file:shared?mode=memory&cache=shared",
+        "file:missing/parent/private?mode=memory",
+        "file:%3Amemory%3A",
+        "file:encoded?%6dode=mem%6fry",
+        "file::memory:%00ignored",
+        "file:encoded?mode=memory%00ignored",
+        "file:",
+        &absolute_memory_uri,
+    ] {
+        let descriptor = memory_descriptor(path);
+        assert!(matches!(
+            open_sqlite_with_removals(&descriptor, SqliteOpenOptions::default(), &NoRemovals),
+            Err(StoreError::Backend(_))
+        ));
+        let store = open_sqlite(&descriptor).unwrap();
+        store
+            .with_conn(|conn| {
+                conn.execute_batch(
+                    "CREATE TABLE items (id INTEGER PRIMARY KEY); INSERT INTO items VALUES (1)",
+                )
+            })
+            .unwrap();
+        store
+            .with_conn_fenced(|tx| {
+                tx.execute("INSERT INTO items VALUES (2)", [])?;
+                Ok(())
+            })
+            .unwrap();
+        let epoch: u64 = store
+            .with_conn(|conn| {
+                conn.query_row(
+                    "SELECT epoch FROM cortexkit_fence WHERE id = 0",
+                    [],
+                    |row| row.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(epoch, store.epoch());
+        assert!(matches!(
+            store.remove("items", ["1"], |_, _| panic!(
+                "no journal: erase must not run"
+            )),
+            Err(StoreError::RemovalsHandlerRequired)
+        ));
+        store
+            .with_conn_fenced(|tx| {
+                assert_eq!(tx.execute("DELETE FROM items WHERE id = 1", [])?, 1);
+                Ok(())
+            })
+            .unwrap();
+        let count: u64 = store
+            .with_conn(|conn| conn.query_row("SELECT count(*) FROM items", [], |row| row.get(0)))
+            .unwrap();
+        assert_eq!(count, 1);
+        drop(store);
+        let lease = acquire_store_lease(&descriptor).unwrap();
+        assert!(lease.epoch() > 0);
+        drop(lease);
+    }
+    assert!(entries(Path::new(".")).is_empty());
+}
+
+#[test]
+fn private_in_memory_stores_with_the_same_descriptor_both_open() {
+    if !in_temporary_working_directory(
+        "private_in_memory_stores_with_the_same_descriptor_both_open",
+        true,
+    ) {
+        return;
+    }
+    for path in [
+        "",
+        ":memory:",
+        "file::memory:",
+        "file:private?mode=memory",
+        "file::memory:?cache=private",
+        "file:private-last?mode=memory&cache=shared&cache=private",
+    ] {
+        let descriptor = memory_descriptor(path);
+        let first = open_sqlite(&descriptor).unwrap();
+        first
+            .with_conn(|conn| conn.execute_batch("CREATE TABLE first_only (v INTEGER)"))
+            .unwrap();
+        let second = open_sqlite(&descriptor).expect("private databases must not contend");
+        second
+            .with_conn_fenced(|tx| tx.execute_batch("CREATE TABLE second_only (v INTEGER)"))
+            .unwrap();
+        first
+            .with_conn(|conn| {
+                assert_eq!(
+                    conn.query_row(
+                        "SELECT count(*) FROM sqlite_schema WHERE name = 'second_only'",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )?,
+                    0
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
+}
+
+#[test]
+fn shared_in_memory_stores_keep_an_exclusive_in_process_lease() {
+    if !in_temporary_working_directory(
+        "shared_in_memory_stores_keep_an_exclusive_in_process_lease",
+        true,
+    ) {
+        return;
+    }
+    for path in [
+        "file::memory:?cache=shared",
+        "file:shared?mode=memory&cache=shared",
+        "file:shared-encoded?mode=memory&%63ache=sha%72ed",
+        "file:shared-last?mode=memory&cache=private&cache=shared",
+    ] {
+        let descriptor = memory_descriptor(path);
+        // Keep SQLite's shared database alive across the store handover.
+        let keeper = Connection::open(path).unwrap();
+        let first = open_sqlite(&descriptor).unwrap();
+        first
+            .with_conn_fenced(|tx| {
+                tx.execute_batch("CREATE TABLE kept (v INTEGER); INSERT INTO kept VALUES (7)")
+            })
+            .unwrap();
+        let epoch = first.epoch();
+        assert!(matches!(
+            open_sqlite(&descriptor),
+            Err(StoreError::Lease(_))
+        ));
+        assert!(matches!(
+            acquire_store_lease(&descriptor),
+            Err(StoreError::Lease(_))
+        ));
+        drop(first);
+        let restored_epoch = epoch + 1_000_000;
+        keeper
+            .execute("UPDATE cortexkit_fence SET epoch = ?1", [restored_epoch])
+            .unwrap();
+        let second = open_sqlite(&descriptor).expect("drop releases the in-process lease");
+        assert!(second.epoch() > restored_epoch);
+        second
+            .with_conn_fenced(|tx| {
+                assert_eq!(tx.execute("DELETE FROM kept WHERE v = 7", [])?, 1);
+                Ok(())
+            })
+            .unwrap();
+        let mut replacement_descriptor = descriptor.clone();
+        replacement_descriptor
+            .storage_namespace
+            .push_str("-replacement");
+        let replacement = open_sqlite(&replacement_descriptor).unwrap();
+        replacement
+            .with_conn_fenced(|tx| tx.execute_batch("INSERT INTO kept VALUES (8)"))
+            .unwrap();
+        assert!(matches!(
+            second.with_conn_fenced(|tx| tx.execute_batch("DELETE FROM kept")),
+            Err(StoreError::Fenced { .. })
+        ));
+        drop(replacement);
+        drop(second);
+        drop(keeper);
+    }
+}
+
+#[test]
+fn disk_uris_keep_their_file_lease() {
+    if !in_temporary_working_directory("disk_uris_keep_their_file_lease", false) {
+        return;
+    }
+    for (path, filename) in [
+        ("file:disk.db?mode=rwc", "disk.db"),
+        ("file:fragment.db#?mode=memory", "fragment.db"),
+        ("file:mode=memory.db", "mode=memory.db"),
+        ("file:query.db?ignored=mode=memory", "query.db"),
+        ("file:cache.db?cache=shared", "cache.db"),
+    ] {
+        let descriptor = memory_descriptor(path);
+        let first = open_sqlite(&descriptor).unwrap();
+        assert!(Path::new(filename).is_file());
+        assert!(entries(Path::new("."))
+            .iter()
+            .any(|path| path.extension().is_some_and(|ext| ext == "lease")));
+        assert!(matches!(
+            open_sqlite(&descriptor),
+            Err(StoreError::Lease(_))
+        ));
+        drop(first);
+        open_sqlite(&descriptor).expect("disk lease is released on drop");
     }
 }
 
 #[test]
 fn memory_and_uri_databases_do_not_claim_or_enforce_ownership() {
-    let _leases = RemoveNewLeases(working_dir_leases());
+    if !in_temporary_working_directory(
+        "memory_and_uri_databases_do_not_claim_or_enforce_ownership",
+        true,
+    ) {
+        return;
+    }
     let db = TestDb::new();
     for path in [
         "",

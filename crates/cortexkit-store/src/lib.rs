@@ -275,6 +275,123 @@ mod sqlite_backend {
         path == ":memory:" || path.is_empty() || path.starts_with("file:")
     }
 
+    /// A URI can name a disk file, so only SQLite's memory forms skip file leases.
+    fn is_memory(path: &str) -> bool {
+        if path.is_empty() || path == ":memory:" {
+            return true;
+        }
+        let Some(uri) = path.strip_prefix("file:") else {
+            return false;
+        };
+        let filename = uri.split(['?', '#']).next().unwrap_or_default();
+        let filename = decode_uri_component(filename);
+        filename.is_empty()
+            || filename == b":memory:"
+            || uri_parameter(path, b"mode").as_deref() == Some(b"memory")
+    }
+
+    fn uri_parameter(path: &str, name: &[u8]) -> Option<Vec<u8>> {
+        let uri = path.strip_prefix("file:")?.split('#').next()?;
+        uri.split_once('?')?
+            .1
+            .split('&')
+            .filter_map(|parameter| {
+                let (key, value) = parameter.split_once('=')?;
+                (decode_uri_component(key) == name).then(|| decode_uri_component(value))
+            })
+            .next_back()
+    }
+
+    fn decode_uri_component(value: &str) -> Vec<u8> {
+        let bytes = value.as_bytes();
+        let mut decoded = Vec::with_capacity(bytes.len());
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let (Some(high), Some(low)) = (
+                    (bytes[i + 1] as char).to_digit(16),
+                    (bytes[i + 2] as char).to_digit(16),
+                ) {
+                    let byte = (high * 16 + low) as u8;
+                    // SQLite ignores the rest of this component after an encoded NUL.
+                    if byte == 0 {
+                        break;
+                    }
+                    decoded.push(byte);
+                    i += 3;
+                    continue;
+                }
+            }
+            decoded.push(bytes[i]);
+            i += 1;
+        }
+        decoded
+    }
+
+    struct MemoryLeases {
+        epoch: u64,
+        held: Vec<LeaseKey>,
+    }
+
+    static MEMORY_LEASES: Mutex<MemoryLeases> = Mutex::new(MemoryLeases {
+        epoch: 0,
+        held: Vec::new(),
+    });
+
+    /// Private databases do not contend. Shared-cache memory databases retain
+    /// descriptor-keyed exclusivity, but their lease state never reaches disk.
+    #[derive(Debug)]
+    struct MemoryLease {
+        key: LeaseKey,
+        epoch: Mutex<u64>,
+        shared: bool,
+    }
+
+    impl MemoryLease {
+        fn acquire(key: LeaseKey, shared: bool) -> Result<Self, LeaseError> {
+            let mut leases = MEMORY_LEASES.lock().unwrap_or_else(|p| p.into_inner());
+            if shared && leases.held.contains(&key) {
+                return Err(LeaseError::Held { key });
+            }
+            if shared {
+                leases.held.push(key.clone());
+            }
+            leases.epoch = leases.epoch.saturating_add(1);
+            Ok(Self {
+                key,
+                epoch: Mutex::new(leases.epoch),
+                shared,
+            })
+        }
+    }
+
+    impl LeaseHandle for MemoryLease {
+        fn key(&self) -> &LeaseKey {
+            &self.key
+        }
+
+        fn epoch(&self) -> u64 {
+            *self.epoch.lock().unwrap_or_else(|p| p.into_inner())
+        }
+
+        fn raise_epoch(&self, at_least: u64) -> Result<u64, LeaseError> {
+            let mut epoch = self.epoch.lock().unwrap_or_else(|p| p.into_inner());
+            *epoch = (*epoch).max(at_least);
+            let mut leases = MEMORY_LEASES.lock().unwrap_or_else(|p| p.into_inner());
+            leases.epoch = leases.epoch.max(*epoch);
+            Ok(*epoch)
+        }
+    }
+
+    impl Drop for MemoryLease {
+        fn drop(&mut self) {
+            if self.shared {
+                let mut leases = MEMORY_LEASES.lock().unwrap_or_else(|p| p.into_inner());
+                leases.held.retain(|key| key != &self.key);
+            }
+        }
+    }
+
     /// Options for [`open_sqlite_with`].
     #[derive(Debug, Clone, Copy)]
     pub struct SqliteOpenOptions {
@@ -610,8 +727,16 @@ mod sqlite_backend {
     /// separately via [`SqliteStore::migrate`], so a multi-domain module can apply
     /// several independent per-domain chains into its one database.
     ///
-    /// The lease is acquired BEFORE the file is opened, so a second live writer is
-    /// rejected (`StoreError::Lease`) without SQLite ever opening the database: the
+    /// In-memory and temporary databases (`:memory:`, an empty path, or a memory
+    /// `file:` URI) use an in-process lease and create no lease file or directory.
+    /// Private memory databases may open concurrently with the same descriptor:
+    /// each connection owns a separate database. Shared-cache memory URIs retain
+    /// descriptor-keyed single-writer exclusivity within this process, released
+    /// when the last handle drops. A `file:` URI naming a disk database still
+    /// takes the existing file lease; URI syntax alone does not mean memory.
+    ///
+    /// For a disk database, the lease is acquired BEFORE the file is opened, so a
+    /// second live writer is rejected (`StoreError::Lease`) without SQLite ever opening the database: the
     /// database file and its `-wal` and `-shm` siblings are not read, created or
     /// written by the refused opener.
     ///
@@ -868,6 +993,12 @@ mod sqlite_backend {
         descriptor: &StorageDescriptor,
     ) -> Result<(String, Box<dyn LeaseHandle>), StoreError> {
         let path = sqlite_path(descriptor)?;
+        if is_memory(&path) {
+            let shared = uri_parameter(&path, b"cache").as_deref() == Some(b"shared");
+            let lease =
+                MemoryLease::acquire(lease_key(descriptor), shared).map_err(StoreError::Lease)?;
+            return Ok((path, Box::new(lease)));
+        }
         let parent = parent_dir(&path);
         prepare_store_dir(&path, &parent)?;
         let lease = FileLeaseStore::new(&parent)
@@ -1105,8 +1236,10 @@ mod sqlite_backend {
     /// missing (owner-only when the store has a directory of its own). It does
     /// not open SQLite, does not read or write `cortexkit_owner`, and does not
     /// create or touch the database file or its `-wal` and `-shm` siblings.
+    /// In-memory descriptors instead get the same disk-free in-process handle
+    /// as [`open_sqlite`], exclusive only for shared-cache memory URIs.
     ///
-    /// A successful acquire, like every lease acquire, creates the lease file if
+    /// For a disk database, a successful acquire creates the lease file if
     /// it is missing and increments the epoch persisted in it; that new epoch is
     /// [`StoreLease::epoch`].
     ///
@@ -2053,19 +2186,6 @@ mod tests {
     /// must not try to inspect or change one.
     #[test]
     fn an_in_memory_store_opens() {
-        // An in-memory store's lease lands in the working directory, because its
-        // path has no parent, so remove the lease this test creates.
-        let leases = || -> std::collections::BTreeSet<std::path::PathBuf> {
-            std::fs::read_dir(".")
-                .map(|dir| {
-                    dir.flatten()
-                        .map(|entry| entry.path())
-                        .filter(|path| path.extension().is_some_and(|ext| ext == "lease"))
-                        .collect()
-                })
-                .unwrap_or_default()
-        };
-        let before = leases();
         for path in [":memory:", "file::memory:", "file::memory:?cache=shared"] {
             let store = open_sqlite(&StorageDescriptor {
                 module_id: "test-module".into(),
@@ -2098,9 +2218,6 @@ mod tests {
             store
                 .with_conn(|conn| conn.execute("UPDATE memory_values SET v = 20", []))
                 .expect("memory read restores writable writer");
-        }
-        for lease in leases().difference(&before) {
-            let _ = std::fs::remove_file(lease);
         }
     }
 
