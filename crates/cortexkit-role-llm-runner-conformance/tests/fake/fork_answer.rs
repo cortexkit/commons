@@ -355,7 +355,9 @@ fn begin(route: &FakeRoute, method: &str, params: &Value) -> Reply {
             return invalid(&field);
         }
         let session = store.sessions.entry(route.session.clone()).or_default();
-        if !session.callers.contains(&route.stamp.principal) && !broken(module, ForkDefect::Callers)
+        let caller = super::sender_module(&route.stamp.principal);
+        if !session.callers.iter().any(|listed| listed == caller)
+            && !broken(module, ForkDefect::Callers)
         {
             return refuse(errors::SCOPE_OWNER_MISMATCH, None);
         }
@@ -378,7 +380,7 @@ fn begin(route: &FakeRoute, method: &str, params: &Value) -> Reply {
             .insert(
                 id.clone(),
                 Fork {
-                    principal: route.stamp.principal.clone(),
+                    principal: super::sender_module(&route.stamp.principal).to_owned(),
                     base,
                     mids,
                     branch: Vec::new(),
@@ -410,7 +412,7 @@ fn begin(route: &FakeRoute, method: &str, params: &Value) -> Reply {
     let Some(fork) = session.forks.get_mut(id) else {
         return refuse(errors::UNKNOWN_FORK, None);
     };
-    if (fork.principal != route.stamp.principal || fork.revoked)
+    if (fork.principal != super::sender_module(&route.stamp.principal) || fork.revoked)
         && !broken(module, ForkDefect::Callers)
     {
         return refuse(errors::UNKNOWN_FORK, None);

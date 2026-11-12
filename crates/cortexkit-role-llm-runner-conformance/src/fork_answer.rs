@@ -123,7 +123,9 @@ async fn start<S: LlmRunnerSubject<Route: RunnerRoute>>(
     mut session: Session<S::Route>,
     tier: Option<&str>,
 ) -> Check<Session<S::Route>> {
-    let members = json!({"fork_callers":[case.subject.owner_stamp().principal]});
+    let owner = case.subject.owner_stamp();
+    let members =
+        json!({"fork_callers":[crate::send_helpers::stamp_module("fork_answer", &owner)?]});
     let fields = case
         .subject
         .send_fields_with_plan(&session.name, true, members.as_object().unwrap())
@@ -803,7 +805,10 @@ async fn callers<S: LlmRunnerSubject<Route: RunnerRoute>>(case: &Case<'_, S>) ->
         refresh(
             case,
             &session,
-            json!([case.subject.owner_stamp().principal]),
+            json!([crate::send_helpers::stamp_module(
+                "restore caller",
+                &case.subject.owner_stamp()
+            )?]),
             2,
         )
         .await?,

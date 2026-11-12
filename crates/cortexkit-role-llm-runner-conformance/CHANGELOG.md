@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.17.53
+
+- Fix the `fork_answer` cases to name the owner in `fork_callers` as a bare
+  module id, as plan lists do, instead of its `reserved:` principal. A runner
+  that matched `fork_callers` the way it matches `readers` failed those cases
+  on this alone. The runner contract now states that list entries are bare
+  module ids.
+
 ## 0.17.52
 
 - Pin runner contract `=0.8.43` for optional open-string `RunError.cause`.

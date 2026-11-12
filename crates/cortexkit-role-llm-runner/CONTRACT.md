@@ -5969,7 +5969,9 @@ froze for a run to every assistant reply the run writes.
 - [pinned] `app_readers` is an opt-in describe group. A plan composer sends
   the plan member `readers: [<principal>, ...]` only to a runner declaring
   it. Each principal is a string, with the same exact matching as
-  `delivery_order::PlanSender.module` (§9.7). A malformed entry or duplicate
+  `delivery_order::PlanSender.module` (§9.7): an entry is a bare module id,
+  so `occipital` names a route whose attested principal is
+  `reserved:occipital`. A malformed entry or duplicate
   is refused at admission as `invalid_params {field: "plan.readers"}`,
   writing nothing. A runner without the group refuses any plan carrying
   `readers`, even an empty list, with the same error and no writes.
@@ -6122,7 +6124,8 @@ head's next request, in the compaction contract), and updates none
   of the head's prompt-size conditions (including
   `conditions.last_prompt_tokens`) or usage.
 - [pinned] `fork_answer.callers`: plan member `fork_callers: [principal]`
-  names who may prepare. The session owner is not admitted unless listed;
+  names who may prepare. Entries are bare module ids, spelled and matched as
+  `readers` entries are (§9.19). The session owner is not admitted unless listed;
   absent or empty admits nobody. The principal is attested by the route,
   never a request member. Admission reads `admission_plan(effective,
   pending)` under the at-acceptance rule, as `readers` does (§9.19). A
