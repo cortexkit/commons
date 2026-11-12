@@ -194,6 +194,23 @@ async fn a_root_level_union_fails_the_flatness_case() {
 }
 
 #[tokio::test]
+async fn an_untyped_property_fails_the_portability_case_by_tool_and_path() {
+    let report = run(&FakeSubject::new(Defects {
+        untyped_property: true,
+        ..Defects::default()
+    }))
+    .await;
+    let reason = failed(&report, "catalog_schemas_portable");
+    assert!(reason.contains(fake::SLOW), "{reason}");
+    assert!(reason.contains("/properties/surface"), "{reason}");
+    assert!(reason.contains("declares no type"), "{reason}");
+    // The schema is valid JSON Schema, so only the portability case objects.
+    assert_passed(&report, "catalog_schemas_flat");
+    assert_passed(&report, "catalog_schema_digest_stable");
+    assert_passed(&report, "catalog_reply_valid");
+}
+
+#[tokio::test]
 async fn an_invalid_reply_fails_the_catalog_reply_case_by_tool_and_member() {
     let report = run(&FakeSubject::new(Defects {
         invalid_reply: true,

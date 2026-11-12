@@ -540,6 +540,16 @@ responsibilities, not behaviors checked by this provider kit.
     `DEFINED_CAPABILITY_TAGS` and checks a tag with `check_capability_tag`;
     the conformance suite refuses a catalog with any tag that fails it.
   - `input_schema` is the argument schema; `description` its description.
+    - Informative guidance, which no consumer enforces: declare `type` on
+      every property; some model providers refuse a property without one even
+      when it is valid JSON Schema. Such a provider refuses a property like
+      `{"enum": ["a", "b"]}` and with it every request that offers the tool.
+      A property that is an `anyOf`, `oneOf` or `allOf` combinator or a `$ref`
+      is exempt. `lint_input_schema` reports each untyped property, nested
+      ones included, by JSON pointer (`/properties/surface`); it never refuses
+      or rewrites a schema, and no decoder calls it. The conformance suite's
+      `catalog_schemas_portable` fails a provider whose served catalog has any
+      finding, so a provider sees the problem at its own gate.
   - `reply` is optional per-tool reply deadline metadata:
     `{max_ms, hold_argument?: {name, default_ms, grace_ms}}`. There is no
     catalog-wide default. A provider knows how long its tools may hold a call;
@@ -1445,7 +1455,7 @@ CI against its real module over a real route; never against a double.
 |---|---|
 | `session_notices_describe` | exact `session-notices/v1` in live `role.describe.capabilities`; otherwise N/A |
 | `role_describe_shape`, `role_describe_cacheable` | — |
-| `catalog_schemas_flat`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_emits_events_boolean`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
+| `catalog_schemas_flat`, `catalog_schemas_portable`, `catalog_reply_valid`, `catalog_modes_valid`, `catalog_emits_events_boolean`, `catalog_schema_digest_stable`, `catalog_digest_only`, `catalog_unknown_preset_refused` | — |
 | `catalog_capability_filter_matches_describe`, `catalog_filter_preserves_plan_item`, `catalog_filter_model_refused` | `tool-catalog-capability-filter/v1` advertised in `role.describe` |
 | `catalog_model_malformed_refused` | `tool-catalog-model/v1` advertised in `role.describe` |
 | `catalog_listed_presets_served` | `presets` listed in the live preset-less catalog answer |

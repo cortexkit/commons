@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.15.6
+
+- Add `lint_input_schema` (re-exported with `SchemaLint` and `SchemaLintKind`
+  from the new `schema_lint` module). It reports, by JSON pointer, each
+  property schema under `properties`, `items`, `prefixItems` or an
+  `additionalProperties` object that declares no `type` and is not an
+  `anyOf`, `oneOf` or `allOf` combinator or a `$ref`. Some model providers
+  refuse such a property even though it is valid JSON Schema. The lint only
+  reports: no decoder or check calls it, and no wire format changes.
+- CONTRACT.md §3 adds informative guidance to declare `type` on every
+  property, and §9 lists the new conformance case `catalog_schemas_portable`.
+
 ## 0.15.5
 
 - Accept `subc-protocol >=0.34.1, <0.37` so consumers pinned to 0.36 can share

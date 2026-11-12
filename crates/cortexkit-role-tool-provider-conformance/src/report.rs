@@ -86,6 +86,11 @@ pub const CASES: &[CaseSpec] = &[
         checks: "every catalog tool has a schema_digest, a flat input_schema and only defined or namespaced capability tags, no role op is listed as a tool, and the quick call's tool is listed",
     },
     CaseSpec {
+        name: "catalog_schemas_portable",
+        requires: &[],
+        checks: "no catalog tool's input_schema has a lint_input_schema finding: every property, nested ones included, declares a type unless it is an anyOf, oneOf or allOf combinator or a $ref",
+    },
+    CaseSpec {
         name: "catalog_reply_valid",
         requires: &[],
         checks: "every catalog tool's optional reply metadata passes check_reply, with a bounded max_ms, positive bounded hold times and a declared numeric hold argument",

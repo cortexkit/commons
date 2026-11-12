@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.15.7
+
+- Add `catalog_schemas_portable`, which requires nothing and fails when any
+  served tool's `input_schema` has a `lint_input_schema` finding: a property
+  declaring no `type` that is not a combinator or `$ref`. The failure names
+  each tool and JSON pointer. Providers whose schemas relied on untyped
+  properties, such as a bare `{"enum": [...]}`, now fail this case until they
+  add the `type`.
+- Pin the provider contract to `=0.15.6`.
+
 ## 0.15.6
 
 - Correct 0.15.4's owner-custody assumptions to match the contract: late

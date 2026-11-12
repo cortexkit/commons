@@ -175,6 +175,20 @@ unknown one. Preservation and refusal of `CallMode::Unknown` are therefore
 checked by the role crate's own tests of `serves_call_mode`, not by this
 suite.
 
+## Portable input schemas
+
+`catalog_schemas_portable` runs for every provider. It passes each served
+tool's `input_schema` to the role crate's `lint_input_schema` and fails when
+any tool has a finding: a property, at any depth under `properties`, `items`,
+`prefixItems` or an `additionalProperties` object, that declares no `type`
+and is not an `anyOf`, `oneOf` or `allOf` combinator or a `$ref`. The failure
+names every offending tool and JSON pointer, for example
+`pick input_schema /properties/surface: declares no type; ...`. Such a
+schema is valid JSON Schema, but some model providers refuse a request that
+offers it, so fix it by adding the `type` (`{"type": "string", "enum":
+["a", "b"]}`). Consumers do not refuse these catalogs; the case exists so the
+provider hears about the problem before a model provider refuses it.
+
 ## Per-tool `emits_events`
 
 `catalog_emits_events_boolean` runs for every provider. It reads the raw

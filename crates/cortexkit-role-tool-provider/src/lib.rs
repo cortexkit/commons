@@ -28,6 +28,7 @@ pub mod points;
 pub mod reply_custody;
 pub mod result;
 pub mod rich_ui;
+pub mod schema_lint;
 pub mod scope;
 pub mod stop_session;
 pub mod user_command;
@@ -39,6 +40,10 @@ pub mod withdraw;
 /// The daemon's bind-mode vocabulary and the manifest capability promising
 /// that a provider reads it on every bind.
 pub use subc_protocol::call_mode::{CallMode, CALL_MODES_CAPABILITY};
+
+/// The input-schema portability lint, re-exported so a provider's own gate
+/// can call it without naming the module.
+pub use schema_lint::{lint_input_schema, SchemaLint, SchemaLintKind};
 
 /// The role name as `role.describe` reports it.
 pub const ROLE: &str = "tool-provider";

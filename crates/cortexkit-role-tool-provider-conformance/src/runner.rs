@@ -20,7 +20,7 @@ use cortexkit_role_tool_provider::{
     describe::{check_describe, select_tool_capabilities},
     errors,
     late_results::{kinds, LateResultsReply, CURSOR_INCARNATION_CHANGED},
-    ops, points,
+    lint_input_schema, ops, points,
     result::{validate, ResultFormat, ToolResult, MAX_RESULT_BYTES},
     withdraw::{WithdrawAnswer, TARGET_CALL_KEY_FIELD},
     CallMode, CATALOG_CAPABILITY_FILTER, CATALOG_MODEL, HELD_REPLY_V1, PROVIDES,
@@ -455,6 +455,7 @@ where
             "role_describe_shape" => self.role_describe_shape().await,
             "role_describe_cacheable" => self.role_describe_cacheable().await,
             "catalog_schemas_flat" => self.catalog_schemas_flat().await,
+            "catalog_schemas_portable" => self.catalog_schemas_portable().await,
             "catalog_reply_valid" => self.catalog_reply_valid().await,
             "catalog_modes_valid" => self.catalog_modes_valid().await,
             "catalog_emits_events_boolean" => self.catalog_emits_events_boolean().await,
@@ -843,6 +844,30 @@ where
             }
         }
         Ok(())
+    }
+
+    /// Every property in every served tool's `input_schema` declares a
+    /// `type`. Some model providers refuse an untyped property even though
+    /// JSON Schema allows it, and refuse every request offering the tool, so
+    /// the finding is reported here, at the provider's own gate. All findings
+    /// are listed, each by tool and JSON pointer.
+    async fn catalog_schemas_portable(&self) -> CaseResult {
+        let route = self.plain_route().await?;
+        let catalog = self.catalog(&route).await?;
+        let findings: Vec<String> = catalog
+            .tools
+            .iter()
+            .flat_map(|tool| {
+                lint_input_schema(&tool.input_schema)
+                    .into_iter()
+                    .map(move |lint| format!("{} input_schema {lint}", tool.name))
+            })
+            .collect();
+        if findings.is_empty() {
+            Ok(())
+        } else {
+            Err(findings.join("; "))
+        }
     }
 
     async fn catalog_reply_valid(&self) -> CaseResult {

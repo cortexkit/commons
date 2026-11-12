@@ -135,6 +135,8 @@ pub struct Defects {
     pub run_held_calls_on_restart: bool,
     /// The held tool's argument schema is a root-level union.
     pub root_union_schema: bool,
+    /// The slow tool's schema has a property with `enum` but no `type`.
+    pub untyped_property: bool,
     /// The quick tool declares a zero maximum reply time.
     pub invalid_reply: bool,
     /// The quick tool declares an empty list of modes.
@@ -500,9 +502,14 @@ impl Module {
         } else {
             json!(["fake:effect/v1", "code.edit/v1"])
         };
+        let slow_schema = if self.defects.untyped_property {
+            json!({ "type": "object", "properties": { "surface": { "enum": ["a", "b"] } } })
+        } else {
+            json!({ "type": "object" })
+        };
         let mut tools = vec![
             json!({ "name": QUICK, "semantics": 1, "capabilities": ["code.edit/v1", "code.read/v1"], "input_schema": object }),
-            json!({ "name": SLOW, "semantics": 1, "capabilities": ["code.outline/v1"], "input_schema": { "type": "object" } }),
+            json!({ "name": SLOW, "semantics": 1, "capabilities": ["code.outline/v1"], "input_schema": slow_schema }),
             json!({ "name": HELD, "semantics": 2, "result_ops": ["prepend", "append"],
                     "capabilities": held_capabilities, "input_schema": held_schema }),
         ];
