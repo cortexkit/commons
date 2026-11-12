@@ -2,10 +2,12 @@ name: Release
 
 # Per-crate release. Tag format: `<crate>-v<version>` (e.g. cortexkit-paths-v0.1.1).
 # Each crate in the workspace versions and publishes independently.
+# The filter requires a full major.minor.patch version, so a tag that names a
+# test-vector set (such as `user-commands-v1`) never starts a release.
 on:
   push:
     tags:
-      - "*-v*"
+      - "*-v[0-9]+.[0-9]+.[0-9]+"
 
 concurrency:
   # Include SHA so a retag at a different commit gets its own group and
