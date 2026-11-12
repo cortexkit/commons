@@ -19,7 +19,7 @@ pub(super) fn admit(module: &Module, params: &Value) -> Option<Reply> {
 
 pub(super) fn read(module: &Module, session: &str, params: &Value) -> Reply {
     use cortexkit_role_llm_runner::plan_view::{
-        PlanView, PlanViewRequest, System, SystemItem, Tool,
+        Pending, PlanView, PlanViewRequest, System, SystemItem, Tool,
     };
 
     if serde_json::from_value::<PlanViewRequest>(params.clone()).is_err() {
@@ -43,10 +43,19 @@ pub(super) fn read(module: &Module, session: &str, params: &Value) -> Reply {
             .iter()
             .map(|name| Tool::new(name, "fixture tool", json!({}), "fixture-tools"))
             .collect(),
+    )
+    .with_pending(
+        Pending::new(1)
+            .with_notes(vec!["owner note".into(), "tool removed".into()])
+            .unwrap(),
     );
     let mut value = serde_json::to_value(view).unwrap();
     match fault(module) {
         Some("not_planned") => value["as_planned"] = json!(false),
+        Some("null_notes") => value["pending"]["notes"] = json!(null),
+        Some("empty_notes") => value["pending"]["notes"] = json!([]),
+        Some("empty_note") => value["pending"]["notes"] = json!(["ok", ""]),
+        Some("legacy_note") => value["pending"] = json!({"generation": 1, "note": "old"}),
         Some("empty_range") => value["system"]["items"][0]["end"] = json!(0),
         Some("split_utf8") => value["system"]["items"][0]["end"] = json!(1),
         Some("outside_text") => value["system"]["items"][1]["end"] = json!(8),

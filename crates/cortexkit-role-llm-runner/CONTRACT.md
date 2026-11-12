@@ -1856,13 +1856,23 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   `{name: string, description: string, input_schema: JSON value,
   provider: string, tokens?: {count: u64, exact: bool}}`, in the order the
   model is offered them. Per-tool counts are `exact: false` unless measured.
-- [pinned] `pending?: {generation: u64, note?: string}` describes a newer plan
+- [pinned] A runner hands each tool's `input_schema` to its host with every
+  JSON object's keys in sorted order (byte order of the UTF-8 key strings),
+  so the reply's `input_schema`, shown with its keys sorted, is in the order
+  the model is offered, as planned (`as_planned` below covers a login plugin
+  or gateway rewriting the request after the runner). A runner that would
+  offer another key order adds a reply member carrying that order in a
+  contract release first; a reader never has to guess which order the model
+  saw.
+- [pinned] `pending?: {generation: u64, notes?: [string]}` describes a newer plan
   not yet applied in full. A pending plan is always newer than the one in
   force: `pending.generation > generation`, also checked at decode. The
-  optional `note` is what the model was told about the pending change; it is
-  absent when the runner has not told the model about it and keeps the old
-  text until rebuilding the prefix. A runner may tell the model through a
-  note before applying the full text, as OpenCode 2 does.
+  optional `notes` contains at least one nonempty string, each exactly one text
+  delivered to the model about the pending change, in delivery order. Decoding
+  refuses an empty array or an empty string element. `notes` is absent when the
+  runner has not told the model about the change and keeps the old text until
+  rebuilding the prefix. A runner may tell the model before applying the full
+  text.
 - [pinned] `as_planned` is required and always `true`, enforced at decode.
   The view describes the request as the plan built it, not a captured
   provider request: a login plugin or gateway may put other text in front.

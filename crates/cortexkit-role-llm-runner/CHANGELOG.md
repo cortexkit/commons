@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.40
+
+- Breaking change to the closed `session.plan_view` reply: replace
+  `pending.note` with optional `pending.notes`, a nonempty array of nonempty
+  exact texts in model delivery order. No compatibility member remains.
+  App relay readers must adopt 0.8.40 before any runner serves `plan_view`;
+  runners serve it only on 0.8.40 or later. No runner has served it yet.
+
 ## 0.8.39
 
 - Name the separate account-wait outcome for `session.send` refusals with

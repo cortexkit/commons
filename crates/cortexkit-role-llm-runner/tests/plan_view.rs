@@ -20,7 +20,7 @@ fn view() -> Value {
         ]},
         "tools":[{"name":"tool", "description":"description", "input_schema":{"type":"object"}, "provider":"tools", "tokens":{"count":4,"exact":false}}],
         "newest_step":{"at_ms":120, "reply_mid":"reply-1"},
-        "pending":{"generation":4, "note":"pending change"},
+        "pending":{"generation":4, "notes":["pending change"]},
         "as_planned":true
     })
 }
@@ -62,7 +62,11 @@ fn plan_view_round_trips_and_builders_preserve_exact_text() {
         ],
     )
     .with_newest_step(NewestStep::new(120).with_reply_mid("reply-1"))
-    .with_pending(Pending::new(4).with_note("pending change"));
+    .with_pending(
+        Pending::new(4)
+            .with_notes(vec!["pending change".into()])
+            .unwrap(),
+    );
     assert_eq!(built, reply);
     let mut timed = built.with_applied_at_ms(100);
     assert_eq!(timed.applied_at_ms, Some(100));
@@ -87,6 +91,48 @@ fn plan_view_omits_unrecorded_optional_facts() {
     wire["pending"] = json!({"generation":4});
     wire["system"].as_object_mut().unwrap().remove("items");
     assert!(serde_json::from_value::<PlanView>(wire).is_ok());
+}
+
+#[test]
+fn plan_view_pending_notes_wire_validation() {
+    assert!(Pending::new(4).with_notes(vec![]).is_err());
+    assert!(Pending::new(4).with_notes(vec![String::new()]).is_err());
+    let mut built = PlanView::new(3, System::new(""), vec![]).with_pending(Pending::new(4));
+    built.pending.as_mut().unwrap().notes = Some(vec![]);
+    assert_eq!(built.check(), Err("pending.notes"));
+    for notes in [
+        json!(["owner note"]),
+        json!(["owner note", "removed é", "line\nthree"]),
+    ] {
+        let mut wire = view();
+        wire["pending"] = json!({"generation":4, "notes": notes});
+        let bytes = serde_json::to_vec(&wire).unwrap();
+        let reply: PlanView = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&serde_json::to_value(reply).unwrap()).unwrap(),
+            bytes
+        );
+    }
+    let bytes = br#"{"generation":4,"notes":["owner note","removed tool"]}"#;
+    let pending: Pending = serde_json::from_slice(bytes).unwrap();
+    assert_eq!(serde_json::to_vec(&pending).unwrap(), bytes);
+    let mut wire = view();
+    wire["pending"] = json!({"generation":4});
+    assert!(serde_json::from_value::<PlanView>(wire).is_ok());
+    for pending in [
+        json!({"generation":4,"notes":null}),
+        json!({"generation":4,"notes":[]}),
+        json!({"generation":4,"notes":[""]}),
+        json!({"generation":4,"notes":["valid", ""]}),
+        json!({"generation":4,"note":"legacy"}),
+    ] {
+        let mut wire = view();
+        wire["pending"] = pending.clone();
+        assert!(
+            serde_json::from_value::<PlanView>(wire).is_err(),
+            "{pending}"
+        );
+    }
 }
 
 #[test]

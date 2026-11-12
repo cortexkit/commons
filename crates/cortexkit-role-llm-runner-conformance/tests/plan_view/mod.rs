@@ -52,6 +52,10 @@ async fn plan_view_without_group_is_inapplicable() {
 async fn plan_view_faults_fail_named_cases() {
     for (name, fault, expected) in [
         ("plan_view_reply", "not_planned", "as_planned"),
+        ("plan_view_reply", "null_notes", "invalid type"),
+        ("plan_view_reply", "empty_notes", "pending.notes"),
+        ("plan_view_reply", "empty_note", "pending.notes"),
+        ("plan_view_reply", "legacy_note", "unknown field"),
         ("plan_view_items", "empty_range", "system.items"),
         ("plan_view_items", "split_utf8", "system.items"),
         ("plan_view_items", "outside_text", "system.items"),

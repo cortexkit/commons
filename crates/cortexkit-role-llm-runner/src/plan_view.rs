@@ -16,7 +16,7 @@ impl PlanViewRequest {
 }
 
 /// A closed `session.plan_view` reply. Decoding validates item ranges,
-/// a newer pending generation, and the required `as_planned: true` marker.
+/// a newer pending generation and its notes, and the required `as_planned: true` marker.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 #[serde(try_from = "WirePlanView")]
 #[non_exhaustive]
@@ -120,6 +120,9 @@ impl PlanView {
             .is_some_and(|pending| pending.generation <= self.generation)
         {
             return Err("pending.generation");
+        }
+        if let Some(pending) = &self.pending {
+            pending.check()?;
         }
         Ok(())
     }
@@ -286,20 +289,49 @@ impl ToolTokens {
 #[non_exhaustive]
 pub struct Pending {
     pub generation: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
+    /// Exact texts delivered to the model, in delivery order; absent if none were sent.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_notes"
+    )]
+    pub notes: Option<Vec<String>>,
+}
+
+fn check_notes(notes: &[String]) -> Result<(), &'static str> {
+    if notes.is_empty() || notes.iter().any(String::is_empty) {
+        return Err("pending.notes");
+    }
+    Ok(())
+}
+
+fn deserialize_notes<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let notes = Vec::<String>::deserialize(deserializer)?;
+    check_notes(&notes).map_err(serde::de::Error::custom)?;
+    Ok(Some(notes))
 }
 
 impl Pending {
     pub fn new(generation: u64) -> Self {
         Self {
             generation,
-            note: None,
+            notes: None,
         }
     }
 
-    pub fn with_note(mut self, note: impl Into<String>) -> Self {
-        self.note = Some(note.into());
-        self
+    pub fn with_notes(mut self, notes: Vec<String>) -> Result<Self, &'static str> {
+        check_notes(&notes)?;
+        self.notes = Some(notes);
+        Ok(self)
+    }
+
+    pub fn check(&self) -> Result<(), &'static str> {
+        if let Some(notes) = &self.notes {
+            check_notes(notes)?;
+        }
+        Ok(())
     }
 }

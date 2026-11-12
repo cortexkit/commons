@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.17.49
+
+- Pin runner contract `=0.8.40` for the breaking `plan_view` pending notes
+  shape. Exercise multiple notes and reject empty notes and the old member.
+
 ## 0.17.48
 
 - Pin runner contract `=0.8.39` for the separate account-wait outcome.
