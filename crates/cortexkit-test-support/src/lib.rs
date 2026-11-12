@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 mod binaries;
 mod daemon;
 mod fence;
+mod profile;
 mod scratch;
 mod sibling_cache;
 mod spawn_guard;
@@ -23,6 +24,7 @@ mod stable;
 pub use binaries::*;
 pub use daemon::{TestDaemon, TestDaemonCommand};
 pub use fence::*;
+pub use profile::{cargo_profile_bin, cargo_profile_dir, cargo_profile_dir_of};
 pub use scratch::{
     process_alive, process_liveness, scratch_root, shared_scratch_root, wait_until_gone, Liveness,
     ScratchDir, STABLE_BIN_DIR,

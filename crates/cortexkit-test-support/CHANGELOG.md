@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.14
+
+- Add `cargo_profile_dir()`, `cargo_profile_dir_of(exe)` and
+  `cargo_profile_bin(name)`, which find the Cargo profile folder
+  (`target/debug`, `target/release`) a test was built into, where Cargo puts
+  the workspace's binaries. Cargo 1.100 builds test executables in
+  `<profile>/build/<package>/<hash>/out/` rather than `<profile>/deps/`, so
+  tests that reached the profile by going two folders up from their own path
+  now look inside the build folder and miss every binary. These functions
+  work for both layouts.
+
 ## 0.1.13
 
 - Sibling build keys work on a source snapshot that another OS user owns, as
