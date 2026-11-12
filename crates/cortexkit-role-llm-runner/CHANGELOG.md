@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.44
+
+- Add the independent `temperature` describe group for
+  `generation.temperature`: a finite number from 0 to 2 inclusive, frozen
+  at admission for every model response. Declaring runners refuse malformed
+  values by field name, clamp to the model's accepted range, and omit the
+  setting for models that accept no temperature, without refusing the run.
+- Keep the raw wire position and add `SendRequest::temperature()` and
+  `with_temperature`, preserving sibling generation settings. Check the
+  group's `session.send` requirement alongside the other declared parameters.
+
 ## 0.8.43
 
 - Add optional open-string `RunError.cause` with a `with_cause` builder,

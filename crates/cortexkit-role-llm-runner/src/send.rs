@@ -911,6 +911,22 @@ impl SendRequest {
         self.positive_limit("generation", "max_output_tokens")
     }
 
+    /// Read the finite sampling temperature in 0..=2, preserving the raw value.
+    /// An error is the offending path for an `invalid_params` refusal.
+    pub fn temperature(&self) -> Result<Option<f64>, String> {
+        let Some(raw) = self.runner_params.get("generation") else {
+            return Ok(None);
+        };
+        let object = raw.as_object().ok_or_else(|| "generation".to_owned())?;
+        object.get("temperature").map_or(Ok(None), |value| {
+            value
+                .as_f64()
+                .filter(|temperature| temperature.is_finite() && (0.0..=2.0).contains(temperature))
+                .map(Some)
+                .ok_or_else(|| "generation.temperature".to_owned())
+        })
+    }
+
     fn positive_limit(&self, parent: &str, member: &str) -> Result<Option<u64>, String> {
         let Some(raw) = self.runner_params.get(parent) else {
             return Ok(None);
@@ -945,6 +961,22 @@ impl SendRequest {
     /// Set `generation.max_output_tokens`, preserving other generation settings.
     pub fn with_max_output_tokens(mut self, limit: u64) -> Self {
         self.set_limit("generation", "max_output_tokens", limit);
+        self
+    }
+
+    /// Set `generation.temperature`, preserving other generation settings.
+    /// Non-finite values become JSON null and are refused by [`Self::temperature`].
+    pub fn with_temperature(mut self, temperature: f64) -> Self {
+        let raw = self
+            .runner_params
+            .entry("generation")
+            .or_insert_with(|| Value::Object(Map::new()));
+        if !raw.is_object() {
+            *raw = Value::Object(Map::new());
+        }
+        raw.as_object_mut()
+            .expect("generation is an object")
+            .insert("temperature".into(), Value::from(temperature));
         self
     }
 
@@ -1958,6 +1990,7 @@ mod run_parameter_tests {
         let request: SendRequest = crate::vectors::round_trip("run parameters", &file["send"]);
         assert_eq!(request.max_steps(), Ok(Some(2)));
         assert_eq!(request.max_output_tokens(), Ok(Some(16)));
+        assert_eq!(request.temperature(), Ok(Some(0.25)));
         assert_eq!(request.no_tools(), Ok(Some(true)));
         assert_eq!(
             serde_json::to_string(&request.runner_params).unwrap(),
@@ -1969,7 +2002,14 @@ mod run_parameter_tests {
             let field = if request.runner_params.contains_key("stop_when") {
                 request.max_steps().unwrap_err()
             } else if request.runner_params.contains_key("generation") {
-                request.max_output_tokens().unwrap_err()
+                if request.runner_params["generation"]
+                    .get("temperature")
+                    .is_some()
+                {
+                    request.temperature().unwrap_err()
+                } else {
+                    request.max_output_tokens().unwrap_err()
+                }
             } else {
                 request.no_tools().unwrap_err()
             };
@@ -1984,6 +2024,7 @@ mod run_parameter_tests {
         let groups = [
             crate::capabilities::MAX_STEPS,
             crate::capabilities::MAX_OUTPUT_TOKENS,
+            crate::capabilities::TEMPERATURE,
             crate::capabilities::NO_TOOLS,
         ];
         for group in groups {
@@ -2005,6 +2046,7 @@ mod run_parameter_tests {
         let decoded: SendRequest = serde_json::from_slice(&wire).unwrap();
         assert_eq!(decoded.max_steps(), Ok(Some(2)));
         assert_eq!(decoded.max_output_tokens(), Ok(Some(16)));
+        assert_eq!(decoded.temperature(), Ok(Some(0.25)));
         assert_eq!(decoded.no_tools(), Ok(Some(true)));
         assert_eq!(serde_json::to_vec(&decoded.runner_params).unwrap(), bytes);
         assert_eq!(serde_json::to_vec(&decoded).unwrap(), wire);
@@ -2029,6 +2071,85 @@ mod run_parameter_tests {
         assert_eq!(request.max_steps(), Ok(Some(2)));
         assert_eq!(request.max_output_tokens(), Ok(Some(16)));
         assert_eq!(request.no_tools(), Ok(Some(true)));
+    }
+
+    #[test]
+    fn temperature_accepts_inclusive_range_and_preserves_raw_numbers() {
+        for value in [json!(0), json!(0.25), json!(2)] {
+            let raw = json!({"generation": {"temperature": value}});
+            let request = SendRequest::new("sample", "temperature")
+                .with_runner_params(raw.as_object().unwrap().clone());
+            assert_eq!(request.temperature(), Ok(value.as_f64()));
+            assert_eq!(request.runner_params["generation"], raw["generation"]);
+        }
+        let request = SendRequest::new("sample", "absent").with_max_output_tokens(16);
+        assert_eq!(request.temperature(), Ok(None));
+    }
+
+    #[test]
+    fn temperature_refuses_malformed_values_by_field_without_changing_them() {
+        for value in [
+            json!(-0.1),
+            json!(2.5),
+            json!("0.25"),
+            json!(null),
+            json!(true),
+            json!([]),
+            json!({}),
+        ] {
+            let raw = json!({"generation": {"temperature": value}});
+            let request = SendRequest::new("sample", "bad-temperature")
+                .with_runner_params(raw.as_object().unwrap().clone());
+            assert_eq!(request.temperature(), Err("generation.temperature".into()));
+            assert_eq!(request.runner_params["generation"], raw["generation"]);
+        }
+        for generation in [json!(null), json!([]), json!("bad"), json!(1)] {
+            let request = SendRequest::new("sample", "bad-generation").with_runner_params(
+                json!({"generation": generation})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            );
+            assert_eq!(request.temperature(), Err("generation".into()));
+            assert_eq!(request.runner_params["generation"], generation);
+        }
+        // JSON cannot represent non-finite numbers; the builder retains them
+        // as null so admission still reports the temperature field as invalid.
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let request = SendRequest::new("sample", "non-finite").with_temperature(value);
+            assert_eq!(request.temperature(), Err("generation.temperature".into()));
+            assert_eq!(
+                request.runner_params["generation"]["temperature"],
+                Value::Null
+            );
+        }
+    }
+
+    #[test]
+    fn temperature_builders_preserve_generation_siblings_in_either_order() {
+        let base = SendRequest::new("sample", "siblings").with_runner_params(
+            json!({"generation":{"vendor":"kept"}})
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        let expected =
+            json!({"generation":{"vendor":"kept","max_output_tokens":16,"temperature":0.25}});
+        for request in [
+            base.clone()
+                .with_max_output_tokens(16)
+                .with_temperature(0.5)
+                .with_temperature(0.25),
+            base.with_temperature(0.25).with_max_output_tokens(16),
+        ] {
+            assert_eq!(request.runner_params, *expected.as_object().unwrap());
+            assert_eq!(request.temperature(), Ok(Some(0.25)));
+            assert_eq!(request.max_output_tokens(), Ok(Some(16)));
+        }
+        let request = SendRequest::new("sample", "replace-parent")
+            .with_runner_params(json!({"generation":null}).as_object().unwrap().clone())
+            .with_temperature(0.25);
+        assert_eq!(request.temperature(), Ok(Some(0.25)));
     }
 
     #[test]
@@ -2071,6 +2192,7 @@ mod run_parameter_tests {
         let absent = SendRequest::new("hi", "absent");
         assert_eq!(absent.max_steps(), Ok(None));
         assert_eq!(absent.max_output_tokens(), Ok(None));
+        assert_eq!(absent.temperature(), Ok(None));
         assert_eq!(absent.no_tools(), Ok(None));
         for value in [json!(null), json!({}), json!(false), json!("none")] {
             let request = SendRequest::new("hi", "bad")

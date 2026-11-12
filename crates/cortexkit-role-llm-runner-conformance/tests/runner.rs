@@ -1578,6 +1578,7 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::InputTokenCap,
     Capability::MaxSteps,
     Capability::MaxOutputTokens,
+    Capability::Temperature,
     Capability::NoTools,
     Capability::TurnDirectives,
     Capability::InterruptReason,
@@ -1736,6 +1737,7 @@ fn faithful_runner_with_all_supported_groups() -> FakeSubject {
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
+        Capability::Temperature,
         Capability::NoTools,
         Capability::TurnDirectives,
         Capability::InterruptReason,
@@ -2203,6 +2205,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::InputTokenCap,
                     Capability::MaxSteps,
                     Capability::MaxOutputTokens,
+                    Capability::Temperature,
                     Capability::NoTools,
                     Capability::TurnDirectives,
                     Capability::InterruptReason,
@@ -2578,6 +2581,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::InputTokenCap,
                     Capability::MaxSteps,
                     Capability::MaxOutputTokens,
+                    Capability::Temperature,
                     Capability::NoTools,
                     Capability::TurnDirectives,
                     Capability::InterruptReason,
@@ -2988,6 +2992,7 @@ async fn retention_paused_non_terminal_run_passes() {
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
+        Capability::Temperature,
         Capability::NoTools,
         Capability::TurnDirectives,
         Capability::InterruptReason,
@@ -3027,6 +3032,7 @@ async fn retention_status_is_inapplicable_when_not_served() {
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
+        Capability::Temperature,
         Capability::NoTools,
         Capability::TurnDirectives,
         Capability::InterruptReason,
@@ -4798,6 +4804,9 @@ const RUN_PARAMETER_CASES: &[&str] = &[
     "max_output_tokens_caps_response",
     "no_tools_offered_to_model",
     "no_tools_later_plan_send_refused",
+    "temperature_reaches_model",
+    "temperature_invalid_refused",
+    "temperature_with_output_cap",
 ];
 
 const SERVICE_TIER_CASES: &[&str] = &[
@@ -4883,6 +4892,7 @@ fn run_parameters(defects: Defects) -> FakeSubject {
     subject.capabilities.extend([
         Capability::MaxSteps,
         Capability::MaxOutputTokens,
+        Capability::Temperature,
         Capability::NoTools,
         Capability::RunUsage,
     ]);
@@ -4890,7 +4900,7 @@ fn run_parameters(defects: Defects) -> FakeSubject {
 }
 
 #[tokio::test]
-async fn declared_run_parameters_pass_all_four_cases() {
+async fn declared_run_parameters_pass_all_cases() {
     let report = run(&run_parameters(Defects::default())).await;
     for name in RUN_PARAMETER_CASES {
         assert_eq!(
@@ -4911,6 +4921,9 @@ async fn undeclared_run_parameters_skip_each_case_by_name() {
         (RUN_PARAMETER_CASES[1], Capability::MaxOutputTokens),
         (RUN_PARAMETER_CASES[2], Capability::NoTools),
         (RUN_PARAMETER_CASES[3], Capability::NoTools),
+        (RUN_PARAMETER_CASES[4], Capability::Temperature),
+        (RUN_PARAMETER_CASES[5], Capability::Temperature),
+        (RUN_PARAMETER_CASES[6], Capability::Temperature),
     ] {
         assert!(
             matches!(report.outcome(name), Some(CaseOutcome::Skipped { missing: names }) if names.contains(&missing)),
@@ -4922,16 +4935,23 @@ async fn undeclared_run_parameters_skip_each_case_by_name() {
 }
 
 async fn run_parameter_break(defects: Defects, expected: &str, message: &str) {
+    run_parameter_breaks(defects, &[(expected, message)]).await;
+}
+
+async fn run_parameter_breaks(defects: Defects, expected: &[(&str, &str)]) {
     let report = run(&run_parameters(defects)).await;
-    let reason = failed(&report, expected);
-    assert!(reason.contains(message), "{expected}: {reason}");
-    assert_none_failed_but(&report, &[expected]);
+    for (name, message) in expected {
+        let reason = failed(&report, name);
+        assert!(reason.contains(message), "{name}: {reason}");
+        println!("NON-VACUITY BREAK {name}: {reason}");
+    }
+    let names: Vec<_> = expected.iter().map(|(name, _)| *name).collect();
+    assert_none_failed_but(&report, &names);
     for name in RUN_PARAMETER_CASES {
-        if *name != expected {
+        if !names.contains(name) {
             assert_passed(&report, name);
         }
     }
-    println!("NON-VACUITY BREAK {expected}: {reason}; other run-parameter cases passed");
 }
 
 #[tokio::test]
@@ -4961,14 +4981,16 @@ async fn unsealed_max_steps_fails_only_its_named_case() {
 }
 
 #[tokio::test]
-async fn ignoring_max_output_tokens_fails_only_its_named_case() {
-    run_parameter_break(
+async fn ignoring_max_output_tokens_fails_output_cap_and_temperature_sibling_cases() {
+    run_parameter_breaks(
         Defects {
             max_output_tokens_ignored: true,
             ..Defects::default()
         },
-        RUN_PARAMETER_CASES[1],
-        "response exceeds cap",
+        &[
+            (RUN_PARAMETER_CASES[1], "response exceeds cap"),
+            (RUN_PARAMETER_CASES[6], "sibling output cap"),
+        ],
     )
     .await;
 }
@@ -5027,6 +5049,60 @@ async fn run_parameter_case_no_tools_offered_to_model() {
 #[tokio::test]
 async fn run_parameter_case_no_tools_later_plan_send_refused() {
     run_parameter_case(RUN_PARAMETER_CASES[3]).await;
+}
+
+#[tokio::test]
+async fn run_parameter_case_temperature_reaches_model() {
+    run_parameter_case(RUN_PARAMETER_CASES[4]).await;
+}
+
+#[tokio::test]
+async fn run_parameter_case_temperature_invalid_refused() {
+    run_parameter_case(RUN_PARAMETER_CASES[5]).await;
+}
+
+#[tokio::test]
+async fn run_parameter_case_temperature_with_output_cap() {
+    run_parameter_case(RUN_PARAMETER_CASES[6]).await;
+}
+
+#[tokio::test]
+async fn ignoring_temperature_fails_only_its_named_case() {
+    run_parameter_break(
+        Defects {
+            temperature_ignored: true,
+            ..Defects::default()
+        },
+        RUN_PARAMETER_CASES[4],
+        "temperature 0",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn accepting_invalid_temperature_fails_only_its_named_case() {
+    run_parameter_break(
+        Defects {
+            temperature_invalid_accepted: true,
+            ..Defects::default()
+        },
+        RUN_PARAMETER_CASES[5],
+        "temperature refusal",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn losing_temperature_beside_output_cap_fails_only_its_named_case() {
+    run_parameter_break(
+        Defects {
+            temperature_with_output_cap_lost: true,
+            ..Defects::default()
+        },
+        RUN_PARAMETER_CASES[6],
+        "temperature 0",
+    )
+    .await;
 }
 
 #[tokio::test]

@@ -1,4 +1,4 @@
-//! Independent discovery-gated run limits and tool suppression (§9.3.1).
+//! Independent discovery-gated run parameters (§9.3.1).
 
 use cortexkit_role_llm_runner::{capabilities as groups, errors, ops, send::SendReply};
 
@@ -45,6 +45,9 @@ where
         "max_steps_seals_pending_calls" => max_steps(case).await,
         "max_steps_final_step_completes" => final_step(case).await,
         "max_output_tokens_caps_response" => output_cap(case, false).await,
+        "temperature_reaches_model" => temperature(case, false).await,
+        "temperature_invalid_refused" => temperature_invalid(case).await,
+        "temperature_with_output_cap" => temperature(case, true).await,
         "no_tools_offered_to_model" => no_tools(case).await,
         "no_tools_later_plan_send_refused" => later_tools(case).await,
         other => Err(format!("unknown run parameter case {other}")),
@@ -283,6 +286,124 @@ where
                 cortexkit_role_llm_runner::finish::Finish::Stop
             };
             crate::finish_reason::check(case, &session.route, &end.run_id, Some(expected)).await?;
+        }
+    }
+    Ok(Ending::Passed)
+}
+
+/// Temperature fixtures use a scripted model accepting the full 0..=2 range.
+/// Model-specific clamping and omission for models without temperature are
+/// contract rules, not checked here: unchanged forwarding is observable only
+/// with a model that accepts the requested values.
+async fn temperature<S>(case: &Case<'_, S>, with_output_cap: bool) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    for requested in [0.0, 0.25, 2.0] {
+        let mut session = case
+            .open(
+                "temperature",
+                Script {
+                    turns: vec![
+                        ScriptedTurn::new(vec![ScriptedPart::ToolCall(
+                            case.mint.call("temperature-step"),
+                        )]),
+                        ScriptedTurn::new(vec![ScriptedPart::Text("done".into())]),
+                    ],
+                },
+            )
+            .await?;
+        crate::send_helpers::require_declared(
+            &session.route,
+            groups::TEMPERATURE,
+            ops::SESSION_SEND,
+        )
+        .await?;
+        if with_output_cap {
+            crate::send_helpers::require_declared(
+                &session.route,
+                groups::MAX_OUTPUT_TOKENS,
+                ops::SESSION_SEND,
+            )
+            .await?;
+        }
+        let mut params = case.params(&session, "sample", &case.mint.next("temperature"), None);
+        params["generation"]["temperature"] = json!(requested);
+        if with_output_cap {
+            params["generation"]["max_output_tokens"] = json!(16);
+        }
+        let end = send(case, &mut session, params).await?;
+        let result = run_result(&session.route, &end.run_id).await?;
+        let requests = case
+            .subject
+            .model_requests(&session.name)
+            .await
+            .map_err(|e| e.to_string())?;
+        if result.state != "completed"
+            || requests.len() != 2
+            || requests.iter().any(|request| {
+                request.temperature != Some(requested)
+                    || (with_output_cap
+                        && request
+                            .max_output_tokens
+                            .is_none_or(|cap| cap == 0 || cap > 16))
+            })
+        {
+            return Err(format!("temperature {requested} or sibling output cap did not reach every model request: requests={requests:?}, result={result:?}"));
+        }
+    }
+    Ok(Ending::Passed)
+}
+
+async fn temperature_invalid<S>(case: &Case<'_, S>) -> Result<Ending, String>
+where
+    S: LlmRunnerSubject,
+    S::Route: RunnerRoute,
+{
+    for (generation, field) in [
+        (json!({"temperature": -0.1}), "generation.temperature"),
+        (json!({"temperature": 2.5}), "generation.temperature"),
+        (json!({"temperature": "0.25"}), "generation.temperature"),
+        (json!({"temperature": null}), "generation.temperature"),
+        (json!(null), "generation"),
+    ] {
+        let session = case
+            .open(
+                "temperature-invalid",
+                Script {
+                    turns: vec![ScriptedTurn::new(vec![ScriptedPart::Text(
+                        "must not start".into(),
+                    )])],
+                },
+            )
+            .await?;
+        crate::send_helpers::require_declared(
+            &session.route,
+            groups::TEMPERATURE,
+            ops::SESSION_SEND,
+        )
+        .await?;
+        let mut params = case.params(
+            &session,
+            "invalid sample",
+            &case.mint.next("temperature-invalid"),
+            None,
+        );
+        params["generation"] = generation;
+        let error = expect_error(
+            "temperature refusal",
+            call(&session.route, ops::SESSION_SEND, params).await?,
+        )?;
+        expect_field("temperature refusal", &error, errors::INVALID_PARAMS, field)?;
+        if case
+            .subject
+            .model_invocations(&session.name)
+            .await
+            .map_err(|e| e.to_string())?
+            != 0
+        {
+            return Err("refused temperature reached the model".into());
         }
     }
     Ok(Ending::Passed)

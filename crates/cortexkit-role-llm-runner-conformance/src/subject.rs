@@ -108,6 +108,9 @@ pub enum Capability {
     MaxSteps,
     /// Positive per-response output cap in `generation.max_output_tokens`.
     MaxOutputTokens,
+    /// Per-response `generation.temperature`. The scripted model must accept
+    /// the full 0 to 2 range so the kit can observe unchanged forwarding.
+    Temperature,
     /// An empty `tools` list suppresses plan tools and host built-ins.
     NoTools,
     /// Stable trailing directives on completed runs, requested at admission.
@@ -248,6 +251,7 @@ impl Capability {
         Self::InputTokenCap,
         Self::MaxSteps,
         Self::MaxOutputTokens,
+        Self::Temperature,
         Self::NoTools,
         Self::TurnDirectives,
         Self::InterruptReason,
@@ -333,6 +337,7 @@ impl Capability {
             Self::InputTokenCap => groups::INPUT_TOKEN_CAP,
             Self::MaxSteps => groups::MAX_STEPS,
             Self::MaxOutputTokens => groups::MAX_OUTPUT_TOKENS,
+            Self::Temperature => groups::TEMPERATURE,
             Self::NoTools => groups::NO_TOOLS,
             Self::TurnDirectives => groups::TURN_DIRECTIVES,
             Self::InterruptReason => groups::INTERRUPT_REASON,
@@ -485,6 +490,8 @@ pub struct ModelRequestObservation {
     pub service_tier_applied: Option<String>,
     /// The output-token maximum actually sent to the model, if any.
     pub max_output_tokens: Option<u64>,
+    /// The sampling temperature actually sent to the model, if any.
+    pub temperature: Option<f64>,
     /// The names of the tools the request offered, in request order.
     pub tools: Vec<String>,
     /// The schema the request asked the provider to shape the final text
@@ -526,6 +533,11 @@ impl RawModelRequestObservation {
 }
 
 impl ModelRequestObservation {
+    pub fn with_temperature(mut self, temperature: f64) -> Self {
+        self.temperature = Some(temperature);
+        self
+    }
+
     pub fn with_max_output_tokens(mut self, limit: u64) -> Self {
         self.max_output_tokens = Some(limit);
         self
@@ -1579,7 +1591,8 @@ pub trait LlmRunnerSubject: Harness {
     /// Every model request the scripted model received for `session`, in
     /// order, across kills and restarts. Keep the record outside the runner
     /// and its state root. Required with [`Capability::StructuredOutput`],
-    /// [`Capability::NoTools`], [`Capability::MaxOutputTokens`] and
+    /// [`Capability::NoTools`], [`Capability::MaxOutputTokens`],
+    /// [`Capability::Temperature`] and
     /// [`Capability::RenderedModelInput`].
     async fn model_requests(
         &self,

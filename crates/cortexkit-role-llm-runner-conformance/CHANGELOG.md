@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.17.54
+
+- Pin runner contract `=0.8.44` and add `Capability::Temperature` with named,
+  discovery-gated cases for accepting 0, 0.25 and 2, refusing malformed
+  values as `invalid_params` naming `generation.temperature`, and preserving
+  temperature beside `max_output_tokens`.
+- Record the dispatched temperature in `ModelRequestObservation`. Adapters
+  declaring the group select a scripted model accepting the full 0 to 2
+  range; accepted values must reach every model request unchanged. Model
+  clamping and omission for models without temperature remain contract rules,
+  not kit cases. Add faithful forwarding and isolated faulty-runner checks.
+
 ## 0.17.53
 
 - Fix the `fork_answer` cases to name the owner in `fork_callers` as a bare

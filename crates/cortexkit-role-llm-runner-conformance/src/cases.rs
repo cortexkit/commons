@@ -297,6 +297,9 @@ where
             "max_steps_seals_pending_calls"
             | "max_steps_final_step_completes"
             | "max_output_tokens_caps_response"
+            | "temperature_reaches_model"
+            | "temperature_invalid_refused"
+            | "temperature_with_output_cap"
             | "no_tools_offered_to_model"
             | "no_tools_later_plan_send_refused" => crate::run_parameters::run(self, name).await,
             "cleared_ride_plan_notes_never_clear" => {

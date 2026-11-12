@@ -327,6 +327,7 @@ alias until the next breaking release.
 | `input_token_cap` | `session.send` with `budget.max_input_tokens` | §9.3 |
 | `max_steps` | `session.send` with `stop_when.max_steps` | §9.3.1 |
 | `max_output_tokens` | `session.send` with `generation.max_output_tokens` | §9.3.1 |
+| `temperature` | `session.send` with `generation.temperature` | §9.3.1 |
 | `no_tools` | `session.send` with `tools: []` | §9.3.1 |
 | `structured_output` | `session.send` with `structured_output`; its answer on `run.result` and `run.status` | §9.4 |
 | `submit_streamed_siblings` | Extends `session.send` in `submit_tool` mode; requires `structured_output`. Earlier siblings may already have been dispatched while the step streamed. A caller requiring that no sibling ever runs must not send `submit_tool` to such a runner, or must offer no tools with side effects in that run. | §6, §9.4 |
@@ -3416,24 +3417,26 @@ A runner that declares `retract` serves `session.retract`.
   their member names are pinned here. Non-advertising runners retain their
   existing budget behavior unchanged.
 
-### 9.3.1 `max_steps`, `max_output_tokens`, `no_tools`: declared run parameters
+### 9.3.1 `max_steps`, `max_output_tokens`, `temperature`, `no_tools`: declared run parameters
 
-- [pinned] These are three independent describe groups. A runner declares
+- [pinned] These are four independent describe groups. A runner declares
   exactly the ones it honours. A caller MUST send `stop_when.max_steps`,
-  `generation.max_output_tokens` or `tools: []` only to a runner declaring
-  `max_steps`, `max_output_tokens` or `no_tools`, respectively.
+  `generation.max_output_tokens`, `generation.temperature` or `tools: []`
+  only to a runner declaring `max_steps`, `max_output_tokens`, `temperature`
+  or `no_tools`, respectively.
   `check_describe` checks each group for `session.send`; none adds discovery
   metadata. Receiving an undeclared member keeps §9's existing rule: the
   runner honours it or refuses `invalid_params` naming the field, never
   silently ignores it.
 - [pinned] The wire positions do not change. The Rust `SendRequest` keeps
   the complete raw members in `runner_params["stop_when"]["max_steps"]`,
-  `runner_params["generation"]["max_output_tokens"]` and
+  `runner_params["generation"]["max_output_tokens"]`,
+  `runner_params["generation"]["temperature"]` and
   `runner_params["tools"]`, exactly as received. There are no separate typed
-  fields. `SendRequest::max_steps()`, `max_output_tokens()` and `no_tools()`
+  fields. `SendRequest::max_steps()`, `max_output_tokens()`, `temperature()` and `no_tools()`
   inspect without changing those values and report the offending field path
-  on malformed input. `with_max_steps`, `with_max_output_tokens` and
-  `with_no_tools` write those same positions; the limit builders preserve
+  on malformed input. `with_max_steps`, `with_max_output_tokens`,
+  `with_temperature` and `with_no_tools` write those same positions; the numeric builders preserve
   sibling members. Decoding alone preserves even malformed legacy values.
 - [pinned] `stop_when.max_steps` is a positive u64 integer. One step is one
   model response. A run ends `max_steps` only when the limit cut it off:
@@ -3460,6 +3463,16 @@ A runner that declares `retract` serves `session.retract`.
   non-integers and overflow) is
   refused `invalid_params` naming `generation.max_output_tokens`; a
   non-object `generation` names `generation`.
+- [pinned] `generation.temperature` is a finite number from 0 to 2 inclusive,
+  frozen at admission and applied to every model response of the run. On a
+  runner declaring `temperature`, any other value (a non-number, NaN or
+  infinity, a negative number, or a number above 2) is refused `invalid_params`
+  naming `generation.temperature`; a non-object `generation` names `generation`.
+  The runner clamps the value to the selected model's accepted range: a
+  model whose maximum is 1 gets at most 1. A model that accepts no temperature
+  at all, such as a reasoning-only model, is sent none. Neither case is a
+  refusal, just as a lower model output maximum is not a refusal under
+  `max_output_tokens`.
 - [pinned] `tools: []` means the model is offered no tools at all, including
   plan tools and host built-ins. Only the empty list has role meaning in
   `no_tools`; a non-empty list stays runner-specific. A non-list is refused

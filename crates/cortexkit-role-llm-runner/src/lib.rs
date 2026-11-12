@@ -391,6 +391,8 @@ pub mod capabilities {
     pub const MAX_STEPS: &str = "max_steps";
     /// Positive per-response output cap in `generation.max_output_tokens`.
     pub const MAX_OUTPUT_TOKENS: &str = "max_output_tokens";
+    /// Per-response sampling temperature in `generation.temperature`.
+    pub const TEMPERATURE: &str = "temperature";
     /// `tools: []` suppresses all tools, including plan tools and built-ins.
     pub const NO_TOOLS: &str = "no_tools";
     /// Stable trailing tags parsed from a completed run's stored final text.
@@ -577,6 +579,7 @@ pub mod capabilities {
         (INPUT_TOKEN_CAP, &[ops::SESSION_SEND]),
         (MAX_STEPS, &[ops::SESSION_SEND]),
         (MAX_OUTPUT_TOKENS, &[ops::SESSION_SEND]),
+        (TEMPERATURE, &[ops::SESSION_SEND]),
         (NO_TOOLS, &[ops::SESSION_SEND]),
         (TURN_DIRECTIVES, &[ops::SESSION_SEND, ops::RUN_RESULT]),
         (INTERRUPT_REASON, &[ops::RUN_RESULT]),

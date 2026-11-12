@@ -548,6 +548,12 @@ pub struct Defects {
     pub max_steps_on_final_step: bool,
     /// The requested output maximum is not passed to the scripted model.
     pub max_output_tokens_ignored: bool,
+    /// A temperature sent without an output cap is not passed to the model.
+    pub temperature_ignored: bool,
+    /// A temperature is lost when it shares generation with an output cap.
+    pub temperature_with_output_cap_lost: bool,
+    /// Malformed temperatures are accepted instead of refused.
+    pub temperature_invalid_accepted: bool,
     /// Empty tools leaves the plan's tools offered to the model.
     pub no_tools_ignored: bool,
     /// A later tools member on a plan session is silently ignored.
@@ -964,6 +970,7 @@ struct RunRec {
     directives: Vec<cortexkit_role_llm_runner::directives::DirectiveName>,
     max_steps: Option<u64>,
     max_output_tokens: Option<u64>,
+    temperature: Option<f64>,
     finish: Option<cortexkit_role_llm_runner::finish::Finish>,
     no_tools: bool,
     run_id: String,
@@ -2097,6 +2104,7 @@ impl Module {
                             .unwrap_or_default(),
                         max_steps: record["max_steps"].as_u64(),
                         max_output_tokens: record["max_output_tokens"].as_u64(),
+                        temperature: record["temperature"].as_f64(),
                         finish: None,
                         no_tools: record["no_tools"] == true,
                         run_id,
@@ -2687,6 +2695,13 @@ impl Module {
                 notices::observe(&mut observation, &sess, &self.world);
                 session_change::observe_notes(&mut observation, &sess, &self.world.defects);
                 observation.max_output_tokens = output_cap;
+                observation.temperature = run.temperature.filter(|_| {
+                    if run.max_output_tokens.is_some() {
+                        !self.world.defects.temperature_with_output_cap_lost
+                    } else {
+                        !self.world.defects.temperature_ignored
+                    }
+                });
                 self.tier_model_ingress(session, &mut observation);
                 keep_warm::real_request(self, session, &observation, turn.usage.as_ref());
                 if self.world.serves(groups::FORK_ANSWER) {
@@ -4035,6 +4050,11 @@ impl Module {
             Ok(limit) => limit,
             Err(field) => return Ok(invalid(&field)),
         };
+        let temperature = match request.temperature() {
+            Ok(temperature) => temperature,
+            Err(_) if self.world.defects.temperature_invalid_accepted => None,
+            Err(field) => return Ok(invalid(&field)),
+        };
         let no_tools = match request.no_tools() {
             Ok(value) => value,
             Err(field) => return Ok(invalid(&field)),
@@ -4489,6 +4509,7 @@ impl Module {
                     "input_cap": budget.as_ref().and_then(|b| b.max_input_tokens),
                     "directives":directives,
                     "max_steps":max_steps, "max_output_tokens":max_output_tokens,
+                    "temperature":temperature,
                     "no_tools":no_tools == Some(true),
                     "structured_output": frozen,
                     "session_structured_output_jcs": session_structured_output_jcs,

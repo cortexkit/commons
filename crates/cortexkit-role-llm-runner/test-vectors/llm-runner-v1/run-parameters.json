@@ -9,6 +9,26 @@
   "runner_params_bytes": "{\"generation\":{\"max_output_tokens\":16,\"temperature\":0.25},\"stop_when\":{\"max_steps\":2,\"vendor_stop\":\"kept\"},\"tools\":[]}",
   "refuse": [
     {
+      "name": "negative temperature",
+      "params": {"prompt":"start","send_id":"negative-temperature","generation":{"temperature":-0.1}},
+      "error": {"code":"invalid_params","detail":{"field":"generation.temperature"}}
+    },
+    {
+      "name": "temperature above range",
+      "params": {"prompt":"start","send_id":"high-temperature","generation":{"temperature":2.5}},
+      "error": {"code":"invalid_params","detail":{"field":"generation.temperature"}}
+    },
+    {
+      "name": "string temperature",
+      "params": {"prompt":"start","send_id":"string-temperature","generation":{"temperature":"0.25"}},
+      "error": {"code":"invalid_params","detail":{"field":"generation.temperature"}}
+    },
+    {
+      "name": "null temperature",
+      "params": {"prompt":"start","send_id":"null-temperature","generation":{"temperature":null}},
+      "error": {"code":"invalid_params","detail":{"field":"generation.temperature"}}
+    },
+    {
       "name": "zero step limit",
       "params": {"prompt":"start","send_id":"bad-steps","stop_when":{"max_steps":0}},
       "error": {"code":"invalid_params","detail":{"field":"stop_when.max_steps"}}
