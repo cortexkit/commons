@@ -93,6 +93,13 @@ pub const CHECKS: &[CheckSpec] = &[
     check("account_for_tier_available", "account_for records fast and pins an account whose plan includes it"),
     check("account_for_tier_fallback", "account_for steps ultrafast down to fast then standard, recording each choice"),
     check("account_for_tier_undeclared", "a caller sends no tier to a non-declaring router and receives standard admission"),
+    check("warm_credential_fresh_honoured", "a fresh conversation honours an eligible hint and keeps it as affinity"),
+    check("warm_credential_hard_filter_ignored", "a hint excluded by candidates is ignored without refusal"),
+    check("warm_credential_unknown_ignored", "an unknown credential hint is ignored without refusal"),
+    check("warm_credential_existing_affinity", "a hint never moves an existing conversation affinity"),
+    check("warm_credential_admission_conflict", "changing a hint under the same admission id is admission_conflict"),
+    check("warm_credential_non_admit_refused", "warm_credential outside admit is invalid_request naming warm_credential"),
+    check("warm_credential_undeclared_refused", "without account_warm_credential the member is refused by name"),
     check("continue_credit_window_refused", "account_continue: credit is refused by exhausted.limit_window because continuation is quota-only"),
     check("continue_offer_excludes_exhausted_account", "account_continue: an offer never names the exhausted account"),
     check("continue_offer_preserves_provider", "account_continue: the offered credential has the previous provider"),
@@ -312,6 +319,7 @@ pub const CHECKS: &[CheckSpec] = &[
 /// Where the kit checks less than the contract says, and why. Every report
 /// prints these.
 pub const NARROWINGS: &[&str] = &[
+    "Warm credential checks use candidates as one hard filter and observe resulting admissions and affinity. Internal rejection records, reserve counts, explicit-pin priority and other hard-filter or quota conditions are not inspected.",
     "engine_reports: attested owner admission is checked, but rolling speed-window retention, latency inspection and realtime filtering are provider policy and are not observable through these hooks",
     "select_engine: malformed slot health diagnostics, retained consumer attribution and scope isolation are not inspected. Remote reachability is exercised with a cooldown, not separate backoff, quota or recorded-failure fixtures. Accuracy and cost are supplied fixture units, not real billing or engine measurements.",
     "report_usage_run_id: the hooks expose no usage counts, so the kit checks acceptance of distinct runs and repeated pairs with changed usage, not deduplicated totals",
@@ -327,7 +335,7 @@ pub const NARROWINGS: &[&str] = &[
     "Affinity is checked with one failure outcome (failed); the other failure outcomes, and the rule that a cancelled or completed report keeps the preference, are not checked.",
     "account_observe idempotency is checked for one runner; the kit does not check that another runner's equal event_id is a separate event.",
     "Credit checks cover observation acceptance without reset evidence and refusal as a continuation window, not the one-hour fence cap, single probe, quota-reading isolation, or continued credential validity.",
-    "The kit does not check that the runner ops refuse a caller that is not a runner module, nor the account_for refusals other than admission_conflict, unknown_decision and invalid_request for malformed pools, undeclared continuation mode (field: mode), credit continuation windows (field: exhausted.limit_window), and a changed continuation question under a reused selection id (field: selection_id).",
+    "The kit does not check that the runner ops refuse a caller that is not a runner module, nor the account_for refusals other than admission_conflict, unknown_decision and invalid_request for malformed pools, non-admit or undeclared warm hints (field: warm_credential), undeclared continuation mode (field: mode), credit continuation windows (field: exhausted.limit_window), and a changed continuation question under a reused selection id (field: selection_id).",
     "Eligibility is checked with model scope and another model on the same account. Account scope cannot distinguish a legitimate account-wide eligibility fence from an incorrect exhaustion/hold with the current hooks, so that distinction is not checked.",
     "Parent preference and fallback are checked on fresh admit requests; priority against an existing child pin, requested_account, renew or reassign is not checked.",
     "Pool isolation, disabled-window omission by runners, and request-size fencing policy are not exercised by the current catalog and provider hooks; vectors check the wire members only.",

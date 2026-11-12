@@ -10,6 +10,73 @@
 
 mod fake;
 
+const WARM_CREDENTIAL_CASES: &[&str] = &[
+    "warm_credential_fresh_honoured",
+    "warm_credential_hard_filter_ignored",
+    "warm_credential_unknown_ignored",
+    "warm_credential_existing_affinity",
+    "warm_credential_admission_conflict",
+    "warm_credential_non_admit_refused",
+    "warm_credential_undeclared_refused",
+];
+
+#[tokio::test]
+async fn warm_credential_cases_pass_and_gate_on_capability() {
+    for declared in [true, false] {
+        let subject = FakeSubject::new(Defects {
+            extension: (!declared).then_some("warm_credential_without_group"),
+            ..Defects::default()
+        });
+        let report = run_suite(&subject).await;
+        assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+        for name in WARM_CREDENTIAL_CASES {
+            let applicable = declared != (*name == "warm_credential_undeclared_refused");
+            match report.outcome(name) {
+                Some(CheckOutcome::Passed) if applicable => {}
+                Some(CheckOutcome::NotApplicable { reason }) if !applicable => {
+                    assert!(!reason.is_empty())
+                }
+                other => panic!(
+                    "{name}, declared={declared}: {other:?}\n{}",
+                    report.render()
+                ),
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn warm_credential_faulty_routers_fail_by_check_name() {
+    for (name, reason) in [
+        ("warm_credential_fresh_honoured", "expected credential"),
+        ("warm_credential_hard_filter_ignored", "expected credential"),
+        ("warm_credential_unknown_ignored", "unknown warm credential"),
+        ("warm_credential_existing_affinity", "expected credential"),
+        (
+            "warm_credential_admission_conflict",
+            "not refused admission_conflict",
+        ),
+        (
+            "warm_credential_non_admit_refused",
+            "not refused invalid_request",
+        ),
+        (
+            "warm_credential_undeclared_refused",
+            "not refused invalid_request",
+        ),
+    ] {
+        breaks(
+            Defects {
+                extension: Some(name),
+                ..Defects::default()
+            },
+            name,
+            reason,
+        )
+        .await;
+    }
+}
+
 const ROUTING_070_CASES: &[&str] = &[
     "panel_full",
     "panel_shortfall",
@@ -529,6 +596,7 @@ async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_pa
         "undeclared_observe_retry_at_ms_refused",
         "undeclared_observe_provider_code_refused",
         "account_for_tier_undeclared",
+        "warm_credential_undeclared_refused",
         "continue_undeclared_group_refuses_mode",
         "undeclared_harness_group_refuses_member",
     ];
@@ -738,6 +806,7 @@ async fn without_harness_group_requests_are_refused() {
             "undeclared_observe_retry_at_ms_refused",
             "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
+            "warm_credential_undeclared_refused",
             "continue_undeclared_group_refuses_mode",
             "requested_harness_is_hosted_and_echoed",
             "undeclared_prefer_group_refuses_member",
@@ -932,6 +1001,7 @@ async fn passes_every_check(subject: &FakeSubject) {
             "undeclared_observe_retry_at_ms_refused",
             "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
+            "warm_credential_undeclared_refused",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
             "undeclared_exclude_providers_group_refuses_member",
@@ -1038,6 +1108,7 @@ async fn decision_input_checks_without_fixture_hook_are_not_applicable() {
         "undeclared_observe_retry_at_ms_refused",
         "undeclared_observe_provider_code_refused",
         "account_for_tier_undeclared",
+        "warm_credential_undeclared_refused",
         "undeclared_harness_group_refuses_member",
         "undeclared_prefer_group_refuses_member",
         "undeclared_exclude_providers_group_refuses_member",
@@ -1272,13 +1343,16 @@ async fn an_expiry_in_the_past_fails() {
 
 #[tokio::test]
 async fn reallocating_a_repeated_admission_fails() {
-    breaks(
+    breaks_all(
         Defects {
             account_for_reallocates_on_replay: true,
             ..Defects::default()
         },
-        "account_for_idempotent_on_admission_id",
-        "the same admission sent again answered",
+        &[
+            "warm_credential_admission_conflict",
+            "account_for_idempotent_on_admission_id",
+        ],
+        "hint conflict replaced the original admission answer",
     )
     .await;
 }
@@ -1643,6 +1717,7 @@ async fn without_exclude_providers_group_its_checks_are_not_applicable() {
             "undeclared_observe_retry_at_ms_refused",
             "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
+            "warm_credential_undeclared_refused",
             "continue_undeclared_group_refuses_mode",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",

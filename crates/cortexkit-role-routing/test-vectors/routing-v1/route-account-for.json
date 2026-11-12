@@ -2,6 +2,16 @@
   "about": "route.account_for requests, the refusals parse_account_for_request answers, answers, and pairs of bodies a provider compares under one admission_id: bodies are compared with defaults applied, so leaving a member out and sending its default are the same body.",
   "requests": [
     {
+      "name": "fresh_admit_with_warm_credential",
+      "params": {
+        "provider": "example-subscription",
+        "model": "model-c",
+        "conversation_key": "conversation-warm",
+        "admission_id": "admission-warm",
+        "warm_credential": "credential-2"
+      }
+    },
+    {
       "name": "minimal_admit",
       "params": {
         "provider": "example-subscription",

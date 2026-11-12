@@ -376,13 +376,15 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines twenty-four
+  does not know is kept and means nothing to it. This version defines twenty-five
   groups:
   - `service_tier`: tier-aware selection and tier metadata in report usage
     (§5.5). A caller sends these members only to a declaring provider.
   - `account_continue`: `route.account_for` reads `mode: "continue"` for a
     runner's durably paused run (§9.1.1). A non-declaring provider refuses
     `invalid_request {field: "mode"}`.
+  - `account_warm_credential`: `route.account_for` reads `warm_credential`
+    on admission (§9.1). A non-declaring provider refuses the member by name.
   - `select_hold_control`: `route.select` reads `hold_ok` and
     `hold_wait_max_s` (§5.1) and decides blocked entries as §5.4 says.
     A provider without it refuses both members (§2). That refusal is why
@@ -1079,8 +1081,10 @@ the routing provider allocates (subscription logins).
   Bodies are compared with defaults applied
   (`AccountForRequest::same_body`): a member left out and the same member
   sent with its default value are the same body.
-  `pool`, `parent_conversation_key` and `service_tier` are part of the body;
-  an absent tier and explicit `standard` compare equal.
+  `pool`, `parent_conversation_key`, `service_tier` and `warm_credential` are
+  part of the body; an absent tier and explicit `standard` compare equal.
+  The same id with a different hint is `admission_conflict`. Omitting
+  `warm_credential` leaves existing request bodies and fingerprints unchanged.
 - [pinned] `mode`: `admit` (the default), `renew` (extend the current pin)
   or `reassign` (a different account after the current one failed).
   `renew` and `reassign` require `expected_pin {id, generation}`; without
@@ -1095,6 +1099,21 @@ the routing provider allocates (subscription logins).
   provider picks only from this list.
 - [pinned] `requested_account` (optional): `{account_id?, credential_id?}`,
   a hint from an explicit pin; `account_id` wins when both are present.
+- [pinned] `warm_credential` (optional): a public vault credential id, using
+  the non-empty opaque string rule of §9.2's `credential_id`. It is valid
+  only in `mode: "admit"` (including the default mode); in any other mode it
+  is `invalid_request {field: "warm_credential"}`. A runner sends it only to
+  a router declaring `account_warm_credential` in `role.describe.capabilities`.
+  A non-declaring router refuses it as an unknown member with that same
+  named refusal: v1 refuses unknown members (§2).
+- [pinned] The router reads `warm_credential` only when it holds no affinity
+  for `conversation_key`, in practice the conversation's first admission.
+  The hint never overrides an existing affinity, an explicit pin, a hold or
+  a reserve. The hinted credential must pass the same hard filters and quota
+  check as a cold pick. Otherwise the router ignores the hint and records
+  its rejection; an unknown or ineligible hinted credential is never itself
+  a refusal. When honoured, the hinted account becomes the conversation's
+  affinity exactly as a cold pick would.
 - [pinned] `hold_wait_max_s` (optional, default 900): the longest the
   runner waits out a short hold instead of being refused. When the
   request's `decision_id` names a decision that recorded a caller's
@@ -1106,6 +1125,10 @@ the routing provider allocates (subscription logins).
   model. A `decision_id` that names a different runner, or a different
   provider or model, is refused `unknown_decision`, so it never reveals
   that the decision exists.
+
+Informative runner guidance: pass the credential the host or plugin last used
+for the session when the runner has no routing history for the conversation,
+typically when a plugin first starts asking routing for accounts.
 
 The answer (`account::AccountForAnswer`):
 

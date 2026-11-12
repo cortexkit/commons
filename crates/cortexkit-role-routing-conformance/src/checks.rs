@@ -10,6 +10,7 @@ mod gateway;
 mod harness_limits;
 mod requires_wire_api;
 mod select_engine;
+mod warm_credential;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -266,6 +267,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         }
         if name.starts_with("account_for_tier_") {
             return self.account_for_tier_check(name).await;
+        }
+        if name.starts_with("warm_credential_") {
+            return self.warm_credential_check(name).await;
         }
         if name.starts_with("continue_") {
             return self.continue_check(name).await;

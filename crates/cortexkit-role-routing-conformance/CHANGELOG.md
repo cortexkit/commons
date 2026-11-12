@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.19
+
+- Pin routing `=0.7.17`. Check `account_warm_credential` routers honour a
+  fresh eligible hint, ignore hard-filtered and unknown credentials without
+  refusal, preserve existing affinity, compare hints for admission idempotency,
+  and refuse the member outside admission mode.
+
 ## 0.10.18
 
 - Accept `subc-protocol` 0.34.1 through 0.36.x, so a module on the 0.36 line

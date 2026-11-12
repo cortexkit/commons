@@ -306,6 +306,7 @@ struct State {
     /// (runner, admission id) to its first body and answer.
     admissions: HashMap<(String, String), (AccountForRequest, AccountForAnswer)>,
     conversations: HashMap<String, ConversationPin>,
+    warm_rejections: Vec<String>,
     /// (runner, event id) to its observation.
     observations: HashMap<(String, String), Observation>,
     /// Consumer to its ladder entries; a consumer not listed is routed by
@@ -889,6 +890,11 @@ impl FakeRoute {
         }
         if self.continue_control {
             describe = describe.with_capability("account_continue");
+        }
+        if !self.fault("warm_credential_without_group")
+            && !self.fault("warm_credential_undeclared_refused")
+        {
+            describe = describe.with_capability("account_warm_credential");
         }
         if self.service_tier_control {
             describe = describe.with_capability("service_tier");
@@ -1942,14 +1948,25 @@ impl FakeRoute {
                 "only runner modules call the account ops",
             ));
         }
-        let declared = if self.service_tier_control {
+        let mut declared = if self.service_tier_control {
             vec![cortexkit_role_routing_conformance::wire::capabilities::SERVICE_TIER]
         } else {
             vec![]
         };
+        if !self.fault("warm_credential_without_group") {
+            declared.push(
+                cortexkit_role_routing_conformance::wire::capabilities::ACCOUNT_WARM_CREDENTIAL,
+            );
+        }
+        let mut params = params.clone();
+        if self.fault("warm_credential_non_admit_refused")
+            && params.get("mode").is_some_and(|m| m != "admit")
+        {
+            params.as_object_mut().unwrap().remove("warm_credential");
+        }
         let request =
             cortexkit_role_routing_conformance::wire::account::parse_account_for_request_serving(
-                params, &declared,
+                &params, &declared,
             )
             .map_err(|mut refusal| {
                 if defects.malformed_pool_wrong_detail
@@ -1967,6 +1984,9 @@ impl FakeRoute {
             let mut compared = request.clone();
             if defects.ignores_pool_body {
                 compared.pool.clone_from(&first.pool);
+            }
+            if self.fault("warm_credential_admission_conflict") {
+                compared.warm_credential.clone_from(&first.warm_credential);
             }
             if defects.ignores_parent_body {
                 compared
@@ -2176,6 +2196,39 @@ impl FakeRoute {
                 "no account away from parent",
             ));
         }
+        let warm = if mode == AccountMode::Admit
+            && (current.is_none() || self.fault("warm_credential_existing_affinity"))
+            && !self.fault("warm_credential_fresh_honoured")
+        {
+            request.warm_credential.as_ref().and_then(|credential| {
+                let index = catalog
+                    .accounts
+                    .iter()
+                    .position(|a| &a.credential_id == credential);
+                let eligible = index.filter(|index| {
+                    usable.contains(index) || self.fault("warm_credential_hard_filter_ignored")
+                });
+                if eligible.is_none() {
+                    state.warm_rejections.push(credential.clone());
+                }
+                eligible
+            })
+        } else {
+            None
+        };
+        if self.fault("warm_credential_unknown_ignored")
+            && request.warm_credential.as_ref().is_some_and(|credential| {
+                !catalog
+                    .accounts
+                    .iter()
+                    .any(|account| &account.credential_id == credential)
+            })
+        {
+            return Err(Refusal::new(
+                RefusalCode::AuthRequired,
+                "unknown warm credential",
+            ));
+        }
         let (account, code) = match (&mode, &current) {
             (AccountMode::Reassign, Some((_, _, held))) => (
                 usable
@@ -2186,17 +2239,23 @@ impl FakeRoute {
                 AccountReasonCode::Reassigned,
             ),
             (AccountMode::Renew, Some((_, _, held))) => (*held, AccountReasonCode::Renewed),
-            (_, Some((_, _, held))) if usable.contains(held) && requested.is_none() => {
+            (_, Some((_, _, held)))
+                if usable.contains(held)
+                    && requested.is_none()
+                    && !(self.fault("warm_credential_existing_affinity") && warm.is_some()) =>
+            {
                 (*held, AccountReasonCode::Affinity)
             }
             _ => match requested {
                 Some(index) => (index, AccountReasonCode::RequestedAccount),
                 None => (
-                    if defects.ignores_parent_preference {
-                        usable[0]
-                    } else {
-                        away.unwrap_or(usable[0])
-                    },
+                    warm.unwrap_or_else(|| {
+                        if defects.ignores_parent_preference {
+                            usable[0]
+                        } else {
+                            away.unwrap_or(usable[0])
+                        }
+                    }),
                     AccountReasonCode::Headroom,
                 ),
             },

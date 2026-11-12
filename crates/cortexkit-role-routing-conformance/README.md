@@ -434,6 +434,21 @@ Report cases send applied-only, served-only and both members.
 Non-declaring routers are not applicable by name, and deliberately faulty
 routers prove each check rejects its named violation.
 
+## Warm-credential admission checks
+
+Routers declaring `account_warm_credential` run the `warm_credential_*` checks
+using the ordinary two-account catalog; no additional fixture hook is required.
+The checks learn a cold pick, hint the other eligible credential on a fresh
+conversation and verify its subsequent affinity. They also exclude the hinted
+account with `candidates` (a hard filter), send an unknown credential, preserve an
+existing conversation's account, change the hint under one admission id, and
+refuse the member in renewal, reassignment and declared continuation modes.
+Without the capability, only `warm_credential_undeclared_refused` applies.
+Each check has a deliberately incorrect fixture router; tests require the
+suite report to list that check's name as failing.
+These checks observe admission results, not internal rejection logs, reserve
+counts or every hard filter and quota condition.
+
 ## Account-continuation checks
 
 Routers declaring `account_continue` implement

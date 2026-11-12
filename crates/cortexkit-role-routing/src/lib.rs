@@ -152,6 +152,8 @@ pub mod capabilities {
     pub const ENGINE_EVALS: &str = "engine_evals";
     /// Switch a durably paused run to a compatible account via `route.account_for`.
     pub const ACCOUNT_CONTINUE: &str = "account_continue";
+    /// Preserve a fresh conversation's last-used credential on admission.
+    pub const ACCOUNT_WARM_CREDENTIAL: &str = "account_warm_credential";
     /// Tier-aware selection and tier metadata in report usage. A caller must
     /// check this group before sending any of those members to a router.
     pub const SERVICE_TIER: &str = "service_tier";
@@ -219,6 +221,7 @@ pub mod capabilities {
         ENGINE_REPORTS,
         ENGINE_EVALS,
         ACCOUNT_CONTINUE,
+        ACCOUNT_WARM_CREDENTIAL,
         SERVICE_TIER,
         SELECT_HOLD_CONTROL,
         SELECT_HARNESS,

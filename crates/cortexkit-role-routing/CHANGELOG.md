@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.17
+
+- Add capability-gated `warm_credential` to `route.account_for` admissions,
+  with a builder and public credential-id validation. A fresh conversation
+  can keep its last-used eligible credential; affinity, pins, holds, reserves,
+  hard filters and quota checks still take precedence. Ignored hints record
+  their rejection rather than causing a refusal.
+- Include present hints in admission idempotency while preserving omitted
+  request bytes and fingerprints. Runners send the hint only to routers
+  declaring `account_warm_credential`; older routers refuse the unknown member.
+
 ## 0.7.16
 
 - Accept `subc-protocol` 0.34.1 through 0.36.x, so a module on the 0.36 line

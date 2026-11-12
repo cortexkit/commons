@@ -543,10 +543,12 @@ fn route_report() {
 
 #[test]
 fn route_account_for() {
-    check_op::<AccountForRequest, AccountForAnswer>(
-        "route-account-for.json",
-        parse_account_for_request,
-    );
+    check_op::<AccountForRequest, AccountForAnswer>("route-account-for.json", |params| {
+        cortexkit_role_routing::account::parse_account_for_request_serving(
+            params,
+            &[cortexkit_role_routing::capabilities::ACCOUNT_WARM_CREDENTIAL],
+        )
+    });
     let file = load("route-account-for.json");
     for case in cases(&file, "bodies") {
         let first = parse_account_for_request(&case["first"]).unwrap();

@@ -122,6 +122,10 @@ pub struct AccountForRequest {
     pub candidates: Option<Candidates>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub requested_account: Option<RequestedAccount>,
+    /// Last-used public vault credential id, considered only on a fresh admit.
+    /// Send only to a router declaring `account_warm_credential`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warm_credential: Option<String>,
     /// The longest the runner waits out a short hold instead of being
     /// refused; defaults to [`DEFAULT_HOLD_WAIT_MAX_S`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -162,6 +166,7 @@ impl AccountForRequest {
             initial_input_estimated: None,
             candidates: None,
             requested_account: None,
+            warm_credential: None,
             hold_wait_max_s: None,
             decision_id: None,
             parent_conversation_key: None,
@@ -211,6 +216,12 @@ impl AccountForRequest {
         self
     }
 
+    /// Hint the credential last used before routing held conversation affinity.
+    pub fn with_warm_credential(mut self, credential_id: impl Into<String>) -> Self {
+        self.warm_credential = Some(credential_id.into());
+        self
+    }
+
     /// Set the longest time the runner will wait out a hold, in seconds.
     pub fn with_hold_wait_max_s(mut self, hold_wait_max_s: u64) -> Self {
         self.hold_wait_max_s = Some(hold_wait_max_s);
@@ -245,7 +256,8 @@ impl AccountForRequest {
 
     /// The request with canonical defaults, for comparing bodies that share
     /// an `admission_id`. Standard tier is represented by absence so legacy
-    /// normalized requests do not gain a new wire member.
+    /// normalized requests do not gain a new wire member. An absent warm
+    /// credential stays absent; a present hint participates in comparison.
     pub fn normalized(&self) -> Self {
         let mut normalized = self.clone();
         normalized.service_tier = normalized.service_tier.filter(|tier| !tier.is_standard());
@@ -381,13 +393,29 @@ pub fn parse_account_for_request(params: &Value) -> Result<AccountForRequest, Re
     parse_account_for_request_serving::<&str>(params, &[])
 }
 
-/// Tier-aware admission for the declared capability set. Without `service_tier`,
+/// Capability-aware admission. An undeclared `warm_credential` is refused by name.
+/// Without `service_tier`,
 /// preserve the legacy parser's treatment of that unknown member: ignore it.
 pub fn parse_account_for_request_serving<C: AsRef<str>>(
     params: &Value,
     capabilities: &[C],
 ) -> Result<AccountForRequest, Refusal> {
     let members = Members::of(params)?;
+    let warm_credential = members.optional_text("warm_credential", None)?;
+    if warm_credential.is_some()
+        && !capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::ACCOUNT_WARM_CREDENTIAL)
+    {
+        return Err(members.refuse("warm_credential", "account_warm_credential is not declared"));
+    }
+    if warm_credential.is_some()
+        && members
+            .optional::<AccountMode>("mode")?
+            .is_some_and(|mode| mode != AccountMode::Admit)
+    {
+        return Err(members.refuse("warm_credential", "warm_credential is only valid on admit"));
+    }
     let request = AccountForRequest {
         service_tier: if capabilities
             .iter()
@@ -408,6 +436,7 @@ pub fn parse_account_for_request_serving<C: AsRef<str>>(
         initial_input_estimated: members.optional("initial_input_estimated")?,
         candidates: members.optional("candidates")?,
         requested_account: members.optional("requested_account")?,
+        warm_credential,
         hold_wait_max_s: members.optional("hold_wait_max_s")?,
         decision_id: members.optional_text("decision_id", None)?,
         parent_conversation_key: members
