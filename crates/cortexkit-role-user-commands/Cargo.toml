@@ -1,0 +1,17 @@
+[package]
+name = "cortexkit-role-user-commands"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "Wire contract and pure validators for user-commands/v1."
+publish = true
+include = ["Cargo.toml", "CONTRACT.md", "README.md", "CHANGELOG.md", "src/**", "tests/**", "test-vectors/**"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_jcs = "0.2"
+sha2 = "0.10"
+subc-protocol = ">=0.34.1, <0.37"
