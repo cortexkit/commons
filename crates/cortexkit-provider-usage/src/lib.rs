@@ -553,7 +553,7 @@ pub struct CreditExpiry {
     pub expires_at: String,
 }
 
-/// Saved reset credits reported by Codex's read-only credits endpoint.
+/// Saved reset credits an upstream reports for an account.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedResets {
@@ -565,6 +565,42 @@ pub struct SavedResets {
     pub soonest_expires_at: Option<String>,
     #[serde(default)]
     pub credits: Vec<CreditExpiry>,
+    /// The same credits grouped by what a reset restores, for an upstream that
+    /// offers more than one kind. Empty, and omitted, when the upstream states
+    /// no kind: that means the kinds are unknown, not that there is one kind.
+    /// When present, the groups' counts add up to `available_count`.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub kinds: Vec<SavedResetKind>,
+}
+
+/// The saved resets of one kind.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedResetKind {
+    /// What a reset of this kind restores. One of the [`saved_reset_kind`]
+    /// values; the list is open, so a consumer must render an unknown value.
+    pub kind: String,
+    pub available_count: u32,
+    /// When this kind's next credit lapses. Absent means none of them states
+    /// an expiry.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub soonest_expires_at: Option<String>,
+}
+
+/// What a saved reset restores, named by the windows it clears.
+///
+/// The list is open. A consumer must handle a value it does not know, and a
+/// new kind is a new constant here, never a reuse of an existing one.
+pub mod saved_reset_kind {
+    /// Restores the five-hour (session) window only.
+    pub const SESSION: &str = "session";
+    /// Restores the weekly window only.
+    pub const WEEKLY: &str = "weekly";
+    /// Restores both the five-hour and the weekly window.
+    pub const FULL: &str = "full";
+    /// Restores one model's own weekly limit, and gives back that model's share
+    /// of the general weekly window.
+    pub const MODEL_WEEKLY: &str = "model_weekly";
 }
 
 fn account_info_is_empty(value: &Option<AccountInfo>) -> bool {
@@ -1355,6 +1391,7 @@ mod tests {
                 credits: vec![CreditExpiry {
                     expires_at: "2026-07-31T20:11:35Z".to_string(),
                 }],
+                kinds: Vec::new(),
             }),
             ..ProviderUsage::degraded("codex", "x")
         };
@@ -1362,8 +1399,46 @@ mod tests {
         assert!(json.contains("\"savedResets\""));
         assert!(json.contains("\"availableCount\":2"));
         assert!(json.contains("\"soonestExpiresAt\""));
+        assert!(
+            !json.contains("\"kinds\""),
+            "no stated kinds must be omitted"
+        );
         let back: ProviderUsage = serde_json::from_str(&json).unwrap();
         assert_eq!(back, entry);
+    }
+
+    #[test]
+    fn saved_reset_kinds_serialize_camel_case_and_old_bodies_still_decode() {
+        let resets = SavedResets {
+            available_count: 2,
+            soonest_expires_at: None,
+            credits: Vec::new(),
+            kinds: vec![
+                SavedResetKind {
+                    kind: saved_reset_kind::SESSION.to_string(),
+                    available_count: 1,
+                    soonest_expires_at: Some("2026-12-01T00:00:00Z".to_string()),
+                },
+                SavedResetKind {
+                    kind: "from_the_future".to_string(),
+                    available_count: 1,
+                    soonest_expires_at: None,
+                },
+            ],
+        };
+        let json = serde_json::to_value(&resets).unwrap();
+        assert_eq!(
+            json["kinds"],
+            serde_json::json!([
+                {"kind": "session", "availableCount": 1, "soonestExpiresAt": "2026-12-01T00:00:00Z"},
+                {"kind": "from_the_future", "availableCount": 1}
+            ])
+        );
+        let back: SavedResets = serde_json::from_value(json).unwrap();
+        assert_eq!(back, resets, "an unknown kind decodes intact");
+        let old: SavedResets =
+            serde_json::from_str(r#"{"availableCount":1,"credits":[]}"#).unwrap();
+        assert!(old.kinds.is_empty(), "a body from before kinds decodes");
     }
 
     #[test]
