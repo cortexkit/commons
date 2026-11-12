@@ -112,8 +112,64 @@ mod tests {
         assert_eq!(body.code, "future_refusal");
         assert_eq!(body.detail.as_ref().unwrap()["provider"], "future.module");
         assert!(!cortexkit_role_llm_runner::errors::is_retryable(&body.code));
+        assert!(!cortexkit_role_llm_runner::errors::is_account_wait(
+            &body.code
+        ));
         let encoded = serde_json::to_value(&body).unwrap();
         assert_eq!(encoded["code"], "future_refusal");
         assert_eq!(encoded["detail"]["provider"], "future.module");
+    }
+
+    #[test]
+    fn account_wait_uses_only_the_outer_refusal_code() {
+        use cortexkit_role_llm_runner::errors;
+        use serde_json::json;
+
+        for (code, account_wait, retryable) in [
+            ("account_selection_refused", true, false),
+            ("account_limit_exhausted", true, false),
+            ("transient", false, true),
+            ("fetch_unavailable", false, true),
+            ("scope_not_synced", false, true),
+            ("session_released", false, true),
+            ("fork_busy", false, true),
+            ("fork_account_held", false, true),
+            ("future_refusal", false, false),
+            ("", false, false),
+        ] {
+            for detail in [
+                None,
+                Some(json!({"class": "transient", "routing_code": "unknown_refusal"})),
+                Some(json!({"class": "permanent", "routing_code": "account_pool_exhausted"})),
+                Some(json!({
+                    "class": "account_selection_refused",
+                    "routing_code": "account_limit_exhausted"
+                })),
+                Some(json!({
+                    "routing_code": "account_pool_exhausted",
+                    "class": "transient",
+                    "retry_after_s": 60,
+                    "retry_after_secs": 60.0,
+                    "decision_id": "acd-refused",
+                    "provider_code": "account_limit_exhausted",
+                    "routing_detail": {
+                        "code": "account_pool_exhausted",
+                        "retry_after_s": 60,
+                        "decision_id": "acd-refused",
+                        "exclusions": []
+                    },
+                    "future_hint": "ignored"
+                })),
+            ] {
+                let mut wire = json!({"code": code, "message": "refused"});
+                if let Some(detail) = detail {
+                    wire["detail"] = detail;
+                }
+                let body: subc_protocol::ErrorBody = serde_json::from_value(wire.clone()).unwrap();
+                assert_eq!(errors::is_account_wait(&body.code), account_wait, "{wire}");
+                assert_eq!(errors::is_retryable(&body.code), retryable, "{wire}");
+                assert_eq!(serde_json::to_value(&body).unwrap(), wire);
+            }
+        }
     }
 }

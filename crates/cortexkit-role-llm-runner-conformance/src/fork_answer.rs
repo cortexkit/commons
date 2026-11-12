@@ -1330,8 +1330,9 @@ fn wire_rules(describe: &cortexkit_role_llm_runner::describe::RoleDescribe) -> C
     ] {
         if !errors::CODES.contains(&code)
             || errors::is_retryable(code) != matches!(code, "fork_busy" | "fork_account_held")
+            || errors::is_account_wait(code)
         {
-            return Err(format!("fork code/retry advice differs for {code}"));
+            return Err(format!("fork code/outcome advice differs for {code}"));
         }
     }
     Ok(())

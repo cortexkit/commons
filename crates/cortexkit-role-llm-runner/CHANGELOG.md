@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.39
+
+- Name the separate account-wait outcome for `session.send` refusals with
+  outer code `account_selection_refused` or `account_limit_exhausted`.
+  Nothing was sent: hold the work, respect refusal timing before repeating,
+  or move it to another model, but never report the work as failed for this
+  reason. Runners selecting accounts inside a run need not refuse sends.
+- Add `errors::is_account_wait` and refusal constants and register both
+  codes. Keep `is_retryable` false for them and classify outcomes by the
+  outer code alone, never a diagnostic class or nested routing code.
+
 ## 0.8.38
 
 - Clarify that runner-specific `detail.cause` is informational: retry decisions

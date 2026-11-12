@@ -4,9 +4,11 @@
 //!
 //! Codes are open strings on the wire: a consumer that meets a code it does
 //! not know treats it as a terminal refusal of that one request. Only the
-//! codes [`is_retryable`] names are retried with the same request; every
-//! other refusal is an answer, and retrying it unchanged meets the same
-//! refusal.
+//! codes [`is_retryable`] names are plain retries with the same request.
+//! Separately, [`is_account_wait`] names send refusals that hold the work
+//! for an account or allow moving it to another model, never fail it.
+//! Every other refusal is an answer, and retrying it unchanged meets the
+//! same refusal.
 //!
 //! This crate carries no error-body type of its own. The helpers here take
 //! the body's `code` and `detail` as found in whatever frame type the
@@ -567,6 +569,11 @@ pub const FORK_ACCOUNT_HELD: &str = "fork_account_held";
 /// Routing permanently refused the fork's admission.
 pub const FORK_ACCOUNT_BLOCKED: &str = "fork_account_blocked";
 
+/// Send-time account selection could not supply an account. Nothing was sent.
+pub const ACCOUNT_SELECTION_REFUSED: &str = "account_selection_refused";
+/// The selected account's usage limit is exhausted. Nothing was sent.
+pub const ACCOUNT_LIMIT_EXHAUSTED: &str = "account_limit_exhausted";
+
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
     UNKNOWN_FORK,
@@ -577,6 +584,8 @@ pub const CODES: &[&str] = &[
     FORK_UNSUPPORTED,
     FORK_ACCOUNT_HELD,
     FORK_ACCOUNT_BLOCKED,
+    ACCOUNT_SELECTION_REFUSED,
+    ACCOUNT_LIMIT_EXHAUSTED,
     RETENTION_REQUIRED,
     RETENTION_CONFLICT,
     SESSION_RELEASED,
@@ -644,7 +653,8 @@ pub const CODES: &[&str] = &[
 /// Whether a runner's refusal is retryable with the same request. Route
 /// refusals the daemon itself classifies as retryable on open (module
 /// reloading or warming, target unavailable) are the transport's to judge
-/// and are not listed here.
+/// and are not listed here. Only the outer error code decides; diagnostic
+/// detail does not. Account waits are separate: see [`is_account_wait`].
 pub fn is_retryable(code: &str) -> bool {
     matches!(
         code,
@@ -655,6 +665,16 @@ pub fn is_retryable(code: &str) -> bool {
             | FORK_BUSY
             | FORK_ACCOUNT_HELD
     )
+}
+
+/// Whether a `session.send` refusal means waiting for an account rather than
+/// failing the work. Nothing was sent, so repeating the send is safe, but not
+/// immediately: honor the refusal's timing, hold the work with backoff when no
+/// time is given, or move it to another model. Never fail the work for this
+/// reason. Only the outer error code decides, not `class` or nested detail.
+/// Runners choosing accounts inside a run need not refuse sends this way.
+pub fn is_account_wait(code: &str) -> bool {
+    matches!(code, ACCOUNT_SELECTION_REFUSED | ACCOUNT_LIMIT_EXHAUSTED)
 }
 
 /// The field an `invalid_params`, `send_id_reuse`, or scoped-send mismatch
@@ -723,7 +743,7 @@ pub mod provider_codes {
     /// The provider's response deadline ended the request.
     pub const RESPONSE_DEADLINE: &str = "response_deadline";
     /// The account's usage limit is exhausted.
-    pub const ACCOUNT_LIMIT_EXHAUSTED: &str = "account_limit_exhausted";
+    pub const ACCOUNT_LIMIT_EXHAUSTED: &str = super::ACCOUNT_LIMIT_EXHAUSTED;
     /// The account's billing or spending allowance is exhausted.
     pub const BILLING_EXHAUSTED: &str = "billing_exhausted";
     /// The provider served an account other than the run's frozen account.
@@ -925,6 +945,33 @@ mod tests {
                 case["retryable"].as_bool().unwrap(),
                 "{code}"
             );
+            assert_eq!(
+                is_account_wait(code),
+                case["account_wait"].as_bool().unwrap_or(false),
+                "{code}"
+            );
+        }
+    }
+
+    #[test]
+    fn account_wait_is_separate_from_retryable_refusals() {
+        assert_eq!(ACCOUNT_SELECTION_REFUSED, "account_selection_refused");
+        assert_eq!(ACCOUNT_LIMIT_EXHAUSTED, "account_limit_exhausted");
+        for code in ["account_selection_refused", "account_limit_exhausted"] {
+            assert!(is_account_wait(code), "{code} must wait for an account");
+            assert!(!is_retryable(code), "{code} is not a plain retry");
+            assert!(CODES.contains(&code), "{code} must be a known refusal");
+        }
+        for code in CODES.iter().chain(provider_codes::CODES) {
+            if !matches!(
+                *code,
+                "account_selection_refused" | "account_limit_exhausted"
+            ) {
+                assert!(!is_account_wait(code), "{code} is not an account wait");
+            }
+        }
+        for code in ["future_refusal", ""] {
+            assert!(!is_account_wait(code), "{code:?} is not an account wait");
         }
     }
 

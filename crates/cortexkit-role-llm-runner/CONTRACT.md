@@ -6934,6 +6934,8 @@ treats it as a terminal refusal of that one request.
 | `fork_unsupported` | the session or storage cannot serve forks cheaply | — | no |
 | `fork_account_held` | routing temporarily cannot supply the head's frozen account, credential and tier | `routing_code?`, `mismatch?`: `account`, `credential` or `service_tier` | **yes** |
 | `fork_account_blocked` | another routing refusal before any model call | `routing_code` | no |
+| `account_selection_refused` | a runner choosing accounts at send time cannot currently supply an account for `session.send`; nothing was sent | shared account-wait detail below | **account wait**, not a plain retry |
+| `account_limit_exhausted` | a runner choosing accounts at send time refuses `session.send` because the account's usage limit is exhausted; nothing was sent | shared account-wait detail below | **account wait**, not a plain retry |
 | `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a compaction_item without a string preset (field plan.compaction_item.preset); a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.subscribe` request with malformed `from` (field `from`, §7); a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
 | `history_changed` | a read cursor names another history_version | — | no: read a fresh page |
 | `served_bytes_changed` | a read would serve a message whose body, rebuilt from the host's store, differs from the digest it was first served with (§4.2.1); or a `run.tool_calls` page rebuilds `args` from a requesting message under the same whole-message digest check (`served_bytes::served_body` and `check_served`), and that rebuild differs or its host row is gone (§6.3). The whole page is refused, never a partial page or a call with absent or different `args` | `{mid}` (`errors::ServedBytesChangedDetail`), the first such message in page order; no content or digest | no. For a read: the changed message is served again only under a raised history_version, so re-read from the tail. For `run.tool_calls`: don't retry that page; the requesting message can't be reproduced, and reading the current transcript doesn't recover the original run's arguments |
@@ -7018,9 +7020,67 @@ treats it as a terminal refusal of that one request.
   `errors::is_retryable` is true exactly for `fork_busy` and
   `fork_account_held`. No old code's retry classification changes; no
   refusal gains a `class` member.
-- [pinned] Only the codes marked retryable are retried with the same request
-  (`errors::is_retryable`). A refusal is an answer: retrying it unchanged
-  meets the same refusal.
+- [pinned] Retry and account-wait decisions use only the outer `code` of the
+  error body (§12), as in the `transient` row above. Neither `class`,
+  `detail.class`, nor a nested code such as `detail.routing_code` decides the
+  outcome; they are informational. For these direct refusals, both
+  `errors::is_retryable` and `errors::is_account_wait` take only that outer
+  code.
+- [pinned] A `session.send` refused with `account_selection_refused` or
+  `account_limit_exhausted` is an **account wait**
+  (`errors::is_account_wait` is true exactly for those two codes).
+  The send was not sent, so repeating it is safe, but the caller MUST NOT
+  repeat it at once. The caller repeats it only after the refusal's named
+  time, holds the work meanwhile, or moves the work to another model. It
+  MUST NOT report the work as failed for this reason. When `retry_after_s`
+  is present, repeat no sooner than that many seconds after receiving the
+  refusal (`retry_after_secs` carries the same value as a float).
+  Otherwise, when `resets_at_ms` is present, repeat no sooner than that
+  Unix-epoch millisecond instant. The relative retry hint takes precedence
+  because routing names when to ask again; a quota reset can be later than
+  a useful probe. With neither hint, the caller uses its own backoff and
+  still never repeats at once.
+
+A send queued behind a running run and refused at its own admission reports
+`session.send_status.state: "finished"`; its `run_id` names the run it would
+have started. That run's `run.status` and `run.result` report state `error`,
+with the ordinary run `error` carrying
+`provider_code: "account_limit_exhausted"`, `retry_after_secs?` and
+`resets_at_ms?`, but no
+`routing_code`, `decision_id` or `routing_detail`. That queued-admission
+error is the same account wait: pass its `provider_code` to
+`errors::is_account_wait`. When `retry_after_secs` is present, repeat no
+sooner than that many float seconds after receiving the error; otherwise,
+when `resets_at_ms` is present, no sooner than that Unix-epoch millisecond
+instant. With neither, use the caller's own backoff, never repeat at once.
+
+- [pinned] Only runners that choose accounts at send time refuse sends with
+  these account-wait codes. A runner that chooses an account for each model
+  request inside a run does not refuse sends this way and is not required to.
+- [pinned] Account waits are separate from plain retries:
+  `errors::is_retryable` remains false for both account-wait codes. Apart
+  from account waits, only the codes marked retryable are retried with the
+  same request (`errors::is_retryable`). A refusal is an answer: retrying it
+  unchanged meets the same refusal.
+
+Both account-wait refusal codes share this `detail` object, with members
+listed in serialized order. Only `routing_code` and `class` are required.
+Readers ignore unknown members and treat `routing_detail` as opaque.
+Every member is informational for outcome classification; only the timing
+members govern when the caller may repeat a send already classified as an
+account wait.
+
+| Member | Value |
+|---|---|
+| `routing_code` | routing's refusal code verbatim (string) |
+| `class` | `transient` or `permanent`; neither value changes the account-wait outcome |
+| `retry_after_s?` | integer seconds before asking again |
+| `retry_after_secs?` | the same duration as a float, present exactly when `retry_after_s` is present |
+| `decision_id?` | string, when routing supplied one |
+| `provider_code?` | `account_limit_exhausted`, only on the refusal with that outer code |
+| `resets_at_ms?` | integer Unix-epoch milliseconds |
+| `routing_detail?` | routing's whole refusal detail object, verbatim, when supplied; opaque to the caller |
+
 - [pinned] `send_retracted` is in `errors::CODES` and is not retryable.
 - [pinned] Route refusals the daemon classifies as retryable on open (module
   reloading or warming, target unavailable) are retried by the caller's
@@ -7083,8 +7143,10 @@ it is the `context_ceiling` refusal or run state (§6).
   recorded run errors may still carry it; consumers MUST treat it as
   `billing_exhausted`.
 
-These are run errors, not request-refusal codes. Plan-fetch refusals, such
-as `plan_param_refused`, are send refusals and do not belong in this list.
+These entries describe run errors, not request refusals. The same bytes
+`account_limit_exhausted` also name the send-time account wait in §12.1,
+including its queued-admission case. Plan-fetch refusals, such as
+`plan_param_refused`, are send refusals and do not belong in this list.
 `errors::provider_codes::CODES` in the role crate lists every provider code
 above.
 

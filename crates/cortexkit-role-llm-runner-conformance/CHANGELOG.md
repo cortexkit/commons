@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.48
+
+- Pin runner contract `=0.8.39` for the separate account-wait outcome.
+  Extend refusal transport/predicate tests to cover both account-wait codes,
+  plain retries, unknown codes and diagnostic details that must not change
+  classification. Fork code checks also exclude account waits.
+
 ## 0.17.47
 
 - Add opt-in `plan_view` cases for the closed validated reply, optional system
