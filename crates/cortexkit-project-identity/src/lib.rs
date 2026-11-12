@@ -168,7 +168,9 @@ impl<P> Request<P> {
 wire_struct!(
     /// A captured checkout binding; its incarnation is a checkout token string.
     ExecutionBinding {
-        root: String, incarnation: String, registration_epoch: String,
+        root: String,
+        incarnation: String,
+        registration_epoch: String,
     }
 );
 wire_struct!(
@@ -190,7 +192,10 @@ wire_struct!(EnumerateParams {
 });
 wire_struct!(
     /// Owner and repository components, passed through without normalization.
-    ResolveRemoteParams { owner: String, repo: String }
+    ResolveRemoteParams {
+        owner: String,
+        repo: String
+    }
 );
 
 /// Successful reads carry the process incarnation inside `result`.
@@ -273,7 +278,10 @@ wire_struct!(
 );
 wire_struct!(
     /// A unique matching project and one of its registered canonical roots.
-    ResolveRemoteFound { project_id: String, root: String }
+    ResolveRemoteFound {
+        project_id: String,
+        root: String
+    }
 );
 wire_struct!(
     /// Matching project ids, sorted lexicographically by the current writer.

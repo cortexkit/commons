@@ -95,7 +95,10 @@ wire_struct!(
 wire_struct!(
     /// Accepted workspace document metadata, not its charter or document text.
     ContextDocument {
-        revision: i64, sha256: String, charter_bytes: i64, document_bytes: i64,
+        revision: i64,
+        sha256: String,
+        charter_bytes: i64,
+        document_bytes: i64,
     }
 );
 wire_struct!(ContextProjectReply {
@@ -301,14 +304,20 @@ wire_struct!(
 wire_struct!(
     /// The wire member is `session`, with no `session_id` alias.
     #[serde(deny_unknown_fields)]
-    AgentSessionForRunnerParams { runner: String, session: String }
+    AgentSessionForRunnerParams {
+        runner: String,
+        session: String
+    }
 );
 /// Operation name for a session lookup by harness and session.
 pub const AGENT_SESSION_FOR_HARNESS: &str = "agent.session_for_harness";
 wire_struct!(
     /// Harness lookup params; unknown members and `session_id` aliases are refused.
     #[serde(deny_unknown_fields)]
-    AgentSessionForHarnessParams { harness: String, session: String }
+    AgentSessionForHarnessParams {
+        harness: String,
+        session: String
+    }
 );
 /// Request envelope for a session lookup by harness and session.
 pub type AgentSessionForHarnessRequest = Request<AgentSessionForHarnessParams>;
@@ -400,7 +409,10 @@ wire_struct!(
 );
 wire_struct!(
     /// Fleet placement summary, not a full workspace record.
-    FleetWorkspace { id: String, name: String }
+    FleetWorkspace {
+        id: String,
+        name: String
+    }
 );
 wire_struct!(FleetAgentIdentity {
     #[serde(rename = "agentId")]
