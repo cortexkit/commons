@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.4.0 (breaking)
+
+- **Behaviour change, `PLAN_VERSION` 4:** `clean_reply` no longer leaves a
+  doubled space, or a space before closing punctuation, where it removes a
+  well-formed tag from the middle of a reply. `"the file §4§ holds it"` cleans
+  to `"the file holds it"`, and `"see §3§."` to `"see."` (closing punctuation
+  is `.,;:!?)]`). Only a U+0020 space next to a removed well-formed tag is
+  dropped. Newlines, other whitespace, the model's own spacing elsewhere,
+  adjacent tags, broken tag forms, the split of leading tags and the outer trim
+  are unchanged. As one JavaScript replace with `""`, after the leading tags
+  are split off: `/(?: §\d+§)+(?=[.,;:!?)\]])|(?<= )§\d+§ |§\d+§/g`.
+- New `clean::clean_reply_for_plan(plan_version, text) -> Option<CleanedReply>`
+  (dispatcher function `clean_reply_for_plan`, input `{plan_version, text}`):
+  plan version 3 and earlier clean byte for byte as before, 4 as `clean_reply`
+  now does, and a newer version is `None`. Version 3 exists only to reproduce
+  bytes recorded before a runner adopted version 4: a resumed run's requests,
+  and offline checks that rebuild recorded requests. It is never for a new
+  render or a served read.
+- `PLAN_VERSION` is 4. Plan rendering is the same at 3 and 4: `plan_at` and
+  `plan_view_at` accept 4 as well as 2 and 3. A v4 row pins the rendering
+  outputs; v3's pins stay as history.
+- **Runners that adopt this release step `history_version` once more:** served
+  reply text cleaned through `clean_reply` changes for replies that hold such a
+  tag, and so do compaction entries built from it and their digests.
+- Vectors: `vectors/cases.json` (checked by `vectors/SHA256SUMS`) gains 23
+  `clean_reply` cases for the new rule and the cases it must leave alone, and
+  103 `clean_reply_for_plan` cases: every `clean_reply` input under plan
+  versions 3 and 4, so the pinned difference is exactly the space rule, and one
+  at version 2. Two earlier `clean_reply` outputs change as described above.
+  JavaScript runners use the WebAssembly companion crate and stay current-only:
+  they call `clean_reply`, because nothing on the JavaScript side replays
+  recorded requests. A JavaScript implementation checked against the file reads
+  it as a JSON array of `{name, function, input, output}`, calls each function
+  it implements with `input` and must produce exactly `output`. It implements
+  `clean_reply` and skips the `clean_reply_for_plan` cases. Every reply-cleaning
+  output is `{"ok": {model_tag, text}}`, where `model_tag` is a JSON number or
+  `null` and always fits in a double.
+- Built on cortexkit-role-compaction 0.4.0, whose entries share content
+  (`Text`), hold tool input as JSON text (`ToolInput`) and hold checksums as
+  `Digest`. No function of this crate changes its signature, and apart from
+  the reply cleaning above every vector and plan output is byte-identical.
+- A replace of `input.<key>` parses the input, writes the member and stores the
+  edited object's compact JSON text. Checking such an edit parses only the one
+  member it names.
+- A replace of `attachments` or `delivered` builds the kept list from the
+  part's readers and sets it, since a tool part no longer exposes those lists
+  as fields. This clones the kept items, which the published version kept in
+  place.
+- Replaced text and inserted texts are new `Text` values, one copy each as
+  before. `Replace.expect` is compared with the part's `Digest` without
+  formatting it.
+
 ## 0.3.0
 
 - Signed floor input for compaction contract rule W3.5 (tool-set changes strip

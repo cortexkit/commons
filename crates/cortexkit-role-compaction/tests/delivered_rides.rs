@@ -111,7 +111,7 @@ fn delivered_rides_tokens_are_metadata_not_content() {
     let PartBody::Tool(tool) = &mut changed.parts[0].body else {
         panic!("tool");
     };
-    tool.delivered[0].tokens = Some(TokenCount::new(100));
+    tool.delivered_mut()[0].tokens = Some(TokenCount::new(100));
     assert_eq!(
         entry_digest(changed.role.clone(), None, &changed.parts),
         entry.digest
@@ -119,7 +119,9 @@ fn delivered_rides_tokens_are_metadata_not_content() {
     let PartBody::Tool(tool) = &mut changed.parts[0].body else {
         panic!("tool");
     };
-    tool.input["tokens"]["count"] = json!(8);
+    let mut input = tool.input.parse();
+    input["tokens"]["count"] = json!(8);
+    tool.input = input.into();
     assert_ne!(
         entry_digest(changed.role, None, &changed.parts),
         entry.digest
@@ -127,11 +129,12 @@ fn delivered_rides_tokens_are_metadata_not_content() {
     let PartBody::Tool(compact) = part.compact().body else {
         panic!("tool");
     };
-    assert_eq!(compact.delivered[0].tokens, Some(TokenCount::new(2)));
-    assert_eq!(compact.delivered[0].text, None);
-    assert_eq!(compact.delivered[0].send_id.as_deref(), Some("send-a"));
+    let delivered = compact.delivered().unwrap();
+    assert_eq!(delivered[0].tokens, Some(TokenCount::new(2)));
+    assert_eq!(delivered[0].text, None);
+    assert_eq!(delivered[0].send_id.as_deref(), Some("send-a"));
     assert_eq!(
-        compact.delivered[0].forms(),
+        delivered[0].forms(),
         &[
             RideForm::TurnSystemCleared,
             RideForm::TurnSystem,

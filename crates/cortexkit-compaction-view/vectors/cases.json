@@ -4,7 +4,7 @@
     "function": "plan_version",
     "input": {},
     "output": {
-      "ok": 3
+      "ok": 4
     }
   },
   {
@@ -4890,7 +4890,7 @@
     "output": {
       "ok": {
         "model_tag": 12,
-        "text": "Dropped  and  as asked."
+        "text": "Dropped and  as asked."
       }
     }
   },
@@ -5965,7 +5965,7 @@
     "output": {
       "ok": {
         "model_tag": null,
-        "text": "Done ."
+        "text": "Done."
       }
     }
   },
@@ -11811,6 +11811,1747 @@
           }
         }
       ]
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a removed tag between two spaces keeps one space",
+    "function": "clean_reply",
+    "input": {
+      "text": "the file §4§ holds it"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "the file holds it"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a removed tag before a full stop takes its space with it",
+    "function": "clean_reply",
+    "input": {
+      "text": "see §3§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see."
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a removed tag before a comma takes its space with it",
+    "function": "clean_reply",
+    "input": {
+      "text": "first §3§, then"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "first, then"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a removed tag before a semicolon takes its space with it",
+    "function": "clean_reply",
+    "input": {
+      "text": "one §3§; two"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "one; two"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a removed tag before a colon takes its space with it",
+    "function": "clean_reply",
+    "input": {
+      "text": "as follows §3§: this"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "as follows: this"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a removed tag before an exclamation mark takes its space with it",
+    "function": "clean_reply",
+    "input": {
+      "text": "done §3§!"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "done!"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a removed tag before a question mark takes its space with it",
+    "function": "clean_reply",
+    "input": {
+      "text": "right §3§?"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "right?"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a removed tag before a closing parenthesis takes its space with it",
+    "function": "clean_reply",
+    "input": {
+      "text": "(see §3§) next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "(see) next"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a removed tag before a closing bracket takes its space with it",
+    "function": "clean_reply",
+    "input": {
+      "text": "[see §3§] next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "[see] next"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: spaced tags before punctuation go with their spaces",
+    "function": "clean_reply",
+    "input": {
+      "text": "x §3§ §4§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "x."
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: spaced tags between words leave one space",
+    "function": "clean_reply",
+    "input": {
+      "text": "a §3§ §4§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a b"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a model-written double space stays",
+    "function": "clean_reply",
+    "input": {
+      "text": "model  wrote  doubles §3§ here"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "model  wrote  doubles here"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a model-written double space before a tag stays",
+    "function": "clean_reply",
+    "input": {
+      "text": "word  §3§ next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "word  next"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a tag before a newline leaves its space",
+    "function": "clean_reply",
+    "input": {
+      "text": "line §3§\nnext"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "line \nnext"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a tag after a newline leaves its space",
+    "function": "clean_reply",
+    "input": {
+      "text": "line\n§3§ next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "line\n next"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a tag at the very start is split off as before",
+    "function": "clean_reply",
+    "input": {
+      "text": "§3§ start"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 3,
+        "text": "start"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a tag at the very end is trimmed as before",
+    "function": "clean_reply",
+    "input": {
+      "text": "end §3§"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "end"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: two adjacent tags between words leave both spaces",
+    "function": "clean_reply",
+    "input": {
+      "text": "a §3§§4§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a  b"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: two adjacent tags before punctuation leave the space",
+    "function": "clean_reply",
+    "input": {
+      "text": "see §3§§4§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see ."
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a broken tag between words leaves both spaces",
+    "function": "clean_reply",
+    "input": {
+      "text": "mid §11865\">§ text"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "mid  text"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: a dangling tag before punctuation leaves its space",
+    "function": "clean_reply",
+    "input": {
+      "text": "see §12$."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see ."
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: tabs around a tag stay",
+    "function": "clean_reply",
+    "input": {
+      "text": "a\t§3§\tb"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a\t\tb"
+      }
+    }
+  },
+  {
+    "name": "reply cleaning, version 4: non-breaking spaces around a tag stay",
+    "function": "clean_reply",
+    "input": {
+      "text": "a §3§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a  b"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a tag inside a reply keeps both spaces",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§12§ §13§ Dropped §4§ and §5\">§6§ as asked."
+    },
+    "output": {
+      "ok": {
+        "model_tag": 12,
+        "text": "Dropped  and  as asked."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a tag after the text keeps its space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "Done §3§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "Done ."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a removed tag between two spaces keeps one space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "the file §4§ holds it"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "the file  holds it"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a removed tag before a full stop takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "see §3§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see ."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a removed tag before a comma takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "first §3§, then"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "first , then"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a removed tag before a semicolon takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "one §3§; two"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "one ; two"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a removed tag before a colon takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "as follows §3§: this"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "as follows : this"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a removed tag before an exclamation mark takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "done §3§!"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "done !"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a removed tag before a question mark takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "right §3§?"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "right ?"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a removed tag before a closing parenthesis takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "(see §3§) next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "(see ) next"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a removed tag before a closing bracket takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "[see §3§] next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "[see ] next"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: spaced tags before punctuation go with their spaces",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "x §3§ §4§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "x  ."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: spaced tags between words leave one space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "a §3§ §4§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a   b"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a model-written double space stays",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "model  wrote  doubles §3§ here"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "model  wrote  doubles  here"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a model-written double space before a tag stays",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "word  §3§ next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "word   next"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a tag before a newline leaves its space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "line §3§\nnext"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "line \nnext"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a tag after a newline leaves its space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "line\n§3§ next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "line\n next"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a tag at the very start is split off as before",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§3§ start"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 3,
+        "text": "start"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a tag at the very end is trimmed as before",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "end §3§"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "end"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: two adjacent tags between words leave both spaces",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "a §3§§4§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a  b"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: two adjacent tags before punctuation leave the space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "see §3§§4§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see ."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a broken tag between words leaves both spaces",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "mid §11865\">§ text"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "mid  text"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a dangling tag before punctuation leaves its space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "see §12$."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see ."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: tabs around a tag stay",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "a\t§3§\tb"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a\t\tb"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: non-breaking spaces around a tag stay",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "a §3§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a  b"
+      }
+    }
+  },
+  {
+    "name": "plan version 4 is the current rule: a tag between two spaces",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "the file §4§ holds it"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "the file holds it"
+      }
+    }
+  },
+  {
+    "name": "plan version 4 is the current rule: a tag before punctuation",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "see §3§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see."
+      }
+    }
+  },
+  {
+    "name": "plan version 4 is the current rule: adjacent tags",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "a §3§§4§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a  b"
+      }
+    }
+  },
+  {
+    "name": "plan version 2 cleans as version 3 did",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 2,
+      "text": "see §3§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see ."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a reply's own prefix is split off",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§12§ Done."
+    },
+    "output": {
+      "ok": {
+        "model_tag": 12,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a reply's own prefix is split off",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§12§ Done."
+    },
+    "output": {
+      "ok": {
+        "model_tag": 12,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: numbers inside a reply are removed",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§12§ §13§ Dropped §4§ and §5\">§6§ as asked."
+    },
+    "output": {
+      "ok": {
+        "model_tag": 12,
+        "text": "Dropped and  as asked."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a section reference keeps its number but not its sign",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "See §5.1 of the spec."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "See 5.1 of the spec."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a section reference keeps its number but not its sign",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "See §5.1 of the spec."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "See 5.1 of the spec."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a cleaned reply is trimmed",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "  §12§ Done.\n\n"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a cleaned reply is trimmed",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "  §12§ Done.\n\n"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: a first prefix too large for a number names no tag, and a later one never stands in",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§18446744073709551616§ §7§ Done."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a first prefix too large for a number names no tag, and a later one never stands in",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§18446744073709551616§ §7§ Done."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: two leading tags",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§1§ §2§ Done."
+    },
+    "output": {
+      "ok": {
+        "model_tag": 1,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: two leading tags",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§1§ §2§ Done."
+    },
+    "output": {
+      "ok": {
+        "model_tag": 1,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a tag after the text",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "Done §3§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "Done."
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a section reference",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§5.1 applies"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "5.1 applies"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a section reference",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§5.1 applies"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "5.1 applies"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: two section references",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§12.3 and §4"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "12.3 and"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: two section references",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§12.3 and §4"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "12.3 and"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a broken tag ending",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§9\"> broken"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "broken"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a broken tag ending",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§9\"> broken"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "broken"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a broken tag ending before a tag",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§9\">§10§ text"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "text"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a broken tag ending before a tag",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§9\">§10§ text"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "text"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a section sign before a colon",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§7: note"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "note"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a section sign before a colon",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§7: note"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "note"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a section sign before letters",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§7a word"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a word"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a section sign before letters",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§7a word"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a word"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a lone trailing section sign",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "trailing §"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "trailing"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a lone trailing section sign",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "trailing §"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "trailing"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a doubled section sign",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§§ double"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "double"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a doubled section sign",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§§ double"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "double"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a reply that is only a tag",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§1§"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 1,
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a reply that is only a tag",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§1§"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 1,
+        "text": ""
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a padded tag",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "  §2§  padded  "
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "padded"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a padded tag",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "  §2§  padded  "
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "padded"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a section sign before a count",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§99 files"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "files"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a section sign before a count",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§99 files"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "files"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: no section sign",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "2024 roadmap"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "2024 roadmap"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: no section sign",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "2024 roadmap"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "2024 roadmap"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: tags on separate lines",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§1§\n\n§2§ multi"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 1,
+        "text": "multi"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: tags on separate lines",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§1§\n\n§2§ multi"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 1,
+        "text": "multi"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: letters between section signs",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§x§ not a tag"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "x not a tag"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: letters between section signs",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§x§ not a tag"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "x not a tag"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: tag zero",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§0§ zero"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 0,
+        "text": "zero"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: tag zero",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§0§ zero"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 0,
+        "text": "zero"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: an oversized tag alone",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§18446744073709551616§ big"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "big"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: an oversized tag alone",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§18446744073709551616§ big"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "big"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: non-breaking spaces around a tag",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": " §5§ nbsp"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "nbsp"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: non-breaking spaces around a tag",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": " §5§ nbsp"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "nbsp"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a section sign before a parenthesis",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§6) closer"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "closer"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a section sign before a parenthesis",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§6) closer"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "closer"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a section sign before a bracket",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§6] closer"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "closer"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a section sign before a bracket",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§6] closer"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "closer"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a section sign before a dash",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§6- dash"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "dash"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a section sign before a dash",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§6- dash"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "dash"
+      }
+    }
+  },
+  {
+    "name": "plan version 3: reply cleaning edge case: a section sign before an underscore",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 3,
+      "text": "§6_ under"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "_ under"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: reply cleaning edge case: a section sign before an underscore",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§6_ under"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "_ under"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a removed tag before a comma takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "first §3§, then"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "first, then"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a removed tag before a semicolon takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "one §3§; two"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "one; two"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a removed tag before a colon takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "as follows §3§: this"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "as follows: this"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a removed tag before an exclamation mark takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "done §3§!"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "done!"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a removed tag before a question mark takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "right §3§?"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "right?"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a removed tag before a closing parenthesis takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "(see §3§) next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "(see) next"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a removed tag before a closing bracket takes its space with it",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "[see §3§] next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "[see] next"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: spaced tags before punctuation go with their spaces",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "x §3§ §4§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "x."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: spaced tags between words leave one space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "a §3§ §4§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a b"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a model-written double space stays",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "model  wrote  doubles §3§ here"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "model  wrote  doubles here"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a model-written double space before a tag stays",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "word  §3§ next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "word  next"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a tag before a newline leaves its space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "line §3§\nnext"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "line \nnext"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a tag after a newline leaves its space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "line\n§3§ next"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "line\n next"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a tag at the very start is split off as before",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "§3§ start"
+    },
+    "output": {
+      "ok": {
+        "model_tag": 3,
+        "text": "start"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a tag at the very end is trimmed as before",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "end §3§"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "end"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: two adjacent tags before punctuation leave the space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "see §3§§4§."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see ."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a broken tag between words leaves both spaces",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "mid §11865\">§ text"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "mid  text"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: a dangling tag before punctuation leaves its space",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "see §12$."
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "see ."
+      }
+    }
+  },
+  {
+    "name": "plan version 4: tabs around a tag stay",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "a\t§3§\tb"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a\t\tb"
+      }
+    }
+  },
+  {
+    "name": "plan version 4: non-breaking spaces around a tag stay",
+    "function": "clean_reply_for_plan",
+    "input": {
+      "plan_version": 4,
+      "text": "a §3§ b"
+    },
+    "output": {
+      "ok": {
+        "model_tag": null,
+        "text": "a  b"
+      }
     }
   }
 ]

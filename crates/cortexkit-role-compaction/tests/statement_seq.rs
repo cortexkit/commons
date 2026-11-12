@@ -190,10 +190,13 @@ fn statement_epoch_validates_builders_and_encoding_and_round_trips_boundaries() 
 }
 
 #[test]
-#[allow(deprecated)]
 fn statement_seq_without_epoch_decodes_for_drop_but_cannot_be_encoded() {
-    let legacy_conditions = conditions().with_statement_seq(42, true);
-    let legacy_setup = setup().with_statement_seq(42, true);
+    // No builder sets a stamp without its epoch; only decoding or a direct
+    // field write can hold one.
+    let mut legacy_conditions = conditions();
+    legacy_conditions.statement_seq = Some(42);
+    let mut legacy_setup = setup();
+    legacy_setup.statement_seq = Some(42);
     for error in [
         serde_json::to_value(legacy_conditions).unwrap_err(),
         serde_json::to_value(legacy_setup).unwrap_err(),
@@ -202,14 +205,17 @@ fn statement_seq_without_epoch_decodes_for_drop_but_cannot_be_encoded() {
             .to_string()
             .contains("statement_seq requires statement_epoch"));
     }
+    // An undeclared projection clears both members.
     let legacy_conditions = conditions()
         .with_statement_order(EPOCH, 42, true)
         .unwrap()
-        .with_statement_seq(43, false);
+        .with_statement_order(EPOCH, 43, false)
+        .unwrap();
     let legacy_setup = setup()
         .with_statement_order(EPOCH, 42, true)
         .unwrap()
-        .with_statement_seq(43, false);
+        .with_statement_order(EPOCH, 43, false)
+        .unwrap();
     for value in [
         serde_json::to_value(legacy_conditions).unwrap(),
         serde_json::to_value(legacy_setup).unwrap(),

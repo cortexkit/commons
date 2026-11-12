@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.4.0 (breaking)
+
+Content is shared instead of copied, tool input is held as its JSON text, and
+checksums are held as 32 bytes. The wire does not change: every message
+serializes to the same bytes, decoders accept what 0.3.8 accepts, and every
+checksum has the same value.
+
+- Removed the deprecated `with_statement_seq` builders of `SetupRequest` and
+  notice `Conditions`, as 0.3.8 announced. Use `with_statement_order(epoch,
+  statement_seq, declared)`, which sets both members; an undeclared projection
+  clears both. Decoding a stamp without an epoch is unchanged.
+- New `Text` (`text::Text`, also at the crate root): shared, immutable UTF-8.
+  Cloning shares the buffer. Build it from `&str`, `String` or `Box<str>` (one
+  copy) or from an `Arc<str>` (shared, no copy). It derefs to `str`, and compares,
+  hashes and orders as `str`. It travels as a JSON string. It is a bare
+  `Arc<str>` (16 bytes): a whole shared buffer, never a slice of one.
+- New `Digest` (`digest::Digest`, also at the crate root): 64 lowercase hex
+  digits are held as 32 bytes. Any other string is kept verbatim, so decoding
+  stays as lenient as before; `is_canonical()` tells the two apart. It
+  serializes exactly the string it was decoded from, orders as the wire strings
+  do, and compares with `str` and `String` as string equality. `with_str` and
+  `write_to` give the hex without allocating; `to_string()` via `Display`.
+- New `ToolInput` (`part::ToolInput`, also at the crate root): a tool call's
+  input as the JSON text of exactly one value, kept as built. `from_text`
+  refuses only text that is not one JSON value; any value is accepted, as
+  before. `as_str()` and `as_text()` never parse; `is_object()`, `parse()` and
+  `get(key)` read it. Built from a `Value`, `&Value` or `Map` by serializing it.
+  It serializes the held text verbatim. `InvalidToolInput` names a refusal.
+  `canonical_digest()` returns the SHA-256 of the value's JCS bytes (the
+  value llm-runner's `content_digest` gives). It is computed on first use and
+  kept with the input; clones carry it, and an input is immutable, so it never
+  goes stale. Building or decoding an input checks its text but computes no
+  digest. After the first computation, comparisons and lookups keyed on the
+  digest reuse the kept bytes. Part and entry checksums don't use it; their formula and
+  values are unchanged.
+- Changed fields: `PartBody::Text.text` and `PartBody::Reasoning.text`,
+  `ToolPart.output` and `Delivered.text` are `Text`. `ToolPart.input` is
+  `ToolInput`. `Part.digest`, `Entry.digest`, `Cursor.digest`,
+  `View.checksum`, `AppliedView.checksum` and `EditOp::Replace.expect` are
+  `Digest`.
+- Changed signatures: `ToolPart::new` takes `input: impl Into<ToolInput>` (a
+  `Value` still works). `ToolPart::with_output` and `Delivered::new` take
+  `impl Into<Text>`. `Cursor::new` and `AppliedView::new` take
+  `impl Into<Digest>` (a `&str` or `String` still works). `part::body_digest`,
+  `read::entry_digest` and `digest::checksum` return `Digest`.
+  `digest::content_digest` (llm-runner's) still returns `String`.
+- `ToolPart` keeps `attachments`, `approval` and `delivered` in one private
+  box that exists only when one of them holds something, so a tool part (and
+  every `PartBody`) is 160 bytes instead of 232. The three fields are no longer
+  public. Read them with `attachments()` (a slice, empty when none),
+  `approval()` and `delivered()` (both `Option`). Set them with the existing
+  `with_attachments`, `with_approval` and `with_delivered`, or on a built part
+  with `set_attachments`, `set_approval(Option)` and `set_delivered`. Setting a
+  field to empty frees the box when nothing else is in it. `delivered_mut()`
+  edits the delivered items in place (an empty slice when there are none); it
+  can't add or remove items. The wire form is unchanged: a tool part encodes
+  and decodes through a flat struct with the same fields, order and defaults.
+- **Behaviour change:** tool-input equality, and with it `ToolPart`, `Part` and
+  `Entry` equality, compares the canonical digests, that is the RFC 8785 (JCS)
+  forms. Two inputs that differ only in whitespace, key order, escapes or number
+  spelling are equal, and so are `1` and `1.0`. Part and entry checksums
+  already matched for inputs that differ only in their JSON spelling.
+- An input built from text is written as that text, also inside
+  pretty-printed output, where a `Value` was re-indented. Decoding from a
+  `Value`, as every decode path of this crate does, keeps the compact text, so
+  re-encoded bytes are unchanged.
+- serde_json is used with `raw_value` (input text is written verbatim) and
+  `float_roundtrip` (a value's text parses back to the same value, so
+  checksums computed from the text equal those computed from the value).
+  `serde_jcs` 0.2 and `sha2` 0.10, which llm-runner already uses, are direct
+  dependencies for the input's canonical digest.
+
 ## 0.3.8
 
 - Add optional Setup and Conditions `statement_epoch`: 1 to 64 visible ASCII

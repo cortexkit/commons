@@ -275,18 +275,6 @@ impl Conditions {
         Ok(self)
     }
 
-    /// Project only the stamp. Prefer `with_statement_order` to set its epoch too.
-    #[deprecated(
-        note = "use with_statement_order; since 0.3.8 encoding refuses a stamp without an epoch; removed in the next breaking compaction release"
-    )]
-    pub fn with_statement_seq(mut self, statement_seq: u64, declared: bool) -> Self {
-        self.statement_seq = declared.then_some(statement_seq);
-        if !declared {
-            self.statement_epoch = None;
-        }
-        self
-    }
-
     /// Project the boundary only when the provider declares its capability.
     pub fn with_signed_floor(mut self, floor: crate::SignedFloor, declared: bool) -> Self {
         self.signed_floor = declared.then_some(floor);

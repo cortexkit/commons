@@ -29,6 +29,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::digest::Digest;
 use crate::read::Role;
 
 /// A published view.
@@ -41,7 +42,7 @@ pub struct View {
     pub version: u64,
     /// Checksum of `version`, `edits` and the optional policy members when
     /// present ([`View::seal_with_policy`]).
-    pub checksum: String,
+    pub checksum: Digest,
     pub edits: Vec<Edit>,
     /// Newest message the provider's index held when it built the view.
     /// Message ids, unlike ordinals, are never reused after a revert.
@@ -126,7 +127,7 @@ fn view_checksum(
     edits: &[Edit],
     built_through: Option<&str>,
     new_signed: Option<&str>,
-) -> String {
+) -> Digest {
     #[derive(Serialize)]
     struct Sealed<'a> {
         version: u64,
@@ -152,7 +153,7 @@ fn view_checksum(
 pub struct AppliedView {
     #[serde(deserialize_with = "crate::integer::required")]
     pub version: u64,
-    pub checksum: String,
+    pub checksum: Digest,
 }
 
 /// One edit, with the view version that first held it.
@@ -200,7 +201,7 @@ pub enum EditOp, "op" {
         /// or for `delivered` the array of item indexes to keep.
         value: Value,
         /// The part's checksum when the provider computed this edit.
-        expect: String,
+        expect: Digest,
     },
     /// Render a message the transcript does not hold, such as the history
     /// summary at the start.
@@ -421,7 +422,7 @@ pub struct AppliedViewAnswer {
 
 impl AppliedView {
     /// Build the value with its required fields.
-    pub fn new(version: u64, checksum: impl Into<String>) -> Self {
+    pub fn new(version: u64, checksum: impl Into<Digest>) -> Self {
         Self {
             version,
             checksum: checksum.into(),

@@ -97,3 +97,38 @@ fn numbering_returns_entries_with_checksums_over_their_numbers() {
         )
     );
 }
+
+/// Every tool part in this crate's vector file encodes to the bytes the
+/// contract crate wrote before a tool part boxed its attachments, approval
+/// and delivered text, and reads those fields back. The fixture holds each
+/// distinct tool part of `vectors/cases.json` with the encoding
+/// cortexkit-role-compaction 0.3.5 wrote for it.
+#[test]
+fn every_vector_tool_part_keeps_its_bytes() {
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/unboxed_tool_parts.jsonl");
+    let fixture = std::fs::read_to_string(fixture).unwrap();
+    assert!(
+        fixture.lines().count() >= 9,
+        "the fixture covers the vectors"
+    );
+    for line in fixture.lines() {
+        let case: serde_json::Value = serde_json::from_str(line).unwrap();
+        let unforked = case["unforked"].as_str().unwrap();
+        let part: Part = serde_json::from_value(case["wire"].clone()).unwrap();
+        assert_eq!(serde_json::to_string(&part).unwrap(), unforked);
+        let written: serde_json::Value = serde_json::from_str(unforked).unwrap();
+        let PartBody::Tool(tool) = &part.body else {
+            panic!("a tool part decodes as one");
+        };
+        assert_eq!(
+            !tool.attachments().is_empty(),
+            written.get("attachments").is_some()
+        );
+        assert_eq!(tool.approval().is_some(), written.get("approval").is_some());
+        assert_eq!(
+            tool.delivered().is_some(),
+            written.get("delivered").is_some()
+        );
+    }
+}

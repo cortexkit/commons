@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 pub use cortexkit_role_llm_runner::message_marks::SpeaksFor;
 
+use crate::digest::Digest;
 use crate::part::Part;
 use crate::view::AppliedView;
 
@@ -81,7 +82,7 @@ pub struct Entry {
     pub completed_at: Option<u64>,
     /// Checksum of W7's full-detail projection of role, notice origin and
     /// parts, minus the metadata W7 lists ([`entry_digest`]).
-    pub digest: String,
+    pub digest: Digest,
     pub parts: Vec<Part>,
     /// For an assistant entry: what the request that produced it reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -171,7 +172,7 @@ pub struct Cursor {
     #[serde(deserialize_with = "crate::integer::required")]
     pub ordinal: u64,
     pub mid: String,
-    pub digest: String,
+    pub digest: Digest,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -278,7 +279,7 @@ pub struct Head {
 /// `tokens` and entry `speaks_for` are not hashed.
 /// Pass full parts: compact parts hash to a
 /// different value.
-pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -> String {
+pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -> Digest {
     #[derive(Serialize)]
     struct Digested<'a> {
         role: Role,
@@ -298,7 +299,7 @@ pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -
         part.as_object_mut().unwrap().remove("tokens");
         crate::part::strip_delivered_tokens(part);
     }
-    crate::digest::content_digest(&value)
+    crate::digest::digest_of(&value)
 }
 
 impl Entry {
@@ -446,7 +447,7 @@ impl StepUsage {
 
 impl Cursor {
     /// Build the value with its required fields.
-    pub fn new(ordinal: u64, mid: impl Into<String>, digest: impl Into<String>) -> Self {
+    pub fn new(ordinal: u64, mid: impl Into<String>, digest: impl Into<Digest>) -> Self {
         Self {
             ordinal,
             mid: mid.into(),

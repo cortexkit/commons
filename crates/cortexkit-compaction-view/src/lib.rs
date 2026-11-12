@@ -38,7 +38,7 @@
 /// not hash final host requests; retaining historical pins and requiring version
 /// bumps are release-review obligations. Runners requiring replay compatibility
 /// must persist/check the version themselves.
-pub const PLAN_VERSION: u32 = 3;
+pub const PLAN_VERSION: u32 = 4;
 
 pub mod clean;
 pub mod render;

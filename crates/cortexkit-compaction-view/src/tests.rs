@@ -355,9 +355,9 @@ fn replaces_change_one_field_and_keep_id_and_tag() {
         panic!()
     };
     assert_eq!(tool.output.as_deref(), Some("[dropped §3§]"));
-    assert_eq!(tool.input["old_string"], "xxx…");
-    assert_eq!(tool.input["path"], "a.rs");
-    assert!(tool.attachments.is_empty());
+    assert_eq!(tool.input.get("old_string").unwrap(), "xxx…");
+    assert_eq!(tool.input.get("path").unwrap(), "a.rs");
+    assert!(tool.attachments().is_empty());
     assert_ne!(replaced.digest, entries[1].parts[2].digest);
 }
 
@@ -942,18 +942,19 @@ fn sealed_and_provider_run_parts_can_only_be_dropped() {
 fn a_replace_of_delivered_keeps_only_the_named_sends() {
     let mut entries = transcript();
     let mut body = tool_body("k1", ToolStatus::Completed);
-    body.delivered = vec![
+    body.set_delivered(vec![
         Delivered::new("provider-a", "first").with_template("provider.reduce"),
         Delivered::new("provider-b", "second"),
-    ];
+    ]);
     entries[1].parts[2] = mk("k1", Some(3), Seal::None, PartBody::Tool(body));
     let keep_second = replace(1, &entries, "a1", "k1", "delivered", json!([1]));
     let rendered = apply_edits(&entries, &[keep_second]).unwrap();
     let PartBody::Tool(tool) = &rendered[1].parts[2].body else {
         panic!("the tool part stays a tool part");
     };
-    assert_eq!(tool.delivered.len(), 1);
-    assert_eq!(tool.delivered[0].text.as_deref(), Some("second"));
+    let delivered = tool.delivered().unwrap();
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(delivered[0].text.as_deref(), Some("second"));
 
     for bad in [json!([2]), json!([0, 0]), json!(["0"])] {
         let edit = replace(1, &entries, "a1", "k1", "delivered", bad);
@@ -975,9 +976,10 @@ fn planned_rides(plan: &crate::render::RenderPlan, part_id: &str) -> Vec<(u64, S
             _ => None,
         })
         .flat_map(|part| {
-            part.rides
-                .iter()
-                .map(|ride| (ride.index, ride.delivered.text.clone().unwrap_or_default()))
+            part.rides.iter().map(|ride| {
+                let text = ride.delivered.text.as_deref().unwrap_or_default();
+                (ride.index, text.to_owned())
+            })
         })
         .collect()
 }
@@ -986,10 +988,10 @@ fn planned_rides(plan: &crate::render::RenderPlan, part_id: &str) -> Vec<(u64, S
 fn the_plan_lists_a_results_rides_and_a_replaced_output_takes_them_with_it() {
     let mut entries = transcript();
     let mut body = tool_body("k1", ToolStatus::Completed);
-    body.delivered = vec![
+    body.set_delivered(vec![
         Delivered::new("provider-a", "first"),
         Delivered::new("provider-b", "second"),
-    ];
+    ]);
     entries[1].parts[2] = mk("k1", Some(3), Seal::None, PartBody::Tool(body));
     let both = vec![(0, "first".to_owned()), (1, "second".to_owned())];
 
@@ -1007,7 +1009,7 @@ fn the_plan_lists_a_results_rides_and_a_replaced_output_takes_them_with_it() {
     let PartBody::Tool(tool) = &rendered[1].parts[2].body else {
         panic!("the tool part stays a tool part");
     };
-    assert!(tool.delivered.is_empty());
+    assert!(tool.delivered().is_none());
 
     // Version 2 kept them after a replaced output, as runners rendered then.
     let at_two = crate::render::plan_at(2, &entries, edits).unwrap().unwrap();
@@ -1025,8 +1027,9 @@ fn the_plan_lists_a_results_rides_and_a_replaced_output_takes_them_with_it() {
     let PartBody::Tool(tool) = &rendered[1].parts[2].body else {
         panic!("the tool part stays a tool part");
     };
-    assert_eq!(tool.delivered.len(), 1);
-    assert_eq!(tool.delivered[0].text.as_deref(), Some("second"));
+    let delivered = tool.delivered().unwrap();
+    assert_eq!(delivered.len(), 1);
+    assert_eq!(delivered[0].text.as_deref(), Some("second"));
 }
 
 #[test]
@@ -1198,7 +1201,7 @@ mod vector_file {
 
     fn only_image() -> Vec<Entry> {
         let mut body = tool_body("k1", ToolStatus::Completed);
-        body.output = Some(String::new());
+        body.output = Some("".into());
         body.output_bytes = Some(0);
         vec![
             entry(1, "u1", Role::User, vec![text("t1", 1, "screenshot")], None),
@@ -1287,7 +1290,7 @@ mod vector_file {
         let stale = {
             let mut edit = replace(1, &t, "u2", "t4", "text", json!("[dropped §4§]"));
             if let EditOp::Replace { expect, .. } = &mut edit.op {
-                *expect = "0".repeat(64);
+                *expect = "0".repeat(64).into();
             }
             edit
         };
@@ -1300,7 +1303,7 @@ mod vector_file {
         );
         let view = View::seal(1, vec![drop_part(1, "a1", "k1")]);
         let mut bad_checksum = view.clone();
-        bad_checksum.checksum = "0".repeat(64);
+        bad_checksum.checksum = "0".repeat(64).into();
         let previous = View::seal(1, vec![drop_part(1, "a1", "k1")]);
         let carried = View::seal(2, vec![drop_part(1, "a1", "k1"), drop_part(2, "u2", "t4")]);
         let backdated = View::seal(2, vec![drop_part(1, "a1", "k1"), drop_part(1, "u2", "t4")]);
@@ -1335,10 +1338,10 @@ mod vector_file {
         let stripped_image = replace(1, &pasted, "u1", "f1", "text", json!("[image stripped]"));
         let mut ridden = transcript([0, 0]);
         let mut ridden_body = tool_body("k1", ToolStatus::Completed);
-        ridden_body.delivered = vec![Delivered::new(
+        ridden_body.set_delivered(vec![Delivered::new(
             "compaction-provider",
             "<system-reminder>\nspent\n</system-reminder>",
-        )];
+        )]);
         ridden[1].parts[2] = mk("k1", Some(3), Seal::None, PartBody::Tool(ridden_body));
         let ridden_output = replace(1, &ridden, "a1", "k1", "output", json!("[dropped §3§]"));
         let keep_ride = replace(2, &ridden, "a1", "k1", "delivered", json!([0]));
@@ -1952,6 +1955,645 @@ mod vector_file {
                 "apply_with_rules",
                 json!({"entries": strip_entries(), "view": strip_view(None, None), "rules": bound(), "signed_floor": "reply"}),
             ),
+            // Version 4: a removed mid-text tag no longer leaves a doubled
+            // space, or a space before closing punctuation. Everything else
+            // a removed tag sits next to stays as the model wrote it.
+            (
+                "reply cleaning, version 4: a removed tag between two spaces keeps one space",
+                "clean_reply",
+                json!({"text": "the file §4§ holds it"}),
+            ),
+            (
+                "reply cleaning, version 4: a removed tag before a full stop takes its space with it",
+                "clean_reply",
+                json!({"text": "see §3§."}),
+            ),
+            (
+                "reply cleaning, version 4: a removed tag before a comma takes its space with it",
+                "clean_reply",
+                json!({"text": "first §3§, then"}),
+            ),
+            (
+                "reply cleaning, version 4: a removed tag before a semicolon takes its space with it",
+                "clean_reply",
+                json!({"text": "one §3§; two"}),
+            ),
+            (
+                "reply cleaning, version 4: a removed tag before a colon takes its space with it",
+                "clean_reply",
+                json!({"text": "as follows §3§: this"}),
+            ),
+            (
+                "reply cleaning, version 4: a removed tag before an exclamation mark takes its space with it",
+                "clean_reply",
+                json!({"text": "done §3§!"}),
+            ),
+            (
+                "reply cleaning, version 4: a removed tag before a question mark takes its space with it",
+                "clean_reply",
+                json!({"text": "right §3§?"}),
+            ),
+            (
+                "reply cleaning, version 4: a removed tag before a closing parenthesis takes its space with it",
+                "clean_reply",
+                json!({"text": "(see §3§) next"}),
+            ),
+            (
+                "reply cleaning, version 4: a removed tag before a closing bracket takes its space with it",
+                "clean_reply",
+                json!({"text": "[see §3§] next"}),
+            ),
+            (
+                "reply cleaning, version 4: spaced tags before punctuation go with their spaces",
+                "clean_reply",
+                json!({"text": "x §3§ §4§."}),
+            ),
+            (
+                "reply cleaning, version 4: spaced tags between words leave one space",
+                "clean_reply",
+                json!({"text": "a §3§ §4§ b"}),
+            ),
+            (
+                "reply cleaning, version 4: a model-written double space stays",
+                "clean_reply",
+                json!({"text": "model  wrote  doubles §3§ here"}),
+            ),
+            (
+                "reply cleaning, version 4: a model-written double space before a tag stays",
+                "clean_reply",
+                json!({"text": "word  §3§ next"}),
+            ),
+            (
+                "reply cleaning, version 4: a tag before a newline leaves its space",
+                "clean_reply",
+                json!({"text": "line §3§\nnext"}),
+            ),
+            (
+                "reply cleaning, version 4: a tag after a newline leaves its space",
+                "clean_reply",
+                json!({"text": "line\n§3§ next"}),
+            ),
+            (
+                "reply cleaning, version 4: a tag at the very start is split off as before",
+                "clean_reply",
+                json!({"text": "§3§ start"}),
+            ),
+            (
+                "reply cleaning, version 4: a tag at the very end is trimmed as before",
+                "clean_reply",
+                json!({"text": "end §3§"}),
+            ),
+            (
+                "reply cleaning, version 4: two adjacent tags between words leave both spaces",
+                "clean_reply",
+                json!({"text": "a §3§§4§ b"}),
+            ),
+            (
+                "reply cleaning, version 4: two adjacent tags before punctuation leave the space",
+                "clean_reply",
+                json!({"text": "see §3§§4§."}),
+            ),
+            (
+                "reply cleaning, version 4: a broken tag between words leaves both spaces",
+                "clean_reply",
+                json!({"text": "mid §11865\">§ text"}),
+            ),
+            (
+                "reply cleaning, version 4: a dangling tag before punctuation leaves its space",
+                "clean_reply",
+                json!({"text": "see §12$."}),
+            ),
+            (
+                "reply cleaning, version 4: tabs around a tag stay",
+                "clean_reply",
+                json!({"text": "a\t§3§\tb"}),
+            ),
+            (
+                "reply cleaning, version 4: non-breaking spaces around a tag stay",
+                "clean_reply",
+                json!({"text": "a\u{a0}§3§\u{a0}b"}),
+            ),
+            // The same inputs as plan version 3 cleaned them, through the
+            // versioned entry point a runner uses for a run recorded under 3,
+            // and a few through it at 4 and at 2.
+            (
+                "plan version 3: a tag inside a reply keeps both spaces",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§12§ §13§ Dropped §4§ and §5\">§6§ as asked."}),
+            ),
+            (
+                "plan version 3: a tag after the text keeps its space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "Done §3§."}),
+            ),
+            (
+                "plan version 3: a removed tag between two spaces keeps one space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "the file §4§ holds it"}),
+            ),
+            (
+                "plan version 3: a removed tag before a full stop takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "see §3§."}),
+            ),
+            (
+                "plan version 3: a removed tag before a comma takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "first §3§, then"}),
+            ),
+            (
+                "plan version 3: a removed tag before a semicolon takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "one §3§; two"}),
+            ),
+            (
+                "plan version 3: a removed tag before a colon takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "as follows §3§: this"}),
+            ),
+            (
+                "plan version 3: a removed tag before an exclamation mark takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "done §3§!"}),
+            ),
+            (
+                "plan version 3: a removed tag before a question mark takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "right §3§?"}),
+            ),
+            (
+                "plan version 3: a removed tag before a closing parenthesis takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "(see §3§) next"}),
+            ),
+            (
+                "plan version 3: a removed tag before a closing bracket takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "[see §3§] next"}),
+            ),
+            (
+                "plan version 3: spaced tags before punctuation go with their spaces",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "x §3§ §4§."}),
+            ),
+            (
+                "plan version 3: spaced tags between words leave one space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "a §3§ §4§ b"}),
+            ),
+            (
+                "plan version 3: a model-written double space stays",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "model  wrote  doubles §3§ here"}),
+            ),
+            (
+                "plan version 3: a model-written double space before a tag stays",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "word  §3§ next"}),
+            ),
+            (
+                "plan version 3: a tag before a newline leaves its space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "line §3§\nnext"}),
+            ),
+            (
+                "plan version 3: a tag after a newline leaves its space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "line\n§3§ next"}),
+            ),
+            (
+                "plan version 3: a tag at the very start is split off as before",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§3§ start"}),
+            ),
+            (
+                "plan version 3: a tag at the very end is trimmed as before",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "end §3§"}),
+            ),
+            (
+                "plan version 3: two adjacent tags between words leave both spaces",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "a §3§§4§ b"}),
+            ),
+            (
+                "plan version 3: two adjacent tags before punctuation leave the space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "see §3§§4§."}),
+            ),
+            (
+                "plan version 3: a broken tag between words leaves both spaces",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "mid §11865\">§ text"}),
+            ),
+            (
+                "plan version 3: a dangling tag before punctuation leaves its space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "see §12$."}),
+            ),
+            (
+                "plan version 3: tabs around a tag stay",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "a\t§3§\tb"}),
+            ),
+            (
+                "plan version 3: non-breaking spaces around a tag stay",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "a\u{a0}§3§\u{a0}b"}),
+            ),
+            (
+                "plan version 4 is the current rule: a tag between two spaces",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "the file §4§ holds it"}),
+            ),
+            (
+                "plan version 4 is the current rule: a tag before punctuation",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "see §3§."}),
+            ),
+            (
+                "plan version 4 is the current rule: adjacent tags",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "a §3§§4§ b"}),
+            ),
+            (
+                "plan version 2 cleans as version 3 did",
+                "clean_reply_for_plan",
+                json!({"plan_version": 2, "text": "see §3§."}),
+            ),
+            // Every reply-cleaning input pinned under both plan versions, so
+            // the pinned difference between 3 and 4 is exactly the space a
+            // removed tag leaves.
+            (
+                "plan version 3: a reply's own prefix is split off",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§12§ Done."}),
+            ),
+            (
+                "plan version 4: a reply's own prefix is split off",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§12§ Done."}),
+            ),
+            (
+                "plan version 4: numbers inside a reply are removed",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§12§ §13§ Dropped §4§ and §5\">§6§ as asked."}),
+            ),
+            (
+                "plan version 3: a section reference keeps its number but not its sign",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "See §5.1 of the spec."}),
+            ),
+            (
+                "plan version 4: a section reference keeps its number but not its sign",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "See §5.1 of the spec."}),
+            ),
+            (
+                "plan version 3: a cleaned reply is trimmed",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "  §12§ Done.\n\n"}),
+            ),
+            (
+                "plan version 4: a cleaned reply is trimmed",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "  §12§ Done.\n\n"}),
+            ),
+            (
+                "plan version 3: a first prefix too large for a number names no tag, and a later one never stands in",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§18446744073709551616§ §7§ Done."}),
+            ),
+            (
+                "plan version 4: a first prefix too large for a number names no tag, and a later one never stands in",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§18446744073709551616§ §7§ Done."}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: two leading tags",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§1§ §2§ Done."}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: two leading tags",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§1§ §2§ Done."}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a tag after the text",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "Done §3§."}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a section reference",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§5.1 applies"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a section reference",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§5.1 applies"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: two section references",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§12.3 and §4"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: two section references",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§12.3 and §4"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a broken tag ending",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§9\"> broken"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a broken tag ending",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§9\"> broken"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a broken tag ending before a tag",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§9\">§10§ text"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a broken tag ending before a tag",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§9\">§10§ text"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a section sign before a colon",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§7: note"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a section sign before a colon",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§7: note"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a section sign before letters",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§7a word"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a section sign before letters",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§7a word"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a lone trailing section sign",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "trailing §"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a lone trailing section sign",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "trailing §"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a doubled section sign",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§§ double"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a doubled section sign",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§§ double"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a reply that is only a tag",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§1§"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a reply that is only a tag",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§1§"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a padded tag",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "  §2§  padded  "}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a padded tag",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "  §2§  padded  "}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a section sign before a count",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§99 files"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a section sign before a count",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§99 files"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: no section sign",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "2024 roadmap"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: no section sign",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "2024 roadmap"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: tags on separate lines",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§1§\n\n§2§ multi"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: tags on separate lines",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§1§\n\n§2§ multi"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: letters between section signs",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§x§ not a tag"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: letters between section signs",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§x§ not a tag"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: tag zero",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§0§ zero"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: tag zero",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§0§ zero"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: an oversized tag alone",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§18446744073709551616§ big"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: an oversized tag alone",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§18446744073709551616§ big"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: non-breaking spaces around a tag",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "\u{a0}§5§\u{a0}nbsp"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: non-breaking spaces around a tag",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "\u{a0}§5§\u{a0}nbsp"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a section sign before a parenthesis",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§6) closer"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a section sign before a parenthesis",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§6) closer"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a section sign before a bracket",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§6] closer"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a section sign before a bracket",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§6] closer"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a section sign before a dash",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§6- dash"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a section sign before a dash",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§6- dash"}),
+            ),
+            (
+                "plan version 3: reply cleaning edge case: a section sign before an underscore",
+                "clean_reply_for_plan",
+                json!({"plan_version": 3, "text": "§6_ under"}),
+            ),
+            (
+                "plan version 4: reply cleaning edge case: a section sign before an underscore",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§6_ under"}),
+            ),
+            (
+                "plan version 4: a removed tag before a comma takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "first §3§, then"}),
+            ),
+            (
+                "plan version 4: a removed tag before a semicolon takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "one §3§; two"}),
+            ),
+            (
+                "plan version 4: a removed tag before a colon takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "as follows §3§: this"}),
+            ),
+            (
+                "plan version 4: a removed tag before an exclamation mark takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "done §3§!"}),
+            ),
+            (
+                "plan version 4: a removed tag before a question mark takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "right §3§?"}),
+            ),
+            (
+                "plan version 4: a removed tag before a closing parenthesis takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "(see §3§) next"}),
+            ),
+            (
+                "plan version 4: a removed tag before a closing bracket takes its space with it",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "[see §3§] next"}),
+            ),
+            (
+                "plan version 4: spaced tags before punctuation go with their spaces",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "x §3§ §4§."}),
+            ),
+            (
+                "plan version 4: spaced tags between words leave one space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "a §3§ §4§ b"}),
+            ),
+            (
+                "plan version 4: a model-written double space stays",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "model  wrote  doubles §3§ here"}),
+            ),
+            (
+                "plan version 4: a model-written double space before a tag stays",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "word  §3§ next"}),
+            ),
+            (
+                "plan version 4: a tag before a newline leaves its space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "line §3§\nnext"}),
+            ),
+            (
+                "plan version 4: a tag after a newline leaves its space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "line\n§3§ next"}),
+            ),
+            (
+                "plan version 4: a tag at the very start is split off as before",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "§3§ start"}),
+            ),
+            (
+                "plan version 4: a tag at the very end is trimmed as before",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "end §3§"}),
+            ),
+            (
+                "plan version 4: two adjacent tags before punctuation leave the space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "see §3§§4§."}),
+            ),
+            (
+                "plan version 4: a broken tag between words leaves both spaces",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "mid §11865\">§ text"}),
+            ),
+            (
+                "plan version 4: a dangling tag before punctuation leaves its space",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "see §12$."}),
+            ),
+            (
+                "plan version 4: tabs around a tag stay",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "a\t§3§\tb"}),
+            ),
+            (
+                "plan version 4: non-breaking spaces around a tag stay",
+                "clean_reply_for_plan",
+                json!({"plan_version": 4, "text": "a\u{a0}§3§\u{a0}b"}),
+            ),
         ]
     }
 
@@ -2136,6 +2778,22 @@ mod vector_file {
                 ),
             ],
         ),
+        // Version 4: reply cleaning drops the space a removed mid-text tag
+        // would leave doubled or before closing punctuation.
+        (
+            4,
+            &[
+                (
+                    143,
+                    "04dcfb58b5ebe5772a90a3cd15d0b28121c529c5df5ece883d309dd6a952bc87",
+                ),
+                // Every reply-cleaning input pinned under both plan versions.
+                (
+                    217,
+                    "4adaad2b75e91164ada699e529991673c5666bf1ca10224e26a62fbdfae1f33c",
+                ),
+            ],
+        ),
     ];
 
     /// The functions whose output a runner renders, or renders from.
@@ -2149,6 +2807,7 @@ mod vector_file {
         "edits_for_transcript",
         "assign_tags",
         "clean_reply",
+        "clean_reply_for_plan",
         "cleared_ride",
     ];
 
@@ -2158,7 +2817,7 @@ mod vector_file {
         let prefix = json!(crate::tags::tag_prefix(12));
         let mut pinned: Vec<&Value> = outputs.iter().take(count).copied().collect();
         pinned.push(&prefix);
-        cortexkit_role_compaction::digest::checksum(&pinned)
+        cortexkit_role_compaction::digest::checksum(&pinned).to_string()
     }
 
     #[test]

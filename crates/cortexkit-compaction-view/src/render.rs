@@ -16,10 +16,11 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use cortexkit_role_compaction::part::{
-    Delivered, FileMedia, OutputFormat, Part, PartBody, RideForm, ToolStatus,
+    Delivered, FileMedia, OutputFormat, Part, PartBody, RideForm, ToolInput, ToolStatus,
 };
 use cortexkit_role_compaction::read::{Entry, NoticeOrigin, Role};
 use cortexkit_role_compaction::rules::{ProviderRules, RuleBreak};
+use cortexkit_role_compaction::text::Text;
 use cortexkit_role_compaction::view::{
     Edit, EditOp, InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
 };
@@ -70,7 +71,7 @@ impl RenderedMessage {
             Some(tag) if !self.final_text.contains(&part.id) => {
                 Some(format!("{}{text}", crate::tags::tag_prefix(tag)))
             }
-            _ => Some(text.clone()),
+            _ => Some(text.as_str().to_owned()),
         }
     }
 }
@@ -241,9 +242,9 @@ pub fn cleared_ride(form: RideForm, route_clears: bool) -> RideRender {
 pub enum RideRule {
     /// Plan version 2: the rides still render after the replaced output.
     KeepAfterReplacedOutput,
-    /// Plan version 3: a ride renders only while its carrying output does,
-    /// so replacing the output drops its rides unless the view names
-    /// `delivered` itself.
+    /// Plan versions 3 and 4: a ride renders only while its carrying output
+    /// does, so replacing the output drops its rides unless the view names
+    /// `delivered` itself. Version 4 changed only reply cleaning.
     FollowOutput,
 }
 
@@ -253,7 +254,7 @@ impl RideRule {
     pub fn for_version(version: u32) -> Option<Self> {
         match version {
             2 => Some(RideRule::KeepAfterReplacedOutput),
-            3 => Some(RideRule::FollowOutput),
+            3 | 4 => Some(RideRule::FollowOutput),
             _ => None,
         }
     }
@@ -339,7 +340,7 @@ pub fn plan_with(
                 let entry = find_entry(&by_mid, mid)?;
                 let found = find_part(entry, part)?;
                 refuse_running(mid, found)?;
-                if &found.digest != expect {
+                if found.digest != *expect {
                     return Err(ViewRefusal::StalePart {
                         mid: mid.clone(),
                         part: part.clone(),
@@ -649,7 +650,8 @@ fn rides_for(part: &Part, replace: &[FieldReplace], rule: RideRule) -> Vec<PlanR
     if named.is_none() && output_replaced && rule == RideRule::FollowOutput {
         return Vec::new();
     }
-    tool.delivered
+    tool.delivered()
+        .unwrap_or_default()
         .iter()
         .enumerate()
         .map(|(index, delivered)| (index as u64, delivered))
@@ -667,7 +669,8 @@ fn rendered_part(part: &Part, planned: &PlanPart) -> Part {
     let mut fields = planned.replace.clone();
     if let PartBody::Tool(tool) = &part.body {
         let names_delivered = fields.iter().any(|edit| edit.field == "delivered");
-        if !names_delivered && planned.rides.len() != tool.delivered.len() {
+        let delivered = tool.delivered().map_or(0, <[_]>::len);
+        if !names_delivered && planned.rides.len() != delivered {
             fields.push(FieldReplace {
                 field: "delivered".to_owned(),
                 value: Value::Array(
@@ -849,7 +852,7 @@ fn check_field(mid: &str, part: &Part, field: &str, value: &Value) -> Result<(),
         }
         (PartBody::Tool(tool), "attachments") => {
             let existing: HashSet<&str> = tool
-                .attachments
+                .attachments()
                 .iter()
                 .map(|attachment| attachment.id.as_str())
                 .collect();
@@ -866,7 +869,8 @@ fn check_field(mid: &str, part: &Part, field: &str, value: &Value) -> Result<(),
             let mut seen = BTreeSet::new();
             for index in value.as_array().ok_or_else(bad)? {
                 let index = index.as_u64().ok_or_else(bad)?;
-                if index >= tool.delivered.len() as u64 || !seen.insert(index) {
+                let delivered = tool.delivered().map_or(0, <[_]>::len);
+                if index >= delivered as u64 || !seen.insert(index) {
                     return Err(bad());
                 }
             }
@@ -899,13 +903,16 @@ fn check_replaced_tags(
     let Some(new_text) = value.as_str() else {
         return Ok(());
     };
+    let input_member: Option<Value>;
     let original: Option<&str> = match (&part.body, field) {
         (PartBody::Text { text }, "text") => Some(text),
         (PartBody::Tool(tool), "output") => tool.output.as_deref(),
-        (PartBody::Tool(tool), field) => field
-            .strip_prefix("input.")
-            .and_then(|key| tool.input.get(key))
-            .and_then(Value::as_str),
+        (PartBody::Tool(tool), field) => {
+            input_member = field
+                .strip_prefix("input.")
+                .and_then(|key| tool.input.get(key));
+            input_member.as_ref().and_then(Value::as_str)
+        }
         _ => None,
     };
     let known: BTreeSet<String> = original
@@ -957,26 +964,40 @@ fn replaced_body(body: &PartBody, fields: &[FieldReplace]) -> PartBody {
                     .as_array()
                     .map(|ids| ids.iter().filter_map(Value::as_str).collect())
                     .unwrap_or_default();
-                tool.attachments
-                    .retain(|attachment| keep.contains(attachment.id.as_str()));
+                let kept = tool
+                    .attachments()
+                    .iter()
+                    .filter(|attachment| keep.contains(attachment.id.as_str()))
+                    .cloned()
+                    .collect();
+                tool.set_attachments(kept);
             }
             (PartBody::Tool(tool), "delivered") => {
                 let keep: HashSet<u64> = value
                     .as_array()
                     .map(|indexes| indexes.iter().filter_map(Value::as_u64).collect())
                     .unwrap_or_default();
-                let mut index = 0u64;
-                tool.delivered.retain(|_| {
-                    let kept = keep.contains(&index);
-                    index += 1;
-                    kept
-                });
+                let kept = tool
+                    .delivered()
+                    .unwrap_or_default()
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| keep.contains(&(*index as u64)))
+                    .map(|(_, delivered)| delivered.clone())
+                    .collect();
+                tool.set_delivered(kept);
             }
             (PartBody::Tool(tool), field) => {
-                if let (Some(key), Some(input)) =
-                    (field.strip_prefix("input."), tool.input.as_object_mut())
-                {
-                    input.insert(key.to_owned(), Value::String(string_of(value)));
+                // The input is held as text: parse it, write the member, and
+                // store the edited object's text.
+                if let Some(key) = field.strip_prefix("input.") {
+                    if let Value::Object(mut input) = tool.input.parse() {
+                        input.insert(
+                            key.to_owned(),
+                            Value::String(value.as_str().unwrap_or_default().to_owned()),
+                        );
+                        tool.input = ToolInput::from(input);
+                    }
                 }
             }
             _ => {}
@@ -985,8 +1006,8 @@ fn replaced_body(body: &PartBody, fields: &[FieldReplace]) -> PartBody {
     body
 }
 
-fn string_of(value: &Value) -> String {
-    value.as_str().unwrap_or_default().to_owned()
+fn string_of(value: &Value) -> Text {
+    Text::new(value.as_str().unwrap_or_default())
 }
 
 /// The one media type an inserted image may have (contract W6.5).
@@ -1003,9 +1024,9 @@ fn render_inserted(
     texts: &[String],
     images: &[InsertedImage],
 ) -> RenderedMessage {
-    let texts = texts
-        .iter()
-        .map(|text| PartBody::Text { text: text.clone() });
+    let texts = texts.iter().map(|text| PartBody::Text {
+        text: Text::new(text),
+    });
     let images = images.iter().map(|image| {
         PartBody::File(FileMedia::inline(
             image.media_type.clone(),

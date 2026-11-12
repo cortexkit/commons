@@ -18,9 +18,20 @@ host requests; retaining historical pins and requiring version bumps are
 release-review obligations. Runners requiring replay compatibility must persist
 and check the version themselves.
 
+Reply cleaning has two versions in the vectors, pinned on the same inputs:
+`clean_reply` is the current rule (plan version 4), and `clean_reply_for_plan`
+at 3 reproduces the rule before it. Version 3 exists only to reproduce bytes
+recorded before a runner adopted version 4: a resumed run's requests, and
+offline checks that rebuild recorded requests. It is never for a new render or
+a served read.
+
 The companion
 [`cortexkit-compaction-view-wasm`](https://crates.io/crates/cortexkit-compaction-view-wasm)
-crate exposes the same implementation to JavaScript runners.
+crate exposes the same implementation to JavaScript runners. On the JavaScript
+side reply cleaning stays current-only: a JavaScript runner calls `clean_reply`
+(version 4), because nothing on that side replays recorded requests. A
+JavaScript implementation checked against `vectors/cases.json` implements
+`clean_reply` and skips the `clean_reply_for_plan` cases.
 
 Use `render::plan_view(entries, view, rules, floor)` (JSON `plan_view` in
 WebAssembly) to check a whole view and honor `new_signed: "strip"`. It drops invalidated

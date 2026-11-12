@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-compaction-view-wasm"
-version = "0.1.2"
+version = "0.2.0"
 edition.workspace = true
 repository.workspace = true
 readme = "README.md"
@@ -12,5 +12,5 @@ name = "cortexkit_compaction_view_wasm"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-cortexkit-compaction-view = { version = "0.3", path = "../cortexkit-compaction-view" }
+cortexkit-compaction-view = { version = "0.4", path = "../cortexkit-compaction-view" }
 serde_json = "1"

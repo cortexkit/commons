@@ -50,11 +50,15 @@ pub mod rules;
 pub mod setup;
 pub mod signed_floor;
 mod statement_order;
+pub mod text;
 pub mod tokens;
 pub mod view;
 pub mod wire;
 
+pub use digest::Digest;
+pub use part::ToolInput;
 pub use signed_floor::SignedFloor;
+pub use text::Text;
 
 /// The capability a compaction provider lists in its manifest. The major is
 /// new because every op below changed shape incompatibly.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.0
+
+- Take compaction-view 0.4. `clean_reply` follows `PLAN_VERSION` 4: it no
+  longer leaves a doubled space, or a space before closing punctuation, where it
+  removes a well-formed tag from the middle of a reply. The JavaScript side is
+  current-only: it never reproduces version 3, which exists only to rebuild bytes
+  a runner recorded before adopting version 4.
+
 ## 0.1.2
 
 - Take compaction-view 0.3. `plan_view`, `plan_view_at`, `apply_with_rules` and

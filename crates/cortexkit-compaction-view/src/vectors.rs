@@ -92,6 +92,10 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
         "{text}: a cleaned {model_tag, text} candidate; the caller applies W4.6's empty-text policy",
     ),
     (
+        "clean_reply_for_plan",
+        "{plan_version, text}: clean_reply as that plan version cleaned, for a run recorded under it",
+    ),
+    (
         "entry_digest",
         "{role, notice?, parts}: an entry's checksum",
     ),
@@ -209,6 +213,13 @@ fn dispatch(function: &str, input: Value) -> Result<Outcome, String> {
         "clean_reply" => {
             let input: Text = parse(input)?;
             ok(clean::clean_reply(&input.text))
+        }
+        "clean_reply_for_plan" => {
+            let input: VersionedText = parse(input)?;
+            match clean::clean_reply_for_plan(input.plan_version, &input.text) {
+                Some(cleaned) => ok(cleaned),
+                None => return Err(format!("unsupported plan version {}", input.plan_version)),
+            }
         }
         "entry_digest" => {
             let input: EntryParts = parse(input)?;
@@ -337,6 +348,12 @@ struct Numbering {
 
 #[derive(Deserialize)]
 struct Text {
+    text: String,
+}
+
+#[derive(Deserialize)]
+struct VersionedText {
+    plan_version: u32,
     text: String,
 }
 

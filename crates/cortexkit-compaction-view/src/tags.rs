@@ -22,10 +22,10 @@ pub fn tag_prefix(tag: u64) -> String {
 /// image, `[file]` otherwise. `None` for a result that has text, has no
 /// attachments, or is still running.
 pub fn empty_result_label(tool: &ToolPart) -> Option<&'static str> {
-    if tool.output_bytes != Some(0) || tool.attachments.is_empty() {
+    if tool.output_bytes != Some(0) || tool.attachments().is_empty() {
         return None;
     }
-    let all_images = tool.attachments.iter().all(
+    let all_images = tool.attachments().iter().all(
         |attachment| matches!(&attachment.item, AttachmentItem::File(file) if file.is_image()),
     );
     Some(if all_images { "[image]" } else { "[file]" })
@@ -135,15 +135,17 @@ mod tests {
             unreachable!()
         };
         assert_eq!(empty_result_label(tool), None);
-        tool.attachments.push(Attachment::new(
+        let mut attachments = vec![Attachment::new(
             "a1",
             AttachmentItem::File(FileMedia::inline("image/png", None)),
-        ));
+        )];
+        tool.set_attachments(attachments.clone());
         assert_eq!(empty_result_label(tool), Some("[image]"));
-        tool.attachments.push(Attachment::new(
+        attachments.push(Attachment::new(
             "a2",
             AttachmentItem::File(FileMedia::inline("application/pdf", None)),
         ));
+        tool.set_attachments(attachments);
         assert_eq!(empty_result_label(tool), Some("[file]"));
         tool.output_bytes = Some(4);
         assert_eq!(empty_result_label(tool), None);

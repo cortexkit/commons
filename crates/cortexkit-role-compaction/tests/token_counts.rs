@@ -268,6 +268,8 @@ fn token_metadata_does_not_hide_opaque_content_changes() {
     let PartBody::Tool(tool) = &mut entry.parts[1].body else {
         panic!("expected tool")
     };
-    tool.input["tokens"]["count"] = json!(8);
+    let mut input = tool.input.parse();
+    input["tokens"]["count"] = json!(8);
+    tool.input = input.into();
     assert_ne!(entry_digest(entry.role, None, &entry.parts), original);
 }
