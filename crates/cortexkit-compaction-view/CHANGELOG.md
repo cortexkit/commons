@@ -21,9 +21,12 @@
 - `PLAN_VERSION` is 4. Plan rendering is the same at 3 and 4: `plan_at` and
   `plan_view_at` accept 4 as well as 2 and 3. `vectors/cases.json` pins each
   rendering case at plan version 4, beside its plan version 3 case.
-- **Runners that adopt this release step `history_version` once more:** served
-  reply text cleaned through `clean_reply` changes for replies that hold such a
-  tag, and so do compaction entries built from it and their digests.
+- **Runners that adopt this release step `history_version` once for each
+  session whose served reply text changes:** text cleaned through `clean_reply`
+  changes for replies that hold such a tag, and so do compaction entries built
+  from it and their digests. A session with no such reply owes no step. The
+  step comes no later than the first read that serves the changed text, never
+  after it.
 - Vectors: `vectors/cases.json` (checked by `vectors/SHA256SUMS`) gains 23
   `clean_reply` cases for the new rule and the cases it must leave alone, and
   103 `clean_reply_for_plan` cases: every `clean_reply` input under plan
