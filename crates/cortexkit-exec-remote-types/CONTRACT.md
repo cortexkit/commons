@@ -146,7 +146,7 @@ a placement, which includes every older runner. The field is omitted when absent
 show unknown values verbatim. `Placement.host` is the server's host name,
 absent and omitted when not reported (overflow placements don't report one).
 
-## Progress before acceptance
+## Progress
 
 These types define the progress record's shape and check its `detail` syntax.
 Everything else in this section is a rule for the runner or the caller that the
@@ -159,13 +159,14 @@ a runner advertising `PROGRESS_CAPABILITY` (`exec-remote-progress/v1`). Older
 runners ignore unknown request fields. The caller never expects progress without
 the opt-in and capability advertisement; a runner must never send it otherwise.
 
-`StreamRecord::Progress` is a known, nonterminal `progress` record. It comes only
-before `Accepted`, never after it. `Started` still reports when an accepted job
-takes runner capacity, covering the wait after acceptance; progress does not
-replace it. The progress record has no `seq` field: a runner never sends one, and
-a caller never advances the resume cursor from progress. An executor never
-replays progress on `exec.attach`. For each run, the runner sends progress at
-most once per 10 s, and only after 2 s of waiting, with one exception: for an
+`StreamRecord::Progress` is a known, nonterminal `progress` record. Before
+`Accepted` it reports submission progress; after acceptance `queue_wait` reports
+queue blockers. `Started` still reports when an accepted job takes runner
+capacity; progress does not replace it. The progress record has no `seq` field:
+a runner never sends one, and a caller never advances the resume cursor from
+progress. An executor never replays progress on `exec.attach`. Before acceptance,
+for each run, the runner sends progress at most once per 10 s, and only after
+2 s of waiting, with one exception: for an
 opted-in request to a runner advertising the progress capability, a runner that
 assigns a job ID sends one progress record carrying it at once, when it assigns
 the ID. That record is exempt from both the 2 s wait and the 10 s interval.
@@ -176,10 +177,20 @@ the opt-in and capability advertisement, no progress is sent.
 {"type":"progress","phase":"placement_wait","phase_elapsed_ms":61200,"detail":"waiting for a host with 16 free vCPUs","job_id":"00000000-0000-4000-8000-000000000001"}
 ```
 
-`phase` is an open `ProgressPhase`: `upload`, `placement_wait`, or `connect`.
+`phase` is an open `ProgressPhase`: `upload`, `placement_wait`, `connect`, or
+`queue_wait`. After `Accepted`, the runner sends `queue_wait` whenever the
+job's blocker changes and at most once a minute while it stays unchanged.
 Unknown phases retain their raw string and are shown generically, as display-only
 progress. `phase_elapsed_ms` is a `u64`, which the runner sets to the milliseconds since the
 **current phase started**, not since it received `exec.run`.
+
+`waiting_on` is an optional, open queue-wait reason: `checkout`,
+`sibling_checkout`, `capacity`, `memory`, or `checkout_disk`; unknown strings are
+preserved and shown generically. `blocker_job_id` is the optional UUID of the
+job holding the checkout. The server names only a job of the same account, never
+another account's job. Both fields are present only with `queue_wait`; readers
+ignore them on other phases. The phase and these fields are display-only, never
+inputs to retry, cancellation, or routing. Older readers ignore the new members.
 
 `job_id` is optional: it is the runner's ID for this job, assigned at submit,
 and the same ID that `Accepted` later carries. When the runner has one, it is

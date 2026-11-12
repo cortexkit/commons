@@ -1,6 +1,6 @@
 # cortexkit-exec-remote-types
 
-Version **0.2.21**: the caller-facing JSON types for `exec-remote/v1`, shared by
+Version **0.2.22**: the caller-facing JSON types for `exec-remote/v1`, shared by
 routing clients and executors. This is a types-only crate: no transport, runtime,
 execution policy, local fallback or `subc-protocol` dependency. Package metadata
 allows publication like other commons primitives; no publication is needed for
@@ -29,9 +29,9 @@ it, so callers keep their existing behavior when it is absent. It is progress,
 never a terminal record. Its `seq` counts toward the attach resume cursor;
 `queue_wait_ms` is measured by the runner and `started_at_ms` is for display only.
 
-`Progress` covers only the wait **before** `Accepted`, never after it; `Started`
-keeps covering the wait after acceptance. A runner sends progress only when the
-request set `progress: true` and it advertises `PROGRESS_CAPABILITY`
+`Progress` covers the wait before `Accepted` and queue blockers after it;
+`Started` still reports when an accepted job takes capacity. A runner sends
+progress only when the request set `progress: true` and it advertises `PROGRESS_CAPABILITY`
 (`exec-remote-progress/v1`). A caller uses `RunRequest::with_progress(true)` only
 after checking that capability, and never expects progress otherwise.
 `progress()` reads the opt-in. False or absent means no progress and is omitted
@@ -45,8 +45,9 @@ before acceptance.
 
 `Progress::new(phase, phase_elapsed_ms, detail)` returns a `Result<Progress,
 ProgressDetailError>`; `phase()`, `phase_elapsed_ms()` and `detail()` read its
-validated fields. `ProgressPhase` is open: `Upload`, `PlacementWait` and `Connect`
-encode as `upload`, `placement_wait` and `connect`; unknown phase strings are
+validated fields. `ProgressPhase` is open: `Upload`, `PlacementWait`, `Connect`
+and `QueueWait` encode as `upload`, `placement_wait`, `connect` and `queue_wait`;
+unknown phase strings are
 retained and displayed generically. `phase_elapsed_ms` is a `u64` count of
 milliseconds since the **current phase started**, not since submission. Optional
 `detail` is one line of at most 120 UTF-8 bytes, with no control characters or
@@ -55,9 +56,19 @@ and decoding reject violations. Runners must not put host names, network
 addresses, tenant or account identifiers, or job contents in `detail`; the types
 don't check that.
 
+After `Accepted`, `queue_wait` is sent when the blocker changes and at most once
+a minute while unchanged. `with_waiting_on` and `waiting_on()` set and read an
+optional open `ProgressWaitingOn`: `checkout`, `sibling_checkout`, `capacity`,
+`memory`, or `checkout_disk`; unknown strings are preserved. The optional
+`blocker_job_id`, set and read with `with_blocker_job_id` and `blocker_job_id()`,
+names only a checkout-holding job of the same account, never another account's.
+Both fields appear only with `queue_wait`; readers ignore them on other phases.
+The phase and both fields are display-only, never retry, cancel or routing inputs.
+
 Progress has no `seq` field and never advances the resume cursor. It is never
-terminal. As runner rules: it is never replayed by `exec.attach`, and it is sent
-at most once per 10 s per run, only after 2 s of waiting, except that for an
+terminal. As runner rules: it is never replayed by `exec.attach`, and before
+acceptance it is sent at most once per 10 s per run, only after 2 s of waiting,
+except that for an
 opted-in request the runner sends one record with the job ID immediately on
 assignment, exempt from both timing rules; later records keep carrying the ID.
 Without the opt-in, no progress is sent. Content and timing are display only:
@@ -460,8 +471,9 @@ as their individual `.sha256` companions. The vector README lists them.
 `.sha256` companion; the directory's `SHA256SUMS` pins both. Tests check the
 inventory, hashes and typed canonical round-trips without changing older vectors.
 
-`test-vectors/exec-remote-v1/progress/` adds ten crate-local cases: each known
-phase, an unknown phase, no detail, exactly 120 bytes of detail, an opted-in
+`test-vectors/exec-remote-v1/progress/` adds thirteen crate-local cases: each known
+phase, an unknown phase, an unknown queue-wait reason, no detail, an optional job
+ID, exactly 120 bytes of detail, an opted-in
 request, and three malformed records (121-byte detail, newline detail, non-`u64`
 phase time). Each has a `.sha256` companion and is pinned by the folder's
 `SHA256SUMS`. Valid requests and records round-trip byte for byte; malformed

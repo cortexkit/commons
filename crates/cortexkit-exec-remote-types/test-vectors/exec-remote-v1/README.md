@@ -359,9 +359,10 @@ contract's field-order example also has a test: clearing `resume_from_seq` and
 command does not. A separate test checks equal request digests when only the
 display-only progress opt-in differs.
 
-## Pre-acceptance progress
+## Progress
 
-`progress/` contains eleven invented-value cases in the same `.jcs`/`.sha256` format.
+`progress/` contains thirteen invented-value cases, each with canonical JSON in
+`.jcs` and its SHA-256 digest in `.sha256`.
 `request-progress` is a `RunRequest`; all other files are individual stream
 records, not whole streams:
 
@@ -371,6 +372,8 @@ records, not whole streams:
 - `no-detail`: optional detail omitted.
 - `with-job-id`: the runner's optional submit-time ID, matching the later
   `Accepted.job_id` and usable for an independently decided cancellation.
+- `queue-wait`: a checkout blocker and same-account job ID after acceptance.
+- `queue-wait-unknown-reason`: an unknown queue-wait reason is preserved.
 - `detail-120-bytes`: valid detail at exactly the 120-byte UTF-8 limit.
 - `request-progress`: an opt-in request with `progress: true`.
 - `malformed-detail-too-long`: 121-byte detail, refused on decode.
@@ -385,13 +388,17 @@ contents in it. A caller renders it as plain text and never starts, extends or
 resets timers or retries/cancels because of progress content or timing. A progress
 record has no `seq` field and is never terminal. The rest are runner rules these
 individual records can't show: progress needs the request opt-in and
-`PROGRESS_CAPABILITY`, comes only before `Accepted`, is never replayed by
-`exec.attach`, and is sent at most once per 10 s per run, only after 2 s of
+`PROGRESS_CAPABILITY`, is never replayed by `exec.attach`, and before acceptance
+is sent at most once per 10 s per run, only after 2 s of
 waiting, except for one immediate record carrying the job ID when assigned.
 That record is exempt from both timing rules; later records keep the ID.
-Without the opt-in and capability advertisement, no progress is sent.
+After acceptance, `queue_wait` is sent when the blocker changes and at most once
+a minute while unchanged. The optional reason and blocker ID are display-only,
+ignored on other phases, and never used for retry, cancellation or routing. A
+blocker ID names a job of the same account, never another account. Without the
+opt-in and capability advertisement, no progress is sent.
 
 The directory's `SHA256SUMS` covers every `.jcs` and `.sha256` file. Tests check
-the exact inventory and hashes, round-trip all eight valid cases through typed
+the exact inventory and hashes, round-trip all ten valid cases through typed
 values byte for byte, and require the three malformed known records to fail
 decoding rather than becoming `Unknown`.

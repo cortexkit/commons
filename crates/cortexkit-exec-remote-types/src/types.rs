@@ -156,7 +156,7 @@ pub struct RunRequest {
     /// beginning. Send only to an executor advertising [`SUBMISSION_KEY_CAPABILITY`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_from_seq: Option<u64>,
-    /// Ask for display-only progress before acceptance. Send `true` only to a
+    /// Ask for display-only progress. Send `true` only to a
     /// runner advertising [`PROGRESS_CAPABILITY`]. Omitted when false.
     #[serde(default, skip_serializing_if = "is_false")]
     pub progress: bool,
@@ -312,13 +312,13 @@ impl RunRequest {
         self.resume_from_seq
     }
 
-    /// Ask for pre-acceptance progress only after checking [`PROGRESS_CAPABILITY`].
+    /// Ask for progress only after checking [`PROGRESS_CAPABILITY`].
     pub fn with_progress(mut self, progress: bool) -> Self {
         self.progress = progress;
         self
     }
 
-    /// Whether display-only pre-acceptance progress is requested.
+    /// Whether display-only progress is requested.
     pub fn progress(&self) -> bool {
         self.progress
     }
@@ -2046,7 +2046,7 @@ impl PathMapping {
     }
 }
 
-/// The pre-acceptance phase currently being reported by the runner.
+/// The display-only phase currently being reported by the runner.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[non_exhaustive]
 #[serde(from = "String", into = "String")]
@@ -2057,6 +2057,8 @@ pub enum ProgressPhase {
     PlacementWait,
     /// Connecting to the selected host.
     Connect,
+    /// Waiting in the queue after acceptance. Never use this for retry, cancellation, or routing.
+    QueueWait,
     /// An unrecognised phase. Show generic progress; this is display-only.
     Unknown(String),
 }
@@ -2067,6 +2069,7 @@ impl From<String> for ProgressPhase {
             "upload" => Self::Upload,
             "placement_wait" => Self::PlacementWait,
             "connect" => Self::Connect,
+            "queue_wait" => Self::QueueWait,
             _ => Self::Unknown(phase),
         }
     }
@@ -2078,7 +2081,54 @@ impl From<ProgressPhase> for String {
             ProgressPhase::Upload => "upload".into(),
             ProgressPhase::PlacementWait => "placement_wait".into(),
             ProgressPhase::Connect => "connect".into(),
+            ProgressPhase::QueueWait => "queue_wait".into(),
             ProgressPhase::Unknown(phase) => phase,
+        }
+    }
+}
+
+/// Display-only reason a job is waiting in the queue; never use it for retry,
+/// cancellation, or routing. Ignore this value outside [`ProgressPhase::QueueWait`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+#[serde(from = "String", into = "String")]
+pub enum ProgressWaitingOn {
+    /// The requested checkout is occupied.
+    Checkout,
+    /// A sibling checkout is occupied.
+    SiblingCheckout,
+    /// Runner capacity is unavailable.
+    Capacity,
+    /// Memory is unavailable.
+    Memory,
+    /// Checkout disk space is unavailable.
+    CheckoutDisk,
+    /// An unrecognised reason, retained for display as generic progress.
+    Unknown(String),
+}
+
+impl From<String> for ProgressWaitingOn {
+    fn from(reason: String) -> Self {
+        match reason.as_str() {
+            "checkout" => Self::Checkout,
+            "sibling_checkout" => Self::SiblingCheckout,
+            "capacity" => Self::Capacity,
+            "memory" => Self::Memory,
+            "checkout_disk" => Self::CheckoutDisk,
+            _ => Self::Unknown(reason),
+        }
+    }
+}
+
+impl From<ProgressWaitingOn> for String {
+    fn from(reason: ProgressWaitingOn) -> Self {
+        match reason {
+            ProgressWaitingOn::Checkout => "checkout".into(),
+            ProgressWaitingOn::SiblingCheckout => "sibling_checkout".into(),
+            ProgressWaitingOn::Capacity => "capacity".into(),
+            ProgressWaitingOn::Memory => "memory".into(),
+            ProgressWaitingOn::CheckoutDisk => "checkout_disk".into(),
+            ProgressWaitingOn::Unknown(reason) => reason,
         }
     }
 }
@@ -2099,13 +2149,15 @@ impl std::fmt::Display for ProgressDetailError {
 
 impl std::error::Error for ProgressDetailError {}
 
-/// Progress sent before [`Accepted`], never terminal or replayed.
+/// Display-only progress, never terminal or replayed.
 ///
 /// The runner sends it only for an opted-in request with [`PROGRESS_CAPABILITY`],
 /// sending one record with the job ID immediately when it assigns the ID at
 /// submit. That record is exempt from the usual timing rules: later records come
-/// at most once per 10 seconds and only after 2 seconds of waiting, and keep the
-/// ID. It carries no sequence number and never advances a resume cursor. Callers
+/// before acceptance at most once per 10 seconds and only after 2 seconds of
+/// waiting, and keep the ID. After acceptance, queue-wait records are sent when
+/// the blocker changes and at most once a minute while it stays unchanged.
+/// It carries no sequence number and never advances a resume cursor. Callers
 /// render detail as plain text and never start, extend or reset timers, retry, or
 /// cancel because of progress content or timing. A caller that independently
 /// decided to stop may use the ID to cancel before acceptance. Producers must
@@ -2120,6 +2172,10 @@ pub struct Progress {
     detail: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     job_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    waiting_on: Option<ProgressWaitingOn>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    blocker_job_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]
@@ -2129,6 +2185,10 @@ struct ProgressInput {
     detail: Option<String>,
     #[serde(default)]
     job_id: Option<Uuid>,
+    #[serde(default)]
+    waiting_on: Option<ProgressWaitingOn>,
+    #[serde(default)]
+    blocker_job_id: Option<Uuid>,
 }
 
 impl<'de> Deserialize<'de> for Progress {
@@ -2137,6 +2197,8 @@ impl<'de> Deserialize<'de> for Progress {
         let mut progress = Self::new(input.phase, input.phase_elapsed_ms, input.detail)
             .map_err(serde::de::Error::custom)?;
         progress.job_id = input.job_id;
+        progress.waiting_on = input.waiting_on;
+        progress.blocker_job_id = input.blocker_job_id;
         Ok(progress)
     }
 }
@@ -2165,6 +2227,8 @@ impl Progress {
             phase_elapsed_ms,
             detail,
             job_id: None,
+            waiting_on: None,
+            blocker_job_id: None,
         })
     }
 
@@ -2177,6 +2241,36 @@ impl Progress {
     /// The runner's job ID, or `None` when the runner has none to give.
     pub fn job_id(&self) -> Option<Uuid> {
         self.job_id
+    }
+
+    /// Set the display-only queue-wait reason. Producers include it only with
+    /// `queue_wait`; readers ignore it on other phases. Never use it for retry,
+    /// cancellation, or routing.
+    pub fn with_waiting_on(mut self, waiting_on: ProgressWaitingOn) -> Self {
+        self.waiting_on = Some(waiting_on);
+        self
+    }
+
+    /// The display-only queue-wait reason. Ignore it on other phases; never use
+    /// it for retry, cancellation, or routing.
+    pub fn waiting_on(&self) -> Option<&ProgressWaitingOn> {
+        self.waiting_on.as_ref()
+    }
+
+    /// Set the display-only ID of the job holding the checkout. Producers include
+    /// it only with `queue_wait` and name only a job of the same account, never
+    /// another account. Readers ignore it on other phases and never use it for
+    /// retry, cancellation, or routing.
+    pub fn with_blocker_job_id(mut self, blocker_job_id: Uuid) -> Self {
+        self.blocker_job_id = Some(blocker_job_id);
+        self
+    }
+
+    /// The display-only ID of the checkout holder, always of the same account,
+    /// never another account. Ignore it on other phases; never use it for retry,
+    /// cancellation, or routing.
+    pub fn blocker_job_id(&self) -> Option<Uuid> {
+        self.blocker_job_id
     }
 
     /// The current phase; show unknown phases generically.
@@ -2736,7 +2830,7 @@ impl StatusReply {
 // Keep Terminal inline: boxing it would break existing public variant construction.
 #[allow(clippy::large_enum_variant)]
 pub enum StreamRecord {
-    /// Opt-in display-only progress before acceptance. Never terminal, carries
+    /// Opt-in display-only progress. Never terminal, carries
     /// no sequence number, and is never replayed by `exec.attach`.
     Progress(Progress),
     Accepted(Accepted),

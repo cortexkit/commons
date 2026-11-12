@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.22
+
+- Add the display-only `queue_wait` progress phase after acceptance, with optional
+  open `waiting_on` reason and same-account `blocker_job_id`. Emit on blocker
+  changes and at most once a minute while unchanged; never use these for retry,
+  cancellation or routing. Readers ignore the optional fields on other phases.
+- Preserve unknown reasons and phases, existing bytes when fields are absent,
+  and older readers' tolerance of the new fields. Add canonical progress vectors.
+
 ## 0.2.21
 
 - Add optional `Accepted.placement` with `with_placement` and an accessor, plus

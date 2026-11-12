@@ -10,6 +10,8 @@ const VALID_RECORDS: &[&str] = &[
     "unknown-phase",
     "no-detail",
     "with-job-id",
+    "queue-wait",
+    "queue-wait-unknown-reason",
     "detail-120-bytes",
 ];
 const INVALID_RECORDS: &[&str] = &[
@@ -72,6 +74,7 @@ fn progress_phases_preserve_known_and_future_tags() {
         ("upload", ProgressPhase::Upload),
         ("placement_wait", ProgressPhase::PlacementWait),
         ("connect", ProgressPhase::Connect),
+        ("queue_wait", ProgressPhase::QueueWait),
         (
             "future_phase",
             ProgressPhase::Unknown("future_phase".into()),
@@ -88,6 +91,112 @@ fn progress_phases_preserve_known_and_future_tags() {
     for invalid in [json!(null), json!(3), json!({"type":"upload"}), json!([])] {
         assert!(serde_json::from_value::<ProgressPhase>(invalid).is_err());
     }
+}
+
+#[test]
+fn progress_queue_wait_reasons_round_trip_and_preserve_future_values() {
+    for (tag, expected) in [
+        ("checkout", ProgressWaitingOn::Checkout),
+        ("sibling_checkout", ProgressWaitingOn::SiblingCheckout),
+        ("capacity", ProgressWaitingOn::Capacity),
+        ("memory", ProgressWaitingOn::Memory),
+        ("checkout_disk", ProgressWaitingOn::CheckoutDisk),
+        (
+            "future_reason",
+            ProgressWaitingOn::Unknown("future_reason".into()),
+        ),
+    ] {
+        let raw = json!({"type":"progress", "phase":"queue_wait", "phase_elapsed_ms":42,
+            "waiting_on":tag});
+        let record: StreamRecord = serde_json::from_value(raw.clone()).unwrap();
+        let StreamRecord::Progress(progress) = &record else {
+            panic!("expected progress")
+        };
+        assert_eq!(progress.phase(), &ProgressPhase::QueueWait);
+        assert_eq!(progress.waiting_on(), Some(&expected));
+        assert_eq!(serde_json::to_value(record).unwrap(), raw);
+    }
+}
+
+#[test]
+fn progress_queue_wait_optional_fields_and_legacy_bytes() {
+    let legacy = Progress::new(ProgressPhase::Upload, 12, Some("uploading".into()))
+        .unwrap()
+        .with_job_id(uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap());
+    let legacy_bytes = br#"{"phase":"upload","phase_elapsed_ms":12,"detail":"uploading","job_id":"00000000-0000-4000-8000-000000000001"}"#;
+    assert_eq!(legacy.waiting_on(), None);
+    assert_eq!(legacy.blocker_job_id(), None);
+    assert_eq!(serde_json::to_vec(&legacy).unwrap(), legacy_bytes);
+    assert_eq!(
+        serde_json::from_slice::<Progress>(legacy_bytes).unwrap(),
+        legacy
+    );
+
+    let blocker = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+    let progress = Progress::new(ProgressPhase::QueueWait, 42, None)
+        .unwrap()
+        .with_waiting_on(ProgressWaitingOn::Checkout)
+        .with_blocker_job_id(blocker);
+    assert_eq!(progress.blocker_job_id(), Some(blocker));
+    let record = StreamRecord::Progress(progress);
+    assert_eq!(
+        serde_json::from_slice::<StreamRecord>(&vector("queue-wait")).unwrap(),
+        record
+    );
+    assert_eq!(
+        serde_json::to_value(&record).unwrap(),
+        json!({"type":"progress", "phase":"queue_wait", "phase_elapsed_ms":42,
+        "waiting_on":"checkout", "blocker_job_id":"00000000-0000-4000-8000-000000000002"})
+    );
+    let future: StreamRecord =
+        serde_json::from_slice(&vector("queue-wait-unknown-reason")).unwrap();
+    let StreamRecord::Progress(future) = future else {
+        panic!("expected progress")
+    };
+    assert_eq!(
+        future.waiting_on(),
+        Some(&ProgressWaitingOn::Unknown("future_reason".into()))
+    );
+    let unknown: Progress =
+        serde_json::from_value(json!({"phase":"future_phase", "phase_elapsed_ms":0})).unwrap();
+    assert_eq!(
+        unknown.phase(),
+        &ProgressPhase::Unknown("future_phase".into())
+    );
+}
+
+#[test]
+fn progress_queue_wait_is_compatible_with_021_reader_shape() {
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    #[serde(from = "String")]
+    enum OlderPhase {
+        Upload,
+        PlacementWait,
+        Connect,
+        Unknown(String),
+    }
+    impl From<String> for OlderPhase {
+        fn from(phase: String) -> Self {
+            match phase.as_str() {
+                "upload" => Self::Upload,
+                "placement_wait" => Self::PlacementWait,
+                "connect" => Self::Connect,
+                _ => Self::Unknown(phase),
+            }
+        }
+    }
+    #[derive(serde::Deserialize)]
+    struct OlderProgress {
+        phase: OlderPhase,
+        phase_elapsed_ms: u64,
+        detail: Option<String>,
+        job_id: Option<uuid::Uuid>,
+    }
+    let decoded: OlderProgress = serde_json::from_slice(&vector("queue-wait")).unwrap();
+    assert_eq!(decoded.phase, OlderPhase::Unknown("queue_wait".into()));
+    assert_eq!(decoded.phase_elapsed_ms, 42);
+    assert_eq!(decoded.detail, None);
+    assert_eq!(decoded.job_id, None);
 }
 
 #[test]
