@@ -9,8 +9,8 @@ checksum has the same value.
 
 - Removed the deprecated `with_statement_seq` builders of `SetupRequest` and
   notice `Conditions`, as 0.3.8 announced. Use `with_statement_order(epoch,
-  statement_seq, declared)`, which sets both members; an undeclared projection
-  clears both. Decoding a stamp without an epoch is unchanged.
+  statement_seq, declared)`, which sets both members, or clears both when
+  `declared` is false. Decoding a stamp without an epoch is unchanged.
 - New `Text` (`text::Text`, also at the crate root): shared, immutable UTF-8.
   Cloning shares the buffer. Build it from `&str`, `String` or `Box<str>` (one
   copy) or from an `Arc<str>` (shared, no copy). It derefs to `str`, and compares,
