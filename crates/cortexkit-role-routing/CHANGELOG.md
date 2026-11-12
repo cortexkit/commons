@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.19
+
+- Pin gateway `explicit_providers` matching to the provider whose catalog rows
+  the credential serves, runner-wide and per harness. Naming the gateway's
+  credential provider id admits no extra routes; other auth methods continue
+  to compare the credential's own provider. No wire shape or capability changes.
+
 ## 0.7.18
 
 - Add independently discovered consumer declarations, per-harness facts,

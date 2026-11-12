@@ -163,6 +163,14 @@ That group's additive defaults, attested namespace and selector rules are in §1
   `wire.api`. The runner sends only the gateway credential, not a second secret
   for the upstream provider. Informatively, the vault and runner allow HTTPS,
   or plain HTTP only to a loopback gateway; routing does not validate endpoints.
+- [pinned] For a credential whose `auth_method` is `gateway`, every
+  `explicit_providers` check, runner-wide or per harness, compares the provider
+  whose catalog rows the gateway serves for that route, never the gateway
+  credential's own provider id. A gateway credential `anthropic-gw-acme` serving
+  `anthropic/...` rows passes a limit of `["anthropic"]`; the same credential
+  serving `openai/...` rows fails it. Listing `anthropic-gw-acme` in
+  `explicit_providers` admits nothing extra: only the served provider counts.
+  For every other auth method, the check compares the credential's own provider.
 - [pinned] Readers first for gateway meaning: deploy routing 0.7.15 before a
   runner declares a `gateway` pair, with routing able to match the vault's
   `llm-gateway` credential as `gateway`. Older parsers accept the token and keep
@@ -224,7 +232,9 @@ That group's additive defaults, attested namespace and selector rules are in §1
   comes only from `runner.pairs` and the runner-level value. A
   `requires_wire_api` member in a harness-limit pair is ignored like other
   unknown members and has no effect. Harness `explicit_providers` is a non-empty, unique provider
-  allow-list with the standing-limit token grammar and 64-entry bound. When
+  allow-list with the standing-limit token grammar and 64-entry bound. For
+  gateway credentials, it compares the served catalog provider as pinned in
+  the gateway rules above. When
   a runner-level allow-list exists, every harness provider must be in it;
   when absent, a harness may introduce an allow-list. Neither field may broaden
   what the runner offers. The union remains safe for readers that ignore the
@@ -269,7 +279,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
   use a platform credential only when its registration names the provider.
   Absent `explicit_providers` means no provider limit. A present
   `standing_limits: {}` also means no limit and retains its empty object
-  when serialized.
+  when serialized. For gateway credentials, this list compares the served
+  catalog provider as pinned in the gateway rules above.
 - [pinned] Optional runner members follow §2's null-as-absence rule.
   Absent `runner`, false `follows_account_choice` and `requires_wire_api`, and empty
   `tool_capabilities` are omitted when serialized. Absent `harness_limits`, `harnesses` and

@@ -1072,38 +1072,66 @@ impl FakeRoute {
                     .expect("no harness limits")
             }
         };
-        limits
-            .explicit_providers
+        let route_facts = state
+            .runner_route_facts
+            .iter()
+            .find(|facts| facts.route_key == model.route_key());
+        let gateway = route_facts.is_some_and(|facts| facts.auth_method == "gateway");
+        let credential_provider = state
+            .catalog
             .as_ref()
-            .is_none_or(|providers| providers.contains(&model.provider))
-            && state
-                .runner_route_facts
-                .iter()
-                .find(|facts| facts.route_key == model.route_key())
-                .map_or_else(
-                    || {
-                        self.fault("runner_requires_wire_api")
-                            || declaration.admits_row(serves_wire_api)
-                    },
-                    |facts| {
-                        limits.pairs.as_ref().is_some_and(|pairs| {
-                            pairs.iter().any(|pair| {
-                                pair.wire_api == facts.wire_api
-                                    && pair.auth_method == facts.auth_method
-                                    && (self.fault("runner_requires_wire_api")
-                                        || if (self.fault("requires_wire_api_pair_false_ignored")
-                                            && pair.requires_wire_api == Some(false))
-                                            || (self.fault("requires_wire_api_pair_true_ignored")
-                                                && pair.requires_wire_api == Some(true))
-                                        {
-                                            declaration.admits_row(serves_wire_api)
-                                        } else {
-                                            declaration.admits_pair_row(pair, serves_wire_api)
-                                        })
-                            })
-                        })
-                    },
-                )
+            .and_then(|catalog| {
+                catalog
+                    .accounts
+                    .iter()
+                    .find(|account| {
+                        if gateway {
+                            account.method == "gateway"
+                        } else {
+                            account.provider == model.provider
+                        }
+                    })
+                    .map(|account| &account.provider)
+            })
+            .unwrap_or(&model.provider);
+        // Gateway credentials can serve another provider's rows. Other
+        // credential methods retain their own provider identity for limits.
+        let provider = if gateway
+            && !(self.fault("runner_gateway_explicit_providers")
+                || (declaration.harness_limits.is_some()
+                    && harness.is_some()
+                    && self.fault("gateway_explicit_providers_harness")))
+        {
+            &model.provider
+        } else {
+            credential_provider
+        };
+        limits.explicit_providers.as_ref().is_none_or(|providers| {
+            providers.contains(provider)
+                || (gateway
+                    && self.fault("gateway_explicit_providers_alias")
+                    && providers.contains(credential_provider))
+        }) && route_facts.map_or_else(
+            || self.fault("runner_requires_wire_api") || declaration.admits_row(serves_wire_api),
+            |facts| {
+                limits.pairs.as_ref().is_some_and(|pairs| {
+                    pairs.iter().any(|pair| {
+                        pair.wire_api == facts.wire_api
+                            && pair.auth_method == facts.auth_method
+                            && (self.fault("runner_requires_wire_api")
+                                || if (self.fault("requires_wire_api_pair_false_ignored")
+                                    && pair.requires_wire_api == Some(false))
+                                    || (self.fault("requires_wire_api_pair_true_ignored")
+                                        && pair.requires_wire_api == Some(true))
+                                {
+                                    declaration.admits_row(serves_wire_api)
+                                } else {
+                                    declaration.admits_pair_row(pair, serves_wire_api)
+                                })
+                    })
+                })
+            },
+        )
     }
 
     fn select(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
@@ -2116,11 +2144,21 @@ impl FakeRoute {
                 reset => Refusal::account_pool_exhausted(reset),
             });
         }
+        let gateway = state.runner_route_facts.iter().any(|facts| {
+            facts.route_key == format!("{}/{}", request.provider, request.model)
+                && facts.auth_method == "gateway"
+        });
         let usable: Vec<usize> = catalog
             .accounts
             .iter()
             .enumerate()
-            .filter(|(_, account)| account.provider == request.provider)
+            .filter(|(_, account)| {
+                if gateway {
+                    account.method == "gateway"
+                } else {
+                    account.provider == request.provider
+                }
+            })
             .filter(|(_, account)| {
                 !state.ineligible.iter().any(|(credential, model)| {
                     credential == &account.credential_id

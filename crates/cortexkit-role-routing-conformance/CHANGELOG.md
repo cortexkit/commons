@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.21
+
+- Pin routing `=0.7.19`. Add `runner_gateway_explicit_providers`: runner-wide
+  and per-harness allow-lists admit an Anthropic-served gateway route and
+  refuse an OpenAI-served route, even when the gateway credential's provider
+  id is listed. Check gateway credential admission and gateway-id-only limits.
+- Update the faithful fake for gateway credentials serving other providers'
+  rows; reject faulty routers that compare the credential's own provider id
+  runner-wide or per harness, or treat that id as an extra allowed provider.
+
 ## 0.10.20
 
 - Pin routing `=0.7.18`. Add seven independently gated consumer/placement

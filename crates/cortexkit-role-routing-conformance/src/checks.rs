@@ -269,6 +269,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         if name == "runner_gateway_credential" {
             return self.gateway_check(name).await;
         }
+        if name == "runner_gateway_explicit_providers" {
+            return self.gateway_explicit_providers_check(name).await;
+        }
         if name == "runner_requires_wire_api" {
             return self.requires_wire_api_check(name).await;
         }

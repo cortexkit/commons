@@ -22,6 +22,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("placement_select_price", "select_price: list and divided subscription rates, multiplier, TTLs, reserve estimate and unpriced omission"),
     check("placement_attempt_outcomes", "report_attempt_outcomes: every status is accepted, unknown counts nothing, and retry_after_ms belongs only to throttled"),
     check("runner_gateway_credential", "runner matching: anthropic.messages/gateway selects without catalog wire.api and admits the gateway credential/account"),
+    check("runner_gateway_explicit_providers", "gateway provider limits compare the served catalog provider, not the credential's provider id, runner-wide and per harness"),
     check("select_engine_eval_measured", "engine_evals: measured engines outrank unmeasured engines and cost"),
     check("select_engine_eval_higher_score", "engine_evals: newest score on the same set ranks higher first"),
     check("select_engine_eval_different_set", "engine_evals: scores from another set are not comparable"),
