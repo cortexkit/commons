@@ -103,9 +103,11 @@ mod tests {
             exe.display(),
             profile.display()
         );
+        // A fresh Cargo 1.100 target folder has build/ but no deps/, and an
+        // older one has deps/; either marks a real profile folder.
         assert!(
-            profile.join("deps").is_dir(),
-            "{} has no deps/ folder",
+            profile.join("deps").is_dir() || profile.join("build").is_dir(),
+            "{} has neither deps/ nor build/",
             profile.display()
         );
     }
