@@ -7080,8 +7080,8 @@ account per model request use the same mapping for the run error's
 
 | Routing refusal code | Outer code / run-error `provider_code` |
 |---|---|
-| `account_pool_exhausted`, `account_pool_reserve_limited`, `account_quota_unknown`, `no_eligible_account` | `account_limit_exhausted` (account wait) |
-| `account_hold`, `account_selection_unavailable`, `pin_generation_conflict`, `store_error`, `internal_error` | `account_selection_refused` (account wait) |
+| `account_pool_exhausted`, `account_pool_reserve_limited`, `account_hold`, `account_quota_unknown`, `no_eligible_account` | `account_limit_exhausted` (account wait) |
+| `account_selection_unavailable`, `pin_generation_conflict`, `store_error`, `internal_error` | `account_selection_refused` (account wait) |
 | `account_not_authorized`, `invalid_request`, `admission_conflict`, `unknown_decision`, `unscoped_caller`, `account_selection_unsupported`, and every routing code the runner does not know | `account_selection_final` |
 
 Unknown routing codes map to final, never a wait, matching routing's own
