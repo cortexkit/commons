@@ -942,6 +942,11 @@ that a model meant as content; it does not tell decoration from content.
   cleaned body. Display rows (§4.7) and `run.result`'s `final_message.text`
   (§6) are built from it, and live text deltas follow §7.1. The host's
   stored copy is untouched.
+- [pinned] **Not the control lane.** Reply text that a `session.subscribe`
+  control unit carries is the host's original, never cleaned, so a replay of
+  that lane stays byte-equal across releases of the cleaning. A client drawing
+  a reply from a control unit runs `clean_reply` on it itself, or draws the
+  reply from the display lane instead.
 - [pinned] **Served bytes.** For an in-scope message the runner rebuilds the
   profile body with the entry's retained strip flag (§4.2.1), then cleans
   the payloads above, then computes or checks the message digest and every
@@ -7075,8 +7080,8 @@ account per model request use the same mapping for the run error's
 
 | Routing refusal code | Outer code / run-error `provider_code` |
 |---|---|
-| `account_pool_exhausted`, `account_pool_reserve_limited`, `account_hold`, `account_quota_unknown`, `no_eligible_account` | `account_limit_exhausted` (account wait) |
-| `account_selection_unavailable`, `pin_generation_conflict`, `store_error`, `internal_error` | `account_selection_refused` (account wait) |
+| `account_pool_exhausted`, `account_pool_reserve_limited`, `account_quota_unknown`, `no_eligible_account` | `account_limit_exhausted` (account wait) |
+| `account_hold`, `account_selection_unavailable`, `pin_generation_conflict`, `store_error`, `internal_error` | `account_selection_refused` (account wait) |
 | `account_not_authorized`, `invalid_request`, `admission_conflict`, `unknown_decision`, `unscoped_caller`, `account_selection_unsupported`, and every routing code the runner does not know | `account_selection_final` |
 
 Unknown routing codes map to final, never a wait, matching routing's own
@@ -7109,6 +7114,11 @@ with the ordinary run `error` carrying the mapped `provider_code`,
   before its named time.
 - [pinned] Resending the original send is allowed only when the caller
   knows no run began, including a queued send refused at its own admission.
+  A resend is a new send with a new `send_id` carrying the same content. A
+  `send_id` names one send for its whole life: a repeat of a recorded send's
+  id is answered from that send's record, however long the caller waits,
+  which is what keeps a transport retry safe. A send refused at admission
+  before the runner recorded it leaves no record, so its id may be used again.
   `run.status.usage.steps` is 0 when nothing reached the model; it is
   informative, not required for handling the wait. A run with
   `provider_code: account_selection_final` is a final failure.

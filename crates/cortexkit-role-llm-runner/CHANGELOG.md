@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Contract §12.1: routing's `account_hold` maps to `account_selection_refused`,
+  not `account_limit_exhausted`. A hold is routing keeping the account for a
+  probe or a continuation, not a spent limit. Both are account waits, so no
+  caller's handling changes, only the wording an app shows. Text only.
+- Contract §12.1: a resend is a new send with a new `send_id`. A recorded
+  send's id answers from its record for its whole life. A send refused before
+  it was recorded leaves no record, so its id may be reused. Text only.
+- Contract §4.2.2: reply text on the `session.subscribe` control
+  lane is never cleaned. Clients clean it themselves or draw from the display
+  lane. Text only.
+
 ## 0.8.41
 
 - Extend account waits to run-end errors on every runner. Never fail the work
