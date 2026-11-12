@@ -1,6 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.8.42
+
+- Name the self-resuming account-limit pause `RunReason::AccountLimit`, wire
+  `account_limit`. The runner resumes the same run on the same account and
+  never moves accounts while paused. Add optional `resume_not_before_ms`
+  (u64 Unix-epoch milliseconds) to `RunStatus`, head `LastRunState` and the
+  paused control event, including the typed `live::RunEnded` payload.
+- Keep the original account-limit error on paused `run.result`, without the
+  resume floor: polling it classifies the account wait and gives the error's
+  time; read `run.status` once for the exact floor. Callers wait on any pause
+  as on an active run up to their own deadline; an account-limit pause still
+  present then is an account wait, never a failure.
+- Compatibility: `RunReason` retains unknown strings as `Unknown`;
+  `RunStatus`, `LastRunState` and `live::RunEnded` do not deny unknown fields;
+  `SubscribeEvent` keeps extra members in its open body. State/reason strings
+  remain open. Older readers decode the additions without adopting 0.8.42
+  first; omitted optional members preserve older bytes.
+- Code building `LastRunState` with a struct literal must add `resume_not_before_ms: None`.
+- Clarify §12.2 timing: `retry_after_secs` names when to ask routing again,
+  possibly before the walled account's own `resets_at_ms`. Relative timing
+  keeps precedence. Text only.
+- Allow §4.9 `session.plan_view` to refuse `transient` with informative
+  `cause: awaiting_plan_applied` until the next `plan_applied`. Readers wait
+  for that event or the next window open, not a retry timer. Text only.
+- Add the account-limit run-status vector and round-trip coverage for the
+  status, head and paused event, older bodies and unknown reasons.
 
 - Contract §12.1: a resend is a new send with a new `send_id`. A recorded
   send's id answers from its record for its whole life. A send refused before

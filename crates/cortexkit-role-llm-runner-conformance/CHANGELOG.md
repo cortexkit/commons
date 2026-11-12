@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.51
+
+- Pin runner contract `=0.8.42` for the named `account_limit` pause and
+  optional `resume_not_before_ms` on status, head and paused control events.
+  Pause reasons and head members are not checked against closed lists, so
+  no check or capability declaration changes are needed. The simulated
+  runner continues to declare only the behavior it implements.
+- The touched reply payloads are open; older readers can decode the new
+  reason and ignore the optional floor without a reader-first rollout.
+
 ## 0.17.50
 
 - Pin runner contract `=0.8.41` for run-end account waits, final account

@@ -1008,10 +1008,14 @@ that a model meant as content; it does not tell decoration from content.
 
 - [pinned] It is its own op, `session.head`, taking no fields
   (`HeadRequest`); `last_ordinal` is absent on an empty transcript;
-  `last_run_state` is `{run_id, state, reason?}` (`LastRunState`) and
+  `last_run_state` is `{run_id, state, reason?, resume_not_before_ms?}` (`LastRunState`) and
   describes the most recent run, never the transcript; `updated_at` is
   milliseconds since the Unix epoch. `last_run_state` is the pinned run
   summary; a page's `history_state` is a runner member, not pinned.
+- [pinned] While the run is paused for `account_limit`, `last_run_state`
+  carries `resume_not_before_ms`, the earliest automatic resume time as `u64`
+  Unix-epoch milliseconds (§6.1). The head alone therefore tells an app that
+  the run is waiting for the account and until when, without a status read.
 - [pinned] `last_run_error?: {class, retry_after_secs?, resets_at_ms?, provider_code?}`
   (`read::LastRunError`, added in 0.7.5) may be present only with
   `last_run_state` whose `state` is `"error"`, and describes that same run.
@@ -1891,6 +1895,13 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   session reads. If the complete encoded reply would exceed the daemon's
   4,194,304-byte frame limit, including the 21-byte header, the runner refuses
   `too_large` rather than truncating the system text, tools or item ranges.
+- [pinned] If the runner cannot yet vouch for the session's tool-to-provider
+  record, it may refuse `transient` with
+  `detail.cause: "awaiting_plan_applied"`. It answers normally from the
+  session's next `plan_applied` event. Readers do not retry this read on a
+  timer; they read again when the window next opens or on `plan_applied`.
+  The code stays `transient`, so the code-only retry rule is unchanged;
+  `cause` is informative, not another refusal code.
 
 ## 5. `dispatch_attribution`
 
@@ -1946,6 +1957,10 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   `context_ceiling`, `cancelled`, `error` and `interrupted`, each its own variant of the non-exhaustive `RunState`. States are decoded open: a runner's own state
   (`transform_unavailable`, say) decodes as a plain string, and a
   consumer does not treat an unknown state as terminal.
+- [pinned] A caller waits on a `paused` run as on an `active` one, whatever
+  the pause reason, up to its own deadline. A run still paused for
+  `account_limit` at that deadline is an account wait until
+  `resume_not_before_ms` (or the run error's time, §12.1), never a failure.
 - [pinned] Structured output adds no state. A run that calls `submit_result`
   (§9.4) ends `completed` after that step, whether or not the submitted value
   validates: `validation: "failed"` is reported on a `completed` run, and no
@@ -2001,8 +2016,9 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   (`RunStatus::context_ceiling_wait`) and on that event. This reuses the
   shape a non-terminal run already uses to say why it is not moving, a
   state with an open `reason`, as `paused` does with `auth_required`; it is
-  not `paused`, because a paused run waits for a caller's retry and changes
-  how sends behind it are admitted (§9), while this wait ends on its own.
+  not `paused`: pausing changes how sends behind the run are admitted (§9),
+  while a ceiling wait does not. Some pauses wait for a caller's retry;
+  `account_limit` instead resumes by itself (§6.1).
   As a runner-owned wait, it is not nudged or stopped before
   `deadline_ms`. The wait ends in progress, when a view arrived (the reason
   and deadline are gone), or in the terminal `context_ceiling` state with
@@ -2102,7 +2118,7 @@ state, polled without reading the transcript.
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
-  structured_output?, context_ceiling?, deadline_ms?, held_calls?, usage?, directives?, finish?}`,
+  structured_output?, context_ceiling?, deadline_ms?, resume_not_before_ms?, held_calls?, usage?, directives?, finish?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason` and
   `retries_used` stay runner members, not pinned. The normalized `finish`
@@ -2112,17 +2128,27 @@ state, polled without reading the transcript.
     terminal.
   - `reason`, where the runner names one: why a paused run is paused, why
     an active run is waiting, or why an ended run ended. It is an open
-    string; the known pause reasons are `auth_required` and `restart`, and
+    string; the known pause reasons are `auth_required`, `restart` and
+    `account_limit` (`RunReason::AccountLimit`), and
     the known waiting reasons are `context_ceiling_wait` and
     `compaction_wait` (§6).
   - `deadline_ms`: on an `active` or `paused` run in a wait the runner owns
     and ends by itself, when that wait ends at the latest (§6, runner-owned
     waits; `context_ceiling_wait` is one such wait); absent otherwise.
+  - `account_limit` means the runner chose to pause rather than end the run
+    because the account's limit reset is close. It resumes the same run by
+    itself on the same account and never moves accounts while paused.
+  - `resume_not_before_ms`: optional `u64` Unix-epoch milliseconds, present
+    while paused for `account_limit`. It names the earliest time the runner
+    resumes, and may lag the account's reset slightly for scheduling. It is
+    a resume floor, not `deadline_ms`'s latest end of a runner-owned wait.
+    The same floor is on the stream's `paused` control event (§7) and the
+    head's `last_run_state` (§4.3).
   - `held_calls`: on a runner declaring `held_calls`, the held tool calls
     whose late answers the run awaits, as specified below.
-  - `error`: on a run that ended `error`, the same run error `run.result`
-    answers (§6), with the same `provider_code` and `provider_detail_code`
-    rules.
+  - `error`: on a run that ended `error` or is paused for `account_limit`,
+    the same run error `run.result` answers (§6), with the same
+    `provider_code` and `provider_detail_code` rules.
   - `detail`: on `budget_exhausted`, exactly the detail `run.result` carries (§6).
   - `structured_output`: exactly what `run.result` carries for the run (§9.4).
   - `context_ceiling`: on `context_ceiling`, exactly the detail `run.result`
@@ -2132,6 +2158,19 @@ state, polled without reading the transcript.
     for the run, on a runner declaring `finish_reason` (§6.6).
   - `usage`: the run's token usage so far, on a runner that declares
     `run_usage` (§6.4).
+- [pinned] For this account-limit pause, `run.result` carries `state: "paused"`,
+  `reason: "account_limit"` and the run's original structured `error`, with
+  `provider_code: "account_limit_exhausted"` and `retry_after_secs` and/or
+  `resets_at_ms`. It does not carry `resume_not_before_ms`. Polling
+  `run.result` is enough to classify the pause as an account wait and gives
+  a time close to the resume floor from that error. A caller wanting the
+  exact floor reads `run.status` once.
+- [pinned] These reply extensions are open: `RunReason` preserves an unknown
+  string as `Unknown`, `RunStatus` and `LastRunState` ignore unknown members,
+  and `SubscribeEvent` keeps them in its body. The typed `run_paused` payload
+  (`live::RunEnded`) also ignores unknown members and has an open string
+  reason. Older readers can decode these additions without a reader-first
+  0.8.42 rollout.
 - [pinned] **Held calls** (added in 0.5.4). A runner declares the describe
   group `held_calls` when it reports held tool-provider calls. It requires
   `run_status` and adds optional `held_calls: [{call_key, tool, provider,
@@ -2676,7 +2715,7 @@ permits inferring an unreported reason.
   describe group, including on a runner without typed `live_events`.
 - [pinned] A stream event that names why a run is paused or waiting uses
   `reason`, an open, display-only string with known values `auth_required`,
-  `restart`, `context_ceiling_wait` and `compaction_wait`, as `run.status`
+  `restart`, `account_limit`, `context_ceiling_wait` and `compaction_wait`, as `run.status`
   does (§6.1). A runner reports a wait it owns (§6, runner-owned waits) with a durable
   `control` event carrying `deadline_ms` when the wait starts, beside the
   wait's `reason`; a reader recognizes the wait by `deadline_ms`, never by
@@ -2687,6 +2726,10 @@ permits inferring an unreported reason.
   for held tool calls, and emits a durable `control` status event when that
   list changes. It omits the list when empty. This wait has no deadline;
   readers recognize it by the non-empty list, independently of `deadline_ms`.
+- [pinned] While a run is paused for `account_limit`, its durable `paused`
+  control event carries `reason: "account_limit"` and `resume_not_before_ms`
+  with the same earliest resume time as `run.status` (§6.1). On a runner
+  declaring `live_events`, this is the `run_paused` payload below.
 
 ### 7.1 `live_events`: typed events on `session.subscribe`
 
@@ -2721,7 +2764,7 @@ new members.
   - `run_started {run_id, send_id?}`, `run_finished {run_id, reason}` with `reason` an
     open string (`live::run_reasons`: `completed`, `cancelled`,
     `interrupted`, `max_steps`, `error`, `budget_exhausted`,
-    `context_ceiling`, ...), and `run_paused {run_id, reason}` for a run
+    `context_ceiling`, ...), and `run_paused {run_id, reason, resume_not_before_ms?}` for a run
     that stopped and can resume under the same `run_id`. A runner that never
     pauses never sends `run_paused`; a reader never requires it.
   - [pinned] Run order: on one session's stream, a run's ending event
@@ -7122,9 +7165,13 @@ with the ordinary run `error` carrying the mapped `provider_code`,
   `run.status.usage.steps` is 0 when nothing reached the model; it is
   informative, not required for handling the wait. A run with
   `provider_code: account_selection_final` is a final failure.
-- [pinned] A runner that pauses the run itself (`paused` with an
-  account-limit reason) and continues it at the named time satisfies the
-  wait. The caller does nothing while it is paused.
+- [pinned] A runner that pauses the run itself (`state: "paused"` with
+  `reason: "account_limit"`, §6.1) and continues it at the named time
+  satisfies the wait. The caller does nothing while it is paused, waiting
+  as on an active run up to its own deadline. If the run is still paused for
+  `account_limit` then, it remains an account wait until
+  `resume_not_before_ms` (or the run error's time), never a failure. The runner
+  resumes by itself on the same account and never moves accounts while paused.
 
 - [pinned] Only runners that choose accounts at send time refuse sends with
   these account-wait codes. A runner that chooses an account for each model
@@ -7180,6 +7227,14 @@ to the provider codes below, this role names the following runner-side class
 [pinned] A run that ends `error` because of a provider names the code
 callers branch on as `provider_code` in its run error, and any finer
 diagnostic as `provider_detail_code`, which never decides anything (§6).
+On a run error, `retry_after_secs` is the relative delay before asking
+routing again: the earliest time routing or the provider names. For example,
+routing may hold a request expecting another account to have room before
+the walled account resets. `resets_at_ms` is that walled account's own reset,
+as Unix-epoch milliseconds. Callers time from `retry_after_secs` first, then
+`resets_at_ms`, then their own backoff, as §12.1 specifies; the account reset
+does not override an earlier useful routing probe.
+
 The provider codes this role names:
 
 | Provider code | When |

@@ -5296,6 +5296,7 @@ impl Module {
                     .filter(|(waiting, _)| *waiting == run.run_id)
                     .map(|_| cortexkit_role_llm_runner::RUN_REASON_CONTEXT_CEILING_WAIT.to_owned())
                     .or_else(|| run.reason.clone()),
+                resume_not_before_ms: None,
             });
             if let Some(stamp) = self.head_stamp(sess) {
                 head = head.with_last_run_rich_ui(stamp);

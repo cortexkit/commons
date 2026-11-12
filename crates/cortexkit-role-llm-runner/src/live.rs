@@ -410,6 +410,10 @@ impl RunStarted {
 pub struct RunEnded {
     pub run_id: String,
     pub reason: String,
+    /// Earliest automatic resume time, in Unix-epoch milliseconds, on a
+    /// `run_paused` event for `account_limit`. Absent on `run_finished`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_not_before_ms: Option<u64>,
 }
 
 impl RunEnded {
@@ -417,7 +421,13 @@ impl RunEnded {
         Self {
             run_id: run_id.into(),
             reason: reason.into(),
+            resume_not_before_ms: None,
         }
+    }
+
+    pub fn with_resume_not_before_ms(mut self, resume_not_before_ms: u64) -> Self {
+        self.resume_not_before_ms = Some(resume_not_before_ms);
+        self
     }
 }
 

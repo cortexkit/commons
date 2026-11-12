@@ -462,6 +462,9 @@ pub const COMPACTION_WAIT_REPORT_AFTER_MS: u64 = 1_000;
 pub enum RunReason {
     AuthRequired,
     Restart,
+    /// A paused run waiting for the same account's limit to reset; the runner
+    /// resumes it by itself, no earlier than `resume_not_before_ms`.
+    AccountLimit,
     /// An `active` run held at the context ceiling until `deadline_ms`.
     ContextCeilingWait,
     /// An `active` run whose step waits on a rewrite ride until
@@ -474,6 +477,7 @@ impl From<String> for RunReason {
         match value.as_str() {
             "auth_required" => Self::AuthRequired,
             "restart" => Self::Restart,
+            "account_limit" => Self::AccountLimit,
             RUN_REASON_CONTEXT_CEILING_WAIT => Self::ContextCeilingWait,
             RUN_REASON_COMPACTION_WAIT => Self::CompactionWait,
             _ => Self::Unknown(value),
@@ -485,6 +489,7 @@ impl From<RunReason> for String {
         match value {
             RunReason::AuthRequired => "auth_required".into(),
             RunReason::Restart => "restart".into(),
+            RunReason::AccountLimit => "account_limit".into(),
             RunReason::ContextCeilingWait => RUN_REASON_CONTEXT_CEILING_WAIT.into(),
             RunReason::CompactionWait => RUN_REASON_COMPACTION_WAIT.into(),
             RunReason::Unknown(s) => s,
@@ -553,6 +558,11 @@ pub struct RunStatus {
     pub detail: Option<BudgetExhaustedDetail>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<RunReason>,
+    /// Earliest automatic resume time, in Unix-epoch milliseconds, while
+    /// paused for `account_limit`. May slightly follow the account's reset
+    /// for scheduling; the run stays on that account while paused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_not_before_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<RunError>,
     /// On an ended run, `None` means delivery could not be determined; an
@@ -595,6 +605,7 @@ impl RunStatus {
             finish: None,
             detail: None,
             reason: None,
+            resume_not_before_ms: None,
             error: None,
             undelivered_steers: None,
             structured_output: None,
@@ -649,6 +660,10 @@ impl RunStatus {
     }
     pub fn with_reason(mut self, reason: RunReason) -> Self {
         self.reason = Some(reason);
+        self
+    }
+    pub fn with_resume_not_before_ms(mut self, resume_not_before_ms: u64) -> Self {
+        self.resume_not_before_ms = Some(resume_not_before_ms);
         self
     }
     pub fn with_detail(mut self, detail: BudgetExhaustedDetail) -> Self {

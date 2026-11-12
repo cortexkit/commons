@@ -1489,6 +1489,10 @@ pub struct LastRunState {
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
+    /// Earliest automatic resume time, in Unix-epoch milliseconds, while
+    /// paused for `account_limit`; may slightly follow the account's reset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_not_before_ms: Option<u64>,
 }
 
 /// A finite, nonnegative retry delay in seconds, encoded as a JSON number.
@@ -1892,6 +1896,7 @@ mod tests {
                 run_id: "error-run".into(),
                 state: "error".into(),
                 reason: Some("provider_error".into()),
+                resume_not_before_ms: None,
             })
             .with_last_run_error(
                 LastRunError::new("transient")

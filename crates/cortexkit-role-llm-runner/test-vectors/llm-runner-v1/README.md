@@ -1,4 +1,10 @@
-# llm-runner/v1 vectors for runner 0.8.34
+# llm-runner/v1 vectors for runner 0.8.42
+
+`run_status.account_limit.json` pins a run paused for an account limit,
+its original structured error and the earliest automatic resume time. The
+resume floor slightly follows the account's reset for scheduling. The
+`account_limit` integration tests round-trip this status and the related
+head, control-event and result shapes, including older bodies without a floor.
 
 `display-host-codes.json` pins both exact interrupt codes, an unknown code
 retained verbatim with text fallback, and an uncoded host part. Each opted-in
