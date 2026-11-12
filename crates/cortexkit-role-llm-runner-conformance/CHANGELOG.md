@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.52
+
+- Pin runner contract `=0.8.43` for optional open-string `RunError.cause`.
+- Check the kit's decoders accept unknown causes and absent causes in
+  `run.status`, `run.result` and raw subscribe control errors. No live suite
+  case, capability or cause-emission requirement is added.
+
 ## 0.17.51
 
 - Pin runner contract `=0.8.42` for the named `account_limit` pause and

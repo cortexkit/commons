@@ -359,3 +359,59 @@ where
 pub fn call_key_well_formed(key: &str) -> bool {
     (1..=256).contains(&key.len()) && key.bytes().all(|b| (0x21..=0x7E).contains(&b))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cortexkit_role_llm_runner::{
+        run::{RunError, RunStatus},
+        subscribe::SubscribeEvent,
+    };
+
+    fn run_error(cause: Option<&str>) -> Value {
+        let mut error = json!({
+            "class": "permanent",
+            "message": "request refused",
+            "provider_code": "request_invalid"
+        });
+        if let Some(cause) = cause {
+            error["cause"] = json!(cause);
+        }
+        error
+    }
+
+    #[test]
+    fn run_error_cause_status_decode_accepts_unknown_and_absent() {
+        for cause in [Some("future_cause"), None] {
+            let body = json!({"state": "error", "error": run_error(cause)});
+            let status: RunStatus = decode("run.status", body.clone()).unwrap();
+            assert_eq!(status.error.as_ref().unwrap().cause.as_deref(), cause);
+            assert_eq!(serde_json::to_value(status).unwrap(), body);
+        }
+    }
+
+    #[test]
+    fn run_error_cause_result_decode_accepts_unknown_and_absent() {
+        for cause in [Some("future_cause"), None] {
+            let body = json!({"run_id": "run-1", "state": "error", "error": run_error(cause)});
+            let result: RunResult = decode("run.result", body.clone()).unwrap();
+            assert_eq!(result.error.as_ref().unwrap().cause.as_deref(), cause);
+            assert_eq!(serde_json::to_value(result).unwrap(), body);
+        }
+    }
+
+    #[test]
+    fn run_error_cause_subscribe_decode_accepts_unknown_and_absent() {
+        for cause in [Some("future_cause"), None] {
+            let body = json!({
+                "kind": "control", "cursor": {"wal_seq": 1},
+                "event": "error", "run_id": "run-1", "error": run_error(cause)
+            });
+            let event: SubscribeEvent = decode("session.subscribe", body.clone()).unwrap();
+            assert_eq!(event.body["error"], body["error"]);
+            let error: RunError = decode("control error", event.body["error"].clone()).unwrap();
+            assert_eq!(error.cause.as_deref(), cause);
+            assert_eq!(serde_json::to_value(event).unwrap(), body);
+        }
+    }
+}

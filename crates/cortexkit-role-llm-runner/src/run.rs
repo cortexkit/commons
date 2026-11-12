@@ -359,6 +359,9 @@ pub struct RunError {
     /// Routing's refusal code verbatim, diagnostic only; never decides retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing_code: Option<String>,
+    /// Structured cause callers may act on; unknown values are treated as absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<String>,
 }
 
 impl RunError {
@@ -379,6 +382,7 @@ impl RunError {
             reason: None,
             provider_detail_code: None,
             routing_code: None,
+            cause: None,
         }
     }
     pub fn with_status(mut self, status: u16) -> Self {
@@ -411,6 +415,10 @@ impl RunError {
     }
     pub fn with_routing_code(mut self, value: impl Into<String>) -> Self {
         self.routing_code = Some(value.into());
+        self
+    }
+    pub fn with_cause(mut self, value: impl Into<String>) -> Self {
+        self.cause = Some(value.into());
         self
     }
 }
@@ -853,6 +861,7 @@ mod tests {
 
     #[test]
     fn run_error_absent_members_are_not_measured_and_bytes_are_pinned() {
+        // These wire bytes were pinned before cause was added, in 0.8.42.
         let bytes = r#"{"class":"future-class","message":"failed","provider_code":"future-code"}"#;
         let error: RunError = serde_json::from_str(bytes).unwrap();
         assert_eq!(
@@ -866,6 +875,7 @@ mod tests {
         assert_eq!(error.provider, None);
         assert_eq!(error.reason, None);
         assert_eq!(error.provider_detail_code, None);
+        assert_eq!(error.cause, None);
         assert_eq!(serde_json::to_string(&error).unwrap(), bytes);
         let full = RunError::new("transient", "limited", "billing_exhausted")
             .with_status(429)
@@ -889,6 +899,30 @@ mod tests {
             r#"{"class":"c","message":"m","provider_code":"p","future":true}"#
         )
         .is_ok());
+    }
+
+    #[test]
+    fn run_error_cause_round_trips_known_and_unknown_strings_byte_for_byte() {
+        for (cause, bytes) in [
+            (
+                "signed_reasoning_rejected",
+                r#"{"class":"permanent","message":"rejected","provider_code":"request_invalid","status":400,"cause":"signed_reasoning_rejected"}"#,
+            ),
+            (
+                "future_cause",
+                r#"{"class":"permanent","message":"rejected","provider_code":"request_invalid","status":400,"cause":"future_cause"}"#,
+            ),
+        ] {
+            let error: RunError = serde_json::from_str(bytes).unwrap();
+            assert_eq!(error.cause.as_deref(), Some(cause));
+            assert_eq!(serde_json::to_string(&error).unwrap(), bytes);
+            assert_eq!(
+                error,
+                RunError::new("permanent", "rejected", "request_invalid")
+                    .with_status(400)
+                    .with_cause(cause)
+            );
+        }
     }
 
     #[test]

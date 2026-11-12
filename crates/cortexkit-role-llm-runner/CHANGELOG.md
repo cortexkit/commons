@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.43
+
+- Add optional open-string `RunError.cause` with a `with_cause` builder,
+  shared by status, result and subscribe control errors. Unknown values are
+  retained as strings and treated as absent by readers. Absent causes are
+  omitted, preserving the 0.8.42 error bytes. `RunError` remains
+  non-exhaustive and does not deny unknown fields.
+- Define `signed_reasoning_rejected` for signed reasoning that was changed
+  or does not belong to the requested model, with `provider_code` set to
+  `request_invalid`. The same request is not retryable as is. Require cause
+  recognition to match the whole provider message under its specific error
+  type, never a free-text substring. Callers act on the cause, not the
+  provider's diagnostic `provider_detail_code`; no recovery rule is defined.
+- Pin byte-for-byte cause round trips, unknown values and absent-cause
+  compatibility with the existing 0.8.42 error bytes.
+
 ## 0.8.42
 
 - Name the self-resuming account-limit pause `RunReason::AccountLimit`, wire

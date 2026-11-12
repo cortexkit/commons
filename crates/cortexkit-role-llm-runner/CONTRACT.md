@@ -2074,7 +2074,7 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
 
 - [pinned] A run error (`RunResult::error`) is `{class, message,
   provider_code, status?, retry_after_secs?, resets_at_ms?, account_ref?,
-  provider?, reason?, provider_detail_code?, routing_code?}`. `class`, `message` and
+  provider?, reason?, provider_detail_code?, routing_code?, cause?}`. `class`, `message` and
   `provider_code` are required strings; `class` and `provider_code` are
   decoded open. `status` is an HTTP status when applicable;
   `retry_after_secs` is a number of seconds and may be fractional;
@@ -2096,6 +2096,23 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
 - [pinned] A run error without a finer code omits `provider_detail_code`.
   A local runner error carries no provider_detail_code unless a peer
   supplied a finer diagnostic refusal code.
+- [pinned] `RunError.cause` (added in 0.8.43) is an optional open string.
+  When absent, the runner states no cause; it is omitted from serialization
+  so existing error bytes do not change. It appears wherever a run error is
+  served: under `error` in `run.status` and `run.result`, and in the subscribe
+  stream's control `error` unit. Readers ignore a cause value they do not
+  know and treat it as absent; they never fail to decode because of it.
+  Callers act on `cause`, never on `provider_detail_code`, which stays the
+  provider's own diagnostic code.
+- [pinned] The first defined cause is `signed_reasoning_rejected`: the
+  provider refused the request because signed reasoning in it was changed,
+  or does not belong to the model the request was sent to. It comes with
+  `provider_code: "request_invalid"` and is not retryable as is: resending
+  the same request fails the same way.
+- [pinned] A runner emits `cause` only from a recognizer anchored to the
+  provider's whole message under the specific provider error type, never
+  from a substring match on free text. It emits no cause when the message
+  does not match.
 - [pinned] An unknown `run_id` is refused `unknown_run`, by `run.result`
   and `run.tool_calls` alike (§6.3).
 - [pinned] **Run attribution.** Each message records which run and episode
