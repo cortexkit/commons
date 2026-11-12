@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 
+#[cfg(feature = "digest")]
+use crate::commands_digest;
 use crate::{
-    commands_digest, facts::check_facts, require, text, validate_code, validate_commands,
-    validate_version, Command, Fact, FactValue, ValidationError, UNITS,
+    facts::check_facts, require, text, validate_code, validate_commands, validate_version, Command,
+    Fact, FactValue, ValidationError, UNITS,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -12,6 +14,7 @@ pub struct DescribeReply {
     pub commands: Vec<Command>,
     pub digest: String,
 }
+#[cfg(feature = "digest")]
 impl DescribeReply {
     pub fn new(commands: Vec<Command>) -> Result<Self, ValidationError> {
         validate_commands(&commands)?;

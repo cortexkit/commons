@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-role-user-commands"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -12,6 +12,21 @@ include = ["Cargo.toml", "CONTRACT.md", "README.md", "CHANGELOG.md", "src/**", "
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_jcs = "0.2"
-sha2 = "0.10"
+serde_jcs = { version = "0.2", optional = true }
+sha2 = { version = "0.10", optional = true }
 subc-protocol = ">=0.34.1, <0.37"
+
+[features]
+default = ["digest"]
+# The describe digest. serde_jcs turns on serde_json's `float_roundtrip` in any
+# build that includes it, so a reader that only decodes app-side types can turn
+# default features off and leave the digest out.
+digest = ["dep:serde_jcs", "dep:sha2"]
+
+[[test]]
+name = "validators"
+required-features = ["digest"]
+
+[[test]]
+name = "vectors"
+required-features = ["digest"]

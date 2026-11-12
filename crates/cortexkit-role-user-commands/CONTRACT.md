@@ -31,8 +31,11 @@ with `{name, arguments}`. Replies are the bodies below, not another envelope.
 
 **[pinned]** `digest` is 64 lowercase hexadecimal characters: SHA-256 of the
 RFC 8785 (JCS) bytes of the **commands array alone**, in its served order.
-`commands_digest` uses `serde_jcs`, without enabling serde_json's
-`float_roundtrip` or `arbitrary_precision`. `DescribeReply::check` verifies the
+`commands_digest` uses `serde_jcs`, which turns on serde_json's
+`float_roundtrip` in any build that includes it (never `arbitrary_precision`).
+The digest, `DescribeReply::new` and `DescribeReply::check` sit behind the
+default `digest` feature, so a reader that only decodes app-side types can turn
+default features off and leave both out. `DescribeReply::check` verifies the
 digest as well as the declarations. A merged list contains commands applying
 to the requested subject, qualified by module; ids are unique per module,
 not globally.

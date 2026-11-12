@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+#[cfg(feature = "digest")]
 use sha2::{Digest, Sha256};
 
 use crate::{require, text, validate_code, SessionRef, ValidationError};
@@ -261,6 +262,7 @@ pub fn validate_commands(commands: &[Command]) -> Result<(), ValidationError> {
 }
 
 /// Lowercase SHA-256 of the RFC 8785 bytes of the array, not the reply envelope.
+#[cfg(feature = "digest")]
 pub fn commands_digest(commands: &[Command]) -> Result<String, ValidationError> {
     let bytes = serde_jcs::to_vec(commands).map_err(|_| ValidationError::new("commands"))?;
     Ok(Sha256::digest(bytes)
