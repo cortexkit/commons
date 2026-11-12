@@ -578,6 +578,10 @@ pub const FILES: &[(&str, &str)] = &[
         "run_status.account_limit.json",
         include_str!("../test-vectors/llm-runner-v1/run_status.account_limit.json"),
     ),
+    (
+        "run-awaits.json",
+        include_str!("../test-vectors/llm-runner-v1/run-awaits.json"),
+    ),
 ];
 
 /// `sha256sum` output over [`FILES`]: one `<hex>  <name>` line per file.

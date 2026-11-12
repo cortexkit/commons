@@ -261,7 +261,9 @@ impl Tool {
     }
 }
 
-/// Per-tool token count. Only a measured count may be marked exact.
+/// Per-tool token count. `exact: true` means the provider's own count, reported
+/// by its count endpoint or usage. A local tokenizer's count is `exact: false`,
+/// even when it is close.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]

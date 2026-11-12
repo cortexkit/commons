@@ -639,11 +639,24 @@ async fn head_error_defect(defects: Defects, failing: &str, text: &str) {
             );
         }
     }
-    assert_none_failed_but(&report, &[failing]);
+    if defects.head_error_on_paused || defects.head_error_without_state {
+        let agreement = failed(&report, "run_awaits_same_run_agrees");
+        assert!(
+            agreement.contains(if defects.head_error_without_state {
+                "head omitted last_run_state"
+            } else {
+                "head and run.status disagree"
+            }),
+            "{agreement}"
+        );
+        assert_none_failed_but(&report, &[failing, "run_awaits_same_run_agrees"]);
+    } else {
+        assert_none_failed_but(&report, &[failing]);
+    }
 }
 
 #[tokio::test]
-async fn head_last_run_error_on_paused_fails_only_state_case() {
+async fn head_last_run_error_on_paused_also_fails_awaits_agreement() {
     head_error_defect(
         Defects {
             head_error_on_paused: true,
@@ -726,7 +739,7 @@ async fn head_last_run_error_wrong_reset_fails_only_status_case() {
 }
 
 #[tokio::test]
-async fn head_last_run_error_without_state_fails_only_presence_case() {
+async fn head_last_run_error_without_state_also_fails_awaits_agreement() {
     head_error_defect(
         Defects {
             head_error_without_state: true,
@@ -924,6 +937,64 @@ use std::{
 async fn run(subject: &FakeSubject) -> SuiteReport {
     let dir = tempfile::tempdir().unwrap();
     run_suite(subject, dir.path()).await.unwrap()
+}
+
+#[tokio::test]
+async fn run_awaits_faithful_surfaces() {
+    let report = run(&head_error_subject(Defects::default())).await;
+    for name in cases_of(&["run_awaits_"]) {
+        assert_passed(&report, name);
+    }
+}
+
+#[tokio::test]
+async fn run_awaits_rejects_incorrect_runners() {
+    for (name, text, defects) in [
+        (
+            "run_awaits_surfaces_decode",
+            "attempt must be at least 1",
+            Defects {
+                awaits_malformed: true,
+                ..Defects::default()
+            },
+        ),
+        (
+            "run_awaits_same_run_agrees",
+            "head and run.status disagree",
+            Defects {
+                awaits_head_disagrees: true,
+                ..Defects::default()
+            },
+        ),
+        (
+            "run_awaits_error_mapping",
+            "terminal error awaits disagrees with shared mapping",
+            Defects {
+                awaits_wrong_ending: true,
+                ..Defects::default()
+            },
+        ),
+        (
+            "run_awaits_completed_absent",
+            "completed run carries awaits",
+            Defects {
+                awaits_on_completed: true,
+                ..Defects::default()
+            },
+        ),
+        (
+            "run_awaits_runner_deadline",
+            "runner-owned wait deadline disagrees",
+            Defects {
+                awaits_wrong_deadline: true,
+                ..Defects::default()
+            },
+        ),
+    ] {
+        let report = run(&head_error_subject(defects)).await;
+        let reason = failed(&report, name);
+        assert!(reason.contains(text), "{name}: {reason}");
+    }
 }
 
 #[tokio::test]
@@ -1265,7 +1336,7 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
-    if case.starts_with("head_last_run_error_")
+    if (case.starts_with("head_last_run_error_") || case.starts_with("run_awaits_"))
         && matches!(report.outcome(case), Some(CaseOutcome::Skipped { missing }) if missing.contains(&Capability::RunStatus))
     {
         return;

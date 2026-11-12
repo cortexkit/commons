@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.45
+
+- Add the reader-first `run_awaits` group and open, bounded `RunAwaits`,
+  `AwaitPerson` and `AwaitMessage` types. Status, head, run-status stream
+  units and paused controls share one wait; terminal errors use the shared
+  `errors::expected_party` mapping and other endings carry none. Include
+  conservative quoted-message cleaning and cross-surface sample vectors.
+- Name `tool_held`, `provider_retry`, `account_free`, `rate_limited`,
+  `server_busy`, `quota_reading` and `routing_hold` as open run reasons.
+  Keep legacy reason and timing fields until the next breaking release.
+- Code building exhaustive `LastRunState` with a struct literal must add
+  `awaits: None` (or use `..Default::default()`). Other extended typed
+  payloads remain non-exhaustive; subscribe keeps its open body accessors.
+- Clarify token-count `exact: true` as the provider's own count from its
+  count endpoint or usage. Local tokenizer counts are `exact: false`, even
+  when close. Documentation only.
+
 ## 0.8.44
 
 - Add the independent `temperature` describe group for

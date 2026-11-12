@@ -95,6 +95,22 @@ pub struct SubscribeEvent {
 }
 
 impl SubscribeEvent {
+    /// Decode the optional wait on a run-status unit or `paused` control.
+    /// Invalid bounded fields make the unit malformed, not a refusal.
+    pub fn awaits(&self) -> Result<Option<crate::awaits::RunAwaits>, serde_json::Error> {
+        self.body
+            .get("awaits")
+            .map_or(Ok(None), |value| serde_json::from_value(value.clone()))
+    }
+
+    pub fn with_awaits(mut self, awaits: crate::awaits::RunAwaits) -> Self {
+        self.body.insert(
+            "awaits".into(),
+            serde_json::to_value(awaits).expect("serializable wait"),
+        );
+        self
+    }
+
     /// The typed held-call list on a run status event. Other event fields
     /// remain in the runner's schema. Absence means no held calls reported.
     pub fn held_calls(&self) -> Result<Vec<crate::run::HeldCall>, serde_json::Error> {

@@ -164,6 +164,9 @@ impl RunResultRequest {
 #[non_exhaustive]
 pub struct RunResult {
     pub run_id: String,
+    /// Reader-facing ending, only on a terminal error. Absent means no information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub awaits: Option<crate::awaits::RunAwaits>,
     /// The run's state, one of [`states`]; any other value decodes as a
     /// plain string.
     pub state: String,
@@ -173,7 +176,8 @@ pub struct RunResult {
     pub finish: Option<Finish>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<BudgetExhaustedDetail>,
-    /// Why the run ended, where the runner names a reason.
+    /// Why the run ended, where the runner names a reason. Kept beside
+    /// `awaits` until the next breaking release, once every reader reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// The error of a run that ended `error`, with optional measured details.
@@ -204,9 +208,21 @@ pub struct RunResult {
 }
 
 impl RunResult {
+    pub fn with_awaits(mut self, awaits: crate::awaits::RunAwaits) -> Self {
+        self.awaits = Some(awaits);
+        self
+    }
+
+    /// On a declaring runner every error ending carries the shared mapping;
+    /// other states carry none. A false answer means malformed, not a refusal.
+    pub fn awaits_consistent(&self) -> bool {
+        crate::awaits::ending_consistent(&self.state, self.error.as_ref(), self.awaits.as_ref())
+    }
+
     pub fn new(run_id: impl Into<String>, state: impl Into<String>) -> Self {
         Self {
             run_id: run_id.into(),
+            awaits: None,
             state: state.into(),
             finish: None,
             detail: None,
@@ -473,6 +489,20 @@ pub enum RunReason {
     /// A paused run waiting for the same account's limit to reset; the runner
     /// resumes it by itself, no earlier than `resume_not_before_ms`.
     AccountLimit,
+    /// A tool provider holds a dispatched call and answers later.
+    ToolHeld,
+    /// The runner's or host's retry of a failed model request.
+    ProviderRetry,
+    /// All accounts are limited; wait for any to come free, then choose again.
+    AccountFree,
+    /// A provider 429 without a confirmed account limit.
+    RateLimited,
+    /// A provider capacity backoff (503 or 529), not an account limit.
+    ServerBusy,
+    /// Waiting for a first quota reading before choosing an account.
+    QuotaReading,
+    /// Routing told the caller to hold.
+    RoutingHold,
     /// An `active` run held at the context ceiling until `deadline_ms`.
     ContextCeilingWait,
     /// An `active` run whose step waits on a rewrite ride until
@@ -486,6 +516,13 @@ impl From<String> for RunReason {
             "auth_required" => Self::AuthRequired,
             "restart" => Self::Restart,
             "account_limit" => Self::AccountLimit,
+            "tool_held" => Self::ToolHeld,
+            "provider_retry" => Self::ProviderRetry,
+            "account_free" => Self::AccountFree,
+            "rate_limited" => Self::RateLimited,
+            "server_busy" => Self::ServerBusy,
+            "quota_reading" => Self::QuotaReading,
+            "routing_hold" => Self::RoutingHold,
             RUN_REASON_CONTEXT_CEILING_WAIT => Self::ContextCeilingWait,
             RUN_REASON_COMPACTION_WAIT => Self::CompactionWait,
             _ => Self::Unknown(value),
@@ -498,6 +535,13 @@ impl From<RunReason> for String {
             RunReason::AuthRequired => "auth_required".into(),
             RunReason::Restart => "restart".into(),
             RunReason::AccountLimit => "account_limit".into(),
+            RunReason::ToolHeld => "tool_held".into(),
+            RunReason::ProviderRetry => "provider_retry".into(),
+            RunReason::AccountFree => "account_free".into(),
+            RunReason::RateLimited => "rate_limited".into(),
+            RunReason::ServerBusy => "server_busy".into(),
+            RunReason::QuotaReading => "quota_reading".into(),
+            RunReason::RoutingHold => "routing_hold".into(),
             RunReason::ContextCeilingWait => RUN_REASON_CONTEXT_CEILING_WAIT.into(),
             RunReason::CompactionWait => RUN_REASON_COMPACTION_WAIT.into(),
             RunReason::Unknown(s) => s,
@@ -558,17 +602,22 @@ impl HeldCall {
 #[non_exhaustive]
 pub struct RunStatus {
     pub state: String,
+    /// Reader-facing wait or terminal error ending; absent means no information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub awaits: Option<crate::awaits::RunAwaits>,
     /// Normalized finish of the last model step, on a declaring runner.
     /// Absent means no reason was reported or no model step ran, never stop.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finish: Option<Finish>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<BudgetExhaustedDetail>,
+    /// Kept beside `awaits` until the next breaking release, once every reader reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<RunReason>,
     /// Earliest automatic resume time, in Unix-epoch milliseconds, while
     /// paused for `account_limit`. May slightly follow the account's reset
-    /// for scheduling; the run stays on that account while paused.
+    /// for scheduling; the run stays on that account while paused. Kept beside
+    /// `awaits` until the next breaking release, once every reader reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_not_before_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -588,6 +637,7 @@ pub struct RunStatus {
     /// whatever its `reason` (`context_ceiling_wait` is one such wait). A
     /// watchdog treats the run as healthy until then
     /// ([`RunStatus::runner_wait_until`]).
+    /// Kept beside `awaits` until the next breaking release, once every reader reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deadline_ms: Option<u64>,
     /// Calls awaiting a tool-provider late answer. Empty lists are omitted,
@@ -607,9 +657,28 @@ pub struct RunStatus {
     pub directives: Option<Vec<crate::directives::Directive>>,
 }
 impl RunStatus {
+    pub fn with_awaits(mut self, awaits: crate::awaits::RunAwaits) -> Self {
+        self.awaits = Some(awaits);
+        self
+    }
+
+    /// Bounded fields and the runner-owned deadline agree with the legacy
+    /// fields. A false answer means malformed, not a refusal.
+    pub fn awaits_consistent(&self) -> bool {
+        crate::awaits::status_consistent(
+            &self.state,
+            self.reason.as_ref(),
+            self.deadline_ms,
+            self.resume_not_before_ms,
+            self.error.as_ref(),
+            self.awaits.as_ref(),
+        )
+    }
+
     pub fn new(state: impl Into<String>) -> Self {
         Self {
             state: state.into(),
+            awaits: None,
             finish: None,
             detail: None,
             reason: None,

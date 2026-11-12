@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.55
+
+- Accept `subc-protocol >=0.34.1, <0.37` so runners using protocol 0.36
+  link one copy; keep compatibility with its non-exhaustive public types.
+- Pin `cortexkit-role-llm-runner` to `=0.8.45` and check the declared
+  `run_awaits` group: decoding, same-run agreement, terminal error mapping,
+  completed-run absence and runner-owned deadlines. The faithful runner
+  declares the group and reports its modeled waits and error endings.
+- Exercise deliberately incorrect runners for each named check, so a
+  missing consistency or mapping check cannot silently accept a violation.
+
 ## 0.17.54
 
 - Pin runner contract `=0.8.44` and add `Capability::Temperature` with named,

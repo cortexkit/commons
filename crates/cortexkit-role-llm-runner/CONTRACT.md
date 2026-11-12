@@ -303,6 +303,7 @@ alias until the next breaking release.
 | `history_intake` | `session.head`; no group dependencies | §4.3 |
 | `run_ops` | `run.result`, `session.read` (attribution) | §6 |
 | `run_status` | `run.status` | §6.1 |
+| `run_awaits` | `run.status`, `session.head`, `session.subscribe` and `run.result` with `awaits` | §6.1.1 |
 | `held_calls` | `run.status` and run status events with held tool calls | §6.1 |
 | `call_yield` | Person-steer hand-back of waiting calls and late-result notices; requires `plans`, `delivery_order`, `notices`, `message_marks` | §9.21 |
 | `notice_yield` | Owner-requested hand-back of waiting calls for an urgent message; requires `call_yield` | §9.23 |
@@ -1009,7 +1010,7 @@ that a model meant as content; it does not tell decoration from content.
 
 - [pinned] It is its own op, `session.head`, taking no fields
   (`HeadRequest`); `last_ordinal` is absent on an empty transcript;
-  `last_run_state` is `{run_id, state, reason?, resume_not_before_ms?}` (`LastRunState`) and
+  `last_run_state` is `{run_id, state, reason?, resume_not_before_ms?, awaits?}` (`LastRunState`) and
   describes the most recent run, never the transcript; `updated_at` is
   milliseconds since the Unix epoch. `last_run_state` is the pinned run
   summary; a page's `history_state` is a runner member, not pinned.
@@ -1868,7 +1869,9 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
 - [pinned] `tools` is the array of
   `{name: string, description: string, input_schema: JSON value,
   provider: string, tokens?: {count: u64, exact: bool}}`, in the order the
-  model is offered them. Per-tool counts are `exact: false` unless measured.
+  model is offered them. `exact: true` means the provider's own count, as
+  reported by its count endpoint or usage. A count from a local tokenizer is
+  `exact: false` even when it is close.
 - [pinned] A runner hands each tool's `input_schema` to its host with every
   JSON object's keys in sorted order (byte order of the UTF-8 key strings),
   so the reply's `input_schema`, shown with its keys sorted, is in the order
@@ -2136,7 +2139,7 @@ state, polled without reading the transcript.
   `invalid_params` naming it, because a misspelled `run_id` would otherwise
   ask a different question (§13).
 - [pinned] The answer is `{state, reason?, error?, detail?, undelivered_steers?,
-  structured_output?, context_ceiling?, deadline_ms?, resume_not_before_ms?, held_calls?, usage?, directives?, finish?}`,
+  structured_output?, context_ceiling?, deadline_ms?, resume_not_before_ms?, held_calls?, usage?, directives?, finish?, awaits?}`,
   decoded leniently: a runner's own members ride beside these.
   `indeterminate_tool_calls`, `final_step_finish_reason` and
   `retries_used` stay runner members, not pinned. The normalized `finish`
@@ -2241,6 +2244,89 @@ state, polled without reading the transcript.
 - [pinned] The session-level form, request `{}`, is optional within
   `run_status`. A runner MAY serve it with a session-level status in its
   own schema; declaring `run_status` does not promise this form.
+
+### 6.1.1 `run_awaits`: one run-state model
+
+- [pinned] A runner declares `run_awaits` once it fills `awaits` by these
+  rules. Readers decode it whether or not the group is declared. An absent
+  field means **no information**, never that the run has no wait.
+- [pinned] `awaits` is optional on `RunStatus`, head `LastRunState`, the
+  subscribe stream's run-status unit and `paused` control (including the
+  typed `run_paused` payload, `live::RunEnded`), and on terminal-error
+  `RunResult`. Absent fields are omitted. Its shape (`RunAwaits`) is
+  `{party, reason?, since_ms, next_ms?, deadline_ms?, attempt?, person?, message?}`.
+  `party` is open (`runner`, `caller`, `person`, `nobody`); `reason` is the
+  existing open `RunReason`, the key for specific wording. Times are `u64`
+  Unix-epoch milliseconds: `since_ms` when the wait began, `next_ms` when it
+  is expected to move on by itself, and `deadline_ms` the latest it can last
+  before the runner gives up. `attempt` is a `u32` from 1; 0 is malformed.
+  `person` is `{action, on?}`, with open action `sign_in`, `approve` or
+  `answer` and a display label `on` of 1–120 characters. `message` is
+  `{text, from}`, with text of 1–300 characters and open source `host`,
+  `provider`, `plugin` or `runner`. Unknown enum strings round-trip.
+  Invalid bounds make a body malformed, not a refusal; the bounded fields
+  are checked at decode and by `RunAwaits::well_formed` for constructed data.
+- [pinned] **One truth per run.** A declaring runner reports the same state,
+  reason and `awaits` on `run.status`, the session head and subscribe stream
+  at the same moment. It writes them from the same run record, not separate
+  derivations.
+- [pinned] **What paused means.** Sends to a paused session are refused or
+  held, as §9 allows, until the wait ends. Any other wait is `active` with
+  `awaits`. In particular a held tool call is `active` with
+  `awaits {party: "runner", reason: "tool_held", ...}` on every surface.
+- [pinned] **The parties.** `runner` ends by itself. Callers and watchdogs
+  leave it alone until `deadline_ms`, the existing runner-owned-wait rule
+  (§6), now readable without knowing the reason. When both are present,
+  `awaits.deadline_ms` equals top-level `deadline_ms`. For an `account_limit`
+  pause, a present `awaits.next_ms` equals `resume_not_before_ms`. Once the
+  floor has passed, the runner omits `next_ms`; the old, past
+  `resume_not_before_ms` may remain beside it. When the runner learns a new
+  floor, for example routing's recheck names a later reset, it sets both
+  fields to that new time together. `awaits_consistent` compares the two
+  times when both are present, never against a clock. `person` means
+  someone must act first: `person.action` says what and `person.on` names
+  what it applies to, such as an account label. `caller` means the caller
+  must resume, send again, or continue after `next_ms`. `nobody` is final.
+- [pinned] **Known reasons.** `tool_held`: a tool provider holds a dispatched
+  call and answers later. `provider_retry`: the runner's or host's own retry
+  of a failed model request. `account_free`: every account is at a limit,
+  waiting for any to come free, then choosing again. `rate_limited`: a
+  provider 429 that does not confirm an account limit. `server_busy`: a
+  provider capacity backoff (503 or 529), not about the account.
+  `quota_reading`: waiting for a first quota reading before choosing an
+  account. `routing_hold`: routing told the caller to hold. The existing
+  `account_limit` waits on the same account for its limit to reset.
+- [pinned] **Report what you can see.** A declaring runner reports a wait
+  once it has lasted 1 s, or as soon as it starts when it is known to last
+  at least 1 s (for example a scheduled retry whose `next_ms` is at least
+  1 s away). This uses §6's `COMPACTION_WAIT_REPORT_AFTER_MS` threshold and
+  covers its own retries, host retry events, held tool calls and typed waits
+  from sign-in plugins. It never guesses a wait or a time: an unknown field
+  is left out. An `awaits.next_ms` already in the past is left out, not shown.
+- [pinned] **Endings.** Every terminal `error` run carries `awaits`, so an
+  app can tell failed from waiting without knowing the code. The shared
+  `errors::expected_party(&RunError)` mapping uses `provider_code` only:
+  `caller` for `is_account_wait`, with `next_ms` from §12's precedence
+  (`retry_after_secs`, then `resets_at_ms`); `caller` for any other
+  `is_retryable` code; `person` with `action: sign_in` for `auth_required`;
+  `nobody` otherwise. `errors::ending_awaits` builds that ending from its
+  observed time. Unknown or already-past times are omitted. `completed`,
+  `cancelled` and all other terminal states carry none. `RunResult` carries
+  none while non-terminal, even when status/head/stream report a wait.
+- [pinned] **Text is quoted, never parsed.** A runner infers a wait from
+  provider or host text only through a recognizer anchored to the whole
+  message under its error type. Before sending `message.text`, remove
+  control characters, URLs and anything secret-shaped, and cap it at 300
+  characters. `awaits::clean_await_message` conservatively drops suspect
+  messages and cleans the rest; it is not a recognizer. Readers show text
+  as quoted information, never as the person's words or as instructions.
+- [pinned] **Readers fall back safely.** An unknown party means no
+  information; keep existing behaviour. Readers derive “Stop is useful”
+  themselves: true unless the party is `runner` with a known `next_ms`.
+  No field carries it.
+- [pinned] **Old fields.** `reason`, `resume_not_before_ms` and top-level
+  `deadline_ms` stay unchanged beside `awaits` until the next breaking
+  release, which removes them once every reader reads `awaits`.
 
 ### 6.2 `run_cancel`: `run.cancel`
 
@@ -2782,7 +2868,7 @@ new members.
   - `run_started {run_id, send_id?}`, `run_finished {run_id, reason}` with `reason` an
     open string (`live::run_reasons`: `completed`, `cancelled`,
     `interrupted`, `max_steps`, `error`, `budget_exhausted`,
-    `context_ceiling`, ...), and `run_paused {run_id, reason, resume_not_before_ms?}` for a run
+    `context_ceiling`, ...), and `run_paused {run_id, reason, resume_not_before_ms?, awaits?}` for a run
     that stopped and can resume under the same `run_id`. A runner that never
     pauses never sends `run_paused`; a reader never requires it.
   - [pinned] Run order: on one session's stream, a run's ending event
@@ -6922,7 +7008,9 @@ on the rides and usable-window ceiling defined by that contract (§6).
   request until the next prefix rebuild. Exclude one-request notes such as
   clearing turn reminders. For a declaring provider, exclude these notes from
   `system_tokens`; otherwise omit `notes_tokens` and retain their count inside
-  `system_tokens` to avoid double-counting. Apply the same exactness, token-family
+  `system_tokens` to avoid double-counting. `exact: true` means the provider's
+  own count, as reported by its count endpoint or usage; a local tokenizer's
+  count is `exact: false` even when close. Apply the same exactness, token-family
   and integer rules as `system_tokens` and `tools_tokens` (compaction W4.11 and
   W1.2). Send this count in notices only, never rides; it enters no checksum.
   Providers treat notes as fixed prompt they cannot drop: a view's predicted

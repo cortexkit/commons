@@ -183,6 +183,11 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub awaits_malformed: bool,
+    pub awaits_head_disagrees: bool,
+    pub awaits_wrong_ending: bool,
+    pub awaits_on_completed: bool,
+    pub awaits_wrong_deadline: bool,
     pub cache_policy: Option<&'static str>,
     pub session_class: Option<(&'static str, &'static str)>,
     pub plan_view: Option<(&'static str, &'static str)>,
@@ -965,6 +970,7 @@ struct SendRec {
 
 #[derive(Clone, Debug)]
 struct RunRec {
+    awaits: Option<cortexkit_role_llm_runner::awaits::RunAwaits>,
     route_decision_id: Option<String>,
     account_route: Option<cortexkit_role_llm_runner::send::AccountRoute>,
     directives: Vec<cortexkit_role_llm_runner::directives::DirectiveName>,
@@ -1663,6 +1669,16 @@ impl Module {
         }
         record["session"] = json!(session);
         record["at"] = json!(self.world.now());
+        if record["kind"] == "terminal" && record["state"] == "error" {
+            if let Ok(error) = serde_json::from_value::<cortexkit_role_llm_runner::run::RunError>(
+                record["error"].clone(),
+            ) {
+                record["awaits"] = json!(errors::ending_awaits(
+                    &error,
+                    record["at"].as_u64().unwrap()
+                ));
+            }
+        }
         step_events::prepare(self, session, &mut record)?;
         step_events::publish(self, session, &record, false);
         let mut file = OpenOptions::new()
@@ -1875,6 +1891,21 @@ impl Module {
                 }
             }
             "held_status" => {
+                if let Some(run) = sess
+                    .runs
+                    .iter_mut()
+                    .find(|run| record["body"]["run_id"] == run.run_id)
+                {
+                    run.awaits = serde_json::from_value(
+                        record["body"].get("awaits").cloned().unwrap_or(Value::Null),
+                    )
+                    .unwrap();
+                    run.reason = run
+                        .awaits
+                        .as_ref()
+                        .and_then(|wait| wait.reason.clone())
+                        .map(String::from);
+                }
                 sess.held_status_events.insert(
                     sess.events.len() - 1,
                     record["body"].as_object().unwrap().clone(),
@@ -1976,9 +2007,33 @@ impl Module {
                 }
             }
             "ceiling_wait" => {
+                if let Some(run) = sess
+                    .runs
+                    .iter_mut()
+                    .find(|run| run.run_id == text("run_id"))
+                {
+                    let mut wait = cortexkit_role_llm_runner::awaits::RunAwaits::new(
+                        cortexkit_role_llm_runner::awaits::AwaitParty::Runner,
+                        record["at"].as_u64().unwrap(),
+                    );
+                    wait.reason =
+                        Some(cortexkit_role_llm_runner::run::RunReason::ContextCeilingWait);
+                    wait.deadline_ms = record["deadline_ms"].as_u64();
+                    run.awaits = Some(wait.clone());
+                    let body = json!({"run_id":text("run_id"),"state":"active","reason":"context_ceiling_wait","deadline_ms":wait.deadline_ms,"awaits":wait});
+                    sess.held_status_events
+                        .insert(sess.events.len() - 1, body.as_object().unwrap().clone());
+                }
                 sess.ceiling_wait = Some((text("run_id"), record["deadline_ms"].as_u64().unwrap()));
             }
-            "ceiling_view" => sess.ceiling_wait = None,
+            "ceiling_view" => {
+                if let Some((id, _)) = &sess.ceiling_wait {
+                    if let Some(run) = sess.runs.iter_mut().find(|run| &run.run_id == id) {
+                        run.awaits = None;
+                    }
+                }
+                sess.ceiling_wait = None;
+            }
             "adopt" => {
                 sess.owner = text("owner");
                 if let Some(digest) = record["reapplied_plan"].as_str() {
@@ -2095,6 +2150,7 @@ impl Module {
                         cortexkit_role_llm_runner::usage::SessionUsage::new(&run_id)
                     });
                     sess.runs.push(RunRec {
+                        awaits: None,
                         route_decision_id: record["route_decision_id"].as_str().map(str::to_owned),
                         account_route: record
                             .get("account_route")
@@ -2377,6 +2433,10 @@ impl Module {
                 sess.ceiling_wait = None;
                 if let Some(run) = sess.run_mut(&run_id) {
                     run.state = text("state");
+                    run.awaits = serde_json::from_value(
+                        record.get("awaits").cloned().unwrap_or(Value::Null),
+                    )
+                    .unwrap();
                     run.reason = record["reason"].as_str().map(str::to_owned);
                     run.ceiling = record.get("context_ceiling").cloned();
                     run.error = record.get("error").cloned();
@@ -2386,6 +2446,18 @@ impl Module {
                         run.final_ordinal = final_ordinal;
                         run.final_text = record["final_text"].as_str().map(str::to_owned);
                     }
+                    let mut body = json!({"run_id":run.run_id,"state":run.state});
+                    if let Some(reason) = &run.reason {
+                        body["reason"] = json!(reason);
+                    }
+                    if let Some(wait) = &run.awaits {
+                        body["awaits"] = json!(wait);
+                    }
+                    if let Some(error) = &run.error {
+                        body["error"] = error.clone();
+                    }
+                    sess.held_status_events
+                        .insert(sess.events.len() - 1, body.as_object().unwrap().clone());
                 }
             }
             "tag_read_person" => {
@@ -5303,6 +5375,13 @@ impl Module {
         if let Some(run) = sess.runs.last() {
             head = head.with_last_run_state(LastRunState {
                 run_id: run.run_id.clone(),
+                awaits: if self.world.defects.awaits_head_disagrees && run.awaits.is_some() {
+                    let mut wait = run.awaits.clone().unwrap();
+                    wait.since_ms += 1;
+                    Some(wait)
+                } else {
+                    run.awaits.clone()
+                },
                 state: if self.world.held_paused
                     && sess.retention.is_some()
                     && run.state == "active"
@@ -5488,6 +5567,19 @@ impl Module {
         if let Some(error) = &run.error {
             result = result.with_error(serde_json::from_value(error.clone()).unwrap());
         }
+        if run.state == "error" {
+            result.awaits = run.awaits.clone();
+            if self.world.defects.awaits_wrong_ending {
+                result.awaits.as_mut().unwrap().party =
+                    cortexkit_role_llm_runner::awaits::AwaitParty::Runner;
+            }
+        }
+        if run.state == "completed" && self.world.defects.awaits_on_completed {
+            result.awaits = Some(cortexkit_role_llm_runner::awaits::RunAwaits::new(
+                cortexkit_role_llm_runner::awaits::AwaitParty::Nobody,
+                1,
+            ));
+        }
         if let Some(detail) = &run.detail {
             result = result.with_detail(serde_json::from_value(detail.clone()).unwrap());
         }
@@ -5543,12 +5635,27 @@ impl Module {
         let run_id = params["run_id"].as_str().unwrap_or_default().to_owned();
         let mut reply = self.run_result(session, params);
         if let Reply::Response(body) = &mut reply {
+            if let Some(wait) = self
+                .sessions
+                .lock()
+                .unwrap()
+                .get(session)
+                .and_then(|sess| sess.run(&run_id))
+                .filter(|run| run.state == "active" || run.state == "paused")
+                .and_then(|run| run.awaits.clone())
+            {
+                body["awaits"] = json!(wait);
+            }
+            if self.world.defects.awaits_malformed {
+                body["awaits"] = json!({"party":"runner","since_ms":1,"attempt":0});
+            }
             if self.world.defects.finish_status_omitted && body["usage"]["steps"] == 2 {
                 body.as_object_mut().unwrap().remove("finish");
             }
             let held = self.held_status(session, &run_id);
             if !held.is_empty() {
                 body["held_calls"] = json!(held);
+                body["reason"] = json!("tool_held");
             }
             let (ceiling, ride) = self
                 .sessions
@@ -5567,6 +5674,9 @@ impl Module {
                 if let Some((_, deadline)) = wait.filter(|(run, _)| *run == run_id) {
                     body["reason"] = json!(reason);
                     body["deadline_ms"] = json!(deadline);
+                    if self.world.defects.awaits_wrong_deadline {
+                        body["awaits"]["deadline_ms"] = json!(deadline + 1);
+                    }
                 }
             }
         }
@@ -6396,6 +6506,7 @@ impl FakeSubject {
                         .iter()
                         .filter_map(|c| c.group())
                         .map(str::to_owned)
+                        .chain(std::iter::once(groups::RUN_AWAITS.to_owned()))
                         .chain(self.held_calls_group.then(|| groups::HELD_CALLS.to_owned()))
                         .chain(
                             self.defects

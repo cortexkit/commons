@@ -1,4 +1,7 @@
-# llm-runner/v1 vectors for runner 0.8.42
+# llm-runner/v1 vectors for runner 0.8.45
+
+`run-awaits.json` pins reader-facing waits across status, head, subscribe and
+applicable terminal results, including open strings and malformed bounded fields.
 
 `run_status.account_limit.json` pins a run paused for an account limit,
 its original structured error and the earliest automatic resume time. The

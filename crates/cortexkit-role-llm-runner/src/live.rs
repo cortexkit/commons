@@ -409,9 +409,14 @@ impl RunStarted {
 #[non_exhaustive]
 pub struct RunEnded {
     pub run_id: String,
+    /// Reader-facing wait on `run_paused`; absent means no information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub awaits: Option<crate::awaits::RunAwaits>,
+    /// Kept beside `awaits` until the next breaking release, once every reader reads it.
     pub reason: String,
     /// Earliest automatic resume time, in Unix-epoch milliseconds, on a
     /// `run_paused` event for `account_limit`. Absent on `run_finished`.
+    /// Kept beside `awaits` until the next breaking release, once every reader reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_not_before_ms: Option<u64>,
 }
@@ -421,12 +426,18 @@ impl RunEnded {
         Self {
             run_id: run_id.into(),
             reason: reason.into(),
+            awaits: None,
             resume_not_before_ms: None,
         }
     }
 
     pub fn with_resume_not_before_ms(mut self, resume_not_before_ms: u64) -> Self {
         self.resume_not_before_ms = Some(resume_not_before_ms);
+        self
+    }
+
+    pub fn with_awaits(mut self, awaits: crate::awaits::RunAwaits) -> Self {
+        self.awaits = Some(awaits);
         self
     }
 }

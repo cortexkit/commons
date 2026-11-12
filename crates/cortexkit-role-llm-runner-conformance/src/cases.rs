@@ -154,6 +154,7 @@ where
             name if name.starts_with("head_last_run_error_") => {
                 crate::last_run_error::run(self, name).await
             }
+            name if name.starts_with("run_awaits_") => crate::run_awaits::run(self, name).await,
             name if name.starts_with("archive_pruning_") => {
                 crate::archive_pruning::run(self, name).await
             }

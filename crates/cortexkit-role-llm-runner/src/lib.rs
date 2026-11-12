@@ -27,6 +27,7 @@ pub mod app_readers;
 pub mod archive_prunes_reasoning;
 pub mod attachments;
 pub mod attribution;
+pub mod awaits;
 pub mod baseline;
 pub mod cache;
 mod call_carrier;
@@ -333,6 +334,8 @@ pub mod capabilities {
     pub const RUN_OPS: &str = "run_ops";
     /// Poll a run's current state, independent of transcript reads.
     pub const RUN_STATUS: &str = "run_status";
+    /// Reader-facing waits shared across served run surfaces (§6.1.1).
+    pub const RUN_AWAITS: &str = "run_awaits";
     /// Held tool calls on run status and status events; requires `run_status`.
     pub const HELD_CALLS: &str = "held_calls";
     /// Cancel an active or paused run.
@@ -561,6 +564,7 @@ pub mod capabilities {
         (RICH_UI_STAMP, &[ops::SESSION_READ, ops::SESSION_HEAD]),
         (RUN_OPS, &[ops::RUN_RESULT, ops::SESSION_READ]),
         (RUN_STATUS, &[ops::RUN_STATUS]),
+        (RUN_AWAITS, &[]),
         (HELD_CALLS, &[ops::RUN_STATUS]),
         (RUN_CANCEL, &[ops::RUN_CANCEL]),
         (RUN_CANCEL_BY_INTERRUPT, &[ops::RUN_CANCEL]),

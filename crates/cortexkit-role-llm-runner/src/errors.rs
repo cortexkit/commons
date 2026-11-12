@@ -682,6 +682,46 @@ pub fn is_account_wait(code: &str) -> bool {
     matches!(code, ACCOUNT_SELECTION_REFUSED | ACCOUNT_LIMIT_EXHAUSTED)
 }
 
+/// Shared terminal-error party mapping (§6.1). Only `provider_code` decides;
+/// diagnostic classes, status and text never turn an ending into a retry.
+pub fn expected_party(error: &crate::run::RunError) -> crate::awaits::AwaitParty {
+    use crate::awaits::AwaitParty;
+    if is_account_wait(&error.provider_code) || is_retryable(&error.provider_code) {
+        AwaitParty::Caller
+    } else if error.provider_code == "auth_required" {
+        AwaitParty::Person
+    } else {
+        AwaitParty::Nobody
+    }
+}
+
+/// Account-wait time under §12's precedence. `since_ms` is the observation
+/// time for a relative delay. Unknown, invalid or already-past times are omitted.
+pub fn account_wait_next_ms(error: &crate::run::RunError, since_ms: u64) -> Option<u64> {
+    let next = match error.retry_after_secs {
+        Some(seconds) if seconds.is_finite() && seconds >= 0.0 => {
+            Some(since_ms.saturating_add((seconds * 1000.0).ceil() as u64))
+        }
+        _ => error.resets_at_ms,
+    };
+    next.filter(|next| *next >= since_ms)
+}
+
+/// Build the common terminal-error ending from its observed time. Runners must
+/// omit a `next_ms` that has passed by the time they serve the answer.
+pub fn ending_awaits(error: &crate::run::RunError, since_ms: u64) -> crate::awaits::RunAwaits {
+    let mut wait = crate::awaits::RunAwaits::new(expected_party(error), since_ms);
+    if is_account_wait(&error.provider_code) {
+        wait.next_ms = account_wait_next_ms(error, since_ms);
+    }
+    if wait.party == crate::awaits::AwaitParty::Person {
+        wait.person = Some(crate::awaits::AwaitPerson::new(
+            crate::awaits::AwaitAction::SignIn,
+        ));
+    }
+    wait
+}
+
 /// The field an `invalid_params`, `send_id_reuse`, or scoped-send mismatch
 /// refusal names, or `None` for any other code or a detail without `field`.
 pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a str> {

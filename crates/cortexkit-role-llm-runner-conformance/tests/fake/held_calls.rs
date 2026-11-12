@@ -54,8 +54,20 @@ impl Module {
                 })
                 .collect();
         }
+        let wait = held.first().map(|held| {
+            let mut wait = cortexkit_role_llm_runner::awaits::RunAwaits::new(
+                cortexkit_role_llm_runner::awaits::AwaitParty::Runner,
+                held.held_at_ms(),
+            );
+            wait.reason = Some(cortexkit_role_llm_runner::run::RunReason::ToolHeld);
+            wait
+        });
         let mut frame = cortexkit_role_llm_runner::subscribe::SubscribeEvent::new("control")
             .with_held_calls(held);
+        if let Some(wait) = wait {
+            frame = frame.with_awaits(wait);
+            frame.body.insert("reason".into(), json!("tool_held"));
+        }
         frame.body.insert("run_id".into(), json!(run_id));
         frame.body.insert("state".into(), json!("active"));
         if defects.held_calls_event_empty && !frame.body.contains_key("held_calls") {

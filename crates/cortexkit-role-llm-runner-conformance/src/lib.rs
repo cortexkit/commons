@@ -79,6 +79,7 @@ pub use restart_survival::{RestartMode, RestartPoint, RestartSurvivalObservation
 pub mod rich_ui_stamp;
 mod route;
 pub mod routed_accounts;
+mod run_awaits;
 mod run_parameters;
 mod run_usage;
 mod runner;

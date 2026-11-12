@@ -1,0 +1,76 @@
+{
+  "cases": [
+    {
+      "name": "account_limit_floor_passed",
+      "status": {"state":"paused","reason":"account_limit","resume_not_before_ms":1790000030000,"awaits":{"party":"runner","reason":"account_limit","since_ms":1790000000000}},
+      "head": {"run_id":"r0","state":"paused","reason":"account_limit","resume_not_before_ms":1790000030000,"awaits":{"party":"runner","reason":"account_limit","since_ms":1790000000000}},
+      "subscribe": {"kind":"control","cursor":{"seq":0},"type":"paused","run_id":"r0","state":"paused","reason":"account_limit","resume_not_before_ms":1790000030000,"awaits":{"party":"runner","reason":"account_limit","since_ms":1790000000000}},
+      "run_paused": {"run_id":"r0","reason":"account_limit","resume_not_before_ms":1790000030000,"awaits":{"party":"runner","reason":"account_limit","since_ms":1790000000000}}
+    },
+    {
+      "name": "account_limit",
+      "status": {"state":"paused","reason":"account_limit","resume_not_before_ms":1790000030000,"awaits":{"party":"runner","reason":"account_limit","since_ms":1790000000000,"next_ms":1790000030000}},
+      "head": {"run_id":"r1","state":"paused","reason":"account_limit","resume_not_before_ms":1790000030000,"awaits":{"party":"runner","reason":"account_limit","since_ms":1790000000000,"next_ms":1790000030000}},
+      "subscribe": {"kind":"control","cursor":{"seq":1},"type":"paused","run_id":"r1","state":"paused","reason":"account_limit","resume_not_before_ms":1790000030000,"awaits":{"party":"runner","reason":"account_limit","since_ms":1790000000000,"next_ms":1790000030000}},
+      "run_paused": {"run_id":"r1","reason":"account_limit","resume_not_before_ms":1790000030000,"awaits":{"party":"runner","reason":"account_limit","since_ms":1790000000000,"next_ms":1790000030000}}
+    },
+    {
+      "name": "host_retry",
+      "status": {"state":"active","reason":"provider_retry","deadline_ms":1790000060000,"awaits":{"party":"runner","reason":"provider_retry","since_ms":1790000000000,"attempt":2,"next_ms":1790000002000,"deadline_ms":1790000060000,"message":{"text":"Retrying in 2 seconds.","from":"host"}}},
+      "head": {"run_id":"r2","state":"active","reason":"provider_retry","awaits":{"party":"runner","reason":"provider_retry","since_ms":1790000000000,"attempt":2,"next_ms":1790000002000,"deadline_ms":1790000060000,"message":{"text":"Retrying in 2 seconds.","from":"host"}}},
+      "subscribe": {"kind":"control","cursor":{"seq":2},"run_id":"r2","state":"active","reason":"provider_retry","deadline_ms":1790000060000,"awaits":{"party":"runner","reason":"provider_retry","since_ms":1790000000000,"attempt":2,"next_ms":1790000002000,"deadline_ms":1790000060000,"message":{"text":"Retrying in 2 seconds.","from":"host"}}}
+    },
+    {
+      "name": "held_tool",
+      "status": {"state":"active","reason":"tool_held","awaits":{"party":"runner","reason":"tool_held","since_ms":1790000000000}},
+      "head": {"run_id":"r3","state":"active","reason":"tool_held","awaits":{"party":"runner","reason":"tool_held","since_ms":1790000000000}},
+      "subscribe": {"kind":"control","cursor":{"seq":3},"run_id":"r3","state":"active","reason":"tool_held","awaits":{"party":"runner","reason":"tool_held","since_ms":1790000000000}}
+    },
+    {
+      "name": "auth_required",
+      "status": {"state":"paused","reason":"auth_required","awaits":{"party":"person","reason":"auth_required","since_ms":1790000000000,"person":{"action":"sign_in","on":"work account"}}},
+      "head": {"run_id":"r4","state":"paused","reason":"auth_required","awaits":{"party":"person","reason":"auth_required","since_ms":1790000000000,"person":{"action":"sign_in","on":"work account"}}},
+      "subscribe": {"kind":"control","cursor":{"seq":4},"type":"paused","run_id":"r4","state":"paused","reason":"auth_required","awaits":{"party":"person","reason":"auth_required","since_ms":1790000000000,"person":{"action":"sign_in","on":"work account"}}},
+      "run_paused": {"run_id":"r4","reason":"auth_required","awaits":{"party":"person","reason":"auth_required","since_ms":1790000000000,"person":{"action":"sign_in","on":"work account"}}}
+    },
+    {
+      "name": "terminal_account_wait",
+      "status": {"state":"error","error":{"class":"transient","message":"Account limited.","provider_code":"account_limit_exhausted","retry_after_secs":30.0,"resets_at_ms":1790000060000},"awaits":{"party":"caller","since_ms":1790000000000,"next_ms":1790000030000}},
+      "head": {"run_id":"r5","state":"error","awaits":{"party":"caller","since_ms":1790000000000,"next_ms":1790000030000}},
+      "subscribe": {"kind":"control","cursor":{"seq":5},"run_id":"r5","state":"error","awaits":{"party":"caller","since_ms":1790000000000,"next_ms":1790000030000}},
+      "result": {"run_id":"r5","state":"error","error":{"class":"transient","message":"Account limited.","provider_code":"account_limit_exhausted","retry_after_secs":30.0,"resets_at_ms":1790000060000},"awaits":{"party":"caller","since_ms":1790000000000,"next_ms":1790000030000}}
+    },
+    {
+      "name": "terminal_retryable",
+      "status": {"state":"error","error":{"class":"transient","message":"Try again.","provider_code":"transient"},"awaits":{"party":"caller","since_ms":1790000000000}},
+      "head": {"run_id":"r6","state":"error","awaits":{"party":"caller","since_ms":1790000000000}},
+      "subscribe": {"kind":"control","cursor":{"seq":6},"run_id":"r6","state":"error","awaits":{"party":"caller","since_ms":1790000000000}},
+      "result": {"run_id":"r6","state":"error","error":{"class":"transient","message":"Try again.","provider_code":"transient"},"awaits":{"party":"caller","since_ms":1790000000000}}
+    },
+    {
+      "name": "terminal_final",
+      "status": {"state":"error","error":{"class":"permanent","message":"Request invalid.","provider_code":"request_invalid"},"awaits":{"party":"nobody","since_ms":1790000000000}},
+      "head": {"run_id":"r7","state":"error","awaits":{"party":"nobody","since_ms":1790000000000}},
+      "subscribe": {"kind":"control","cursor":{"seq":7},"run_id":"r7","state":"error","awaits":{"party":"nobody","since_ms":1790000000000}},
+      "result": {"run_id":"r7","state":"error","error":{"class":"permanent","message":"Request invalid.","provider_code":"request_invalid"},"awaits":{"party":"nobody","since_ms":1790000000000}}
+    },
+    {
+      "name": "completed",
+      "status": {"state":"completed"},
+      "head": {"run_id":"r8","state":"completed"},
+      "subscribe": {"kind":"control","cursor":{"seq":8},"run_id":"r8","state":"completed"},
+      "result": {"run_id":"r8","state":"completed","final_message":{"ordinal":2,"mid":"m2","text":"Done."}}
+    },
+    {
+      "name": "unknown_party_action",
+      "status": {"state":"active","awaits":{"party":"future_party","since_ms":1790000000000,"person":{"action":"future_action"}}},
+      "head": {"run_id":"r9","state":"active","awaits":{"party":"future_party","since_ms":1790000000000,"person":{"action":"future_action"}}},
+      "subscribe": {"kind":"control","cursor":{"seq":9},"run_id":"r9","state":"active","awaits":{"party":"future_party","since_ms":1790000000000,"person":{"action":"future_action"}}}
+    }
+  ],
+  "malformed": [
+    {"name":"attempt_zero","awaits":{"party":"runner","since_ms":1790000000000,"attempt":0}},
+    {"name":"text_over_300","awaits":{"party":"runner","since_ms":1790000000000,"message":{"from":"host","text":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}},
+    {"name":"label_over_120","awaits":{"party":"person","since_ms":1790000000000,"person":{"action":"sign_in","on":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}}}
+  ]
+}

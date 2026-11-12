@@ -1481,16 +1481,21 @@ impl HeadCut {
 
 /// The state of a session's most recent run. Describes that run, never the
 /// transcript as a whole.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct LastRunState {
     pub run_id: String,
+    /// The same reader-facing wait as `run.status`; absent means no information.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub awaits: Option<crate::awaits::RunAwaits>,
     /// A run state ([`crate::run::states`]); any other value decodes as a
     /// plain string.
     pub state: String,
+    /// Kept beside `awaits` until the next breaking release, once every reader reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// Earliest automatic resume time, in Unix-epoch milliseconds, while
     /// paused for `account_limit`; may slightly follow the account's reset.
+    /// Kept beside `awaits` until the next breaking release, once every reader reads it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_not_before_ms: Option<u64>,
 }
@@ -1894,6 +1899,7 @@ mod tests {
             .with_history_version(1)
             .with_last_run_state(LastRunState {
                 run_id: "error-run".into(),
+                awaits: None,
                 state: "error".into(),
                 reason: Some("provider_error".into()),
                 resume_not_before_ms: None,
