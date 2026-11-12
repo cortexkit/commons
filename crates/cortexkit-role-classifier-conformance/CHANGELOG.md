@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.8.4
+
+- Accept `subc-protocol` 0.34.1 through 0.36.x, so a module on the 0.36 line
+  links one copy; no API or behaviour change. Pin classifier `=0.6.4`.
+
 ## 0.8.3
 
 - Pin classifier 0.6.3 and check permanent and transient routing admission

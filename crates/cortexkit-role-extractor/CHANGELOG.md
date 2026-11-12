@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- Accept `subc-protocol` 0.34.1 through 0.36.x, so a module on the 0.36 line
+  links one copy; no API or behaviour change.
+
 ## 0.2.1
 
 - Requires subc-protocol 0.34 for development checks only; no API or wire change.

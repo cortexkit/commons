@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.18
+
+- Accept `subc-protocol` 0.34.1 through 0.36.x, so a module on the 0.36 line
+  links one copy; no API or behaviour change. Pin routing `=0.7.16`.
+
 ## 0.10.17
 
 - Pin routing `=0.7.15`. Add `runner_gateway_credential`: a declared

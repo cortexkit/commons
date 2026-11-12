@@ -690,7 +690,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier"
-version = "0.6.3"
+version = "0.6.4"
 dependencies = [
  "cortexkit-model-batch",
  "cortexkit-role-routing",
@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier-conformance"
-version = "0.8.3"
+version = "0.8.4"
 dependencies = [
  "async-trait",
  "cortexkit-role-classifier",
@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor-conformance"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "cortexkit-role-extractor",
@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing"
-version = "0.7.15"
+version = "0.7.16"
 dependencies = [
  "cortexkit-role-llm-runner 0.8.44",
  "cortexkit-role-media",
@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing-conformance"
-version = "0.10.17"
+version = "0.10.18"
 dependencies = [
  "async-trait",
  "cortexkit-role-routing",

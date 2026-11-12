@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Accept `subc-protocol` 0.34.1 through 0.36.x, so a module on the 0.36 line
+  links one copy; no API or behaviour change. Pin extractor `=0.2.2`.
+
 ## 0.4.0
 
 - Requires subc-protocol 0.34; breaking because `Reply::Error` contains its

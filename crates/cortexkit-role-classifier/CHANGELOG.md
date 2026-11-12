@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.4
+
+- Accept `subc-protocol` 0.34.1 through 0.36.x, so a module on the 0.36 line
+  links one copy; no API or behaviour change.
+
 ## 0.6.3
 
 - Classify answered routing refusals using routing 0.7.6: temporary refusals
