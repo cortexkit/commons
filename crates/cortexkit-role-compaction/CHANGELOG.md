@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.8
+
+- Add optional Setup and Conditions `statement_epoch`: 1 to 64 visible ASCII
+  characters, minted fresh in memory at every Setup and never repeated within
+  the session's life. Keep `compaction-statement-seq/v1`, now epoch plus stamp;
+  providers may declare it only on 0.3.8 or later. None declared it under 0.3.6.
+- Check epoch presence and value before stamps or notice numbers. Drop foreign
+  epochs and stamps without an epoch whole, advancing nothing; answer dropped
+  notices `setup_required` and refuse dropped rides `unknown_session` to trigger
+  repair through Setup. Setup replaces both held values; a Setup with neither
+  member clears both and preserves unstamped arrival order. Within one epoch,
+  lower stamps give no runner state, including size readings, but still give
+  entries and events.
+- Add capability-gated `with_statement_order` builders and epoch validation on
+  building, decoding and encoding. Encoding refuses a stamp without an epoch;
+  decoding retains missing epochs so providers can request Setup. Deprecate
+  `with_statement_seq` without changing its signature; remove it in the next
+  breaking compaction release. Add regression tests and epoch wire vectors.
+- Preserve declaration-order serialization, with epoch and stamp first when
+  present and byte-identical 0.3.7 output when both are absent. Exhaustive field
+  matching makes a forgotten serializer field a compile error.
+
 ## 0.3.7
 
 - Add optional Setup `limits` with typed `Limits`, `PageLimits` and

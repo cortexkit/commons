@@ -30,6 +30,7 @@
     "signed_floor": {
       "through": "message-a"
     },
+    "statement_epoch": "89abcdef0123456789abcdef01234567",
     "statement_seq": 42
   }
 }

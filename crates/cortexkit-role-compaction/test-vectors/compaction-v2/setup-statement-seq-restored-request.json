@@ -27,6 +27,7 @@
       "history_edit_cost": "suffix",
       "signed_parts": "none"
     },
+    "statement_epoch": "fedcba9876543210fedcba9876543210",
     "statement_seq": 7
   }
 }

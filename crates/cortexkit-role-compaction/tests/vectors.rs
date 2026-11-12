@@ -242,7 +242,8 @@ fn samples() -> Vec<(&'static str, Value)> {
                 ops::COMPACTION_SETUP,
                 setup
                     .clone()
-                    .with_statement_seq(42, true)
+                    .with_statement_order("89abcdef0123456789abcdef01234567", 42, true)
+                    .unwrap()
                     .with_signed_floor(
                         cortexkit_role_compaction::SignedFloor::new("message-a"),
                         true,
@@ -257,7 +258,8 @@ fn samples() -> Vec<(&'static str, Value)> {
                     5,
                     conditions
                         .clone()
-                        .with_statement_seq(42, true)
+                        .with_statement_order("89abcdef0123456789abcdef01234567", 42, true)
+                        .unwrap()
                         .with_signed_floor(
                             cortexkit_role_compaction::SignedFloor::new("message-a"),
                             true,
@@ -285,7 +287,8 @@ fn samples() -> Vec<(&'static str, Value)> {
                     1_500,
                     conditions
                         .clone()
-                        .with_statement_seq(42, true)
+                        .with_statement_order("89abcdef0123456789abcdef01234567", 42, true)
+                        .unwrap()
                         .with_signed_floor(
                             cortexkit_role_compaction::SignedFloor::new("message-a"),
                             true,
@@ -298,7 +301,23 @@ fn samples() -> Vec<(&'static str, Value)> {
             "setup-statement-seq-restored-request.json",
             request(
                 ops::COMPACTION_SETUP,
-                setup.clone().with_statement_seq(7, true),
+                setup
+                    .clone()
+                    .with_statement_order("fedcba9876543210fedcba9876543210", 7, true)
+                    .unwrap(),
+            ),
+        ),
+        (
+            "notice-statement-seq-restored-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(
+                    1,
+                    conditions
+                        .clone()
+                        .with_statement_order("fedcba9876543210fedcba9876543210", 8, true)
+                        .unwrap(),
+                ),
             ),
         ),
         (

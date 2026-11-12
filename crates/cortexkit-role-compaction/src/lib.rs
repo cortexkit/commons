@@ -49,6 +49,7 @@ pub mod ride;
 pub mod rules;
 pub mod setup;
 pub mod signed_floor;
+mod statement_order;
 pub mod tokens;
 pub mod view;
 pub mod wire;
@@ -70,7 +71,8 @@ pub const COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES: &str = "compaction-entry-speaks-
 pub const COMPACTION_SIGNED_FLOOR_PROVIDES: &str = "compaction-signed-floor/v1";
 
 /// Additional provider manifest capability enabling Setup and Conditions
-/// `statement_seq`. Runners send the stamp only to declaring providers.
+/// `statement_epoch` and `statement_seq`. Runners send both only to declaring
+/// providers on contract version 0.3.8 or later.
 pub const COMPACTION_STATEMENT_SEQ_PROVIDES: &str = "compaction-statement-seq/v1";
 
 /// Additional provider manifest capability enabling Conditions `notes_tokens`.

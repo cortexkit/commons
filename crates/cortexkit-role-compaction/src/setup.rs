@@ -17,11 +17,17 @@ use crate::ride::RideCause;
 use crate::rules::ProviderRules;
 use crate::view::AppliedView;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[non_exhaustive]
 pub struct SetupRequest {
+    /// Fresh, memory-only Setup epoch: 1 to 64 visible ASCII characters, never
+    /// repeated during this session's life. Replaces the provider's held epoch.
+    /// Send only to providers declaring `compaction-statement-seq/v1`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::statement_order::optional_epoch")]
+    pub statement_epoch: Option<String>,
     /// Authoritative runner-state stamp: replaces the provider's held stamp,
-    /// even when lower after a session restore. See W3.5 for restore ordering.
+    /// even when lower after a restore. Encoding requires `statement_epoch`.
     /// Send only to providers declaring `compaction-statement-seq/v1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::integer::optional")]
@@ -211,6 +217,7 @@ impl SetupRequest {
         now: u64,
     ) -> Self {
         Self {
+            statement_epoch: None,
             statement_seq: None,
             signed_floor: None,
             preset: preset.into(),
@@ -245,9 +252,30 @@ impl SetupRequest {
         self
     }
 
-    /// Project the state stamp only when the provider declares its capability.
+    /// Project an epoch and state stamp together, only for declaring providers.
+    /// The epoch must contain 1 to 64 visible ASCII characters (W3.5).
+    pub fn with_statement_order(
+        mut self,
+        epoch: impl Into<String>,
+        statement_seq: u64,
+        declared: bool,
+    ) -> Result<Self, String> {
+        let epoch = epoch.into();
+        crate::statement_order::validate_epoch(&epoch)?;
+        self.statement_epoch = declared.then_some(epoch);
+        self.statement_seq = declared.then_some(statement_seq);
+        Ok(self)
+    }
+
+    /// Project only the stamp. Prefer `with_statement_order` to set its epoch too.
+    #[deprecated(
+        note = "use with_statement_order; since 0.3.8 encoding refuses a stamp without an epoch; removed in the next breaking compaction release"
+    )]
     pub fn with_statement_seq(mut self, statement_seq: u64, declared: bool) -> Self {
         self.statement_seq = declared.then_some(statement_seq);
+        if !declared {
+            self.statement_epoch = None;
+        }
         self
     }
 
@@ -275,6 +303,17 @@ impl SetupRequest {
     pub fn with_newest(mut self, newest: Cursor) -> Self {
         self.newest = Some(newest);
         self
+    }
+}
+
+impl Serialize for SetupRequest {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::statement_order::serialize_statement!(self, serializer, "SetupRequest",
+            [optional statement_epoch, optional statement_seq, optional signed_floor,
+                required preset, optional child_harness, required model,
+                optional accepts_images, optional view_anchor, optional limits,
+                required context_window, required output_reserve, required rules,
+                required detects, optional applied_view, optional newest, required now])
     }
 }
 

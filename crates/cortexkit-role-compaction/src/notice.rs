@@ -63,19 +63,23 @@ pub struct NoticeRequest {
 
 /// What the session runs under now. Notices and rides both carry it, so a
 /// change reaches the provider with the next one.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[non_exhaustive]
 pub struct Conditions {
-    pub model: ModelRef,
-    /// Per-session runner-state stamp, nondecreasing across runner restarts.
-    /// Newer state never has a lower stamp; equal stamps describe the same
-    /// state and are processed normally. Providers ignore runner-state members
-    /// below their held stamp, but size readings keep their own staleness rule.
-    /// Setup resets the held stamp, even lower; see W3.5 for restore ordering.
+    /// The epoch of the Setup under which this statement was built. A different
+    /// epoch (including mismatched presence) makes the provider drop the whole
+    /// statement and request Setup, before comparing stamps (W3.5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(deserialize_with = "crate::statement_order::optional_epoch")]
+    pub statement_epoch: Option<String>,
+    /// Runner-state stamp, nondecreasing within a Setup epoch. Below the held
+    /// stamp, no runner state is taken, including size readings; entries and
+    /// events still are. Equal stamps use arrival order. Encoding requires an epoch.
     /// Send only to providers declaring `compaction-statement-seq/v1`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::integer::optional")]
     pub statement_seq: Option<u64>,
+    pub model: ModelRef,
     /// Runner-authoritative signed reasoning boundary. Send only to providers
     /// declaring `compaction-signed-floor/v1`; see [`crate::SignedFloor`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -100,8 +104,9 @@ pub struct Conditions {
     /// Send only with `last_prompt_tokens`; providers ignore it without a reading.
     /// W6.5's `stale_version` refuses any version not greater than the latest
     /// accepted, so a runner-reported version names exactly one view in that
-    /// session. When present, a reading counts toward compaction only if this
-    /// equals the newest version the provider has seen the runner apply; a lower
+    /// session. After the epoch and stamp checks pass (W3.5), a reading counts
+    /// toward compaction only if this equals the newest version the provider has
+    /// seen the runner apply; a lower
     /// version, or `0` once any view is applied, is stale.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::integer::optional")]
@@ -228,6 +233,7 @@ impl Conditions {
     ) -> Self {
         Self {
             model,
+            statement_epoch: None,
             statement_seq: None,
             signed_floor: None,
             accepts_images: None,
@@ -254,9 +260,30 @@ impl Conditions {
         self
     }
 
-    /// Project the state stamp only when the provider declares its capability.
+    /// Project an epoch and state stamp together, only for declaring providers.
+    /// The epoch must contain 1 to 64 visible ASCII characters (W3.5).
+    pub fn with_statement_order(
+        mut self,
+        epoch: impl Into<String>,
+        statement_seq: u64,
+        declared: bool,
+    ) -> Result<Self, String> {
+        let epoch = epoch.into();
+        crate::statement_order::validate_epoch(&epoch)?;
+        self.statement_epoch = declared.then_some(epoch);
+        self.statement_seq = declared.then_some(statement_seq);
+        Ok(self)
+    }
+
+    /// Project only the stamp. Prefer `with_statement_order` to set its epoch too.
+    #[deprecated(
+        note = "use with_statement_order; since 0.3.8 encoding refuses a stamp without an epoch; removed in the next breaking compaction release"
+    )]
     pub fn with_statement_seq(mut self, statement_seq: u64, declared: bool) -> Self {
         self.statement_seq = declared.then_some(statement_seq);
+        if !declared {
+            self.statement_epoch = None;
+        }
         self
     }
 
@@ -294,5 +321,16 @@ impl Conditions {
     ) -> Self {
         self.notes_tokens = declared.then_some(tokens);
         self
+    }
+}
+
+impl Serialize for Conditions {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        crate::statement_order::serialize_statement!(self, serializer, "Conditions",
+            [optional statement_epoch, optional statement_seq, required model,
+                optional signed_floor, optional accepts_images, required context_window,
+                required output_reserve, required rules, optional last_prompt_tokens,
+                optional last_prompt_view, optional system_tokens, optional tools_tokens,
+                optional notes_tokens, optional window_over_budget])
     }
 }

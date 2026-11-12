@@ -55,7 +55,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 |---|---|
 | S1 | The runner calls `compaction.setup` (W5.1) when it starts serving a session whose preset has a compaction provider, when a compaction item is first applied or the applied item's provider, preset or params changed (to the current provider, W2.5), after its own restart, before the next send after a Setup that failed with no view applied (W1.3a), and when a notice answers `setup_required` or a ride is refused `unknown_session`. |
 | S2 | Setup either answers `ready` or fails with a refusal (W1.3) naming why. It never carries content, and the provider never reads the transcript inside it. |
-| S3 | A second Setup for a session the provider already holds keeps the provider's state; both sides restart the notice count (W5.2 `seq`). |
+| S3 | A second Setup for a session the provider already holds keeps the provider's state, except that it replaces the held statement epoch and stamp (W3.5); both sides restart the notice count (W5.2 `seq`). |
 | S4 | If the applied view differs from the one the provider holds (version or checksum), the provider reads the runner's with `session.applied_view` and adopts it unless it is foreign (W5.6). |
 | S5 | The provider sets no ceiling or percentage on the runner. |
 | S6 | A runner that has asked for Setup during a notice pass does not ask again in that pass; it waits out its existing backoff. This is runner-side scheduling, not a new provider obligation. |
@@ -68,7 +68,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | N2 | The provider answers at once and does the work afterwards. The runner never waits on that work. |
 | N3 | The runner sends a session's notices one at a time: the next only after the previous one was answered. Changes made while a notice is unanswered go into the next notice, so a slow provider never builds a queue. Before a ride, the runner sends any change not yet noticed. |
 | N4 | A notice is a convenience, not the source of truth. The provider keeps its own position, and reads any gap with `session.entries`. |
-| N5 | A notice whose `seq` is not greater than the last one handled since the latest Setup is ignored. |
+| N5 | Check the statement epoch first (W3.5). A dropped foreign-epoch notice advances nothing, including the held notice `seq`. Of notices that pass that check, one whose `seq` is not greater than the last one handled since the latest Setup is ignored. |
 | N6 | The first notice after Setup carries only entries newer than the entry Setup named in `newest`, plus entries changed since that Setup, subject to the ordinary notice budget (W4.11). Like every later notice, it is a delta, not a replay. The provider pages with `session.entries` for older entries (N4); providers were already required to do so. No capability is needed. |
 
 ## A6. Reads
@@ -155,7 +155,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | Id | Rule |
 |---|---|
 | F1 | Provider unreachable: the runner keeps applying its last view. An `over_limit` ride with no answer ends in `context_ceiling`. |
-| F2 | Provider restart: notices answer `setup_required`, rides are refused `unknown_session`, the runner calls Setup again, and the provider rebuilds from its store and one read from its last cut. |
+| F2 | Provider restart: notices answer `setup_required`, rides are refused `unknown_session`, the runner calls Setup again, and the provider rebuilds from its store and one read from its last cut (the last transcript range it compacted). Statements dropped by the epoch check (W3.5) use the same answers to trigger Setup again. |
 | F3 | Runner restart: it reloads its stored applied view and transcript and keeps applying them, and calls Setup again. Cache expiry is unknown until a cache touch arrives after that start. It reports `cache_expired` only with every touch since its own start and the newest touch's reported lifetime passed; never for an `implicit` cache (RD3). |
 | F4 | One session's slow or silent runner never delays another session. |
 
@@ -178,7 +178,7 @@ Codes and what the caller does next:
 | `invalid_params` | `field` | `params` does not decode into the op's request. | A bug in the caller: log it. On `compaction.setup` the runner applies W1.3a; on other methods it does not retry. |
 | `unknown_method` | `method` | The route's role does not serve this method. | A bug in the caller: log it, do not retry. On `compaction.setup` (for example from a provider that predates this contract), the runner handles it as a refused Setup (W1.3a). |
 | `unknown_preset` | `preset` | Setup names a preset the provider does not know. | The runner logs it and handles it as a refused Setup (W1.3a). |
-| `unknown_session` | | A ride for a session the provider holds no Setup for. | The runner treats it as `nothing`, then calls Setup before its next notice. |
+| `unknown_session` | | A ride for a session the provider holds no Setup for, or one dropped by W3.5's epoch check: a foreign epoch, mismatched epoch presence, or a stamp without an epoch. | The runner treats it as `nothing`, then calls Setup before its next notice. |
 | `compaction_not_permitted` | `reason` | The runner refuses a `compaction-runner/v1` route or call from a caller that is not the session's selected provider (W2.5). | The provider suspends work for that session until a new Setup answers `ready` (W2.5). |
 
 **W1.3a A refused or unanswered Setup.** When `compaction.setup` is refused, with any code (`invalid_params`, `unknown_method` and `unknown_preset` included), or gets no answer within the runner's deadline, the runner gets no new views from that Setup:
@@ -198,11 +198,14 @@ unknown members; this does not authorize sending the member without the
 declaration. The floor remains authoritative in the runner even when the
 provider does not declare it (W3.5).
 
-For `statement_seq` in Setup and `Conditions`, the provider declares the
+For `statement_epoch` and `statement_seq` in Setup and `Conditions`, the provider declares the
 additional manifest capability `compaction-statement-seq/v1`
 (`COMPACTION_STATEMENT_SEQ_PROVIDES`; `provides_statement_seq`). The runner sends
-the member only to declaring providers. Existing Setup and Conditions decoders
-ignore unknown members; the declaration is still required (W3.5).
+both members only to declaring providers, and sends a stamp only together with
+its epoch. A provider may declare this capability only on contract version
+0.3.8 or later. No provider declared it under 0.3.6, which is why v1 can still
+change to mean epoch plus stamp. Existing Setup and Conditions decoders ignore
+unknown members; the declaration is still required (W3.5).
 
 For `Conditions.notes_tokens`, the provider declares the additional manifest
 capability `compaction-notes-tokens/v1` (`COMPACTION_NOTES_TOKENS_PROVIDES`;
@@ -236,7 +239,7 @@ without the declaration it MUST omit the member, not invent a notice origin.
 | Value | Received by | Treated as |
 |---|---|---|
 | Setup answer | runner | A Setup refusal, handled as W1.3a: a view already applied stays applied, and with no view the turn ends `compaction_unavailable` before any model call. |
-| Notice answer | runner | `setup_required`: the runner calls Setup before its next notice. |
+| Notice answer | runner | `setup_required` (also used for no held session and notices dropped by W3.5's epoch check: foreign epoch, mismatched epoch presence, or stamp without epoch): the runner calls Setup before its next notice. |
 | Ride answer | runner | `nothing`. |
 | `session.apply_view` answer | provider | Outcome unconfirmed: the provider doesn't send that view again, and reads the runner's applied view (`session.applied_view`) before relying on either outcome. |
 | View refusal code or rule break | provider | A refusal it cannot act on: it does not send that view again (V6). |
@@ -347,7 +350,8 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | For the current model and account. |
 | `signed_floor` | `{through: string}`, optional | Runner-authoritative signed reasoning boundary, by stable entry id, with the semantics below. Only for providers declaring `compaction-signed-floor/v1`. |
-| `statement_seq` | integer, optional | Per-session `u64` runner-state stamp, bounded to `0..2^53-1` on the wire (W1.2), with the statement-order semantics below. Only for providers declaring `compaction-statement-seq/v1`; also sent in Setup. |
+| `statement_epoch` | string, optional | The epoch of the Setup under which this notice or ride was built: 1 to 64 visible ASCII characters (`0x21`–`0x7E`), opaque. Check it before the stamp, as below. Only for providers declaring `compaction-statement-seq/v1`. |
+| `statement_seq` | integer, optional | Runner-state stamp, non-decreasing within the Setup epoch, bounded to `0..2^53-1` on the wire (W1.2), with the statement-order semantics below. Send only together with `statement_epoch`, only to providers declaring `compaction-statement-seq/v1`; also sent in Setup. |
 | `last_prompt_tokens` | integer, optional | The prompt size the model provider reported for the session's newest model request: uncached input plus cache reads plus cache writes. Absent before the first request, or when the provider reported none. Requests of child sessions do not count. |
 | `last_prompt_view` | integer, optional | The applied view version the request measured by `last_prompt_tokens` was rendered with when the runner built it. At least 1 names an applied view (view versions start at 1, W6.1); `0` means no view was applied. The runner sends it whenever it can tie the reading to the request it measured; absent means it cannot, for example after a runner restart. Providers may use a reading without it for compaction without checking a view version. The runner sends it only with `last_prompt_tokens`; the provider ignores it when `last_prompt_tokens` is absent. |
 | `system_tokens` | `{count, exact}`, optional | Count of the runner's own system text for the next request under these conditions, excluding system entries; in notices only, never rides (W4.11). |
@@ -390,30 +394,58 @@ one it dropped.
 
 **Statement order.** A background notice can arrive after a ride built from
 newer session state, so arrival order alone can roll the provider's floor or
-other runner state back. `statement_seq` is a per-session `u64` that never
-decreases, including across the runner's restart. A statement built from newer
-session state never carries a lower stamp than one built from older state.
-Equal stamps are allowed and mean the statements were built from the same
-session state, so they state the same runner state. A runner may use a persisted
+other runner state back. A statement built before a restore, process restart or
+crash recovery that discarded the tail of the session log can also arrive after
+Setup on another route, with a stamp higher than the restored session's stamps.
+Runners need not drain those routes: the epoch fences the replaced history.
+
+The runner mints a fresh `statement_epoch` at every Setup, never repeated within
+the session's life. It is an opaque string of 1 to 64 visible ASCII characters
+(`0x21`–`0x7E`); 128 random bits in hex are suggested. The epoch lives in the
+runner's memory and needs no durable write. S1/F3 already require Setup after
+the runner's own restart, so that Setup always mints a new epoch. Every notice
+and ride carries the epoch of the Setup it was built under, beside its
+`statement_seq`; both are sent only to declaring providers.
+
+**Check the epoch before the stamp or notice number.** Only matching epoch
+presence and value pass. A statement with an epoch different from the held one
+belongs to a history the runner has replaced. After a Setup with an epoch, a
+statement without one is foreign; after a Setup without one, a statement with
+one is foreign too. A stamp without an epoch is a runner bug and is dropped
+whole in exactly the same way, even if the provider holds no epoch. The paired
+builders set epoch and stamp together, and encoding refuses a stamp without an
+epoch; decoders retain that case so a provider can drop it as specified here.
+
+A dropped statement gives the provider nothing: no runner state, no size
+reading, no entries and no events. A dropped foreign-epoch notice advances
+nothing, including N5's notice number, so restored-session notices cannot be
+refused as old because of it. The provider answers a dropped notice
+`setup_required` and refuses a dropped ride `unknown_session`, for every drop
+case above. These existing re-Setup triggers (S1, F2, W5.2) let a live runner
+repair a wrong or missing epoch instead of dropping statements forever; an
+answer to a dead process changes nothing there. Real history is read through
+`session.entries` (N4), not recovered from a dropped statement.
+
+A Setup sets both the held epoch and the held stamp to its own values, even
+when the stamp is lower after a restore. A Setup with neither clears any held
+epoch and stamp: a runner that never stamps continues to send unstamped
+statements, taken in arrival order as before 0.3.6. After restoring a session,
+the runner sends Setup before any notice or ride built under the new epoch.
+
+Within one epoch, `statement_seq` is a `u64` non-decreasing in build order. A
+statement built from newer session state never carries a lower stamp than one
+built from older state. Equal stamps are allowed, describe the same runner
+state, and keep arrival order under the existing rules. A runner may use a
 counter or the position of the newest record in its session log when the
-statement was built; either satisfies the rule.
+statement was built; Setup permits either to reset, even to a lower value.
 
-A provider ignores every runner-state member of a `Conditions` whose stamp is
-below the highest it holds for that session: `signed_floor`, `notes_tokens`,
-`system_tokens`, `tools_tokens`, and any other current or later runner-state
-member. An equal stamp is processed normally. The size reading
-(`last_prompt_tokens` with `last_prompt_view`) keeps its own staleness rule above.
-Without the member, runner state is processed in arrival order. After a provider
-restart, the first stamped statement it receives establishes its held stamp.
-
-A Setup sets the provider's held stamp to the Setup's own value, even when
-lower, because Setup states what the session is now, for example after the
-runner restored the session from a backup. After restoring a session, a runner
-sends the session's Setup before any notice or ride, and sends nothing built
-from before the restore once that Setup has been sent. A statement already in
-flight from before the restore can still arrive after that Setup. The cost is
-bounded to a refused view or a held rebuild, because the runner checks every
-view against its own floor before applying it.
+For a matching epoch, a provider takes nothing of the runner state in a
+`Conditions` whose stamp is below the highest it holds: `signed_floor`,
+`notes_tokens`, `system_tokens`, `tools_tokens`, `last_prompt_tokens`,
+`last_prompt_view`, and any other current or later runner-state member. The
+earlier statement's size reading is the same as or older than the held one;
+it gives nothing. Entries and events are still processed. An equal or higher
+stamp is processed normally, including the size-reading staleness rule above.
 
 A view that keeps a signed part at or before the floor MUST NOT be refused for
 keeping that part, even if the view would otherwise invalidate its signature.
@@ -689,7 +721,8 @@ Request:
 | `output_reserve` | integer | W3.4. |
 | `rules` | `ProviderRules` | W3.3. |
 | `signed_floor` | `{through: string}`, optional | W3.5. Send only to providers declaring `compaction-signed-floor/v1`. |
-| `statement_seq` | integer, optional | W3.5. Sets the provider's held stamp to this value, even when lower. Send only to providers declaring `compaction-statement-seq/v1`. |
+| `statement_epoch` | string, optional | W3.5. Fresh at every Setup, never repeated within the session's life; 1 to 64 visible ASCII characters (`0x21`–`0x7E`). Replaces the held epoch. Only for providers declaring `compaction-statement-seq/v1`. |
+| `statement_seq` | integer, optional | W3.5. Sets the provider's held stamp to this value, even when lower. Send only with `statement_epoch`, only to providers declaring `compaction-statement-seq/v1`. Neither member means clear both held values. |
 | `detects` | array of cause names | The ride causes (W5.3) the runner can detect (RD5). |
 | `applied_view` | `AppliedView`, optional | The view the runner applies now: after its restart, the one it reloaded; for a session moved in, the installed first view. |
 | `newest` | `Cursor`, optional | The newest entry; absent for an empty transcript. |
@@ -746,7 +779,7 @@ Events, each an object with an `event` field:
 | `view_refused` | `version`, `refusal` (W6.5) | A view the runner refused when it came to apply it: a ride's answer, or an accepted view that no longer fits the transcript at the next step boundary. |
 | `marker_written` | `version` | The runner wrote its host's compaction marker for this view's cut. |
 
-Answer: `{"answer": "received"}`, or `{"answer": "setup_required"}` when the provider holds no session for the route (it restarted); the runner then calls Setup before its next notice. Refusals: `invalid_params`.
+Answer: `{"answer": "received"}`, or `{"answer": "setup_required"}` when the provider holds no session for the route (it restarted), or drops the notice under W3.5 (foreign epoch, mismatched epoch presence, or stamp without epoch); the runner then calls Setup before its next notice. Refusals: `invalid_params`.
 
 ### W5.3 `compaction.ride` (provider)
 
@@ -777,7 +810,9 @@ A cause says what changed at the runner, not what the provider must do. Only `ov
 
 Answer: `{"answer": "view", "view": View}` or `{"answer": "nothing"}`. The runner checks a returned view like one handed over with `session.apply_view` (W6.5). If accepted, it applies the view to this very request and stores it as its latest; if refused, it keeps its view and reports `view_refused` in its next notice. With `over_limit`, it then estimates again, and refuses the turn with `context_ceiling` if the request still does not fit.
 
-Refusals: `unknown_session`, `invalid_params`.
+Refusals: `unknown_session` when the provider holds no Setup or drops the ride
+under W3.5 (foreign epoch, mismatched epoch presence, or stamp without epoch);
+`invalid_params` for malformed parameters.
 
 ### W5.4 `session.entries` (runner, `compaction-runner/v1`)
 

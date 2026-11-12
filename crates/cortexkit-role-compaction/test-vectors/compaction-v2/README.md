@@ -31,14 +31,18 @@ notes from system text for `compaction-notes-tokens/v1` providers.
 notes inside `system_tokens` for non-declaring providers.
 
 `setup-statement-seq-request.json`, `notice-statement-seq-request.json` and
-`ride-statement-seq-request.json` carry the same state stamp (`42`) and signed
-floor for `compaction-statement-seq/v1` providers. Equal stamps are processed
-normally; the notice also carries next-request surface counts, while size
-readings retain their separate staleness rule. The restored-session Setup in
-`setup-statement-seq-restored-request.json` authoritatively resets the held stamp
-to `7` and reports no floor. After a restore the runner sends Setup first and
-sends no more statements built before the restore. Older Setup, notice and ride
-vectors omit the stamp for non-declaring providers.
+`ride-statement-seq-request.json` carry the same epoch, state stamp (`42`) and
+signed floor for `compaction-statement-seq/v1` providers. Equal stamps are
+processed normally; the notice also carries next-request surface counts.
+Within that epoch, lower stamps give no runner state, including size readings,
+but their entries and events are still processed. The restored-session Setup in
+`setup-statement-seq-restored-request.json` replaces the epoch, resets the held
+stamp to `7` and reports no floor. A late statement from the replaced epoch is
+dropped whole, including its notice number; a dropped notice answers
+`setup_required`, and a dropped ride is refused `unknown_session`. Older Setup,
+notice and ride vectors omit both epoch and stamp for non-declaring providers.
+`notice-statement-seq-restored-request.json` uses the new epoch with stamp `8`
+and restarts the notice number at `1`, unaffected by a late old-epoch notice.
 
 `setup-limits-request.json` advertises runner-owned page, named-read and window
 bounds, plus `window_over_budget` detection for a `compaction-limits/v1`
