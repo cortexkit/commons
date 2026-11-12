@@ -128,6 +128,7 @@ mod tests {
         for (code, account_wait, retryable) in [
             ("account_selection_refused", true, false),
             ("account_limit_exhausted", true, false),
+            ("account_selection_final", false, false),
             ("transient", false, true),
             ("fetch_unavailable", false, true),
             ("scope_not_synced", false, true),

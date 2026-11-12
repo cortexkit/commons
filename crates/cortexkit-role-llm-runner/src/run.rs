@@ -356,6 +356,9 @@ pub struct RunError {
     /// Diagnostics only: never replaces `provider_code` or decides retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_detail_code: Option<String>,
+    /// Routing's refusal code verbatim, diagnostic only; never decides retry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routing_code: Option<String>,
 }
 
 impl RunError {
@@ -375,6 +378,7 @@ impl RunError {
             provider: None,
             reason: None,
             provider_detail_code: None,
+            routing_code: None,
         }
     }
     pub fn with_status(mut self, status: u16) -> Self {
@@ -403,6 +407,10 @@ impl RunError {
     }
     pub fn with_provider_detail_code(mut self, value: impl Into<String>) -> Self {
         self.provider_detail_code = Some(value.into());
+        self
+    }
+    pub fn with_routing_code(mut self, value: impl Into<String>) -> Self {
+        self.routing_code = Some(value.into());
         self
     }
 }

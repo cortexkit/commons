@@ -682,6 +682,37 @@ async fn head_last_run_error_wrong_class_fails_only_status_case() {
 }
 
 #[tokio::test]
+async fn head_last_run_error_wrong_provider_code_fails_only_status_case() {
+    head_error_defect(
+        Defects {
+            head_error_provider_code_wrong: true,
+            ..Defects::default()
+        },
+        "head_last_run_error_matches_run_status",
+        "differs from run.status",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn head_last_run_error_without_provider_code_passes() {
+    let report = run(&head_error_subject(Defects {
+        head_error_provider_code_omitted: true,
+        ..Defects::default()
+    }))
+    .await;
+    for name in cases_of(&["head_last_run_error_"]) {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
 async fn head_last_run_error_wrong_reset_fails_only_status_case() {
     head_error_defect(
         Defects {

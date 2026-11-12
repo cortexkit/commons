@@ -1525,7 +1525,7 @@ impl From<RetryAfterSecs> for f64 {
     }
 }
 
-/// Retry metadata for the same run named by [`HeadMeta::last_run_state`],
+/// Error code and retry metadata for the run named by [`HeadMeta::last_run_state`],
 /// present only when its state is `"error"`. Paused (for example
 /// `account_changed`) and interrupted runs carry none because `reason`
 /// already explains why they stopped. Absence on an error means not reported
@@ -1535,10 +1535,10 @@ impl From<RetryAfterSecs> for f64 {
 /// never a separate derivation. A runner should write both from the same
 /// terminal record. A negative or non-finite retry delay is omitted here.
 ///
-/// The head is served to client apps and intentionally omits `message`,
-/// `provider_code`, `status`, `account_ref` and provider diagnostics: retry
-/// decisions need only class and timing. A reader wanting text calls
-/// `run.status` once.
+/// The optional `provider_code` lets client apps word an account wait from
+/// the head alone. The head intentionally omits `message`, `status`,
+/// `account_ref` and provider diagnostics. A reader wanting text calls
+/// `run.status` once. Unknown members are ignored.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct LastRunError {
@@ -1553,6 +1553,9 @@ pub struct LastRunError {
     /// Provider reset time in milliseconds since the Unix epoch, if reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resets_at_ms: Option<u64>,
+    /// The run error's role code, when reported; identifies account waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_code: Option<String>,
 }
 
 impl LastRunError {
@@ -1561,6 +1564,7 @@ impl LastRunError {
             class: class.into(),
             retry_after_secs: None,
             resets_at_ms: None,
+            provider_code: None,
         }
     }
 
@@ -1580,6 +1584,11 @@ impl LastRunError {
 
     pub fn resets_at_ms(&self) -> Option<u64> {
         self.resets_at_ms
+    }
+
+    pub fn with_provider_code(mut self, provider_code: impl Into<String>) -> Self {
+        self.provider_code = Some(provider_code.into());
+        self
     }
 }
 

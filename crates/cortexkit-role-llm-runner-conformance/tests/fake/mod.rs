@@ -285,6 +285,8 @@ pub struct Defects {
     pub head_error_on_paused: bool,
     pub head_error_retry_rounded: bool,
     pub head_error_class_wrong: bool,
+    pub head_error_provider_code_wrong: bool,
+    pub head_error_provider_code_omitted: bool,
     pub head_error_reset_wrong: bool,
     pub head_error_without_state: bool,
     pub head_error_omitted: bool,
@@ -5303,6 +5305,12 @@ impl Module {
                     let mut summary = cortexkit_role_llm_runner::read::LastRunError::new(
                         error["class"].as_str().unwrap(),
                     );
+                    if let Some(code) = error["provider_code"]
+                        .as_str()
+                        .filter(|_| !self.world.defects.head_error_provider_code_omitted)
+                    {
+                        summary = summary.with_provider_code(code);
+                    }
                     if let Some(delay) = error["retry_after_secs"].as_f64() {
                         let delay = if self.world.defects.head_error_retry_rounded {
                             delay.round()
@@ -5320,6 +5328,9 @@ impl Module {
                     }
                     if self.world.defects.head_error_class_wrong {
                         summary.class = "permanent".into();
+                    }
+                    if self.world.defects.head_error_provider_code_wrong {
+                        summary.provider_code = Some("account_selection_final".into());
                     }
                     if self.world.defects.head_error_reset_wrong {
                         summary.resets_at_ms = Some(1);

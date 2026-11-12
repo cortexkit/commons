@@ -5,8 +5,8 @@
 //! Codes are open strings on the wire: a consumer that meets a code it does
 //! not know treats it as a terminal refusal of that one request. Only the
 //! codes [`is_retryable`] names are plain retries with the same request.
-//! Separately, [`is_account_wait`] names send refusals that hold the work
-//! for an account or allow moving it to another model, never fail it.
+//! Separately, [`is_account_wait`] names send refusals and run errors that
+//! hold the work for an account or allow moving it to another model, never fail it.
 //! Every other refusal is an answer, and retrying it unchanged meets the
 //! same refusal.
 //!
@@ -573,6 +573,8 @@ pub const FORK_ACCOUNT_BLOCKED: &str = "fork_account_blocked";
 pub const ACCOUNT_SELECTION_REFUSED: &str = "account_selection_refused";
 /// The selected account's usage limit is exhausted. Nothing was sent.
 pub const ACCOUNT_LIMIT_EXHAUSTED: &str = "account_limit_exhausted";
+/// Routing refused the account choice and waiting cannot change it. Final.
+pub const ACCOUNT_SELECTION_FINAL: &str = "account_selection_final";
 
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
@@ -586,6 +588,7 @@ pub const CODES: &[&str] = &[
     FORK_ACCOUNT_BLOCKED,
     ACCOUNT_SELECTION_REFUSED,
     ACCOUNT_LIMIT_EXHAUSTED,
+    ACCOUNT_SELECTION_FINAL,
     RETENTION_REQUIRED,
     RETENTION_CONFLICT,
     SESSION_RELEASED,
@@ -667,12 +670,14 @@ pub fn is_retryable(code: &str) -> bool {
     )
 }
 
-/// Whether a `session.send` refusal means waiting for an account rather than
-/// failing the work. Nothing was sent, so repeating the send is safe, but not
-/// immediately: honor the refusal's timing, hold the work with backoff when no
-/// time is given, or move it to another model. Never fail the work for this
-/// reason. Only the outer error code decides, not `class` or nested detail.
-/// Runners choosing accounts inside a run need not refuse sends this way.
+/// Whether a send refusal's outer code or a run error's `provider_code` means
+/// waiting for an account, never failing the work. Honor the named time for
+/// that account, or use backoff when none is given; a different account may
+/// resume at once. A send-time refusal's time binds the whole eligible pool.
+/// After a run ends, continue with a new send saying the previous run ended,
+/// whether or not any step ran. Repeat the original send only when known not
+/// to have begun a run. Unpinned work may move to another model; pinned work
+/// waits. Neither `class` nor nested diagnostic detail decides the outcome.
 pub fn is_account_wait(code: &str) -> bool {
     matches!(code, ACCOUNT_SELECTION_REFUSED | ACCOUNT_LIMIT_EXHAUSTED)
 }
@@ -744,6 +749,10 @@ pub mod provider_codes {
     pub const RESPONSE_DEADLINE: &str = "response_deadline";
     /// The account's usage limit is exhausted.
     pub const ACCOUNT_LIMIT_EXHAUSTED: &str = super::ACCOUNT_LIMIT_EXHAUSTED;
+    /// Routing temporarily refused the account choice. An account wait.
+    pub const ACCOUNT_SELECTION_REFUSED: &str = super::ACCOUNT_SELECTION_REFUSED;
+    /// Routing refused the account choice and waiting cannot change it. Final.
+    pub const ACCOUNT_SELECTION_FINAL: &str = super::ACCOUNT_SELECTION_FINAL;
     /// The account's billing or spending allowance is exhausted.
     pub const BILLING_EXHAUSTED: &str = "billing_exhausted";
     /// The provider served an account other than the run's frozen account.
@@ -779,6 +788,8 @@ pub mod provider_codes {
         OUTPUT_CEILING,
         RESPONSE_DEADLINE,
         ACCOUNT_LIMIT_EXHAUSTED,
+        ACCOUNT_SELECTION_REFUSED,
+        ACCOUNT_SELECTION_FINAL,
         BILLING_EXHAUSTED,
         ACCOUNT_CHANGED,
         CYBER_POLICY,

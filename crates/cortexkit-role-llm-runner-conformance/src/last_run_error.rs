@@ -120,6 +120,10 @@ fn check(name: &str, head: &HeadMeta, status: Option<(&str, &RunStatus)>) -> Res
             if error.class != expected.class
                 || error.retry_after_secs() != delay
                 || error.resets_at_ms() != expected.resets_at_ms
+                || error
+                    .provider_code
+                    .as_ref()
+                    .is_some_and(|code| code != &expected.provider_code)
             {
                 return Err(format!(
                     "last_run_error {error:?} differs from run.status RunError {expected:?}"

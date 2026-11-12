@@ -458,7 +458,7 @@ pub const CASES: &[CaseSpec] = &[
     case("head_last_run_error_only_on_error", &[Queue, TranscriptReads],
         "reported last_run_error is absent on every state other than error, including after a successful later run"),
     case("head_last_run_error_matches_run_status", &[Queue, TranscriptReads, RunOps, Capability::RunStatus],
-        "reported class, exact fractional retry seconds and reset timestamp equal run.status for the same run"),
+        "reported class, exact fractional retry seconds, reset timestamp and optional provider code equal run.status for the same run"),
     case("head_last_run_error_requires_last_run_state", &[Queue, TranscriptReads],
         "reported last_run_error always accompanies last_run_state"),
     case("session_usage_sums_runs_since_first", SESSION_USAGE,

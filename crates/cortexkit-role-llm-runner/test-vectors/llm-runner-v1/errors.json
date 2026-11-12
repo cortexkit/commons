@@ -12,6 +12,7 @@
     {"code": "fork_account_blocked", "retryable": false, "detail": {"routing_code": "account_not_authorized"}},
     {"code": "account_selection_refused", "retryable": false, "account_wait": true},
     {"code": "account_limit_exhausted", "retryable": false, "account_wait": true},
+    {"code": "account_selection_final", "retryable": false, "account_wait": false},
     {
       "code": "unknown_session",
       "retryable": false

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.50
+
+- Pin runner contract `=0.8.41` for run-end account waits, final account
+  selection refusals and the optional diagnostic run/head members. Both error
+  objects are open, so older readers ignore the new members without requiring
+  a reader-first 0.8.41 rollout.
+- Check a reported head `last_run_error.provider_code` against the same run's
+  `run.status` error, while accepting its omission. Reject an incorrect code
+  with `head_last_run_error_matches_run_status`.
+
 ## 0.17.49
 
 - Pin runner contract `=0.8.40` for the breaking `plan_view` pending notes

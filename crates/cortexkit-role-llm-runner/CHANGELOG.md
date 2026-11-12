@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.8.41
+
+- Extend account waits to run-end errors on every runner. Never fail the work
+  for an account wait: continue in the same session saying the previous run
+  ended, or replace one-shot work in a new session. Only resend the original
+  send when no run began. Paused runs that resume themselves need no caller
+  action; unpinned work may move to another model, while pinned work waits.
+- Bind retry timing to the account, not the session; a different account may
+  resume at once. A send-time refusal binds the whole eligible account pool.
+- Add final, non-retryable `account_selection_final` and document the exact
+  routing-refusal mapping for send-time and per-model-request selection.
+  Unknown routing codes are final, never waits. Per-request runners build run
+  errors from routing's answer and timing, not host text or generic errors.
+- Add optional diagnostic `RunError.routing_code` and optional
+  `LastRunError.provider_code` for wording account waits from the head alone,
+  with builders. Both objects are open (no `deny_unknown_fields`); older
+  readers ignore unknown members, so readers need not adopt 0.8.41 before
+  runners send them. Absent members are omitted with existing bytes unchanged.
+- Register the account-selection run codes and extend the error-code vectors.
+
 ## 0.8.40
 
 - Breaking change to the closed `session.plan_view` reply: replace
