@@ -42,6 +42,9 @@ a module plays.
 
 ### 1.1 Catalog declarations and consumers
 
+The baseline rules below remain unchanged without `consumer_declarations`.
+That group's additive defaults, attested namespace and selector rules are in §16.1.
+
 - [pinned] A module may declare its consumers, its runner support, or both in its manifest's daemon slot
   `role_declarations["routing/v1"]` (`ROLE_DECLARATIONS_KEY`). The daemon
   relays this JSON object unread; this role owns its schema
@@ -235,7 +238,7 @@ a module plays.
   construction log a warning naming the runner and the error; they do not
   remove the runner or apply part of the map. `limits_for_harness` resolves
   inheritance and returns the same error for callers to log and fall back.
-- [pinned] For `route.select`, resolve the session harness from the request,
+- [pinned] Without `decision_harness` (§16.3), for `route.select`, resolve the session harness from the request,
   declared default, or sole declared harness before matching models, then use
   that harness's effective pairs and provider allow-list. If no harness is
   resolved, use runner-level values. This applies to pins and reused choices
@@ -376,8 +379,17 @@ a module plays.
 - [pinned] `capabilities` lists the optional groups the provider serves
   (`capabilities::KNOWN`), each once. It is left out when the provider
   serves none, and a reader decodes it left out as empty. A name a reader
-  does not know is kept and means nothing to it. This version defines twenty-five
-  groups:
+  does not know is kept and means nothing to it. This version defines these groups:
+  - `consumer_declarations`: consumer `iq`, `ladder`, `placement`, `selectors`
+    and `kind`, including the attested module-root rule (§16.1).
+  - `runner_harness_facts`: per-harness `starts_sessions`, `capabilities`
+    and `exclude` (§16.2).
+  - `decision_harness`: decisions bind `{module, harness}` in the existing
+    `runner` object (§16.3); no member changes type.
+  - `select_kind`: workload `kind` on selects (§16.4).
+  - `select_eligible_routes`: the per-call route subset (§16.4).
+  - `select_price`: value-estimate rates on select answers (§16.5).
+  - `report_attempt_outcomes`: authoritative attempt statuses on reports (§16.6).
   - `service_tier`: tier-aware selection and tier metadata in report usage
     (§5.5). A caller sends these members only to a declaring provider.
   - `account_continue`: `route.account_for` reads `mode: "continue"` for a
@@ -1994,3 +2006,205 @@ Replacement params and answer:
   newest evaluation per `(kind, provider, model, metric, set.id)` as §13 says;
   neither speed reports nor reports of job success supply accuracy. The success
   answer is `{}`.
+
+## 16. Consumer defaults and runner placement (independent optional groups)
+
+- [pinned] These groups are reader-first. No module declares a new member until
+  its live router advertises the corresponding group in `role.describe`.
+  Callers send request members only toward a declaring router. Non-declaring
+  routers refuse unread request members by name, never silently apply a weaker
+  constraint. Omission (or `null`) leaves every existing body, serialization
+  and report fingerprint unchanged. The baseline types and members keep their
+  existing types and meanings unless the corresponding group is declared.
+
+### 16.1 `consumer_declarations`
+
+- [pinned] The consumer slot remains the flattened object in §1.1, not a new
+  nested `defaults` object. It additionally admits `iq?: 0..100`,
+  `ladder?: [pin]`, `placement?: "caller_runner" | {module: string}`,
+  `selectors?: [module-id]`, and `kind?: string`. Members use the usual optional
+  null/omission convention. Module ids are attested ids, never caller-supplied
+  identities; an empty module id is invalid. Placement objects have only `module`.
+- [pinned] For typed declarations, `ConsumerDeclarations::validate()` validates
+  a reader without the new group, preserving the old refusal of `iq`, even
+  `iq: null`. `validate_serving(capabilities)` is for declaring readers:
+  with `consumer_declarations`, a valid iq default is accepted and null is
+  absent. Serde presence metadata preserves this distinction without adding
+  a wire member or changing serialization or equality of absent defaults.
+- [pinned] A declared name is honoured only if it equals the declaring module's
+  id or starts with `<module id>.`. Any other name is ignored with a health
+  warning naming the module. This is an identity check after schema validation;
+  it does not discard that module's other, valid names. The catalog's nonce
+  verification still applies. Different attested modules cannot own one root,
+  so the baseline conflicting-owner rule cannot arise for these declarations.
+- [pinned] Admission succeeds when the route's attested identity is the owner
+  or a listed selector, or the select comes from a daemon-stamped scope the
+  owner owns. Absent `selectors` means the owner only (plus the owned-scope
+  arm). A selector's own scope is not the owner's scope. No request body can
+  assert either identity or scope ownership. Other callers get
+  `consumer_not_owned {consumer}`.
+- [pinned] A call's explicit `iq` and `eq` override the corresponding declared
+  defaults, including an explicit zero. Omission is not zero. A caller may
+  omit `requirements.iq` only toward a declaring router for a consumer with a
+  declared `iq` default. Dotted children inherit defaults within the owner's
+  namespace; underscores do not inherit. Settings override defaults by name.
+  The legacy parser and `Requirements.iq: u8` are unchanged:
+  `select::parse_select_request_with_defaults` resolves admitted, inherited
+  defaults before validating the call. Without a declared default, omission
+  retains today's refusal. Admission and inheritance precede that helper.
+- [pinned] `ladder` is the default ordered list in ladder mode, replaced by an
+  operator's ladder when configured. Each entry is a pin accepted by
+  `RouteRef::parse_pin`: `provider/model` or `provider/model:variant`. Entries
+  that do not parse are invalid; no second ladder grammar is introduced.
+- [pinned] `"caller_runner"` means the same runner **module** as the caller's
+  session, on any harness of that module that can host the task. It does not
+  bind the caller's harness. `{module}` limits the task to that module for a
+  selector opening the session itself. Settings cannot move a consumer away
+  from a declared placement. A head keeps its current placement; these facts
+  govern session creation, not live head moves.
+- [pinned] Declarations narrow and never widen settings. No declared demand,
+  ladder, selector, kind or placement can admit a model, provider, paid key or
+  runner that settings exclude. Settings still override defaults by name;
+  dotted children inherit. An undeclared settings name produces a warning,
+  not a refusal. An explicit settings `owner` still creates an operator-only
+  consumer using the existing attested owner/owned-scope admission rule.
+- [pinned] `kind` is an open list: `llm` (the default), `transcribe`,
+  `stream_transcribe`, `synthesize`, `realtime`, `image`, `video`, `search`.
+  Unknown well-formed tokens decode and are retained, not silently treated as
+  `llm`. A consumer routes only within its kind. Catalog type words map with
+  `transcription` ↔ `transcribe` and `speech` ↔ `synthesize`. Embedding and
+  reranking are not routing kinds defined here.
+
+### 16.2 `runner_harness_facts` and shared exclusion specs
+
+- [pinned] Existing `runner.harness_limits.<harness>` entries additionally admit
+  `starts_sessions?: bool`, `capabilities?: [token]`, `exclude?: [spec]`.
+  Missing `starts_sessions` inherits the runner-level value; missing capabilities
+  asserts no new task capability; missing exclusions adds no exclusion.
+  `capabilities` is open: defined names are `one_off` (tool-free one-off session),
+  `fork_answer`, and `output_cap` (can enforce the requested output cap).
+  Unknown tokens are retained and confer no known capability.
+- [pinned] A harness with `starts_sessions: false` never hosts a new session.
+  Exclusions reject catalog routes even though the catalog lists them. Per-harness
+  facts only narrow runner-wide offers, never widen them. Existing independent
+  malformed-map warning and fallback rules still apply.
+  `typed_harness_limits_serving` gates new facts for a reader; without the group,
+  such a map is not applied. The ungated typed accessor validates producer data.
+- [pinned] Shared exclusion specs have forms `provider`, `provider/model`,
+  `-provider`, `-provider/model`. Each entry is trimmed. Consumers drop an empty
+  entry, a bare `-`, or an empty slash segment; producers must refuse these
+  entries, never emit them. The first slash separates provider from model;
+  the rest belongs to the model, so `openrouter/anthropic/example-model` names
+  provider `openrouter`, model `anthropic/example-model`.
+- [pinned] A provider spec matches all keys under that provider at a slash
+  boundary. A model spec matches that exact key or its slash descendants, never
+  a substring or a prefix inside a segment. Model-level matches beat
+  provider-level matches regardless of order; within each level, the later
+  matching entry wins. A positive entry uses the list's base value; `-` flips
+  it. A list with no matching entry leaves the caller's value unchanged.
+  For harness `exclude`, the base is `true` (excluded), with no match admitting
+  the route. `route_spec::is_route_spec`, `matches` and `resolve` share these
+  rules; `resolve` returns `None` when there is no match.
+- [pinned] There are no globs, version ranges or special `:variant` semantics
+  in exclusion specs: a colon is part of the literal model id. A harness
+  refusing old model generations lists those model ids explicitly. Ladder pins
+  use their own parser, not this exclusion grammar.
+
+### 16.3 `decision_harness`
+
+- [pinned] A decision names both the chosen runner module and harness, using
+  the existing `runner: {module, model, auth?, harness}` object. No member
+  changes type; the already optional `runner.harness` is required on decisions
+  produced under this group. A creating send uses that harness; a runner refuses
+  a contradictory harness instead of silently substituting. The router selects
+  a harness that can host the task and route, not merely a runner's default.
+- [pinned] Callers' `runners` and `harness` only narrow allowed placements.
+  If nothing remains, the answer is `no_route` with reason `harness_unavailable`.
+  Settings remain the source of allowed placements; shipping these groups does
+  not by itself move any workload.
+
+### 16.4 `select_kind` and `select_eligible_routes`
+
+- [pinned] `select_kind` adds `kind?: string` to `route.select`. It uses the
+  same open kind list as declarations; omission means `llm` unless the admitted
+  consumer declares another kind. A call cannot cross a consumer's declared
+  kind. Unknown kinds are retained and have no implicit fallback to another kind.
+- [pinned] `select_eligible_routes` independently adds
+  `eligible_routes?: [{provider, model, variant?}]`, using `RouteRef`. These are
+  routes, not pins, provider globs or exclusion expressions. The caller computes
+  the subset for this call (format, duration, filters or other eligibility).
+  Routing ranks within it and never adds to it, even for a pin or ladder.
+  An explicitly empty subset is `no_route`, never `invalid_request`. Omitted
+  means no additional subset restriction. Other policy and request restrictions
+  still intersect it. Repeated entries do not grant any additional eligibility.
+
+### 16.5 `select_price`
+
+- [pinned] A select answer may carry:
+  `price: {basis, multiplier?, rates_per_mtok: {input, output, cache_read?,
+  cache_write?, cache_write_ttl?: {<lifetime>: rate}}, estimated_task_usd?}`.
+  Rates, multiplier and estimates are JSON numbers (`serde_json::Number`, as
+  the existing `max_cost_usd` uses), not decimal strings or integer micros.
+  Rates and estimates are finite and non-negative; a multiplier is finite and
+  positive. `input` and `output` are required, other rate roles are optional.
+- [pinned] Producer bases are exactly `metered` and `subscription_equivalent`.
+  Metered carries the catalog's list rates and **no multiplier**.
+  Subscription equivalent carries those list rates divided by the value
+  multiplier, and **must state that multiplier**. The multiplier is the router's
+  measured subscription value multiplier when available, otherwise the operator's
+  configured value. Plan pressure is a scarcity signal, not a price, and stays
+  out of rates. Readers may retain unfamiliar record bases; producers must not
+  emit them.
+- [pinned] Every rate is already the rate the caller multiplies reported usage
+  by: `cost = Σ(tokens × rate / 1_000_000)` for either basis. Reasoning tokens
+  are inside `output`, never added twice. The caller multiplies and settles;
+  the runner reports usage only and never derives a charge from this answer.
+- [pinned] `cache_write_ttl` keys are the catalog's lifetime strings verbatim,
+  not a closed enum. A usage bucket with a lifetime is priced only by the
+  matching lifetime entry. An unmatched lifetime is unpriced, **never borrowed
+  from plain `cache_write`**. Samples include `5m`/`1h` and `30m`/`12h`/`24h`.
+  Catalog `.above_context.<n>` conditions are resolved by routing for the
+  selected request: the answer carries the applicable rate, not the condition.
+- [pinned] `estimated_task_usd` is routing's per-task estimate, suitable for a
+  caller's pre-call reserve. All these numbers are an **estimate of value, not
+  money spent**; every reader must present and interpret them that way.
+- [pinned] Routing omits `price` if it cannot price the route. A caller holding
+  a dollar cap must refuse to send without a price (`price_unknown` at that
+  caller). This is the caller's rule, not a routing refusal. Neither the runner
+  nor an absent estimate is an alternative rate source.
+
+### 16.6 `report_attempt_outcomes`
+
+- [pinned] `route.report` additionally carries
+  `attempt_outcome?: {status: string, retry_after_ms?: u64}`. It is authoritative
+  over legacy `outcome` when the router declares this group. Producers emit
+  exactly this closed set; decoding is open and an unknown status counts
+  **nothing**, including no route penalty, score change, cooldown or affinity
+  change. This overrides the legacy unknown-`outcome` failure rule only when
+  `attempt_outcome` is present. Without it, all old report effects remain.
+
+  | `status` | Meaning | Companion legacy `outcome` |
+  | --- | --- | --- |
+  | `served` | Work served | `completed` |
+  | `served_empty` | Served with an empty result | `completed` |
+  | `quota` | Route quota exhausted | `failed` |
+  | `throttled` | Retryable throttling | `failed` |
+  | `credential` | Credential cannot serve | `failed` |
+  | `unavailable` | Provider unavailable | `failed` |
+  | `rejected` | Caller's own bad request | `cancelled` |
+
+- [pinned] `rejected` never counts against a route. There is no faithful legacy
+  value for it: `cancelled` is the mildest no-penalty approximation. Likewise
+  `served_empty` loses the empty-result distinction when mapped to `completed`;
+  quota/throttled/credential/unavailable lose their specific cause in `failed`.
+  Callers send the table's companion, so readers never infer contradictory
+  effects. Known statuses with a different companion are `invalid_request
+  {field: "outcome"}`. A future unknown status is read without imposing a
+  legacy-companion check; a producer of this version never emits it.
+- [pinned] `retry_after_ms` is optional for `throttled` and means **the provider
+  named this wait**. It is an unsigned integer duration, including zero. Absent
+  means unknown, and routing applies its own backoff; a runner must not invent
+  a duration when the provider supplied no wait or reset time. The member is
+  invalid on every other status: `invalid_request
+  {field: "attempt_outcome.retry_after_ms"}`. Malformed values, including
+  non-integers and negative numbers, are refused by that same field path.

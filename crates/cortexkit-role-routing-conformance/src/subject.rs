@@ -313,6 +313,12 @@ impl ModelInputFacts {
 /// same state answers the same route and runner.
 #[async_trait]
 pub trait RoutingSubject: Send + Sync {
+    /// Test-only route kinds, catalog list rates, subscription value multipliers
+    /// and caller-session runner. A router declaring the new groups must support
+    /// these fixtures; no production configuration format is prescribed.
+    async fn configure_selection_facts(&self, _facts: &SelectionFacts) -> Result<(), String> {
+        Err("selection facts are not supported by this subject".into())
+    }
     type Route: RoutingRoute;
 
     /// Return the provider to a fresh state: no consumers, catalog, pins,
@@ -475,6 +481,27 @@ pub trait RoutingSubject: Send + Sync {
 
     /// Open a route to the provider under `stamp`.
     async fn route(&self, stamp: &RouteStamp) -> Result<Self::Route, String>;
+}
+
+/// Facts joined by route key for the consumer/placement conformance cases.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct SelectionFacts {
+    pub kinds: std::collections::BTreeMap<String, String>,
+    pub list_rates: std::collections::BTreeMap<String, crate::wire::price::RatesPerMtok>,
+    pub multipliers: std::collections::BTreeMap<String, serde_json::Number>,
+    pub estimates: std::collections::BTreeMap<String, serde_json::Number>,
+    pub caller_runner: Option<String>,
+}
+
+impl SelectionFacts {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_caller_runner(mut self, runner: impl Into<String>) -> Self {
+        self.caller_runner = Some(runner.into());
+        self
+    }
 }
 
 #[cfg(test)]

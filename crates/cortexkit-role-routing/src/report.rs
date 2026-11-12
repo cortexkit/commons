@@ -268,6 +268,9 @@ pub const EXHAUSTION_CODES: &[&str] = &[
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ReportRequest {
+    /// Authoritative attempt result when `report_attempt_outcomes` is declared.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_outcome: Option<crate::attempt::AttemptOutcome>,
     pub decision_id: String,
     pub outcome: Outcome,
     /// The runner's typed refusal or error code, verbatim.
@@ -299,8 +302,22 @@ pub struct ReportRequest {
 }
 
 impl ReportRequest {
+    pub fn with_attempt_outcome(mut self, attempt: crate::attempt::AttemptOutcome) -> Self {
+        self.outcome = attempt.legacy_outcome();
+        self.attempt_outcome = Some(attempt);
+        self
+    }
+
+    /// Only use this effect when the router declares `report_attempt_outcomes`.
+    pub fn counts_against_route(&self) -> bool {
+        self.attempt_outcome.as_ref().map_or_else(
+            || self.outcome.is_failure(),
+            |attempt| attempt.counts_against_route(),
+        )
+    }
     pub fn new(decision_id: impl Into<String>, outcome: Outcome) -> Self {
         Self {
+            attempt_outcome: None,
             decision_id: decision_id.into(),
             outcome,
             runner_code: None,
@@ -396,6 +413,29 @@ pub fn parse_report_request_serving<C: AsRef<str>>(
     capabilities: &[C],
 ) -> Result<ReportRequest, Refusal> {
     let members = Members::of(params)?;
+    if members
+        .object
+        .get("attempt_outcome")
+        .and_then(|attempt| attempt.get("retry_after_ms"))
+        .is_some_and(|retry| !retry.is_null() && retry.as_u64().is_none())
+    {
+        return Err(members.refuse(
+            "attempt_outcome.retry_after_ms",
+            "retry_after_ms must be an unsigned duration",
+        ));
+    }
+    let attempt_outcome: Option<crate::attempt::AttemptOutcome> =
+        members.optional("attempt_outcome")?;
+    if attempt_outcome.is_some()
+        && !capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::REPORT_ATTEMPT_OUTCOMES)
+    {
+        return Err(members.refuse(
+            "attempt_outcome",
+            "attempt_outcome requires report_attempt_outcomes",
+        ));
+    }
     let mut outcome: Outcome = members.required("outcome")?;
     let report_outcomes = capabilities
         .iter()
@@ -461,6 +501,7 @@ pub fn parse_report_request_serving<C: AsRef<str>>(
         }
     }
     let request = ReportRequest {
+        attempt_outcome,
         decision_id: members.text("decision_id", None)?,
         outcome,
         runner_code: members.optional_text("runner_code", None)?,
@@ -472,6 +513,9 @@ pub fn parse_report_request_serving<C: AsRef<str>>(
         request_input_tokens: members.optional("request_input_tokens")?,
         refusal_class: members.optional("refusal_class")?,
     };
+    if let Some(attempt) = &request.attempt_outcome {
+        attempt.check(&request.outcome)?;
+    }
     if let Some(class) = request.refusal_class {
         if !report_outcomes {
             return Err(members.refuse(

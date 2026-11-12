@@ -1,0 +1,25 @@
+{
+  "about": "Opt-in consumer defaults, per-harness facts, kind and per-call eligibility, decisions with a harness, estimated value prices, and every attempt status. Prices are estimates of value, never money spent. TTL keys are the catalog's verbatim strings.",
+  "declaration": {
+    "consumers": [
+      {"name":"example-consumer.summary","iq":40,"eq":20,"ladder":["example-provider/model-b","example-provider/model-a:fast"],"placement":"caller_runner","selectors":["example-selector"],"kind":"llm"},
+      {"name":"example-consumer.search","placement":{"module":"runner-one"},"kind":"search"}
+    ],
+    "runner": {"pairs":[{"wire_api":"messages","auth_method":"api_key"}],"harnesses":["alpha","beta"],"default_harness":"alpha","harness_limits":{"alpha":{"starts_sessions":true,"capabilities":["one_off","fork_answer","output_cap"],"exclude":["example-provider/model-old","-example-provider/model-old/allowed"]},"beta":{"starts_sessions":false,"capabilities":[],"exclude":[]}}}
+  },
+  "request": {"consumer":"example-consumer.summary","requirements":{"iq":50},"kind":"llm","eligible_routes":[{"provider":"example-provider","model":"model-a"}]},
+  "answers": [
+    {"decision_id":"decision-metered","route":{"provider":"example-provider","model":"model-a"},"runner":{"module":"runner-one","model":{"provider":"example-provider","model":"model-a"},"harness":"alpha"},"context_window":200000,"max_output_tokens":32000,"expires_at_ms":1800000000000,"explanation":"The eligible metered route fits.","price":{"basis":"metered","rates_per_mtok":{"input":3,"output":15,"cache_read":0.3,"cache_write":3.75,"cache_write_ttl":{"5m":3.75,"1h":6}},"estimated_task_usd":0.015}},
+    {"decision_id":"decision-subscription","route":{"provider":"example-provider","model":"model-a"},"runner":{"module":"runner-one","model":{"provider":"example-provider","model":"model-a"},"harness":"alpha"},"context_window":200000,"max_output_tokens":32000,"expires_at_ms":1800000000000,"explanation":"The eligible subscription route fits.","price":{"basis":"subscription_equivalent","multiplier":20,"rates_per_mtok":{"input":0.1,"output":0.5,"cache_read":0.01,"cache_write_ttl":{"30m":0.15,"12h":0.2,"24h":0.25}},"estimated_task_usd":0.001}}
+  ],
+  "reports": [
+    {"decision_id":"decision-1","outcome":"completed","attempt_outcome":{"status":"served"}},
+    {"decision_id":"decision-2","outcome":"completed","attempt_outcome":{"status":"served_empty"}},
+    {"decision_id":"decision-3","outcome":"failed","attempt_outcome":{"status":"quota"}},
+    {"decision_id":"decision-4","outcome":"failed","attempt_outcome":{"status":"throttled","retry_after_ms":1250}},
+    {"decision_id":"decision-5","outcome":"failed","attempt_outcome":{"status":"credential"}},
+    {"decision_id":"decision-6","outcome":"failed","attempt_outcome":{"status":"unavailable"}},
+    {"decision_id":"decision-7","outcome":"cancelled","attempt_outcome":{"status":"rejected"}},
+    {"decision_id":"decision-8","outcome":"failed","attempt_outcome":{"status":"throttled"}}
+  ]
+}

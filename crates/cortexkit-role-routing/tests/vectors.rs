@@ -37,6 +37,7 @@ mod registration;
 /// directory, so a new file cannot land without a test reading it.
 const FILES: &[&str] = &[
     "consumer-declarations.json",
+    "consumers-and-placement.json",
     "open-sets.json",
     "refusals.json",
     "reply-envelope.json",

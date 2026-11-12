@@ -7,6 +7,10 @@
 /// The vectors' directory name, inside `test-vectors/`.
 pub const DIR: &str = "routing-v1";
 
+/// Opt-in consumer, harness, eligibility, price and attempt samples.
+pub const CONSUMERS_AND_PLACEMENT_JSON: &str =
+    include_str!("../test-vectors/routing-v1/consumers-and-placement.json");
+
 /// Reference-set accuracy requests and field-specific refusals.
 pub const ROUTE_ENGINE_EVAL_JSON: &str =
     include_str!("../test-vectors/routing-v1/route-engine-eval.json");
@@ -124,6 +128,7 @@ pub const ROUTE_SELECT_SETTINGS_JSON: &str =
 /// Every vector file as `(file name, contents)`, in `SHA256SUMS` order.
 pub const FILES: &[(&str, &str)] = &[
     ("consumer-declarations.json", CONSUMER_DECLARATIONS_JSON),
+    ("consumers-and-placement.json", CONSUMERS_AND_PLACEMENT_JSON),
     ("open-sets.json", OPEN_SETS_JSON),
     ("refusals.json", REFUSALS_JSON),
     ("reply-envelope.json", REPLY_ENVELOPE_JSON),

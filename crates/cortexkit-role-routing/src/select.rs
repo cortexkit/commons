@@ -212,6 +212,13 @@ pub struct ConcurrencySlot {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SelectRequest {
+    /// Workload kind, sent only with `select_kind`; omission means llm.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<crate::placement::Kind>,
+    /// Per-call subset, sent only with `select_eligible_routes`. Empty means
+    /// no route, not a malformed request. Routing never adds to this subset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub eligible_routes: Option<Vec<RouteRef>>,
     /// Send only to a router declaring `service_tier`. Absent means standard.
     /// Only accounts whose plans include the chosen tier are eligible.
     #[serde(
@@ -312,6 +319,8 @@ impl SelectRequest {
     pub fn new(consumer: impl Into<String>, requirements: Requirements) -> Self {
         Self {
             consumer: consumer.into(),
+            kind: None,
+            eligible_routes: None,
             service_tier: None,
             requirements,
             pin: None,
@@ -333,6 +342,18 @@ impl SelectRequest {
             prefer_prompt_cache: None,
             settings: None,
         }
+    }
+
+    pub fn with_kind(mut self, kind: crate::placement::Kind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+    pub fn with_eligible_routes(mut self, routes: Vec<RouteRef>) -> Self {
+        self.eligible_routes = Some(routes);
+        self
+    }
+    pub fn kind(&self) -> &str {
+        self.kind.as_ref().map_or("llm", |kind| kind.as_str())
     }
 
     pub fn with_harness(mut self, harness: impl Into<String>) -> Self {
@@ -554,7 +575,8 @@ pub struct RunnerRef {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth: Option<RunnerAuth>,
     /// The session program: a requested program the runner declares, otherwise
-    /// its declared default or sole program. Never inferred from a route/pair.
+    /// its declared default or sole program. With `decision_harness`, routing
+    /// instead chooses a harness capable of serving the task and route.
     /// A caller does not bind a runner session on an answer without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
@@ -589,6 +611,9 @@ impl RunnerRef {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct SelectAnswer {
+    /// Estimated value, not money spent. Omitted if the route cannot be priced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price: Option<crate::price::Price>,
     /// The level selected after ultrafast -> fast -> standard fallback. Present
     /// for an explicit tier request, including a fallback to standard. Producers
     /// use ServiceTier::as_str; readers retain unfamiliar record levels.
@@ -620,6 +645,10 @@ pub struct SelectAnswer {
 }
 
 impl SelectAnswer {
+    pub fn with_price(mut self, price: crate::price::Price) -> Self {
+        self.price = Some(price);
+        self
+    }
     /// An answer naming `route` on `runner` with the provider's limits.
     pub fn new(
         decision_id: impl Into<String>,
@@ -631,6 +660,7 @@ impl SelectAnswer {
         explanation: impl Into<String>,
     ) -> Self {
         Self {
+            price: None,
             decision_id: decision_id.into(),
             service_tier_chosen: None,
             route,
@@ -699,6 +729,11 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
 ) -> Result<SelectRequest, Refusal> {
     let members = Members::of(params)?;
     for (field, group) in [
+        ("kind", crate::capabilities::SELECT_KIND),
+        (
+            "eligible_routes",
+            crate::capabilities::SELECT_ELIGIBLE_ROUTES,
+        ),
         ("pin_slot", "select_pin_slot"),
         ("available_routes", "select_available_routes"),
         ("prefer_prompt_cache", "select_prefer_prompt_cache"),
@@ -716,6 +751,24 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         }
     }
     let consumer = members.text("consumer", None)?;
+    let kind: Option<crate::placement::Kind> = members.optional("kind")?;
+    if kind
+        .as_ref()
+        .is_some_and(|kind| !crate::declarations::is_runner_token(kind.as_str()))
+    {
+        return Err(members.refuse("kind", "kind must be a token"));
+    }
+    let eligible_routes: Option<Vec<RouteRef>> = members.optional("eligible_routes")?;
+    if eligible_routes.as_ref().is_some_and(|routes| {
+        routes
+            .iter()
+            .any(|route| RouteRef::parse_pin(&route.pin()).as_ref() != Some(route))
+    }) {
+        return Err(members.refuse(
+            "eligible_routes",
+            "eligible_routes must contain route references",
+        ));
+    }
     let service_tier = crate::service_tier::parse_member(members.object.get("service_tier"))?;
     if service_tier.is_some()
         && !capabilities
@@ -901,6 +954,8 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         }
     }
     Ok(SelectRequest {
+        kind,
+        eligible_routes,
         consumer,
         service_tier,
         requirements,
@@ -1152,6 +1207,13 @@ impl std::fmt::Display for AnswerProblem {
 /// `project_settings` must be present exactly when `settings.project_id` was sent.
 /// Pin rules apply to `pin_slot` just as to `pin`.
 pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<(), AnswerProblem> {
+    if request
+        .eligible_routes
+        .as_ref()
+        .is_some_and(|routes| !routes.contains(&answer.route))
+    {
+        return Err(AnswerProblem::RouteNotAvailable(answer.route.route_key()));
+    }
     if !crate::service_tier::check_chosen(
         request.service_tier,
         answer.service_tier_chosen.as_deref(),
@@ -1212,6 +1274,68 @@ pub fn check_answer(request: &SelectRequest, answer: &SelectAnswer) -> Result<()
         (true, false) => return Err(AnswerProblem::MissingProjectSettings),
         (false, true) => return Err(AnswerProblem::UnexpectedProjectSettings),
         _ => {}
+    }
+    Ok(())
+}
+
+/// Resolve admitted declaration demand defaults before legacy validation.
+/// Identity admission, dotted inheritance and operator limits are the router's
+/// responsibility. Explicit call values, including zero, always win here.
+pub fn parse_select_request_with_defaults<C: AsRef<str>>(
+    params: &Value,
+    capabilities: &[C],
+    defaults: &crate::declarations::DemandDefaults,
+) -> Result<SelectRequest, Refusal> {
+    if !capabilities
+        .iter()
+        .any(|cap| cap.as_ref() == crate::capabilities::CONSUMER_DECLARATIONS)
+    {
+        return parse_select_request_serving(params, capabilities);
+    }
+    let mut params = params.clone();
+    if let Some(requirements) = params
+        .get_mut("requirements")
+        .and_then(Value::as_object_mut)
+    {
+        let defaults = serde_json::to_value(defaults).expect("declaration defaults are JSON");
+        for field in REQUIREMENT_FIELDS {
+            if requirements.get(*field).is_none_or(Value::is_null) {
+                if let Some(value) = defaults.get(*field).filter(|v| !v.is_null()) {
+                    requirements.insert((*field).into(), value.clone());
+                }
+            }
+        }
+    }
+    parse_select_request_serving(&params, capabilities)
+}
+
+/// Additional checks promised by declared answer groups. Legacy answer
+/// validation deliberately retains its previous behavior.
+pub fn check_answer_serving<C: AsRef<str>>(
+    request: &SelectRequest,
+    answer: &SelectAnswer,
+    capabilities: &[C],
+) -> Result<(), String> {
+    check_answer(request, answer).map_err(|problem| problem.to_string())?;
+    if capabilities
+        .iter()
+        .any(|cap| cap.as_ref() == crate::capabilities::DECISION_HARNESS)
+        && answer
+            .runner
+            .harness
+            .as_ref()
+            .is_none_or(|harness| !crate::declarations::is_runner_token(harness))
+    {
+        return Err("decision_harness requires runner.harness".into());
+    }
+    if let Some(price) = &answer.price {
+        if !capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::SELECT_PRICE)
+        {
+            return Err("price requires select_price".into());
+        }
+        price.check().map_err(str::to_owned)?;
     }
     Ok(())
 }

@@ -17,6 +17,7 @@ extern crate self as cortexkit_role_routing_conformance;
 
 mod checks;
 pub mod fixture;
+mod placement_facts;
 mod report;
 mod route;
 mod runner;
@@ -28,6 +29,7 @@ pub use report::{
 };
 pub use route::{Reply, RouteFailure, RoutingRoute};
 pub use runner::run_suite;
+pub use subject::SelectionFacts;
 pub use subject::{
     Catalog, CatalogAccount, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig,
     ConsumerMode, ContinueCredential, EngineFacts, HoldLimits, ModelInputFacts,

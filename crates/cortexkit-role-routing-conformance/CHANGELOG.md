@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.20
+
+- Pin routing `=0.7.18`. Add seven independently gated consumer/placement
+  cases, with declaring-router fixtures and an intentionally incorrect router
+  control for every case. Cover inherited iq, ladders, selectors and owned
+  scopes, placement, harness starts/exclusions, kinds, eligible subsets, prices
+  with cache lifetimes, and attempt status decoding and retry validation.
+- Check throttled reports both with and without a provider-named retry wait.
+- Add the `SelectionFacts` fixture hook for kinds, catalog list rates,
+  subscription value multipliers, task estimates and the caller-session runner.
+  Unsupported declaring adapters fail explicitly rather than pass untested.
+- Root declaration fixtures in their attested module id. Keep the old
+  conflicting-owner check for baseline readers; it is inapplicable to routers
+  enforcing the new disjoint module-root namespaces.
+
 ## 0.10.19
 
 - Pin routing `=0.7.17`. Check `account_warm_credential` routers honour a

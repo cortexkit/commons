@@ -495,3 +495,42 @@ fn new_group_vectors_refusal_bodies() {
         }
     }
 }
+
+#[test]
+fn consumer_and_placement_samples_roundtrip() {
+    use cortexkit_role_routing::{
+        declarations::parse_consumer_declarations_serving, report::parse_report_request_serving,
+        select::check_answer_serving,
+    };
+    let samples = load("consumers-and-placement.json");
+    let declaration =
+        parse_consumer_declarations_serving(&samples["declaration"], capabilities::KNOWN).unwrap();
+    assert_eq!(
+        serde_json::to_value(&declaration).unwrap(),
+        samples["declaration"]
+    );
+    assert!(parse_consumer_declarations(&samples["declaration"]).is_err());
+    let harnesses = declaration
+        .runner
+        .unwrap()
+        .typed_harness_limits()
+        .unwrap()
+        .unwrap();
+    assert_eq!(harnesses["beta"].starts_sessions, Some(false));
+    assert_eq!(harnesses["alpha"].capabilities.as_ref().unwrap().len(), 3);
+    let request = parse_select_request_serving(&samples["request"], capabilities::KNOWN).unwrap();
+    assert_eq!(serde_json::to_value(&request).unwrap(), samples["request"]);
+    for answer in samples["answers"].as_array().unwrap() {
+        let parsed: SelectAnswer = serde_json::from_value(answer.clone()).unwrap();
+        check_answer_serving(&request, &parsed, capabilities::KNOWN).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), *answer);
+    }
+    for report in samples["reports"].as_array().unwrap() {
+        let parsed = parse_report_request_serving(report, capabilities::KNOWN).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), *report);
+        assert_eq!(
+            parse_report_request(report).unwrap_err().detail["field"],
+            "attempt_outcome"
+        );
+    }
+}

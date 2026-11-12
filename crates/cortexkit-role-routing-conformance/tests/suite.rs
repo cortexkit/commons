@@ -588,6 +588,13 @@ const HOLD_CHECKS: &[&str] = &[
 async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_passes() {
     let report = run_suite(&FakeSubject::without_hold_control(Defects::default())).await;
     let mut not_applicable = vec![
+        "placement_consumer_declarations",
+        "placement_harness_facts",
+        "placement_decision_harness",
+        "placement_select_kind",
+        "placement_eligible_routes",
+        "placement_select_price",
+        "placement_attempt_outcomes",
         "undeclared_pin_slot_refused",
         "undeclared_available_routes_refused",
         "undeclared_prefer_prompt_cache_refused",
@@ -798,6 +805,13 @@ async fn without_harness_group_requests_are_refused() {
     assert_eq!(
         report.not_applicable(),
         [
+            "placement_consumer_declarations",
+            "placement_harness_facts",
+            "placement_decision_harness",
+            "placement_select_kind",
+            "placement_eligible_routes",
+            "placement_select_price",
+            "placement_attempt_outcomes",
             "undeclared_pin_slot_refused",
             "undeclared_available_routes_refused",
             "undeclared_prefer_prompt_cache_refused",
@@ -993,6 +1007,13 @@ async fn passes_every_check(subject: &FakeSubject) {
     assert_eq!(report.checks.len(), CHECKS.len());
     for check in &report.checks {
         if [
+            "placement_consumer_declarations",
+            "placement_harness_facts",
+            "placement_decision_harness",
+            "placement_select_kind",
+            "placement_eligible_routes",
+            "placement_select_price",
+            "placement_attempt_outcomes",
             "undeclared_pin_slot_refused",
             "undeclared_available_routes_refused",
             "undeclared_prefer_prompt_cache_refused",
@@ -1100,6 +1121,13 @@ async fn decision_input_checks_without_fixture_hook_are_not_applicable() {
         );
     }
     let allowed_skips = [
+        "placement_consumer_declarations",
+        "placement_harness_facts",
+        "placement_decision_harness",
+        "placement_select_kind",
+        "placement_eligible_routes",
+        "placement_select_price",
+        "placement_attempt_outcomes",
         "undeclared_pin_slot_refused",
         "undeclared_available_routes_refused",
         "undeclared_prefer_prompt_cache_refused",
@@ -1709,6 +1737,13 @@ async fn without_exclude_providers_group_its_checks_are_not_applicable() {
     assert_eq!(
         report.not_applicable(),
         [
+            "placement_consumer_declarations",
+            "placement_harness_facts",
+            "placement_decision_harness",
+            "placement_select_kind",
+            "placement_eligible_routes",
+            "placement_select_price",
+            "placement_attempt_outcomes",
             "undeclared_pin_slot_refused",
             "undeclared_available_routes_refused",
             "undeclared_prefer_prompt_cache_refused",
@@ -1823,4 +1858,55 @@ async fn task_ref_without_group_checks_are_not_applicable_by_name() {
         assert!(report.render().contains(&format!("N/A  {name}:")));
     }
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}
+
+const PLACEMENT_CASES: &[&str] = &[
+    "placement_consumer_declarations",
+    "placement_harness_facts",
+    "placement_decision_harness",
+    "placement_select_kind",
+    "placement_eligible_routes",
+    "placement_select_price",
+    "placement_attempt_outcomes",
+];
+
+#[tokio::test]
+async fn placement_groups_pass_and_are_not_applicable_without_declaration() {
+    for declared in [true, false] {
+        let subject = if declared {
+            FakeSubject::with_placement(Defects::default())
+        } else {
+            FakeSubject::new(Defects::default())
+        };
+        let report = run_suite(&subject).await;
+        assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+        for name in PLACEMENT_CASES {
+            match report.outcome(name) {
+                Some(CheckOutcome::Passed) if declared => {}
+                Some(CheckOutcome::NotApplicable { reason }) if !declared => {
+                    assert!(!reason.is_empty())
+                }
+                other => panic!(
+                    "{name}, declared={declared}: {other:?}\n{}",
+                    report.render()
+                ),
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn placement_faulty_routers_fail_by_check_name() {
+    for name in PLACEMENT_CASES {
+        let subject = FakeSubject::with_placement(Defects {
+            extension: Some(name),
+            ..Defects::default()
+        });
+        let report = run_suite(&subject).await;
+        assert!(
+            matches!(report.outcome(name), Some(CheckOutcome::Failed { .. })),
+            "{name} accepted an intentionally incorrect router\n{}",
+            report.render()
+        );
+    }
 }

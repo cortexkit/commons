@@ -27,7 +27,7 @@ pub const SUMMARY: &str = "example_summary";
 /// A consumer id the provider is never configured with.
 pub const UNCONFIGURED: &str = "example_unconfigured";
 /// A name learned only from the declaring module's catalog entry.
-pub const DECLARED: &str = "example.declared";
+pub const DECLARED: &str = "example-declarer.declared";
 /// The daemon-attested identity declaring the name.
 pub const DECLARING_PRINCIPAL: &str = "reserved:example-declarer";
 /// An independent module selecting on behalf of scoped work.

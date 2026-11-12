@@ -1,5 +1,26 @@
 # cortexkit-role-routing
 
+Version 0.7.18 adds reader-first groups `consumer_declarations`,
+`runner_harness_facts`, `decision_harness`, `select_kind`,
+`select_eligible_routes`, `select_price`, and `report_attempt_outcomes`.
+See CONTRACT.md §16 for their independent discovery and wire rules. Modules
+declare new members only after the live router advertises their group.
+Use the declaration builders, `parse_consumer_declarations_serving`,
+`parse_select_request_with_defaults` and `check_answer_serving` when adopting
+them; existing parsers keep their baseline request behavior.
+For typed declarations use `validate()` without the group and
+`validate_serving(capabilities)` for a declaring reader. The latter accepts
+declared iq defaults and treats `iq: null` as absent; the former preserves
+the strict legacy unknown-member refusal even after typed decoding.
+
+Select prices estimate value, **not money spent**. Callers multiply usage by
+the returned rates (already divided by the stated subscription multiplier),
+and match lifetime cache writes only to their exact `cache_write_ttl` entry.
+Reasoning tokens are already in output. A caller holding a dollar cap refuses
+to send without a price; this is the caller's rule, not a routing refusal.
+Runners still report usage only. `attempt_outcome` is authoritative when its
+group is declared; rejected and unknown statuses never count against a route.
+
 Since 0.6.0, `route.account_for` accepts optional `service_tier` only from
 callers that discovered the `service_tier` group, using select's existing plan
 eligibility and descending fallback. Its answer records top-level
@@ -19,14 +40,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.7.7"
+cortexkit-role-routing = "0.7.18"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.7.7", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.7.18", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant

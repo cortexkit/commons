@@ -7,10 +7,23 @@ use serde_json::{json, Value};
 
 use crate::select::{parse_requirements, Modality, ToolsRequirement, REQUIREMENT_FIELDS};
 
-/// Optional declaration defaults using selection demand names and types,
-/// except `iq`, which only requests and operator configuration may set.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Optional declaration defaults using selection demand names and types.
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct DemandDefaults {
+    /// Serde presence metadata for strict legacy validation, never a wire member.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub iq_present: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iq: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ladder: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<crate::placement::Placement>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selectors: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<crate::placement::Kind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub eq: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -30,12 +43,104 @@ pub struct DemandDefaults {
     pub unknown: BTreeMap<String, Value>,
 }
 
+impl<'de> Deserialize<'de> for DemandDefaults {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        fn take<T: serde::de::DeserializeOwned, E: serde::de::Error>(
+            fields: &mut BTreeMap<String, Value>,
+            name: &str,
+        ) -> Result<Option<T>, E> {
+            fields
+                .remove(name)
+                .filter(|value| !value.is_null())
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(E::custom)
+        }
+        let mut fields = BTreeMap::<String, Value>::deserialize(deserializer)?;
+        Ok(Self {
+            iq_present: fields.contains_key("iq"),
+            iq: take(&mut fields, "iq")?,
+            eq: take(&mut fields, "eq")?,
+            ladder: take(&mut fields, "ladder")?,
+            placement: take(&mut fields, "placement")?,
+            selectors: take(&mut fields, "selectors")?,
+            kind: take(&mut fields, "kind")?,
+            context_window: take(&mut fields, "context_window")?,
+            max_output_tokens: take(&mut fields, "max_output_tokens")?,
+            tools: take(&mut fields, "tools")?,
+            tool_capabilities: take(&mut fields, "tool_capabilities")?,
+            modalities: take(&mut fields, "modalities")?,
+            structured_output: take(&mut fields, "structured_output")?,
+            unknown: fields,
+        })
+    }
+}
+
+impl PartialEq for DemandDefaults {
+    fn eq(&self, other: &Self) -> bool {
+        self.iq == other.iq
+            && self.eq == other.eq
+            && self.ladder == other.ladder
+            && self.placement == other.placement
+            && self.selectors == other.selectors
+            && self.kind == other.kind
+            && self.context_window == other.context_window
+            && self.max_output_tokens == other.max_output_tokens
+            && self.tools == other.tools
+            && self.tool_capabilities == other.tool_capabilities
+            && self.modalities == other.modalities
+            && self.structured_output == other.structured_output
+            && self.unknown == other.unknown
+    }
+}
+impl Eq for DemandDefaults {}
+
+impl DemandDefaults {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn with_iq(mut self, iq: u8) -> Self {
+        self.iq_present = true;
+        self.iq = Some(iq);
+        self
+    }
+    pub fn with_ladder(mut self, ladder: Vec<String>) -> Self {
+        self.ladder = Some(ladder);
+        self
+    }
+    pub fn with_placement(mut self, placement: crate::placement::Placement) -> Self {
+        self.placement = Some(placement);
+        self
+    }
+    pub fn with_selectors(mut self, selectors: Vec<String>) -> Self {
+        self.selectors = Some(selectors);
+        self
+    }
+    pub fn with_kind(mut self, kind: crate::placement::Kind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+}
+
 /// One consumer owned by the module whose catalog entry carries it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConsumerDeclaration {
     pub name: String,
     #[serde(flatten)]
     pub defaults: DemandDefaults,
+}
+
+impl ConsumerDeclaration {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            defaults: DemandDefaults::default(),
+        }
+    }
+    pub fn with_defaults(mut self, defaults: DemandDefaults) -> Self {
+        self.defaults = defaults;
+        self
+    }
 }
 
 /// The object in a module's `role_declarations["routing/v1"]` catalog slot.
@@ -72,9 +177,25 @@ impl ConsumerDeclarations {
         self
     }
 
-    /// Validate the whole declaration, including values built without serde.
+    /// Validate for a reader that does not declare the new consumer group.
+    /// Even a decoded `iq: null` is refused as an unknown legacy member.
     pub fn validate(&self) -> Result<(), DeclarationError> {
-        parse_consumer_declarations(&serde_json::to_value(self).expect("JSON declaration"))?;
+        self.validate_serving::<&str>(&[])
+    }
+
+    /// Validate typed declarations for the reader's advertised groups. With
+    /// `consumer_declarations`, `iq: null` is absent and valid iq defaults apply.
+    pub fn validate_serving<C: AsRef<str>>(
+        &self,
+        capabilities: &[C],
+    ) -> Result<(), DeclarationError> {
+        let mut value = serde_json::to_value(self).expect("JSON declaration");
+        for (index, consumer) in self.consumers.iter().enumerate() {
+            if consumer.defaults.iq_present && consumer.defaults.iq.is_none() {
+                value["consumers"][index]["iq"] = Value::Null;
+            }
+        }
+        parse_consumer_declarations_serving(&value, capabilities)?;
         Ok(())
     }
 }
@@ -165,6 +286,12 @@ pub struct StandingLimits {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct HarnessLimits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starts_sessions: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<Vec<crate::placement::HarnessCapability>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exclude: Option<Vec<String>>,
     #[serde(
         default,
         with = "harness_pairs",
@@ -229,6 +356,21 @@ mod harness_pairs {
 }
 
 impl HarnessLimits {
+    pub fn with_starts_sessions(mut self, starts: bool) -> Self {
+        self.starts_sessions = Some(starts);
+        self
+    }
+    pub fn with_capabilities(
+        mut self,
+        capabilities: Vec<crate::placement::HarnessCapability>,
+    ) -> Self {
+        self.capabilities = Some(capabilities);
+        self
+    }
+    pub fn with_exclude(mut self, exclude: Vec<String>) -> Self {
+        self.exclude = Some(exclude);
+        self
+    }
     pub fn new() -> Self {
         Self::default()
     }
@@ -438,6 +580,19 @@ impl RunnerDeclaration {
                 let fields = value.as_object().ok_or_else(|| invalid(path.clone()))?;
                 let limits: HarnessLimits =
                     serde_json::from_value(value.clone()).map_err(|_| invalid(path.clone()))?;
+                if limits.exclude.as_ref().is_some_and(|list| {
+                    list.iter()
+                        .any(|spec| !crate::route_spec::is_route_spec(spec))
+                }) {
+                    return Err(invalid(format!("{path}.exclude")));
+                }
+                if limits
+                    .capabilities
+                    .as_ref()
+                    .is_some_and(|list| list.iter().any(|cap| !is_runner_token(cap.as_str())))
+                {
+                    return Err(invalid(format!("{path}.capabilities")));
+                }
                 if let Some(pairs) = &limits.pairs {
                     if pairs.is_empty() {
                         return Err(HarnessLimitsError::EmptyPairs {
@@ -497,6 +652,36 @@ impl RunnerDeclaration {
         })
     }
 
+    /// Reader-side capability gate. Without the group, new facts are not
+    /// applied; the normal invalid-map warning and runner-level fallback apply.
+    pub fn typed_harness_limits_serving<C: AsRef<str>>(
+        &self,
+        capabilities: &[C],
+    ) -> Option<Result<BTreeMap<String, HarnessLimits>, HarnessLimitsError>> {
+        self.typed_harness_limits().map(|parsed| {
+            let parsed = parsed?;
+            if !capabilities
+                .iter()
+                .any(|cap| cap.as_ref() == crate::capabilities::RUNNER_HARNESS_FACTS)
+            {
+                for (harness, limits) in &parsed {
+                    for (field, present) in [
+                        ("starts_sessions", limits.starts_sessions.is_some()),
+                        ("capabilities", limits.capabilities.is_some()),
+                        ("exclude", limits.exclude.is_some()),
+                    ] {
+                        if present {
+                            return Err(HarnessLimitsError::InvalidField {
+                                field: format!("runner.harness_limits.{harness}.{field}"),
+                            });
+                        }
+                    }
+                }
+            }
+            Ok(parsed)
+        })
+    }
+
     /// Resolve inheritance, returning an error rather than partially applying a
     /// malformed map. Callers log that error and use runner-level values instead.
     pub fn limits_for_harness(
@@ -506,6 +691,11 @@ impl RunnerDeclaration {
         let limits = self.typed_harness_limits().transpose()?.unwrap_or_default();
         let entry = harness.and_then(|harness| limits.get(harness));
         Ok(HarnessLimits {
+            starts_sessions: entry
+                .and_then(|limits| limits.starts_sessions)
+                .map(|starts| self.starts_sessions && starts),
+            capabilities: entry.and_then(|limits| limits.capabilities.clone()),
+            exclude: entry.and_then(|limits| limits.exclude.clone()),
             pairs: Some(
                 entry
                     .and_then(|limits| limits.pairs.clone())
@@ -580,10 +770,19 @@ impl std::error::Error for DeclarationError {}
 
 /// Validate and decode a catalog declaration. No partially valid declaration
 /// is returned, except that `runner.harness_limits` is validated independently
-/// by its typed accessor. Demand validation is shared with `route.select`, but `iq`
-/// is an unknown member here: it can never act as a declared default.
+/// by its typed accessor. New declaration members require the corresponding
+/// capability in [`parse_consumer_declarations_serving`].
 pub fn parse_consumer_declarations(
     value: &Value,
+) -> Result<ConsumerDeclarations, DeclarationError> {
+    parse_consumer_declarations_serving::<&str>(value, &[])
+}
+
+/// Parse declarations only after checking the live router's groups. Old
+/// readers continue to reject new consumer defaults instead of ignoring them.
+pub fn parse_consumer_declarations_serving<C: AsRef<str>>(
+    value: &Value,
+    capabilities: &[C],
 ) -> Result<ConsumerDeclarations, DeclarationError> {
     let invalid = |field: String| DeclarationError::InvalidField { field };
     let object = value.as_object().ok_or_else(|| invalid("$".into()))?;
@@ -621,9 +820,17 @@ pub fn parse_consumer_declarations(
         if !names.insert(name) {
             return Err(DeclarationError::DuplicateName { name: name.into() });
         }
+        let extended = capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::CONSUMER_DECLARATIONS);
+        let extensions = ["iq", "ladder", "placement", "selectors", "kind"];
         if let Some(field) = fields.keys().find(|key| {
             key.as_str() != "name"
-                && (key.as_str() == "iq" || !REQUIREMENT_FIELDS.contains(&key.as_str()))
+                && if extensions.contains(&key.as_str()) {
+                    !extended
+                } else {
+                    !REQUIREMENT_FIELDS.contains(&key.as_str())
+                }
         }) {
             return Err(DeclarationError::UnknownMember {
                 field: format!("{path}.{field}"),
@@ -631,9 +838,12 @@ pub fn parse_consumer_declarations(
         }
         let mut demands = fields.clone();
         demands.remove("name");
-        // The request validator requires iq. A temporary zero lets it check
-        // the declaration's other demands without storing a declared iq.
-        demands.insert("iq".into(), json!(0));
+        for field in ["ladder", "placement", "selectors", "kind"] {
+            demands.remove(field);
+        }
+        if demands.get("iq").is_none_or(Value::is_null) {
+            demands.insert("iq".into(), json!(0));
+        }
         parse_requirements(Some(&Value::Object(demands))).map_err(|refusal| {
             let field = refusal
                 .detail
@@ -642,6 +852,39 @@ pub fn parse_consumer_declarations(
                 .unwrap_or("requirements");
             invalid(format!("{path}.{field}"))
         })?;
+        let decoded: DemandDefaults = serde_json::from_value(Value::Object(
+            fields
+                .iter()
+                .filter(|(key, _)| key.as_str() != "name")
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        ))
+        .map_err(|_| invalid(path.clone()))?;
+        if decoded.ladder.as_ref().is_some_and(|list| {
+            list.iter()
+                .any(|pin| crate::select::RouteRef::parse_pin(pin).is_none())
+        }) {
+            return Err(invalid(format!("{path}.ladder")));
+        }
+        if decoded
+            .selectors
+            .as_ref()
+            .is_some_and(|list| list.iter().any(|id| id.is_empty()))
+        {
+            return Err(invalid(format!("{path}.selectors")));
+        }
+        if decoded
+            .kind
+            .as_ref()
+            .is_some_and(|kind| !is_runner_token(kind.as_str()))
+        {
+            return Err(invalid(format!("{path}.kind")));
+        }
+        if let Some(crate::placement::Placement::Module { module }) = &decoded.placement {
+            if module.is_empty() {
+                return Err(invalid(format!("{path}.placement.module")));
+            }
+        }
     }
     if let Some(runner) = object.get("runner").filter(|value| !value.is_null()) {
         validate_runner(runner)?;

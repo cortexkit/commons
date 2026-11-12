@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.18
+
+- Add independently discovered consumer declarations, per-harness facts,
+  harness-bound decisions, workload kinds, eligible route subsets, select
+  value estimates and provider attempt outcomes. Existing members retain
+  their types; omitted additions preserve legacy body and fingerprint bytes.
+- Add constructors, builders and capability-aware validators, including a
+  declaration-default resolver that preserves an explicit zero iq. Pin module
+  roots, attested selectors, narrowing placement and dotted inheritance.
+- Share the exclusion-spec validator/matcher and existing ladder pin parser.
+  Prices use JSON numbers and verbatim cache-write lifetime maps; callers
+  settle usage with list or already-divided subscription-equivalent rates.
+  Unknown attempt statuses count nothing; rejected requests never penalize routes.
+- Treat a throttled attempt's `retry_after_ms` as optional provider evidence:
+  absent means unknown and routing chooses backoff, never an invented wait.
+  Other statuses and malformed supplied durations remain invalid.
+- Readers first: declarations are not sent until the router's live reader
+  advertises the corresponding group. Add checksummed samples for every group.
+
 ## 0.7.17
 
 - Add capability-gated `warm_credential` to `route.account_for` admissions,

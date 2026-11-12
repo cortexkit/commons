@@ -14,6 +14,13 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("placement_consumer_declarations", "consumer_declarations: attested names, selector and scope admission, inherited defaults, ladder and placement only narrow selection"),
+    check("placement_harness_facts", "runner_harness_facts: non-starting harnesses cannot create sessions and per-harness exclusions narrow routes"),
+    check("placement_decision_harness", "decision_harness: selection binds both the runner module and its harness"),
+    check("placement_select_kind", "select_kind: default llm and explicit kinds never mix candidate kinds"),
+    check("placement_eligible_routes", "select_eligible_routes: routing never expands the subset; empty is no_route"),
+    check("placement_select_price", "select_price: list and divided subscription rates, multiplier, TTLs, reserve estimate and unpriced omission"),
+    check("placement_attempt_outcomes", "report_attempt_outcomes: every status is accepted, unknown counts nothing, and retry_after_ms belongs only to throttled"),
     check("runner_gateway_credential", "runner matching: anthropic.messages/gateway selects without catalog wire.api and admits the gateway credential/account"),
     check("select_engine_eval_measured", "engine_evals: measured engines outrank unmeasured engines and cost"),
     check("select_engine_eval_higher_score", "engine_evals: newest score on the same set ranks higher first"),
@@ -319,6 +326,7 @@ pub const CHECKS: &[CheckSpec] = &[
 /// Where the kit checks less than the contract says, and why. Every report
 /// prints these.
 pub const NARROWINGS: &[&str] = &[
+    "placement_*: health-warning text, settings-file placement overrides, real one_off/fork_answer/output_cap execution, catalog context-tier resolution, pressure-derived pricing, and internal scoring/cooldown counters are not inspected. Attempt safety is observed through nondefault affinity; price fixtures supply list rates, not live catalog or billing data. Numeric iq-to-catalog mapping remains provider policy, so explicit-value precedence is pinned by contract helper tests rather than a required route at iq 100.",
     "Warm credential checks use candidates as one hard filter and observe resulting admissions and affinity. Internal rejection records, reserve counts, explicit-pin priority and other hard-filter or quota conditions are not inspected.",
     "engine_reports: attested owner admission is checked, but rolling speed-window retention, latency inspection and realtime filtering are provider policy and are not observable through these hooks",
     "select_engine: malformed slot health diagnostics, retained consumer attribution and scope isolation are not inspected. Remote reachability is exercised with a cooldown, not separate backoff, quota or recorded-failure fixtures. Accuracy and cost are supplied fixture units, not real billing or engine measurements.",

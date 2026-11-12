@@ -47,6 +47,7 @@ mod members;
 pub mod account;
 pub mod account_continue;
 pub mod account_status;
+pub mod attempt;
 pub mod billing;
 pub mod budget;
 pub mod consumer_models;
@@ -59,8 +60,11 @@ pub mod explain;
 pub mod head_choices;
 pub mod observe;
 pub mod panel;
+pub mod placement;
+pub mod price;
 pub mod refusals;
 pub mod report;
+pub mod route_spec;
 pub mod select;
 pub mod select_engine;
 pub mod service_tier;
@@ -70,9 +74,9 @@ pub mod vectors;
 pub mod wire;
 
 pub use declarations::{
-    parse_consumer_declarations, ConsumerDeclaration, ConsumerDeclarations, DeclarationError,
-    DemandDefaults, HarnessLimits, HarnessLimitsError, RunnerDeclaration, RunnerPair,
-    StandingLimits,
+    parse_consumer_declarations, parse_consumer_declarations_serving, ConsumerDeclaration,
+    ConsumerDeclarations, DeclarationError, DemandDefaults, HarnessLimits, HarnessLimitsError,
+    RunnerDeclaration, RunnerPair, StandingLimits,
 };
 pub use engine_declarations::{
     parse_engine_declarations, EngineDeclarationError, EngineDeclarations,
@@ -144,6 +148,20 @@ pub const RUNNER_OPS: &[&str] = &[ops::ROUTE_ACCOUNT_FOR, ops::ROUTE_ACCOUNT_OBS
 /// A caller sends a group's members only to a provider that declares the
 /// group; a provider that does not declare it refuses them as unknown.
 pub mod capabilities {
+    /// Consumer demand, ladder, placement, selectors and kind declarations.
+    pub const CONSUMER_DECLARATIONS: &str = "consumer_declarations";
+    /// Per-harness session starts, capabilities and route exclusions.
+    pub const RUNNER_HARNESS_FACTS: &str = "runner_harness_facts";
+    /// Decisions bind the chosen runner module and harness.
+    pub const DECISION_HARNESS: &str = "decision_harness";
+    /// Workload kind on selection requests.
+    pub const SELECT_KIND: &str = "select_kind";
+    /// Caller-computed route eligibility, including an empty subset.
+    pub const SELECT_ELIGIBLE_ROUTES: &str = "select_eligible_routes";
+    /// Estimated value rates on selection answers.
+    pub const SELECT_PRICE: &str = "select_price";
+    /// Provider attempt statuses, authoritative over legacy report outcomes.
+    pub const REPORT_ATTEMPT_OUTCOMES: &str = "report_attempt_outcomes";
     /// Media engine selection through `route.select_engine`.
     pub const SELECT_ENGINE: &str = "select_engine";
     /// Per-job engine speed reports. Requires `SELECT_ENGINE`.
@@ -217,6 +235,13 @@ pub mod capabilities {
 
     /// Every group this version defines.
     pub const KNOWN: &[&str] = &[
+        CONSUMER_DECLARATIONS,
+        RUNNER_HARNESS_FACTS,
+        DECISION_HARNESS,
+        SELECT_KIND,
+        SELECT_ELIGIBLE_ROUTES,
+        SELECT_PRICE,
+        REPORT_ATTEMPT_OUTCOMES,
         SELECT_ENGINE,
         ENGINE_REPORTS,
         ENGINE_EVALS,

@@ -1,11 +1,29 @@
 # cortexkit-role-routing-conformance
 
+Version 0.10.20 pins routing `=0.7.18`. The seven `placement_*` checks each
+discover their own capability group before sending its members. Declaring
+adapters supply `configure_selection_facts(&SelectionFacts)` where needed:
+catalog list rates (never pre-divided), subscription value multipliers,
+per-task estimates, route kinds and the caller-session runner module.
+These fixture facts are not a production settings schema. Missing fixture
+support fails a declaring router's check explicitly; absent groups are reported
+not applicable. Existing adapters need no new hook until they declare a group.
+
+The cases cover consumer roots, defaults, selectors, scopes, placement,
+per-harness session starts and exclusions, harness-bound decisions, kind-local
+selection, eligible subsets (empty means no_route), value-estimate prices with
+verbatim cache lifetimes, and provider attempt outcomes. Every case has a
+faulty-router control. The old conflicting-owner declaration case remains
+applicable only without the new module-root rule, since roots are disjoint.
+Price assertions are estimates of value, not money spent; a capped caller,
+not routing, refuses to send an unpriced route.
+
 The `account_for_tier_*` checks exercise direct account admission at an
 available tier, ordered fallback with the chosen tier recorded, and a caller
 that omits tiers for a non-declaring router. The cases use the existing
 `configure_service_tiers` plan fixture hook; for an unsupported fixture the
-report marks each affected case `NotApplicable` with its name and reason,
-never passed. This release pins routing 0.7.4 exactly, whose account answer
+  report marks each affected case `NotApplicable` with its name and reason,
+never passed. These cases were introduced with routing 0.7.4, whose account answer
 and pin use constructors instead of exhaustive Rust struct literals.
 
 The conformance kit for the `routing/v1` role
@@ -16,7 +34,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.10.4"
+cortexkit-role-routing-conformance = "0.10.20"
 ```
 
 ```rust,ignore

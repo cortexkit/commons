@@ -8,6 +8,7 @@ mod decision_inputs;
 mod extensions;
 mod gateway;
 mod harness_limits;
+mod placement;
 mod requires_wire_api;
 mod select_engine;
 mod warm_credential;
@@ -244,6 +245,27 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
     /// Run the check named `name` from a fresh provider.
     pub async fn run(&self, name: &str) -> Result<Ending, String> {
         self.fresh().await?;
+        if name == "declared_consumer_conflict_refused" {
+            let route = self.route_as(CONSUMER).await?;
+            let describe: RoleDescribe =
+                answer(&route, ops::ROLE_DESCRIBE, &json!({}), "describe").await?;
+            if describe.serves(capabilities::CONSUMER_DECLARATIONS) {
+                return Ok(Ending::NotApplicable(
+                    "module-root declarations cannot have conflicting owners".into(),
+                ));
+            }
+        }
+        if name == "unrequested_harness_uses_declaration" {
+            let route = self.route_as(CONSUMER).await?;
+            let describe: RoleDescribe =
+                answer(&route, ops::ROLE_DESCRIBE, &json!({}), "describe").await?;
+            if describe.serves(capabilities::DECISION_HARNESS) {
+                return Ok(Ending::NotApplicable("decision_harness requires selecting a harness instead of omitting an ambiguous harness".into()));
+            }
+        }
+        if placement::CASES.iter().any(|(case, _)| *case == name) {
+            return self.placement_check(name).await;
+        }
         if name == "runner_gateway_credential" {
             return self.gateway_check(name).await;
         }
@@ -895,20 +917,21 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         }
 
         let mut verified = fixture::catalog_declarations().remove(0);
-        verified.principal = fixture::DELEGATE_PRINCIPAL.into();
         verified.role_declarations.insert(
             cortexkit_role_routing::ROLE_DECLARATIONS_KEY.into(),
             json!({"consumers": [{"name": fixture::DECLARED, "max_output_tokens": 16_000}]}),
         );
         // Catalog ordering cannot let an unverified claimant steal a verified
         // module's name or replace that module's declared output floor.
+        let mut claimant = unverified[0].clone();
+        claimant.principal = fixture::DELEGATE_PRINCIPAL.into();
         for modules in [
-            vec![unverified[0].clone(), verified.clone()],
-            vec![verified.clone(), unverified[0].clone()],
+            vec![claimant.clone(), verified.clone()],
+            vec![verified.clone(), claimant.clone()],
         ] {
             self.fresh().await?;
             self.declaration_entries(&modules).await?;
-            let owner = self.route_as(fixture::DELEGATE_PRINCIPAL).await?;
+            let owner = self.route_as(fixture::DECLARING_PRINCIPAL).await?;
             let selected = select(
                 &owner,
                 &params,

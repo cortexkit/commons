@@ -17,6 +17,7 @@
 
 mod continuation;
 mod extensions;
+mod placement;
 mod select_engine;
 
 use std::{
@@ -264,6 +265,7 @@ struct ConversationPin {
 
 #[derive(Default)]
 struct State {
+    selection_facts: cortexkit_role_routing_conformance::SelectionFacts,
     runner_declarations:
         BTreeMap<String, cortexkit_role_routing_conformance::wire::RunnerDeclaration>,
     runner_route_facts: Vec<cortexkit_role_routing_conformance::RunnerRouteFacts>,
@@ -398,6 +400,7 @@ impl State {
 }
 
 pub struct FakeSubject {
+    policy_control: bool,
     model_input_hook: bool,
     extensions: bool,
     panel_calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -418,6 +421,12 @@ pub struct FakeSubject {
 }
 
 impl FakeSubject {
+    pub fn with_placement(defects: Defects) -> Self {
+        Self {
+            policy_control: true,
+            ..Self::new(defects)
+        }
+    }
     pub fn without_continue_control(defects: Defects) -> Self {
         Self {
             continue_control: false,
@@ -432,6 +441,7 @@ impl FakeSubject {
     }
     pub fn new(defects: Defects) -> Self {
         Self {
+            policy_control: false,
             model_input_hook: true,
             extensions: true,
             panel_calls: Arc::default(),
@@ -511,6 +521,13 @@ impl FakeSubject {
 
 #[async_trait]
 impl RoutingSubject for FakeSubject {
+    async fn configure_selection_facts(
+        &self,
+        facts: &cortexkit_role_routing_conformance::SelectionFacts,
+    ) -> Result<(), String> {
+        self.state.lock().unwrap().selection_facts = facts.clone();
+        Ok(())
+    }
     type Route = FakeRoute;
 
     async fn reset(&self) -> Result<(), String> {
@@ -596,7 +613,11 @@ impl RoutingSubject for FakeSubject {
             let Some(raw) = module.role_declarations.get(ROLE_DECLARATIONS_KEY) else {
                 continue;
             };
-            let Ok(declaration) = parse_consumer_declarations(raw) else {
+            let Ok(declaration) = (if self.policy_control {
+                cortexkit_role_routing_conformance::wire::declarations::parse_consumer_declarations_serving(raw, cortexkit_role_routing_conformance::wire::capabilities::KNOWN)
+            } else {
+                parse_consumer_declarations(raw)
+            }) else {
                 continue;
             };
             if let Some(runner) = declaration.runner {
@@ -605,6 +626,17 @@ impl RoutingSubject for FakeSubject {
                     .insert(module.principal.clone(), runner);
             }
             for consumer in declaration.consumers {
+                if self.policy_control
+                    && !cortexkit_role_routing_conformance::wire::placement::owns_consumer_name(
+                        module
+                            .principal
+                            .strip_prefix("reserved:")
+                            .unwrap_or(&module.principal),
+                        &consumer.name,
+                    )
+                {
+                    continue;
+                }
                 let entry = state
                     .declarations
                     .entry(consumer.name)
@@ -729,6 +761,7 @@ impl RoutingSubject for FakeSubject {
 
     async fn route(&self, stamp: &RouteStamp) -> Result<FakeRoute, String> {
         Ok(FakeRoute {
+            policy_control: self.policy_control,
             extensions: self.extensions,
             panel_calls: Arc::clone(&self.panel_calls),
             continue_control: self.continue_control,
@@ -748,6 +781,7 @@ impl RoutingSubject for FakeSubject {
 
 /// A route to the fake, carrying the caller and scope it was opened under.
 pub struct FakeRoute {
+    policy_control: bool,
     extensions: bool,
     panel_calls: Arc<std::sync::atomic::AtomicUsize>,
     continue_control: bool,
@@ -772,7 +806,7 @@ impl RoutingRoute for FakeRoute {
         } else {
             match method {
                 ops::ROLE_DESCRIBE => self.describe(&state),
-                ops::ROUTE_SELECT => self.select_extensions(&mut state, params),
+                ops::ROUTE_SELECT => self.select_placement(&mut state, params),
                 ops::ROUTE_SELECT_PANEL => self.panel(&mut state, params),
                 ops::ROUTE_BUDGET_QUOTE
                 | ops::ROUTE_EXPLAIN
@@ -862,6 +896,11 @@ impl FakeRoute {
             }
         }
         let mut describe = RoleDescribe::new(consumers, true);
+        if self.policy_control {
+            for group in placement::GROUPS {
+                describe = describe.with_capability(*group);
+            }
+        }
         describe.requirement_fields.extend(
             cortexkit_role_routing_conformance::wire::select::OPTIONAL_REQUIREMENT_FIELDS
                 .iter()
@@ -1144,6 +1183,12 @@ impl FakeRoute {
             let scope_owner = self.stamp.scope.as_ref().map(|scope| scope.owner.as_str());
             let owned = owner.as_deref().is_some_and(|owner| {
                 self.principal() == owner
+                    || (self.policy_control
+                        && declaration.is_some_and(|(_, defaults)| {
+                            defaults.selectors.as_ref().is_some_and(|selectors| {
+                                selectors.iter().any(|id| id == self.principal())
+                            })
+                        }))
                     || (!defects.admits_only_declaring_principal && scope_owner == Some(owner))
             });
             if owner.is_none() || (!defects.serves_foreign_consumer && !owned) {
@@ -1751,6 +1796,11 @@ impl FakeRoute {
     }
 
     fn report(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
+        if self.fault("placement_attempt_outcomes") && params.get("attempt_outcome").is_some() {
+            let mut legacy = params.clone();
+            legacy.as_object_mut().unwrap().remove("attempt_outcome");
+            return self.report(state, &legacy);
+        }
         if self.defects.tier_report_refused
             && params.get("usage").is_some_and(|usage| {
                 usage.get("service_tier_applied").is_some()
@@ -1770,7 +1820,11 @@ impl FakeRoute {
             match cortexkit_role_routing_conformance::wire::report::parse_report_request_serving(
                 &params,
                 if self.extensions {
-                    extensions::GROUPS
+                    if self.policy_control {
+                        cortexkit_role_routing_conformance::wire::capabilities::KNOWN
+                    } else {
+                        extensions::GROUPS
+                    }
                 } else {
                     &[]
                 },
@@ -1846,7 +1900,11 @@ impl FakeRoute {
             report_id: state.next("report"),
             outcome: request.outcome.clone(),
         };
-        if request.outcome.is_failure() {
+        if if self.policy_control {
+            request.counts_against_route()
+        } else {
+            request.outcome.is_failure()
+        } {
             for entry in state.affinity.values_mut() {
                 if entry.decision_id == request.decision_id {
                     entry.ended = true;
@@ -1855,7 +1913,9 @@ impl FakeRoute {
         }
         // A failed report with a reset fences only the decision's route on
         // its account. Only `failed` fences; other failures just end affinity.
-        if request.outcome == cortexkit_role_routing_conformance::wire::report::Outcome::Failed {
+        if request.outcome == cortexkit_role_routing_conformance::wire::report::Outcome::Failed
+            && (!self.policy_control || request.counts_against_route())
+        {
             if let Some(reset) = request.reset_at_ms {
                 let now = now_ms();
                 if reset <= now {
