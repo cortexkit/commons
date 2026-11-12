@@ -129,6 +129,14 @@ on that crate. Each part is 1–256 characters, used without normalization.
 An agent id is 1–128 characters. The app supplies the subject from its current
 page; nothing infers it. Checking shape does not prove the subject exists.
 
+**[pinned]** In a session subject, `runner` is the module id of the runner that
+hosts the session, never the name of a host process or agent program, and
+`harness` is that runner's harness name, exactly as the runner's compaction
+`SessionRef` carries them. Apps take `{runner, harness, session}` verbatim from the app server's
+session details and never assemble it. A session that no runner module hosts,
+such as one inside an agent program running outside every runner module, has no
+session subject, so no module offers it session commands.
+
 ## Previews and display data
 
 `Preview` is `{version, available, reason?, effect?, facts?, figure?, table?}`.
@@ -215,6 +223,11 @@ body returns the stored answer and never runs twice. Comparing a repeat uses
 the full module-side body, including subject, args, version and caller facts,
 not just the command id. Checking and insertion are atomic module duties.
 
+**[pinned]** A `request_id` is scoped to its subject. The module keys stored
+answers by subject and request id, so the same id on another subject is a
+different run, never a repeat and never `request_conflict`. The conflict and
+repeat rules above apply within one subject. Apps make a fresh id for every run.
+
 **[pinned]** A run needing the module's own approval keeps the call open while
 waiting. The module bounds the wait at **no more than five minutes** and then
 answers. The app shows waiting for approval, not a timed-out spinner. From a
@@ -234,8 +247,11 @@ operator text and never parsed. The body decodes leniently. Known codes:
 - `unknown_command`: no such command in the selected module.
 - `unknown_subject`: the module does not hold the named subject.
 - `caller_not_admitted`: route caller or required first-party mark fails.
+- `unavailable`: the module could not take the run now, for example because it
+  could not record its answer. Nothing ran, so repeating the same request,
+  with the same `request_id`, is safe.
 
-The latter three need no detail. Field validators operate after routing has
+The latter four need no detail. Field validators operate after routing has
 selected a command; selecting unknown commands/subjects and applying admission
 before validation remain serving duties.
 
