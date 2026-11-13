@@ -5,12 +5,13 @@ use std::{fmt, io, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Where a piece of persona text came from.
+/// Where a piece of persona or guidance text came from.
 ///
 /// `File` names the tier and the file's path relative to that tier's root
 /// (for example `cortexkit/demo/roles/writer/PERSONA.md` in tier `user`), which
 /// is stable across machines. `Supplied` is a qualified fragment the module
-/// handed to [`crate::LoadedRole::render`].
+/// handed to [`crate::LoadedRole::render`]. `Guidance` names a source in a
+/// caller-supplied [`crate::GuidanceSet`].
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 #[non_exhaustive]
@@ -27,6 +28,11 @@ pub enum SourceRef {
         /// The qualified fragment id.
         fragment: String,
     },
+    /// A named template in a caller-supplied guidance set.
+    Guidance {
+        /// The template id.
+        template: String,
+    },
 }
 
 impl fmt::Display for SourceRef {
@@ -34,6 +40,7 @@ impl fmt::Display for SourceRef {
         match self {
             SourceRef::File { tier, path } => write!(f, "{path} (tier `{tier}`)"),
             SourceRef::Supplied { fragment } => write!(f, "supplied fragment `{fragment}`"),
+            SourceRef::Guidance { template } => write!(f, "guidance template `{template}`"),
         }
     }
 }
@@ -68,6 +75,22 @@ impl fmt::Display for RenderFailure {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PersonaError {
+    /// A guidance source, facts object or statically checked access is invalid.
+    #[error("guidance template `{template}`: {message}")]
+    Guidance {
+        /// The template being collected, checked or rendered.
+        template: String,
+        /// The refusal, including the variable path when applicable.
+        message: String,
+    },
+    /// A JSON Schema node cannot describe a supported facts shape.
+    #[error("facts schema at `{path}`: {message}")]
+    FactsSchema {
+        /// Location of the schema node, starting at `$`.
+        path: String,
+        /// The invalid structure or unsupported keyword, by name.
+        message: String,
+    },
     /// An identifier (module, role, tier, fragment, block, workspace, path
     /// segment, extension key) does not follow its grammar.
     #[error("invalid {what} `{value}`: {reason}")]

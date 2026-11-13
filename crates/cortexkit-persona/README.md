@@ -9,7 +9,7 @@ a serialisable resolution report. [SPEC.md](SPEC.md) states every rule
 
 ```toml
 [dependencies]
-cortexkit-persona = "0.2.1"
+cortexkit-persona = "0.3.0"
 ```
 
 ## Use
@@ -76,6 +76,83 @@ take `role.tiers()[i]` for the repository tier, read its `layer_digest`, and
 store it keyed by module, role, project key and `relative_path`. A render's
 report lists the same tiers, so it shows a repository layer that applied or
 one that was skipped, but you never need a render to approve one.
+
+## Guidance without persona bundles
+
+`GuidanceSet` gives tool providers the same sealed MiniJinja renderer without
+tiers, front matter or approvals. Supply named sources (usually `include_str!`
+in the provider binary), then render against a single JSON object. Its keys
+are the template roots; there are no implicit persona roots.
+
+```rust
+use cortexkit_persona::{FactsShape, GuidanceSet, RenderLimits};
+use serde_json::json;
+
+let guidance = GuidanceSet::new([
+    ("main", "Available: {% include 'tools' %}"),
+    ("tools", "{% for name in tools %}{{ name }} {% endfor %}"),
+])?;
+let shape = FactsShape::from_json_schema(&json!({
+    "type": "object",
+    "properties": {"tools": {"type": "array", "items": {"type": "string"}}}
+}))?;
+guidance.check(&shape)?;
+let facts = json!({"tools": ["read", "search"]});
+let rendered = guidance.render("main", &facts, RenderLimits::default())?;
+assert_eq!(rendered.text, "Available: read search ");
+```
+
+Ids reuse the crate's **bare-id grammar**: 1–64 lowercase ASCII letters,
+digits and hyphens, starting and ending with a letter or digit. Duplicate ids,
+invalid syntax and sources over `MAX_FILE_BYTES` (before normalization) are
+refused. Includes, imports and inheritance use only literal ids present in the
+set; dynamic targets and `ignore missing` are refused, even in unused branches.
+There is no filesystem loader. Rendering uses the same environment factory as
+personas: strict undefined, no auto-escaping, default whitespace settings, and
+per-call `RenderLimits`. Missing entries or values are errors, never empty text.
+An intentional default can be written in the template with `is defined`.
+Source text is LF-normalized; values containing `{{` or CRLF remain verbatim
+and are never re-rendered.
+
+The result is `guidance::Rendered` (also exported as `GuidanceRendered`), not
+the persona `Rendered`: `text`, `output_digest`, and `template_digests` (a sorted
+map of every source id to its normalized-text digest, including unused sources).
+`GuidanceSet::digest()` hashes the compact JSON object of all normalized source
+texts keyed by id, sorted lexicographically by UTF-8 bytes. It changes when a
+template id or normalized source changes, not when render branches change.
+
+`FactsShape` reads `type` (object, array, string, boolean, integer, number),
+`properties`, and `items`; arrays must contain scalars, not objects or arrays.
+Every node requires one type name; object properties may be omitted.
+`required`, `additionalProperties`, `minLength`, `uniqueItems`, `$schema`, `$id`,
+`title`, `description`, and any `x-*` annotation are accepted and ignored.
+Every other keyword, including `$ref`, composition and conditional keywords,
+is refused **by name**, including at nested properties/items. This is not a
+schema validator: it describes available names, including optional names, and
+does not validate runtime facts or enforce validation-only keywords.
+
+`check` uses a custom walk of MiniJinja's pinned AST: the built-in nested-name
+analysis does not follow item paths or local aliases and omits some expression
+fields. Every template and branch is visited, including `is defined` guards.
+Dotted and literal-string item paths, scalar-list indices and loop variables,
+and simple `set`/`with` aliases are checked. Scalar loop items cannot have
+attributes. Each template is checked independently against the declared facts
+roots, so it cannot rely on locals supplied by its includer. Names first bound
+in a conditional are unavailable after it; existing aliases retain their shape
+only when both branches agree. Bindings cannot change a declared root's shape
+(including loop-variable shadowing), preventing unchecked reads through includes.
+Dynamic object keys, attribute-indirection filters (`attr`, `map`,
+`selectattr`, `rejectattr`, `groupby`, or filters with `attribute`/expanded keyword
+arguments), and member access/iteration on opaque filter or call results are
+refused. `range` has a known scalar-list result. The check is conservative;
+rendering can evaluate expressions that this static subset cannot prove.
+
+Providers should keep facts fixed whenever repeated renders must produce
+identical bytes. For example, store facts in a plan's guidance request and reuse
+them during planning and execution, replacing them only when generating a new
+plan. Reusing the same set, entry and facts renders identical bytes each time.
+The engine adds no time-, count- or session-dependent data; callers must keep
+such mutable inputs out of facts themselves.
 
 ## Per-render execution limits
 

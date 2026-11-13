@@ -10,6 +10,33 @@
 //! fragments the module supplies ([`FragmentSources`]), returning the bytes,
 //! their digest and a [`ResolutionReport`].
 //!
+//! # Guidance templates
+//!
+//! [`GuidanceSet`] renders named caller-supplied sources without persona tiers,
+//! front matter or approvals, using the same sealed environment and
+//! [`RenderLimits`]. Facts are a JSON object with top-level template roots.
+//! [`FactsShape`] declares available paths from a small JSON Schema subset;
+//! [`GuidanceSet::check`] checks every branch before rendering. See
+//! [`guidance`] for its conservative static-analysis boundaries. The result is
+//! [`GuidanceRendered`], leaving persona [`Rendered`] unchanged.
+//!
+//! ```
+//! use cortexkit_persona::{FactsShape, GuidanceSet, PersonaError, RenderLimits};
+//! use serde_json::json;
+//! let sources = GuidanceSet::new([("main", "Hello {{ user.name }}")])?;
+//! let shape = FactsShape::from_json_schema(&json!({
+//!     "type": "object", "properties": {
+//!         "user": {"type": "object", "properties": {"name": {"type": "string"}}}
+//!     }
+//! }))?;
+//! sources.check(&shape)?;
+//! let out = sources.render("main", &json!({"user": {"name": "reader"}}), RenderLimits::default())?;
+//! assert_eq!(out.text, "Hello reader");
+//! # Ok::<(), PersonaError>(())
+//! ```
+//!
+//! # Persona bundles
+//!
 //! ```
 //! use cortexkit_persona::*;
 //!
@@ -51,6 +78,7 @@ mod digest;
 mod duplicates;
 mod error;
 mod extension;
+pub mod guidance;
 mod ids;
 mod limits;
 mod load;
@@ -68,6 +96,7 @@ pub use context::{
 pub use digest::{normalize_newlines, Digest, DigestParseError};
 pub use error::{PersonaError, RenderFailure, SourceRef};
 pub use extension::{Extension, LayerExtensions, MergeFn, MergeInput, MergeRule};
+pub use guidance::{FactsShape, GuidanceSet, Rendered as GuidanceRendered};
 pub use ids::{FragmentId, ProjectKey};
 pub use limits::RenderLimits;
 pub use load::{LoadRequest, LoadedRole, PersonaEngine};

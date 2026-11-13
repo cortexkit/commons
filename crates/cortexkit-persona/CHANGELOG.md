@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0
+
+- Add `GuidanceSet` for caller-supplied named templates, without persona tiers,
+  front matter or approvals. It shares the persona environment factory and
+  `RenderLimits`, refuses missing names, and renders JSON-object facts verbatim.
+- Add `guidance::Rendered` (root alias `GuidanceRendered`) with `text`,
+  `output_digest` and sorted `template_digests`, plus a stable set-wide digest
+  over all normalized template ids and texts. Existing persona `Rendered` is
+  unchanged.
+- Add `FactsShape::from_json_schema` and a conservative all-branches AST check
+  for declared variable paths, scalar-list loops and local aliases. Accept the
+  documented validation-only/schema metadata keywords and `x-*` annotations;
+  refuse all other keywords by name. Dynamic or opaque member paths are
+  refused rather than silently skipped. Runtime facts are not schema-validated.
+
 ## 0.2.1
 
 - `RenderLimits` configures nonzero recursion and fuel budgets with

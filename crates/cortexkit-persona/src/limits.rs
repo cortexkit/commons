@@ -4,7 +4,8 @@ use std::num::{NonZeroU64, NonZeroUsize};
 
 use crate::{FUEL_LIMIT, RECURSION_LIMIT};
 
-/// Execution budgets for [`LoadedRole::render_with_limits`](crate::LoadedRole::render_with_limits).
+/// Execution budgets for [`LoadedRole::render_with_limits`](crate::LoadedRole::render_with_limits)
+/// and [`GuidanceSet::render`](crate::GuidanceSet::render).
 ///
 /// Defaults match [`LoadedRole::render`](crate::LoadedRole::render). Limits
 /// decide only whether a render completes: they never change digests,
