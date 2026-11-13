@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Contract text only: a `signed_out` fence lasts while the vault lists the
+  credential as unusable. If the vault never reports it unusable, the router
+  may bound the fence and probe the credential once. The reporting run is never
+  offered that credential again.
+
 ## 0.7.21
 
 - Pin `caller_runner` resolution to an attested catalog runner caller, or

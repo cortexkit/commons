@@ -1271,8 +1271,12 @@ The answer (`account::AccountForAnswer`):
   the account cannot serve. For `signed_out`, `resets_at_ms`, `retry_after_s`
   and `pool` must be absent, not even `null`; a present member is
   `invalid_request {field: "exhausted.<field>"}`. `observed_at_ms` remains
-  required. The router treats that credential as unusable for new selections
-  and offers until the vault reports it usable again, not until a reset.
+  required. While the vault lists that credential as unusable, the router never
+  selects or offers it, with no time limit and not until a reset. If the vault
+  never reports it unusable, the router may apply its own bounded fence and
+  then probe the credential once, so a single refusal the vault disagrees
+  with cannot bar a working sign-in. The run that reported it is never
+  offered that credential again.
   This record is only for quota exhaustion or the definite sign-in signals
   above, not arbitrary observations: a `credit` wall (§9.3) still does not
   trigger continuation.
@@ -1309,9 +1313,9 @@ The answer (`account::AccountForAnswer`):
   boundaries, providers, models or owner scopes; never change the run's
   frozen session plan (the llm-runner contract's §10.1), tool set or renderer.
   Never offer the exhausted account for this selection. For quota exhaustion,
-  never offer it before its reset; for `signed_out`, never offer it until the
-  vault reports the credential usable again. Never offer an account under
-  a known hold for the relevant window or pool.
+  never offer it before its reset; for `signed_out`, follow the signed-out
+  fence above. Never offer an account under a known hold for the relevant
+  window or pool.
 - [pinned] Reserve an offer once per `selection_id`. A retry with the same
   id returns the identical offer, including its decision and expiry, and
   never reserves twice. The offered `decision_id` links to
