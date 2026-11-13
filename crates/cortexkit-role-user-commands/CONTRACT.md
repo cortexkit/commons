@@ -200,7 +200,7 @@ number facts through the app library's `format_fact`.
 Informative examples (not pinned): "about 6.7k tokens", "about 115k tokens",
 "about 1.2M tokens", "about 840 tokens", and an approximate zero as "none".
 
-`state` is `ready | building | paused | stale | unavailable | off`.
+`state` is `ready | building | paused | stale | unavailable | failed | off`.
 `progress` is a finite number in 0–1, only on `building`. State tones are fixed.
 Number facts may set `tone` to `neutral | info | success | warning | danger`,
 overriding neutral. No state may carry unit, noun, approx or tone, even false
@@ -230,8 +230,16 @@ Informative state wording (not pinned):
 | `building` | Building, or "Building, 40%" with progress 0.4 | info |
 | `paused` | Paused | warning |
 | `stale` | Out of date | warning |
-| `unavailable` | Unavailable | danger |
+| `unavailable` | Unavailable | neutral |
+| `failed` | Failed | danger |
 | `off` | Off | neutral |
+
+`unavailable` means the value cannot be shown right now, not that there is a
+fault. `failed` means something that should work does not. Apps format facts
+through Occipital's `format_fact`, so modules must not send `failed` until a
+formatter that knows it is live. A reader pinned to 0.1.2 treats `failed` as
+an unknown state under the malformed-fact rule: the label is shown with a
+neutral placeholder.
 
 ## Runs and replies
 

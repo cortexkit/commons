@@ -7,7 +7,15 @@ pub const FACT_MALFORMED: &str = "fact_malformed";
 pub const FACT_CONFLICT: &str = "fact_conflict";
 pub const FACT_RANGE: &str = "fact_range";
 pub const UNITS: &[&str] = &["count", "tokens", "bytes", "duration", "ratio"];
-pub const STATES: &[&str] = &["ready", "building", "paused", "stale", "unavailable", "off"];
+pub const STATES: &[&str] = &[
+    "ready",
+    "building",
+    "paused",
+    "stale",
+    "unavailable",
+    "failed",
+    "off",
+];
 pub const TONES: &[&str] = &["neutral", "info", "success", "warning", "danger"];
 pub const MAX_FACTS: usize = 16;
 

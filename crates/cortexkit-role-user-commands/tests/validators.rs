@@ -201,6 +201,15 @@ fn argument_kinds_defaults_and_exact_limits() {
 }
 
 #[test]
+fn failed_fact_state_is_accepted() {
+    let body = json!({"label":"Errors", "state":"failed"});
+    validate_fact(&body).unwrap();
+    let fact: Fact = serde_json::from_value(body).unwrap();
+    fact.check().unwrap();
+    validate_fact_value(&json!({"state":"failed"})).unwrap();
+}
+
+#[test]
 fn fact_boundaries_finiteness_and_unknowns() {
     let mut fact = Fact::new("é".repeat(64), FactValue::number(1.5));
     fact.data.unit = Some("ratio".into());

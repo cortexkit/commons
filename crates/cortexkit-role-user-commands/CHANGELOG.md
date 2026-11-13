@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3
+
+- Make the `unavailable` fact state neutral and add the danger-toned `failed`
+  state. Modules must wait until the app formatter supports `failed` before
+  sending it; older readers show a neutral placeholder for the unknown state.
+
 ## 0.1.2
 
 - Add tolerant list and describe readers that retain readable entries and

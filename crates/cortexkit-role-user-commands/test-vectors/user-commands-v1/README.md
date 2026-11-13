@@ -20,7 +20,9 @@ Module names are `example-context` and `example-code-tools`.
   and a module-defined outcome with an item to open. View 42 is a count fact,
   not an extra result field.
 - `facts.json`: valid examples of every unit/state/tone, default count and a
-  ratio over 1; invalid cases naming each library error class and field.
+  ratio over 1; invalid cases naming each library error class and field. The
+  `unavailable` and `failed` cases also carry `expected_wording` and
+  `expected_tone` for formatter consumers; these are not wire body fields.
 - `invalid.json`: read with run, 17 facts, and an invalid request id. Each
   case names the refused field; fact conflicts are in `facts.json`.
 
