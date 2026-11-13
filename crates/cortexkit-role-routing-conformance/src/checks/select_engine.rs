@@ -798,7 +798,11 @@ mod tests {
     }
 
     fn rules() -> Vec<Rule> {
-        serde_json::from_str(include_str!("../../rule-map.json")).unwrap()
+        let rules: Vec<Rule> = serde_json::from_str(include_str!("../../rule-map.json")).unwrap();
+        rules
+            .into_iter()
+            .filter(|rule| rule.id.starts_with("select_engine."))
+            .collect()
     }
 
     #[test]

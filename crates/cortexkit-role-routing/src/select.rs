@@ -729,6 +729,15 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
     capabilities: &[C],
 ) -> Result<SelectRequest, Refusal> {
     let members = Members::of(params)?;
+    for field in ["privacy", "caller_local"] {
+        if members
+            .object
+            .get(field)
+            .is_some_and(|value| !value.is_null())
+        {
+            return Err(members.refuse(field, "admitted only by the non-llm media parser"));
+        }
+    }
     for (field, group) in [
         ("kind", crate::capabilities::SELECT_KIND),
         (

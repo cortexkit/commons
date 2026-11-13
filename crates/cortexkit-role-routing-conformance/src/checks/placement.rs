@@ -283,6 +283,10 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 }
             }
             "placement_select_kind" => {
+                if describe.serves(capabilities::SELECT_MEDIA) {
+                    select(&route, &base(), "omitted kind remains llm").await?;
+                    return self.select_media_check("select_media_unlisted_kind").await;
+                }
                 self.subject
                     .configure_selection_facts(&crate::placement_facts::facts())
                     .await?;

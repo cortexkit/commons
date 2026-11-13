@@ -494,11 +494,12 @@ That group's additive defaults, attested namespace and selector rules are in §1
 - [pinned] A consumer id is a non-empty string, with no character-set or
   length restriction in this version.
 - [pinned] `requirements` (required, an object):
-  - `iq` (required, 0 to 100) and `eq` (optional, 0 to 100): task demand,
+  - For llm, `iq` (required, 0 to 100) and `eq` (optional, 0 to 100): task demand,
     which the provider maps onto its own model facts.
     For a consumer whose router does not rank by iq (such as a classifier
     consumer), callers send `0` and the router ignores it; it remains
-    required on the wire.
+    required on the wire. Only `select_media` relaxes `iq` for a non-llm
+    kind (§16.4.1); the llm request and answer are unchanged.
   - `context_window` and `max_output_tokens`: floors, in tokens.
   - `tools`: `"none"` (only runner and model pairs that run with no tools
     offered) or `"required"` (only routes that accept tool calls). Absent
@@ -530,7 +531,7 @@ That group's additive defaults, attested namespace and selector rules are in §1
     `modalities: ["image"]` covers image inputs.
 - [pinned] A requirement member the provider does not read is refused
   `invalid_requirements {field}` naming it as sent; it is never ignored. A
-  malformed requirement (a missing `iq`, a demand above 100, a `tools` or
+  malformed requirement (a missing llm `iq`, a demand above 100, a `tools` or
   modality value this version does not define) is refused the same way,
   naming it.
 - [pinned] `pin`: `"provider/model[:variant]"`. The provider is everything
@@ -1971,6 +1972,12 @@ Replacement params and answer:
 
 ## 13. `route.select_engine` — group `select_engine`
 
+`route.select_engine` remains served, unchanged and accuracy-first, during
+the migration to non-llm `route.select` (§16.4.1). The two operations rank
+differently during this overlap: `route.select` uses demand and catalog grade,
+not accuracy-first selection. `route.select_engine` retires only in a later
+breaking release, after callers have migrated to `route.select`.
+
 - [pinned] `select_engine.opt_in`: This operation is optional and declared
   together with `select_engine`. It does not add fields to `route.select` or
   to the `routing/v1` declaration slot.
@@ -2300,6 +2307,109 @@ Replacement params and answer:
   An explicitly empty subset is `no_route`, never `invalid_request`. Omitted
   means no additional subset restriction. Other policy and request restrictions
   still intersect it. Repeated entries do not grant any additional eligibility.
+
+#### 16.4.1 `select_media`
+
+- [pinned] `select_media.advertisement`: `select_media` requires `select_kind`.
+  A router lists the group in `role.describe.capabilities` and lists in
+  `role.describe.kinds: [...]` the non-llm kinds it serves through `route.select`.
+  A caller sends a non-llm `kind` only when listed. A router advertising the
+  group refuses an unlisted non-llm kind with `invalid_request {field: "kind"}`,
+  never a silent fallback. Without the group, today's `select_kind` behaviour
+  is unchanged. This is the one selection operation for non-llm kinds, media
+  now and search when a router advertises it later.
+- [pinned] `select_media.requirements`: The request still uses one
+  `requirements` object. A non-llm kind admits §13's requirement members
+  verbatim: `language`, `voice`, `format`, `duration_ms`, `input_bytes`,
+  `reference_formats`, `bias`, `size`, `resolution`, `quality`, `latency_class`,
+  and `metric`, with the same types and matching rules. It additionally admits
+  video's `output_duration_ms` (unsigned milliseconds, no greater than the
+  catalog's output-duration limit), `aspect_ratio` (`"W:H"`, positive integer
+  components, a catalog-supported ratio), and `audio` (bool, matching catalog
+  support). An absent fact fails a stated requirement. These media members
+  are refused for `llm`. Conversely, non-llm kinds refuse `eq`,
+  `context_window`, `max_output_tokens`, `tools`, `tool_capabilities`,
+  `modalities`, `structured_output`, `questions`, `input_tokens`, and
+  `max_cost_usd`. Section 5.1's refuse-by-name rule still applies: a member the
+  router does not read is `invalid_requirements {field}`, never ignored,
+  even if another router reads it. `requirement_fields` lists the members read.
+- [pinned] `select_media.metric_limit`: `requirements.metric_limit` is
+  `{metric: string, at_most?: number, at_least?: number}`, with exactly one
+  finite bound. Malformed limits are `invalid_requirements {field:
+  "metric_limit"}`. This is a hard requirement, not a ranking hint: compare
+  §15's evaluation score on that metric using §13's comparison-set and newest
+  evaluation rules; an engine with no comparable evaluation fails it. A
+  separate `requirements.metric` still chooses the ranking metric as in §13.
+- [pinned] `select_media.privacy`: Top-level `privacy` is required for a
+  non-llm kind and is `local_only` or `remote_allowed`. Top-level
+  `caller_local?` reuses §13's per-engine shape, uniqueness, local-only checks
+  and dotted, indexed refusal paths. Both members are admitted only for a
+  non-llm kind; sending either to `llm` is `invalid_request {field}`. Catalog
+  attestation, requirement matching, privacy and reachability reuse §13.
+- [pinned] `select_media.demand`: Only for a non-llm kind under this group,
+  the media request's `requirements.iq` is optional. When present it is a level
+  from 0 to 100 mapped onto that kind's catalog `quality.grade` scale relative
+  to the highest routable grade of that kind, as llm iq maps onto Elo. Select
+  the cheapest route at or above that level by expected job cost, with unknown
+  cost after known cost. A default iq declared under `consumer_declarations`
+  supplies the level when the request omits it; explicit zero overrides it.
+  With a level, rank adequate routes by expected job cost ascending (known
+  before unknown), then grade descending, then measured result descending
+  (§15, read as §13 does), then deterministic §13 identity order. The level is
+  the bar; cheapest adequate decides. A caller needing a measured quality
+  floor states `metric_limit` separately. A graded route below the level is
+  ineligible. Ungraded routes remain eligible as unknowns, after every adequate
+  graded route, regardless of cost. Order ungraded routes among themselves by
+  expected job cost ascending (known before unknown), then measured result
+  descending (measured before unmeasured), then deterministic §13 identity
+  order. If no routable route of the kind is graded, the level maps to nothing
+  and selection uses this ungraded order, including for caller-local engines
+  and consumers with a declared default level.
+  With neither request level nor declared default, rank grade descending
+  (graded before ungraded), then measured result descending (measured before
+  unmeasured), then expected job cost ascending (known before unknown), then
+  deterministic §13 identity order. Examples:
+  - Among two adequate grade-400 engines with evaluation scores 0.9 at expected
+    cost 10 and 0.8 at expected cost 1, a stated level chooses the cost-1 engine;
+    no level chooses the score-0.9 engine.
+  - Adding an ungraded engine at expected cost 0 does not displace either
+    adequate graded engine.
+  - If all three engines are ungraded, the cost-0 engine wins even with a
+    stated or declared level.
+  An empty eligible engine set is `no_route` (§5.3), or `pin_unavailable` when pinned.
+- [pinned] `select_media.answer`: For a non-llm kind the answer is
+  `{decision_id, expires_at_ms, engine: {provider, model, local, caller_local,
+  module?, index?}, price?}`. The engine matrix, caller-local index and exact
+  ten-minute expiry are §13's. `select_media::SelectMediaRequest`,
+  `MediaRequirements` and `SelectMediaAnswer` are separate decoding types for
+  the same `route.select` wire operation: dispatch by the kind the caller sent
+  before choosing a parser, never by guessing the answer shape. The llm
+  `SelectRequest` still requires `iq`; `SelectAnswer` still requires its route,
+  runner, context and output limits, explanation and other existing members.
+  Neither its validation nor its `rates_per_mtok` is loosened.
+- [pinned] `select_media.price`: A non-llm answer's optional price is a unit
+  price: `{basis, multiplier?, rates: {"<role>.per_<unit>": {rate, step?,
+  minimum?}}, estimated_task_usd?}`. The key notation is a placeholder: use
+  catalog keys verbatim, including `input.per_character`,
+  `input.per_audio_second`, `output.per_image`, and `output.per_video_second`.
+  An unmatched role/unit stays unpriced; never borrow a different unit's rate.
+  Section 16.5's basis, multiplier, finiteness, division for subscription
+  equivalent, estimate-not-money and `price_unknown` rules apply unchanged.
+  Rates and minimums are finite and non-negative; steps are finite and
+  positive. Omit `price` when the router cannot price the job.
+- [pinned] `select_media.policy`: Pins, ladders, `exclude`,
+  `exclude_providers`, `eligible_routes` and `not_for` apply to module engines
+  by `provider/model`. A pin is one fixed model, whoever serves it. A pin
+  naming a caller-local `(kind, model)` selects that engine only when the
+  caller offers it in `caller_local`; otherwise answer `pin_unavailable`.
+  A pin naming a module model excludes caller-local engines. A ladder entry
+  naming a caller-local model is usable only when offered. Caller-local
+  engines take part in ladders and demand ranking unless a pin is in force.
+  No further mapping from operator settings to kinds is specified here.
+- [pinned] `select_media.decisions`: Report these decisions through
+  `report_attempt_outcomes`. `route.account_for` admits a media decision under
+  `select_engine.decision_admission`'s module-binding, expiry and replay rule;
+  caller-local decisions cannot be admitted by a module.
 
 ### 16.5 `select_price`
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.27
+
+- Check stated/default levels with ungraded catalogs and caller-local engines:
+  retain unknown grades, prefer adequate graded routes regardless of cost,
+  reject below-level grades, and order unknowns by cost, measurement and identity.
+
+- Pin routing `=0.7.24`. Add capability-gated media selection checks for
+  per-kind requirement refusal, hard metric bounds, advertised kinds,
+  distinct answers, caller-local pins and ladders, grade/cost demand,
+  evaluation ties, video facts, unit prices and retained decision admission.
+- Exercise a matching fake router and intentionally incorrect implementations
+  rejected by each check's name, without loosening legacy llm answer checks.
+
 ## 0.10.26
 
 - Pin routing `=0.7.23`. Add wire cases for the timed `concurrency_full`

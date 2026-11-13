@@ -11,6 +11,7 @@ mod harness_limits;
 mod placement;
 mod requires_wire_api;
 mod select_engine;
+mod select_media;
 mod warm_credential;
 
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -286,6 +287,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         }
         if name.starts_with("select_engine_") {
             return self.select_engine_check(name).await;
+        }
+        if name.starts_with("select_media_") {
+            return self.select_media_check(name).await;
         }
         if extensions::CASES.iter().any(|(case, _, _)| *case == name) {
             return self.extension_check(name).await;

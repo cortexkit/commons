@@ -14,6 +14,22 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("select_media_privacy", "select_media: required privacy, local-only filtering and validated caller-local engines"),
+    check("select_media_requirements", "select_media: admit and match media requirements through route.select"),
+    check("select_media_video", "select_media: video duration, aspect ratio and audio are hard catalog requirements"),
+    check("select_media_ranking", "select_media: grade outranks cost without a level; evaluation breaks equal-grade ties"),
+    check("select_media_ladder", "select_media: caller-local ladder entries require an offer and module pins never select them"),
+    check("select_media_llm_refuses_media", "select_media: llm refuses media requirements and top-level members"),
+    check("select_media_refuses_llm", "select_media: non-llm refuses llm requirements including eq"),
+    check("select_media_metric_limit", "select_media: exactly one finite bound and missing evaluations fail a hard metric limit"),
+    check("select_media_unlisted_kind", "select_media: unlisted kinds refuse invalid_request naming kind"),
+    check("select_media_answer", "select_media: distinct engine answer with ten-minute expiry; llm answer stays strict"),
+    check("select_media_pin", "select_media: caller-local pins require the offered engine; module pins exclude caller-local"),
+    check("select_media_price", "select_media: catalog unit keys pass verbatim; unmatched units stay unpriced"),
+    check("select_media_demand", "select_media: optional relative grade level chooses expected job cost; no level chooses highest grade"),
+    check("select_media_ungraded_level", "select_media: ungraded routes remain eligible under a level, after adequate graded routes, ordered by cost, measurement and identity"),
+    check("select_media_policy", "select_media: provider/model exclusions and eligible subsets also constrain engines"),
+    check("select_media_report_admission", "select_media: attempt reports and module-bound admission reuse engine decisions"),
     check("placement_consumer_declarations", "consumer_declarations: attested names, selector and scope admission, inherited defaults, ladder and placement only narrow selection"),
     check("placement_harness_facts", "runner_harness_facts: non-starting harnesses cannot create sessions and per-harness exclusions narrow routes"),
     check("placement_decision_harness", "decision_harness: selection names a declared harness when the runner has programs, and omits it otherwise"),

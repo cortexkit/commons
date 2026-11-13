@@ -565,3 +565,38 @@ fn fleet_optional_children_keep_present_empty_values() {
         assert!(serde_json::from_value::<FleetAgentIdentity>(null).is_err());
     }
 }
+
+#[test]
+fn pin_status_carries_stale_since_ms_only_when_stale() {
+    // A status the registry could not confirm keeps its last confirmed state
+    // and says since when; a fresh status has no member at all.
+    let stale: PinStatus = round_trip(json!({
+        "state": "available", "blocked": false, "stale_since_ms": 1_794_000_000_000_i64
+    }));
+    assert_eq!(stale.stale_since_ms, Some(1_794_000_000_000));
+    assert_eq!(stale.state, PinStatusState::Available);
+    let fresh: PinStatus = round_trip(json!({"state": "revoked", "blocked": true}));
+    assert_eq!(fresh.stale_since_ms, None);
+    assert_eq!(
+        serde_json::to_value(PinStatus::new(PinStatusState::Available, false)).unwrap(),
+        json!({"state": "available", "blocked": false})
+    );
+    assert_eq!(
+        serde_json::to_value(
+            PinStatus::new(PinStatusState::Available, false).with_stale_since_ms(7)
+        )
+        .unwrap(),
+        json!({"state": "available", "blocked": false, "stale_since_ms": 7})
+    );
+}
+
+#[test]
+fn a_flow_pin_with_a_stale_status_round_trips_in_a_context_pin() {
+    let pin: ContextPin = round_trip(json!({
+        "name": "@example/hello-flow", "version": "1.0.0", "kind": "flow",
+        "manifest_sha256": "a".repeat(64), "archive_sha256": "b".repeat(64),
+        "publisher_fingerprint": "c".repeat(64),
+        "status": {"state": "available", "blocked": false, "stale_since_ms": 1_794_000_000_000_i64}
+    }));
+    assert_eq!(pin.kind, PinKind::Other("flow".into()));
+}

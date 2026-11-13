@@ -10,6 +10,25 @@
 
 mod fake;
 
+fn legacy_not_applicable(
+    report: &cortexkit_role_routing_conformance::SuiteReport,
+) -> Vec<&'static str> {
+    for check in &report.checks {
+        if check.check.starts_with("select_media_") {
+            assert!(
+                matches!(&check.outcome, CheckOutcome::NotApplicable { reason } if !reason.is_empty()),
+                "{}",
+                check.check
+            );
+        }
+    }
+    report
+        .not_applicable()
+        .into_iter()
+        .filter(|name| !name.starts_with("select_media_"))
+        .collect()
+}
+
 const WARM_CREDENTIAL_CASES: &[&str] = &[
     "warm_credential_fresh_honoured",
     "warm_credential_hard_filter_ignored",
@@ -684,13 +703,13 @@ async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_pa
     not_applicable.push("undeclared_prefer_group_refuses_member");
     not_applicable.push("undeclared_exclude_providers_group_refuses_member");
     assert_eq!(
-        report.not_applicable(),
+        legacy_not_applicable(&report),
         not_applicable,
         "{}",
         report.render()
     );
     for check in &report.checks {
-        if !not_applicable.contains(&check.check) {
+        if !not_applicable.contains(&check.check) && !check.check.starts_with("select_media_") {
             assert_eq!(check.outcome, CheckOutcome::Passed, "{}", check.check);
         }
     }
@@ -876,7 +895,7 @@ async fn selecting_gateway_fails() {
 async fn without_harness_group_requests_are_refused() {
     let report = run_suite(&FakeSubject::without_harness_control(Defects::default())).await;
     assert_eq!(
-        report.not_applicable(),
+        legacy_not_applicable(&report),
         [
             "placement_consumer_declarations",
             "placement_harness_facts",
@@ -1080,6 +1099,10 @@ async fn passes_every_check(subject: &FakeSubject) {
     let report = run_suite(subject).await;
     assert_eq!(report.checks.len(), CHECKS.len());
     for check in &report.checks {
+        if check.check.starts_with("select_media_") {
+            assert!(matches!(check.outcome, CheckOutcome::NotApplicable { .. }));
+            continue;
+        }
         if [
             "placement_consumer_declarations",
             "placement_harness_facts",
@@ -1225,7 +1248,7 @@ async fn decision_input_checks_without_fixture_hook_are_not_applicable() {
         .filter(|check| allowed_skips.contains(&check.name))
         .map(|check| check.name)
         .collect();
-    assert_eq!(report.not_applicable(), skipped);
+    assert_eq!(legacy_not_applicable(&report), skipped);
 }
 
 #[tokio::test]
@@ -1811,7 +1834,7 @@ async fn without_exclude_providers_group_its_checks_are_not_applicable() {
     ))
     .await;
     assert_eq!(
-        report.not_applicable(),
+        legacy_not_applicable(&report),
         [
             "placement_consumer_declarations",
             "placement_harness_facts",
@@ -2004,6 +2027,12 @@ async fn placement_groups_pass_and_are_not_applicable_without_declaration() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn select_media_group_passes_alongside_legacy_checks() {
+    let report = run_suite(&FakeSubject::with_media(Defects::default())).await;
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
 }
 
 #[tokio::test]

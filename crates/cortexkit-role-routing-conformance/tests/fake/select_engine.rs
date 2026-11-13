@@ -5,14 +5,14 @@ use cortexkit_role_routing_conformance::{wire::select_engine as engine, EngineFa
 
 #[derive(Default)]
 pub(super) struct EngineState {
-    modules: Vec<(String, engine::Engine)>,
+    pub(super) modules: Vec<(String, engine::Engine)>,
     principals: Vec<String>,
     pub facts: Vec<EngineFacts>,
     pub elapsed: u64,
-    decisions: HashMap<String, (String, engine::SelectEngineAnswer)>,
-    decision_kinds: HashMap<String, engine::Kind>,
+    pub(super) decisions: HashMap<String, (String, engine::SelectEngineAnswer)>,
+    pub(super) decision_kinds: HashMap<String, engine::Kind>,
     admissions: HashMap<(String, String), (Value, Value)>,
-    evaluations: Vec<measurements::EngineEvalRequest>,
+    pub(super) evaluations: Vec<measurements::EngineEvalRequest>,
 }
 
 impl EngineState {
@@ -81,7 +81,7 @@ impl FakeRoute {
                     {
                         Err(Refusal::unknown_decision())
                     } else {
-                        parse_report_request(params).map(|request| json!({"decision_id":request.decision_id, "report_id":"engine-report", "outcome":request.outcome}))
+                        cortexkit_role_routing_conformance::wire::report::parse_report_request_serving(params, if self.media_control { cortexkit_role_routing_conformance::wire::capabilities::KNOWN } else { &[] }).map(|request| json!({"decision_id":request.decision_id, "report_id":"engine-report", "outcome":request.outcome}))
                     },
                 )
             }

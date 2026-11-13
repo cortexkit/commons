@@ -196,10 +196,35 @@ impl From<PinStatusState> for Value {
     }
 }
 
-wire_struct!(PinStatus {
-    state: PinStatusState,
-    blocked: bool
-});
+/// A pin's registry status. `stale_since_ms` is present only when the registry
+/// could not confirm this status recently: it is when the last confirmed status
+/// went stale, in Unix milliseconds, and `state` is still that last confirmed
+/// state. Absent means the status is fresh.
+#[non_exhaustive]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PinStatus {
+    pub state: PinStatusState,
+    pub blocked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stale_since_ms: Option<i64>,
+}
+
+impl PinStatus {
+    /// Constructs a fresh status without checking cross-field writer invariants.
+    pub fn new(state: PinStatusState, blocked: bool) -> Self {
+        Self {
+            state,
+            blocked,
+            stale_since_ms: None,
+        }
+    }
+
+    /// Marks the status as unconfirmed since `stale_since_ms`.
+    pub fn with_stale_since_ms(mut self, stale_since_ms: i64) -> Self {
+        self.stale_since_ms = Some(stale_since_ms);
+        self
+    }
+}
 wire_struct!(ContextPin {
     name: String, version: String, kind: PinKind, manifest_sha256: String,
     archive_sha256: String, publisher_fingerprint: String, status: Option<PinStatus>,

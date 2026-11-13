@@ -21,6 +21,7 @@ mod extensions;
 mod gateway_catalog;
 mod placement;
 mod select_engine;
+mod select_media;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -411,6 +412,7 @@ impl State {
 }
 
 pub struct FakeSubject {
+    media_control: bool,
     policy_control: bool,
     model_input_hook: bool,
     extensions: bool,
@@ -433,6 +435,19 @@ pub struct FakeSubject {
 }
 
 impl FakeSubject {
+    pub fn with_media(defects: Defects) -> Self {
+        Self {
+            media_control: true,
+            ..Self::new(defects)
+        }
+    }
+    #[allow(dead_code)] // Used by unit checks, not by every shared fake test target.
+    pub fn with_media_declarations(defects: Defects) -> Self {
+        Self {
+            policy_control: true,
+            ..Self::with_media(defects)
+        }
+    }
     pub fn with_placement(defects: Defects) -> Self {
         Self {
             policy_control: true,
@@ -459,6 +474,7 @@ impl FakeSubject {
     }
     pub fn new(defects: Defects) -> Self {
         Self {
+            media_control: false,
             policy_control: false,
             model_input_hook: true,
             extensions: true,
@@ -795,6 +811,7 @@ impl RoutingSubject for FakeSubject {
     async fn route(&self, stamp: &RouteStamp) -> Result<FakeRoute, String> {
         Ok(FakeRoute {
             policy_control: self.policy_control,
+            media_control: self.media_control,
             extensions: self.extensions,
             panel_calls: Arc::clone(&self.panel_calls),
             continue_control: self.continue_control,
@@ -815,6 +832,7 @@ impl RoutingSubject for FakeSubject {
 
 /// A route to the fake, carrying the caller and scope it was opened under.
 pub struct FakeRoute {
+    media_control: bool,
     policy_control: bool,
     extensions: bool,
     panel_calls: Arc<std::sync::atomic::AtomicUsize>,
@@ -841,6 +859,22 @@ impl RoutingRoute for FakeRoute {
         } else {
             match method {
                 ops::ROLE_DESCRIBE => self.describe(&state),
+                ops::ROUTE_SELECT if self.fault("select_media_llm_refuses_media") => {
+                    let mut params = params.clone();
+                    params["requirements"] = json!({"iq":0});
+                    params.as_object_mut().unwrap().remove("privacy");
+                    params.as_object_mut().unwrap().remove("caller_local");
+                    self.select_placement(&mut state, &params)
+                }
+                ops::ROUTE_SELECT
+                    if self.media_control
+                        && params
+                            .get("kind")
+                            .and_then(Value::as_str)
+                            .is_some_and(|kind| kind != "llm") =>
+                {
+                    self.select_media_route(&mut state, params)
+                }
                 ops::ROUTE_SELECT => self.select_placement(&mut state, params),
                 ops::ROUTE_SELECT_PANEL => self.panel(&mut state, params),
                 ops::ROUTE_BUDGET_QUOTE
@@ -989,6 +1023,21 @@ impl FakeRoute {
             }
         }
         let mut describe = RoleDescribe::new(consumers, true);
+        if self.media_control {
+            describe = describe
+                .with_capability("select_media")
+                .with_capability("select_kind");
+            describe.kinds = ["transcribe", "video"].map(Into::into).into();
+            describe = describe.with_capability("report_attempt_outcomes");
+            describe = describe
+                .with_capability("select_eligible_routes")
+                .with_capability("select_exclude_providers");
+            describe.requirement_fields.extend(
+                cortexkit_role_routing_conformance::wire::select_media::REQUIREMENT_FIELDS
+                    .iter()
+                    .map(|field| (*field).into()),
+            );
+        }
         if self.policy_control {
             for group in placement::GROUPS {
                 if *group == cortexkit_role_routing_conformance::wire::capabilities::SELECT_KIND
@@ -1956,7 +2005,7 @@ impl FakeRoute {
             match cortexkit_role_routing_conformance::wire::report::parse_report_request_serving(
                 &params,
                 if self.extensions {
-                    if self.policy_control {
+                    if self.policy_control || self.media_control {
                         cortexkit_role_routing_conformance::wire::capabilities::KNOWN
                     } else {
                         extensions::GROUPS
@@ -2036,7 +2085,7 @@ impl FakeRoute {
             report_id: state.next("report"),
             outcome: request.outcome.clone(),
         };
-        if if self.policy_control {
+        if if self.policy_control || self.media_control {
             request.counts_against_route()
         } else {
             request.outcome.is_failure()
@@ -2050,7 +2099,7 @@ impl FakeRoute {
         // A failed report with a reset fences only the decision's route on
         // its account. Only `failed` fences; other failures just end affinity.
         if request.outcome == cortexkit_role_routing_conformance::wire::report::Outcome::Failed
-            && (!self.policy_control || request.counts_against_route())
+            && (!(self.policy_control || self.media_control) || request.counts_against_route())
         {
             if let Some(reset) = request.reset_at_ms {
                 let now = now_ms();

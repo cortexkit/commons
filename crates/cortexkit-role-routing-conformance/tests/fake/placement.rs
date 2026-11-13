@@ -38,7 +38,7 @@ impl FakeRoute {
         state: &mut State,
         params: &Value,
     ) -> Result<Value, Refusal> {
-        if !self.policy_control {
+        if !self.policy_control && !self.media_control {
             return self.select_extensions(state, params);
         }
         let mut params = params.clone();
@@ -232,7 +232,10 @@ impl FakeRoute {
             answer["route"]["model"].as_str().unwrap()
         );
         let runner = answer["runner"]["module"].as_str().unwrap().to_owned();
-        if let Some(harness) = harnesses.get(&(runner, key.clone())) {
+        if let Some(harness) = harnesses
+            .get(&(runner, key.clone()))
+            .filter(|_| self.policy_control || requested.harness.is_some())
+        {
             answer["runner"]["harness"] = json!(harness);
         }
         if self.fault("placement_decision_harness") {

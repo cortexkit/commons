@@ -13,6 +13,9 @@ use crate::{select::REQUIREMENT_FIELDS, REQUIRED_OPS, ROLE, VERSION_NUMBER};
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RoleDescribe {
+    /// Non-llm kinds served by `route.select`, only with `select_media`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kinds: Vec<crate::placement::Kind>,
     /// Always `"routing"`.
     pub role: String,
     /// Always `1` for this major.
@@ -49,6 +52,7 @@ impl RoleDescribe {
     /// `requirement_fields` only when the router reads them.
     pub fn new(consumers: Vec<ConsumerEntry>, detail_supported: bool) -> Self {
         Self {
+            kinds: Vec::new(),
             role: ROLE.to_owned(),
             version: VERSION_NUMBER,
             ops: REQUIRED_OPS.iter().map(|op| (*op).to_owned()).collect(),
@@ -161,6 +165,10 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
         }
     }
     for (group, requires) in [
+        (
+            crate::capabilities::SELECT_MEDIA,
+            crate::capabilities::SELECT_KIND,
+        ),
         (
             crate::capabilities::SELECT_PANEL_ESTIMATE,
             crate::capabilities::SELECT_PANEL,

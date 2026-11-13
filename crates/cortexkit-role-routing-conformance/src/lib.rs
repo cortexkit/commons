@@ -29,6 +29,7 @@ pub use report::{
 };
 pub use route::{Reply, RouteFailure, RoutingRoute};
 pub use runner::run_suite;
+pub use subject::MediaRouteFacts;
 pub use subject::SelectionFacts;
 pub use subject::{
     Catalog, CatalogAccount, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig,

@@ -1,6 +1,11 @@
 # cortexkit-role-routing-conformance
 
-Version 0.10.25 pins routing `=0.7.22`. The seven `placement_*` checks each
+Version 0.10.27 pins routing `=0.7.24`. The `select_media_*` checks exercise
+non-llm `route.select` with distinct request and answer types. Adapters provide
+media grades, unit prices and video facts through `SelectionFacts.media`,
+expected job costs through `configure_engine_facts`, and reference evaluations
+through `route.engine_eval`; catalog accuracy fixtures never supply evaluations.
+The seven `placement_*` checks each
 discover their own capability group before sending its members. Declaring
 adapters supply `configure_selection_facts(&SelectionFacts)` where needed:
 catalog list rates (never pre-divided), subscription value multipliers,

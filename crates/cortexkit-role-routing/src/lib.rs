@@ -67,6 +67,7 @@ pub mod report;
 pub mod route_spec;
 pub mod select;
 pub mod select_engine;
+pub mod select_media;
 pub mod service_tier;
 pub mod spellings;
 #[cfg(any(test, feature = "test-vectors"))]
@@ -158,6 +159,8 @@ pub mod capabilities {
     pub const DECISION_HARNESS: &str = "decision_harness";
     /// Workload kind on selection requests.
     pub const SELECT_KIND: &str = "select_kind";
+    /// Non-llm engines selected through `route.select`. Requires `SELECT_KIND`.
+    pub const SELECT_MEDIA: &str = "select_media";
     /// Caller-computed route eligibility, including an empty subset.
     pub const SELECT_ELIGIBLE_ROUTES: &str = "select_eligible_routes";
     /// Estimated value rates on selection answers.
@@ -246,6 +249,7 @@ pub mod capabilities {
         RUNNER_HARNESS_FACTS,
         DECISION_HARNESS,
         SELECT_KIND,
+        SELECT_MEDIA,
         SELECT_ELIGIBLE_ROUTES,
         SELECT_PRICE,
         REPORT_ATTEMPT_OUTCOMES,

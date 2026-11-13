@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Add optional `stale_since_ms` to `PinStatus`: present only when the registry
+  could not confirm the pin's status recently, with `state` still the last
+  confirmed state; omitted on write when absent, so fresh statuses encode as
+  before. `PinStatus::new` keeps its signature; `with_stale_since_ms` sets it.
+
 ## 0.1.2
 
 - Add strict `agent.session_for_harness` params, a typed request alias and operation

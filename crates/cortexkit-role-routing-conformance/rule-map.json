@@ -1,4 +1,13 @@
 [
+  {"id":"select_media.advertisement","cases":["select_media_unlisted_kind"],"bug_shaped":false},
+  {"id":"select_media.requirements","cases":["select_media_requirements","select_media_video","select_media_llm_refuses_media","select_media_refuses_llm"],"bug_shaped":false},
+  {"id":"select_media.metric_limit","cases":["select_media_metric_limit","select_media_ranking"],"bug_shaped":false},
+  {"id":"select_media.privacy","cases":["select_media_privacy"],"bug_shaped":false},
+  {"id":"select_media.demand","cases":["select_media_demand","select_media_ranking","select_media_ungraded_level"],"bug_shaped":false},
+  {"id":"select_media.answer","cases":["select_media_answer"],"bug_shaped":false},
+  {"id":"select_media.price","cases":["select_media_price"],"bug_shaped":false},
+  {"id":"select_media.policy","cases":["select_media_pin","select_media_ladder","select_media_policy"],"bug_shaped":false},
+  {"id":"select_media.decisions","cases":["select_media_report_admission"],"bug_shaped":false},
   {
     "id": "select_engine.metric",
     "cases": ["select_engine_eval_default_metric", "select_engine_eval_requested_metric"],

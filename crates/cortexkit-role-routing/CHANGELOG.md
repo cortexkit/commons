@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.24
+
+- Keep ungraded media routes eligible under a stated or declared level as
+  unknowns after adequate graded routes. All-ungraded catalogs and caller-local
+  engines use expected cost, measured result and identity order, not `no_route`.
+
+- Add `select_media`, requiring `select_kind`, with advertised non-llm kinds
+  served through `route.select`. Reuse engine requirements, privacy and
+  caller-local checks; add optional relative grade demand, video requirements
+  and hard evaluation limits, and specify model pins and ladder participation.
+- Keep separate media request and engine answer types, including verbatim
+  catalog unit prices. Llm requests still require iq and llm answers retain
+  their required members and token prices. Refuse media-only top-level members
+  on the llm parser rather than ignoring them.
+- Keep `route.select_engine` unchanged and accuracy-first during migration;
+  media `route.select` uses demand/grade and expected job cost. Bind media
+  decisions to module admission and attempt-outcome reporting.
+
 ## 0.7.23
 
 - Define router-owned per-account concurrency caps and the timed
