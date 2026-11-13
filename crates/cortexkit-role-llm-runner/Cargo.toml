@@ -9,7 +9,7 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-llm-runner"
-version = "0.8.46"
+version = "0.8.47"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

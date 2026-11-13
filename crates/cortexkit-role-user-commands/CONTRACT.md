@@ -168,7 +168,11 @@ there are no free-text values. A value is finite. `unit` is optional, defaults
 to `count`, and is one of `count | tokens | bytes | duration | ratio`.
 Duration is milliseconds; ratio treats 1 as the whole and **may exceed 1**.
 `time` is not a v1 unit. `noun` is 1–24 characters and goes only with `count`.
-`approx` is a boolean on number facts only; true is printed as "about".
+`approx` is a boolean on number facts only; true marks an estimate. Apps word
+number facts through the app library's `format_fact`.
+
+Informative examples (not pinned): "about 6.7k tokens", "about 115k tokens",
+"about 1.2M tokens", "about 840 tokens", and an approximate zero as "none".
 
 `state` is `ready | building | paused | stale | unavailable | off`.
 `progress` is a finite number in 0–1, only on `building`. State tones are fixed.

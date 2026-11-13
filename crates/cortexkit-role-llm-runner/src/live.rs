@@ -11,7 +11,7 @@
 //!   after a reconnect;
 //! - best-effort `display` frames carry coalesced deltas of the step in
 //!   flight (`text_delta`, `reasoning_delta`, `tool_input_delta`) and the
-//!   stream's own signals (`display_gap`, `display_reset`).
+//!   stream's own signals (`display_gap`, `display_reset`, `run_status`).
 //!
 //! Every frame of one stream carries `seq`, starting at [`FIRST_SEQ`] and
 //! rising by one per frame across both lanes. A jump in `seq`, or a
@@ -81,6 +81,7 @@ pub mod event_types {
     pub const RUN_STARTED: &str = "run_started";
     pub const RUN_FINISHED: &str = "run_finished";
     pub const RUN_PAUSED: &str = "run_paused";
+    pub const RUN_STATUS: &str = "run_status";
     pub const TEXT_DELTA: &str = "text_delta";
     pub const REASONING_DELTA: &str = "reasoning_delta";
     pub const TOOL_INPUT_DELTA: &str = "tool_input_delta";
@@ -527,6 +528,20 @@ impl DisplayGap {
     }
 }
 
+/// A live run's state changed; re-read the head. An absent wait means the wait ended.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct RunStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub awaits: Option<crate::awaits::RunAwaits>,
+}
+
+impl RunStatus {
+    pub fn new(awaits: Option<crate::awaits::RunAwaits>) -> Self {
+        Self { awaits }
+    }
+}
+
 /// A typed stream event. Decoded leniently: an event whose `type` this
 /// crate does not know, or a known type whose members do not decode, is
 /// [`LiveEvent::DisplayReset`], so a reader drops only its display-lane state
@@ -546,6 +561,7 @@ pub enum LiveEvent {
     RunStarted(RunStarted),
     RunFinished(RunEnded),
     RunPaused(RunEnded),
+    RunStatus(RunStatus),
     TextDelta(TextDelta),
     ReasoningDelta(TextDelta),
     ToolInputDelta(ToolInputDelta),
@@ -604,6 +620,7 @@ impl LiveEvent {
             t::RUN_STARTED => Self::RunStarted(typed(kind, value)?),
             t::RUN_FINISHED => Self::RunFinished(typed(kind, value)?),
             t::RUN_PAUSED => Self::RunPaused(typed(kind, value)?),
+            t::RUN_STATUS => Self::RunStatus(typed(kind, value)?),
             t::TEXT_DELTA => Self::TextDelta(typed(kind, value)?),
             t::REASONING_DELTA => Self::ReasoningDelta(typed(kind, value)?),
             t::TOOL_INPUT_DELTA => Self::ToolInputDelta(typed(kind, value)?),
@@ -626,6 +643,7 @@ impl LiveEvent {
             Self::RunStarted(_) => t::RUN_STARTED,
             Self::RunFinished(_) => t::RUN_FINISHED,
             Self::RunPaused(_) => t::RUN_PAUSED,
+            Self::RunStatus(_) => t::RUN_STATUS,
             Self::TextDelta(_) => t::TEXT_DELTA,
             Self::ReasoningDelta(_) => t::REASONING_DELTA,
             Self::ToolInputDelta(_) => t::TOOL_INPUT_DELTA,
@@ -778,6 +796,20 @@ impl SubscribeEvent {
 mod tests {
     use super::*;
     use crate::vectors;
+
+    #[test]
+    fn run_status_display_round_trips_both_wait_edges() {
+        for value in [
+            serde_json::json!({"type": "run_status", "awaits": {"party": "runner", "since_ms": 123}}),
+            serde_json::json!({"type": "run_status"}),
+        ] {
+            let event = LiveEvent::decode_strict(&value).unwrap();
+            assert!(matches!(event, LiveEvent::RunStatus(_)));
+            assert_eq!(event.type_name(), "run_status");
+            assert_eq!(serde_json::to_value(&event).unwrap(), value);
+            assert_eq!(serde_json::from_value::<LiveEvent>(value).unwrap(), event);
+        }
+    }
 
     #[test]
     fn live_ids_absent_preserve_wire_bytes() {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.47
+
+- Name `provider_error` as the required catch-all provider code when no named
+  code applies; the provider's own code remains diagnostic detail.
+- Pin and type the best-effort display `run_status` signal for live wait changes.
+
 ## 0.8.46
 
 - Allow host-part facts, display host marks/codes and tag-read host answers on

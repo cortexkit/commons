@@ -2143,6 +2143,10 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   absent; existing serialized bytes do not change.
 - [pinned] `provider_code` is the code callers branch on.
   `errors::provider_codes` lists the ones this role names (§12.2).
+- [pinned] `provider_code` stays required on every run error. A runner with
+  no named code sends `provider_error`, never an omitted member or an empty
+  string. For a terminal error with this code, the wait's expected party
+  (`errors::expected_party`, §6.1.1) is `nobody`.
 - [pinned] A provider's optional finer code goes in the separate, optional
   `provider_detail_code`: diagnostics only, for logs and display. It never
   replaces `provider_code`, a caller never branches on it, and it never
@@ -2970,7 +2974,7 @@ new members.
   `{kind: "display", event: {type, ...}}`:
   `text_delta {message_id, delta, tool_call_id?}`, `reasoning_delta
   {message_id, delta}`, `tool_input_delta {tool_call_id, delta}`,
-  `display_gap {dropped}` and `display_reset`. `message_id` is the model
+  `display_gap {dropped}`, `display_reset` and `run_status {awaits?}`. `message_id` is the model
   provider's id and may be empty. For an assistant message in scope of
   §4.2.2, grouped by the part's key: in the last display epoch for that
   part (since the attach snapshot or the latest `display_reset`), the
@@ -3022,6 +3026,11 @@ new members.
      or tool control event is emitted for it.
   7. A host that names messages at creation never sends `live_id`; its streams
      are unchanged.
+- [pinned] A display `run_status` means the live run's state changed; re-read
+  the head. It carries the run's current `awaits` when there is one; no
+  `awaits` means the wait ended. It carries no durable record and no cursor,
+  and a reader may miss it. `session.head` and `run.status` remain the record.
+  Readers that do not recognise it treat it as an unknown display event.
 - [pinned] `display_reset` resets only the display lane: live words,
   reasoning and tool-input deltas. Durable control state a reader has
   applied stands across it: stored messages, running and finished tool
@@ -7411,6 +7420,7 @@ The provider codes this role names:
 
 | Provider code | When |
 |---|---|
+| `provider_error` | the provider refused or failed and no code this role names applies; callers decide only by `class`; the provider's own code, if any, goes in `provider_detail_code` |
 | `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
 | `context_overflow` | the provider refused the request as exceeding the model's context window. Not the ceiling: a stop the runner decides itself before sending is the `context_ceiling` run state or refusal (§6, §12.1), never this code |
 | `output_ceiling` | the provider's output-token ceiling prevents a complete response |

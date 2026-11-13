@@ -695,6 +695,20 @@ pub fn expected_party(error: &crate::run::RunError) -> crate::awaits::AwaitParty
     }
 }
 
+#[cfg(test)]
+#[test]
+fn provider_error_has_default_party() {
+    let error = crate::run::RunError::new(
+        "transient",
+        "provider failed",
+        provider_codes::PROVIDER_ERROR,
+    );
+    assert_eq!(provider_codes::PROVIDER_ERROR, "provider_error");
+    assert_eq!(expected_party(&error), crate::awaits::AwaitParty::Nobody);
+    let unknown = crate::run::RunError::new("transient", "provider failed", "unknown");
+    assert_eq!(expected_party(&error), expected_party(&unknown));
+}
+
 /// Account-wait time under §12's precedence. `since_ms` is the observation
 /// time for a relative delay. Unknown, invalid or already-past times are omitted.
 pub fn account_wait_next_ms(error: &crate::run::RunError, since_ms: u64) -> Option<u64> {
@@ -773,6 +787,8 @@ pub mod tool_result_reasons {
 /// `provider_code` values a runner writes on a run that ends `error`
 /// because of a provider the session depends on.
 pub mod provider_codes {
+    /// The provider failed or refused without a more specific named code.
+    pub const PROVIDER_ERROR: &str = "provider_error";
     /// Routing refused the caller's decision (including an expired decision).
     /// No model call or independent account allocation is permitted.
     pub const ROUTING_DECISION_REFUSED: &str = "routing_decision_refused";
@@ -822,6 +838,7 @@ pub mod provider_codes {
 
     /// Every provider code this role names; providers may define others.
     pub const CODES: &[&str] = &[
+        PROVIDER_ERROR,
         ROUTING_DECISION_REFUSED,
         PRE_USER_UNAVAILABLE,
         CONTEXT_OVERFLOW,
@@ -918,6 +935,7 @@ mod tests {
     #[test]
     fn newly_pinned_provider_codes_and_legacy_alias_are_named() {
         for code in [
+            "provider_error",
             "context_overflow",
             "output_ceiling",
             "response_deadline",

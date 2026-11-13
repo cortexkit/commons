@@ -7,7 +7,7 @@
 # production build never compiles the suite.
 [package]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.17.56"
+version = "0.17.57"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -22,7 +22,7 @@ test-vectors = ["cortexkit-role-llm-runner/test-vectors"]
 base64 = "0.22"
 async-trait = "0.1"
 cortexkit-role-harness = { version = "0.1.0", path = "../cortexkit-role-harness" }
-cortexkit-role-llm-runner = { version = "=0.8.46", path = "../cortexkit-role-llm-runner", features = ["test-vectors"] }
+cortexkit-role-llm-runner = { version = "=0.8.47", path = "../cortexkit-role-llm-runner", features = ["test-vectors"] }
 cortexkit-rich-ui-syntax = { version = "0.3.0", path = "../cortexkit-rich-ui-syntax", features = ["test-vectors"] }
 futures-util = { version = "0.3", default-features = false }
 serde = "1"

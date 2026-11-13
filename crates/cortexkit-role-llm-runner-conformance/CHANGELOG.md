@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.57
+
+- Pin the role contract to `=0.8.47`.
+
 ## 0.17.56
 
 - Pin the role contract to `=0.8.46`. Accept assistant host-part facts and

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Documentation only: clarify approximate number facts and their app formatting.
+
 ## 0.1.1
 
 - The describe digest (`commands_digest`, `DescribeReply::new` and
