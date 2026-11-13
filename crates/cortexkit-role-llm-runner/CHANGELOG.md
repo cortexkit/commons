@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.51
+
+- Add `errors::is_wait` for account waits plus `concurrency_full`, keeping
+  `is_account_wait` narrow: a capacity hold is not an account usage limit.
+- Map routing's capacity refusal to a wait at admission and a runner-owned
+  pause mid-run. Add `RunReason::ConcurrencyFull` and its `awaits` timing from
+  routing's reset; shared error-ending helpers also keep capacity-held work
+  waiting rather than classifying it as failed.
+- §10.2: a pending plan change whose fetched tools and system text equal the
+  effective plan's applies at the next run's start whatever its rung, with no
+  plan note and no signed floor.
+- §9.17: when a pending change's stamped system-text answer is byte-identical
+  to the effective one, a runner may take the newer stamp from the next run
+  while the rest of the change keeps its rung.
+
 ## 0.8.50
 
 - Add per-harness `RoleDescribe.harnesses` and non-exhaustive `HarnessDescribe`

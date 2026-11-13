@@ -7,6 +7,17 @@ use serde_json::{json, Value};
 
 use crate::select::{parse_requirements, Modality, ToolsRequirement, REQUIREMENT_FIELDS};
 
+/// Scheduling class, highest priority first. Omission means `Worker`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConsumerPriority {
+    Interactive,
+    Blocking,
+    #[default]
+    Worker,
+    Background,
+}
+
 /// Optional declaration defaults using selection demand names and types.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct DemandDefaults {
@@ -14,6 +25,12 @@ pub struct DemandDefaults {
     #[doc(hidden)]
     #[serde(skip)]
     pub iq_present: bool,
+    /// Serde presence metadata for reader-first validation, never a wire member.
+    #[doc(hidden)]
+    #[serde(skip)]
+    pub priority_present: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<ConsumerPriority>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iq: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -59,6 +76,8 @@ impl<'de> Deserialize<'de> for DemandDefaults {
         let mut fields = BTreeMap::<String, Value>::deserialize(deserializer)?;
         Ok(Self {
             iq_present: fields.contains_key("iq"),
+            priority_present: fields.contains_key("priority"),
+            priority: take(&mut fields, "priority")?,
             iq: take(&mut fields, "iq")?,
             eq: take(&mut fields, "eq")?,
             ladder: take(&mut fields, "ladder")?,
@@ -79,6 +98,7 @@ impl<'de> Deserialize<'de> for DemandDefaults {
 impl PartialEq for DemandDefaults {
     fn eq(&self, other: &Self) -> bool {
         self.iq == other.iq
+            && self.priority == other.priority
             && self.eq == other.eq
             && self.ladder == other.ladder
             && self.placement == other.placement
@@ -102,6 +122,11 @@ impl DemandDefaults {
     pub fn with_iq(mut self, iq: u8) -> Self {
         self.iq_present = true;
         self.iq = Some(iq);
+        self
+    }
+    pub fn with_priority(mut self, priority: ConsumerPriority) -> Self {
+        self.priority_present = true;
+        self.priority = Some(priority);
         self
     }
     pub fn with_ladder(mut self, ladder: Vec<String>) -> Self {
@@ -177,14 +202,15 @@ impl ConsumerDeclarations {
         self
     }
 
-    /// Validate for a reader that does not declare the new consumer group.
-    /// Even a decoded `iq: null` is refused as an unknown legacy member.
+    /// Validate for a reader without optional consumer groups. Even decoded
+    /// `iq: null` and `priority: null` are refused as unknown legacy members.
     pub fn validate(&self) -> Result<(), DeclarationError> {
         self.validate_serving::<&str>(&[])
     }
 
     /// Validate typed declarations for the reader's advertised groups. With
     /// `consumer_declarations`, `iq: null` is absent and valid iq defaults apply.
+    /// Priority independently requires `consumer_priority`, including null.
     pub fn validate_serving<C: AsRef<str>>(
         &self,
         capabilities: &[C],
@@ -193,6 +219,9 @@ impl ConsumerDeclarations {
         for (index, consumer) in self.consumers.iter().enumerate() {
             if consumer.defaults.iq_present && consumer.defaults.iq.is_none() {
                 value["consumers"][index]["iq"] = Value::Null;
+            }
+            if consumer.defaults.priority_present && consumer.defaults.priority.is_none() {
+                value["consumers"][index]["priority"] = Value::Null;
             }
         }
         parse_consumer_declarations_serving(&value, capabilities)?;
@@ -826,7 +855,11 @@ pub fn parse_consumer_declarations_serving<C: AsRef<str>>(
         let extensions = ["iq", "ladder", "placement", "selectors", "kind"];
         if let Some(field) = fields.keys().find(|key| {
             key.as_str() != "name"
-                && if extensions.contains(&key.as_str()) {
+                && if key.as_str() == "priority" {
+                    !capabilities
+                        .iter()
+                        .any(|cap| cap.as_ref() == crate::capabilities::CONSUMER_PRIORITY)
+                } else if extensions.contains(&key.as_str()) {
                     !extended
                 } else {
                     !REQUIREMENT_FIELDS.contains(&key.as_str())
@@ -838,8 +871,12 @@ pub fn parse_consumer_declarations_serving<C: AsRef<str>>(
         }
         let mut demands = fields.clone();
         demands.remove("name");
-        for field in ["ladder", "placement", "selectors", "kind"] {
+        for field in ["ladder", "placement", "selectors", "kind", "priority"] {
             demands.remove(field);
+        }
+        if let Some(priority) = fields.get("priority").filter(|value| !value.is_null()) {
+            serde_json::from_value::<ConsumerPriority>(priority.clone())
+                .map_err(|_| invalid(format!("{path}.priority")))?;
         }
         if demands.get("iq").is_none_or(Value::is_null) {
             demands.insert("iq".into(), json!(0));

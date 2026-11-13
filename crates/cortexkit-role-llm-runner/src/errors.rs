@@ -575,6 +575,8 @@ pub const ACCOUNT_SELECTION_REFUSED: &str = "account_selection_refused";
 pub const ACCOUNT_LIMIT_EXHAUSTED: &str = "account_limit_exhausted";
 /// Routing refused the account choice and waiting cannot change it. Final.
 pub const ACCOUNT_SELECTION_FINAL: &str = "account_selection_final";
+/// Routing's in-flight capacity is occupied. Wait, never fail the work.
+pub const CONCURRENCY_FULL: &str = "concurrency_full";
 
 /// Every refusal code this role defines.
 pub const CODES: &[&str] = &[
@@ -589,6 +591,7 @@ pub const CODES: &[&str] = &[
     ACCOUNT_SELECTION_REFUSED,
     ACCOUNT_LIMIT_EXHAUSTED,
     ACCOUNT_SELECTION_FINAL,
+    CONCURRENCY_FULL,
     RETENTION_REQUIRED,
     RETENTION_CONFLICT,
     SESSION_RELEASED,
@@ -657,7 +660,7 @@ pub const CODES: &[&str] = &[
 /// refusals the daemon itself classifies as retryable on open (module
 /// reloading or warming, target unavailable) are the transport's to judge
 /// and are not listed here. Only the outer error code decides; diagnostic
-/// detail does not. Account waits are separate: see [`is_account_wait`].
+/// detail does not. Work holds are separate: see [`is_wait`].
 pub fn is_retryable(code: &str) -> bool {
     matches!(
         code,
@@ -678,15 +681,25 @@ pub fn is_retryable(code: &str) -> bool {
 /// whether or not any step ran. Repeat the original send only when known not
 /// to have begun a run. Unpinned work may move to another model; pinned work
 /// waits. Neither `class` nor nested diagnostic detail decides the outcome.
+/// Capacity waits are deliberately excluded: a run held for capacity is not
+/// held for that account's usage limit. Use [`is_wait`] for all work holds.
 pub fn is_account_wait(code: &str) -> bool {
     matches!(code, ACCOUNT_SELECTION_REFUSED | ACCOUNT_LIMIT_EXHAUSTED)
+}
+
+/// Whether an admission refusal's outer code or a run error's `provider_code`
+/// means wait, never fail the work. Includes account waits and routing capacity;
+/// diagnostic detail and error class never decide. Capacity waits retry at the
+/// router's reset time; a paused run resumes itself without changing accounts.
+pub fn is_wait(code: &str) -> bool {
+    is_account_wait(code) || code == CONCURRENCY_FULL
 }
 
 /// Shared terminal-error party mapping (§6.1). Only `provider_code` decides;
 /// diagnostic classes, status and text never turn an ending into a retry.
 pub fn expected_party(error: &crate::run::RunError) -> crate::awaits::AwaitParty {
     use crate::awaits::AwaitParty;
-    if is_account_wait(&error.provider_code) || is_retryable(&error.provider_code) {
+    if is_wait(&error.provider_code) || is_retryable(&error.provider_code) {
         AwaitParty::Caller
     } else if error.provider_code == "auth_required" {
         AwaitParty::Person
@@ -725,7 +738,7 @@ pub fn account_wait_next_ms(error: &crate::run::RunError, since_ms: u64) -> Opti
 /// omit a `next_ms` that has passed by the time they serve the answer.
 pub fn ending_awaits(error: &crate::run::RunError, since_ms: u64) -> crate::awaits::RunAwaits {
     let mut wait = crate::awaits::RunAwaits::new(expected_party(error), since_ms);
-    if is_account_wait(&error.provider_code) {
+    if is_wait(&error.provider_code) {
         wait.next_ms = account_wait_next_ms(error, since_ms);
     }
     if wait.party == crate::awaits::AwaitParty::Person {
@@ -809,6 +822,7 @@ pub mod provider_codes {
     pub const ACCOUNT_SELECTION_REFUSED: &str = super::ACCOUNT_SELECTION_REFUSED;
     /// Routing refused the account choice and waiting cannot change it. Final.
     pub const ACCOUNT_SELECTION_FINAL: &str = super::ACCOUNT_SELECTION_FINAL;
+    pub const CONCURRENCY_FULL: &str = super::CONCURRENCY_FULL;
     /// The account's billing or spending allowance is exhausted.
     pub const BILLING_EXHAUSTED: &str = "billing_exhausted";
     /// The provider served an account other than the run's frozen account.
@@ -847,6 +861,7 @@ pub mod provider_codes {
         ACCOUNT_LIMIT_EXHAUSTED,
         ACCOUNT_SELECTION_REFUSED,
         ACCOUNT_SELECTION_FINAL,
+        CONCURRENCY_FULL,
         BILLING_EXHAUSTED,
         ACCOUNT_CHANGED,
         CYBER_POLICY,

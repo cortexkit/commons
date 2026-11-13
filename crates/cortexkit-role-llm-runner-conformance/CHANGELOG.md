@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.61
+
+- Pin runner `=0.8.51`. Add wait/account-wait truth tables over all named
+  codes, capacity admission/run-error coverage, and a paused runner-owned
+  `concurrency_full` awaits sample.
+
 ## 0.17.60
 
 - Pin the role contract to `=0.8.50`. Add per-harness host-fact validation and

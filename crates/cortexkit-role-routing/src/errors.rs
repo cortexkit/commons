@@ -35,7 +35,7 @@ open_set! {
         /// `route.select`: the pin cannot be served now;
         /// `detail {pin, reason, reset_at_ms?}`.
         PinUnavailable => "pin_unavailable",
-        /// `route.select`: nothing meets the request;
+        /// `route.select`, or capacity on `route.account_for`: nothing meets the request;
         /// `detail {reason, reset_at_ms?}`.
         NoRoute => "no_route",
         /// `route.select_engine`: no engine remains after `detail.filter`.
@@ -117,7 +117,8 @@ open_set! {
 }
 
 open_set! {
-    /// Why nothing meets a `route.select` (`no_route`'s `detail.reason`).
+    /// Why nothing meets a `route.select`, or capacity on `route.account_for`
+    /// (`no_route`'s `detail.reason`).
     pub enum NoRouteReason {
         NoAvailableModel => "no_available_model",
         /// No session-starting runner declares the requested harness.
@@ -129,6 +130,9 @@ open_set! {
         /// Every route that would serve is cooling down or out of quota;
         /// carries `reset_at_ms` when the earliest end is known.
         QuotaOrCooldown => "quota_or_cooldown",
+        /// Every eligible account for every adequate route is at its in-flight
+        /// cap. Always carries `reset_at_ms`; wait, never fail the work.
+        ConcurrencyFull => "concurrency_full",
         /// Every candidate falls short of the requirements.
         AllInadequate => "all_inadequate",
         /// Every entry that would serve has all its eligible accounts

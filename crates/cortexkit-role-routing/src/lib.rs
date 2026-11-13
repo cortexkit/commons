@@ -150,6 +150,8 @@ pub const RUNNER_OPS: &[&str] = &[ops::ROUTE_ACCOUNT_FOR, ops::ROUTE_ACCOUNT_OBS
 pub mod capabilities {
     /// Consumer demand, ladder, placement, selectors and kind declarations.
     pub const CONSUMER_DECLARATIONS: &str = "consumer_declarations";
+    /// Consumer scheduling priority, independent of demand defaults.
+    pub const CONSUMER_PRIORITY: &str = "consumer_priority";
     /// Per-harness session starts, capabilities and route exclusions.
     pub const RUNNER_HARNESS_FACTS: &str = "runner_harness_facts";
     /// Decisions bind the chosen runner module and harness.
@@ -195,6 +197,8 @@ pub mod capabilities {
 
     /// Multi-model panels and seat replacements.
     pub const SELECT_PANEL: &str = "select_panel";
+    /// Read-only panel sizing without decisions or reservations.
+    pub const SELECT_PANEL_ESTIMATE: &str = "select_panel_estimate";
     /// Package and output-limit quotes for retained selections.
     pub const BUDGET_QUOTE: &str = "budget_quote";
     /// Explanations of retained selections.
@@ -238,6 +242,7 @@ pub mod capabilities {
     /// Every group this version defines.
     pub const KNOWN: &[&str] = &[
         CONSUMER_DECLARATIONS,
+        CONSUMER_PRIORITY,
         RUNNER_HARNESS_FACTS,
         DECISION_HARNESS,
         SELECT_KIND,
@@ -257,6 +262,7 @@ pub mod capabilities {
         SELECT_EXCLUDE_PROVIDERS,
         SELECT_TASK_REF,
         SELECT_PANEL,
+        SELECT_PANEL_ESTIMATE,
         BUDGET_QUOTE,
         EXPLAIN,
         ACCOUNT_STATUS,

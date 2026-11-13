@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.26
+
+- Pin routing `=0.7.23`. Add wire cases for the timed `concurrency_full`
+  wait and priority round-trips, invalid values and reader-first validation,
+  including explicit null on typed declarations.
+- Cover reader-first panel estimates, id-free answer decoding with package-fit
+  evidence, and continued required ids on ordinary panel answers.
+
 ## 0.10.25
 
 - Pin routing `=0.7.22`. Extend `placement_decision_harness` to check runners

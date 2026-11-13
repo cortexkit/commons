@@ -106,6 +106,10 @@ pub struct SelectPanelRequest {
     pub package_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<String>,
+    /// Read-only sizing, requiring `select_panel_estimate`. No decisions or
+    /// reservations are created when true; false/omission selects normally.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<bool>,
 }
 
 impl SelectPanelRequest {
@@ -125,6 +129,7 @@ impl SelectPanelRequest {
             temperatures: None,
             package_tokens: None,
             seed: None,
+            estimate: None,
         }
     }
 
@@ -363,6 +368,103 @@ pub struct SelectPanelAnswer {
     pub shortfall: Option<PanelShortfall>,
 }
 
+/// Read-only panel sizing. There is no retained panel or decision identifier;
+/// ordinary panel answers retain their required identifiers unchanged.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct SelectPanelEstimate {
+    pub policy: PanelPolicy,
+    pub seats: Vec<PanelEstimateSeat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shortfall: Option<PanelShortfall>,
+}
+
+impl SelectPanelEstimate {
+    pub fn new(policy: PanelPolicy, seats: Vec<PanelEstimateSeat>) -> Self {
+        Self {
+            policy,
+            seats,
+            shortfall: None,
+        }
+    }
+}
+
+/// An estimated slot, not an independently reportable decision.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct PanelEstimateSeat {
+    pub slot: u64,
+    pub phase: PanelPhase,
+    pub answer: PanelEstimateSelection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub family: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+}
+
+impl PanelEstimateSeat {
+    pub fn new(slot: u64, phase: PanelPhase, answer: PanelEstimateSelection) -> Self {
+        Self {
+            slot,
+            phase,
+            answer,
+            family: None,
+            temperature: None,
+        }
+    }
+}
+
+/// The selection facts of an estimate, with no `decision_id`. The expiry is
+/// snapshot freshness only: it never grants access to a decision operation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct PanelEstimateSelection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub price: Option<crate::price::Price>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_tier_chosen: Option<String>,
+    pub route: select::RouteRef,
+    pub runner: select::RunnerRef,
+    pub context_window: u64,
+    pub max_output_tokens: u64,
+    pub expires_at_ms: u64,
+    pub explanation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_outcome: Option<select::PinOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_settings: Option<select::ProjectSettings>,
+}
+
+impl PanelEstimateSelection {
+    pub fn new(
+        route: select::RouteRef,
+        runner: select::RunnerRef,
+        context_window: u64,
+        max_output_tokens: u64,
+        expires_at_ms: u64,
+        explanation: impl Into<String>,
+    ) -> Self {
+        Self {
+            price: None,
+            service_tier_chosen: None,
+            route,
+            runner,
+            context_window,
+            max_output_tokens,
+            expires_at_ms,
+            explanation: explanation.into(),
+            detail: None,
+            pin_outcome: None,
+            project_settings: None,
+        }
+    }
+}
+
 impl SelectPanelAnswer {
     pub fn new(panel_id: impl Into<String>, policy: PanelPolicy, seats: Vec<PanelSeat>) -> Self {
         Self {
@@ -475,11 +577,18 @@ pub fn parse_select_panel_request_serving<C: AsRef<str>>(
         if !SHARED_FIELDS.contains(&field.as_str())
             && !matches!(
                 field.as_str(),
-                "class" | "requirements" | "temperatures" | "package_tokens" | "seed"
+                "class" | "requirements" | "temperatures" | "package_tokens" | "seed" | "estimate"
             )
         {
             return Err(members.refuse(field, "not a new-panel request member"));
         }
+    }
+    if members.object.contains_key("estimate")
+        && !capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::SELECT_PANEL_ESTIMATE)
+    {
+        return Err(members.refuse("estimate", "select_panel_estimate is not declared"));
     }
     let class = PanelClass::parse(&members.text("class", None)?);
     let requirements = parse_panel_requirements(members.object.get("requirements"))?;
@@ -521,6 +630,7 @@ pub fn parse_select_panel_request_serving<C: AsRef<str>>(
         temperatures,
         package_tokens: members.optional("package_tokens")?,
         seed,
+        estimate: members.optional("estimate")?,
     })
 }
 

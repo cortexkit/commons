@@ -162,6 +162,10 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
     }
     for (group, requires) in [
         (
+            crate::capabilities::SELECT_PANEL_ESTIMATE,
+            crate::capabilities::SELECT_PANEL,
+        ),
+        (
             crate::capabilities::OBSERVE_CREDENTIAL_REFUSED,
             crate::capabilities::OBSERVE_BACKOFF,
         ),

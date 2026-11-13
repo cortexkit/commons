@@ -403,6 +403,7 @@ That group's additive defaults, attested namespace and selector rules are in §1
   does not know is kept and means nothing to it. This version defines these groups:
   - `consumer_declarations`: consumer `iq`, `ladder`, `placement`, `selectors`
     and `kind`, including the attested module-root rule (§16.1).
+  - `consumer_priority`: independently gated scheduling priority (§16.1.1).
   - `runner_harness_facts`: per-harness `starts_sessions`, `capabilities`
     and `exclude` (§16.2).
   - `decision_harness`: decisions bind `{module, harness}` in the existing
@@ -444,6 +445,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
     never selection. A caller sends it only to a provider declaring the group;
     a provider without the group refuses the member by name (§2).
   - `select_panel`: `route.select_panel`, including seat replacements (§11.1).
+  - `select_panel_estimate`: read-only panel sizing; requires `select_panel`
+    (§11.1.1).
   - `budget_quote`: `route.budget_quote` (§11.2).
   - `explain`: `route.explain` (§11.3).
   - `account_status`: `route.account_status` (§11.4).
@@ -601,6 +604,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
   returned to any other caller. `route.report` needs no new member because
   it already names its decision. `correlation_id` remains log-only.
 - [pinned] `concurrency_slots`: an optional hint,
+  accepted for compatibility; nothing needs to send it because the router owns
+  provider concurrency caps (§5.3.1). The hint's existing shape remains
   `[{key, running, limit, queued?}]`.
 - [pinned] `detail`: bool; asks for the provider's explanation object.
 - [pinned] `hold_ok`: bool, default `true` (group `select_hold_control`).
@@ -699,7 +704,7 @@ That group's additive defaults, attested namespace and selector rules are in §1
 - [pinned] `no_route {reason, reset_at_ms?}`. `reason` is an open set:
   `no_available_model`, `missing_capability`, `context_too_small`,
   `quota_or_cooldown`, `all_inadequate`, `accounts_blocked` (§5.4),
-  `harness_unavailable`. When no session-starting runner lists the requested
+  `harness_unavailable`, `concurrency_full` (§5.3.1). When no session-starting runner lists the requested
   program, answer `no_route` with reason `harness_unavailable`, naming the
   requested harness in the message; this cause is not timed. Other existing
   refusals (including `pin_unavailable` for an unservable pin) are unchanged.
@@ -707,6 +712,40 @@ That group's additive defaults, attested namespace and selector rules are in §1
   exhausted quota whose reset is known. A consumer waits until then and
   asks again, rather than failing its work. A refusal without `reset_at_ms`
   is not timed. `reset_at_ms` alone decides whether a consumer waits.
+
+### 5.3.1 Provider concurrency
+
+- [pinned] The router owns provider concurrency caps. A cap belongs to an
+  account, so capacity adds across accounts, and comes from the model catalog's
+  plan row with an optional operator override. If neither states a cap, the
+  cap is unknown and there is no limit. A cap is never zero and is never
+  learned from rate-limit errors. This contract fixes the rules, not cap values.
+- [pinned] One started run counts as one slot until it finishes. A reserved,
+  unstarted admission also counts during its validity window, so simultaneous
+  admissions cannot all take the last slot. Interactive head turns count toward
+  the cap but are never refused for concurrency; the router recognizes them
+  from the attested caller's head scope, not a declaration claiming priority.
+- [pinned] `route.select` passes over a route whose every eligible account is
+  at its cap for the next adequate route, without widening the candidate set.
+  When every eligible account for every adequate route is full, it answers
+  `no_route {reason: "concurrency_full", reset_at_ms}`. The required timestamp
+  is absolute Unix milliseconds: the router's earliest expected free slot, or
+  30 seconds from now when unknown. This is a wait, never a failure: the caller
+  waits until `reset_at_ms`, then selects again. `refusals::retry_class` returns
+  `RetryAt(reset_at_ms)`, the same wait class as other timed refusals.
+- [pinned] `route.account_for` skips a full account for another eligible account
+  on the same route. A conversation already holding an account keeps it and
+  waits instead of moving and rewriting its prompt cache. When capacity blocks
+  admission it returns the same `no_route` reason and timestamp. A runner
+  receiving it mid-run pauses as it does for an account limit and resumes the
+  same run on its held account at the named time.
+- [pinned] When a slot frees, priority is `interactive`, then `blocking`, then
+  `worker`, then `background`. Within a class, work is first come, first served
+  by first refusal time, which the router records. A lower class is refused
+  before a higher class would be left without the last slot. Consumer priority
+  is declared under §16.1.1, defaults to `worker` when undeclared, and may be
+  overridden by the operator by consumer name. The router does not hardcode
+  consumer names for scheduling.
 
 ### 5.4 Holds
 
@@ -1204,6 +1243,7 @@ The answer (`account::AccountForAnswer`):
   `headroom`, `renewed` and `reassigned`.
 - [pinned] Refusals: `invalid_request {field}`, `unknown_decision`,
   `account_not_authorized`, `auth_required`, `account_hold {until_ms}`
+  (timed), `no_route {reason: "concurrency_full", reset_at_ms}` (§5.3.1)
   (timed), `account_quota_unknown`, `account_pool_exhausted
   {reset_at_ms?}` (timed when the reset is known),
   `account_pool_reserve_limited`, `account_selection_disabled` (not timed),
@@ -1569,7 +1609,7 @@ What a runner saw on an account, so the provider's headroom stays current.
 | `unknown_consumer` | `route.select`, `route.select_panel`, `route.select_engine` | `{consumer}` | no |
 | `consumer_not_owned` | `route.select`, `route.select_panel` (§1.1), `route.select_engine` | `{consumer}` | no (terminal) |
 | `pin_unavailable` | `route.select` (§5.3) | `{pin, reason, reset_at_ms?}` | when `reset_at_ms` is present |
-| `no_route` | `route.select` (§5.3) | `{reason, reset_at_ms?}` | when `reset_at_ms` is present |
+| `no_route` | `route.select` (§5.3), `route.account_for` (capacity, §5.3.1) | `{reason, reset_at_ms?}` | when `reset_at_ms` is present; required for `concurrency_full` |
 | `no_engine` | `route.select_engine` (§13) | `{filter}` | no |
 | `engine_not_declared_by_caller` | `route.engine_report`, `route.engine_eval` | `{}` | no |
 | `unknown_decision` | `route.report` (§6), `route.account_for` (§9.1), panel replacement (§11.1), `route.budget_quote`, `route.explain` (§11) | `{}` | no |
@@ -1628,6 +1668,7 @@ New-panel params (`panel::SelectPanelRequest`):
 | `temperatures?` | At most 8 finite numbers in `0..=2`, indexed by slot; otherwise `invalid_request {field: "temperatures"}`. |
 | `package_tokens?` | Unsigned evidence-package size; every seated route's package ceiling (§11.2) must cover it. Absent means unconstrained. |
 | `seed?` | String of at most 256 bytes. Random draws depend only on seed and candidates, so identical seed and candidates give the same panel. |
+| `estimate?` | Boolean under `select_panel_estimate` (§11.1.1); true sizes the panel without creating decisions or reservations. False, null or omission selects normally. |
 
 - [pinned] Other members, including select's `pin`, `pin_slot`, `prefer`,
   `prefer_prompt_cache` and `affinity`, are `invalid_request {field}` naming
@@ -1638,7 +1679,7 @@ New-panel params (`panel::SelectPanelRequest`):
   floor. Never seat the same `provider/model` twice, nor two models of one
   family; models without a known family count as one family.
 
-Answer (`SelectPanelAnswer`):
+Ordinary answer (`SelectPanelAnswer`, without `estimate: true`):
 
 | Member | Meaning |
 |---|---|
@@ -1740,6 +1781,30 @@ Replacement params and answer:
   no historically seated route or decision id, family diversity with other
   standing slots, and the seat answer against `seat_request(replace.exclude)`,
   window floor and package ceiling.
+
+#### 11.1.1 Read-only sizing — group `select_panel_estimate`
+
+- [pinned] This group requires `select_panel`. Following §16's reader-first
+  rule, callers send `estimate` only to advertising routers. A non-advertising
+  router refuses that member by name (`invalid_request {field: "estimate"}`),
+  even for false or null. Advertising routers refuse a non-boolean non-null
+  value with the same field. Omission leaves existing requests unchanged.
+- [pinned] For `estimate: true`, return `panel::SelectPanelEstimate`: the same
+  policy, seat selection facts, shortfall detail and per-candidate package
+  limits as today's panel answer, but omit `panel_id` and every seat answer's
+  `decision_id`. The router issues no decisions and reserves nothing: no
+  admissions, recovery reservations or probe reservations. The estimate is
+  never valid input to a decision operation, including replacement, reporting,
+  account admission, budget quoting or explanation. Call ordinary selection
+  when ready to run; an estimate never grants later admission.
+- [pinned] Separate `PanelEstimateSeat` and `PanelEstimateSelection` types
+  preserve the ordinary answer's required ids and validation. The three
+  estimate records reject unknown members, including ids, rather than silently
+  accepting an ordinary decision as an estimate. Seat facts retain the other
+  `SelectAnswer` members; `expires_at_ms` describes snapshot freshness only.
+  Evidence records continue to ignore unknown members. The distinct
+  estimate answer is chosen by the request flag, not inferred from missing ids
+  on a malformed ordinary answer.
 
 ### 11.2 `route.budget_quote` — group `budget_quote`
 
@@ -2150,6 +2215,22 @@ Replacement params and answer:
   `llm`. A consumer routes only within its kind. Catalog type words map with
   `transcription` ↔ `transcribe` and `speech` ↔ `synthesize`. Embedding and
   reranking are not routing kinds defined here.
+
+#### 16.1.1 Scheduling priority — group `consumer_priority`
+
+- [pinned] The flattened consumer declaration additionally admits optional
+  `priority: "interactive" | "blocking" | "worker" | "background"`. Null or
+  omission means undeclared, hence `worker`; no other string or type is valid.
+  The operator may override priority by consumer name. Priority only orders
+  eligible work under §5.3.1, never widens eligibility or grants a head scope.
+- [pinned] `consumer_priority` is independent of `consumer_declarations`:
+  routers already advertising demand defaults may not understand scheduling
+  priority. Modules declare `priority` only after the live router advertises
+  `consumer_priority`. `parse_consumer_declarations` and typed `validate()`
+  reject it by name, even when null. Serving parsers and `validate_serving`
+  accept it only with this group and reject invalid values by name. Presence
+  metadata preserves null through typed serving validation without emitting
+  a new wire member; omission keeps old bytes and equality unchanged.
 
 ### 16.2 `runner_harness_facts` and shared exclusion specs
 

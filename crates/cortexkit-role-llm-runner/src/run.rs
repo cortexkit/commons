@@ -489,6 +489,9 @@ pub enum RunReason {
     /// A paused run waiting for the same account's limit to reset; the runner
     /// resumes it by itself, no earlier than `resume_not_before_ms`.
     AccountLimit,
+    /// Routing capacity is occupied; the runner resumes this same run at the
+    /// router's expected free-slot time without moving its held account.
+    ConcurrencyFull,
     /// A tool provider holds a dispatched call and answers later.
     ToolHeld,
     /// The runner's or host's retry of a failed model request.
@@ -516,6 +519,7 @@ impl From<String> for RunReason {
             "auth_required" => Self::AuthRequired,
             "restart" => Self::Restart,
             "account_limit" => Self::AccountLimit,
+            "concurrency_full" => Self::ConcurrencyFull,
             "tool_held" => Self::ToolHeld,
             "provider_retry" => Self::ProviderRetry,
             "account_free" => Self::AccountFree,
@@ -535,6 +539,7 @@ impl From<RunReason> for String {
             RunReason::AuthRequired => "auth_required".into(),
             RunReason::Restart => "restart".into(),
             RunReason::AccountLimit => "account_limit".into(),
+            RunReason::ConcurrencyFull => "concurrency_full".into(),
             RunReason::ToolHeld => "tool_held".into(),
             RunReason::ProviderRetry => "provider_retry".into(),
             RunReason::AccountFree => "account_free".into(),

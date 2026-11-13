@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.7.23
+
+- Define router-owned per-account concurrency caps and the timed
+  `no_route` reason `concurrency_full` on selection and account admission.
+  Capacity is a wait, not a failure; held conversations keep their accounts.
+- Add independently gated `consumer_priority` declarations, with reader-first
+  validation, worker defaults and operator overrides. Specify class ordering
+  and first-refusal fairness; retain the optional `concurrency_slots` hint.
+- Add `select_panel_estimate` and `estimate` request validation. Distinct
+  id-free estimate answer types retain policy, capacity facts and shortfall
+  evidence without weakening required ids on ordinary answers. Estimates
+  create no decisions or reservations and cannot be used in decision ops.
+
 ## 0.7.22
 
 - Contract text only: a `signed_out` fence lasts while the vault lists the

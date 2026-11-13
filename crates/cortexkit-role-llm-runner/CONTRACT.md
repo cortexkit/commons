@@ -2260,8 +2260,9 @@ state, polled without reading the transcript.
     terminal.
   - `reason`, where the runner names one: why a paused run is paused, why
     an active run is waiting, or why an ended run ended. It is an open
-    string; the known pause reasons are `auth_required`, `restart` and
-    `account_limit` (`RunReason::AccountLimit`), and
+    string; the known pause reasons are `auth_required`, `restart`,
+    `account_limit` (`RunReason::AccountLimit`) and `concurrency_full`
+    (`RunReason::ConcurrencyFull`), and
     the known waiting reasons are `context_ceiling_wait` and
     `compaction_wait` (§6).
   - `deadline_ms`: on an `active` or `paused` run in a wait the runner owns
@@ -2405,7 +2406,11 @@ state, polled without reading the transcript.
   provider 429 that does not confirm an account limit. `server_busy`: a
   provider capacity backoff (503 or 529), not about the account.
   `quota_reading`: waiting for a first quota reading before choosing an
-  account. `routing_hold`: routing told the caller to hold. The existing
+  account. `concurrency_full`: routing's in-flight capacity is occupied;
+  `party` is `runner` and `next_ms` comes from routing's `reset_at_ms`.
+  The run pauses and resumes itself on its held account, without moving it or
+  rebuilding its prompt cache; this is not that account's usage limit.
+  `routing_hold`: routing told the caller to hold. The existing
   `account_limit` waits on the same account for its limit to reset.
 - [pinned] **Report what you can see.** A declaring runner reports a wait
   once it has lasted 1 s, or as soon as it starts when it is known to last
@@ -2417,7 +2422,7 @@ state, polled without reading the transcript.
 - [pinned] **Endings.** Every terminal `error` run carries `awaits`, so an
   app can tell failed from waiting without knowing the code. The shared
   `errors::expected_party(&RunError)` mapping uses `provider_code` only:
-  `caller` for `is_account_wait`, with `next_ms` from §12's precedence
+  `caller` for `is_wait`, with `next_ms` from §12's precedence
   (`retry_after_secs`, then `resets_at_ms`); `caller` for any other
   `is_retryable` code; `person` with `action: sign_in` for `auth_required`;
   `nobody` otherwise. `errors::ending_awaits` builds that ending from its
@@ -2950,7 +2955,7 @@ permits inferring an unreported reason.
   describe group, including on a runner without typed `live_events`.
 - [pinned] A stream event that names why a run is paused or waiting uses
   `reason`, an open, display-only string with known values `auth_required`,
-  `restart`, `account_limit`, `context_ceiling_wait` and `compaction_wait`, as `run.status`
+   `restart`, `account_limit`, `concurrency_full`, `context_ceiling_wait` and `compaction_wait`, as `run.status`
   does (§6.1). A runner reports a wait it owns (§6, runner-owned waits) with a durable
   `control` event carrying `deadline_ms` when the wait starts, beside the
   wait's `reason`; a reader recognizes the wait by `deadline_ms`, never by
@@ -6146,6 +6151,19 @@ froze for a run to every assistant reply the run writes.
   affects only runs that start after it applies; the rows of earlier runs
   keep their stamp. A runner may derive the stamp per run from the run's
   start record.
+- [pinned] **Same text, newer stamp.** When a pending change (§10.2) holds a
+  stamped system-text answer whose text is byte-identical to the effective
+  plan's answer for the same provider item (the same provider and item in
+  both plans), the runner may take the pending answer's stamp for that
+  effective answer from the next run's start. A stamp never moves to an
+  answer whose text it was not declared with. It
+  records that stamp durably with the frozen effective answer, so a restart
+  serves the same stamp. Both stamps were declared for the same bytes, so the
+  newer one is as true as the old and lets readers retire an old catalog
+  digest sooner. Only the stamp moves: the rest of the change keeps its rung,
+  `applied_generation` stays, and the runner sends no plan note and records no
+  signed floor. The conflict rule above still applies to the stamps that
+  result. Runs started earlier keep their stamp.
 - [pinned] **Where it is served**, each optional and omitted when absent:
   - `rich_ui` on every display row (`display::DisplayRow`, §4.7) of an
     assistant message written by a run whose frozen plan carries a stamp,
@@ -6746,6 +6764,14 @@ every request, answer and refusal.
   fold, a model switch, a `session.flush_prefix`). Applying it moves
   `applied_generation` to its generation and sets `effective`, and clears
   `pending` (§10).
+- [pinned] A pending change whose fetched tools and system text are
+  byte-identical to the effective plan's touches no surface
+  (`session_change::surfaces` is empty). It applies at the start of the next
+  run whatever its rung, because the rung protects a prefix, system text or
+  history that the change leaves unchanged; waiting would only hold
+  `applied_generation` back. Such a change sends no plan note, leaves `tools`
+  unchanged so it records no signed floor (§11.1.1), and does not count as a
+  prefix, system or history rebuild for any other pending change.
 
 **Sender and reader admission at acceptance.**
 
@@ -7284,6 +7310,7 @@ treats it as a terminal refusal of that one request.
 | `account_selection_refused` | a runner choosing accounts at send time cannot currently supply an account for `session.send`; nothing was sent | shared account-selection detail below | **account wait**, not a plain retry |
 | `account_limit_exhausted` | a runner choosing accounts at send time refuses `session.send` because the account's usage limit is exhausted; nothing was sent | shared account-selection detail below | **account wait**, not a plain retry |
 | `account_selection_final` | routing refused the account choice and waiting cannot change it; nothing was sent | shared account-selection detail below | no: final, never an account wait |
+| `concurrency_full` | routing's in-flight capacity is occupied; nothing was sent | shared account-selection detail below, `resets_at_ms` from routing's `reset_at_ms` | **wait**, never a failure or plain retry |
 | `invalid_params` | an unknown or duplicate directive name, a non-array `directives` value, or a non-string array element on a `turn_directives` runner (field `directives`, §9.9); a request field is malformed, unknown, or combined with one it excludes; a compaction_item without a string preset (field plan.compaction_item.preset); a plan's malformed `senders`, or `senders` without `delivery_order`; a list in `delivery` on a runner without `delivery_order` (field `delivery`), a malformed list, a list member (`dedupe_key`, `expires_at_ms`, `template`) malformed or sent without a list, or an `idle_start` its sender's grant excludes (§9.7); an `after` cursor never given, or `limit: 0`, on `run.tool_calls`; a `session.subscribe` request with malformed `from` (field `from`, §7); a `session.history` request naming more than one of `cursor`, `from_mid` and `before_mid`, naming `view: "model"`, or carrying a cursor that does not parse (§4.6) | `field` | no |
 | `history_changed` | a read cursor names another history_version | — | no: read a fresh page |
 | `served_bytes_changed` | a read would serve a message whose body, rebuilt from the host's store, differs from the digest it was first served with (§4.2.1); or a `run.tool_calls` page rebuilds `args` from a requesting message under the same whole-message digest check (`served_bytes::served_body` and `check_served`), and that rebuild differs or its host row is gone (§6.3). The whole page is refused, never a partial page or a call with absent or different `args` | `{mid}` (`errors::ServedBytesChangedDetail`), the first such message in page order; no content or digest | no. For a read: the changed message is served again only under a raised history_version, so re-read from the tail. For `run.tool_calls`: don't retry that page; the requesting message can't be reproduced, and reading the current transcript doesn't recover the original run's arguments |
@@ -7386,6 +7413,16 @@ treats it as a terminal refusal of that one request.
   takes precedence because routing names when to ask again; a quota reset
   can be later than a useful probe. With neither hint, the caller uses its
   own backoff, never asks the same account again at once.
+- [pinned] `errors::is_wait(code)` is true exactly for the two account-wait
+  codes plus `concurrency_full`: all mean wait, never fail the work. It uses
+  only the outer refusal code or the run error's `provider_code`, not class
+  or nested diagnostic detail. `is_account_wait` keeps its narrower set because
+  a run held for capacity is not held for that account's usage limit.
+  `is_retryable` is false for all three. At admission, `concurrency_full` is
+  handled like an account wait; wait until routing's absolute `reset_at_ms`,
+  exposed as `resets_at_ms`, then try admission again. If a queued admission
+  ends a run with this code, its work is still a wait, never a failure, and
+  the continuation rules below apply.
 - [pinned] The named time binds the **account, not the session**. A refusal
   or limit for one account forbids asking that account again before that
   time. A caller that can be routed to a different account may resume at
@@ -7405,6 +7442,7 @@ account per model request use the same mapping for the run error's
 |---|---|
 | `account_pool_exhausted`, `account_pool_reserve_limited`, `account_hold`, `account_quota_unknown`, `no_eligible_account` | `account_limit_exhausted` (account wait) |
 | `account_selection_unavailable`, `pin_generation_conflict`, `store_error`, `internal_error` | `account_selection_refused` (account wait) |
+| `no_route` with `reason: "concurrency_full"` | `concurrency_full` (wait); copy `reset_at_ms` to `resets_at_ms` |
 | `account_not_authorized`, `invalid_request`, `admission_conflict`, `unknown_decision`, `unscoped_caller`, `account_selection_unsupported`, and every routing code the runner does not know | `account_selection_final` |
 
 Unknown routing codes map to final, never a wait, matching routing's own
@@ -7413,6 +7451,15 @@ not refusals in this mapping: `auth_required` pauses for sign-in;
 `account_selection_disabled` means the runner uses its own credential.
 A runner MUST NOT send a wait code for a refusal waiting cannot cure:
 every reader holds work for wait codes and retries them forever.
+
+The `no_route` capacity reason is the one reason-specific exception to the
+outer routing-code mapping: other `no_route` reasons retain the existing
+unknown-code/final rule. A runner receiving `concurrency_full` mid-run from
+`route.account_for` MUST pause as for an account limit, with
+`awaits {party: "runner", reason: "concurrency_full", next_ms: reset_at_ms}`.
+The runner retries at that time and resumes the same run on its held account;
+the caller leaves the run alone. A capacity pause is never a terminal failure.
+An already-past `next_ms` is omitted under §6.1's ordinary timing rule.
 
 A send queued behind a running run and refused at its own admission reports
 `session.send_status.state: "finished"`; its `run_id` names the run it would
@@ -7462,7 +7509,7 @@ with the ordinary run `error` carrying the mapped `provider_code`,
   same request (`errors::is_retryable`). A refusal is an answer: retrying it
   unchanged meets the same refusal.
 
-All three account-selection refusal codes share this `detail` object, with members
+All three account-selection refusal codes and `concurrency_full` share this `detail` object, with members
 listed in serialized order. Only `routing_code` and `class` are required.
 Readers ignore unknown members and treat `routing_detail` as opaque.
 Every member is informational for outcome classification; only the timing
@@ -7525,6 +7572,7 @@ The provider codes this role names:
 | `output_ceiling` | the provider's output-token ceiling prevents a complete response |
 | `response_deadline` | the provider's response deadline ended the request |
 | `account_limit_exhausted` | the provider account's usage limit is exhausted |
+| `concurrency_full` | routing's in-flight capacity is occupied; wait, never fail the work (§12.1) |
 | `account_selection_refused` | routing temporarily refused the run's account choice; an account wait (§12.1) |
 | `account_selection_final` | routing refused the run's account choice and waiting cannot change it; a final failure |
 | `billing_exhausted` | the provider account's billing or spending allowance is exhausted |
