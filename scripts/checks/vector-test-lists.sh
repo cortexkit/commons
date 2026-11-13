@@ -32,15 +32,19 @@ required=$(
     done | sort -u
 )
 
+# Membership is tested with a here-string, not `printf | grep -q`: under
+# pipefail, grep -q exits at the first match and the still-writing printf
+# dies of SIGPIPE, so the pipeline reports failure exactly when the crate
+# is listed. That raced on Linux bash and failed a release gate.
 gate_list=$(listed "$gate")
 ci_list=$(listed "$ci")
 status=0
 for crate in $required; do
-    if ! printf '%s\n' "$gate_list" | grep -qxF "$crate"; then
+    if ! grep -qxF "$crate" <<<"$gate_list"; then
         echo "FAIL: $crate has tests that need the test-vectors feature but is missing from the vector test command in scripts/gate.sh" >&2
         status=1
     fi
-    if ! printf '%s\n' "$ci_list" | grep -qxF "$crate"; then
+    if ! grep -qxF "$crate" <<<"$ci_list"; then
         echo "FAIL: $crate has tests that need the test-vectors feature but is missing from the vector test command in .github/workflows/ci.yml" >&2
         status=1
     fi
