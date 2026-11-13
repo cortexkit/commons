@@ -129,3 +129,34 @@ fn render_failed_rejects_non_string_locators() {
         assert!(serde_json::from_value::<ViewRefusal>(raw).is_err());
     }
 }
+
+#[test]
+fn render_failed_notice_vectors_pin_served_state_shapes() {
+    for (fixture, refusal) in [
+        (
+            include_str!("../test-vectors/compaction-v2/notice-render-failed-part-request.json"),
+            json!({
+                "code":"render_failed", "mid":"message-b", "part":"part-b",
+                "field":"attachments"
+            }),
+        ),
+        (
+            include_str!("../test-vectors/compaction-v2/notice-render-failed-message-request.json"),
+            json!({"code":"render_failed", "mid":"message-b"}),
+        ),
+        (
+            include_str!(
+                "../test-vectors/compaction-v2/notice-render-failed-unlocated-request.json"
+            ),
+            json!({"code":"render_failed"}),
+        ),
+    ] {
+        let raw: Value = serde_json::from_str(fixture).unwrap();
+        assert_eq!(
+            raw["params"]["events"],
+            json!([{"event":"view_refused", "version":7, "refusal":refusal}])
+        );
+        let notice: NoticeRequest = serde_json::from_value(raw["params"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(notice).unwrap(), raw["params"]);
+    }
+}

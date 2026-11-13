@@ -324,10 +324,10 @@ pub enum ViewRefusal, "code" {
         part: String,
         field: String,
     },
-    /// The host could not render an accepted view. `mid` and `part` identify
-    /// the part whose replaces are skipped; `field` optionally narrows the
-    /// diagnosis. `mid` alone names a message mismatch; no fields means the
-    /// host cannot locate the failure. Neither case identifies a skippable part.
+    /// The host could not render an accepted view. `mid` and `part` mean the
+    /// version is served minus every replacement of that part; `field` only
+    /// narrows the diagnosis. `mid` alone or no fields mean no view is served,
+    /// with a known message or no known location, respectively (W6.6a).
     RenderFailed => "render_failed" {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mid: Option<String>,
@@ -386,7 +386,7 @@ pub enum ViewRefusal, "code" {
 }
 
 impl ViewRefusal {
-    /// A host rendering failure with no known location. Carries no message text.
+    /// A no-view fallback with no known failure location. Carries no message text.
     pub fn render_failed() -> Self {
         Self::RenderFailed {
             mid: None,
@@ -395,7 +395,7 @@ impl ViewRefusal {
         }
     }
 
-    /// A mismatch between a host message and the plan's covered messages.
+    /// A no-view fallback with a known message, including a message-plan mismatch.
     pub fn render_failed_message(mid: impl Into<String>) -> Self {
         Self::RenderFailed {
             mid: Some(mid.into()),
@@ -404,8 +404,8 @@ impl ViewRefusal {
         }
     }
 
-    /// A part the host could not edit. The runner skips all replaces of this
-    /// part, even when `field` diagnoses one field (CONTRACT.md W6.6a).
+    /// A view served minus every replacement of this part, even when `field`
+    /// diagnoses one field. Never use for a no-view fallback (CONTRACT.md W6.6a).
     /// Field names are those accepted by `replace`, as with `bad_field`.
     pub fn render_failed_edit(
         mid: impl Into<String>,

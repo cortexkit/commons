@@ -201,6 +201,43 @@ fn samples() -> Vec<(&'static str, Value)> {
     };
     let mut samples = vec![
         (
+            "notice-render-failed-part-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(5, conditions.clone()).with_view_refused(
+                    7,
+                    ViewRefusal::render_failed_edit(
+                        "message-b",
+                        "part-b",
+                        Some("attachments".into()),
+                    ),
+                    true,
+                ),
+            ),
+        ),
+        (
+            "notice-render-failed-message-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(5, conditions.clone()).with_view_refused(
+                    7,
+                    ViewRefusal::render_failed_message("message-b"),
+                    true,
+                ),
+            ),
+        ),
+        (
+            "notice-render-failed-unlocated-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(5, conditions.clone()).with_view_refused(
+                    7,
+                    ViewRefusal::render_failed(),
+                    true,
+                ),
+            ),
+        ),
+        (
             "setup-limits-request.json",
             request(
                 ops::COMPACTION_SETUP,

@@ -1026,7 +1026,7 @@ What could mislead the model is a number in bytes the provider writes, such as a
 | `unknown_part` | `mid`, `part` | |
 | `stale_part` | `mid`, `part` | The part's `digest` differs from the edit's `expect`. |
 | `bad_field` | `mid`, `part`, `field` | The field does not exist for that kind, the value has the wrong shape, an attachment or delivered index does not exist or repeats, or the part is sealed or provider-executed (PR5). |
-| `render_failed` | `mid`, `part`, `field` (all optional) | The host could not render an accepted view while building a request. `mid` and `part` name the part it could not edit; optional `field` names `text`, `output`, `attachments`, `delivered` or `input.<name>`, as for `replace` and `bad_field`. `mid` alone means the host cannot account for a message: its request holds one the plan does not cover, or the reverse. With none of these fields, the host cannot locate the failure. No message text is included. Sent only in `view_refused`, to providers declaring `compaction-render-failed/v1` (W1.4). |
+| `render_failed` | `mid`, `part`, `field` (all optional) | The host could not render an accepted view while building a request. `mid` and `part` always mean this view version is served minus every replacement of that part; the runner reports this shape only when that is what it serves. Optional `field` names `text`, `output`, `attachments`, `delivered` or `input.<name>`, as for `replace` and `bad_field`, and only narrows the diagnosis. `mid` alone means no view is served and the host knows the message; with none of these fields, no view is served and the host cannot locate the failure. A no-view fallback never reports `mid` with `part`. No message text is included. Sent only in `view_refused`, to providers declaring `compaction-render-failed/v1` (W1.4). |
 | `conflict` | `mid`, `part` | Two edits cannot both hold: a drop and a replace of one part, or two replaces of one field. |
 | `running_tool` | `mid`, `part` | A tool still running cannot be dropped, replaced or cut. |
 | `unknown_anchor` | `mid` | An insert anchors before an entry not on the active path. |
@@ -1053,7 +1053,9 @@ never the skip. In particular, `output` and `attachments` are not retried or
 skipped independently. Only `replace` edits may be skipped by this rule. If
 this one-skip candidate still cannot be rendered or fails a provider rule,
 choose the no-view fallback at that same first failing step, rather than
-trying further skips.
+trying further skips. Decide which fallback will be served before reporting:
+send one report at this first failing step, with the shape of the fallback
+actually served, not a report for a one-skip candidate that was not served.
 
 If the failure names no replaceable part (`mid` alone or no location), the
 runner renders with no view, under the existing session, move and size rules.
@@ -1075,21 +1077,30 @@ are therefore not eligible. The runner still plans and checks the fallback
 with the session's rules, including PR2 and W6.1's stripping permission;
 fallback never authorizes an invalid request.
 
-The decision lasts for as long as that view version is applied. Do not retry
-the failing edit or accumulate different skips on later steps: unchanged
-transcript and request inputs must render the same bytes on every step. The
-runner stores the skipped part (or the no-view decision) durably with the
-applied view before sending a fallback request, so a restart uses the same
-decision. Keep the accepted view, version, checksum and edit `since` values
-unchanged; the fallback is separate runner state, not a rewritten view.
-Reverts still use W6.6 in addition to this recorded skip.
+The version's fallback record only moves forward: no skip, then a one-part
+skip, then no view; it may move directly from no skip to no view. If a later
+step cannot render the recorded one-part skip or it fails a provider rule,
+move to no view at that step, rather than trying another skip. Once a version
+has reached no view, never go back to serving that version as a view. Do not
+retry the failing edit or accumulate different skips on later steps:
+unchanged transcript and request inputs must render the same bytes on every
+step. The runner stores the skipped part (or the no-view decision) durably
+with the applied view before sending a fallback request, so a restart uses
+the same record. Keep the accepted view, version, checksum and edit `since`
+values unchanged; the fallback is separate runner state, not a rewritten
+view. Reverts still use W6.6 in addition to this recorded skip.
 
 The runner reports `view_refused` with `render_failed` in its next notice,
-once per view version, never once per step, and only when the provider declares
-`compaction-render-failed/v1`. It durably records that report with the fallback
-so restarting does not produce another report for the same version. The
-provider can then rebuild the view. A non-declaring provider receives no such
-report, but gets exactly the same fallback rendering.
+once per fallback state the version serves, at most twice per version, never
+once per step, and only when the provider declares
+`compaction-render-failed/v1`. Whenever no view is served, report `mid` alone
+when the message is known, or no location when it is not; never report `mid`
+with `part` (W6.5). A version that reported a one-part skip and later moves to
+no view records exactly one more report at that step for its next notice,
+in this message-only or unlocated shape. There is no third report. The runner
+durably records each report with its fallback state so restarting does not
+repeat it. The provider can then rebuild the view. A non-declaring provider
+receives no such report, but gets exactly the same fallback rendering.
 
 **W6.7 Rendering and size.** The runner renders each inserted image as an image part after the message's texts, in array order and in its host's own form. Like inserted texts, images get no tag number. A provider sends no view over 3 MiB (3,145,728 bytes) of JSON (V5); image fields, including their base64 data, count toward that limit.
 

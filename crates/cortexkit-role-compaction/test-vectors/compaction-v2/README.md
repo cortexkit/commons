@@ -26,6 +26,24 @@ are unchanged when count metadata is removed (W7).
 `view-rule-final-turn.json` is the `rule` refusal a runner sends for a view
 that removes the turn the request ends on (PR6).
 
+The `notice-render-failed-*-request.json` examples are independent notices to
+a provider declaring `compaction-render-failed/v1`, not three reports for one
+version (W6.5/W6.6a):
+
+- `notice-render-failed-part-request.json` means version 7 is served minus
+  every replacement of `message-b`'s `part-b`. The `attachments` field only
+  narrows the diagnosis; it does not narrow the skipped replacements.
+- `notice-render-failed-message-request.json` means no view is served for
+  version 7 and the runner knows the message (`message-b`).
+- `notice-render-failed-unlocated-request.json` means no view is served for
+  version 7 and the runner cannot locate the failure.
+
+The runner decides its first-step fallback before reporting, so a one-skip
+candidate that still fails uses one of the no-view shapes, never the part
+shape. A later escalation from a reported one-part skip to no view sends
+exactly one more report, also in one of the no-view shapes. No third report
+is sent, and non-declaring providers receive none of these reports.
+
 `setup-child-harness-request.json` names the harness for the next child on
 the same runner. `applied-view-attributed.json` carries the recorded applying
 module id; the older applied-view examples omit it. The signed-policy apply

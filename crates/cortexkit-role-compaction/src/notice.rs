@@ -210,7 +210,8 @@ impl NoticeRequest {
 
     /// Append a refusal notice, omitting `render_failed` unless the provider
     /// declares its capability. The runner still records its fallback and
-    /// reports each failed view version at most once (CONTRACT.md W6.6a).
+    /// reports each served fallback state once, at most twice per view version
+    /// (CONTRACT.md W6.6a).
     pub fn with_view_refused(
         mut self,
         version: u64,

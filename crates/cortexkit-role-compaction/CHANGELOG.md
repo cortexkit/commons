@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.3
+
+- Pin W6.5/W6.6a `render_failed` report shapes to the fallback actually served:
+  `mid` and `part` mean the view minus every replacement of that part;
+  message-only and unlocated reports mean no view. Decide the first-step
+  fallback before reporting, including when the one-skip candidate fails.
+- Replace once-per-version reporting with once per served fallback state,
+  at most twice: a later escalation from a one-part skip to no view sends
+  exactly one more message-only or unlocated report. The durable state only
+  moves forward and never returns from no view to a view. Reports remain
+  gated by `compaction-render-failed/v1`; wire fields are unchanged.
+- Add notice vectors for the one-part-skip, message-only no-view and unlocated
+  no-view report shapes, and align the refusal and notice builder documentation.
+
 ## 0.4.2
 
 - Add W6.5 `render_failed` on `view_refused` notices for host failures after a
