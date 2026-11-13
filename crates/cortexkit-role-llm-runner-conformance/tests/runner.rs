@@ -6647,7 +6647,7 @@ async fn host_code_on_system_fails_projection_by_name() {
     }))
     .await;
     assert!(failed(&report, "display_row_is_the_profile_projection")
-        .contains("host must be emitted only as true on a user or assistant part"));
+        .contains("host must be emitted only as true on a user, assistant or synthetic part"));
 }
 
 #[tokio::test]
@@ -9030,6 +9030,21 @@ async fn host_parts_read_only_facts_validate_without_display_history() {
                 "{mode}: {reason}"
             );
         }
+    }
+}
+
+#[tokio::test]
+async fn host_parts_synthetic_read_only_facts_accept_optional_codes() {
+    for mode in ["synthetic", "synthetic_code"] {
+        let mut subject = read_facts_subject(None);
+        subject.defects.display_host = Some(mode);
+        let report = run(&subject).await;
+        assert_eq!(
+            report.outcome("read_display_facts_opt_in_envelope"),
+            Some(&CaseOutcome::Passed),
+            "{mode}: {}",
+            report.render()
+        );
     }
 }
 

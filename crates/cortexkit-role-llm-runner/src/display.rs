@@ -300,6 +300,8 @@ impl ModelFallback {
 /// below choose default keys; they do not prescribe a serializer profile's keys.
 /// On a user or assistant row, `host: true` means host-written, never the
 /// sender's or model's words.
+/// Native `synthetic` rows are entirely host text, marked or not; marking is
+/// optional and useful only to attach a code.
 /// Shared projections never set it; runners opt in with [`Self::with_host`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -327,8 +329,9 @@ impl DisplayPart {
         }
     }
 
-    /// Mark a user- or assistant-entry part the host wrote, from exact recorded knowledge.
+    /// Mark a user, assistant or native synthetic part from exact recorded knowledge.
     /// Emit this fact only after every reader has shipped support (CONTRACT §4.7).
+    /// For synthetic parts, first have readers pass the synthetic host-code samples.
     pub fn with_host(mut self, host: bool) -> Self {
         match &mut self {
             Self::Text(part) | Self::Reasoning(part) => part.host = host,
@@ -398,6 +401,19 @@ pub mod host_codes {
     pub const INTERRUPTED_FOR_TOOL_USE: &str = "interrupted_for_tool_use";
     /// The exact host text represented by [`INTERRUPTED_FOR_TOOL_USE`].
     pub const INTERRUPTED_FOR_TOOL_USE_TEXT: &str = "[Request interrupted by user for tool use]\n";
+
+    /// OpenCode 2's native synthetic continuation after a cut stream.
+    pub const CONTINUED_AFTER_INTERRUPTION: &str = "continued_after_interruption";
+    /// Exact whole text for [`CONTINUED_AFTER_INTERRUPTION`], with no trailing newline.
+    pub const CONTINUED_AFTER_INTERRUPTION_TEXT: &str = "The previous response was interrupted. Continue from where you left off without repeating completed content.";
+    /// OpenCode 2's native synthetic continuation after an output-limit stop.
+    pub const CONTINUED_AFTER_OUTPUT_LIMIT: &str = "continued_after_output_limit";
+    /// Exact whole text for [`CONTINUED_AFTER_OUTPUT_LIMIT`], with no trailing newline.
+    pub const CONTINUED_AFTER_OUTPUT_LIMIT_TEXT: &str = "Your last response hit the output token limit (stop reason: length). Do not apologize, recap, or repeat yourself. Break the remaining work into smaller pieces.";
+    /// OpenCode 2's native synthetic continuation after a server restart.
+    pub const CONTINUED_AFTER_RESTART: &str = "continued_after_restart";
+    /// Exact whole text for [`CONTINUED_AFTER_RESTART`], with no trailing newline.
+    pub const CONTINUED_AFTER_RESTART_TEXT: &str = "The server restarted while you were working. Continue from where you left off without repeating completed work.";
 
     /// Bookkeeping parts written by the host's fallback-model plugin, not the model.
     pub const SERVER_FALLBACK: &str = "server_fallback";
@@ -495,7 +511,7 @@ impl<'de> Deserialize<'de> for DisplayPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct TextPart {
-    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
+    /// Host-written on a user, assistant or synthetic row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].
@@ -525,7 +541,7 @@ impl TextPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolCallPart {
-    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
+    /// Host-written on a user, assistant or synthetic row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].
@@ -593,7 +609,7 @@ pub struct ToolCallPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolResultPart {
-    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
+    /// Host-written on a user, assistant or synthetic row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].
@@ -672,7 +688,7 @@ pub mod projection_reasons {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct FilePart {
-    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
+    /// Host-written on a user, assistant or synthetic row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].
@@ -698,7 +714,7 @@ pub struct FilePart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct OtherPart {
-    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
+    /// Host-written on a user, assistant or synthetic row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].

@@ -161,9 +161,11 @@ where
             if read
                 .role
                 .as_deref()
-                .is_some_and(|role| !matches!(role, "user" | "assistant"))
+                .is_some_and(|role| !matches!(role, "user" | "assistant" | "synthetic"))
             {
-                return Err("host_parts are allowed only on a user or assistant entry".into());
+                return Err(
+                    "host_parts are allowed only on a user, assistant or synthetic entry".into(),
+                );
             }
             let projected = profile
                 .as_deref()

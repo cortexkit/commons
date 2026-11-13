@@ -27,6 +27,14 @@ a sender citation quotes only its resolved part, never its host neighbour.
 The `display::tests::host_parts_` and `host_parts_tag_read_` tests consume these
 cases; shared projections perform no marker detection.
 
+`display-synthetic-host-codes.json` pins an OpenCode 2 native `synthetic`
+continuation row, its read facts and its tag-read answer, all carrying
+`continued_after_interruption`. A system row with a code must be refused.
+Synthetic parts remain host text with or without marks. Runners emit these
+facts only after readers pass these samples; 0.8.47 readers refuse them.
+The `host_code` integration tests and conformance host-part tests consume
+these cases.
+
 `message-marks-retry.json` pins whole-object speaker comparison, changed notice
 and keep refusal fields, identical marks, and false/absent retry equivalence.
 The mark retry-identity unit test consumes these cases without hashing marks.

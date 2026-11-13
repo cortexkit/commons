@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.48
+
+- Allow optional host marks, read `host_parts` and tag-read host codes on native
+  `synthetic` rows, with the same shape, stored-key order and read/display
+  agreement rules as user and assistant rows. Every synthetic part remains
+  host text whether marked or not; other roles still refuse host facts.
+- Add OpenCode 2's `continued_after_interruption`, `continued_after_output_limit`
+  and `continued_after_restart` constants with exact v2.2.3 text bytes. Emit
+  these only for whole-text matches on native synthetic text parts, never
+  substrings, other roles or guesses. Unknown codes still fall back to text.
+- Require readers to pass the synthetic host-code samples before runners emit
+  these facts: 0.8.47 readers refuse them. Add display/read/tag-read samples
+  and a refused system-row code, with checksum and regression coverage.
+- Clarify that readers recognising display `run_status` keep streamed words,
+  reasoning and tool-input deltas unchanged: it withdraws nothing. Only
+  `display_reset` withdraws streamed words; unknown-event lenient decoding
+  still resets the live view.
+
 ## 0.8.47
 
 - Name `provider_error` as the required catch-all provider code when no named

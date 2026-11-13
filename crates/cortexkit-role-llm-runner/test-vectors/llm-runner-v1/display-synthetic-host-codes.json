@@ -1,0 +1,68 @@
+{
+  "profile": "opencode-v2",
+  "cases": [
+    {
+      "name": "native synthetic continuation after interruption",
+      "read": {
+        "ordinal": 0,
+        "mid": "continued-run",
+        "role": "synthetic",
+        "message": {
+          "id": "continued-run",
+          "type": "synthetic",
+          "text": "The previous response was interrupted. Continue from where you left off without repeating completed content."
+        },
+        "host_parts": [{"part": "0", "host_code": "continued_after_interruption"}]
+      },
+      "row": {
+        "role": "synthetic",
+        "text": "The previous response was interrupted. Continue from where you left off without repeating completed content.",
+        "parts": [{
+          "type": "text",
+          "part": "0",
+          "text": "The previous response was interrupted. Continue from where you left off without repeating completed content.",
+          "host": true,
+          "host_code": "continued_after_interruption"
+        }]
+      }
+    }
+  ],
+  "tag_read_answers": [
+    {
+      "name": "native synthetic continuation tag retains its code",
+      "answer": {
+        "entry": {
+          "ordinal": 0,
+          "mid": "continued-run",
+          "role": "synthetic",
+          "message": {
+            "id": "continued-run",
+            "type": "synthetic",
+            "text": "The previous response was interrupted. Continue from where you left off without repeating completed content."
+          },
+          "host_parts": [{"part": "0", "host_code": "continued_after_interruption"}]
+        },
+        "part": 0,
+        "host": true,
+        "host_code": "continued_after_interruption"
+      }
+    }
+  ],
+  "invalid_cases": [
+    {
+      "name": "system row refuses a host code",
+      "read": {
+        "ordinal": 1,
+        "mid": "system-note",
+        "role": "system",
+        "message": {"id": "system-note", "type": "system", "text": "Host note."},
+        "host_parts": [{"part": "0", "host_code": "continued_after_interruption"}]
+      },
+      "row": {
+        "role": "system",
+        "text": "Host note.",
+        "parts": [{"type": "text", "part": "0", "text": "Host note.", "host": true, "host_code": "continued_after_interruption"}]
+      }
+    }
+  ]
+}

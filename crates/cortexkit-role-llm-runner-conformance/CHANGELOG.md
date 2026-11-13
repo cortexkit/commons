@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.58
+
+- Pin the role contract to `=0.8.48`. Accept native synthetic host marks and
+  read host facts with optional codes, retaining positive-only display marks,
+  refusals on all other roles and read/display part-and-code agreement.
+- Exercise synthetic samples, mismatched marks/codes, system-row code refusal
+  and read-only facts with and without codes. Readers must pass the synthetic
+  host-code samples before runners emit them; 0.8.47 readers refuse them.
+
 ## 0.17.57
 
 - Pin the role contract to `=0.8.47`.

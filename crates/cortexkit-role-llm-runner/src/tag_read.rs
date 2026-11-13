@@ -128,7 +128,8 @@ impl TagReadAnswer {
     }
 
     /// Set both `host` and its presentation code from the same exact match.
-    /// Native `synthetic` rows carry no code. Unknown codes fall back to text.
+    /// Native `synthetic` rows may carry a code after readers pass the samples
+    /// (CONTRACT §4.7). Unknown codes fall back to text.
     pub fn with_host_code(mut self, code: impl Into<String>) -> Self {
         self.host = true;
         self.host_code = Some(code.into());

@@ -505,8 +505,10 @@ pub struct ReadMessage {
     /// One item per tool call, in call order, only with `include_display_facts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_times: Vec<ToolTime>,
-    /// Host-written user or assistant parts in stored part order, only with
-    /// `include_display_facts`. Keys, never indices; absent means none.
+    /// Host-written user, assistant or native synthetic parts in stored part order,
+    /// only with `include_display_facts`. Keys, never indices; absent means no marks.
+    /// Synthetic parts remain host text without marks; emit their facts only after
+    /// readers pass the synthetic host-code samples (CONTRACT §4.7).
     /// Validate against the entry's role and keys with [`Self::check_host_parts`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_parts: Vec<HostPart>,
@@ -517,7 +519,7 @@ pub struct ReadMessage {
     pub model_fallback: Option<crate::display::ModelFallback>,
 }
 
-/// A host-written part of a user or assistant entry. Listing its key is the host mark;
+/// A host-written part of a user, assistant or synthetic entry. Listing its key is the host mark;
 /// no separate `host` flag is needed. Outside stored bodies and all digests.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
@@ -801,13 +803,13 @@ impl ReadMessage {
     /// The opaque raw body cannot supply those keys without its serializer profile.
     pub fn check_host_parts(&self, role: &str, part_keys: &[&str]) -> Result<(), &'static str> {
         if !self.host_parts.is_empty()
-            && (!matches!(role, "user" | "assistant")
+            && (!matches!(role, "user" | "assistant" | "synthetic")
                 || self
                     .role
                     .as_deref()
-                    .is_some_and(|role| !matches!(role, "user" | "assistant")))
+                    .is_some_and(|role| !matches!(role, "user" | "assistant" | "synthetic")))
         {
-            return Err("host_parts are allowed only on a user or assistant entry");
+            return Err("host_parts are allowed only on a user, assistant or synthetic entry");
         }
         let mut previous = None;
         for fact in &self.host_parts {

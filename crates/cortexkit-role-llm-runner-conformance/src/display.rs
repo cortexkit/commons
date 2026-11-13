@@ -84,7 +84,7 @@ async fn display_page<R: RunnerRoute>(
 }
 
 /// Check emitted marks before decoding: readers accept false as absent, but
-/// runners emit only true, and only on parts of user or assistant rows.
+/// runners emit only true, and only on parts of user, assistant or synthetic rows.
 fn check_host_parts(page: &Value) -> Result<(), String> {
     for entry in page["messages"].as_array().into_iter().flatten() {
         let row = &entry["row"];
@@ -93,9 +93,14 @@ fn check_host_parts(page: &Value) -> Result<(), String> {
                 return Err("host_code requires host: true".into());
             }
             if let Some(host) = part.get("host") {
-                if host != true || !matches!(row["role"].as_str(), Some("user" | "assistant")) {
+                if host != true
+                    || !matches!(
+                        row["role"].as_str(),
+                        Some("user" | "assistant" | "synthetic")
+                    )
+                {
                     return Err(format!(
-                        "host must be emitted only as true on a user or assistant part, not on {} in {}",
+                        "host must be emitted only as true on a user, assistant or synthetic part, not on {} in {}",
                         part["part"], entry["mid"]
                     ));
                 }
@@ -226,22 +231,98 @@ mod host_parts_tests {
     use super::*;
 
     #[test]
-    fn host_parts_wire_marks_are_positive_and_user_or_assistant_only() {
-        for role in ["user", "assistant", "synthetic", "system", "tool", "skill"] {
+    fn host_parts_wire_marks_are_positive_and_only_on_supported_roles() {
+        for role in [
+            "user",
+            "assistant",
+            "synthetic",
+            "system",
+            "tool",
+            "skill",
+            "future_role",
+        ] {
             for host in [json!(true), json!(false), json!(null), json!("true")] {
                 let page = json!({"messages":[{"mid":"fixture", "row":{
                     "role":role, "parts":[{"type":"text", "part":"0", "text":"text", "host":host}]
                 }}]});
                 assert_eq!(
                     check_host_parts(&page).is_ok(),
-                    matches!(role, "user" | "assistant") && host == true,
+                    matches!(role, "user" | "assistant" | "synthetic") && host == true,
                     "role={role}, host={host}"
+                );
+            }
+            for code in ["future_notice_7", "future_code"] {
+                let coded = json!({"messages":[{"mid":"fixture", "row":{
+                    "role":role, "parts":[{"type":"text", "part":"0", "text":"text", "host":true, "host_code":code}]
+                }}]});
+                assert_eq!(
+                    check_host_parts(&coded).is_ok(),
+                    matches!(role, "user" | "assistant" | "synthetic"),
+                    "role={role}, code={code}"
                 );
             }
             let unmarked = json!({"messages":[{"mid":"fixture", "row":{
                 "role":role, "parts":[{"type":"text", "part":"0", "text":"text"}]
             }}]});
             assert!(check_host_parts(&unmarked).is_ok());
+        }
+    }
+
+    #[test]
+    fn host_parts_synthetic_display_accepts_optional_codes() {
+        for code in [
+            None,
+            Some("continued_after_interruption"),
+            Some("future_code"),
+        ] {
+            let mut part = json!({"type":"text", "part":"0", "text":display::host_codes::CONTINUED_AFTER_INTERRUPTION_TEXT, "host":true});
+            if let Some(code) = code {
+                part["host_code"] = json!(code);
+            }
+            let page = json!({"messages":[{"mid":"native-synthetic", "row":{
+                "role":"synthetic", "parts":[part]
+            }}]});
+            check_host_parts(&page).unwrap();
+        }
+    }
+
+    #[test]
+    fn host_parts_synthetic_samples_agree_and_system_codes_are_refused() {
+        let file: Value = serde_json::from_str(
+            cortexkit_role_llm_runner::vectors::file("display-synthetic-host-codes.json").unwrap(),
+        )
+        .unwrap();
+        for case in file["cases"].as_array().unwrap() {
+            let page = json!({"messages":[{"mid":case["read"]["mid"], "row":case["row"]}]});
+            check_host_parts(&page).unwrap();
+            let read: ReadMessage = serde_json::from_value(case["read"].clone()).unwrap();
+            let row = serde_json::from_value(case["row"].clone()).unwrap();
+            let shown = DisplayEntry::new(read.ordinal, &read.mid, 0, row);
+            host_agreement(&read, &shown).unwrap();
+            let mut mismatched = read.clone();
+            mismatched.host_parts[0].host_code = Some("future_code".into());
+            assert!(host_agreement(&mismatched, &shown)
+                .unwrap_err()
+                .contains("host_parts disagree"));
+            mismatched.host_parts.clear();
+            assert!(host_agreement(&mismatched, &shown)
+                .unwrap_err()
+                .contains("host_parts disagree"));
+            let unmarked = DisplayEntry::new(
+                read.ordinal,
+                &read.mid,
+                0,
+                display::project(file["profile"].as_str().unwrap(), &read.message, None).unwrap(),
+            );
+            assert!(host_agreement(&read, &unmarked)
+                .unwrap_err()
+                .contains("host_parts disagree"));
+        }
+        for case in file["invalid_cases"].as_array().unwrap() {
+            let page = json!({"messages":[{"mid":case["read"]["mid"], "row":case["row"]}]});
+            assert!(check_host_parts(&page)
+                .unwrap_err()
+                .contains("host must be emitted only as true"));
         }
     }
 }

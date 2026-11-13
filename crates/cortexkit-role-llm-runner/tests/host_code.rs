@@ -312,7 +312,7 @@ fn host_parts_validate_key_order_role_and_shape_without_parsing_opaque_body() {
     assert!(entry.check_host_parts("user", &["part-b"]).is_err());
     assert!(entry
         .clone()
-        .with_role("synthetic")
+        .with_role("system")
         .check_host_parts("user", &["part-b", "part-z"])
         .is_err());
     let empty = entry.with_host_parts(vec![]);
@@ -338,21 +338,169 @@ fn host_parts_assistant_role_validates_and_other_roles_are_refused() {
         .with_role("assistant")
         .with_host_parts(vec![HostPart::new("0")]);
     entry.check_host_parts("assistant", &["0"]).unwrap();
-    for role in ["system", "tool", "developer", "synthetic", "future_role"] {
-        assert!(entry.check_host_parts(role, &["0"]).is_err(), "{role}");
-        assert!(
-            entry
-                .clone()
-                .with_role(role)
-                .check_host_parts("assistant", &["0"])
-                .is_err(),
-            "{role}"
-        );
+    for fact in [
+        HostPart::new("0"),
+        HostPart::new("0").with_host_code("future_code"),
+    ] {
+        let entry = entry.clone().with_host_parts(vec![fact]);
+        for role in ["system", "tool", "developer", "skill", "future_role"] {
+            assert!(entry.check_host_parts(role, &["0"]).is_err(), "{role}");
+            assert!(
+                entry
+                    .clone()
+                    .with_role(role)
+                    .check_host_parts("assistant", &["0"])
+                    .is_err(),
+                "{role}"
+            );
+        }
     }
     entry
         .with_host_parts(vec![])
         .check_host_parts("system", &["0"])
         .unwrap();
+}
+
+#[test]
+fn host_parts_synthetic_accepts_optional_codes_and_validates_stored_keys() {
+    for code in [
+        None,
+        Some("continued_after_interruption"),
+        Some("future_code"),
+    ] {
+        let mut fact = HostPart::new("part-b");
+        if let Some(code) = code {
+            fact = fact.with_host_code(code);
+        }
+        let entry = ReadMessage::new(1, "native-synthetic", json!({"type":"synthetic"}))
+            .with_role("synthetic")
+            .with_host_parts(vec![fact.clone(), HostPart::new("part-z")]);
+        entry
+            .check_host_parts("synthetic", &["part-a", "part-b", "part-z"])
+            .unwrap();
+        entry
+            .clone()
+            .with_role("user")
+            .check_host_parts("synthetic", &["part-b", "part-z"])
+            .unwrap();
+        entry
+            .check_host_parts("user", &["part-b", "part-z"])
+            .unwrap();
+        assert!(entry.check_host_parts("synthetic", &["part-b"]).is_err());
+        assert!(entry
+            .check_host_parts("synthetic", &["part-z", "part-b"])
+            .is_err());
+        assert!(entry
+            .clone()
+            .with_host_parts(vec![fact.clone(), fact])
+            .check_host_parts("synthetic", &["part-b", "part-z"])
+            .is_err());
+        let raw = serde_json::to_value(&entry).unwrap();
+        assert_eq!(serde_json::from_value::<ReadMessage>(raw).unwrap(), entry);
+    }
+}
+
+#[test]
+fn host_code_synthetic_samples_keep_read_display_and_tag_marks_equal() {
+    let file: Value = serde_json::from_str(include_str!(
+        "../test-vectors/llm-runner-v1/display-synthetic-host-codes.json"
+    ))
+    .unwrap();
+    for case in file["cases"].as_array().unwrap() {
+        let coded: ReadMessage = serde_json::from_value(case["read"].clone()).unwrap();
+        let row: DisplayRow = serde_json::from_value(case["row"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(&coded).unwrap(), case["read"]);
+        assert_eq!(serde_json::to_value(&row).unwrap(), case["row"]);
+        assert_eq!(
+            row.parts[0].host_code(),
+            Some(host_codes::CONTINUED_AFTER_INTERRUPTION)
+        );
+        assert_eq!(
+            row.text.as_bytes(),
+            host_codes::CONTINUED_AFTER_INTERRUPTION_TEXT.as_bytes()
+        );
+        let projected =
+            display::project(file["profile"].as_str().unwrap(), &coded.message, None).unwrap();
+        assert_eq!(projected.role, "synthetic");
+        assert!(projected.parts.iter().all(|part| !part.host()));
+        for mark in [None, Some(false), Some(true)] {
+            let mut entry = coded.clone();
+            let mut shown = projected.clone();
+            if let Some(with_code) = mark {
+                entry.host_parts = vec![if with_code {
+                    HostPart::new("0").with_host_code(host_codes::CONTINUED_AFTER_INTERRUPTION)
+                } else {
+                    HostPart::new("0")
+                }];
+                shown.parts[0] = if with_code {
+                    shown.parts[0]
+                        .clone()
+                        .with_host_code(host_codes::CONTINUED_AFTER_INTERRUPTION)
+                } else {
+                    shown.parts[0].clone().with_host(true)
+                };
+            } else {
+                entry.host_parts.clear();
+            }
+            let keys: Vec<&str> = shown.parts.iter().map(DisplayPart::part).collect();
+            entry.check_host_parts(&shown.role, &keys).unwrap();
+            let marked: Vec<HostPart> = shown
+                .parts
+                .iter()
+                .filter(|part| part.host())
+                .map(|part| {
+                    let fact = HostPart::new(part.part());
+                    match part.host_code() {
+                        Some(code) => fact.with_host_code(code),
+                        None => fact,
+                    }
+                })
+                .collect();
+            assert_eq!(entry.host_parts, marked);
+            if mark == Some(true) {
+                assert_eq!(shown, row);
+            }
+            assert_eq!(shown.text, row.text);
+            assert_eq!(entry.message, coded.message);
+        }
+    }
+    for case in file["tag_read_answers"].as_array().unwrap() {
+        let answer: TagReadAnswer = serde_json::from_value(case["answer"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(&answer).unwrap(), case["answer"]);
+        assert_eq!(answer.entry.role.as_deref(), Some("synthetic"));
+        assert_eq!(
+            answer.host_code.as_deref(),
+            Some(host_codes::CONTINUED_AFTER_INTERRUPTION)
+        );
+        assert_eq!(
+            TagReadAnswer::new(answer.entry.clone(), answer.part)
+                .with_host_code(host_codes::CONTINUED_AFTER_INTERRUPTION),
+            answer
+        );
+    }
+    for case in file["invalid_cases"].as_array().unwrap() {
+        let entry: ReadMessage = serde_json::from_value(case["read"].clone()).unwrap();
+        assert!(entry.check_host_parts("system", &["0"]).is_err());
+    }
+}
+
+#[test]
+fn host_code_opencode_continuation_constants_pin_exact_bytes() {
+    for (code, expected_code, text, expected_text) in [
+        (host_codes::CONTINUED_AFTER_INTERRUPTION, "continued_after_interruption",
+         host_codes::CONTINUED_AFTER_INTERRUPTION_TEXT,
+         b"The previous response was interrupted. Continue from where you left off without repeating completed content.".as_slice()),
+        (host_codes::CONTINUED_AFTER_OUTPUT_LIMIT, "continued_after_output_limit",
+         host_codes::CONTINUED_AFTER_OUTPUT_LIMIT_TEXT,
+         b"Your last response hit the output token limit (stop reason: length). Do not apologize, recap, or repeat yourself. Break the remaining work into smaller pieces.".as_slice()),
+        (host_codes::CONTINUED_AFTER_RESTART, "continued_after_restart",
+         host_codes::CONTINUED_AFTER_RESTART_TEXT,
+         b"The server restarted while you were working. Continue from where you left off without repeating completed work.".as_slice()),
+    ] {
+        assert_eq!(code, expected_code);
+        assert_eq!(text.as_bytes(), expected_text);
+        host_codes::check(true, Some(code)).unwrap();
+    }
 }
 
 #[test]

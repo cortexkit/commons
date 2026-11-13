@@ -33,6 +33,10 @@ pub const FILES: &[(&str, &str)] = &[
         include_str!("../test-vectors/llm-runner-v1/display-host-parts.json"),
     ),
     (
+        "display-synthetic-host-codes.json",
+        include_str!("../test-vectors/llm-runner-v1/display-synthetic-host-codes.json"),
+    ),
+    (
         "host-start.json",
         include_str!("../test-vectors/llm-runner-v1/host-start.json"),
     ),

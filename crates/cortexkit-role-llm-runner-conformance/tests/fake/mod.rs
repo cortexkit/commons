@@ -4921,6 +4921,14 @@ impl Module {
             .iter()
             .map(|m| {
                 let mut entry = self.read_message(sess, m);
+                if matches!(
+                    self.world.defects.display_host,
+                    Some("synthetic" | "synthetic_code")
+                ) && m.body["role"] == "user"
+                {
+                    entry.role = Some("synthetic".into());
+                    entry.message["role"] = json!("synthetic");
+                }
                 if self.world.defects.display_host.is_some()
                     && matches!(m.body["role"].as_str(), Some("user" | "assistant"))
                 {
@@ -4976,6 +4984,7 @@ impl Module {
                             let fact = cortexkit_role_llm_runner::read::HostPart::new(key);
                             entry.host_parts = vec![match mode {
                                 "code" => fact.with_host_code("interrupted"),
+                                "synthetic_code" => fact.with_host_code("future_synthetic_note"),
                                 "code_mismatch" => fact.with_host_code("future_notice"),
                                 "code_bad_shape" => fact.with_host_code("Bad"),
                                 _ => fact,

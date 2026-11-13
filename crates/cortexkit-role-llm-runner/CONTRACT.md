@@ -706,8 +706,8 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   per-call facts, never invent a time, omit absent members, and decode
   `unanswered` as an open string. An entry with no calls omits `tool_times`.
 - [pinned] `host_parts?: [{part: string, host_code?: string}]`
-  (`read::HostPart`, added in 0.8.33, widened in 0.8.46) lists host-written
-  parts of a `user` or `assistant` entry in stored part order, served only
+  (`read::HostPart`, added in 0.8.33, widened in 0.8.46 and 0.8.48) lists host-written
+  parts of a `user`, `assistant` or native `synthetic` entry in stored part order, served only
   with `include_display_facts`, like
   `tool_times`. `part` is the stored part key, never an index. Each key occurs
   once and must belong to that entry; a stray key is invalid, just as a
@@ -732,8 +732,10 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   `host_code`, exactly when `host_parts` lists its key. A reader projecting
   raw entries itself applies the fact to the projected part with that key,
   never by index. Shared projections cannot reproduce runner knowledge.
-  Native `synthetic` entries carry no `host_parts` and no code; their role
-  already identifies host text. These facts change neither body bytes nor
+  Native `synthetic` entries may carry `host_parts` with optional codes;
+  marking is optional and adds no meaning because their role already
+  identifies every part as host text, marked or not. A runner marks a
+  synthetic part only to attach a code. These facts change neither body bytes nor
   identity, digests, tag numbering, compaction, grants or `client_message_id`
   matching.
 - [pinned] `call_key` and `schema_pin` (added in 0.7.43) appear only on a
@@ -1586,17 +1588,22 @@ display-ready row for an app's reader on a runner declaring
   text parts as `run.result` does (§6). Media is described by the
   `media_ref` descriptors mode serves (§4.2), never inlined; a URL stays a
   URL.
-- [pinned] **Host-written user and assistant parts (added in 0.8.32, widened
-  in 0.8.46).** Any display part of a `user` or `assistant` entry may carry
-  `host: true`: the host wrote that part, not the sender or model. Absent
-  means the sender's or model's part; readers accept `false` as absent,
+- [pinned] **Host-written parts (added in 0.8.32, widened
+  in 0.8.46 and 0.8.48).** Any display part of a `user`, `assistant` or native
+  `synthetic` entry may carry `host: true`: the host wrote that part, not the
+  sender or model. On user and assistant entries, absent means the sender's
+  or model's part; readers accept `false` as absent,
   and runners serialize the member only when true. It is per part, never a
   list of indices: projection can replace or drop stored parts. The fact
   follows the stored part's key even when its display representation changes.
   A runner never sets the member on any other role; validation refuses it.
   OpenCode 2's native
   `synthetic` row already identifies host text by role; it keeps that role
-  and needs no `host` member. `system` and `skill` keep their native roles too.
+  and needs no `host` member. Marking is optional and adds no meaning:
+  readers treat every part as host text whether or not it is marked. A runner
+  marks a synthetic part only to attach a code. `system` and `skill` keep
+  their native roles too and, like every role except `user`, `assistant` and
+  `synthetic`, refuse host facts.
 - [pinned] A host part may also carry `host_code?: string` (added in 0.8.33),
   serialized only when set and valid only beside `host: true`. The string is
   1–64 bytes of lowercase ASCII letters, digits and `_`. The vocabulary is
@@ -1619,7 +1626,16 @@ display-ready row for an app's reader on a runner declaring
   `SERVER_FALLBACK_USAGE_PREFIX` (`cortexkit-server-fallback-usage-v1:`) for
   usage. These constants match only the start of a signed reasoning part's
   signature, not its text (one or two invisible U+2060 characters).
-  Native `synthetic` rows carry no code.
+  `CONTINUED_AFTER_INTERRUPTION` (`continued_after_interruption`),
+  `CONTINUED_AFTER_OUTPUT_LIMIT` (`continued_after_output_limit`) and
+  `CONTINUED_AFTER_RESTART` (`continued_after_restart`) identify OpenCode 2's
+  continuation rows, written when it resumes after a cut stream, an output-limit
+  stop or a server restart. Their matching `*_TEXT` constants contain OpenCode
+  v2.2.3's exact text bytes with no trailing newline. A runner sets one of these
+  codes only on the text part of a native `synthetic` row whose whole text
+  equals that code's `*_TEXT` byte for byte: never on a substring, never on
+  another role, never from a guess. The vocabulary stays open; readers fall
+  back to the text for an unknown code.
 - [pinned] Readers draw a host part as a host note or hide it, never as the
   sender's or model's words, including on an assistant row. A reader quoting
   a user entry as the person's words MUST omit host parts; a reader quoting
@@ -1674,7 +1690,10 @@ display-ready row for an app's reader on a runner declaring
   (verified words), the phone and desktop apps through Occipital, and Magic
   Context if its compaction views quote user or assistant text. No runner
   emits these facts on assistant rows until those readers have posted that
-  their support is live. Occipital's readiness
+  their support is live. Runners emit host facts on native `synthetic` rows
+  only after readers pass the synthetic host-code samples in
+  `test-vectors/llm-runner-v1/display-synthetic-host-codes.json`:
+  0.8.47 readers refuse those facts. Occipital's readiness
   depends on applying the read `host_parts` fact, not on decoding the display
   row member: its readers project raw entries themselves (§4.2.2).
   Unknown-member tolerance
@@ -3030,7 +3049,12 @@ new members.
   the head. It carries the run's current `awaits` when there is one; no
   `awaits` means the wait ended. It carries no durable record and no cursor,
   and a reader may miss it. `session.head` and `run.status` remain the record.
+  A reader that recognises `run_status` leaves the live view unchanged:
+  streamed words, reasoning and tool-input deltas stand, because `run_status`
+  withdraws nothing; only `display_reset` withdraws streamed words.
   Readers that do not recognise it treat it as an unknown display event.
+  That reader's lenient decoding resets the live view, which is why recognising
+  `run_status` matters.
 - [pinned] `display_reset` resets only the display lane: live words,
   reasoning and tool-input deltas. Durable control state a reader has
   applied stands across it: stored messages, running and finished tool
@@ -4434,14 +4458,14 @@ Opaque per-part identities are carried by `part_digests` or, for an
   message identity and never substitutes for it. Resolve against that request,
   never today's numbering.
 - [pinned] A tag CAN resolve to a host-written part: `host` does not change
-  numbering or lookup. Host parts of user and assistant entries are allowed.
+  numbering or lookup. Host parts of user, assistant and native synthetic entries are allowed.
   Such an answer is not a citation of the person's or model's words.
   The runner sets answer-level `host: true` when the resolved part is
   host-written, using the same exact knowledge and readers-first rollout as
   display parts (§4.7), including when the entry's native role is `synthetic`.
   The optional answer-level `host_code` follows the same shape, validity,
-  exact-match and text-fallback rules as a display part's code. It is absent
-  for native `synthetic` rows. `TagReadAnswer::with_host_code` sets both
+  exact-match and text-fallback rules as a display part's code, including on
+  native `synthetic` rows. `TagReadAnswer::with_host_code` sets both
   `host: true` and the code; `with_host(false)` clears both. The code never
   changes the resolved bytes or what the tag names.
   It is absent otherwise; readers accept `false` as absent, and runners emit
