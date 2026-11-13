@@ -171,10 +171,13 @@ pub struct CatalogRunner {
     pub starts_sessions: bool,
 }
 
-/// A subscription account the provider allocates.
+/// A vault account the provider allocates.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CatalogAccount {
     pub provider: String,
+    /// Catalog providers named by the vault at credential creation. Only
+    /// `method == "gateway"` makes these borrowed-row sources for gateway routes.
+    pub serves: Vec<String>,
     pub account_id: String,
     pub credential_id: String,
     pub method: String,

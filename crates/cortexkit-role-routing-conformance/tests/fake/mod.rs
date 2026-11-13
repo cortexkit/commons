@@ -17,11 +17,13 @@
 
 mod continuation;
 mod extensions;
+#[cfg(test)]
+mod gateway_catalog;
 mod placement;
 mod select_engine;
 
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -84,6 +86,10 @@ pub struct Defects {
     pub continue_changed_question: bool,
     pub continue_unknown_now: bool,
     pub continue_undeclared: bool,
+    pub continue_signed_out_offer: bool,
+    pub continue_signed_out_fresh: bool,
+    pub continue_signed_out_no_spare: bool,
+    pub continue_signed_out_undeclared: bool,
     pub tier_ineligible_account: bool,
     pub tier_skips_fast_fallback: bool,
     pub tier_absent_is_fast: bool,
@@ -296,6 +302,10 @@ struct State {
     ineligible: Vec<(String, Option<String>)>,
     consumers: Vec<ConsumerConfig>,
     catalog: Option<Catalog>,
+    /// Gateway provider id to its resolved catalog provider, before route expansion.
+    gateway_sources: BTreeMap<String, String>,
+    /// Filtered route views must not be expanded again and regain removed routes.
+    catalog_resolved: bool,
     declarations: BTreeMap<String, (Option<String>, DemandDefaults)>,
     /// (project, consumer) to pin.
     project_pins: HashMap<(String, String), String>,
@@ -318,6 +328,7 @@ struct State {
     hold_limits: HashMap<String, (u64, u64)>,
     /// Account id to the end of its blocking window; `None` when unknown.
     blocks: HashMap<String, Option<u64>>,
+    signed_out_credentials: Vec<String>,
     /// (route key, account id) to the end of a report fence.
     fences: HashMap<(String, String), u64>,
     /// Decision id to the account index its account_for named.
@@ -405,6 +416,7 @@ pub struct FakeSubject {
     extensions: bool,
     panel_calls: Arc<std::sync::atomic::AtomicUsize>,
     continue_control: bool,
+    signed_out_control: bool,
     service_tier_control: bool,
     state: Arc<Mutex<State>>,
     defects: Defects,
@@ -433,6 +445,12 @@ impl FakeSubject {
             ..Self::new(defects)
         }
     }
+    pub fn without_signed_out_control(defects: Defects) -> Self {
+        Self {
+            signed_out_control: false,
+            ..Self::new(defects)
+        }
+    }
     pub fn without_service_tier(defects: Defects) -> Self {
         Self {
             service_tier_control: false,
@@ -446,6 +464,7 @@ impl FakeSubject {
             extensions: true,
             panel_calls: Arc::default(),
             continue_control: true,
+            signed_out_control: true,
             state: Arc::new(Mutex::new(State::default())),
             service_tier_control: true,
             defects,
@@ -541,7 +560,20 @@ impl RoutingSubject for FakeSubject {
     }
 
     async fn configure_catalog(&self, catalog: &Catalog) -> Result<(), String> {
-        self.state.lock().unwrap().catalog = Some(catalog.clone());
+        let mut catalog = catalog.clone();
+        if self.defects.extension == Some("gateway_serves_ambiguous") {
+            // This faulty resolver chooses the first provider instead of
+            // leaving a gateway with ambiguous serves unresolved.
+            for account in &mut catalog.accounts {
+                if account.method == "gateway" && account.serves.len() > 1 {
+                    account.serves.truncate(1);
+                }
+            }
+        }
+        let mut state = self.state.lock().unwrap();
+        state.gateway_sources = FakeRoute::gateway_sources(&catalog);
+        state.catalog_resolved = false;
+        state.catalog = Some(catalog);
         Ok(())
     }
 
@@ -587,6 +619,7 @@ impl RoutingSubject for FakeSubject {
         state.continue_credentials = credentials.to_vec();
         state.catalog.as_mut().unwrap().accounts =
             credentials.iter().map(|c| c.account.clone()).collect();
+        state.gateway_sources = FakeRoute::gateway_sources(state.catalog.as_ref().unwrap());
         Ok(())
     }
 
@@ -765,6 +798,7 @@ impl RoutingSubject for FakeSubject {
             extensions: self.extensions,
             panel_calls: Arc::clone(&self.panel_calls),
             continue_control: self.continue_control,
+            signed_out_control: self.signed_out_control,
             service_tier_control: self.service_tier_control,
             state: Arc::clone(&self.state),
             defects: self.defects,
@@ -785,6 +819,7 @@ pub struct FakeRoute {
     extensions: bool,
     panel_calls: Arc<std::sync::atomic::AtomicUsize>,
     continue_control: bool,
+    signed_out_control: bool,
     service_tier_control: bool,
     state: Arc<Mutex<State>>,
     defects: Defects,
@@ -864,12 +899,70 @@ impl FakeRoute {
         &self.stamp.principal
     }
 
+    fn gateway_source<'a>(catalog: &'a Catalog, provider: &str) -> Option<&'a str> {
+        if catalog
+            .models
+            .iter()
+            .any(|model| model.provider == provider)
+        {
+            return None;
+        }
+        let serves: BTreeSet<_> = catalog
+            .accounts
+            .iter()
+            .filter(|account| account.provider == provider && account.method == "gateway")
+            .flat_map(|account| account.serves.iter().map(String::as_str))
+            .collect();
+        if serves.len() != 1 {
+            return None;
+        }
+        let served = *serves.first()?;
+        catalog
+            .models
+            .iter()
+            .any(|model| model.provider == served)
+            .then_some(served)
+    }
+
     fn catalog(state: &State) -> Catalog {
-        state.catalog.clone().unwrap_or(Catalog {
+        let mut catalog = state.catalog.clone().unwrap_or(Catalog {
             models: vec![],
             runners: vec![],
             accounts: vec![],
-        })
+        });
+        if state.catalog_resolved {
+            return catalog;
+        }
+        let mut routes = Vec::new();
+        for (gateway, served) in &state.gateway_sources {
+            for model in catalog
+                .models
+                .iter()
+                .filter(|model| &model.provider == served)
+            {
+                let mut route = model.clone();
+                route.provider = gateway.to_owned();
+                routes.push(route);
+            }
+        }
+        catalog.models.extend(routes);
+        catalog
+    }
+
+    fn gateway_sources(catalog: &Catalog) -> BTreeMap<String, String> {
+        let gateways: BTreeSet<_> = catalog
+            .accounts
+            .iter()
+            .filter(|account| account.method == "gateway")
+            .map(|account| account.provider.as_str())
+            .collect();
+        gateways
+            .into_iter()
+            .filter_map(|gateway| {
+                Self::gateway_source(catalog, gateway)
+                    .map(|served| (gateway.to_owned(), served.to_owned()))
+            })
+            .collect()
     }
 
     fn describe(&self, state: &State) -> Result<Value, Refusal> {
@@ -929,6 +1022,9 @@ impl FakeRoute {
         }
         if self.continue_control {
             describe = describe.with_capability("account_continue");
+            if self.signed_out_control {
+                describe = describe.with_capability("account_continue_signed_out");
+            }
         }
         if !self.fault("warm_credential_without_group")
             && !self.fault("warm_credential_undeclared_refused")
@@ -1076,41 +1172,32 @@ impl FakeRoute {
             .runner_route_facts
             .iter()
             .find(|facts| facts.route_key == model.route_key());
-        let gateway = route_facts.is_some_and(|facts| facts.auth_method == "gateway");
-        let credential_provider = state
-            .catalog
-            .as_ref()
-            .and_then(|catalog| {
-                catalog
-                    .accounts
-                    .iter()
-                    .find(|account| {
-                        if gateway {
-                            account.method == "gateway"
-                        } else {
-                            account.provider == model.provider
-                        }
-                    })
-                    .map(|account| &account.provider)
-            })
-            .unwrap_or(&model.provider);
-        // Gateway credentials can serve another provider's rows. Other
-        // credential methods retain their own provider identity for limits.
+        let served_provider = state
+            .gateway_sources
+            .get(&model.provider)
+            .map(String::as_str);
+        let gateway = served_provider.is_some();
+        // Gateway route keys retain the credential's provider; only the
+        // allow-list comparison uses the provider of the borrowed catalog row.
         let provider = if gateway
             && !(self.fault("runner_gateway_explicit_providers")
                 || (declaration.harness_limits.is_some()
                     && harness.is_some()
                     && self.fault("gateway_explicit_providers_harness")))
         {
-            &model.provider
+            if self.fault("gateway_explicit_providers_spelling") {
+                model.provider.split('-').next().unwrap()
+            } else {
+                served_provider.unwrap()
+            }
         } else {
-            credential_provider
+            &model.provider
         };
         limits.explicit_providers.as_ref().is_none_or(|providers| {
-            providers.contains(provider)
+            providers.iter().any(|allowed| allowed == provider)
                 || (gateway
                     && self.fault("gateway_explicit_providers_alias")
-                    && providers.contains(credential_provider))
+                    && providers.contains(&model.provider))
         }) && route_facts.map_or_else(
             || self.fault("runner_requires_wire_api") || declaration.admits_row(serves_wire_api),
             |facts| {
@@ -2144,20 +2231,19 @@ impl FakeRoute {
                 reset => Refusal::account_pool_exhausted(reset),
             });
         }
-        let gateway = state.runner_route_facts.iter().any(|facts| {
-            facts.route_key == format!("{}/{}", request.provider, request.model)
-                && facts.auth_method == "gateway"
-        });
+        let gateway = state.gateway_sources.contains_key(&request.provider);
         let usable: Vec<usize> = catalog
             .accounts
             .iter()
             .enumerate()
             .filter(|(_, account)| {
-                if gateway {
-                    account.method == "gateway"
-                } else {
-                    account.provider == request.provider
-                }
+                account.provider == request.provider && (!gateway || account.method == "gateway")
+            })
+            .filter(|(_, account)| {
+                self.defects.continue_signed_out_fresh
+                    || !state
+                        .signed_out_credentials
+                        .contains(&account.credential_id)
             })
             .filter(|(_, account)| {
                 !state.ineligible.iter().any(|(credential, model)| {

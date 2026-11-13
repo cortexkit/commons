@@ -17,6 +17,20 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 }
             )));
         }
+        let signed_out = name.starts_with("continue_signed_out");
+        let signed_out_undeclared = name == "continue_signed_out_undeclared_refuses_window";
+        if signed_out
+            && describe.serves(capabilities::ACCOUNT_CONTINUE_SIGNED_OUT) == signed_out_undeclared
+        {
+            return Ok(Ending::NotApplicable(format!(
+                "role.describe {} account_continue_signed_out",
+                if signed_out_undeclared {
+                    "declares"
+                } else {
+                    "does not declare"
+                }
+            )));
+        }
         let mut request = ContinueRequest::new(
             "continue-run",
             "continue-admission",
@@ -25,19 +39,27 @@ impl<S: RoutingSubject> Suite<'_, S> {
             ExhaustedAccount::new("credential-1", "account-1", "five_hour", now_ms()),
             "continue-selection",
         );
-        if undeclared {
+        if signed_out {
+            request.exhausted.limit_window = "signed_out".into();
+        }
+        if undeclared || signed_out_undeclared {
             let runner = self.route_as(fixture::RUNNER_ONE).await?;
             let refusal = refused(
                 &runner,
                 ops::ROUTE_ACCOUNT_FOR,
                 &serde_json::to_value(&request).unwrap(),
                 RefusalCode::InvalidRequest,
-                "undeclared continuation mode",
+                "undeclared continuation capability",
             )
             .await?;
-            if refusal.detail.get("field") != Some(&json!("mode")) {
+            let field = if signed_out_undeclared {
+                "exhausted.limit_window"
+            } else {
+                "mode"
+            };
+            if refusal.detail.get("field") != Some(&json!(field)) {
                 return Err(format!(
-                    "undeclared mode refusal did not name mode: {refusal}"
+                    "undeclared capability refusal did not name {field}: {refusal}"
                 ));
             }
             return Ok(Ending::Passed);
@@ -100,6 +122,10 @@ impl<S: RoutingSubject> Suite<'_, S> {
             now_ms(),
         )
         .with_resets_at_ms(now_ms() + 300_000);
+        if signed_out {
+            request.exhausted.limit_window = "signed_out".into();
+            request.exhausted.resets_at_ms = None;
+        }
         if name == "continue_credit_window_refused" {
             request.exhausted.limit_window = "credit".into();
             request.exhausted.resets_at_ms = None;
@@ -163,6 +189,54 @@ impl<S: RoutingSubject> Suite<'_, S> {
                     && c.account.account_id == offer.account
             })
             .ok_or("offer is not a seeded credential/account pair")?;
+        if signed_out {
+            if offer.account == request.exhausted.account {
+                return Err("offer names the signed-out account".into());
+            }
+            if offered.account.provider != original.account.provider
+                || offered.account.method != original.account.method
+                || !offered.models.contains(&selected.route.model)
+                || offer.account == "account-6"
+            {
+                return Err("signed-out offer changes provider, auth method or model, or names a held account".into());
+            }
+            if offer.decision_id.is_empty()
+                || offer.decision_id == request.previous_decision_id
+                || offer.valid_until_ms <= now_ms()
+            {
+                return Err("signed-out offer must name a new decision and future deadline".into());
+            }
+            // A new conversation avoids replaying the original admission or its affinity.
+            let fresh: AccountForAnswer = answer(
+                &runner,
+                ops::ROUTE_ACCOUNT_FOR,
+                &Self::account_for("signed-out-fresh", "signed-out-fresh", "model-c"),
+                "fresh admission after signed-out continuation",
+            )
+            .await?;
+            if fresh.account.account_id == request.exhausted.account
+                || fresh.account.credential_id == request.exhausted.credential_id
+            {
+                return Err("fresh admission names the signed-out credential".into());
+            }
+            // Remove every spare without pre-blocking the signed-out account:
+            // the signed-out evidence must exclude that account.
+            self.subject
+                .configure_continue_credentials(std::slice::from_ref(original))
+                .await?;
+            request.selection_id = "signed-out-no-spare".into();
+            let no_spare: ContinueAnswer = answer(
+                &runner,
+                ops::ROUTE_ACCOUNT_FOR,
+                &serde_json::to_value(&request).unwrap(),
+                "signed-out continuation without a compatible spare",
+            )
+            .await?;
+            if matches!(no_spare, ContinueAnswer::Offer(_)) {
+                return Err("signed-out continuation without a spare must hold or refuse".into());
+            }
+            return Ok(Ending::Passed);
+        }
         match name {
             "continue_offer_excludes_exhausted_account"
                 if offer.account == request.exhausted.account =>

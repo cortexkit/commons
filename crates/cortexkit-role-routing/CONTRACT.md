@@ -165,10 +165,20 @@ That group's additive defaults, attested namespace and selector rules are in §1
   or plain HTTP only to a loopback gateway; routing does not validate endpoints.
 - [pinned] For a credential whose `auth_method` is `gateway`, every
   `explicit_providers` check, runner-wide or per harness, compares the provider
-  whose catalog rows the gateway serves for that route, never the gateway
-  credential's own provider id. A gateway credential `anthropic-gw-acme` serving
-  `anthropic/...` rows passes a limit of `["anthropic"]`; the same credential
-  serving `openai/...` rows fails it. Listing `anthropic-gw-acme` in
+  of the catalog row the gateway route borrows, which is the provider the vault
+  credential's `serves` names, never the gateway credential's own provider id.
+  Catalog rows keep their catalog provider ids. A gateway route is
+  `<gateway provider id>/<model>`, borrowing the served provider's catalog row,
+  never the borrowed provider's own route key. A provider without catalog rows
+  borrows the rows of the one catalog provider its active gateway credentials'
+  `serves` collectively names. If they name no provider or more than one, the
+  provider stays unresolved: it gets no routes and nothing is selected from it.
+  The vault sets `serves` at credential creation and never changes it. Other
+  credential methods also carry `serves`; only `gateway` enables this borrowing.
+  A gateway credential `anthropic-gw-acme` with `serves: ["anthropic"]` forms
+  `anthropic-gw-acme/<model>` from `anthropic/<model>` and passes a limit of
+  `["anthropic"]`; a gateway borrowing `openai/...` rows fails it. Listing
+  `anthropic-gw-acme` in
   `explicit_providers` admits nothing extra: only the served provider counts.
   For every other auth method, the check compares the credential's own provider.
 - [pinned] Readers first for gateway meaning: deploy routing 0.7.15 before a
@@ -406,6 +416,9 @@ That group's additive defaults, attested namespace and selector rules are in §1
   - `account_continue`: `route.account_for` reads `mode: "continue"` for a
     runner's durably paused run (§9.1.1). A non-declaring provider refuses
     `invalid_request {field: "mode"}`.
+  - `account_continue_signed_out`: only together with `account_continue`,
+    accepts `exhausted.limit_window: "signed_out"` for a run paused for
+    sign-in (§9.1.1). Unknown capability support counts as no support.
   - `account_warm_credential`: `route.account_for` reads `warm_credential`
     on admission (§9.1). A non-declaring provider refuses the member by name.
   - `select_hold_control`: `route.select` reads `hold_ok` and
@@ -1120,6 +1133,9 @@ the routing provider allocates (subscription logins).
 - [pinned] `candidates` (optional): `{view_digest, accounts: [{account_id,
   credential_id}]}`, the accounts the runner can use now. When present, the
   provider picks only from this list.
+- [pinned] A router never admits a fresh run onto a credential the vault
+  reports as needing sign-in. Affinity, an explicit pin or a warm hint cannot
+  override this eligibility rule.
 - [pinned] `requested_account` (optional): `{account_id?, credential_id?}`,
   a hint from an explicit pin; `account_id` wins when both are present.
 - [pinned] `warm_credential` (optional): a public vault credential id, using
@@ -1208,11 +1224,25 @@ The answer (`account::AccountForAnswer`):
   as a continuation answer. Legacy account requests, replies and their parser
   remain unchanged. The additive `account_continue::ContinueRequest` and
   `parse_continue_request(params, describe)` handle only this mode.
+- [pinned] A router opts into sign-in continuation by also declaring
+  `account_continue_signed_out`, only together with `account_continue`.
+  A runner sends a `signed_out` continuation only to a router declaring both;
+  unknown support counts as no. A router without the additional capability
+  refuses `invalid_request {field: "exhausted.limit_window"}`, exactly as for
+  any unknown window.
 - [pinned] Only the runner itself, on its own routing route, sends this
-  request, for a run it has durably paused on an account usage limit. The
+  request, for a run it has durably paused on an account usage limit or,
+  under `account_continue_signed_out`, for sign-in. The
   session's owner and plan composer never send it; the router answers it.
   The route authenticates the runner under §9; no body member supplies
   caller identity.
+- [pinned] Sign-in continuation requires a definite signal: the vault reports
+  that the credential needs sign-in, or the provider refuses with an
+  authentication-class 401 or 403 after a freshly loaded token. These are
+  the same signals that pause a run for sign-in. An unreachable vault,
+  transient error or timeout never triggers it. A run already paused for
+  sign-in may ask once per pause, with a new `selection_id`, when the runner
+  next re-checks that pause; transport retries still keep the same id.
 - [pinned] The request is `{mode: "continue", run_id, admission_id,
   conversation_key, previous_decision_id, exhausted, selection_id}`.
   `admission_id` always stays the original admission, not a new one.
@@ -1232,12 +1262,20 @@ The answer (`account::AccountForAnswer`):
   account id, with the meaning and string type of §9.2's `served_account_id`;
   `credential_id` likewise uses that report's public string id. Window and
   pool are strings and times are unsigned integers, reusing §9.2's evidence
-  types. `limit_window` must be `five_hour` or `seven_day`; `observed_at_ms`
+  types. `limit_window` must be `five_hour` or `seven_day`, or `signed_out`
+  under `account_continue_signed_out`; `observed_at_ms`
   is the original observation time in Unix milliseconds. `resets_at_ms` is
   Unix milliseconds, and `retry_after_s` is a duration in seconds. The router
-  records this exhaustion evidence too, not merely the selection request.
-  This runner-supplied record is only for quota exhaustion, not arbitrary
-  observations: a `credit` wall (§9.3) does not trigger continuation.
+  records this evidence too, not merely the selection request. `signed_out`
+  is the one value of `limit_window` that is not a usage window: it names why
+  the account cannot serve. For `signed_out`, `resets_at_ms`, `retry_after_s`
+  and `pool` must be absent, not even `null`; a present member is
+  `invalid_request {field: "exhausted.<field>"}`. `observed_at_ms` remains
+  required. The router treats that credential as unusable for new selections
+  and offers until the vault reports it usable again, not until a reset.
+  This record is only for quota exhaustion or the definite sign-in signals
+  above, not arbitrary observations: a `credit` wall (§9.3) still does not
+  trigger continuation.
 - [pinned] Required ids are non-empty opaque strings. `selection_id` has
   the same syntax as `admission_id`: at most 128 characters, no parsing or
   case folding. `admission_id` and `conversation_key` retain §9.1's bounds.
@@ -1253,7 +1291,9 @@ The answer (`account::AccountForAnswer`):
   these different is refused before replaying a cached answer, using the
   ordinary refusal envelope: `invalid_request {field: "selection_id"}`.
   The first answer stands and is not replaced. Comparing after parsing means
-  absent and `null` optional evidence members are equal (§2).
+  absent and `null` optional quota evidence members are equal (§2); those
+  members are forbidden for `signed_out`. A different `limit_window` is a
+  different question, including changing a usage window to `signed_out`.
 - [pinned] A valid, authorized continuation request has exactly one of three
   `account_continue::ContinueAnswer` outcomes. The wire tag is `kind`:
 
@@ -1268,8 +1308,9 @@ The answer (`account::AccountForAnswer`):
   owner scope as the previous decision. Never cross API-key/subscription
   boundaries, providers, models or owner scopes; never change the run's
   frozen session plan (the llm-runner contract's §10.1), tool set or renderer.
-  Never offer the exhausted account before its
-  reset, and never offer it for this selection. Never offer an account under
+  Never offer the exhausted account for this selection. For quota exhaustion,
+  never offer it before its reset; for `signed_out`, never offer it until the
+  vault reports the credential usable again. Never offer an account under
   a known hold for the relevant window or pool.
 - [pinned] Reserve an offer once per `selection_id`. A retry with the same
   id returns the identical offer, including its decision and expiry, and
@@ -1302,6 +1343,8 @@ The answer (`account::AccountForAnswer`):
   the runner asks again at `until_ms` or on its own wake, with a new selection
   id for a fresh check. Absent `until_ms` means unknown, never "now".
   `ContinueAnswer::wait_until_ms` preserves that distinction.
+  For `signed_out`, the run waits for another compatible account, never for
+  the signed-out account; it asks again at `until_ms` with a new id.
 - [pinned] `refuse` carries `{routing_code, detail}`: the router will not
   offer a switch for this pause. Examples are a caller-pinned account—an
   admission whose `requested_account` came from an explicit pin—
@@ -1310,8 +1353,10 @@ The answer (`account::AccountForAnswer`):
   an unknown or mismatched previous decision (`"unknown_decision"`), or
   selection disabled (reuse `"account_selection_disabled"`). These are
   continuation outcomes, not the legacy refusal envelope. The run stays
-  paused on the original account, resumes only after that account's own
-  reset passes, and the runner does not ask again for this pause. A later
+  paused on the original account. For quota exhaustion it resumes only after
+  that account's own reset passes; for `signed_out` it stays paused for
+  sign-in, waiting for a person as before. The runner does not ask again for
+  this pause. A later
   pause of the same run may ask again with a new selection id.
 
 ### 9.2 `route.account_observe`
@@ -1491,7 +1536,9 @@ What a runner saw on an account, so the provider's headroom stays current.
   persists after the runner's own retry (the key is invalid or revoked)
   counts as refused for any use. For a sign-in method such as OAuth, the same
   refusal means the sign-in must be renewed: the runner pauses for sign-in and
-  does not send `credential_refused`.
+  does not send `credential_refused`. Under `account_continue_signed_out`,
+  the runner may instead move the paused run via §9.1.1's continuation
+  exchange, only on that section's definite sign-in signals.
 - [pinned] Blocking outcomes are reported by the party holding the admission.
   A runner that holds an admission (through `routed_accounts`, or by calling
   `route.account_for` itself) sends `transient_backoff` and

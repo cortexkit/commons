@@ -7,13 +7,13 @@ impl<S: RoutingSubject> Suite<'_, S> {
         catalog.models.retain(|model| {
             model.provider == fixture::SUBSCRIPTION_PROVIDER && model.model == "model-c"
         });
-        catalog.models[0].provider = "anthropic-gw-example".into();
         let model = &catalog.models[0];
-        let key = model.route_key();
+        let key = format!("anthropic-gw-example/{}", model.model);
         catalog.runners.truncate(1);
         catalog.runners[0].route_keys = vec![key.clone()];
         catalog.accounts.truncate(1);
-        catalog.accounts[0].provider.clone_from(&model.provider);
+        catalog.accounts[0].provider = "anthropic-gw-example".into();
+        catalog.accounts[0].serves = vec![model.provider.clone()];
         catalog.accounts[0].method = "gateway".into();
         self.subject.configure_catalog(&catalog).await?;
         if !self
@@ -64,7 +64,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
             &runner,
             ops::ROUTE_ACCOUNT_FOR,
             &json!({
-                "provider": model.provider,
+                "provider": catalog.accounts[0].provider,
                 "model": model.model,
                 "conversation_key": "gateway-conversation",
                 "admission_id": "gateway-admission",
@@ -97,35 +97,85 @@ impl<S: RoutingSubject> Suite<'_, S> {
         catalog.models[0].model = "claude-opus-5-5".into();
         catalog.models[1].provider = "openai".into();
         catalog.models[1].model = "model-example".into();
-        let keys: Vec<_> = catalog
-            .models
-            .iter()
-            .map(|model| model.route_key())
-            .collect();
+        let keys = [
+            "anthropic-gw-x/claude-opus-5-5",
+            "openai-gw-y/model-example",
+            "acme-llm/claude-opus-5-5",
+        ];
+        let unserved_key = "acme-llm/model-example";
         catalog.runners.truncate(1);
-        catalog.runners[0].route_keys = keys.clone();
-        catalog.accounts.truncate(1);
-        catalog.accounts[0].provider = "anthropic-gw-x".into();
-        catalog.accounts[0].method = "gateway".into();
+        catalog.runners[0].route_keys = keys
+            .iter()
+            .copied()
+            .chain([unserved_key])
+            .map(str::to_owned)
+            .collect();
+        let template = catalog.accounts[0].clone();
+        catalog.accounts = [
+            ("anthropic-gw-x", "anthropic"),
+            ("openai-gw-y", "openai"),
+            ("acme-llm", "anthropic"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (provider, served))| {
+            let mut account = template.clone();
+            account.provider = provider.into();
+            account.serves = vec![served.into()];
+            account.account_id = format!("gateway-account-{index}");
+            account.credential_id = format!("gateway-credential-{index}");
+            account.method = "gateway".into();
+            account
+        })
+        .collect();
+        // A native subscription is tempting but must not enter a gateway pool.
+        let mut native_account = template;
+        native_account.provider = "anthropic".into();
+        native_account.serves = vec!["anthropic".into()];
+        catalog.accounts.push(native_account);
 
         for per_harness in [false, true] {
-            for (providers, admitted_routes) in [
-                (json!(["anthropic"]), [true, false]),
-                (json!(["anthropic", "anthropic-gw-x"]), [true, false]),
-                (json!(["anthropic-gw-x"]), [false, false]),
+            for (providers, admitted_routes, acme_serves) in [
+                (json!(["anthropic"]), [true, false, true], vec!["anthropic"]),
+                (
+                    json!(["anthropic", "anthropic-gw-x", "openai-gw-y", "acme-llm"]),
+                    [true, false, true],
+                    vec!["anthropic"],
+                ),
+                (
+                    json!(["anthropic-gw-x", "openai-gw-y", "acme-llm"]),
+                    [false, false, false],
+                    vec!["anthropic"],
+                ),
                 // Both rows must be runnable when their served providers are
                 // allowed, so an unavailable OpenAI route cannot pass a refusal.
-                (json!(["anthropic", "openai"]), [true, true]),
+                (
+                    json!(["anthropic", "openai"]),
+                    [true, true, true],
+                    vec!["anthropic"],
+                ),
+                (json!(["anthropic", "openai"]), [true, true, false], vec![]),
+                (
+                    json!(["anthropic", "openai"]),
+                    [true, true, false],
+                    vec!["anthropic", "openai"],
+                ),
             ] {
-                // Rebuild the same two routes so decisions cannot preserve an
+                catalog.accounts[2].serves = acme_serves
+                    .iter()
+                    .map(|provider| (*provider).into())
+                    .collect();
+                // Rebuild the same routes so decisions cannot preserve an
                 // admission from a previous allow-list or harness variant.
                 self.fresh().await?;
                 self.subject.configure_catalog(&catalog).await?;
                 if !self
                     .subject
                     .configure_runner_route_facts(&[
-                        RunnerRouteFacts::new(&keys[0], "anthropic.messages", "gateway"),
-                        RunnerRouteFacts::new(&keys[1], "openai.responses", "gateway"),
+                        RunnerRouteFacts::new(keys[0], "anthropic.messages", "gateway"),
+                        RunnerRouteFacts::new(keys[1], "openai.responses", "gateway"),
+                        RunnerRouteFacts::new(keys[2], "anthropic.messages", "gateway"),
+                        RunnerRouteFacts::new(unserved_key, "openai.responses", "gateway"),
                     ])
                     .await?
                 {
@@ -162,7 +212,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
                     .await?;
 
                 let consumer = self.route_as(CONSUMER).await?;
-                let context = format!("{name}: per_harness={per_harness}, providers={providers}");
+                let context = format!("{name}: per_harness={per_harness}, providers={providers}, acme serves={acme_serves:?}");
                 for (index, admitted_route) in admitted_routes.into_iter().enumerate() {
                     let request = with(base(), "pin", json!(keys[index]));
                     if !admitted_route {
@@ -190,8 +240,8 @@ impl<S: RoutingSubject> Suite<'_, S> {
                         &runner,
                         ops::ROUTE_ACCOUNT_FOR,
                         &json!({
-                            "provider": catalog.models[index].provider,
-                            "model": catalog.models[index].model,
+                            "provider": selected.route.provider,
+                            "model": selected.route.model,
                             "conversation_key": format!("gateway-limit-conversation-{index}"),
                             "admission_id": format!("gateway-limit-admission-{index}"),
                             "decision_id": selected.decision_id
@@ -199,7 +249,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
                         &context,
                     )
                     .await?;
-                    let expected = &catalog.accounts[0];
+                    let expected = &catalog.accounts[index];
                     if admitted.account.provider != expected.provider
                         || admitted.account.account_id != expected.account_id
                         || admitted.account.credential_id != expected.credential_id
@@ -211,6 +261,14 @@ impl<S: RoutingSubject> Suite<'_, S> {
                         ));
                     }
                 }
+                refused(
+                    &consumer,
+                    ops::ROUTE_SELECT,
+                    &with(base(), "pin", json!(unserved_key)),
+                    RefusalCode::PinUnavailable,
+                    &context,
+                )
+                .await?;
             }
         }
         Ok(Ending::Passed)
@@ -246,6 +304,8 @@ mod tests {
             name,
             "gateway_explicit_providers_harness",
             "gateway_explicit_providers_alias",
+            "gateway_explicit_providers_spelling",
+            "gateway_serves_ambiguous",
         ] {
             let subject = FakeSubject::new(Defects {
                 extension: Some(fault),
@@ -261,6 +321,20 @@ mod tests {
                 assert!(
                     matches!(&report.outcome, crate::CheckOutcome::Failed { reason }
                     if reason.contains("per_harness=true")),
+                    "{report:?}"
+                );
+            }
+            if fault == "gateway_explicit_providers_spelling" {
+                assert!(
+                    matches!(&report.outcome, crate::CheckOutcome::Failed { reason }
+                    if reason.contains("acme-llm/claude-opus-5-5")),
+                    "{report:?}"
+                );
+            }
+            if fault == "gateway_serves_ambiguous" {
+                assert!(
+                    matches!(&report.outcome, crate::CheckOutcome::Failed { reason }
+                    if reason.contains("acme serves=[\"anthropic\", \"openai\"]")),
                     "{report:?}"
                 );
             }

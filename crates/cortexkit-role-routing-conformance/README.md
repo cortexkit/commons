@@ -1,6 +1,6 @@
 # cortexkit-role-routing-conformance
 
-Version 0.10.20 pins routing `=0.7.18`. The seven `placement_*` checks each
+Version 0.10.22 pins routing `=0.7.20`. The seven `placement_*` checks each
 discover their own capability group before sending its members. Declaring
 adapters supply `configure_selection_facts(&SelectionFacts)` where needed:
 catalog list rates (never pre-divided), subscription value multipliers,
@@ -34,7 +34,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.10.20"
+cortexkit-role-routing-conformance = "0.10.22"
 ```
 
 ```rust,ignore
@@ -479,6 +479,8 @@ then send the exhausted account's evidence as the runner.
 
 | Check | Rule (CONTRACT §9.1.1) |
 |---|---|
+| `continue_signed_out` | With `account_continue_signed_out`, offer a same-provider/auth/model spare, never the signed-out account; fresh admissions exclude its credential; without a spare, hold or refuse |
+| `continue_signed_out_undeclared_refuses_window` | With only `account_continue`, refuse `signed_out` as `invalid_request` naming `exhausted.limit_window` |
 | `continue_offer_excludes_exhausted_account` | Never offer the exhausted account |
 | `continue_offer_preserves_provider` | The credential's provider is unchanged |
 | `continue_offer_preserves_auth_method` | The credential's auth method is unchanged |
@@ -489,11 +491,17 @@ then send the exhausted account's evidence as the runner.
 | `continue_hold_unknown_until_stays_unknown` | With no known reset, return hold without `until_ms`, never now |
 | `continue_undeclared_group_refuses_mode` | Without the group, refuse `invalid_request` naming `mode` |
 
-The first eight checks are not applicable without the group; the last runs only
-without it. Tests pair each check with a deliberately faulty router and assert
+Quota continuation checks are not applicable without `account_continue`; the
+undeclared-mode check runs only without it. The signed-out checks additionally
+gate on `account_continue_signed_out` being present or absent, respectively.
+The signed-out check uses the same owner route and reuses the credential hook to
+remove spares while preserving the original admission. Tests pair each check
+with deliberately faulty routers and assert
 its failing name. The kit's exported `NARROWINGS` list, printed in every suite
 report, records the limits: credential facts and whole-account
 holds are observable, but internal reservation counts, expiry release, ancestry,
 pricing, exhaustion persistence, owner isolation and runner durability are not.
+The signed-out check likewise cannot inspect owner-scope equality; the contract
+still requires the offered decision to preserve the exact owner and scope stamp.
 The kit does not inspect frozen session plans, tool sets or renderers, nor exercise terminal
 refusal policy, transport retries or pool/window-specific holds.

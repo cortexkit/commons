@@ -159,6 +159,7 @@ pub fn catalog() -> Catalog {
     let route_keys: Vec<String> = models.iter().map(CatalogModel::route_key).collect();
     let account = |n: u32| CatalogAccount {
         provider: SUBSCRIPTION_PROVIDER.to_owned(),
+        serves: vec![SUBSCRIPTION_PROVIDER.to_owned()],
         account_id: format!("account-{n}"),
         credential_id: format!("credential-{n}"),
         method: "oauth".to_owned(),
@@ -229,6 +230,7 @@ pub fn hold_catalog() -> Catalog {
     let route_keys: Vec<String> = models.iter().map(CatalogModel::route_key).collect();
     let account = |provider: &str, n: u32| CatalogAccount {
         provider: provider.to_owned(),
+        serves: vec![provider.to_owned()],
         account_id: format!("account-{n}"),
         credential_id: format!("credential-{n}"),
         method: "oauth".to_owned(),
@@ -261,6 +263,7 @@ pub fn continue_credentials() -> Vec<crate::ContinueCredential> {
         ContinueCredential::new(
             CatalogAccount {
                 provider: provider.into(),
+                serves: vec![provider.into()],
                 account_id: format!("account-{n}"),
                 credential_id: format!("credential-{n}"),
                 method: method.into(),
@@ -301,6 +304,20 @@ mod tests {
     use cortexkit_role_routing::declarations::{
         ConsumerDeclarations, RunnerDeclaration, RunnerPair,
     };
+
+    #[test]
+    fn ordinary_account_serves_defaults_to_its_provider() {
+        for catalog in [
+            catalog(),
+            harness_catalog(),
+            hold_catalog(),
+            continue_catalog(),
+        ] {
+            for account in catalog.accounts {
+                assert_eq!(account.serves, vec![account.provider]);
+            }
+        }
+    }
 
     /// Every tool capability tag a fixture runner reaches must be one a real
     /// runner can declare, or a provider loading the fixture refuses it.

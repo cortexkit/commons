@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.22
+
+- Correct gateway fixtures to keep catalog rows under their original providers
+  and form gateway-id routes from singleton `serves`. Check distinct account
+  pools, runner-wide and per-harness limits, a gateway id unrelated to its
+  served provider's spelling, and unresolved empty or ambiguous `serves`.
+  Keep positive controls and reject own-id, alias, spelling-derived and
+  ambiguous-source faulty routers by check name.
+- Breaking fixture API: the public, exhaustive `CatalogAccount` gains
+  `serves: Vec<String>`; adapters constructing it with struct literals must add
+  the field. Existing ordinary-account fixtures seed it from `provider`.
+
+- Pin routing `=0.7.20`. Add `continue_signed_out` for declaring routers:
+  require a compatible spare, exclude the signed-out credential from fresh
+  admissions, and hold or refuse without a spare. Add the undeclared-capability
+  refusal check naming `exhausted.limit_window`.
+- Reject faulty fakes that offer the signed-out account, admit it fresh, offer
+  it without a spare, or accept the request without declaring the capability.
+  Reuse existing fixture hooks; the check cannot inspect whether an offered
+  decision preserves owner-scope equality.
+
 ## 0.10.21
 
 - Pin routing `=0.7.19`. Add `runner_gateway_explicit_providers`: runner-wide

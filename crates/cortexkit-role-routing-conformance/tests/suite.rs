@@ -234,6 +234,78 @@ async fn routing_078_panel_replacement_detail_requires_cause() {
 }
 
 #[tokio::test]
+async fn continue_signed_out_faulty_offer_fails_by_name() {
+    breaks(
+        Defects {
+            continue_signed_out_offer: true,
+            ..Defects::default()
+        },
+        "continue_signed_out",
+        "offer names the signed-out account",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_signed_out_faulty_fresh_admission_fails_by_name() {
+    breaks(
+        Defects {
+            continue_signed_out_fresh: true,
+            ..Defects::default()
+        },
+        "continue_signed_out",
+        "fresh admission names the signed-out credential",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_signed_out_faulty_no_spare_offer_fails_by_name() {
+    breaks(
+        Defects {
+            continue_signed_out_no_spare: true,
+            ..Defects::default()
+        },
+        "continue_signed_out",
+        "without a spare must hold or refuse",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_signed_out_without_capability_refuses_by_field() {
+    let report = run_suite(&FakeSubject::without_signed_out_control(Defects::default())).await;
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    assert_eq!(
+        report.outcome("continue_signed_out_undeclared_refuses_window"),
+        Some(&CheckOutcome::Passed)
+    );
+    assert!(matches!(
+        report.outcome("continue_signed_out"),
+        Some(CheckOutcome::NotApplicable { .. })
+    ));
+}
+
+#[tokio::test]
+async fn continue_signed_out_faulty_undeclared_capability_fails_by_name() {
+    let report = run_suite(&FakeSubject::without_signed_out_control(Defects {
+        continue_signed_out_undeclared: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.failing(),
+        ["continue_signed_out_undeclared_refuses_window"],
+        "{}",
+        report.render()
+    );
+    assert!(
+        matches!(report.outcome("continue_signed_out_undeclared_refuses_window"),
+        Some(CheckOutcome::Failed { reason }) if reason.contains("not refused invalid_request"))
+    );
+}
+
+#[tokio::test]
 async fn continue_faulty_exhausted_account_fails_by_name() {
     breaks(
         Defects {
@@ -604,6 +676,7 @@ async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_pa
         "undeclared_observe_provider_code_refused",
         "account_for_tier_undeclared",
         "warm_credential_undeclared_refused",
+        "continue_signed_out_undeclared_refuses_window",
         "continue_undeclared_group_refuses_mode",
         "undeclared_harness_group_refuses_member",
     ];
@@ -821,6 +894,7 @@ async fn without_harness_group_requests_are_refused() {
             "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
             "warm_credential_undeclared_refused",
+            "continue_signed_out_undeclared_refuses_window",
             "continue_undeclared_group_refuses_mode",
             "requested_harness_is_hosted_and_echoed",
             "undeclared_prefer_group_refuses_member",
@@ -1026,6 +1100,7 @@ async fn passes_every_check(subject: &FakeSubject) {
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
             "undeclared_exclude_providers_group_refuses_member",
+            "continue_signed_out_undeclared_refuses_window",
             "continue_undeclared_group_refuses_mode",
         ]
         .contains(&check.check)
@@ -1140,6 +1215,7 @@ async fn decision_input_checks_without_fixture_hook_are_not_applicable() {
         "undeclared_harness_group_refuses_member",
         "undeclared_prefer_group_refuses_member",
         "undeclared_exclude_providers_group_refuses_member",
+        "continue_signed_out_undeclared_refuses_window",
         "continue_undeclared_group_refuses_mode",
         "questions_requirement_honoured",
         "max_cost_usd_requirement_honoured",
@@ -1753,6 +1829,7 @@ async fn without_exclude_providers_group_its_checks_are_not_applicable() {
             "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
             "warm_credential_undeclared_refused",
+            "continue_signed_out_undeclared_refuses_window",
             "continue_undeclared_group_refuses_mode",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",

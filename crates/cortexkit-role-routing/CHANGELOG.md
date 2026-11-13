@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.20
+
+- Clarify that gateway routes keep the gateway provider id and borrow catalog
+  rows through the vault credential's immutable `serves`. Provider allow-lists
+  compare the borrowed row's provider. A provider without catalog rows remains
+  unresolved when its active gateway credentials name zero or multiple served
+  providers; other auth methods do not enable gateway borrowing.
+
+- Add `account_continue_signed_out`, requiring `account_continue`, so a runner
+  can move a run paused on definite sign-in evidence to a compatible account.
+  Parse `signed_out` only with the capability, forbid quota-only evidence
+  members, and keep it distinct in same-question comparisons. Public field
+  types and legacy requests/replies are unchanged; credit walls still do not
+  trigger continuation.
+- Pin credential exclusion until the vault reports it usable again, fresh
+  admission eligibility, and sign-in-specific hold/refuse behavior. Add parser
+  coverage and a shared signed-out continuation vector.
+
 ## 0.7.19
 
 - Pin gateway `explicit_providers` matching to the provider whose catalog rows

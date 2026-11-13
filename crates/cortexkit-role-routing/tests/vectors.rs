@@ -168,6 +168,31 @@ fn continuation_samples_round_trip_and_pin_identical_retry() {
     use cortexkit_role_routing::account_continue::{parse_continue_request, ContinueAnswer};
     let describe = RoleDescribe::new(vec![], false).with_capability(capabilities::ACCOUNT_CONTINUE);
     let vectors = load("route-account-continue.json");
+    let signed_out = &vectors["signed_out"];
+    let signed_out_describe = describe
+        .clone()
+        .with_capability(capabilities::ACCOUNT_CONTINUE_SIGNED_OUT);
+    let signed_out_parsed =
+        parse_continue_request(&signed_out["params"], &signed_out_describe).unwrap();
+    assert_eq!(
+        serde_json::to_value(&signed_out_parsed).unwrap(),
+        signed_out["params"]
+    );
+    let refusal = parse_continue_request(&signed_out["params"], &describe).unwrap_err();
+    assert_eq!(
+        refusal.code.as_str(),
+        signed_out["without_capability_refusal"]["code"]
+    );
+    assert_eq!(
+        json!(refusal.detail),
+        signed_out["without_capability_refusal"]["detail"]
+    );
+    let signed_out_answer: ContinueAnswer =
+        serde_json::from_value(signed_out["answer"].clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(signed_out_answer).unwrap(),
+        signed_out["answer"]
+    );
     let parsed = parse_continue_request(&vectors["request"], &describe).unwrap();
     assert_eq!(serde_json::to_value(parsed).unwrap(), vectors["request"]);
     for case in vectors["answers"].as_array().unwrap() {

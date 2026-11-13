@@ -1,5 +1,5 @@
 {
-  "about": "Only runners durably paused on account limits send continue to routers declaring account_continue. Account and credential names are public opaque ids.",
+  "about": "Only runners durably paused on account limits or definite sign-in signals send continue to declaring routers. Sign-in continuation also requires account_continue_signed_out. Account and credential names are public opaque ids.",
   "capabilities": ["account_continue"],
   "request": {
     "mode": "continue",
@@ -55,6 +55,12 @@
       "refusal":{"code":"invalid_request","detail":{"field":"exhausted.limit_window"}}
     }
   ],
+  "signed_out": {
+    "capabilities": ["account_continue", "account_continue_signed_out"],
+    "params":{"mode":"continue","run_id":"run-1","admission_id":"admission-1","conversation_key":"conversation-1","previous_decision_id":"decision-1","exhausted":{"credential_id":"credential-1","account":"account-1","limit_window":"signed_out","observed_at_ms":1900000000000},"selection_id":"selection-sign-in"},
+    "answer":{"kind":"offer","credential_id":"credential-2","account":"account-2","decision_id":"decision-2","valid_until_ms":1900000060000},
+    "without_capability_refusal":{"code":"invalid_request","detail":{"field":"exhausted.limit_window"}}
+  },
   "undeclared_group": {
     "capabilities": [],
     "params":{"mode":"continue","run_id":"run-1","admission_id":"admission-1","conversation_key":"conversation-1","previous_decision_id":"decision-1","exhausted":{"credential_id":"credential-1","account":"account-1","limit_window":"five_hour","observed_at_ms":1900000000000},"selection_id":"selection-1"},

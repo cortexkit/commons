@@ -254,8 +254,11 @@ impl FakeRoute {
             ));
         }
         let original_catalog = state.catalog.clone();
+        let original_resolved = state.catalog_resolved;
         if let Some(routes) = available {
             if !self.fault("available_routes_honoured") {
+                state.catalog = Some(Self::catalog(state));
+                state.catalog_resolved = true;
                 state
                     .catalog
                     .as_mut()
@@ -266,6 +269,7 @@ impl FakeRoute {
         }
         let result = self.select(state, &params);
         state.catalog = original_catalog;
+        state.catalog_resolved = original_resolved;
         let mut selected = result?;
         if project {
             selected["project_settings"] = json!(if self.fault("settings_unresolved_selects") {

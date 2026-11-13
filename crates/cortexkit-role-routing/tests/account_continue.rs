@@ -4,7 +4,7 @@ use cortexkit_role_routing::{
         parse_continue_request, ContinueAnswer, ContinueHold, ContinueOffer, ContinueRefusal,
         ContinueRequest, ExhaustedAccount,
     },
-    capabilities::ACCOUNT_CONTINUE,
+    capabilities::{ACCOUNT_CONTINUE, ACCOUNT_CONTINUE_SIGNED_OUT},
     describe::RoleDescribe,
 };
 use serde_json::json;
@@ -22,6 +22,69 @@ fn request() -> ContinueRequest {
 
 fn describe() -> RoleDescribe {
     RoleDescribe::new(vec![], false).with_capability(ACCOUNT_CONTINUE)
+}
+
+#[test]
+fn signed_out_continuation_requires_capability() {
+    let mut expected = request();
+    expected.exhausted.limit_window = "signed_out".into();
+    let params = serde_json::to_value(&expected).unwrap();
+    assert_eq!(
+        parse_continue_request(
+            &params,
+            &describe().with_capability(ACCOUNT_CONTINUE_SIGNED_OUT)
+        )
+        .unwrap(),
+        expected
+    );
+    let refusal = parse_continue_request(&params, &describe()).unwrap_err();
+    assert_eq!(refusal.code.as_str(), "invalid_request");
+    assert_eq!(refusal.detail["field"], "exhausted.limit_window");
+}
+
+#[test]
+fn signed_out_continuation_requires_absent_usage_evidence() {
+    let mut params = serde_json::to_value(request()).unwrap();
+    params["exhausted"]["limit_window"] = json!("signed_out");
+    let describe = describe().with_capability(ACCOUNT_CONTINUE_SIGNED_OUT);
+    for (field, value) in [
+        ("resets_at_ms", json!(500)),
+        ("retry_after_s", json!(60)),
+        ("pool", json!("primary")),
+    ] {
+        for value in [value, json!(null)] {
+            let mut invalid = params.clone();
+            invalid["exhausted"][field] = value;
+            let refusal = parse_continue_request(&invalid, &describe).unwrap_err();
+            assert_eq!(refusal.code.as_str(), "invalid_request");
+            assert_eq!(refusal.detail["field"], format!("exhausted.{field}"));
+        }
+    }
+    params["exhausted"]
+        .as_object_mut()
+        .unwrap()
+        .remove("observed_at_ms");
+    assert_eq!(
+        parse_continue_request(&params, &describe)
+            .unwrap_err()
+            .detail["field"],
+        "exhausted.observed_at_ms"
+    );
+}
+
+#[test]
+fn signed_out_is_a_different_continuation_question() {
+    let quota = request();
+    let mut params = serde_json::to_value(&quota).unwrap();
+    params["exhausted"]["limit_window"] = json!("signed_out");
+    let signed_out = parse_continue_request(
+        &params,
+        &describe().with_capability(ACCOUNT_CONTINUE_SIGNED_OUT),
+    )
+    .unwrap();
+    assert!(!quota.same_question(&signed_out));
+    assert!(!signed_out.same_question(&quota));
+    assert!(signed_out.same_question(&signed_out.clone()));
 }
 
 #[test]

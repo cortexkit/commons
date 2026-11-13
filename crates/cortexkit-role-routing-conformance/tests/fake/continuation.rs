@@ -19,6 +19,9 @@ impl FakeRoute {
         if self.defects.continue_undeclared {
             describe = describe.with_capability("account_continue");
         }
+        if self.defects.continue_signed_out_undeclared {
+            describe = describe.with_capability("account_continue_signed_out");
+        }
         if self.fault("continue_credit_window_refused")
             && params["exhausted"]["limit_window"] == "credit"
         {
@@ -28,6 +31,13 @@ impl FakeRoute {
             )));
         }
         let request = parse_continue_request(params, &describe)?;
+        let signed_out = request.exhausted.limit_window == "signed_out";
+        if signed_out && !self.signed_out_control && self.defects.continue_signed_out_undeclared {
+            return to_value(ContinueAnswer::Hold(ContinueHold::new(
+                "account_pool_exhausted",
+                json!({}),
+            )));
+        }
         if !self.continue_control && self.defects.continue_undeclared {
             return to_value(ContinueAnswer::Hold(ContinueHold::new(
                 "account_pool_exhausted",
@@ -72,11 +82,21 @@ impl FakeRoute {
         let principal = previous.principal.clone();
         let hold_cap = previous.hold_cap;
         let method = admitted.account.method.clone();
-        state.blocks.insert(
-            request.exhausted.account.clone(),
-            request.exhausted.resets_at_ms,
-        );
-        let forced = if self.defects.continue_exhausted {
+        if signed_out {
+            state
+                .signed_out_credentials
+                .push(request.exhausted.credential_id.clone());
+        } else {
+            state.blocks.insert(
+                request.exhausted.account.clone(),
+                request.exhausted.resets_at_ms,
+            );
+        }
+        let forced = if signed_out {
+            self.defects
+                .continue_signed_out_offer
+                .then_some(request.exhausted.account.as_str())
+        } else if self.defects.continue_exhausted {
             Some(request.exhausted.account.as_str())
         } else if self.defects.continue_provider {
             Some("account-3")
@@ -89,7 +109,7 @@ impl FakeRoute {
         } else {
             None
         };
-        let account = state
+        let mut account = state
             .continue_credentials
             .iter()
             .find(|c| {
@@ -97,6 +117,9 @@ impl FakeRoute {
                     && c.account.provider == route.provider
                     && c.account.method == method
                     && c.models.contains(&route.model)
+                    && !state
+                        .signed_out_credentials
+                        .contains(&c.account.credential_id)
                     && !state
                         .blocks
                         .get(&c.account.account_id)
@@ -114,6 +137,12 @@ impl FakeRoute {
                     .account
                     .clone()
             });
+        if signed_out && self.defects.continue_signed_out_no_spare && account.is_none() {
+            account = state
+                .continue_credentials
+                .first()
+                .map(|c| c.account.clone());
+        }
         let answer = if let Some(account) = account {
             let decision_id = state.next("continue-decision");
             state.decisions.insert(

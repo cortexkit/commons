@@ -13,7 +13,7 @@ use crate::{
     members::Members,
 };
 
-/// The exhausted public account and its original limit evidence. Field types
+/// The unavailable public account and its original quota or sign-in evidence. Field types
 /// match `observe::AccountObserveRequest`: public ids and windows are strings,
 /// and observation/reset times are unsigned Unix milliseconds. `retry_after_s`
 /// is an optional unsigned duration in seconds.
@@ -23,7 +23,7 @@ pub struct ExhaustedAccount {
     pub credential_id: String,
     /// The public account id (`served_account_id` in an observation).
     pub account: String,
-    /// Only `five_hour` or `seven_day` is valid in a continue request.
+    /// `five_hour` or `seven_day`, or `signed_out` with its declared capability.
     pub limit_window: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pool: Option<String>,
@@ -242,7 +242,7 @@ pub fn parse_continue_request(
     }
     let mode: ContinueMode = members.required("mode")?;
     let exhausted_value: Value = members.required("exhausted")?;
-    let exhausted = parse_exhausted(&exhausted_value).map_err(|mut refusal| {
+    let exhausted = parse_exhausted(&exhausted_value, describe).map_err(|mut refusal| {
         if let Some(field) = refusal.detail.get_mut("field") {
             *field = Value::String(format!("exhausted.{}", field.as_str().unwrap_or("params")));
         }
@@ -259,11 +259,20 @@ pub fn parse_continue_request(
     })
 }
 
-fn parse_exhausted(value: &Value) -> Result<ExhaustedAccount, Refusal> {
+fn parse_exhausted(value: &Value, describe: &RoleDescribe) -> Result<ExhaustedAccount, Refusal> {
     let members = Members::of(value)?;
     let limit_window = members.text("limit_window", None)?;
-    if !matches!(limit_window.as_str(), "five_hour" | "seven_day") {
-        return Err(members.refuse("limit_window", "expected five_hour or seven_day"));
+    let signed_out =
+        limit_window == "signed_out" && describe.serves(capabilities::ACCOUNT_CONTINUE_SIGNED_OUT);
+    if !matches!(limit_window.as_str(), "five_hour" | "seven_day") && !signed_out {
+        return Err(members.refuse("limit_window", "expected a declared continuation window"));
+    }
+    if signed_out {
+        for field in ["resets_at_ms", "retry_after_s", "pool"] {
+            if members.object.contains_key(field) {
+                return Err(members.refuse(field, "must be absent for signed_out"));
+            }
+        }
     }
     Ok(ExhaustedAccount {
         credential_id: members.text("credential_id", None)?,
@@ -284,12 +293,15 @@ mod tests {
 
     #[test]
     fn exhausted_credit_is_not_a_continuation_quota_window() {
-        let refusal = parse_exhausted(&json!({
-            "credential_id": "credential-copper",
-            "account": "account-copper",
-            "limit_window": "credit",
-            "observed_at_ms": 100
-        }))
+        let refusal = parse_exhausted(
+            &json!({
+                "credential_id": "credential-copper",
+                "account": "account-copper",
+                "limit_window": "credit",
+                "observed_at_ms": 100
+            }),
+            &RoleDescribe::new(vec![], false),
+        )
         .unwrap_err();
         assert_eq!(refusal.code, RefusalCode::InvalidRequest);
         assert_eq!(refusal.detail["field"], "limit_window");
@@ -298,12 +310,15 @@ mod tests {
     #[test]
     fn exhausted_quota_windows_keep_optional_reset_evidence() {
         for window in ["five_hour", "seven_day"] {
-            let exhausted = parse_exhausted(&json!({
-                "credential_id": "credential-copper",
-                "account": "account-copper",
-                "limit_window": window,
-                "observed_at_ms": 100
-            }))
+            let exhausted = parse_exhausted(
+                &json!({
+                    "credential_id": "credential-copper",
+                    "account": "account-copper",
+                    "limit_window": window,
+                    "observed_at_ms": 100
+                }),
+                &RoleDescribe::new(vec![], false),
+            )
             .unwrap();
             assert_eq!(exhausted.limit_window, window);
             assert_eq!(exhausted.resets_at_ms, None);

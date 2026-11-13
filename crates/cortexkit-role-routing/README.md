@@ -1,5 +1,8 @@
 # cortexkit-role-routing
 
+Version 0.7.20 adds `account_continue_signed_out` for continuing a run paused
+for sign-in onto a compatible account (CONTRACT.md §9.1.1).
+
 Version 0.7.18 adds reader-first groups `consumer_declarations`,
 `runner_harness_facts`, `decision_harness`, `select_kind`,
 `select_eligible_routes`, `select_price`, and `report_attempt_outcomes`.
@@ -40,14 +43,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.7.18"
+cortexkit-role-routing = "0.7.20"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.7.18", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.7.20", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant
@@ -331,12 +334,21 @@ exhaustion evidence and a retry-stable `selection_id`. The additive
 `parse_continue_request(params, describe)` and `ContinueAnswer`. The old account
 request, answer and parser are unchanged; a non-declaring router refuses the mode.
 
+With the additional `account_continue_signed_out` capability, a runner may send
+`limit_window: "signed_out"` after a definite needs-sign-in signal. It omits
+`pool`, `resets_at_ms` and `retry_after_s`. The router records the evidence and
+excludes the credential from selections, offers and fresh admissions until the
+vault reports it usable again. An unreachable vault, transient error or timeout
+never triggers sign-in continuation; credit walls still do not trigger it.
+
 The reply's `kind` is `offer`, `hold` or `refuse`. Offers switch only to the same
 provider, auth method, model and owner scope, never the exhausted account or an
 account under a known hold for the relevant window or pool. The kit's hold check
 blocks a whole account. The runner records a validated switch before sending and never uses an
 expired offer. Unknown hold times remain unknown; a terminal refusal leaves the
-run on its original account until its own reset. Transport retries keep the same
+run on its original account until its own reset, or waiting for a person to
+renew sign-in for `signed_out`. A sign-in hold waits for another compatible
+account, never the signed-out one. Transport retries keep the same
 selection id; asking again after a hold or for another fresh eligibility check
 uses a new one. Shared samples are in
 `route-account-continue.json`, including identical-offer retries and refusals.

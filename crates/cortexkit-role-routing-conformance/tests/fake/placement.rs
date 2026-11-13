@@ -84,6 +84,7 @@ impl FakeRoute {
             )?;
         let mut catalog = Self::catalog(state);
         let original_catalog = state.catalog.clone();
+        let original_resolved = state.catalog_resolved;
         let original_ladders = state.ladders.clone();
         if let Some(runners) = &requested.runners {
             catalog
@@ -188,8 +189,10 @@ impl FakeRoute {
             params.as_object_mut().unwrap().remove(field);
         }
         state.catalog = Some(catalog);
+        state.catalog_resolved = true;
         let result = self.select_extensions(state, &params);
         state.catalog = original_catalog;
+        state.catalog_resolved = original_resolved;
         state.ladders = original_ladders;
         let mut answer = result?;
         let key = format!(

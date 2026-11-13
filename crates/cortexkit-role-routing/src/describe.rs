@@ -160,13 +160,19 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
             return Err(DescribeProblem::OpGroupMismatch { group });
         }
     }
-    if describe.serves(crate::capabilities::OBSERVE_CREDENTIAL_REFUSED)
-        && !describe.serves(crate::capabilities::OBSERVE_BACKOFF)
-    {
-        return Err(DescribeProblem::MissingCapabilityDependency {
-            group: crate::capabilities::OBSERVE_CREDENTIAL_REFUSED,
-            requires: crate::capabilities::OBSERVE_BACKOFF,
-        });
+    for (group, requires) in [
+        (
+            crate::capabilities::OBSERVE_CREDENTIAL_REFUSED,
+            crate::capabilities::OBSERVE_BACKOFF,
+        ),
+        (
+            crate::capabilities::ACCOUNT_CONTINUE_SIGNED_OUT,
+            crate::capabilities::ACCOUNT_CONTINUE,
+        ),
+    ] {
+        if describe.serves(group) && !describe.serves(requires) {
+            return Err(DescribeProblem::MissingCapabilityDependency { group, requires });
+        }
     }
     for group in [
         crate::capabilities::ENGINE_REPORTS,
@@ -242,6 +248,24 @@ mod tests {
                 Err(DescribeProblem::OpGroupMismatch { group })
             );
         }
+    }
+
+    #[test]
+    fn signed_out_continuation_requires_continue_by_name() {
+        use crate::capabilities::{ACCOUNT_CONTINUE, ACCOUNT_CONTINUE_SIGNED_OUT};
+        let describe =
+            RoleDescribe::new(vec![], false).with_capability(ACCOUNT_CONTINUE_SIGNED_OUT);
+        assert_eq!(
+            check_describe(&describe),
+            Err(DescribeProblem::MissingCapabilityDependency {
+                group: ACCOUNT_CONTINUE_SIGNED_OUT,
+                requires: ACCOUNT_CONTINUE,
+            })
+        );
+        assert_eq!(
+            check_describe(&describe.with_capability(ACCOUNT_CONTINUE)),
+            Ok(())
+        );
     }
 
     #[test]
