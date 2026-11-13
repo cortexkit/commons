@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-user-commands"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "serde_jcs",

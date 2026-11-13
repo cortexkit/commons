@@ -1,0 +1,6 @@
+{
+  "commands": [
+    {"id":"edit_workspace", "title":"Edit workspace", "summary":"Edit workspace data.", "subject":"workspace", "args":[], "effects":["reversible"], "run":{}}
+  ],
+  "digest":"f597b7c413b862a7629e81cdc123e296a08c47436eb409a85012d545248b5bce"
+}

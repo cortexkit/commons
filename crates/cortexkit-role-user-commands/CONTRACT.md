@@ -46,6 +46,20 @@ Optional members are omitted on write; readers accept `table: null` as absent.
 Effects, fact units/states/tones, outcome codes and caller facts retain unknown
 strings on decode. Decoding alone is not producer validation.
 
+## Reading newer declarations
+
+`ListReply` and `DescribeReply` decode strictly: one unknown or malformed
+command fails the whole reply. Apps use `read_list_reply` to retain readable
+entries and receive diagnostics for unreadable entries, including their module
+id when present. Relays use `DescribeReply::decode_tolerant` (with the `digest`
+feature) for module descriptions. It first checks the digest over the complete
+raw commands array, then decodes each command separately and reports skipped
+entries with their id when present. A digest mismatch fails the whole reply.
+
+Both readers reject malformed reply envelopes and do not validate producer
+constraints. The verified digest identifies the original complete array,
+including skipped entries; it is not the digest of the filtered commands.
+
 ## Admission and audit
 
 **[pinned]** A module admits **all three** management operations only from the
@@ -71,7 +85,7 @@ do not enter chat history, a transcript, or model input. An agent learns of a
 ## Commands and arguments
 
 `Command` is `{id, title, summary, subject, args, effects, run?}`. The
-declaration's **`subject` is a kind string** (`session | agent | computer`);
+declaration's **`subject` is a kind string** (`session | agent | computer | project | workspace`);
 a request's **`subject` is an object identifying the thing** (§ Subjects).
 
 **[pinned]** There are at most 64 commands per module, with unique ids. An id
@@ -125,12 +139,24 @@ Requests name exactly one of:
 {"kind":"session","session":{"runner":"example-runner","harness":"example-host","session":"example-session"}}
 {"kind":"agent","agent_id":"example-agent"}
 {"kind":"computer"}
+{"kind":"project","project_id":"example-project"}
+{"kind":"workspace","workspace_id":"example-workspace"}
 ```
 
 The session triple mirrors the compaction role's `SessionRef` without depending
 on that crate. Each part is 1–256 characters, used without normalization.
-An agent id is 1–128 characters. The app supplies the subject from its current
-page; nothing infers it. Checking shape does not prove the subject exists.
+Agent, project and workspace ids are 1–128 characters and used verbatim. The app
+supplies the subject from its current page; nothing infers it. Checking shape
+does not prove the subject exists; a module that does not hold the named
+subject answers `unknown_subject`.
+
+**[pinned]** `project_id` and `workspace_id` are the fleet's own project and
+workspace ids, carried by the relaying app server's project pages. Apps take
+these ids from the page and never assemble or infer them.
+
+A 0.1.1 reader decodes `SubjectKind` as a closed set and refuses declarations
+naming `project` or `workspace`. Modules declare these kinds only after the
+relaying app server and the apps run 0.1.2.
 
 **[pinned]** In a session subject, `runner` is the module id of the runner that
 hosts the session, never the name of a host process or agent program, and
@@ -233,7 +259,9 @@ not just the command id. Checking and insertion are atomic module duties.
 **[pinned]** A `request_id` is scoped to its subject. The module keys stored
 answers by subject and request id, so the same id on another subject is a
 different run, never a repeat and never `request_conflict`. The conflict and
-repeat rules above apply within one subject. Apps make a fresh id for every run.
+repeat rules above apply within one subject. For a project subject, a module
+may key stored answers by `(project_id, request_id)`. Apps make a fresh id for
+every run.
 
 **[pinned]** A run needing the module's own approval keeps the call open while
 waiting. The module bounds the wait at **no more than five minutes** and then

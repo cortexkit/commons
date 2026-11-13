@@ -1,12 +1,15 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[cfg(feature = "digest")]
-use crate::commands_digest;
+use crate::{command::jcs_sha256_hex, commands_digest};
 use crate::{
     facts::check_facts, require, text, validate_code, validate_commands, validate_version, Command,
     Fact, FactValue, ValidationError, UNITS,
 };
 
+/// Strict describe decoding. Relays can use `DescribeReply::decode_tolerant`
+/// with the `digest` feature to retain readable commands in a verified reply.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -24,6 +27,34 @@ impl DescribeReply {
     pub fn check(&self) -> Result<(), ValidationError> {
         validate_commands(&self.commands)?;
         require(self.digest == commands_digest(&self.commands)?, "digest")
+    }
+
+    /// Verify the full raw array's digest before decoding its entries independently.
+    /// This does not validate producer constraints on the readable commands.
+    pub fn decode_tolerant(bytes: &[u8]) -> Result<TolerantDescribeReply, DescribeDecodeError> {
+        let raw: RawDescribeReply =
+            serde_json::from_slice(bytes).map_err(DescribeDecodeError::Json)?;
+        if raw.digest != jcs_sha256_hex(&raw.commands).map_err(DescribeDecodeError::Json)? {
+            return Err(DescribeDecodeError::DigestMismatch);
+        }
+        let mut result = TolerantDescribeReply {
+            commands: Vec::new(),
+            unreadable: Vec::new(),
+            digest: raw.digest,
+        };
+        for (index, value) in raw.commands.into_iter().enumerate() {
+            let id = value.get("id").and_then(Value::as_str).map(str::to_owned);
+            match serde_json::from_value(value) {
+                Ok(command) => result.commands.push(command),
+                Err(error) => result.unreadable.push(UnreadableCommand {
+                    index,
+                    module: None,
+                    id,
+                    error: error.to_string(),
+                }),
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -43,6 +74,8 @@ impl ListedCommand {
     }
 }
 
+/// Strict list decoding. Apps should use [`read_list_reply`] so an unreadable
+/// entry, such as a future subject kind, cannot hide the rest of the list.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -67,6 +100,100 @@ impl ListReply {
         }
         Ok(())
     }
+}
+
+/// An entry that could not be decoded, identified by its zero-based array index.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct UnreadableCommand {
+    pub index: usize,
+    pub module: Option<String>,
+    pub id: Option<String>,
+    pub error: String,
+}
+
+/// Decodable list entries and diagnostics for entries omitted during decoding.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct TolerantListReply {
+    pub commands: Vec<ListedCommand>,
+    pub unreadable: Vec<UnreadableCommand>,
+}
+
+/// Decodable describe entries and diagnostics for entries omitted during decoding.
+#[derive(Clone, Debug, PartialEq)]
+#[non_exhaustive]
+pub struct TolerantDescribeReply {
+    pub commands: Vec<Command>,
+    pub unreadable: Vec<UnreadableCommand>,
+    pub digest: String,
+}
+
+/// A malformed description or a digest that does not match its original array.
+#[cfg(feature = "digest")]
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum DescribeDecodeError {
+    Json(serde_json::Error),
+    DigestMismatch,
+}
+
+#[cfg(feature = "digest")]
+impl std::fmt::Display for DescribeDecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Json(error) => write!(f, "invalid describe reply: {error}"),
+            Self::DigestMismatch => write!(f, "describe reply digest mismatch"),
+        }
+    }
+}
+
+#[cfg(feature = "digest")]
+impl std::error::Error for DescribeDecodeError {}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawListReply {
+    commands: Vec<Value>,
+}
+
+#[cfg(feature = "digest")]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawDescribeReply {
+    commands: Vec<Value>,
+    digest: String,
+}
+
+/// Decode each list entry independently; malformed reply envelopes still fail.
+/// This decodes wire shapes only and does not validate producer constraints.
+pub fn read_list_reply(value: Value) -> Result<TolerantListReply, serde_json::Error> {
+    let raw: RawListReply = serde_json::from_value(value)?;
+    let mut result = TolerantListReply {
+        commands: Vec::new(),
+        unreadable: Vec::new(),
+    };
+    for (index, value) in raw.commands.into_iter().enumerate() {
+        let module = value
+            .get("module")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        let id = value
+            .get("command")
+            .and_then(|command| command.get("id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        match serde_json::from_value(value) {
+            Ok(command) => result.commands.push(command),
+            Err(error) => result.unreadable.push(UnreadableCommand {
+                index,
+                module,
+                id,
+                error: error.to_string(),
+            }),
+        }
+    }
+    Ok(result)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

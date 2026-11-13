@@ -37,6 +37,8 @@ fn every_json_vector_is_exercised_and_roundtrips() {
     let expected: BTreeSet<_> = [
         "declarations.json",
         "describe.json",
+        "describe-project.json",
+        "describe-workspace.json",
         "list.json",
         "requests.json",
         "previews.json",
@@ -85,6 +87,60 @@ fn declaration_describe_and_merged_list_vectors() {
             .as_array()
             .unwrap()
             .contains(&serde_json::to_value(entry.command).unwrap()));
+    }
+}
+
+#[test]
+fn project_and_workspace_describe_and_run_vectors() {
+    let requests = vector("requests.json");
+    for (describe_name, request_name, kind) in [
+        ("describe-project.json", "project_run", "project"),
+        ("describe-workspace.json", "workspace_run", "workspace"),
+    ] {
+        let body = vector(describe_name);
+        assert_eq!(body["commands"][0]["subject"], kind);
+        assert_eq!(requests[request_name]["subject"]["kind"], kind);
+        let describe: DescribeReply = roundtrip(&body);
+        describe.check().unwrap();
+        let request: ModuleRunRequest = roundtrip(&requests[request_name]);
+        request.check(&describe.commands[0]).unwrap();
+    }
+}
+
+#[test]
+fn raw_and_typed_digests_agree_for_command_vectors() {
+    use sha2::{Digest, Sha256};
+
+    let declarations = vector("declarations.json");
+    let mut arrays: Vec<Value> = declarations
+        .as_object()
+        .unwrap()
+        .values()
+        .cloned()
+        .collect();
+    for name in [
+        "describe.json",
+        "describe-project.json",
+        "describe-workspace.json",
+    ] {
+        let body = vector(name);
+        let tolerant = DescribeReply::decode_tolerant(&serde_json::to_vec(&body).unwrap()).unwrap();
+        assert!(tolerant.unreadable.is_empty());
+        assert_eq!(tolerant.digest, body["digest"]);
+        arrays.push(body["commands"].clone());
+    }
+    for entry in vector("list.json")["commands"].as_array().unwrap() {
+        arrays.push(serde_json::json!([entry["command"]]));
+    }
+    for case in vector("invalid.json").as_array().unwrap() {
+        if case["kind"] == "command" {
+            arrays.push(serde_json::json!([case["body"]]));
+        }
+    }
+    for raw in arrays {
+        let commands: Vec<Command> = serde_json::from_value(raw.clone()).unwrap();
+        let raw_digest = format!("{:x}", Sha256::digest(serde_jcs::to_vec(&raw).unwrap()));
+        assert_eq!(raw_digest, commands_digest(&commands).unwrap());
     }
 }
 

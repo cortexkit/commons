@@ -28,6 +28,8 @@ pub enum SubjectKind {
     Session,
     Agent,
     Computer,
+    Project,
+    Workspace,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -264,7 +266,16 @@ pub fn validate_commands(commands: &[Command]) -> Result<(), ValidationError> {
 /// Lowercase SHA-256 of the RFC 8785 bytes of the array, not the reply envelope.
 #[cfg(feature = "digest")]
 pub fn commands_digest(commands: &[Command]) -> Result<String, ValidationError> {
-    let bytes = serde_jcs::to_vec(commands).map_err(|_| ValidationError::new("commands"))?;
+    jcs_sha256_hex(commands).map_err(|_| ValidationError::new("commands"))
+}
+
+/// The one digest form for a commands array, shared by the typed digest above
+/// and the tolerant reader, which hashes the array exactly as received.
+#[cfg(feature = "digest")]
+pub(crate) fn jcs_sha256_hex<T: Serialize + ?Sized>(
+    value: &T,
+) -> Result<String, serde_json::Error> {
+    let bytes = serde_jcs::to_vec(value)?;
     Ok(Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))

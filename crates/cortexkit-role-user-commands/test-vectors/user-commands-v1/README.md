@@ -7,8 +7,11 @@ Module names are `example-context` and `example-code-tools`.
   code status. Declaration `subject` is a kind, not a request subject object.
 - `describe.json`: context command array and its independently fixed JCS
   SHA-256 digest. The digest covers the array, not this envelope.
+- `describe-project.json` and `describe-workspace.json`: runnable project and
+  workspace commands and their JSON Canonicalization Scheme (JCS) digests.
 - `list.json`: one app reply merging both modules for a session subject.
-- `requests.json`: module/app params for describe, list, preview and run.
+- `requests.json`: module/app params for describe, list, preview and run,
+  including project and workspace runs.
 - `previews.json`: available flush facts and figure, all four unavailable flush
   reasons, context status, code status facts and index-parts table, and both
   unavailable code-status reasons.

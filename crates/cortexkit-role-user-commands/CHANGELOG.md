@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.1.2
 
+- Add tolerant list and describe readers that retain readable entries and
+  report per-entry decode errors; strict decoding remains available. Describe
+  digests can be verified against the complete original array.
+- Add project and workspace command subjects, constructors, validation and wire
+  vectors. Modules declare the new kinds only after the relaying app server and
+  apps run 0.1.2; older readers reject them.
 - Documentation only: clarify approximate number facts and their app formatting.
 
 ## 0.1.1

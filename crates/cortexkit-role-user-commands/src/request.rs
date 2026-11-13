@@ -47,6 +47,8 @@ pub enum Subject {
     Session { session: SessionRef },
     Agent { agent_id: String },
     Computer {},
+    Project { project_id: String },
+    Workspace { workspace_id: String },
 }
 
 impl Subject {
@@ -58,6 +60,16 @@ impl Subject {
             agent_id: agent_id.into(),
         }
     }
+    pub fn project(project_id: impl Into<String>) -> Self {
+        Self::Project {
+            project_id: project_id.into(),
+        }
+    }
+    pub fn workspace(workspace_id: impl Into<String>) -> Self {
+        Self::Workspace {
+            workspace_id: workspace_id.into(),
+        }
+    }
     pub fn computer() -> Self {
         Self::Computer {}
     }
@@ -66,6 +78,8 @@ impl Subject {
             Self::Session { .. } => SubjectKind::Session,
             Self::Agent { .. } => SubjectKind::Agent,
             Self::Computer {} => SubjectKind::Computer,
+            Self::Project { .. } => SubjectKind::Project,
+            Self::Workspace { .. } => SubjectKind::Workspace,
         }
     }
     pub fn check(&self) -> Result<(), ValidationError> {
@@ -73,6 +87,8 @@ impl Subject {
             Self::Session { session } => session.check().map_err(|e| e.at("session")),
             Self::Agent { agent_id } => require(text(agent_id, 128), "agent_id"),
             Self::Computer {} => Ok(()),
+            Self::Project { project_id } => require(text(project_id, 128), "project_id"),
+            Self::Workspace { workspace_id } => require(text(workspace_id, 128), "workspace_id"),
         }
     }
 }

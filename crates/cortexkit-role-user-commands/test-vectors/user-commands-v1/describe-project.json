@@ -1,0 +1,6 @@
+{
+  "commands": [
+    {"id":"edit_project", "title":"Edit project", "summary":"Edit project data.", "subject":"project", "args":[], "effects":["reversible"], "run":{}}
+  ],
+  "digest":"83be40bdd53c305330ec70edb127b160db91a8bde5aa33d4ad38ca38e4707ddd"
+}
