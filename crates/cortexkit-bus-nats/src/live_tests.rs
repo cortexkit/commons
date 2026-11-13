@@ -57,6 +57,12 @@ impl TestServer {
     }
 
     async fn start(config: Option<&RenderConfig<'_>>) -> Option<Self> {
+        Self::start_on(config, None).await
+    }
+
+    /// `first_port` forces the first attempt's port, so a test can hand the
+    /// server a port that is already taken.
+    async fn start_on(config: Option<&RenderConfig<'_>>, first_port: Option<u16>) -> Option<Self> {
         let required = env::var("CK_REQUIRE_NATS_SERVER").as_deref() == Ok("1");
         let binary = env::var_os("CK_NATS_SERVER_BIN")
             .map(PathBuf::from)
@@ -82,47 +88,71 @@ impl TestServer {
             );
         }
 
-        let listener = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
-        let port = listener.local_addr().expect("reserved address").port();
-        drop(listener);
-        // The server's store lives under the process temp root; TempDir removes it
-        // when the guard drops, which is on every exit path of the test.
-        let directory = tempfile::Builder::new()
-            .prefix("cortexkit-bus-nats-")
-            .tempdir()
-            .expect("temporary NATS directory");
-        let mut command = Command::new(binary);
-        if let Some(render) = config {
-            let config_path = directory.path().join("nats.conf");
-            std::fs::write(&config_path, render(port, &directory)).expect("write NATS config");
-            command.arg("-c").arg(config_path);
-        } else {
-            command
-                .arg("--jetstream")
-                .arg("--store_dir")
-                .arg(directory.path().join("store"))
-                .arg("--port")
-                .arg(port.to_string());
+        // The port is found by binding and releasing it, so a test running in
+        // parallel can be handed the same port before this server binds it.
+        // This server then exits on the bind failure while a plain connect
+        // probe reaches the other test's server, and the test's first real
+        // connect is refused once that other server stops. nats-server writes
+        // `<name>_<pid>.ports` only after its own listeners are up, so the
+        // file from this child's pid proves the port is this server's. A child
+        // that exits first lost the port and is retried on a fresh one.
+        let mut forced = first_port;
+        for _ in 0..5 {
+            let port = match forced.take() {
+                Some(port) => port,
+                None => {
+                    let listener = TcpListener::bind("127.0.0.1:0").expect("reserve loopback port");
+                    listener.local_addr().expect("reserved address").port()
+                }
+            };
+            // The server's store lives under the process temp root; TempDir
+            // removes it when the guard drops, which is on every exit path.
+            let directory = tempfile::Builder::new()
+                .prefix("cortexkit-bus-nats-")
+                .tempdir()
+                .expect("temporary NATS directory");
+            let ports_dir = directory.path().join("ports");
+            std::fs::create_dir(&ports_dir).expect("ports file directory");
+            let mut command = Command::new(&binary);
+            if let Some(render) = config {
+                let config_path = directory.path().join("nats.conf");
+                std::fs::write(&config_path, render(port, &directory)).expect("write NATS config");
+                command.arg("-c").arg(config_path);
+            } else {
+                command
+                    .arg("--jetstream")
+                    .arg("--store_dir")
+                    .arg(directory.path().join("store"))
+                    .arg("--port")
+                    .arg(port.to_string());
+            }
+            command.arg("--ports_file_dir").arg(&ports_dir);
+            let mut child = command
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("start nats-server");
+            let suffix = format!("_{}.ports", child.id());
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                if ports_file_written(&ports_dir, &suffix) {
+                    return Some(Self {
+                        child,
+                        _directory: directory,
+                        url: format!("127.0.0.1:{port}"),
+                    });
+                }
+                if child.try_wait().expect("poll nats-server").is_some() {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "nats-server did not listen in time"
+                );
+                sleep(Duration::from_millis(20)).await;
+            }
         }
-        let child = command
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("start nats-server");
-        let url = format!("127.0.0.1:{port}");
-        let deadline = Instant::now() + Duration::from_secs(5);
-        while TcpStream::connect(&url).await.is_err() {
-            assert!(
-                Instant::now() < deadline,
-                "nats-server did not listen in time"
-            );
-            sleep(Duration::from_millis(20)).await;
-        }
-        Some(Self {
-            child,
-            _directory: directory,
-            url,
-        })
+        panic!("nats-server lost its port to another process five times in a row");
     }
 
     fn unavailable(required: bool, reason: &str) -> Option<Self> {
@@ -133,6 +163,39 @@ impl TestServer {
         eprintln!("nats-server-absent: skipped ({reason})");
         None
     }
+}
+
+fn ports_file_written(directory: &std::path::Path, suffix: &str) -> bool {
+    std::fs::read_dir(directory)
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|entry| entry.file_name().to_string_lossy().ends_with(suffix))
+        })
+        .unwrap_or(false)
+}
+
+/// A port a parallel test's server already holds must not become this
+/// fixture's URL: this server exits on the bind failure, and a probe would
+/// reach the other server, which goes away when its test ends.
+#[tokio::test]
+async fn a_port_taken_before_the_server_binds_is_retried() {
+    let Some(holder) = TestServer::open().await else {
+        return;
+    };
+    let taken = holder
+        .url
+        .rsplit(':')
+        .next()
+        .and_then(|port| port.parse::<u16>().ok())
+        .expect("holder port");
+    let server = TestServer::start_on(None, Some(taken))
+        .await
+        .expect("the server was available a moment ago");
+    assert_ne!(server.url, holder.url);
+    drop(holder);
+    let admin = connect(&server.url, ADMIN_PUBLIC).await;
+    drop(admin);
 }
 
 #[test]
