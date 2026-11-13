@@ -70,6 +70,11 @@ pub const COMPACTION_PROVIDES: &str = "compaction-provider/v2";
 /// serving a session without restarting.
 pub const COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES: &str = "compaction-entry-speaks-for/v1";
 
+/// Additional provider manifest capability enabling `Entry.host_parts`.
+/// Runners capture it at every Setup and retain it until the next Setup.
+/// Providers must not withdraw it while serving a session without restarting.
+pub const COMPACTION_HOST_PARTS_PROVIDES: &str = "compaction-host-parts/v1";
+
 /// Additional provider manifest capability enabling Setup and Conditions
 /// `signed_floor`. Runners send the boundary only to declaring providers.
 pub const COMPACTION_SIGNED_FLOOR_PROVIDES: &str = "compaction-signed-floor/v1";
@@ -123,6 +128,14 @@ pub fn provides_entry_speaks_for(provides: &[String]) -> bool {
     provides
         .iter()
         .any(|capability| capability == COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES)
+}
+
+/// Whether a provider's catalog capabilities declare host-part support.
+/// Evaluate at Setup, not from the runner's own Setup request fields.
+pub fn provides_host_parts(provides: &[String]) -> bool {
+    provides
+        .iter()
+        .any(|capability| capability == COMPACTION_HOST_PARTS_PROVIDES)
 }
 
 /// The role and version a runner declares when it opens a route for this

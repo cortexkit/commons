@@ -6,7 +6,7 @@ and view libraries share this contract without depending on an implementation.
 
 ```toml
 [dependencies]
-cortexkit-role-compaction = "0.3.2"
+cortexkit-role-compaction = "0.4.1"
 ```
 
 `Delivered` adds optional `send_id`, ordered `forms` and ride-text `tokens`
@@ -16,6 +16,13 @@ is available through `cortexkit_role_compaction::rides`; views suppress rides
 when replacing output unless they explicitly choose `delivered` (CONTRACT W6).
 Runners opt into checksummed view anchors through
 Setup's `view_anchor`; without it providers preserve the pre-anchor view shape.
+
+`Entry.host_parts` identifies host-written user or assistant parts by stable id,
+separately from stored text and checksums. Capture `provides_host_parts` from the
+provider's catalog at Setup and pass it to `Entry::with_host_parts`; only a
+provider declaring `compaction-host-parts/v1` receives the facts. Host text is
+neither the person's prompt nor the model's words, and a host-only entry is not
+a user turn or summary boundary.
 
 See [CONTRACT.md](CONTRACT.md) for the protocol rules and
 [`test-vectors/compaction-v2`](test-vectors/compaction-v2) for wire examples.

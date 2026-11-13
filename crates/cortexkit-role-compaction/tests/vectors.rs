@@ -6,8 +6,8 @@ use cortexkit_role_compaction::{
         ToolPart, ToolStatus,
     },
     read::{
-        Cursor, Detail, Entry, Head, NoticeOrigin, ReadName, ReadPage, ReadRequest, Role, Select,
-        SpeaksFor, StepUsage,
+        Cursor, Detail, Entry, Head, HostPart, NoticeOrigin, ReadName, ReadPage, ReadRequest, Role,
+        Select, SpeaksFor, StepUsage,
     },
     ride::{RideAnswer, RideCause, RideRequest},
     rules::{EditCost, ProviderRules, RuleBreak, SignedParts},
@@ -90,6 +90,49 @@ fn samples() -> Vec<(&'static str, Value)> {
             .with_output_tokens(64),
     );
     let cursor = Cursor::new(assistant.ordinal, &assistant.mid, &assistant.digest);
+    let host_entries = vec![
+        Entry::new(
+            1,
+            "mixed-message",
+            Role::User,
+            1_700_000_000_000,
+            vec![
+                Part::new(
+                    "prompt",
+                    PartBody::Text {
+                        text: "An invented prompt.".into(),
+                    },
+                ),
+                Part::new(
+                    "interrupt",
+                    PartBody::Text {
+                        text: "[Request interrupted by user]\n".into(),
+                    },
+                ),
+            ],
+        )
+        .with_host_parts(
+            vec![HostPart::new("interrupt").with_host_code("interrupted")],
+            true,
+        )
+        .unwrap(),
+        Entry::new(
+            2,
+            "host-only-message",
+            Role::User,
+            1_700_000_000_100,
+            vec![Part::new(
+                "retry",
+                PartBody::Text {
+                    text:
+                        "The previous response was interrupted. Continue from where you left off."
+                            .into(),
+                },
+            )],
+        )
+        .with_host_parts(vec![HostPart::new("retry")], true)
+        .unwrap(),
+    ];
     let view = View::seal(
         1,
         vec![
@@ -376,6 +419,20 @@ fn samples() -> Vec<(&'static str, Value)> {
                 )
                 .with_speaks_for(SpeaksFor::new("agent-a").with_name("Ada"), true),
             ),
+        ),
+        (
+            "entries-host-parts.json",
+            value(ReadPage::new(host_entries.clone(), Head::new())),
+        ),
+        (
+            "entries-host-parts-legacy.json",
+            value(ReadPage::new(
+                host_entries
+                    .into_iter()
+                    .map(|entry| entry.with_host_parts(Vec::new(), false).unwrap())
+                    .collect(),
+                Head::new(),
+            )),
         ),
         (
             "notice-speaks-for-entry.json",
@@ -843,6 +900,26 @@ fn request_round_trip<T: DeserializeOwned + Serialize>(
 }
 
 fn check(name: &str, json: Value) {
+    if matches!(
+        name,
+        "entries-host-parts.json" | "entries-host-parts-legacy.json"
+    ) {
+        round_trip::<ReadPage>(json.clone());
+        let page: ReadPage = serde_json::from_value(json).unwrap();
+        let declared = name == "entries-host-parts.json";
+        for entry in page.entries {
+            assert_eq!(entry.host_parts.is_empty(), !declared);
+            assert_eq!(
+                entry.digest,
+                cortexkit_role_compaction::read::entry_digest(
+                    entry.role.clone(),
+                    entry.notice.as_ref(),
+                    &entry.parts,
+                )
+            );
+        }
+        return;
+    }
     if matches!(
         name,
         "speaks-for-entry.json" | "notice-speaks-for-entry.json"

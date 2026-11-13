@@ -43,7 +43,7 @@ pub struct SessionRef {
 /// Kinds allowed by role: user entries (notices included) hold text and
 /// files; assistant entries hold text, reasoning, tool, file and opaque
 /// parts; system entries hold text only.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct Entry {
     /// Position on the session's active path, counting from 1 at its first
@@ -67,6 +67,12 @@ pub struct Entry {
     /// Frozen write-time attribution, excluded from every checksum.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaks_for: Option<SpeaksFor>,
+    /// Host-written user or assistant parts, in stored part order. Listing an
+    /// id is the mark; it is not the person's prompt or the model's words.
+    /// Sent only to providers declaring `compaction-host-parts/v1` and excluded
+    /// from every checksum. Use [`Self::with_host_parts`] to project the gate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub host_parts: Vec<HostPart>,
     /// When the host first stored the message, in milliseconds since the Unix
     /// epoch. It does not change when the entry is updated. For a message the
     /// runner did not store itself (history from before the runner, a moved
@@ -97,6 +103,102 @@ pub struct Entry {
     /// view, so the view library's rule check compares against it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generated_under: Option<AppliedView>,
+}
+
+// Decode the same wire fields before checking facts against the whole entry.
+// A field-level deserializer cannot validate membership or stored part order.
+#[derive(Deserialize)]
+#[serde(remote = "Entry")]
+struct EntryFields {
+    #[serde(deserialize_with = "crate::integer::required")]
+    ordinal: u64,
+    mid: String,
+    role: Role,
+    #[serde(default)]
+    notice: Option<NoticeOrigin>,
+    #[serde(default)]
+    speaks_for: Option<SpeaksFor>,
+    #[serde(default)]
+    host_parts: Vec<HostPart>,
+    #[serde(deserialize_with = "crate::integer::required")]
+    written_at: u64,
+    #[serde(default, deserialize_with = "crate::integer::optional")]
+    completed_at: Option<u64>,
+    digest: Digest,
+    parts: Vec<Part>,
+    #[serde(default)]
+    usage: Option<StepUsage>,
+    #[serde(default)]
+    reasoning_tokens: Option<crate::tokens::ReasoningTokens>,
+    #[serde(default)]
+    generated_under: Option<AppliedView>,
+}
+
+impl<'de> Deserialize<'de> for Entry {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let entry = EntryFields::deserialize(deserializer)?;
+        entry.check_host_parts().map_err(serde::de::Error::custom)?;
+        Ok(entry)
+    }
+}
+
+/// A host-written part, identified by its stable id within one entry, never
+/// by index. The runner records this fact only from exact host knowledge.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct HostPart {
+    pub part: String,
+    /// An open presentation code. Unknown or absent codes use the part's text.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "host_code"
+    )]
+    pub host_code: Option<String>,
+}
+
+impl HostPart {
+    pub fn new(part: impl Into<String>) -> Self {
+        Self {
+            part: part.into(),
+            host_code: None,
+        }
+    }
+
+    /// Use the same exact host knowledge that identified the part. Check an
+    /// in-memory code with [`Self::check`]; decoding checks it automatically.
+    pub fn with_host_code(mut self, code: impl Into<String>) -> Self {
+        self.host_code = Some(code.into());
+        self
+    }
+
+    /// Validate code shape, not vocabulary. Membership, role and stored part
+    /// order are checked by [`Entry::check_host_parts`].
+    pub fn check(&self) -> Result<(), &'static str> {
+        check_host_code(self.host_code.as_deref())
+    }
+}
+
+fn check_host_code(code: Option<&str>) -> Result<(), &'static str> {
+    if let Some(code) = code {
+        if code.is_empty()
+            || code.len() > 64
+            || !code
+                .bytes()
+                .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        {
+            return Err("host_code must be 1-64 bytes of lowercase ASCII letters, digits or _");
+        }
+    }
+    Ok(())
+}
+
+fn host_code<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let code = String::deserialize(deserializer)?;
+    check_host_code(Some(&code)).map_err(serde::de::Error::custom)?;
+    Ok(Some(code))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,7 +378,7 @@ pub struct Head {
 /// parts, each part with its `id`, `tag` and `digest`, as [`Entry::digest`]
 /// carries it. The ordinal, `mid`, `written_at`, `completed_at`, usage and
 /// `generated_under`, reasoning counts, part `tokens` and delivered-item
-/// `tokens` and entry `speaks_for` are not hashed.
+/// `tokens` and entry `speaks_for` and `host_parts` are not hashed.
 /// Pass full parts: compact parts hash to a
 /// different value.
 pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -> Digest {
@@ -320,6 +422,7 @@ impl Entry {
             role,
             notice: None,
             speaks_for: None,
+            host_parts: Vec::new(),
             written_at,
             completed_at: None,
             digest,
@@ -344,6 +447,45 @@ impl Entry {
     pub fn with_speaks_for(mut self, speaks_for: SpeaksFor, provider_declared: bool) -> Self {
         self.speaks_for = provider_declared.then_some(speaks_for);
         self
+    }
+
+    /// Project host facts using the provider declaration captured at Setup.
+    /// Without it, clear even previously attached facts. With it, validate the
+    /// role, code shapes, part membership, uniqueness and stored part order.
+    /// Neither path changes content, digests or an applied view.
+    pub fn with_host_parts(
+        mut self,
+        host_parts: Vec<HostPart>,
+        provider_declared: bool,
+    ) -> Result<Self, &'static str> {
+        self.host_parts = if provider_declared {
+            host_parts
+        } else {
+            Vec::new()
+        };
+        self.check_host_parts()?;
+        Ok(self)
+    }
+
+    /// Validate facts constructed in memory. Decoding checks them automatically.
+    pub fn check_host_parts(&self) -> Result<(), &'static str> {
+        if !self.host_parts.is_empty() && !matches!(self.role, Role::User | Role::Assistant) {
+            return Err("host_parts are allowed only on a user or assistant entry");
+        }
+        let mut previous = None;
+        for fact in &self.host_parts {
+            fact.check()?;
+            let index = self
+                .parts
+                .iter()
+                .position(|part| part.id == fact.part)
+                .ok_or("host_parts names an id not in the entry")?;
+            if previous.is_some_and(|previous| previous >= index) {
+                return Err("host_parts must be unique and in stored part order");
+            }
+            previous = Some(index);
+        }
+        Ok(())
     }
 
     /// Set the host's completion stamp without changing the content checksum.

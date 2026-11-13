@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.1
+
+- Add optional entry-level `host_parts: [{part, host_code?}]`, identifying
+  host-written parts by stable id without changing `Part` or stored/model-bound
+  bytes. Host text is neither the person's prompt nor the model's words; a
+  host-only entry is not a user turn or a summary boundary.
+- Add `read::HostPart`, its code builder and shape check, plus
+  `Entry::check_host_parts` and capability-gated `Entry::with_host_parts`.
+  Decoding and validation refuse unsupported roles, unknown or duplicate ids,
+  ids out of stored part order, and malformed codes. The code vocabulary is open.
+- Add `COMPACTION_HOST_PARTS_PROVIDES` (`compaction-host-parts/v1`) and
+  `provides_host_parts`, captured from the provider's catalog at Setup and kept
+  until the next Setup. Non-declaring providers receive no host-part facts.
+- Host facts stay outside every W7 checksum and part digest. First serving a
+  mark on stored history is not a transcript change and needs no notice.
+  Add paired marked/legacy entry vectors with identical content digests.
+
 ## 0.4.0 (breaking)
 
 Content is shared instead of copied, tool input is held as its JSON text, and

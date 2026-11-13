@@ -1,5 +1,12 @@
 # Compaction wire examples
 
+`entries-host-parts.json` includes a mixed user entry with a whole-block
+interrupt marker and a host-only retry entry, marked by stable part id. The
+retry entry has no code. `entries-host-parts-legacy.json` carries the same entries
+without facts for a provider not declaring `compaction-host-parts/v1`. Part and
+entry digests are byte-identical between the two pages; host text is never the
+person's prompt, and the host-only entry is not a user turn or summary boundary.
+
 `view-anchor-shapes.json` pins Setup's absent, false and true `view_anchor`
 flags and sealed view bytes. Without true, both policy members are absent and
 the view retains the 0.2.9 shape and checksum.
