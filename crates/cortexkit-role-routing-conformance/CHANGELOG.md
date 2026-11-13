@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.24
+
+- Correct placement runner pairs to use contract spellings and OAuth route
+  facts, configured explicitly rather than relying on router defaults.
+- Make the self-test router treat unknown runner-pair tokens as non-matching,
+  and verify the harness-facts check rejects a router that selects a
+  harness-excluded route while still honoring session-start limits.
+- Use shared pair spellings in the fixture tool-capability validation test too.
+
 ## 0.10.23
 
 - Pin routing `=0.7.21`. Drive caller-runner placement through attested caller

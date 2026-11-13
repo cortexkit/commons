@@ -327,8 +327,10 @@ mod tests {
             for runner in &catalog.runners {
                 for provider in &runner.tool_providers {
                     for tag in &provider.capabilities {
-                        let mut declaration =
-                            RunnerDeclaration::new(vec![RunnerPair::new("example-api", "api-key")]);
+                        let mut declaration = RunnerDeclaration::new(vec![RunnerPair::new(
+                            crate::wire::spellings::WIRE_APIS[0],
+                            crate::wire::spellings::AUTH_METHODS[1],
+                        )]);
                         declaration.tool_capabilities = vec![tag.clone()];
                         let result = ConsumerDeclarations::new()
                             .with_runner(declaration)

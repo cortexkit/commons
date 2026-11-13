@@ -3,7 +3,8 @@ use super::*;
 use crate::fixture::{
     OTHER_CONSUMER, PRICED_PROVIDER, RUNNER_ONE, RUNNER_TWO, SUBSCRIPTION_PROVIDER,
 };
-use crate::wire::{price::Price, select::check_answer_serving};
+use crate::wire::{price::Price, select::check_answer_serving, spellings};
+use crate::RunnerRouteFacts;
 
 pub(super) const CASES: &[(&str, &str)] = &[
     (
@@ -60,6 +61,26 @@ impl<S: RoutingSubject> Suite<'_, S> {
         }
         let key_a = format!("{PRICED_PROVIDER}/model-a");
         let key_b = format!("{PRICED_PROVIDER}/model-b");
+        let wire_api = spellings::WIRE_APIS[0];
+        let auth_method = spellings::AUTH_METHODS[1];
+        if matches!(
+            name,
+            "placement_consumer_declarations" | "placement_harness_facts"
+        ) {
+            // Both placement checks declare a runner pair. Give every fixture
+            // route the same explicit wire format and its accounts' OAuth method
+            // so pair matching cannot depend on the subject's catalog defaults.
+            let facts: Vec<_> = fixture::catalog()
+                .models
+                .iter()
+                .map(|model| RunnerRouteFacts::new(model.route_key(), wire_api, auth_method))
+                .collect();
+            if !self.subject.configure_runner_route_facts(&facts).await? {
+                return Ok(Ending::NotApplicable(
+                    "configure_runner_route_facts is unsupported".into(),
+                ));
+            }
+        }
         match name {
             "placement_consumer_declarations" => {
                 let declared = "example-consumer.task";
@@ -183,7 +204,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
                     return Err("module placement was not honoured".into());
                 }
                 let runner_consumer = format!("{RUNNER_ONE}.task");
-                self.subject.configure_catalog_declarations(&[slot(RUNNER_ONE, json!({"runner":{"pairs":[{"wire_api":"messages","auth_method":"api_key"}]},"consumers":[{"name":runner_consumer,"iq":40,"placement":"caller_runner"}]}))]).await?;
+                self.subject.configure_catalog_declarations(&[slot(RUNNER_ONE, json!({"runner":{"pairs":[{"wire_api":wire_api,"auth_method":auth_method}]},"consumers":[{"name":runner_consumer,"iq":40,"placement":"caller_runner"}]}))]).await?;
                 let runner_route = self.route_as(RUNNER_ONE).await?;
                 let mut runner_params = json!({"consumer":runner_consumer,"requirements":{}});
                 for runners in [
@@ -211,7 +232,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 }
             }
             "placement_harness_facts" => {
-                self.subject.configure_catalog_declarations(&[slot(RUNNER_ONE, json!({"runner":{"pairs":[{"wire_api":"messages","auth_method":"api_key"}],"harnesses":["alpha","beta"],"default_harness":"alpha","harness_limits":{"alpha":{"starts_sessions":false,"capabilities":["future_task"]},"beta":{"starts_sessions":true,"capabilities":["one_off","fork_answer","output_cap"],"exclude":[key_a]}}}}))]).await?;
+                self.subject.configure_catalog_declarations(&[slot(RUNNER_ONE, json!({"runner":{"pairs":[{"wire_api":wire_api,"auth_method":auth_method}],"harnesses":["alpha","beta"],"default_harness":"alpha","harness_limits":{"alpha":{"starts_sessions":false,"capabilities":["future_task"]},"beta":{"starts_sessions":true,"capabilities":["one_off","fork_answer","output_cap"],"exclude":[key_a]}}}}))]).await?;
                 let mut params = base();
                 params["runners"] = json!([RUNNER_ONE]);
                 if describe.serves(capabilities::SELECT_HARNESS) {
@@ -397,5 +418,104 @@ impl<S: RoutingSubject> Suite<'_, S> {
             _ => unreachable!(),
         }
         Ok(Ending::Passed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::checks::select_engine::fake::{Defects, FakeSubject};
+
+    #[tokio::test]
+    async fn placement_harness_facts_uses_matching_runner_pairs() {
+        let subject = FakeSubject::with_placement(Defects::default());
+        assert_eq!(
+            Suite::new(&subject).run("placement_harness_facts").await,
+            Ok(Ending::Passed)
+        );
+    }
+
+    #[tokio::test]
+    async fn placement_harness_facts_rejects_ignored_exclusion() {
+        let subject = FakeSubject::with_placement(Defects {
+            extension: Some("placement_harness_exclusion"),
+            ..Defects::default()
+        });
+        let spec = crate::CHECKS
+            .iter()
+            .find(|spec| spec.name == "placement_harness_facts")
+            .unwrap();
+        let report = crate::runner::run_check(&Suite::new(&subject), spec).await;
+        assert_eq!(report.check, "placement_harness_facts");
+        assert!(
+            matches!(&report.outcome, crate::CheckOutcome::Failed { reason }
+                if reason == "harness facts did not narrow selection"),
+            "{report:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn placement_pair_facts_unsupported_are_skipped_not_passed() {
+        let subject = FakeSubject::with_placement(Defects {
+            runner_route_facts_unsupported: true,
+            ..Defects::default()
+        });
+        for name in ["placement_consumer_declarations", "placement_harness_facts"] {
+            assert!(
+                matches!(Suite::new(&subject).run(name).await,
+                    Ok(Ending::NotApplicable(reason))
+                    if reason.contains("configure_runner_route_facts")),
+                "{name}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn fake_runner_pair_tokens_must_be_known() {
+        let wire_api = spellings::WIRE_APIS[0];
+        let auth_method = spellings::AUTH_METHODS[1];
+        for explicit_facts in [false, true] {
+            for (wire, auth, matches) in [
+                (wire_api, auth_method, true),
+                ("messages", auth_method, false),
+                (wire_api, "api_key", false),
+                ("messages", "api_key", false),
+            ] {
+                let subject = FakeSubject::with_placement(Defects::default());
+                let suite = Suite::new(&subject);
+                suite.fresh().await.unwrap();
+                let mut catalog = fixture::catalog();
+                catalog.models.truncate(1);
+                catalog.runners.truncate(1);
+                let key = catalog.models[0].route_key();
+                catalog.runners[0].route_keys = vec![key.clone()];
+                subject.configure_catalog(&catalog).await.unwrap();
+                if explicit_facts {
+                    assert!(subject
+                        .configure_runner_route_facts(&[RunnerRouteFacts::new(
+                            &key,
+                            wire_api,
+                            auth_method,
+                        )])
+                        .await
+                        .unwrap());
+                }
+                subject
+                    .configure_catalog_declarations(&[slot(
+                        RUNNER_ONE,
+                        json!({"runner":{"pairs":[{"wire_api":wire,"auth_method":auth}]}}),
+                    )])
+                    .await
+                    .unwrap();
+                let route = suite.route_as(CONSUMER).await.unwrap();
+                let mut params = base();
+                params["runners"] = json!([RUNNER_ONE]);
+                if matches {
+                    select(&route, &params, "known runner pair").await.unwrap();
+                } else {
+                    no_route(&route, &params).await.unwrap();
+                }
+            }
+        }
     }
 }

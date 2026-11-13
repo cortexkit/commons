@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing-conformance"
-version = "0.10.23"
+version = "0.10.24"
 dependencies = [
  "async-trait",
  "cortexkit-role-routing",

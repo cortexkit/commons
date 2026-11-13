@@ -49,7 +49,7 @@ use cortexkit_role_routing_conformance::{
             parse_select_request_serving, PinFallback, PinOutcome, Requirements, RouteRef,
             RunnerRef, SelectAnswer, ToolsRequirement, REQUIREMENT_FIELDS,
         },
-        wire, DemandDefaults, ROLE_DECLARATIONS_KEY,
+        spellings, wire, DemandDefaults, ROLE_DECLARATIONS_KEY,
     },
     Catalog, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig, ConsumerMode, HoldLimits,
     Reply, RouteFailure, RouteStamp, RoutingRoute, RoutingSubject,
@@ -1161,7 +1161,7 @@ impl FakeRoute {
         {
             declaration.harness_limits = None;
         }
-        let limits = match declaration.limits_for_harness(harness) {
+        let mut limits = match declaration.limits_for_harness(harness) {
             Ok(limits) => limits,
             Err(error) => {
                 eprintln!("runner {module}: {error}; using runner-level values");
@@ -1174,6 +1174,16 @@ impl FakeRoute {
                     .expect("no harness limits")
             }
         };
+        // CONTRACT §1.2: "Routing intersects the runner module's pairs with the
+        // vault's available provider credentials and the catalog's routes."
+        // Those producers use only spellings::WIRE_APIS / AUTH_METHODS, so an
+        // unknown token matches nothing, even when this fake has no route facts.
+        if let Some(pairs) = &mut limits.pairs {
+            pairs.retain(|pair| {
+                spellings::WIRE_APIS.contains(&pair.wire_api.as_str())
+                    && spellings::AUTH_METHODS.contains(&pair.auth_method.as_str())
+            });
+        }
         let route_facts = state
             .runner_route_facts
             .iter()
@@ -1199,32 +1209,37 @@ impl FakeRoute {
         } else {
             &model.provider
         };
-        limits.explicit_providers.as_ref().is_none_or(|providers| {
-            providers.iter().any(|allowed| allowed == provider)
-                || (gateway
-                    && self.fault("gateway_explicit_providers_alias")
-                    && providers.contains(&model.provider))
-        }) && route_facts.map_or_else(
-            || self.fault("runner_requires_wire_api") || declaration.admits_row(serves_wire_api),
-            |facts| {
-                limits.pairs.as_ref().is_some_and(|pairs| {
-                    pairs.iter().any(|pair| {
-                        pair.wire_api == facts.wire_api
-                            && pair.auth_method == facts.auth_method
-                            && (self.fault("runner_requires_wire_api")
-                                || if (self.fault("requires_wire_api_pair_false_ignored")
-                                    && pair.requires_wire_api == Some(false))
-                                    || (self.fault("requires_wire_api_pair_true_ignored")
-                                        && pair.requires_wire_api == Some(true))
-                                {
-                                    declaration.admits_row(serves_wire_api)
-                                } else {
-                                    declaration.admits_pair_row(pair, serves_wire_api)
-                                })
+        limits.pairs.as_ref().is_some_and(|pairs| !pairs.is_empty())
+            && limits.explicit_providers.as_ref().is_none_or(|providers| {
+                providers.iter().any(|allowed| allowed == provider)
+                    || (gateway
+                        && self.fault("gateway_explicit_providers_alias")
+                        && providers.contains(&model.provider))
+            })
+            && route_facts.map_or_else(
+                || {
+                    self.fault("runner_requires_wire_api")
+                        || declaration.admits_row(serves_wire_api)
+                },
+                |facts| {
+                    limits.pairs.as_ref().is_some_and(|pairs| {
+                        pairs.iter().any(|pair| {
+                            pair.wire_api == facts.wire_api
+                                && pair.auth_method == facts.auth_method
+                                && (self.fault("runner_requires_wire_api")
+                                    || if (self.fault("requires_wire_api_pair_false_ignored")
+                                        && pair.requires_wire_api == Some(false))
+                                        || (self.fault("requires_wire_api_pair_true_ignored")
+                                            && pair.requires_wire_api == Some(true))
+                                    {
+                                        declaration.admits_row(serves_wire_api)
+                                    } else {
+                                        declaration.admits_pair_row(pair, serves_wire_api)
+                                    })
+                        })
                     })
-                })
-            },
-        )
+                },
+            )
     }
 
     fn select(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
