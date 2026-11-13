@@ -326,7 +326,7 @@ async fn continue_signed_out_faulty_undeclared_capability_fails_by_name() {
 
 #[tokio::test]
 async fn continue_faulty_exhausted_account_fails_by_name() {
-    breaks(
+    breaks_with_account_decision_checks(
         Defects {
             continue_exhausted: true,
             ..Defects::default()
@@ -339,7 +339,7 @@ async fn continue_faulty_exhausted_account_fails_by_name() {
 
 #[tokio::test]
 async fn continue_faulty_provider_fails_by_name() {
-    breaks(
+    breaks_with_account_decision_checks(
         Defects {
             continue_provider: true,
             ..Defects::default()
@@ -352,7 +352,7 @@ async fn continue_faulty_provider_fails_by_name() {
 
 #[tokio::test]
 async fn continue_faulty_auth_method_fails_by_name() {
-    breaks(
+    breaks_with_account_decision_checks(
         Defects {
             continue_auth: true,
             ..Defects::default()
@@ -365,7 +365,7 @@ async fn continue_faulty_auth_method_fails_by_name() {
 
 #[tokio::test]
 async fn continue_faulty_model_fails_by_name() {
-    breaks(
+    breaks_with_account_decision_checks(
         Defects {
             continue_model: true,
             ..Defects::default()
@@ -378,7 +378,7 @@ async fn continue_faulty_model_fails_by_name() {
 
 #[tokio::test]
 async fn continue_faulty_known_hold_fails_by_name() {
-    breaks(
+    breaks_with_account_decision_checks(
         Defects {
             continue_held: true,
             ..Defects::default()
@@ -478,6 +478,90 @@ async fn continue_without_group_refuses_and_skips_optional_cases() {
                 report.render()
             );
         }
+    }
+}
+
+const ACCOUNT_DECISION_CHECKS: &[&str] = &[
+    "continue_account_decision_preserves_route",
+    "continue_account_decision_wrong_admission_refused",
+    "continue_account_decision_chain",
+];
+
+#[tokio::test]
+async fn continue_account_decision_cases_pass() {
+    let report = run_suite(&FakeSubject::new(Defects::default())).await;
+    for name in ACCOUNT_DECISION_CHECKS {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CheckOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn continue_select_only_router_fails_each_account_decision_check() {
+    let report = run_suite(&FakeSubject::new(Defects {
+        continue_select_decisions_only: true,
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(
+        report.failing(),
+        ACCOUNT_DECISION_CHECKS,
+        "{}",
+        report.render()
+    );
+    for name in ACCOUNT_DECISION_CHECKS {
+        match report.outcome(name) {
+            Some(CheckOutcome::Failed { reason }) => {
+                assert!(
+                    reason.contains("expected offer") && reason.contains("unknown_decision"),
+                    "{name}: {reason}"
+                );
+            }
+            other => panic!("{name} must reject a select-only resolver, got {other:?}"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn continue_foreign_account_decision_fails_by_name() {
+    breaks(
+        Defects {
+            continue_foreign_account_decision: true,
+            ..Defects::default()
+        },
+        "continue_account_decision_wrong_admission_refused",
+        "must refuse unknown_decision",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn continue_offered_account_decision_unknown_fails_by_name() {
+    breaks(
+        Defects {
+            continue_offered_decision_unknown: true,
+            ..Defects::default()
+        },
+        "continue_account_decision_chain",
+        "unknown_decision",
+    )
+    .await;
+}
+
+async fn breaks_with_account_decision_checks(defects: Defects, red: &str, because: &str) {
+    let report = run_suite(&FakeSubject::new(defects)).await;
+    let mut reds = ACCOUNT_DECISION_CHECKS.to_vec();
+    reds.push(red);
+    assert_eq!(report.failing(), reds, "{}", report.render());
+    match report.outcome(red) {
+        Some(CheckOutcome::Failed { reason }) => {
+            assert!(reason.contains(because), "{red}: {reason}")
+        }
+        other => panic!("{red} should fail, got {other:?}"),
     }
 }
 

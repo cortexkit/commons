@@ -89,6 +89,8 @@ pub struct ContinueRequest {
     pub run_id: String,
     pub admission_id: String,
     pub conversation_key: String,
+    /// The current select decision, or an account decision from this admission
+    /// when the run was admitted without selection or has already continued.
     pub previous_decision_id: String,
     pub exhausted: ExhaustedAccount,
     pub selection_id: String,

@@ -1,5 +1,7 @@
 use super::*;
-use cortexkit_role_routing::account_continue::{ContinueAnswer, ContinueRequest, ExhaustedAccount};
+use cortexkit_role_routing::account_continue::{
+    ContinueAnswer, ContinueOffer, ContinueRequest, ExhaustedAccount,
+};
 
 impl<S: RoutingSubject> Suite<'_, S> {
     pub(super) async fn continue_check(&self, name: &str) -> Result<Ending, String> {
@@ -63,6 +65,15 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 ));
             }
             return Ok(Ending::Passed);
+        }
+
+        if matches!(
+            name,
+            "continue_account_decision_preserves_route"
+                | "continue_account_decision_wrong_admission_refused"
+                | "continue_account_decision_chain"
+        ) {
+            return self.continue_account_decision_check(name).await;
         }
 
         let mut catalog = fixture::continue_catalog();
@@ -344,4 +355,178 @@ impl<S: RoutingSubject> Suite<'_, S> {
         }
         Ok(Ending::Passed)
     }
+
+    async fn continue_account_decision_check(&self, name: &str) -> Result<Ending, String> {
+        let mut catalog = fixture::continue_catalog();
+        catalog.accounts.retain(|a| a.account_id == "account-1");
+        self.subject.configure_catalog(&catalog).await?;
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        // No selection is made: the model is pinned directly by this admission.
+        let admitted: AccountForAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &Self::account_for(
+                "account-decision-admission",
+                "account-decision-conversation",
+                "model-c",
+            ),
+            "select-less admission",
+        )
+        .await?;
+        if admitted.reason.decision_id.is_empty()
+            || admitted.account.provider != fixture::SUBSCRIPTION_PROVIDER
+            || admitted.account.method != "oauth"
+            || admitted.account.account_id != "account-1"
+            || admitted.account.credential_id != "credential-1"
+        {
+            return Err(
+                "select-less admission did not name the seeded account and its decision".into(),
+            );
+        }
+        let mut request = ContinueRequest::new(
+            "account-decision-run",
+            "account-decision-admission",
+            "account-decision-conversation",
+            &admitted.reason.decision_id,
+            ExhaustedAccount::new(
+                &admitted.account.credential_id,
+                &admitted.account.account_id,
+                "five_hour",
+                now_ms(),
+            )
+            .with_resets_at_ms(now_ms() + 300_000),
+            "account-decision-selection",
+        );
+        let _: AccountObserveAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_OBSERVE,
+            &json!({
+                "event_id":"account-decision-started", "kind":"admission_started",
+                "admission_id":request.admission_id, "run_id":request.run_id,
+                "served_account_id":admitted.account.account_id,
+                "credential_id":admitted.account.credential_id, "observed_at_ms":now_ms()
+            }),
+            "select-less run started",
+        )
+        .await?;
+        if name == "continue_account_decision_wrong_admission_refused" {
+            // Both admissions use the same account, so account identity cannot
+            // substitute for checking which admission owns the decision.
+            let foreign: AccountForAnswer = answer(
+                &runner,
+                ops::ROUTE_ACCOUNT_FOR,
+                &Self::account_for("foreign-admission", "foreign-conversation", "model-c"),
+                "other select-less admission",
+            )
+            .await?;
+            let mut mismatched = request.clone();
+            mismatched.previous_decision_id = foreign.reason.decision_id;
+            mismatched.selection_id = "foreign-account-decision-selection".into();
+            let refusal: ContinueAnswer = answer(
+                &runner,
+                ops::ROUTE_ACCOUNT_FOR,
+                &serde_json::to_value(mismatched).unwrap(),
+                "account decision from another admission",
+            )
+            .await?;
+            if !matches!(refusal, ContinueAnswer::Refuse(ref r) if r.routing_code == "unknown_decision")
+            {
+                return Err(format!("another admission's account decision must refuse unknown_decision, got {refusal:?}"));
+            }
+        }
+        let mut credentials = fixture::continue_credentials();
+        if name == "continue_account_decision_chain" {
+            let mut third = credentials[1].clone();
+            third.account.account_id = "account-7".into();
+            third.account.credential_id = "credential-7".into();
+            credentials.push(third);
+        }
+        self.subject
+            .configure_continue_credentials(&credentials)
+            .await?;
+        self.subject
+            .block_account("account-6", Some(now_ms() + 300_000))
+            .await?;
+        // A same-admission offer is also required after the foreign-id refusal;
+        // refusing every account decision must not pass the isolation check.
+        let first: ContinueAnswer = answer(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &serde_json::to_value(&request).unwrap(),
+            "continue from admission account decision",
+        )
+        .await?;
+        let offer = account_decision_offer(&first, &request, &credentials)?;
+        if name == "continue_account_decision_chain" {
+            let _: AccountObserveAnswer = answer(
+                &runner,
+                ops::ROUTE_ACCOUNT_OBSERVE,
+                &json!({
+                    "event_id":"account-decision-switched", "kind":"admission_started",
+                    "admission_id":request.admission_id, "run_id":request.run_id,
+                    "served_account_id":offer.account, "credential_id":offer.credential_id,
+                    "observed_at_ms":now_ms()
+                }),
+                "first account switch recorded",
+            )
+            .await?;
+            request.previous_decision_id = offer.decision_id;
+            request.exhausted =
+                ExhaustedAccount::new(offer.credential_id, offer.account, "seven_day", now_ms())
+                    .with_resets_at_ms(now_ms() + 300_000);
+            request.selection_id = "account-decision-second-selection".into();
+            let second: ContinueAnswer = answer(
+                &runner,
+                ops::ROUTE_ACCOUNT_FOR,
+                &serde_json::to_value(&request).unwrap(),
+                "continue from offered account decision",
+            )
+            .await?;
+            let second = account_decision_offer(&second, &request, &credentials)?;
+            if second.decision_id == admitted.reason.decision_id
+                || second.account == admitted.account.account_id
+            {
+                return Err(
+                    "second continuation reused the original decision or exhausted account".into(),
+                );
+            }
+        }
+        Ok(Ending::Passed)
+    }
+}
+
+fn account_decision_offer(
+    answer: &ContinueAnswer,
+    request: &ContinueRequest,
+    credentials: &[crate::ContinueCredential],
+) -> Result<ContinueOffer, String> {
+    let ContinueAnswer::Offer(offer) = answer else {
+        return Err(format!(
+            "a compatible spare exists for the account decision, expected offer, got {answer:?}"
+        ));
+    };
+    let offered = credentials
+        .iter()
+        .find(|c| {
+            c.account.credential_id == offer.credential_id && c.account.account_id == offer.account
+        })
+        .ok_or("account-decision offer is not a seeded credential/account pair")?;
+    if offered.account.provider != fixture::SUBSCRIPTION_PROVIDER
+        || offered.account.method != "oauth"
+        || !offered.models.iter().any(|m| m == "model-c")
+    {
+        return Err(
+            "account-decision offer changes provider, auth method or model eligibility".into(),
+        );
+    }
+    if offer.account == request.exhausted.account || offer.account == "account-6" {
+        return Err("account-decision offer names an exhausted or held account".into());
+    }
+    if offer.decision_id.is_empty()
+        || offer.decision_id == request.previous_decision_id
+        || offer.valid_until_ms <= now_ms()
+    {
+        return Err("account-decision offer must name a new decision and future deadline".into());
+    }
+    Ok(offer.clone())
 }

@@ -1288,10 +1288,25 @@ The answer (`account::AccountForAnswer`):
   conversation_key, previous_decision_id, exhausted, selection_id}`.
   `admission_id` always stays the original admission, not a new one.
   `previous_decision_id` names the decision the run is currently using:
-  the admitted decision, or, after an earlier switch, the offered decision
-  it switched to. The router
-  binds these to the paused run and takes provider, auth method, model and
-  owner scope only from that decision, never changing them.
+  the admitted select decision, or, after an earlier switch, the offered
+  decision it switched to. For a run admitted without a select decision,
+  it initially names the account decision from the admission's
+  `route.account_for` answer (`reason.decision_id`); after a switch, it names
+  the account decision that continuation offered.
+- [pinned] The router resolves `previous_decision_id` in both select decisions
+  and account decisions. An account decision is accepted only if it belongs
+  to the same `admission_id`; an account decision from another admission is
+  refused with `kind: "refuse", routing_code: "unknown_decision"`, exactly
+  like an unknown id. The router binds the decision to the paused run and
+  keeps everything the admission fixed: provider, model, auth method, owner
+  scope and harness. Only the account may change, whether the predecessor
+  is a select decision or an account decision.
+- [pinned] Resolving account decisions adds no wire member or capability.
+  A router that does not implement it answers `unknown_decision` as before.
+  The runner handles that continuation refusal by keeping the run paused on
+  its original account: for quota exhaustion, resume only after that account's
+  own reset; for `signed_out`, wait for a person to renew sign-in. It does not
+  ask again for this pause; a later pause may ask with a new selection id.
 - [pinned] Owner scope is the owner derived under §3 and stamped on the
   previous decision, together with that decision's scope stamp. An offered
   decision must keep the same owner and an exactly equal scope stamp: the
@@ -1350,8 +1365,10 @@ The answer (`account::AccountForAnswer`):
 
 - [pinned] An `offer` authorizes switching only this run to that credential
   and account pair. It always has the same provider, auth method, model and
-  owner scope as the previous decision. Never cross API-key/subscription
-  boundaries, providers, models or owner scopes; never change the run's
+  owner scope and harness as the previous decision, including when that is
+  an account decision from a select-less admission or an earlier continuation.
+  Never cross API-key/subscription boundaries, providers, models, owner scopes
+  or harnesses; never change the run's
   frozen session plan (the llm-runner contract's §10.1), tool set or renderer.
   Never offer the exhausted account for this selection. For quota exhaustion,
   never offer it before its reset; for `signed_out`, follow the signed-out
@@ -1361,6 +1378,9 @@ The answer (`account::AccountForAnswer`):
   id returns the identical offer, including its decision and expiry, and
   never reserves twice. The offered `decision_id` links to
   `previous_decision_id`, so pricing and per-task records follow the switch.
+  This link is the same for a select or account predecessor; the offered
+  account decision belongs to the original `admission_id` and can be named
+  by the next continuation.
 - [pinned] The runner validates that `valid_until_ms` has not passed and
   that it can load the offered credential for the decision's provider and
   auth method, then durably records the switch before any send. The runner

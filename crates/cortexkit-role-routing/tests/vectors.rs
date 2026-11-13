@@ -168,6 +168,21 @@ fn continuation_samples_round_trip_and_pin_identical_retry() {
     use cortexkit_role_routing::account_continue::{parse_continue_request, ContinueAnswer};
     let describe = RoleDescribe::new(vec![], false).with_capability(capabilities::ACCOUNT_CONTINUE);
     let vectors = load("route-account-continue.json");
+    let select_less = &vectors["select_less_admission"];
+    let request = parse_continue_request(&select_less["params"], &describe).unwrap();
+    assert_eq!(
+        serde_json::to_value(&request).unwrap(),
+        select_less["params"]
+    );
+    assert_eq!(
+        request.previous_decision_id,
+        select_less["admission_reason_decision_id"]
+    );
+    let answer: ContinueAnswer = serde_json::from_value(select_less["answer"].clone()).unwrap();
+    assert!(
+        matches!(&answer, ContinueAnswer::Offer(offer) if offer.decision_id != request.previous_decision_id)
+    );
+    assert_eq!(serde_json::to_value(answer).unwrap(), select_less["answer"]);
     let signed_out = &vectors["signed_out"];
     let signed_out_describe = describe
         .clone()

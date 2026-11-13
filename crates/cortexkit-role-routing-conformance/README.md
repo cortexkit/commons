@@ -1,6 +1,6 @@
 # cortexkit-role-routing-conformance
 
-Version 0.10.27 pins routing `=0.7.24`. The `select_media_*` checks exercise
+Version 0.10.28 pins routing `=0.7.25`. The `select_media_*` checks exercise
 non-llm `route.select` with distinct request and answer types. Adapters provide
 media grades, unit prices and video facts through `SelectionFacts.media`,
 expected job costs through `configure_engine_facts`, and reference evaluations
@@ -40,7 +40,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.10.23"
+cortexkit-role-routing-conformance = "0.10.28"
 ```
 
 ```rust,ignore
@@ -485,6 +485,9 @@ then send the exhausted account's evidence as the runner.
 
 | Check | Rule (CONTRACT §9.1.1) |
 |---|---|
+| `continue_account_decision_preserves_route` | Without selection, continue from the admission answer's `reason.decision_id` and offer a spare eligible for the same provider, model and auth method |
+| `continue_account_decision_wrong_admission_refused` | Refuse another admission's account decision as `unknown_decision`; require an offer for the same admission's decision as a positive control |
+| `continue_account_decision_chain` | After recording the first switch, continue again from its offered decision under the original admission, retaining provider, model and auth method |
 | `continue_signed_out` | With `account_continue_signed_out`, offer a same-provider/auth/model spare, never the signed-out account; fresh admissions exclude its credential; without a spare, hold or refuse |
 | `continue_signed_out_undeclared_refuses_window` | With only `account_continue`, refuse `signed_out` as `invalid_request` naming `exhausted.limit_window` |
 | `continue_offer_excludes_exhausted_account` | Never offer the exhausted account |
@@ -500,6 +503,12 @@ then send the exhausted account's evidence as the runner.
 Quota continuation checks are not applicable without `account_continue`; the
 undeclared-mode check runs only without it. The signed-out checks additionally
 gate on `account_continue_signed_out` being present or absent, respectively.
+Account-decision resolution adds no capability or wire member. Older routers
+may refuse `unknown_decision`; the runner keeps the run paused on its original
+account until its quota reset or, for `signed_out`, a person renews sign-in,
+without asking again for that pause. A later pause may ask with a new selection id.
+Both decision spaces preserve the admission's provider, model, auth method,
+owner scope and harness, and link each offered decision to its predecessor.
 The signed-out check uses the same owner route and reuses the credential hook to
 remove spares while preserving the original admission. Tests pair each check
 with deliberately faulty routers and assert

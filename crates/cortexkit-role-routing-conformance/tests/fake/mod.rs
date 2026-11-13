@@ -91,6 +91,9 @@ pub struct Defects {
     pub continue_signed_out_fresh: bool,
     pub continue_signed_out_no_spare: bool,
     pub continue_signed_out_undeclared: bool,
+    pub continue_select_decisions_only: bool,
+    pub continue_foreign_account_decision: bool,
+    pub continue_offered_decision_unknown: bool,
     pub tier_ineligible_account: bool,
     pub tier_skips_fast_fallback: bool,
     pub tier_absent_is_fast: bool,
@@ -313,6 +316,9 @@ struct State {
     /// Route key to the end of its cooldown.
     cooldowns: HashMap<String, u64>,
     decisions: HashMap<String, Decision>,
+    /// Account decision id to its owning (runner, admission id).
+    account_decisions: HashMap<String, (String, String)>,
+    decision_predecessors: HashMap<String, String>,
     /// (principal, consumer, affinity key) to its last decision.
     affinity: HashMap<(String, String, String), AffinityEntry>,
     reports: HashMap<(String, Option<String>), (ReportRequest, ReportAnswer)>,
@@ -2538,6 +2544,23 @@ impl FakeRoute {
         };
         if request.decision_id.is_some() {
             state.decision_accounts.insert(decision_id.clone(), account);
+        } else {
+            state
+                .account_decisions
+                .insert(decision_id.clone(), key.clone());
+            state.decisions.insert(
+                decision_id.clone(),
+                Decision {
+                    principal: self.principal().into(),
+                    route: RouteRef {
+                        provider: request.provider.clone(),
+                        model: request.model.clone(),
+                        variant: None,
+                    },
+                    runner: self.principal().into(),
+                    hold_cap: None,
+                },
+            );
         }
         let chosen = &catalog.accounts[account];
         let mut answer = AccountForAnswer::new(

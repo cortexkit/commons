@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.28
+
+- Pin routing `=0.7.25`. Check continuation from a select-less admission's
+  account decision, refusal of another admission's account decision, and a
+  second continuation from the first offered account decision.
+- Extend the fake router's account-decision resolution and reject a
+  select-decisions-only implementation by each new check's name.
+
 ## 0.10.27
 
 - Check stated/default levels with ungraded catalogs and caller-local engines:

@@ -18,6 +18,12 @@
     },
     "selection_id": "selection-1"
   },
+  "select_less_admission": {
+    "about":"The run was admitted without route.select. Its admission account_for answer named reason.decision_id acd_1; only the account changes and the offered account decision links to acd_1 under the same admission.",
+    "admission_reason_decision_id":"acd_1",
+    "params":{"mode":"continue","run_id":"run-pinned","admission_id":"admission-pinned","conversation_key":"conversation-pinned","previous_decision_id":"acd_1","exhausted":{"credential_id":"credential-1","account":"account-1","limit_window":"five_hour","observed_at_ms":1900000000000},"selection_id":"selection-pinned"},
+    "answer":{"kind":"offer","credential_id":"credential-2","account":"account-2","decision_id":"acd_2","valid_until_ms":1900000060000}
+  },
   "answers": [
     {"name":"offer","answer":{"kind":"offer","credential_id":"credential-2","account":"account-2","decision_id":"decision-2","valid_until_ms":1900000060000}},
     {"name":"hold","answer":{"kind":"hold","until_ms":1900000300000,"routing_code":"account_pool_exhausted","detail":{"pool":"primary"}}},

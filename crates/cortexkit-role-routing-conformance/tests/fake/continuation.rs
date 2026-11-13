@@ -69,8 +69,19 @@ impl FakeRoute {
                 json!({}),
             )));
         };
+        let same_admission = match state.account_decisions.get(&request.previous_decision_id) {
+            Some(owner) => {
+                !self.defects.continue_select_decisions_only
+                    && !(self.defects.continue_offered_decision_unknown
+                        && state
+                            .decision_predecessors
+                            .contains_key(&request.previous_decision_id))
+                    && (owner == &admission_key || self.defects.continue_foreign_account_decision)
+            }
+            None => admission.decision_id.as_deref() == Some(&request.previous_decision_id),
+        };
         if previous.runner != self.principal()
-            || admission.decision_id.as_deref() != Some(&request.previous_decision_id)
+            || !same_admission
             || admission.conversation_key != request.conversation_key
         {
             return to_value(ContinueAnswer::Refuse(ContinueRefusal::new(
@@ -145,6 +156,12 @@ impl FakeRoute {
         }
         let answer = if let Some(account) = account {
             let decision_id = state.next("continue-decision");
+            state
+                .account_decisions
+                .insert(decision_id.clone(), admission_key);
+            state
+                .decision_predecessors
+                .insert(decision_id.clone(), request.previous_decision_id.clone());
             state.decisions.insert(
                 decision_id.clone(),
                 Decision {

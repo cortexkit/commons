@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.25
+
+- Resolve continuation predecessors in both select and account decisions so a
+  run admitted without selection can change accounts. Account decisions must
+  belong to the same admission; preserve the admission's provider, model,
+  auth method, owner scope and harness across chained continuations.
+- Keep the wire shape and capabilities unchanged. Document the existing
+  `unknown_decision` fallback for routers that do not resolve account decisions,
+  and add a checksummed select-less continuation request and answer.
+
 ## 0.7.24
 
 - Keep ungraded media routes eligible under a stated or declared level as

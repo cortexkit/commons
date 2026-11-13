@@ -343,6 +343,19 @@ exhaustion evidence and a retry-stable `selection_id`. The additive
 `parse_continue_request(params, describe)` and `ContinueAnswer`. The old account
 request, answer and parser are unchanged; a non-declaring router refuses the mode.
 
+For a run admitted without `route.select`, `previous_decision_id` initially
+names the account decision in its admission answer's `reason.decision_id`.
+After a switch it names the account decision the continuation offered. The
+router resolves both select and account decisions; an account decision must
+belong to the same `admission_id`, otherwise the continuation refuses
+`unknown_decision`, as for an unknown id. Only the account may change: provider,
+model, auth method, owner scope and harness stay fixed, and the offered decision
+links to its predecessor in either space. No wire member or capability is added.
+A router without account-decision resolution refuses `unknown_decision` as
+before. The runner keeps the run paused on its original account until its own
+quota reset, or waiting for a person to renew sign-in for `signed_out`, and does
+not ask again for that pause. A later pause may ask with a new selection id.
+
 With the additional `account_continue_signed_out` capability, a runner may send
 `limit_window: "signed_out"` after a definite needs-sign-in signal. It omits
 `pool`, `resets_at_ms` and `retry_after_s`. The router records the evidence and
@@ -351,7 +364,7 @@ vault reports it usable again. An unreachable vault, transient error or timeout
 never triggers sign-in continuation; credit walls still do not trigger it.
 
 The reply's `kind` is `offer`, `hold` or `refuse`. Offers switch only to the same
-provider, auth method, model and owner scope, never the exhausted account or an
+provider, auth method, model, owner scope and harness, never the exhausted account or an
 account under a known hold for the relevant window or pool. The kit's hold check
 blocks a whole account. The runner records a validated switch before sending and never uses an
 expired offer. Unknown hold times remain unknown; a terminal refusal leaves the
