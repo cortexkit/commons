@@ -98,7 +98,10 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   must not declare such a pair until the router it relies on runs routing 0.7.12
   or later.
 - [pinned] `media.engine.matching`: Submit matches its job kind; streams match
-  stream_transcribe; tokens match realtime. MIME type/subtype compare ignoring
+  stream_transcribe; tokens match only realtime. A transcription model serving
+  dictation tokens is also declared as a realtime-kind engine. The same provider
+  and model may be declared once per kind; duplicate_engine keys on
+  `(kind, provider, model)`. MIME type/subtype compare ignoring
   case and every declared parameter must equal the request's parameter. PCM
   declares parameters, for example `audio/L16;rate=16000;channels=1`.
   Languages match ignoring case, equal or extending a declared tag at a subtag
@@ -107,7 +110,7 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   fact or limit is unmet. Realtime formats are informative, never matched.
 - [pinned] `media.input.limits`: Count decoded audio bytes, UTF-8 synthesis text
   bytes, or summed reference bytes against max_input_bytes; streams count all
-  audio received. Count decoded audio duration (PCM derived from parameters),
+  accepted audio frames. Count decoded audio duration (PCM derived from parameters),
   or video duration_s times 1,000 against max_duration_ms. Video duration_s is
   an integer from 1. Stated duration_ms is not authoritative: submit refuses
   stated duration over the limit, and decoded duration over it fails running
@@ -243,7 +246,7 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 
 - [pinned] `media.admission.lifecycle`: Local work makes no account_for or
   account_observe calls; a supplied decision_id is length-checked and unused.
-  Remote submit/first frame/token requires a decision before admission.
+  Remote submit/stream open/token requires a decision before admission.
   account_for names the engine provider/model and hold_wait_max_s 0.
   admission_started and run_finished name the original admission_id with
   event_id `<admission_id>/started` or `/finished`; started is sent when the
@@ -270,7 +273,7 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   32 random lowercase hex characters (106 total). Calls use `call:` plus the
   hash of `{call_id, principal}`; each token request adds `/t/` and 32 fresh
   random hex characters (104 total), reused only for transport retries. A
-  refused stream first frame may reopen with a new admission. Later job
+  refused stream open may reopen with a new admission. Later job
   admission refusal ends the job without an attempt record.
 - [pinned] `media.admission.refusal`: Account refusals become routing_refused
   with detail.routing_code. Only account_hold, account_pool_exhausted and
@@ -375,13 +378,30 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 
 ## Streaming
 
-- [pinned] `media.stream.frames`: `media.stream_transcribe` is a multi-frame call with
-  first `{stream_id, model, decision_id?, format, language?, bias?}`; submit
+- [pinned] `media.stream.open`: `media.stream_transcribe`
+  `{stream_id, model, decision_id?, format, language?, bias?}` opens a stream; submit
   refusals apply. Accepted stream ids stay remembered across restart for 3,600
-  seconds, repeats give stream_id_reuse. A refused first frame, including
-  routing_refused/realtime_lane_full, is ERROR, opens/writes nothing. Audio is
-  `{seq, data}` with decoded bytes at most cap; final frame `{seq, end: true}`.
-  Seq begins zero without gaps/repeats, otherwise stream_seq_mismatch.
+  seconds, repeats give stream_id_reuse. A refused open, including
+  routing_refused/realtime_lane_full, is ERROR, opens/writes nothing. The open
+  request stays open, emits the partial and final events below as stream data,
+  and its terminal reply is the end answer defined by media.stream.answer.
+- [pinned] `media.stream.audio`: `media.stream_audio` sends
+  `{stream_id, seq, data}` with at most 2,097,152 decoded bytes (the inline
+  cap of media.objects.value), or
+  `{stream_id, seq, end: true}` to end. Each is an ordinary request answering `{}`
+  once the provider holds that frame. Seq begins zero without gaps or repeats;
+  otherwise refuse that request with stream_seq_mismatch.
+- [pinned] `media.stream.window`: A caller may have at most 8 stream_audio
+  requests unanswered per stream. The provider orders frames by seq within the
+  window from the next expected seq through that seq plus 7 inclusive; seq
+  outside that window is stream_seq_mismatch. Buffered frames do not advance
+  the next expected seq until all preceding frames have arrived.
+- [pinned] `media.stream.scope`: Look up streams by `(principal, stream_id)`,
+  never by route. Audio for an unknown or closed stream, including another
+  principal's stream, answers stream_closed without revealing its existence.
+- [pinned] `media.stream.local`: media.stream_transcribe and media.stream_audio
+  are mutate management operations, callable only on the computer by local
+  callers. The phone dictates directly to the vendor with a token.
 - [pinned] `media.stream.events`: Partials `{type: "partial", segment, text}`
   replace earlier partials for the segment; finals `{type: "final", segment,
   text, words}` append once in order, segment begins zero and advances by one.
@@ -393,10 +413,16 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   requires empty segments and the provider's speech check; absent check or no
   verified silence with empty finals fails engine_empty_result. Failures after
   acceptance answer `{segments, failure}` with prior non-empty finals and no
-  no_speech. A frame crossing cumulative byte/duration limits is not transcribed
-  and fails input_too_large. Usage and release follow attempt rules.
+  no_speech. Per media.usage.attempt, each started remote stream writes exactly
+  one record when its engine stops; refused or unstarted work writes none.
+  Per media.admission.lifecycle, release each admission exactly once.
+- [pinned] `media.stream.limits`: Cumulative byte and duration limits count every
+  accepted audio frame. The frame crossing either limit is refused with
+  input_too_large in its own stream_audio reply and is not transcribed. The open
+  request then ends with `{segments, failure}` carrying input_too_large and the
+  prior non-empty finals.
 - [pinned] `media.stream.restart`: Streams cannot resume; lost calls use new
-  ids. Closing cancels. Restart drops open streams without answer; started
+  ids. Cancelling the open request closes the stream. Restart drops open streams without answer; started
   remote streams write failed module_restarted, unstarted write none; release
   each admission once and keep stream_id remembered.
 - [informative] `media.stream.lane`: Streams use a realtime lane, not the jobs
@@ -491,6 +517,8 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 ## Rules not checked by the provider conformance kit
 
 - [informative] `media.kit.exemptions`: `media.bias.token_recount` is
-  `not_observable`; `media.front.hand_off_message`,
+  `not_observable`; `media.stream.local` is `not_observable` because the kit
+  adapter has no management-op classification and no remote-computer caller.
+  `media.front.hand_off_message`,
   `media.front.hand_off_send_id` and `media.packs.privacy` are `caller_side`,
   checked by crate helpers' tests. Other pinned ids are provider-observable.

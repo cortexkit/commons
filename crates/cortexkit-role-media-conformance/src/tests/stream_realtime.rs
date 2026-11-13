@@ -8,12 +8,19 @@ macro_rules! cases {
             let case = stringify!($name).strip_prefix("media_kit_stream_realtime_").unwrap();
             assert_eq!(run_case(&Fake::new(None,true,true),case).await,Outcome::Passed,"conforming {case}");
             let bad = run_case(&Fake::new(Some(case),true,true),case).await;
+            if case.starts_with("stream_audio_") {
+                eprintln!("faulty {case}: {bad:?}");
+            }
             assert!(matches!(bad,Outcome::Failed(ref reason) if reason.starts_with(&format!("{case}:"))),"faulty {case}: {bad:?}");
         }
     )*};
 }
 cases! {
     media_kit_stream_realtime_stream_input_limits,
+    media_kit_stream_realtime_stream_audio_reorders_window,
+    media_kit_stream_realtime_stream_audio_outside_window,
+    media_kit_stream_realtime_stream_audio_principal_scope,
+    media_kit_stream_realtime_stream_audio_crossing_frame,
     media_kit_stream_realtime_stream_id_reuse_refused,
     media_kit_stream_realtime_stream_first_frame_refused,
     media_kit_stream_realtime_stream_restart,
@@ -26,6 +33,7 @@ cases! {
     media_kit_stream_realtime_context_pack_admission,
     media_kit_stream_realtime_context_pack_if_version,
     media_kit_stream_realtime_realtime_token_uses_requested_model,
+    media_kit_stream_realtime_realtime_dictation_requires_realtime_engine,
     media_kit_stream_realtime_realtime_token_requires_decision,
     media_kit_stream_realtime_realtime_token_refuses_unadmitted_principal,
     media_kit_stream_realtime_realtime_token_bound_to_call,
@@ -123,6 +131,7 @@ fn media_kit_stream_realtime_rule_map() {
 }
 
 #[tokio::test]
+#[allow(deprecated)]
 async fn media_kit_stream_realtime_default_hooks_fail_by_name() {
     let empty = Empty;
     let errors = [
@@ -143,6 +152,10 @@ async fn media_kit_stream_realtime_default_hooks_fail_by_name() {
                 .send_stream_frame("alice", "s", json!({}))
                 .await
                 .unwrap_err(),
+        ),
+        (
+            "stream_audio_inputs",
+            empty.stream_audio_inputs("alice", "s").await.unwrap_err(),
         ),
         (
             "poll_stream",

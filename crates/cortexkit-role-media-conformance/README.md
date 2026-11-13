@@ -5,7 +5,7 @@ Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.
 decoded answer. STREAM_DATA event bodies and referenced output-object contents
 stay unwrapped.
 
-Version 0.2.4 pins `cortexkit-role-media` exactly to 0.1.7. Implement `MediaSubject`
+Version 0.2.5 pins `cortexkit-role-media` exactly to 0.1.8. Implement `MediaSubject`
 in an adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
 Each case needs an isolated, empty provider store and a Tokio runtime with time
 enabled. `Outcome::Failed` includes the case name; `NotApplicable` names an
@@ -26,15 +26,38 @@ ends one attempt, and its remaining steps are available to the next attempt.
 `release_engine` unblocks both. Transcripts come from scripts, not recognition
 accuracy. Engine output scripts may intentionally be malformed or oversized.
 
-`open_stream` opens the real multi-frame `stream_transcribe` call under its route
-principal and returns only after acceptance or first-frame ERROR. Subsequent
-`send_stream_frame` calls feed that transport, not unary requests. `poll_stream`
+`open_stream` opens the real `media.stream_transcribe` request under its route
+principal and returns only after acceptance or an opening ERROR. The request
+stays open for STREAM_DATA events and its terminal RESPONSE. Audio and end
+frames are ordinary `media.stream_audio` requests sent through `call_as`, with
+`stream_id` in every request; their replies acknowledge held frames with `{}`.
+The legacy `send_stream_frame` hook is deprecated and no longer used by cases.
+`poll_stream`
 drains events without blocking and reports whether the transport has closed and
 its raw terminal RESPONSE body, if any, including the `result` envelope. A restart
 closes an accepted stream without an answer. `close_stream` closes the caller's
-transport. These are adapter hooks,
+open request. These are adapter hooks,
 not additional wire methods. The stream cases use the same 30-second polling
 ceiling as job cases.
+
+`stream_audio_inputs` observes decoded chunks actually forwarded to the engine
+in consumption order, not arrival order. Do not sort or synthesize this
+observation in the adapter. The reorder case sends seq 7 through 1 before seq 0,
+then verifies that the engine saw their bytes in seq order 0 through 7, regardless
+of engine chunk boundaries. The window is independent for
+each `(principal, stream_id)`, from next expected seq through next seq plus 7;
+buffered frames never advance it across a gap. At most eight audio requests may
+remain unanswered per stream. Audio may use a different route from the open
+request: preserve principal lookup, not route-local stream state. Unknown,
+closed and foreign streams all refuse with `stream_closed`. The crossing frame
+gets its own `input_too_large` ERROR and never reaches the engine; the open
+request also ends with that failure and the prior finals.
+
+Both stream operations are `mutate` management operations, available only to
+local callers on the computer. A phone dictates directly to the vendor with a
+token. Dictation token models must also be declared with kind `realtime`:
+tokens match only that kind, while duplicate engines key on kind, provider and
+model, allowing the same model once per kind.
 
 `open_watch` subscribes to the real `realtime.watch` transport for a recorded
 call; `poll_watch` drains pushes without blocking. The case opens a watch after
@@ -79,8 +102,11 @@ reject bare answers and extra top-level keys by name. The rule map lists every
 `[pinned]` rule id from the
 [media contract](../cortexkit-role-media/CONTRACT.md). Its completeness test rejects
 missing or extra ids, unknown cases, pinned rules lacking marker-position ids and
-exemptions that differ between the contract and the rule map. The four exemptions
-are token-unit bias recounting (`not_observable`), and the hand-off message,
+exemptions that differ between the contract and the rule map. The five exemptions
+include recounting bias with the engine's tokenizer after combining terms and
+prompt (`not_observable`), and local-only stream management classification
+(`not_observable`: the adapter has no management-op classification and no
+remote-computer caller). The other exemptions are the hand-off message,
 hand-off send-id and pack privacy helpers (`caller_side`, checked by the contract
 crate's helper tests). Shared admission cases cover
 jobs, queued/running streams, unattached tokens and attached calls, including

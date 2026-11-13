@@ -1,3 +1,6 @@
+// The retained legacy frame constructors refer to their deprecated types.
+#![allow(deprecated)]
+
 use crate::{
     bias::{Bias, BiasApplied},
     errors::{check_failure, Failure},
@@ -6,10 +9,41 @@ use crate::{
     CheckError, CheckResult,
 };
 
+pub const STREAM_TRANSCRIBE_OP: &str = "media.stream_transcribe";
+pub const STREAM_AUDIO_OP: &str = "media.stream_audio";
+pub const STREAM_AUDIO_WINDOW: u64 = 8;
+
 wire_struct!(#[serde(deny_unknown_fields)] StreamRequest { stream_id: String, model: String, format: String } optional {
     decision_id: String => with_decision_id, language: String => with_language, bias: Bias => with_bias,
 });
 wire_struct!(
+    #[serde(deny_unknown_fields)]
+    StreamAudioRequest {
+        stream_id: String,
+        seq: u64,
+        data: String
+    }
+);
+wire_struct!(
+    #[serde(deny_unknown_fields)]
+    StreamEndRequest {
+        stream_id: String,
+        seq: u64,
+        end: bool
+    }
+);
+wire_struct!(StreamAudioAnswer {});
+impl Default for StreamAudioAnswer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+wire_struct!(
+    #[deprecated(
+        since = "0.1.8",
+        note = "Use StreamAudioRequest with media.stream_audio"
+    )]
     #[serde(deny_unknown_fields)]
     AudioFrame {
         seq: u64,
@@ -17,6 +51,7 @@ wire_struct!(
     }
 );
 wire_struct!(
+    #[deprecated(since = "0.1.8", note = "Use StreamEndRequest with media.stream_audio")]
     #[serde(deny_unknown_fields)]
     EndFrame {
         seq: u64,

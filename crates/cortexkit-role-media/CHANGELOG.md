@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.8
+
+- Replace multi-frame streaming input with an open `media.stream_transcribe`
+  request and ordinary `media.stream_audio` requests, each acknowledging a held
+  frame with `{}`. Keep events and the open request's terminal answer unchanged.
+  Deprecate, but retain, the old `AudioFrame` and `EndFrame` types.
+- Pin a per-stream eight-request reorder window and principal-scoped lookup;
+  unknown, foreign and closed streams refuse audio with `stream_closed`.
+  Refuse the frame crossing cumulative byte or duration limits in its own reply
+  with `input_too_large`, and end the open request with that failure.
+- Both stream operations are local-only mutate management operations. Dictation
+  token models also declare a realtime engine; tokens match only that kind and
+  duplicate engines key on kind, provider and model.
+
 ## 0.1.7
 
 - Refuse voice-front tokens with permanent `front_unavailable {reason}` when

@@ -548,6 +548,11 @@ impl State {
     }
     fn call(&mut self, p: &str, method: &str, params: Value) -> SubjectResult<Value> {
         match method {
+            "media.stream_audio" => {
+                let id = params["stream_id"].as_str().unwrap_or("").to_string();
+                self.stream_frame(p, &id, params)?;
+                Ok(json!({}))
+            }
             "context.for_agent"
             | "realtime.token"
             | "realtime.call_started"
@@ -964,8 +969,8 @@ impl MediaSubject for Fake {
     async fn poll_watch(&self, p: &str, id: &str) -> SubjectResult<Vec<Value>> {
         self.state.lock().unwrap().watch_poll(p, id)
     }
-    async fn send_stream_frame(&self, p: &str, id: &str, frame: Value) -> SubjectResult<()> {
-        self.state.lock().unwrap().stream_frame(p, id, frame)
+    async fn stream_audio_inputs(&self, p: &str, id: &str) -> SubjectResult<Vec<Vec<u8>>> {
+        self.state.lock().unwrap().stream_audio_inputs(p, id)
     }
     async fn poll_stream(&self, p: &str, id: &str) -> SubjectResult<StreamObservation> {
         self.state.lock().unwrap().stream_poll(p, id)

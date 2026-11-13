@@ -103,6 +103,22 @@ fn media_contract_describe_same_kind_model_different_providers() {
     let typed: Describe = round_trip(d);
     check_describe(&typed).unwrap();
 }
+
+#[test]
+fn media_contract_describe_dictation_model_once_per_kind() {
+    let engine = json!({"kind":"transcribe","provider":"fixture","model":"dictation",
+        "local":false,"formats":["audio/wav"],"latency_class":"realtime"});
+    let mut stream = engine.clone();
+    stream["kind"] = json!("stream_transcribe");
+    let mut realtime = engine.clone();
+    realtime["kind"] = json!("realtime");
+    let mut d = json!({"groups":["jobs","stream_transcribe","realtime","usage_feed"],
+        "jobs_survive_restart":false,"token_max_ttl_ms":1000,"call_silence_timeout_s":30,
+        "engines":[engine,stream,realtime.clone()]});
+    check_describe_value(&d).unwrap();
+    d["engines"].as_array_mut().unwrap().push(realtime);
+    describe_code(d, "duplicate_engine");
+}
 #[test]
 fn media_contract_describe_duplicate_engine() {
     let mut d = describe();
@@ -928,6 +944,7 @@ fn media_contract_usage_feed_entries_ack_answers_and_bounds() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn media_contract_realtime_stream_vectors_and_redacted_debug() {
     let v = vector("realtime.json");
     round_trip::<TokenRequest>(&v["token_request"]);
@@ -942,6 +959,9 @@ fn media_contract_realtime_stream_vectors_and_redacted_debug() {
     round_trip::<StreamRequest>(&v["stream_request"]);
     round_trip::<AudioFrame>(&v["audio_frame"]);
     round_trip::<EndFrame>(&v["end_frame"]);
+    round_trip::<StreamAudioRequest>(&v["stream_audio_request"]);
+    round_trip::<StreamEndRequest>(&v["stream_end_request"]);
+    round_trip::<StreamAudioAnswer>(&v["stream_audio_answer"]);
     round_trip::<StreamEvent>(&v["partial"]);
     round_trip::<StreamEvent>(&v["final"]);
     let answer: StreamAnswer = round_trip(&v["stream_answer"]);
@@ -1006,7 +1026,35 @@ fn media_contract_live_call_refusal_reasons() {
 #[test]
 fn media_contract_live_call_operation_names_are_pinned() {
     let contract = include_str!("../CONTRACT.md");
-    assert!(contract.contains("`media.stream.frames`: `media.stream_transcribe`"));
+    assert_eq!(STREAM_TRANSCRIBE_OP, "media.stream_transcribe");
+    assert_eq!(STREAM_AUDIO_OP, "media.stream_audio");
+    assert_eq!(STREAM_AUDIO_WINDOW, 8);
+    assert!(contract.contains("`media.stream.open`: `media.stream_transcribe`"));
+    assert!(contract.contains("`media.stream.audio`: `media.stream_audio`"));
+}
+
+#[test]
+fn media_contract_stream_audio_requests_are_strict_and_independent() {
+    assert_eq!(StreamAudioAnswer::default(), StreamAudioAnswer::new());
+    let audio = StreamAudioRequest::new("stream-1".into(), 0, "YQ==".into());
+    let end = StreamEndRequest::new("stream-1".into(), 1, true);
+    assert_eq!(
+        serde_json::to_value(audio).unwrap(),
+        vector("realtime.json")["stream_audio_request"]
+    );
+    assert_eq!(
+        serde_json::to_value(end).unwrap(),
+        vector("realtime.json")["stream_end_request"]
+    );
+    for invalid in [
+        json!({"seq":0,"data":"YQ=="}),
+        json!({"stream_id":"stream-1","seq":0,"data":"YQ==","end":true}),
+    ] {
+        assert!(serde_json::from_value::<StreamAudioRequest>(invalid).is_err());
+    }
+    assert!(serde_json::from_value::<StreamEndRequest>(json!({"seq":1,"end":true})).is_err());
+    let body = cortexkit_role_media::wire::reply_body(&StreamAudioAnswer::new()).unwrap();
+    assert_eq!(body, br#"{"result":{}}"#);
 }
 
 #[test]
@@ -1030,6 +1078,7 @@ fn media_contract_live_call_tool_only_on_tool_call() {
 }
 
 #[test]
+#[allow(deprecated)]
 fn media_contract_requests_reject_unknown_members_and_ids_count_scalars() {
     macro_rules! closed {
         ($ty:ty, $value:expr) => {{
@@ -1053,6 +1102,8 @@ fn media_contract_requests_reject_unknown_members_and_ids_count_scalars() {
     closed!(StreamRequest, v["stream_request"].clone());
     closed!(AudioFrame, v["audio_frame"].clone());
     closed!(EndFrame, v["end_frame"].clone());
+    closed!(StreamAudioRequest, v["stream_audio_request"].clone());
+    closed!(StreamEndRequest, v["stream_end_request"].clone());
     for case in vector("kinds.json").as_array().unwrap().iter().take(4) {
         match case["kind"].as_str().unwrap() {
             "transcribe" => closed!(TranscribeInput, case["input"].clone()),

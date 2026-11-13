@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.5
+
+- Pin media 0.1.8 and change stream adapters to open a long-lived request and
+  send ordinary `media.stream_audio` requests, observing their own replies.
+- Check in-window reordering, out-of-window refusal, principal isolation and
+  crossing-frame limit refusals, with independent faulty-provider tests.
+- Refresh the streaming rule map, vectors and adapter guidance.
+- Check that dictation tokens refuse transcription-only engine declarations,
+  then accept the same model when it is also declared with kind `realtime`.
+
 ## 0.2.4
 
 - Pin media `=0.1.7` for voice-front availability refusals, optional open watch

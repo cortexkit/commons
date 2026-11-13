@@ -29,6 +29,8 @@
   {"code":"feed_not_admitted","message":"Feed not admitted","detail":{"class":"permanent"}},
   {"code":"stream_id_reuse","message":"Stream id reused","detail":{"class":"permanent"}},
   {"code":"stream_seq_mismatch","message":"Stream sequence differs","detail":{"class":"permanent"}},
+  {"code":"stream_closed","message":"Stream closed","detail":{"class":"permanent"}},
+  {"code":"input_too_large","message":"Stream input exceeds limit","detail":{"class":"permanent","field":"audio","limit":"max_input_bytes"}},
   {"code":"unknown_agent","message":"Unknown agent","detail":{"class":"permanent"}},
   {"code":"call_id_reuse","message":"Call id reused","detail":{"class":"permanent"}},
   {"code":"token_call_mismatch","message":"Token does not match call","detail":{"class":"permanent"}},

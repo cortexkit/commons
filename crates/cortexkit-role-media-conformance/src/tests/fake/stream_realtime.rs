@@ -20,6 +20,8 @@ struct Stream {
     script: Script,
     steps: VecDeque<ScriptStep>,
     seq: u64,
+    pending: BTreeMap<u64, Value>,
+    audio: Vec<Vec<u8>>,
     bytes: u64,
     active: bool,
     admission: String,
@@ -274,6 +276,14 @@ impl State {
         }
         if self.fault("realtime_token_uses_requested_model") {
             req["model"] = json!("realtime-a");
+        }
+        if !self.fault("realtime_dictation_requires_realtime_engine")
+            && !self
+                .engines
+                .iter()
+                .any(|e| e.kind.as_str() == "realtime" && req["model"] == e.model)
+        {
+            return Err(refuse("unsupported", Some("model")));
         }
         if !self.fault("realtime_front_unavailable") {
             self.front_ready(&req)?;
@@ -535,6 +545,8 @@ impl State {
                 steps: sc.steps.clone().into(),
                 script: sc,
                 seq: 0,
+                pending: BTreeMap::new(),
+                audio: vec![],
                 bytes: 0,
                 active: false,
                 admission,
@@ -578,17 +590,29 @@ impl State {
         Ok(out)
     }
     pub(super) fn stream_frame(&mut self, p: &str, id: &str, frame: Value) -> SubjectResult<()> {
-        let key = (p.into(), id.into());
+        let mut key = (p.into(), id.into());
+        if self.fault("stream_audio_principal_scope") {
+            if let Some(found) = self.extra.streams.keys().find(|(_, sid)| sid == id) {
+                key = found.clone();
+            }
+        }
         let mut st = self
             .extra
             .streams
             .remove(&key)
-            .ok_or_else(|| SubjectError::new("unknown stream"))?;
-        let result = self.process_stream(p, id, &mut st, frame);
+            .ok_or_else(|| refuse("stream_closed", None))?;
+        let result = self.accept_stream_frame(p, id, &mut st, frame);
         self.extra.streams.insert(key, st);
         result
     }
-    fn process_stream(
+    pub(super) fn stream_audio_inputs(&self, p: &str, id: &str) -> SubjectResult<Vec<Vec<u8>>> {
+        self.extra
+            .streams
+            .get(&(p.into(), id.into()))
+            .map(|st| st.audio.clone())
+            .ok_or_else(|| refuse("stream_closed", None))
+    }
+    fn accept_stream_frame(
         &mut self,
         p: &str,
         id: &str,
@@ -596,12 +620,17 @@ impl State {
         frame: Value,
     ) -> SubjectResult<()> {
         if st.closed {
-            return Err(SubjectError::new("stream closed"));
+            return Err(refuse("stream_closed", None));
         }
-        if frame["seq"] != st.seq {
+        let seq = frame["seq"].as_u64().unwrap();
+        let arrival_order = self.fault("stream_audio_reorders_window");
+        if !arrival_order
+            && (seq < st.seq
+                || st.pending.contains_key(&seq)
+                || (seq.saturating_sub(st.seq) >= 8 && !self.fault("stream_audio_outside_window")))
+        {
             return Err(refuse("stream_seq_mismatch", None));
         }
-        st.seq += 1;
         let bytes = frame["data"]
             .as_str()
             .map(|d| STANDARD.decode(d).unwrap().len() as u64)
@@ -621,13 +650,44 @@ impl State {
             if self.fault("stream_input_limits") {
                 f["code"] = json!("wrong");
             }
-            return self.finish_stream(p, id, st, Some(f));
+            self.finish_stream(p, id, st, Some(f))?;
+            if self.fault("stream_audio_crossing_frame") {
+                return Ok(());
+            }
+            let mut e = refuse("input_too_large", Some("audio"));
+            e.refusal.as_mut().unwrap()["detail"]["limit"] = json!(limit);
+            return Err(e);
         }
+        if arrival_order {
+            return self.process_stream(p, id, st, frame);
+        }
+        st.pending.insert(seq, frame);
+        while let Some(frame) = st.pending.remove(&st.seq) {
+            st.seq += 1;
+            self.process_stream(p, id, st, frame)?;
+            if st.closed {
+                break;
+            }
+        }
+        Ok(())
+    }
+    fn process_stream(
+        &mut self,
+        p: &str,
+        id: &str,
+        st: &mut Stream,
+        frame: Value,
+    ) -> SubjectResult<()> {
+        let audio = frame["data"].as_str().map(|d| STANDARD.decode(d).unwrap());
+        let bytes = audio.as_ref().map_or(0, |v| v.len());
         if !st.active && !self.held.contains("stream") && bytes > 0 {
             st.active = true;
             self.extra_observe(&st.admission, "admission_started")?;
         }
         if st.active {
+            if let Some(audio) = audio {
+                st.audio.push(audio);
+            }
             while let Some(step) = st.steps.pop_front() {
                 match step {
                     ScriptStep::Pause => break,

@@ -5,6 +5,10 @@ pub const CASES: &[&str] = &[
     "stream_reply_envelope",
     "realtime_watch",
     "stream_input_limits",
+    "stream_audio_reorders_window",
+    "stream_audio_outside_window",
+    "stream_audio_principal_scope",
+    "stream_audio_crossing_frame",
     "stream_id_reuse_refused",
     "stream_first_frame_refused",
     "stream_restart",
@@ -17,6 +21,7 @@ pub const CASES: &[&str] = &[
     "context_pack_admission",
     "context_pack_if_version",
     "realtime_token_uses_requested_model",
+    "realtime_dictation_requires_realtime_engine",
     "realtime_token_requires_decision",
     "realtime_token_refuses_unadmitted_principal",
     "realtime_token_bound_to_call",
@@ -47,13 +52,25 @@ async fn open<S: MediaSubject>(s: &S, id: &str) -> Result<(), String> {
     s.open_stream("alice", first(id)).await.map_err(err)
 }
 async fn audio<S: MediaSubject>(s: &S, id: &str, seq: u64, bytes: usize) -> Result<(), String> {
-    s.send_stream_frame(
+    send_audio(
+        s,
         "alice",
-        id,
-        json!({"seq":seq,"data":STANDARD.encode(vec![0;bytes])}),
+        json!({"stream_id":id,"seq":seq,"data":STANDARD.encode(vec![0;bytes])}),
     )
     .await
-    .map_err(err)
+}
+async fn send_audio<S: MediaSubject>(s: &S, principal: &str, params: Value) -> Result<(), String> {
+    let answer = call(
+        s,
+        principal,
+        cortexkit_role_media::streams::STREAM_AUDIO_OP,
+        params,
+    )
+    .await?;
+    require(
+        answer == json!({}),
+        "stream_audio acknowledgement is not empty",
+    )
 }
 async fn observe<S: MediaSubject>(
     s: &S,
@@ -81,9 +98,7 @@ async fn observe<S: MediaSubject>(
     }
 }
 async fn finish<S: MediaSubject>(s: &S, id: &str, seq: u64) -> Result<StreamObservation, String> {
-    s.send_stream_frame("alice", id, json!({"seq":seq,"end":true}))
-        .await
-        .map_err(err)?;
+    send_audio(s, "alice", json!({"stream_id":id,"seq":seq,"end":true})).await?;
     observe(s, id, true).await
 }
 async fn open_refused<S: MediaSubject>(
@@ -240,7 +255,138 @@ async fn streams<S: MediaSubject>(
                 "stream answer changed",
             )
         }
-        "stream_input_limits" => {
+        "stream_audio_reorders_window" => {
+            script(s, "stream", vec![ScriptStep::Final(segment(0, "ordered"))]).await?;
+            open(s, "reordered").await?;
+            for seq in (1..8).rev() {
+                send_audio(
+                    s,
+                    "alice",
+                    json!({"stream_id":"reordered","seq":seq,
+                    "data":STANDARD.encode([seq as u8;2])}),
+                )
+                .await?;
+            }
+            require(
+                s.stream_audio_inputs("alice", "reordered")
+                    .await
+                    .map_err(err)?
+                    .concat()
+                    .is_empty(),
+                "buffered audio reached engine before the missing seq",
+            )?;
+            send_audio(
+                s,
+                "alice",
+                json!({"stream_id":"reordered","seq":0,"data":STANDARD.encode([0;2])}),
+            )
+            .await?;
+            let out = finish(s, "reordered", 8).await?;
+            answer(s, &out).await?;
+            require(
+                s.stream_audio_inputs("alice", "reordered")
+                    .await
+                    .map_err(err)?
+                    .concat()
+                    == (0..8).flat_map(|n| [n; 2]).collect::<Vec<_>>(),
+                "engine audio was not reordered by seq within the eight-frame window",
+            )
+        }
+        "stream_audio_outside_window" => {
+            script(s, "stream", vec![ScriptStep::Final(segment(0, "ordered"))]).await?;
+            open(s, "window").await?;
+            let params =
+                |seq| json!({"stream_id":"window","seq":seq,"data":STANDARD.encode([1;2])});
+            for seq in [8, 99] {
+                refusal(
+                    s,
+                    "alice",
+                    cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                    params(seq),
+                    "stream_seq_mismatch",
+                    None,
+                )
+                .await?;
+            }
+            send_audio(s, "alice", params(7)).await?;
+            for seq in [7, 8] {
+                refusal(
+                    s,
+                    "alice",
+                    cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                    params(seq),
+                    "stream_seq_mismatch",
+                    None,
+                )
+                .await?;
+            }
+            send_audio(s, "alice", params(0)).await?;
+            refusal(
+                s,
+                "alice",
+                cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                params(0),
+                "stream_seq_mismatch",
+                None,
+            )
+            .await?;
+            for seq in 1..7 {
+                send_audio(s, "alice", params(seq)).await?;
+            }
+            answer(s, &finish(s, "window", 8).await?).await?;
+            require(
+                s.stream_audio_inputs("alice", "window")
+                    .await
+                    .map_err(err)?
+                    .concat()
+                    == vec![1; 16],
+                "refused seq reached engine or valid window audio was lost",
+            )
+        }
+        "stream_audio_principal_scope" => {
+            script(s, "stream", vec![ScriptStep::Final(segment(0, "owner"))]).await?;
+            open(s, "private").await?;
+            let params = |id| json!({"stream_id":id,"seq":0,"data":STANDARD.encode([1;2])});
+            for (principal, id) in [("bob", "private"), ("alice", "unknown"), ("bob", "unknown")] {
+                let v = refusal(
+                    s,
+                    principal,
+                    cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                    params(id),
+                    "stream_closed",
+                    None,
+                )
+                .await?;
+                require(
+                    v["detail"]["class"] == "permanent",
+                    "stream_closed is not permanent",
+                )?;
+            }
+            audio(s, "private", 0, 32).await?;
+            answer(s, &finish(s, "private", 1).await?).await?;
+            refusal(
+                s,
+                "alice",
+                cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                params("private"),
+                "stream_closed",
+                None,
+            )
+            .await?;
+            open(s, "cancelled").await?;
+            s.close_stream("alice", "cancelled").await.map_err(err)?;
+            refusal(
+                s,
+                "alice",
+                cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                params("cancelled"),
+                "stream_closed",
+                None,
+            )
+            .await?;
+            balanced(r, 1, 2)
+        }
+        "stream_input_limits" | "stream_audio_crossing_frame" => {
             for (i, limit) in ["max_input_bytes", "max_duration_ms"]
                 .into_iter()
                 .enumerate()
@@ -269,7 +415,13 @@ async fn streams<S: MediaSubject>(
                     !before.closed && before.answer.is_none(),
                     "exact input limit was rejected",
                 )?;
-                audio(s, &id, 2, if i == 0 { 1 } else { 32 }).await?;
+                let refused = refusal(s, "alice", cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                    json!({"stream_id":id,"seq":2,"data":STANDARD.encode(vec![0;if i == 0 { 1 } else { 32 }])}),
+                    "input_too_large", Some("audio")).await?;
+                require(
+                    refused["detail"]["field"] == "audio" && refused["detail"]["limit"] == limit,
+                    "crossing frame refusal lost limit detail",
+                )?;
                 let v = answer(s, &observe(s, &id, true).await?).await?;
                 require(
                     v["failure"]["code"] == "input_too_large"
@@ -281,6 +433,14 @@ async fn streams<S: MediaSubject>(
                 require(
                     v["segments"] == json!([segment(0, "kept")]),
                     "limit transcribed crossing frame or discarded prior final",
+                )?;
+                require(
+                    s.stream_audio_inputs("alice", &id)
+                        .await
+                        .map_err(err)?
+                        .concat()
+                        == vec![0; 64],
+                    "crossing frame was transcribed",
                 )?;
                 let rs = wait_records(s, i + 1).await?;
                 require(
@@ -524,13 +684,11 @@ async fn empty_streams<S: MediaSubject>(s: &S) -> Result<(), String> {
             let id = format!("empty-{count}");
             open(s, &id).await?;
             // Tone, not digital silence: only the scripted speech verdict authorizes no_speech.
-            s.send_stream_frame(
+            send_audio(s,
                 "alice",
-                &id,
-                json!({"seq":0,"data":STANDARD.encode(&AudioFixture::Tone.wav()[44..])}),
+                json!({"stream_id":id,"seq":0,"data":STANDARD.encode(&AudioFixture::Tone.wav()[44..])}),
             )
-            .await
-            .map_err(err)?;
+            .await?;
             let o = finish(s, &id, 1).await?;
             let v = answer(s, &o).await?;
             let silent = s.capabilities().has_speech_check && verdict == Some(false);
@@ -724,6 +882,29 @@ async fn realtime<S: MediaSubject>(
                 )?;
             }
             Ok(())
+        }
+        "realtime_dictation_requires_realtime_engine" => {
+            for model in ["transcribe", "stream"] {
+                refusal(
+                    s,
+                    "alice",
+                    "realtime.token",
+                    token_request(model, model),
+                    "unsupported",
+                    Some("model"),
+                )
+                .await?;
+            }
+            no_effect(s, r, 0, 0).await?;
+            let mut es = engines();
+            let mut realtime = es.iter().find(|e| e.model == "transcribe").unwrap().clone();
+            realtime.kind = cortexkit_role_media::describe::Kind::Realtime;
+            es.push(realtime);
+            s.configure_engines(es).await.map_err(err)?;
+            let d = call(s, "alice", "role.describe", json!({})).await?;
+            cortexkit_role_media::describe::check_describe_value(&d).map_err(err)?;
+            let t = token(s, "alice", "dictation", "transcribe").await?;
+            require(t["model"] == "transcribe", "dictation model changed")
         }
         "realtime_token_requires_decision" | "call_id_bounds" => {
             let mut req = token_request("call", "realtime-a");

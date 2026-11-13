@@ -210,10 +210,12 @@ pub trait MediaSubject: Send + Sync {
     async fn poll_watch(&self, _principal: &str, _call_id: &str) -> SubjectResult<Vec<Value>> {
         Err(SubjectError::unsupported("poll_watch"))
     }
-    /// Open the multi-frame media.stream_transcribe transport; first-frame ERROR is a refusal.
-    async fn open_stream(&self, _principal: &str, _first_frame: Value) -> SubjectResult<()> {
+    /// Open media.stream_transcribe; return after acceptance or an opening ERROR.
+    /// Events and the terminal RESPONSE remain available through poll_stream.
+    async fn open_stream(&self, _principal: &str, _params: Value) -> SubjectResult<()> {
         Err(SubjectError::unsupported("open_stream"))
     }
+    #[deprecated(since = "0.2.5", note = "Send media.stream_audio through call_as")]
     async fn send_stream_frame(
         &self,
         _principal: &str,
@@ -221,6 +223,16 @@ pub trait MediaSubject: Send + Sync {
         _frame: Value,
     ) -> SubjectResult<()> {
         Err(SubjectError::unsupported("send_stream_frame"))
+    }
+    /// Decoded audio chunks actually forwarded to the engine, in consumption order.
+    /// Chunk boundaries may differ from request boundaries.
+    /// Observe the engine boundary; do not sort requests or include refused frames.
+    async fn stream_audio_inputs(
+        &self,
+        _principal: &str,
+        _stream_id: &str,
+    ) -> SubjectResult<Vec<Vec<u8>>> {
+        Err(SubjectError::unsupported("stream_audio_inputs"))
     }
     /// Drain events without blocking. The terminal answer, when present, remains readable.
     async fn poll_stream(
