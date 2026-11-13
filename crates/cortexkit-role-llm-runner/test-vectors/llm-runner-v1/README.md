@@ -10,10 +10,14 @@ resume floor slightly follows the account's reset for scheduling. The
 head, control-event and result shapes, including older bodies without a floor.
 
 `display-host-codes.json` pins both exact interrupt codes, an unknown code
-retained verbatim with text fallback, and an uncoded host part. Each opted-in
-read entry's key-based `host_parts` agrees with its display row. Invalid cases
-cover a code without `host: true`, a stray host-part key, duplicate keys and a
-non-user entry. The `host_code` integration tests consume these cases.
+retained verbatim with text fallback, and an uncoded host part. It also covers
+assistant fallback boundary/usage signatures, a malformed boundary that remains
+a host part without `model_fallback`, and a durable runner replacement record
+with no host parts. Each opted-in read entry's key-based `host_parts` and optional
+`model_fallback` agree with its display row. Invalid cases cover a code without
+`host: true`, a stray host-part key, duplicate keys, and system or tool entries.
+The `host_code` integration tests consume these cases; shared projections infer
+neither host marks nor fallback notes.
 
 `display-host-parts.json` pins an Anthropic user body projected unchanged,
 then explicitly marked by its runner with a leading `host: true` part. Reader

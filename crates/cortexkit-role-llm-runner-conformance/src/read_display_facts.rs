@@ -117,6 +117,7 @@ where
                 || entry.get("send_id").is_some()
                 || entry.get("tool_times").is_some()
                 || entry.get("host_parts").is_some()
+                || entry.get("model_fallback").is_some()
                 || entry.get("completed_at").is_some()
                 || entry.get("created_at").is_some()
                 || entry.get("reasoning_summaries").is_some()
@@ -136,12 +137,33 @@ where
     let mut calls_found = false;
     let profile = case.subject.serializer_profile(&session.name);
     let mut host_keys_unknown = false;
+    let mut fallback_role_unknown = false;
     for (plain, entry) in entries.iter().zip(shown) {
         let read: ReadMessage = serde_json::from_value(entry.clone())
             .map_err(|error| format!("read display facts do not decode: {error}"))?;
+        if read.model_fallback.is_some() {
+            let projected = profile
+                .as_deref()
+                .filter(|profile| display::projects(profile))
+                .map(|profile| display::project(profile, &read.message, None))
+                .transpose()
+                .map_err(|error| error.to_string())?;
+            match read
+                .role
+                .as_deref()
+                .or_else(|| projected.as_ref().map(|row| row.role.as_str()))
+            {
+                Some(role) => read.check_model_fallback(role).map_err(str::to_owned)?,
+                None => fallback_role_unknown = true,
+            }
+        }
         if !read.host_parts.is_empty() {
-            if read.role.as_deref().is_some_and(|role| role != "user") {
-                return Err("host_parts are allowed only on a user entry".into());
+            if read
+                .role
+                .as_deref()
+                .is_some_and(|role| !matches!(role, "user" | "assistant"))
+            {
+                return Err("host_parts are allowed only on a user or assistant entry".into());
             }
             let projected = profile
                 .as_deref()
@@ -200,6 +222,7 @@ where
             .remove("client_message_id");
         stripped.as_object_mut().unwrap().remove("tool_times");
         stripped.as_object_mut().unwrap().remove("host_parts");
+        stripped.as_object_mut().unwrap().remove("model_fallback");
         stripped.as_object_mut().unwrap().remove("sender");
         stripped.as_object_mut().unwrap().remove("send_id");
         stripped.as_object_mut().unwrap().remove("completed_at");
@@ -218,6 +241,11 @@ where
     if host_keys_unknown {
         return Ok(Ending::Inapplicable(
             "host_parts key membership needs a known role and stored keys or a shared serializer profile".into(),
+        ));
+    }
+    if fallback_role_unknown {
+        return Ok(Ending::Inapplicable(
+            "model_fallback validation needs a known role or a shared serializer profile".into(),
         ));
     }
     Ok(Ending::Passed)

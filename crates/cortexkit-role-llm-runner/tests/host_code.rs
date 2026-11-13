@@ -106,6 +106,10 @@ fn host_parts_read_fact_decode_round_trip() {
             .all(|part| !part.host() && part.host_code().is_none()));
         let keys: Vec<&str> = projected.parts.iter().map(DisplayPart::part).collect();
         entry.check_host_parts(&projected.role, &keys).unwrap();
+        entry.check_model_fallback(&projected.role).unwrap();
+        row.check_model_fallback().unwrap();
+        assert!(projected.model_fallback.is_none());
+        projected.model_fallback = entry.model_fallback.clone();
         for part in &mut projected.parts {
             if let Some(fact) = entry
                 .host_parts
@@ -213,6 +217,15 @@ fn host_code_builders_set_both_members_and_clearing_host_clears_code() {
         host_codes::INTERRUPTED_FOR_TOOL_USE_TEXT,
         "[Request interrupted by user for tool use]\n"
     );
+    assert_eq!(host_codes::SERVER_FALLBACK, "server_fallback");
+    assert_eq!(
+        host_codes::SERVER_FALLBACK_PREFIX,
+        "cortexkit-server-fallback-v1:"
+    );
+    assert_eq!(
+        host_codes::SERVER_FALLBACK_USAGE_PREFIX,
+        "cortexkit-server-fallback-usage-v1:"
+    );
 }
 
 #[test]
@@ -291,7 +304,7 @@ fn host_parts_validate_key_order_role_and_shape_without_parsing_opaque_body() {
         .check_host_parts("user", &["part-a", "part-b", "part-z"])
         .unwrap();
     assert!(entry
-        .check_host_parts("assistant", &["part-b", "part-z"])
+        .check_host_parts("tool", &["part-b", "part-z"])
         .is_err());
     assert!(entry
         .check_host_parts("user", &["part-z", "part-b"])
@@ -317,4 +330,56 @@ fn host_parts_validate_key_order_role_and_shape_without_parsing_opaque_body() {
     }
     assert!(host_codes::check(false, Some("interrupted")).is_err());
     assert!(host_codes::check(true, Some("Bad")).is_err());
+}
+
+#[test]
+fn host_parts_assistant_role_validates_and_other_roles_are_refused() {
+    let entry = ReadMessage::new(1, "reply", json!({"native":"opaque"}))
+        .with_role("assistant")
+        .with_host_parts(vec![HostPart::new("0")]);
+    entry.check_host_parts("assistant", &["0"]).unwrap();
+    for role in ["system", "tool", "developer", "synthetic", "future_role"] {
+        assert!(entry.check_host_parts(role, &["0"]).is_err(), "{role}");
+        assert!(
+            entry
+                .clone()
+                .with_role(role)
+                .check_host_parts("assistant", &["0"])
+                .is_err(),
+            "{role}"
+        );
+    }
+    entry
+        .with_host_parts(vec![])
+        .check_host_parts("system", &["0"])
+        .unwrap();
+}
+
+#[test]
+fn host_parts_assistant_reasoning_and_tag_answer_round_trip() {
+    let raw = json!({"role":"assistant", "text":"", "parts":[{
+        "type":"reasoning", "part":"0", "text":"\u{2060}",
+        "host":true, "host_code":"server_fallback"
+    }]});
+    let row: DisplayRow = serde_json::from_value(raw.clone()).unwrap();
+    assert_eq!(serde_json::to_value(row).unwrap(), raw);
+    let body = json!({"role":"assistant", "content":[{
+        "type":"thinking", "thinking":"\u{2060}",
+        "signature":"cortexkit-server-fallback-v1:requested|answered"
+    }]});
+    let entry = ReadMessage::new(1, "reply", body.clone())
+        .with_role("assistant")
+        .with_host_parts(vec![
+            HostPart::new("0").with_host_code(host_codes::SERVER_FALLBACK)
+        ]);
+    entry.check_host_parts("assistant", &["0"]).unwrap();
+    let answer = TagReadAnswer::new(entry, 0).with_host_code(host_codes::SERVER_FALLBACK);
+    let raw = serde_json::to_value(&answer).unwrap();
+    assert_eq!(raw["host"], true);
+    assert_eq!(raw["host_code"], "server_fallback");
+    assert_eq!(raw["entry"]["message"], body);
+    assert_eq!(
+        serde_json::from_value::<TagReadAnswer>(raw).unwrap(),
+        answer
+    );
 }

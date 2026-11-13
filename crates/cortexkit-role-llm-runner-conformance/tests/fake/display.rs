@@ -385,6 +385,12 @@ impl Module {
             }
         };
         let mut row = project(limits);
+        if let Some(mode) = defects.model_fallback {
+            if mode != "read_only" && row.role == if mode == "user" { "user" } else { "assistant" }
+            {
+                row.model_fallback = Some(fallback_fact(mode));
+            }
+        }
         if let Some(mode) = defects.display_host {
             let target = if matches!(mode, "assistant" | "code_non_user") {
                 "assistant"
@@ -408,6 +414,9 @@ impl Module {
                 }
                 if mode == "projection" {
                     row.text.push_str("not in the stored body");
+                }
+                if mode == "code_non_user" {
+                    row.role = "system".into();
                 }
             }
         }
@@ -827,4 +836,12 @@ pub(super) fn opencode_v2_body(id: &str, body: &Value) -> Value {
         } else { part }
     }).collect();
     json!({"id":id, "type":"assistant", "content":content})
+}
+
+pub(super) fn fallback_fact(mode: &str) -> display_rows::ModelFallback {
+    let mut fact = display_rows::ModelFallback::new("test/requested", "test/answered").unwrap();
+    if mode == "equal" {
+        fact.answered = fact.requested.clone();
+    }
+    fact
 }

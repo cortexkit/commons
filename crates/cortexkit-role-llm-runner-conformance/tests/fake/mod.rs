@@ -577,6 +577,7 @@ pub struct Defects {
     /// Host marks/codes with matching read facts, or deliberately invalid marks,
     /// projection text, read-fact keys, roles or agreement between the two forms.
     pub display_host: Option<&'static str>,
+    pub model_fallback: Option<&'static str>,
     /// Serve native bodies and display rows without naming a shared profile.
     pub display_no_profile: bool,
     /// A cut keeps exactly its bound's bytes, splitting a character and
@@ -4920,7 +4921,9 @@ impl Module {
             .iter()
             .map(|m| {
                 let mut entry = self.read_message(sess, m);
-                if self.world.defects.display_host.is_some() && m.body["role"] == "user" {
+                if self.world.defects.display_host.is_some()
+                    && matches!(m.body["role"].as_str(), Some("user" | "assistant"))
+                {
                     entry.part_keys = Some(vec!["0".into()]);
                 }
                 entry.sender = None;
@@ -4957,9 +4960,14 @@ impl Module {
                     entry.notices = notices::facts(m, &self.world.defects);
                     entry.attribution = attribution::fact(m, &self.world.defects);
                     if let Some(mode) = self.world.defects.display_host {
-                        if (m.body["role"] == "user" && mode != "missing_read_fact")
-                            || (m.body["role"] == "assistant" && mode == "non_user_read_fact")
+                        if (m.body["role"] == "user"
+                            && !matches!(mode, "missing_read_fact" | "assistant"))
+                            || (m.body["role"] == "assistant"
+                                && matches!(mode, "assistant" | "non_user_read_fact"))
                         {
+                            if mode == "non_user_read_fact" {
+                                entry.role = Some("system".into());
+                            }
                             let key = if mode == "stray_read_key" {
                                 "missing"
                             } else {
@@ -5024,6 +5032,18 @@ impl Module {
                     }
                     if self.world.defects.read_display_facts == Some("body_changed") {
                         entry.message["display_facts"] = json!(true);
+                    }
+                }
+                if let Some(mode) = self.world.defects.model_fallback {
+                    if (request.include_display_facts || mode == "default_leak")
+                        && mode != "display_only"
+                        && m.body["role"] == if mode == "user" { "user" } else { "assistant" }
+                    {
+                        let mut fact = display::fallback_fact(mode);
+                        if mode == "mismatch" {
+                            fact.requested = "test/another-requested".into();
+                        }
+                        entry.model_fallback = Some(fact);
                     }
                 }
                 if !request.include_display_facts

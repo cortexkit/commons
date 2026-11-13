@@ -505,14 +505,19 @@ pub struct ReadMessage {
     /// One item per tool call, in call order, only with `include_display_facts`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_times: Vec<ToolTime>,
-    /// Host-written user parts in stored part order, only with
+    /// Host-written user or assistant parts in stored part order, only with
     /// `include_display_facts`. Keys, never indices; absent means none.
     /// Validate against the entry's role and keys with [`Self::check_host_parts`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_parts: Vec<HostPart>,
+    /// Exactly recorded replacement of the requested model, only on assistant
+    /// entries and only with `include_display_facts`. Absent means no claim.
+    /// Outside stored bytes and digests; validate with [`Self::check_model_fallback`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_fallback: Option<crate::display::ModelFallback>,
 }
 
-/// A host-written part of a user entry. Listing its key is the host mark;
+/// A host-written part of a user or assistant entry. Listing its key is the host mark;
 /// no separate `host` flag is needed. Outside stored bodies and all digests.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
@@ -776,13 +781,33 @@ impl ReadMessage {
         self
     }
 
+    pub fn with_model_fallback(mut self, fallback: crate::display::ModelFallback) -> Self {
+        self.model_fallback = Some(fallback);
+        self
+    }
+
+    /// Validate a fallback against the known role without interpreting the raw body.
+    pub fn check_model_fallback(&self, role: &str) -> Result<(), &'static str> {
+        if let Some(fallback) = &self.model_fallback {
+            fallback.check(role)?;
+            if let Some(role) = &self.role {
+                fallback.check(role)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Validate host facts against the entry's known role and stored part keys.
     /// The opaque raw body cannot supply those keys without its serializer profile.
     pub fn check_host_parts(&self, role: &str, part_keys: &[&str]) -> Result<(), &'static str> {
         if !self.host_parts.is_empty()
-            && (role != "user" || self.role.as_deref().is_some_and(|role| role != "user"))
+            && (!matches!(role, "user" | "assistant")
+                || self
+                    .role
+                    .as_deref()
+                    .is_some_and(|role| !matches!(role, "user" | "assistant")))
         {
-            return Err("host_parts are allowed only on a user entry");
+            return Err("host_parts are allowed only on a user or assistant entry");
         }
         let mut previous = None;
         for fact in &self.host_parts {
@@ -846,6 +871,7 @@ impl ReadMessage {
             attribution: None,
             tool_times: Vec::new(),
             host_parts: Vec::new(),
+            model_fallback: None,
         }
     }
 

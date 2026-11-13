@@ -113,6 +113,10 @@ pub struct DisplayRow {
     /// before a runner omits it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Exact recorded model replacement on this assistant reply. Absent makes
+    /// no claim; outside stored bytes and digests. See CONTRACT §4.7.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_fallback: Option<ModelFallback>,
     /// The `client_message_id` of the send that created this user message,
     /// kept by the runner beside the stored body, never inside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -175,6 +179,7 @@ impl DisplayRow {
             text,
             parts,
             model: None,
+            model_fallback: None,
             client_message_id: None,
             sender: None,
             speaks_for: None,
@@ -199,6 +204,20 @@ impl DisplayRow {
         self
     }
 
+    /// Attach a recorded fallback only after readers support it (CONTRACT §4.7).
+    pub fn with_model_fallback(mut self, fallback: ModelFallback) -> Self {
+        self.model_fallback = Some(fallback);
+        self
+    }
+
+    /// Validate a fallback fact against this row's role and model-id rules.
+    pub fn check_model_fallback(&self) -> Result<(), &'static str> {
+        if let Some(fallback) = &self.model_fallback {
+            fallback.check(&self.role)?;
+        }
+        Ok(())
+    }
+
     pub fn with_client_message_id(mut self, id: impl Into<String>) -> Self {
         self.client_message_id = Some(id.into());
         self
@@ -220,11 +239,67 @@ impl DisplayRow {
     }
 }
 
+/// An exactly recorded replacement of the requested model for an assistant reply.
+/// Both ids use the same form as [`DisplayRow::model`]; if provider-qualified,
+/// qualify both bare marker ids with the reply's own provider. Absence of the
+/// fact means no claim. The source must be a well-formed documented boundary
+/// marker or the runner's own durable replacement record (CONTRACT §4.7).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(try_from = "ModelFallbackWire")]
+#[non_exhaustive]
+pub struct ModelFallback {
+    pub requested: String,
+    pub answered: String,
+}
+
+#[derive(Deserialize)]
+struct ModelFallbackWire {
+    requested: String,
+    answered: String,
+}
+
+impl TryFrom<ModelFallbackWire> for ModelFallback {
+    type Error = &'static str;
+
+    fn try_from(wire: ModelFallbackWire) -> Result<Self, Self::Error> {
+        Self::new(wire.requested, wire.answered)
+    }
+}
+
+impl ModelFallback {
+    pub fn new(
+        requested: impl Into<String>,
+        answered: impl Into<String>,
+    ) -> Result<Self, &'static str> {
+        let fact = Self {
+            requested: requested.into(),
+            answered: answered.into(),
+        };
+        fact.check("assistant")?;
+        Ok(fact)
+    }
+
+    /// Validate constructed values as well as the entry's known role.
+    pub fn check(&self, role: &str) -> Result<(), &'static str> {
+        if role != "assistant" {
+            return Err("model_fallback is allowed only on an assistant entry");
+        }
+        if self.requested.is_empty() || self.answered.is_empty() {
+            return Err("model_fallback requires two non-empty model ids");
+        }
+        if self.requested == self.answered {
+            return Err("model_fallback model ids must differ");
+        }
+        Ok(())
+    }
+}
+
 /// One part of a [`DisplayRow`], tagged by `type`. Every part carries
 /// `part`, the runner-defined key of the stored part it comes from, so a live
 /// delta naming a part finds its place in the stored row. The projection helpers
 /// below choose default keys; they do not prescribe a serializer profile's keys.
-/// On a user row, `host: true` means host-written, never the sender's words.
+/// On a user or assistant row, `host: true` means host-written, never the
+/// sender's or model's words.
 /// Shared projections never set it; runners opt in with [`Self::with_host`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -252,7 +327,7 @@ impl DisplayPart {
         }
     }
 
-    /// Mark a user-entry part the host wrote, from exact recorded knowledge.
+    /// Mark a user- or assistant-entry part the host wrote, from exact recorded knowledge.
     /// Emit this fact only after every reader has shipped support (CONTRACT §4.7).
     pub fn with_host(mut self, host: bool) -> Self {
         match &mut self {
@@ -311,7 +386,7 @@ impl DisplayPart {
     }
 }
 
-/// Open presentation codes for exact whole host blocks, never model-byte edits.
+/// Open presentation codes for exactly identified host parts, never model-byte edits.
 pub mod host_codes {
     use serde::{Deserialize, Deserializer};
 
@@ -323,6 +398,15 @@ pub mod host_codes {
     pub const INTERRUPTED_FOR_TOOL_USE: &str = "interrupted_for_tool_use";
     /// The exact host text represented by [`INTERRUPTED_FOR_TOOL_USE`].
     pub const INTERRUPTED_FOR_TOOL_USE_TEXT: &str = "[Request interrupted by user for tool use]\n";
+
+    /// Bookkeeping parts written by the host's fallback-model plugin, not the model.
+    pub const SERVER_FALLBACK: &str = "server_fallback";
+    /// From the plugin's documented stored form: match only at the start of a
+    /// signed reasoning part's signature, never its text or a substring.
+    pub const SERVER_FALLBACK_PREFIX: &str = "cortexkit-server-fallback-v1:";
+    /// From the plugin's documented stored form: match only at the start of a
+    /// signed reasoning part's signature, never its text or a substring.
+    pub const SERVER_FALLBACK_USAGE_PREFIX: &str = "cortexkit-server-fallback-usage-v1:";
 
     /// Check display members constructed in memory, including concrete part
     /// structs. The vocabulary is open; only shape and the host mark are checked.
@@ -411,7 +495,7 @@ impl<'de> Deserialize<'de> for DisplayPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct TextPart {
-    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].
@@ -441,7 +525,7 @@ impl TextPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolCallPart {
-    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].
@@ -509,7 +593,7 @@ pub struct ToolCallPart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ToolResultPart {
-    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].
@@ -588,7 +672,7 @@ pub mod projection_reasons {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct FilePart {
-    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].
@@ -614,7 +698,7 @@ pub struct FilePart {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct OtherPart {
-    /// Host-written on a user row; see [`DisplayPart::with_host`].
+    /// Host-written on a user or assistant row; see [`DisplayPart::with_host`].
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,
     /// Optional host presentation code; requires `host: true`. See [`host_codes`].

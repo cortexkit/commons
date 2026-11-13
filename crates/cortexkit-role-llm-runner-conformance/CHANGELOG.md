@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.56
+
+- Pin the role contract to `=0.8.46`. Accept assistant host-part facts and
+  display marks alongside user parts, retaining refusals for other roles and
+  read/display agreement checks, including without a shared serializer profile.
+- Validate assistant-only `model_fallback` read/display facts, their distinct
+  non-empty model ids, opt-in absence and cross-surface agreement. Exclude the
+  separately validated fact from shared projection equality. Exercise valid
+  fallback notes with no host parts and deliberately incorrect runners for role,
+  equal-id, default-read leak and mismatched-surface checks by check name.
+
 ## 0.17.55
 
 - Accept `subc-protocol >=0.34.1, <0.37` so runners using protocol 0.36

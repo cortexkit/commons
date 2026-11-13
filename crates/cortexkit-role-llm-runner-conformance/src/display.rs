@@ -40,7 +40,8 @@ where
 {
     match name {
         "display_row_is_the_profile_projection" => projection(case).await,
-        "host_parts_agree_with_display_rows" => host_parts_agree(case).await,
+        "host_parts_agree_with_display_rows" => reply_facts_agree(case, false).await,
+        "model_fallback_agrees_with_display_rows" => reply_facts_agree(case, true).await,
         "display_own_run_records_model" => own_run_model(case).await,
         "display_limits_cut_on_a_utf8_boundary" => limits(case).await.map(|()| Ending::Passed),
         "display_without_limits_is_whole" => whole(case).await.map(|()| Ending::Passed),
@@ -74,13 +75,16 @@ async fn display_page<R: RunnerRoute>(
     )?;
     check_host_parts(&body)?;
     let page: DisplayPage = decode("a display session.history", body)?;
+    for entry in &page.messages {
+        entry.row.check_model_fallback().map_err(str::to_owned)?;
+    }
     page.check()
         .map_err(|problem| format!("a display page breaks a history page's rules: {problem:?}"))?;
     Ok(page)
 }
 
 /// Check emitted marks before decoding: readers accept false as absent, but
-/// runners emit only true, and only on parts of user rows.
+/// runners emit only true, and only on parts of user or assistant rows.
 fn check_host_parts(page: &Value) -> Result<(), String> {
     for entry in page["messages"].as_array().into_iter().flatten() {
         let row = &entry["row"];
@@ -89,9 +93,9 @@ fn check_host_parts(page: &Value) -> Result<(), String> {
                 return Err("host_code requires host: true".into());
             }
             if let Some(host) = part.get("host") {
-                if host != true || row["role"] != "user" {
+                if host != true || !matches!(row["role"].as_str(), Some("user" | "assistant")) {
                     return Err(format!(
-                        "host must be emitted only as true on a user part, not on {} in {}",
+                        "host must be emitted only as true on a user or assistant part, not on {} in {}",
                         part["part"], entry["mid"]
                     ));
                 }
@@ -152,7 +156,7 @@ fn host_agreement(read: &ReadMessage, shown: &DisplayEntry) -> Check {
     Ok(())
 }
 
-async fn host_parts_agree<S>(case: &Case<'_, S>) -> Result<Ending, String>
+async fn reply_facts_agree<S>(case: &Case<'_, S>, fallback: bool) -> Result<Ending, String>
 where
     S: LlmRunnerSubject,
     S::Route: RunnerRoute,
@@ -168,7 +172,15 @@ where
     let session = written(case, case.mint.call("host-parts-call")).await?;
     let facts = host_read_facts(&session.route).await?;
     let shown = display_walk(&session.route, None).await?;
-    if !facts.iter().any(|entry| !entry.host_parts.is_empty())
+    if fallback {
+        if !facts.iter().any(|entry| entry.model_fallback.is_some())
+            && !shown.iter().any(|entry| entry.row.model_fallback.is_some())
+        {
+            return Ok(Ending::Inapplicable(
+                "neither form serves model_fallback".into(),
+            ));
+        }
+    } else if !facts.iter().any(|entry| !entry.host_parts.is_empty())
         && !shown
             .iter()
             .any(|entry| entry.row.parts.iter().any(DisplayPart::host))
@@ -182,13 +194,29 @@ where
             .iter()
             .find(|read| read.mid == entry.mid)
             .ok_or_else(|| format!("host_parts read omitted {}", entry.mid))?;
-        host_agreement(read, entry)?;
+        if fallback {
+            read.check_model_fallback(&entry.row.role)
+                .map_err(str::to_owned)?;
+            if read.model_fallback != entry.row.model_fallback {
+                return Err(format!(
+                    "model_fallback disagrees with display row for {}",
+                    read.mid
+                ));
+            }
+        } else {
+            host_agreement(read, entry)?;
+        }
     }
-    if facts
-        .iter()
-        .any(|read| !read.host_parts.is_empty() && !shown.iter().any(|entry| entry.mid == read.mid))
-    {
-        return Err("host_parts read entry is missing from display history".into());
+    if facts.iter().any(|read| {
+        (if fallback {
+            read.model_fallback.is_some()
+        } else {
+            !read.host_parts.is_empty()
+        }) && !shown.iter().any(|entry| entry.mid == read.mid)
+    }) {
+        return Err(
+            "host_parts or model_fallback read entry is missing from display history".into(),
+        );
     }
     Ok(Ending::Passed)
 }
@@ -198,15 +226,15 @@ mod host_parts_tests {
     use super::*;
 
     #[test]
-    fn host_parts_wire_marks_are_positive_and_user_only() {
-        for role in ["user", "assistant", "synthetic", "system", "skill"] {
+    fn host_parts_wire_marks_are_positive_and_user_or_assistant_only() {
+        for role in ["user", "assistant", "synthetic", "system", "tool", "skill"] {
             for host in [json!(true), json!(false), json!(null), json!("true")] {
                 let page = json!({"messages":[{"mid":"fixture", "row":{
                     "role":role, "parts":[{"type":"text", "part":"0", "text":"text", "host":host}]
                 }}]});
                 assert_eq!(
                     check_host_parts(&page).is_ok(),
-                    role == "user" && host == true,
+                    matches!(role, "user" | "assistant") && host == true,
                     "role={role}, host={host}"
                 );
             }
@@ -351,6 +379,8 @@ where
             }
             expected.client_message_id = shown.row.client_message_id.clone();
             expected.sender = shown.row.sender.clone();
+            // Fallback facts come from durable runner knowledge, not projection.
+            expected.model_fallback = shown.row.model_fallback.clone();
             // The rich-UI catalog is selected when the run is admitted, and
             // output references capture the request that wrote the entry.
             // Neither identity is in the native body; dedicated cases check them.

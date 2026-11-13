@@ -624,11 +624,12 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   Without the opt-in all display-fact members are absent and default replies
   keep their exact bytes.
 - [pinned] Display-part `host: true` (§4.7) identifies host-written content,
-  never the person's words. Readers projecting raw entries learn it from
+  never the person's or model's words. Readers projecting raw entries learn it from
   `ReadMessage.host_parts` below, never by detecting markers themselves or
   adding members to the opaque `message`. A reader quoting a user entry as the
-  person's words leaves host parts out; an entry containing only host parts
-  is not the person's words. A native `synthetic` row is host text under the
+  person's words leaves host parts out; a reader quoting the model's reply
+  likewise omits host parts. An entry containing only host parts is neither
+  the person's nor the model's words. A native `synthetic` row is host text under the
   same rule. This applies to verified-word readers of `tag_read` (§9.6.1) too:
   its answer carries the resolved part's host fact beside `entry` and `part`;
   resolving a tag identifies content, not who authored it.
@@ -705,18 +706,27 @@ pruned_reasoning?, reasoning_pruned?}` (`ReadPage`).
   per-call facts, never invent a time, omit absent members, and decode
   `unanswered` as an open string. An entry with no calls omits `tool_times`.
 - [pinned] `host_parts?: [{part: string, host_code?: string}]`
-  (`read::HostPart`, added in 0.8.33) lists host-written parts of a `user`
-  entry in stored part order, served only with `include_display_facts`, like
+  (`read::HostPart`, added in 0.8.33, widened in 0.8.46) lists host-written
+  parts of a `user` or `assistant` entry in stored part order, served only
+  with `include_display_facts`, like
   `tool_times`. `part` is the stored part key, never an index. Each key occurs
   once and must belong to that entry; a stray key is invalid, just as a
-  `tool_times` item naming a call outside the entry is invalid. A non-user
-  entry carries no host parts. No host parts means absent, not `null`; empty
+  `tool_times` item naming a call outside the entry is invalid. Every other
+  role carries no host parts and is refused if it supplies any. No host parts
+  means absent, not `null`; empty
   lists decode as none and are omitted on serialization. The optional code
   follows §4.7's shape and open-vocabulary rules; listing the key itself is
   the host mark, so this item needs no `host` member. Attach facts with
   `ReadMessage::with_host_parts`; `ReadMessage::check_host_parts` validates
   role, membership, uniqueness and order against the entry's known part keys,
   since its opaque body cannot be interpreted without a serializer profile.
+- [pinned] `model_fallback?: {requested: string, answered: string}` (added in
+  0.8.46) is an assistant-only reply fact, served only with
+  `include_display_facts`, with the same value as the display row (§4.7).
+  Both model ids are required, non-empty and different. Absent means no
+  claim, not that the requested model answered. The shared `display::ModelFallback`
+  type validates the values; `ReadMessage::check_model_fallback` validates
+  them against the known role without parsing the opaque body.
 - [pinned] A runner serving read facts and display history marks the same
   parts in both: a display part has `host: true`, with the same optional
   `host_code`, exactly when `host_parts` lists its key. A reader projecting
@@ -1557,7 +1567,7 @@ display-ready row for an app's reader on a runner declaring
   It follows every
   rule of §4.6, and `DisplayPage::check` checks the ones a page shows.
 - [pinned] A row (`display::DisplayRow`) is `{role, text, parts, model?,
-  client_message_id?, sender?, speaks_for?, notice?}`. The optional marks are
+  model_fallback?, client_message_id?, sender?, speaks_for?, notice?}`. The optional marks are
   those of §9.7.3; `notice` is served only when true.
   `parts` keeps the stored message's order; each part
   is `{type, part, ...}`, where `part` is the stored part's key (a content
@@ -1576,13 +1586,15 @@ display-ready row for an app's reader on a runner declaring
   text parts as `run.result` does (§6). Media is described by the
   `media_ref` descriptors mode serves (§4.2), never inlined; a URL stays a
   URL.
-- [pinned] **Host-written user parts (added in 0.8.32).** Any display part of
-  a `user` entry may carry `host: true`: the host wrote that part, not the
-  sender. Absent means the sender's part; readers accept `false` as absent,
+- [pinned] **Host-written user and assistant parts (added in 0.8.32, widened
+  in 0.8.46).** Any display part of a `user` or `assistant` entry may carry
+  `host: true`: the host wrote that part, not the sender or model. Absent
+  means the sender's or model's part; readers accept `false` as absent,
   and runners serialize the member only when true. It is per part, never a
   list of indices: projection can replace or drop stored parts. The fact
   follows the stored part's key even when its display representation changes.
-  A runner never sets the member on a non-user row. OpenCode 2's native
+  A runner never sets the member on any other role; validation refuses it.
+  OpenCode 2's native
   `synthetic` row already identifies host text by role; it keeps that role
   and needs no `host` member. `system` and `skill` keep their native roles too.
 - [pinned] A host part may also carry `host_code?: string` (added in 0.8.33),
@@ -1600,13 +1612,22 @@ display-ready row for an app's reader on a runner declaring
   `[Request interrupted by user for tool use]\n`. Here `\n` is one line feed;
   the matching `*_TEXT` constants contain the exact bytes. These are Claude
   Code's interrupt markers, matched as whole blocks, never substrings.
+  `SERVER_FALLBACK` (`server_fallback`) identifies the host plugin's fallback
+  bookkeeping parts. Its documented stored form is a signed reasoning part
+  whose signature starts with `SERVER_FALLBACK_PREFIX`
+  (`cortexkit-server-fallback-v1:`) for a boundary, or
+  `SERVER_FALLBACK_USAGE_PREFIX` (`cortexkit-server-fallback-usage-v1:`) for
+  usage. These constants match only the start of a signed reasoning part's
+  signature, not its text (one or two invisible U+2060 characters).
   Native `synthetic` rows carry no code.
 - [pinned] Readers draw a host part as a host note or hide it, never as the
-  sender's words. A reader quoting a user entry as the person's words MUST
-  omit host parts; a host-only entry is not the person's words. A native
+  sender's or model's words, including on an assistant row. A reader quoting
+  a user entry as the person's words MUST omit host parts; a reader quoting
+  the model's reply MUST omit host parts too. A host-only entry is neither
+  the person's nor the model's words. A native
   `synthetic` row is likewise never drawn or quoted as the person's words.
   `row.text` still joins all text parts, including host text: it is not a
-  ready-made quote of the person. A quoting reader uses the part-level facts,
+  ready-made quote of the person or model. A quoting reader uses the part-level facts,
   including when verifying words cited through `tag_read` (§9.6.1).
   Readers that do not render a host part ignore its presentation hint rather
   than interpreting it as an instruction or granting it authority.
@@ -1614,7 +1635,11 @@ display-ready row for an app's reader on a runner declaring
   or part digests, tag numbering, compaction, grants or `client_message_id`
   matching. It is not a sender or identity claim. A runner sets it only from
   exact knowledge: a host's documented marker strings matched as whole blocks,
-  or the host's own synthetic flag, never guesses from content. The shared
+  a versioned prefix that the host or its plugin documents as reserved for
+  its bookkeeping parts, matched at the start of the documented field (for
+  example a reasoning part's signature) of a part of the documented kind,
+  or the host's own synthetic flag. Never a substring match or a guess from
+  text or other content. The shared
   projections detect no markers or flags and never set `host`; a runner
   explicitly marks its own parts with `DisplayPart::with_host`, or
   `DisplayPart::with_host_code`, which sets both `host: true` and the code.
@@ -1622,16 +1647,39 @@ display-ready row for an app's reader on a runner declaring
   `with_host(false)` clears the code as well as the mark. Upgrading the
   crate alone therefore emits nothing new. Claude Code marker detection
   belongs to its runner, not this crate.
+- [pinned] **Fallback reply note (added in 0.8.46).** An assistant display row
+  may carry `model_fallback?: {requested: string, answered: string}`, with the
+  same value as an opted-in read entry. Only assistant entries may carry it;
+  validation refuses it on every other role. Both required, non-empty ids
+  use exactly the same form as the row's own `model` member and must differ.
+  If that form is provider-qualified, the runner qualifies both bare ids
+  with the reply's own provider. Absent means no claim, not "same model".
+  A runner sets it only from either a stored boundary marker in the host
+  plugin's documented form that parses as the reserved
+  `cortexkit-server-fallback-v1:` prefix followed by exactly two non-empty
+  ids around one `|`, or its own durable record that it replaced the
+  requested model and recorded both ids. A runner setting the fact from its
+  own record carries no host parts for that record. A malformed boundary
+  marker still gets its host-part fact
+  from the reserved signature prefix, but no `model_fallback`; a usage
+  marker alone supplies no fallback reply fact. Usage, model names in text
+  and other content never qualify as evidence. Shared projections infer
+  neither fact. Readers show a quiet note on the reply naming both models,
+  falling back to the raw id when there is no display name. The fact changes
+  no stored or model-bound bytes, identity, digests, tags, compaction,
+  grants or `client_message_id` matching.
 - [pinned] **Readers first.** Runners emit `host: true`, `host_code` and the
-  corresponding read `host_parts` facts only after each
+  corresponding read `host_parts` facts, and `model_fallback`, only after each
   applicable reader has posted that its support is live: Occipital, core
   (verified words), the phone and desktop apps through Occipital, and Magic
-  Context if its compaction views quote user text. Occipital's readiness
+  Context if its compaction views quote user or assistant text. No runner
+  emits these facts on assistant rows until those readers have posted that
+  their support is live. Occipital's readiness
   depends on applying the read `host_parts` fact, not on decoding the display
   row member: its readers project raw entries themselves (§4.2.2).
   Unknown-member tolerance
   alone is not support: an older reader may decode the fact but still draw
-  or quote host text as the person's words.
+  or quote host text as the person's or model's words.
 - [pinned] **Projection failures are carried, not hidden.** A file inside a
   tool result that cannot be projected is omitted from `files` and recorded
   in `unprojected: [{kind, reason}]`, in native order. `kind` is the item's
@@ -1696,11 +1744,13 @@ display-ready row for an app's reader on a runner declaring
   `client_message_id` (§9.11) and `sender` (below), and on a runner
   declaring `call_identity` each tool call's `call_key`, `call_carrier` and `schema_pin`
   (§9.16), and each tool call's stored times and unanswered outcome (§4.7.1).
-  A runner may explicitly add user-part `host` facts under the rules above.
+  A runner may explicitly add user- or assistant-part `host` facts and an
+  assistant `model_fallback` under the rules above.
   The conformance kit
   checks that a served row equals the function applied to the same entry's
   raw form, with only those members taken from the served row and valid
-  user-part `host` facts excluded from the projection comparison. This applies
+  user- or assistant-part `host` facts excluded from the projection comparison.
+  The separately validated `model_fallback` is runner-owned metadata too. This applies
   to the profiles for which `display::projects(profile)` is true:
   `anthropic-messages`, `opencode-aisdk`, `opencode-v2` and `pi`. For
   another profile, such as the runner-owned profile, the runner supplies its
@@ -4375,7 +4425,8 @@ Opaque per-part identities are carried by `part_digests` or, for an
   message identity and never substitutes for it. Resolve against that request,
   never today's numbering.
 - [pinned] A tag CAN resolve to a host-written part: `host` does not change
-  numbering or lookup. Such an answer is not a citation of the person's words.
+  numbering or lookup. Host parts of user and assistant entries are allowed.
+  Such an answer is not a citation of the person's or model's words.
   The runner sets answer-level `host: true` when the resolved part is
   host-written, using the same exact knowledge and readers-first rollout as
   display parts (§4.7), including when the entry's native role is `synthetic`.
@@ -4387,7 +4438,7 @@ Opaque per-part identities are carried by `part_digests` or, for an
   It is absent otherwise; readers accept `false` as absent, and runners emit
   it only when true. It changes no bytes in `entry.message` or tag resolution.
   A citation reader MUST refuse an answer with `host: true` as a citation of
-  the person. A citation quotes only the resolved part, never the entry's
+  the person or model. A citation quotes only the resolved part, never the entry's
   concatenated text, so a sender part in a mixed entry never quotes its host
   neighbour. A native `synthetic` row is never a citation of the person,
   even without the new answer member. Neither a successful lookup nor a

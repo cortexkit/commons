@@ -48,6 +48,53 @@
         "role": "user", "text": "Host note.Person's words.",
         "parts": [{"type": "text", "part": "0", "text": "Host note.", "host": true}, {"type": "text", "part": "1", "text": "Person's words."}]
       }
+    },
+    {
+      "name": "assistant fallback boundary and usage signatures",
+      "read": {
+        "ordinal": 4, "mid": "fallback-reply", "role": "assistant",
+        "message": {"role": "assistant", "content": [
+          {"type": "thinking", "thinking": "\u2060", "signature": "cortexkit-server-fallback-v1:claude-fable-5-2|claude-opus-4-8"},
+          {"type": "thinking", "thinking": "\u2060\u2060", "signature": "cortexkit-server-fallback-usage-v1:{}"},
+          {"type": "text", "text": "The model's reply."}
+        ]},
+        "host_parts": [{"part": "0", "host_code": "server_fallback"}, {"part": "1", "host_code": "server_fallback"}],
+        "model_fallback": {"requested": "claude-fable-5-2", "answered": "claude-opus-4-8"}
+      },
+      "row": {
+        "role": "assistant", "text": "The model's reply.",
+        "parts": [
+          {"type": "reasoning", "part": "0", "text": "\u2060", "host": true, "host_code": "server_fallback"},
+          {"type": "reasoning", "part": "1", "text": "\u2060\u2060", "host": true, "host_code": "server_fallback"},
+          {"type": "text", "part": "2", "text": "The model's reply."}
+        ],
+        "model_fallback": {"requested": "claude-fable-5-2", "answered": "claude-opus-4-8"}
+      }
+    },
+    {
+      "name": "malformed boundary still a host part without a fallback note",
+      "read": {
+        "ordinal": 5, "mid": "malformed-fallback", "role": "assistant",
+        "message": {"role": "assistant", "content": [{"type": "thinking", "thinking": "\u2060", "signature": "cortexkit-server-fallback-v1:missing-separator"}]},
+        "host_parts": [{"part": "0", "host_code": "server_fallback"}]
+      },
+      "row": {
+        "role": "assistant", "text": "",
+        "parts": [{"type": "reasoning", "part": "0", "text": "\u2060", "host": true, "host_code": "server_fallback"}]
+      }
+    },
+    {
+      "name": "runner durable replacement record needs no host part",
+      "read": {
+        "ordinal": 6, "mid": "recorded-fallback", "role": "assistant",
+        "message": {"role": "assistant", "content": [{"type": "text", "text": "A replacement reply."}]},
+        "model_fallback": {"requested": "provider/requested", "answered": "provider/answered"}
+      },
+      "row": {
+        "role": "assistant", "text": "A replacement reply.",
+        "parts": [{"type": "text", "part": "0", "text": "A replacement reply."}],
+        "model_fallback": {"requested": "provider/requested", "answered": "provider/answered"}
+      }
     }
   ],
   "invalid_parts": [
@@ -56,7 +103,8 @@
   ],
   "invalid_facts": [
     {"name": "stray key", "role": "user", "host_parts": [{"part": "missing"}]},
-    {"name": "non-user entry", "role": "assistant", "host_parts": [{"part": "0"}]},
+    {"name": "system entry", "role": "system", "host_parts": [{"part": "0"}]},
+    {"name": "tool entry", "role": "tool", "host_parts": [{"part": "0"}]},
     {"name": "duplicate key", "role": "user", "host_parts": [{"part": "0"}, {"part": "0"}]}
   ]
 }

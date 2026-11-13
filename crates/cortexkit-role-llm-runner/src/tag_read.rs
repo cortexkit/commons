@@ -74,7 +74,7 @@ impl TagReadRequest {
 pub struct TagReadAnswer {
     pub entry: ReadMessage,
     pub part: u32,
-    /// The resolved part is host-written, never a citation of the person's words.
+    /// The resolved part is host-written, never a citation of the person's or model's words.
     /// Emit only after citation readers support it; false is absent on the wire.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub host: bool,

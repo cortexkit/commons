@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.46
+
+- Allow host-part facts, display host marks/codes and tag-read host answers on
+  assistant entries as well as user entries. Readers omit host parts when
+  quoting either the person or the model. Keep the native synthetic tag-read
+  exception unchanged and retain the readers-first rollout.
+- Add `server_fallback` and the plugin's documented signature-prefix constants
+  for signed reasoning bookkeeping parts. Exact knowledge admits reserved,
+  versioned prefixes only at the start of the documented field and part kind;
+  whole-block interrupt matching remains unchanged. Shared projections still
+  detect nothing and stored/model-bound bytes, digests and tags do not change.
+- Add opt-in assistant `model_fallback` read/display facts with required,
+  distinct non-empty model ids in the row model's form. Only a well-formed
+  boundary marker or the runner's durable replacement record qualifies; readers
+  show a quiet note naming both models. Add contextual role/value validation,
+  round-trips, refusal tests and fallback samples, including a malformed marker
+  that remains a host part without a fallback note.
+
 ## 0.8.45
 
 - Add the reader-first `run_awaits` group and open, bounded `RunAwaits`,

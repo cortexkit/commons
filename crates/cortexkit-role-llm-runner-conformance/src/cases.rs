@@ -366,7 +366,8 @@ where
             name if name.starts_with("history_") => crate::host_history::run(self, name).await,
             name if name.starts_with("display_")
                 || name.starts_with("client_message_id_")
-                || name == "host_parts_agree_with_display_rows" =>
+                || name == "host_parts_agree_with_display_rows"
+                || name == "model_fallback_agrees_with_display_rows" =>
             {
                 crate::display::run(self, name).await
             }
