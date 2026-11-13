@@ -238,6 +238,11 @@ impl FakeRoute {
         if self.fault("placement_decision_harness") {
             answer["runner"].as_object_mut().unwrap().remove("harness");
         }
+        if self.fault("placement_invents_harness")
+            && answer["runner"].get("harness").is_none_or(Value::is_null)
+        {
+            answer["runner"]["harness"] = json!("invented-program");
+        }
         if let Some(rates) = state.selection_facts.list_rates.get(&key) {
             let mut price = match state.selection_facts.multipliers.get(&key) {
                 Some(multiplier) => Price::subscription_equivalent(

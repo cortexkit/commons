@@ -2188,12 +2188,18 @@ Replacement params and answer:
 
 ### 16.3 `decision_harness`
 
-- [pinned] A decision names both the chosen runner module and harness, using
-  the existing `runner: {module, model, auth?, harness}` object. No member
-  changes type; the already optional `runner.harness` is required on decisions
-  produced under this group. A creating send uses that harness; a runner refuses
-  a contradictory harness instead of silently substituting. The router selects
-  a harness that can host the task and route, not merely a runner's default.
+- [pinned] A decision names the chosen runner module and, when the runner
+  declares programs, its harness, using the existing
+  `runner: {module, model, auth?, harness?}` object. No member
+  changes type. When the selected runner declares harnesses, a decision produced
+  under this group MUST carry `runner.harness` naming one of those declared
+  programs: its default, or the program chosen by the request or applicable
+  limits. When the selected runner declares no harnesses, the decision MUST
+  omit `runner.harness`; a module id or other invented name is not a program
+  declaration. A creating send uses the chosen harness when present; a runner
+  refuses a contradictory harness instead of silently substituting. The router
+  selects a harness that can host the task and route, not merely a runner's
+  default.
 - [pinned] Callers' `runners` and `harness` only narrow allowed placements.
   If nothing remains, the answer is `no_route` with reason `harness_unavailable`.
   Settings remain the source of allowed placements; shipping these groups does

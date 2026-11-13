@@ -1,11 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.7.22
 
 - Contract text only: a `signed_out` fence lasts while the vault lists the
   credential as unusable. If the vault never reports it unusable, the router
   may bound the fence and probe the credential once. The reporting run is never
   offered that credential again.
+- Clarify §16.3: `decision_harness` MUST name a declared program when the
+  selected runner declares harnesses, and MUST omit `runner.harness` when it
+  declares none. Never substitute a module id or other invented program.
+- Add `check_answer_serving_with_harnesses`, taking the selected runner's
+  declared list to require a program under `decision_harness`, reject invented
+  names and check membership. Keep `check_answer_serving` for one release
+  without changing its signature, avoiding a source break for callers. It now
+  explicitly leaves harness validation to the new function rather than
+  assuming every runner declares a program; request and price checks remain.
 
 ## 0.7.21
 

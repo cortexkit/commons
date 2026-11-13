@@ -1948,6 +1948,40 @@ const PLACEMENT_CASES: &[&str] = &[
 ];
 
 #[tokio::test]
+async fn decision_harness_accepts_runner_without_programs() {
+    let report = run_suite(&FakeSubject::with_placement(Defects::default())).await;
+    assert!(
+        matches!(
+            report.outcome("placement_decision_harness"),
+            Some(CheckOutcome::Passed)
+        ),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn decision_harness_rejects_invented_program_by_check_name() {
+    let subject = FakeSubject::with_placement(Defects {
+        extension: Some("placement_invents_harness"),
+        ..Defects::default()
+    });
+    let report = run_suite(&subject).await;
+    assert_eq!(
+        report.failing(),
+        ["placement_decision_harness", "harness_only_when_declared"],
+        "{}",
+        report.render()
+    );
+    match report.outcome("placement_decision_harness") {
+        Some(CheckOutcome::Failed { reason }) => {
+            assert!(reason.contains("declares no harnesses"), "{reason}");
+        }
+        other => panic!("placement_decision_harness accepted an invented program: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn placement_groups_pass_and_are_not_applicable_without_declaration() {
     for declared in [true, false] {
         let subject = if declared {

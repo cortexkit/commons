@@ -3,7 +3,7 @@ use super::*;
 use crate::fixture::{
     OTHER_CONSUMER, PRICED_PROVIDER, RUNNER_ONE, RUNNER_TWO, SUBSCRIPTION_PROVIDER,
 };
-use crate::wire::{price::Price, select::check_answer_serving, spellings};
+use crate::wire::{price::Price, select::check_answer_serving_with_harnesses, spellings};
 use crate::RunnerRouteFacts;
 
 pub(super) const CASES: &[(&str, &str)] = &[
@@ -260,15 +260,26 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 }
             }
             "placement_decision_harness" => {
-                let mut params = base();
-                params["runners"] = json!([RUNNER_ONE]);
-                let selected = select(&route, &params, "runner and harness decision").await?;
-                let request = parse_select_request_serving(&params, capabilities::KNOWN).unwrap();
-                check_answer_serving(&request, &selected, &describe.capabilities)?;
-                if selected.runner.module != RUNNER_ONE
-                    || selected.runner.harness.as_deref() != Some("alpha")
-                {
-                    return Err("decision must bind the chosen module and harness".into());
+                let catalog = fixture::catalog();
+                self.subject.configure_catalog(&catalog).await?;
+                for runner in &catalog.runners {
+                    let mut params = base();
+                    params["runners"] = json!([runner.module]);
+                    let selected = select(&route, &params, "runner and harness decision").await?;
+                    let request =
+                        parse_select_request_serving(&params, capabilities::KNOWN).unwrap();
+                    check_answer_serving_with_harnesses(
+                        &request,
+                        &selected,
+                        &describe.capabilities,
+                        runner.harnesses.as_deref(),
+                    )?;
+                    if selected.runner.module != runner.module
+                        || (runner.default_harness.is_some()
+                            && selected.runner.harness != runner.default_harness)
+                    {
+                        return Err("decision must bind the chosen module and harness".into());
+                    }
                 }
             }
             "placement_select_kind" => {

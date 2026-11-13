@@ -8,8 +8,9 @@ use cortexkit_role_routing::{
     price::{Price, RatesPerMtok},
     report::{parse_report_request, parse_report_request_serving, Outcome, ReportRequest},
     select::{
-        check_answer, check_answer_serving, parse_select_request, parse_select_request_serving,
-        parse_select_request_with_defaults, Requirements, SelectAnswer, SelectRequest,
+        check_answer, check_answer_serving, check_answer_serving_with_harnesses,
+        parse_select_request, parse_select_request_serving, parse_select_request_with_defaults,
+        Requirements, RouteRef, RunnerRef, SelectAnswer, SelectRequest,
     },
 };
 use serde_json::{json, Value};
@@ -185,10 +186,11 @@ fn select_groups_refuse_undeclared_and_subset_never_expands() {
     assert!(check_answer(&request, &answer).is_err());
     let mut no_harness = answer.clone();
     no_harness.runner.harness = None;
-    assert!(check_answer_serving(
+    assert!(check_answer_serving_with_harnesses(
         &SelectRequest::new("example", Requirements::iq(50)),
         &no_harness,
-        &[capabilities::DECISION_HARNESS]
+        &[capabilities::DECISION_HARNESS],
+        Some(&["alpha".into()]),
     )
     .is_err());
     assert_eq!(
@@ -199,6 +201,93 @@ fn select_groups_refuse_undeclared_and_subset_never_expands() {
     assert_eq!(future.as_str(), "future_kind");
     let capability: HarnessCapability = serde_json::from_value(json!("future_task")).unwrap();
     assert_eq!(capability.as_str(), "future_task");
+}
+
+fn harness_answer() -> SelectAnswer {
+    let route = RouteRef::new("example-provider", "model-a");
+    SelectAnswer::new(
+        "decision",
+        route.clone(),
+        RunnerRef::new("runner-one", route),
+        100_000,
+        10_000,
+        60_000,
+        "Selected an available route.",
+    )
+}
+
+#[test]
+fn decision_harness_requires_a_declared_program_and_checks_membership() {
+    let request = SelectRequest::new("example", Requirements::iq(50));
+    let mut answer = harness_answer();
+    let declared = vec!["alpha".into(), "beta".into()];
+    let groups = &[capabilities::DECISION_HARNESS];
+    assert_eq!(
+        check_answer_serving_with_harnesses(&request, &answer, groups, Some(&declared)),
+        Err("decision_harness requires runner.harness when the runner declares harnesses".into())
+    );
+    for harness in ["alpha", "beta"] {
+        answer.runner.harness = Some(harness.into());
+        check_answer_serving_with_harnesses(&request, &answer, groups, Some(&declared)).unwrap();
+    }
+    for harness in ["unknown", "runner-one", "", "Bad token"] {
+        answer.runner.harness = Some(harness.into());
+        assert_eq!(
+            check_answer_serving_with_harnesses(&request, &answer, groups, Some(&declared)),
+            Err("runner.harness must name one of the runner's declared harnesses".into())
+        );
+    }
+    answer.runner.harness = Some("Bad token".into());
+    assert!(check_answer_serving_with_harnesses(
+        &request,
+        &answer,
+        groups,
+        Some(&["Bad token".into()])
+    )
+    .is_err());
+    answer.runner.harness = None;
+    check_answer_serving_with_harnesses(&request, &answer, &[] as &[&str], Some(&declared))
+        .unwrap();
+}
+
+#[test]
+fn decision_harness_omits_program_for_runner_without_declarations() {
+    let request = SelectRequest::new("example", Requirements::iq(50));
+    let groups = &[capabilities::DECISION_HARNESS];
+    for declared in [None, Some([].as_slice())] {
+        let mut answer = harness_answer();
+        check_answer_serving_with_harnesses(&request, &answer, groups, declared).unwrap();
+        for invented in ["runner-one", "invented-program"] {
+            answer.runner.harness = Some(invented.into());
+            assert_eq!(
+                check_answer_serving_with_harnesses(&request, &answer, groups, declared),
+                Err("runner.harness is forbidden: runner declares no harnesses".into())
+            );
+        }
+    }
+}
+
+#[test]
+fn legacy_serving_check_leaves_harness_presence_to_declaration_aware_check() {
+    let mut request = SelectRequest::new("example", Requirements::iq(50));
+    let mut answer = harness_answer();
+    let groups = &[capabilities::DECISION_HARNESS];
+    check_answer_serving(&request, &answer, groups).unwrap();
+    request.runners = Some(vec!["runner-two".into()]);
+    assert!(check_answer_serving(&request, &answer, groups).is_err());
+    request.runners = None;
+    answer.price = Some(Price::metered(RatesPerMtok::new(3.into(), 15.into())));
+    assert_eq!(
+        check_answer_serving(&request, &answer, groups),
+        Err("price requires select_price".into())
+    );
+    check_answer_serving_with_harnesses(
+        &request,
+        &answer,
+        &[capabilities::DECISION_HARNESS, capabilities::SELECT_PRICE],
+        None,
+    )
+    .unwrap();
 }
 
 #[test]

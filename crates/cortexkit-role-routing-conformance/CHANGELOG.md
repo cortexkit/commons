@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.25
+
+- Pin routing `=0.7.22`. Extend `placement_decision_harness` to check runners
+  with and without declared programs using declaration-aware validation:
+  require a declared harness when available, and reject an invented harness
+  when none is declared. Keep `harness_only_when_declared` unchanged: it still
+  checks the runner's declared default and omission when none was declared.
+- Add self-tests accepting a harness-less decision and rejecting an invented
+  program by the `placement_decision_harness` check name, alongside the
+  existing missing-declared-program fault.
+
 ## 0.10.24
 
 - Correct placement runner pairs to use contract spellings and OAuth route

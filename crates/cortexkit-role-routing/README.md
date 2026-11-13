@@ -1,5 +1,11 @@
 # cortexkit-role-routing
 
+Version 0.7.22 clarifies `decision_harness`: decisions name a program only
+when the selected runner declares programs, and omit the harness otherwise.
+Use `check_answer_serving_with_harnesses` with that runner's declared list to
+validate presence and membership. The old `check_answer_serving` signature is
+retained for one release but no longer checks harnesses without declarations.
+
 Version 0.7.21 pins `caller_runner` placement to a catalog runner attested as
 the caller, or otherwise to the single runner in the select request (§16).
 
@@ -12,8 +18,8 @@ Version 0.7.18 adds reader-first groups `consumer_declarations`,
 See CONTRACT.md §16 for their independent discovery and wire rules. Modules
 declare new members only after the live router advertises their group.
 Use the declaration builders, `parse_consumer_declarations_serving`,
-`parse_select_request_with_defaults` and `check_answer_serving` when adopting
-them; existing parsers keep their baseline request behavior.
+`parse_select_request_with_defaults` and `check_answer_serving_with_harnesses`
+when adopting them; existing parsers keep their baseline request behavior.
 For typed declarations use `validate()` without the group and
 `validate_serving(capabilities)` for a declaring reader. The latter accepts
 declared iq defaults and treats `iq: null` as absent; the former preserves

@@ -1,6 +1,6 @@
 # cortexkit-role-routing-conformance
 
-Version 0.10.23 pins routing `=0.7.21`. The seven `placement_*` checks each
+Version 0.10.25 pins routing `=0.7.22`. The seven `placement_*` checks each
 discover their own capability group before sending its members. Declaring
 adapters supply `configure_selection_facts(&SelectionFacts)` where needed:
 catalog list rates (never pre-divided), subscription value multipliers,

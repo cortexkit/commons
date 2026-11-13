@@ -577,6 +577,7 @@ pub struct RunnerRef {
     /// The session program: a requested program the runner declares, otherwise
     /// its declared default or sole program. With `decision_harness`, routing
     /// instead chooses a harness capable of serving the task and route.
+    /// A runner declaring no harnesses must be answered without this member.
     /// A caller does not bind a runner session on an answer without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
@@ -1309,25 +1310,20 @@ pub fn parse_select_request_with_defaults<C: AsRef<str>>(
     parse_select_request_serving(&params, capabilities)
 }
 
-/// Additional checks promised by declared answer groups. Legacy answer
-/// validation deliberately retains its previous behavior.
+/// Compatibility check for request constraints and capability-gated prices.
+///
+/// Retained for one release with its existing signature. This function does
+/// **not** check harness presence, token grammar or declaration membership:
+/// without the selected runner's declarations it cannot distinguish a missing
+/// required program from a runner that has no programs. In 0.7.22 it no longer
+/// unconditionally requires a harness under `decision_harness`. Use
+/// [`check_answer_serving_with_harnesses`] for declaration-aware validation.
 pub fn check_answer_serving<C: AsRef<str>>(
     request: &SelectRequest,
     answer: &SelectAnswer,
     capabilities: &[C],
 ) -> Result<(), String> {
     check_answer(request, answer).map_err(|problem| problem.to_string())?;
-    if capabilities
-        .iter()
-        .any(|cap| cap.as_ref() == crate::capabilities::DECISION_HARNESS)
-        && answer
-            .runner
-            .harness
-            .as_ref()
-            .is_none_or(|harness| !crate::declarations::is_runner_token(harness))
-    {
-        return Err("decision_harness requires runner.harness".into());
-    }
     if let Some(price) = &answer.price {
         if !capabilities
             .iter()
@@ -1338,6 +1334,48 @@ pub fn check_answer_serving<C: AsRef<str>>(
         price.check().map_err(str::to_owned)?;
     }
     Ok(())
+}
+
+/// Check an answer using the selected runner's actual declared program list.
+///
+/// Pass that runner's `harnesses` declaration, not a list inferred from its
+/// module id or from the answer. `None` (or an empty slice) means no declared
+/// programs and requires an absent `runner.harness`. A named harness must be a
+/// valid token in the declared list. Under `decision_harness`, a nonempty list
+/// also requires the decision to name a program. Default selection, request
+/// matching and per-harness limits remain the router's responsibility.
+pub fn check_answer_serving_with_harnesses<C: AsRef<str>>(
+    request: &SelectRequest,
+    answer: &SelectAnswer,
+    capabilities: &[C],
+    harnesses: Option<&[String]>,
+) -> Result<(), String> {
+    check_answer_serving(request, answer, capabilities)?;
+    let harnesses = harnesses.filter(|harnesses| !harnesses.is_empty());
+    match (harnesses, answer.runner.harness.as_deref()) {
+        (None, Some(_)) => Err("runner.harness is forbidden: runner declares no harnesses".into()),
+        (Some(harnesses), Some(harness)) => {
+            if !crate::declarations::is_runner_token(harness)
+                || !harnesses.iter().any(|declared| declared == harness)
+            {
+                return Err(
+                    "runner.harness must name one of the runner's declared harnesses".into(),
+                );
+            }
+            Ok(())
+        }
+        (Some(_), None)
+            if capabilities
+                .iter()
+                .any(|cap| cap.as_ref() == crate::capabilities::DECISION_HARNESS) =>
+        {
+            Err(
+                "decision_harness requires runner.harness when the runner declares harnesses"
+                    .into(),
+            )
+        }
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]

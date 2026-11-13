@@ -16,7 +16,7 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 pub const CHECKS: &[CheckSpec] = &[
     check("placement_consumer_declarations", "consumer_declarations: attested names, selector and scope admission, inherited defaults, ladder and placement only narrow selection"),
     check("placement_harness_facts", "runner_harness_facts: non-starting harnesses cannot create sessions and per-harness exclusions narrow routes"),
-    check("placement_decision_harness", "decision_harness: selection binds both the runner module and its harness"),
+    check("placement_decision_harness", "decision_harness: selection names a declared harness when the runner has programs, and omits it otherwise"),
     check("placement_select_kind", "select_kind: default llm and explicit kinds never mix candidate kinds"),
     check("placement_eligible_routes", "select_eligible_routes: routing never expands the subset; empty is no_route"),
     check("placement_select_price", "select_price: list and divided subscription rates, multiplier, TTLs, reserve estimate and unpriced omission"),
