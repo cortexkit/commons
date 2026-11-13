@@ -1239,6 +1239,21 @@ pub trait LlmRunnerSubject: Harness {
         ))
     }
 
+    /// Install a system-text plan item with optional facts and a named preset.
+    /// Required for `plans`. The provider journal must capture the actual
+    /// `tool.catalog.facts` bytes separately from `system_text`, without
+    /// reconstructing them from the plan. The default shares the system-text
+    /// fixture; adapters may override it for a separate provider.
+    async fn prepare_system_text_facts(
+        &self,
+        session: &str,
+        provides: &[String],
+        item: &Value,
+    ) -> Result<Map<String, Value>, HarnessError> {
+        self.prepare_system_text_default(session, provides, item)
+            .await
+    }
+
     /// Observe every provider fetch, the actual received system-text item
     /// bytes, and durable runner state. Never reconstruct these from inputs or
     /// admission replies. The snapshot must change for any admission write
@@ -2463,6 +2478,9 @@ pub struct ArchivePruningPart {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct SystemTextDefaultObservation {
+    /// One entry per actual fetch: exact JSON facts bytes, or `None` when the
+    /// request has no facts member. Used by the system-text facts cases.
+    pub provider_facts: Vec<Option<Vec<u8>>>,
     /// All provider fetches, including requests without system text.
     pub provider_calls: usize,
     pub provider_items: Vec<Vec<u8>>,

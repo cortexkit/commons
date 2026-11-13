@@ -119,6 +119,8 @@ pub enum LateCustodyDefect {
 /// Fixture variations and deliberate contract breaks for runner tests.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    pub refuse_system_text_facts: bool,
+    pub accept_malformed_system_text_facts: bool,
     pub late_custody: Option<LateCustodyDefect>,
     /// Serve one entry per page so later pages exercise custody checks too.
     pub paginate_late_results: bool,
@@ -536,6 +538,20 @@ impl Module {
     }
 
     fn catalog(&self, arguments: &Value) -> Result<Value, ErrorBody> {
+        let mut arguments = arguments.clone();
+        if arguments.get("facts").is_some() {
+            if self.defects.refuse_system_text_facts {
+                return Err(errors::invalid_request("facts", "unsupported"));
+            }
+            if self.defects.accept_malformed_system_text_facts {
+                arguments.as_object_mut().unwrap().remove("facts");
+            } else {
+                serde_json::from_value::<
+                    cortexkit_role_tool_provider_conformance::wire::SystemTextFacts,
+                >(arguments["facts"].clone())
+                .map_err(|e| errors::invalid_request("facts", e.to_string()))?;
+            }
+        }
         let mut request: CatalogRequest = serde_json::from_value(arguments.clone())
             .map_err(|e| errors::invalid_request("arguments", e.to_string()))?;
         let filter_request = request.params.contains_key("capabilities");
@@ -1113,6 +1129,7 @@ impl FakeSubject {
                 Capability::ApprovalExecution,
                 Capability::LateResults,
                 Capability::SystemText,
+                Capability::SystemTextFacts,
                 Capability::SystemTextOptionalPreset,
                 Capability::CallModes,
                 Capability::HeldReplyV1,

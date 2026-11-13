@@ -111,6 +111,44 @@ truncation or redispatch. Newly encoded user-command bodies omit session_ref
 (0.8.1 still accepts and discards it on input).
 The optional send_status group serves session.send_status and the send.status
 alias until the next breaking release.
+## Plan-carried system-text facts (0.8.50)
+
+- [pinned] `role.describe.harnesses` is an optional object keyed by the same
+  harness ids used in a session's `harness` identity. Each value is a
+  `HarnessDescribe` object with optional `host_facts: [string]`. An absent map,
+  absent entry or absent list declares no facts. Entries describe only what
+  the harness offers the model, not which harnesses a runner may host or route;
+  routing's runner declaration is separate.
+- [pinned] Each `host_facts` list is sorted in UTF-8 byte order and unique.
+  Every name matches `[a-z0-9_.-]{1,64}`. A present null, non-string name,
+  invalid token, duplicate or unsorted list makes the describe answer invalid.
+  These explicit names are the only host properties a composer may include
+  in system-text `harness.facts`; it never derives them from other capabilities.
+- [pinned] A `plan.system_text_items[]` item may carry optional `facts`, in
+  addition to its existing provider, preset and params. Facts use the shared
+  `cortexkit-role-tool-provider::SystemTextFacts` shape and canonical serializer.
+  The runner contract reuses that type through its existing tool-provider
+  dependency; the rest of the plan remains opaque JSON. The composer freezes
+  these canonical facts with the plan generation. They contain model provider
+  and id, harness id and declared facts, every served tool's catalog name and
+  every sender module allowed to start a turn. They contain no variant, effort,
+  time, count or session state.
+- [pinned] At admission, before any provider fetch or state write, malformed
+  facts are refused as `invalid_params` naming the facts field. This validation
+  applies even to optional items and items whose provider does not support
+  facts. A runner fetching the item sends its facts byte-for-byte as the
+  top-level `facts` member beside `tool.catalog.system_text`, only when the
+  provider's manifest declares the exact `system-text-facts/v1` token.
+  Otherwise it omits the member entirely; older providers need not accept an
+  unknown member. It never augments, filters or recomputes facts from current
+  host state. Both the composer's fetch and the runner's fetch render from
+  the same frozen facts, so their text bytes agree. A new plan generation is
+  needed to change the facts or text.
+- [informative] `system_text_facts::for_provider` validates and selects the
+  original JSON value without rewriting it. It does not fetch or write state;
+  the caller handles admission ordering and copies the selected value into
+  the provider request, not into its `params` or `system_text` members.
+
 ## 1. Role identity and addressing
 
 - [pinned] A runner lists `llm-runner/v1` in its manifest's

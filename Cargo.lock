@@ -664,7 +664,7 @@ dependencies = [
 name = "cortexkit-role-agent-data"
 version = "0.3.0"
 dependencies = [
- "cortexkit-role-llm-runner 0.8.49",
+ "cortexkit-role-llm-runner 0.8.50",
  "serde",
  "serde_json",
  "serde_json_canonicalizer",
@@ -719,7 +719,7 @@ dependencies = [
 name = "cortexkit-role-compaction"
 version = "0.4.1"
 dependencies = [
- "cortexkit-role-llm-runner 0.8.49",
+ "cortexkit-role-llm-runner 0.8.50",
  "serde",
  "serde_jcs",
  "serde_json",
@@ -785,7 +785,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner"
-version = "0.8.49"
+version = "0.8.50"
 dependencies = [
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-tool-provider",
@@ -797,13 +797,13 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.17.59"
+version = "0.17.60"
 dependencies = [
  "async-trait",
  "base64",
  "cortexkit-rich-ui-syntax",
  "cortexkit-role-harness",
- "cortexkit-role-llm-runner 0.8.49",
+ "cortexkit-role-llm-runner 0.8.50",
  "cortexkit-role-tool-provider",
  "futures-util",
  "getrandom 0.4.3",
@@ -842,7 +842,7 @@ dependencies = [
 name = "cortexkit-role-routing"
 version = "0.7.22"
 dependencies = [
- "cortexkit-role-llm-runner 0.8.49",
+ "cortexkit-role-llm-runner 0.8.50",
  "cortexkit-role-media",
  "cortexkit-role-tool-provider",
  "serde",
@@ -867,7 +867,7 @@ dependencies = [
 name = "cortexkit-role-step-transform-provider"
 version = "0.5.0"
 dependencies = [
- "cortexkit-role-llm-runner 0.8.49",
+ "cortexkit-role-llm-runner 0.8.50",
  "serde",
  "serde_json",
 ]
@@ -885,9 +885,10 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.15.6"
+version = "0.15.7"
 dependencies = [
  "cortexkit-role-tool-display",
+ "jsonschema",
  "serde",
  "serde_jcs",
  "serde_json",
@@ -897,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.15.7"
+version = "0.15.8"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",
@@ -980,7 +981,7 @@ name = "cortexkit-usage-steps"
 version = "0.2.7"
 dependencies = [
  "chrono",
- "cortexkit-role-llm-runner 0.8.49",
+ "cortexkit-role-llm-runner 0.8.50",
  "serde",
  "serde_json",
  "sha2 0.10.9",

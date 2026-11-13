@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.7
+
+- Add plan-carried `SystemTextFacts`, constructors with canonical set ordering,
+  strict decoding, a canonical serializer and the packaged JSON Schema exposed
+  as `SYSTEM_TEXT_FACTS_SCHEMA`. Document its `x-sorted` annotation separately
+  from standard schema validation.
+- Add manifest token `system-text-facts/v1`, optional `CatalogRequest.facts`
+  beside `system_text`, and a capability-gated builder. The original exhaustive
+  `SystemTextItem` is unchanged. Pin deterministic rendering to frozen facts
+  plus the provider's own preset and module switches, never live state.
+
 ## 0.15.6
 
 - Add `lint_input_schema` (re-exported with `SchemaLint` and `SchemaLintKind`

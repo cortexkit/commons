@@ -97,6 +97,7 @@ pub mod step_events;
 mod structured_output;
 mod subject;
 mod system_text_default;
+mod system_text_facts;
 mod tool_calls;
 mod tool_result_limit;
 pub mod upfront;

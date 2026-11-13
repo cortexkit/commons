@@ -56,6 +56,9 @@ pub enum Capability {
     /// The provider serves system text alongside its catalog. See
     /// [`ToolProviderSubject::system_text_catalog_arguments`].
     SystemText,
+    /// The module manifest declares `system-text-facts/v1`. Supplied by the
+    /// adapter because the provider route does not expose the module catalog.
+    SystemTextFacts,
     /// The harness can open real routes with known bind modes, and the
     /// subject supplies a restricted tool probe. Omit this when no tool
     /// excludes a known mode; the mode case is then skipped, never passed.
@@ -113,6 +116,7 @@ impl Capability {
             Self::ReplyCustodyRefusal => "reply_custody_refusal_fixture",
             Self::ReplyCustodyCatalogChange => "reply_custody_catalog_change_fixture",
             Self::SystemText => "system_text",
+            Self::SystemTextFacts => cortexkit_role_tool_provider::SYSTEM_TEXT_FACTS_V1,
             Self::CallModes => "call_modes",
             Self::ToolResultV1 => "tool-result/v1",
             Self::LegacyReply => "legacy_reply",

@@ -31,6 +31,7 @@ pub mod rich_ui;
 pub mod schema_lint;
 pub mod scope;
 pub mod stop_session;
+pub mod system_text_facts;
 pub mod user_command;
 #[cfg(any(test, feature = "test-vectors"))]
 pub mod vectors;
@@ -68,6 +69,13 @@ pub const TOOL_VIEWS_CAPABILITY: &str = "tool-views/v1";
 /// The manifest capability promising default text for a `system_text` item
 /// without a preset. Consumers discover it through the daemon's catalog.
 pub const SYSTEM_TEXT_DEFAULT: &str = "system-text-default/v1";
+
+/// Manifest opt-in for plan-carried system-text rendering facts.
+pub const SYSTEM_TEXT_FACTS_V1: &str = "system-text-facts/v1";
+
+pub use system_text_facts::{
+    SystemTextFacts, SystemTextHarness, SystemTextModel, SYSTEM_TEXT_FACTS_SCHEMA,
+};
 
 /// The route-bind capability a consumer declares when it decodes `tool-result/v1` results.
 pub const TOOL_RESULT_V1_CAPABILITY: &str = "tool-result/v1";

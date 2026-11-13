@@ -69,6 +69,7 @@ pub mod step_events;
 pub mod stop_all;
 pub mod structured_output;
 pub mod subscribe;
+pub mod system_text_facts;
 pub mod tag_read;
 pub mod tool_calls;
 pub mod tool_result_limit;

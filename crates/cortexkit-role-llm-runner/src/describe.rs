@@ -146,6 +146,11 @@ pub mod problem_names {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct RoleDescribe {
+    /// Model-facing host facts by session harness id. Not a declaration of
+    /// which harnesses this runner can route or host. Missing entries declare
+    /// no facts, and other capabilities never imply them.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub harnesses: std::collections::BTreeMap<String, HarnessDescribe>,
     /// Wall-clock idle lifetime in seconds, positive and present exactly with
     /// the `fork_answer` group.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -217,6 +222,56 @@ pub struct RoleDescribe {
     /// Backup labels required when the `session_class` group is declared.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_class: Option<SessionClass>,
+}
+
+/// Model-facing properties explicitly offered by one session harness.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct HarnessDescribe {
+    #[serde(
+        default,
+        deserialize_with = "decode_host_facts",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    host_facts: Vec<String>,
+}
+
+impl HarnessDescribe {
+    /// Normalize a declared set; every token is 1–64 ASCII characters from
+    /// `[a-z0-9_.-]`. Decoding instead refuses noncanonical order or duplicates.
+    pub fn new(mut host_facts: Vec<String>) -> Result<Self, &'static str> {
+        if !host_facts.iter().all(|name| valid_host_fact(name)) {
+            return Err("host_facts tokens must match [a-z0-9_.-]{1,64}");
+        }
+        host_facts.sort();
+        host_facts.dedup();
+        Ok(Self { host_facts })
+    }
+
+    pub fn host_facts(&self) -> &[String] {
+        &self.host_facts
+    }
+}
+
+fn valid_host_fact(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"_.-".contains(&b))
+}
+
+fn decode_host_facts<'de, D: serde::Deserializer<'de>>(
+    decoder: D,
+) -> Result<Vec<String>, D::Error> {
+    let names = Vec::<String>::deserialize(decoder)?;
+    if !names.iter().all(|name| valid_host_fact(name))
+        || names.windows(2).any(|pair| pair[0] >= pair[1])
+    {
+        return Err(serde::de::Error::custom(
+            "host_facts must be sorted, unique [a-z0-9_.-]{1,64} tokens",
+        ));
+    }
+    Ok(names)
 }
 
 /// Discovery metadata for the `session_class` capability group.

@@ -165,6 +165,9 @@ pub const CASES: &[CaseSpec] = &[
         requires: &[SystemText, SystemTextOptionalPreset],
         checks: "a system_text item without a preset, in a catalog request without a preset, is answered, not refused, with a well-formed system-text item whose item_digest a repeat request returns again, and whose text and item_digest equal the subject's named default preset's, when it names one",
     },
+    CaseSpec { name: "system_text_facts_accepted", requires: &[SystemText, Capability::SystemTextFacts], checks: "a declaring provider accepts valid plan-carried facts" },
+    CaseSpec { name: "system_text_facts_malformed_refused", requires: &[SystemText, Capability::SystemTextFacts], checks: "malformed facts are refused rather than ignored or normalized" },
+    CaseSpec { name: "system_text_facts_legacy_omitted", requires: &[SystemText], checks: "requests to a non-declaring provider omit facts" },
     CaseSpec {
         name: "catalog_disabled_tool_absent",
         requires: &[DisableTool],

@@ -8,6 +8,7 @@ use cortexkit_role_llm_runner_conformance::{
 pub(super) struct Provider {
     provides: Vec<String>,
     received: Vec<Vec<u8>>,
+    facts: Vec<Option<Vec<u8>>>,
 }
 
 impl FakeSubject {
@@ -22,6 +23,7 @@ impl FakeSubject {
             Provider {
                 provides: provides.to_vec(),
                 received: vec![],
+                facts: vec![],
             },
         );
         let mut fields = self.send_fields(session, true);
@@ -52,6 +54,14 @@ impl FakeSubject {
             Err(e) => return Err(HarnessError::new(e.to_string())),
         };
         observation.provider_calls = observation.provider_items.len();
+        observation.provider_facts = self
+            .world()
+            .system_text_default
+            .lock()
+            .unwrap()
+            .get(session)
+            .map(|p| p.facts.clone())
+            .unwrap_or_default();
         Ok(observation)
     }
 }
@@ -61,10 +71,11 @@ impl Module {
         let entry = params.get("plan")?.get("system_text")?;
         let mut providers = self.world.system_text_default.lock().unwrap();
         let provider = providers.get_mut(session)?;
-        if !provider
-            .provides
-            .iter()
-            .any(|name| name == SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY)
+        if entry["item"].get("preset").is_none()
+            && !provider
+                .provides
+                .iter()
+                .any(|name| name == SYSTEM_TEXT_DEFAULT_PROVIDER_CAPABILITY)
             && !self.world.defects.system_text_default_ignores_catalog
         {
             return Some(refuse(
@@ -73,6 +84,29 @@ impl Module {
             ));
         }
         let mut item = entry["item"].clone();
+        let facts = if self.world.defects.system_text_facts_accepts_malformed
+            || self.world.defects.system_text_facts_ignores_opt_in
+        {
+            item.get("facts").cloned()
+        } else {
+            match cortexkit_role_llm_runner::system_text_facts::for_provider(
+                &item,
+                &provider.provides,
+            ) {
+                Ok(facts) => facts.cloned(),
+                Err(field) => {
+                    return Some(refuse(errors::INVALID_PARAMS, Some(json!({"field":field}))))
+                }
+            }
+        };
+        let mut facts = facts;
+        if let (true, Some(facts)) = (self.world.defects.system_text_facts_rewrites, &mut facts) {
+            facts["model"]["id"] = json!("rewritten");
+        }
+        provider
+            .facts
+            .push(facts.map(|facts| serde_json::to_vec(&facts).unwrap()));
+        item.as_object_mut().unwrap().remove("facts");
         if self.world.defects.system_text_default_invents_preset {
             item["preset"] = json!("invented-default");
         }

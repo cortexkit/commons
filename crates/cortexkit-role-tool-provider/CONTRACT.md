@@ -271,7 +271,7 @@ responsibilities, not behaviors checked by this provider kit.
   `program: source:rich-ui/1`; the declarations do not authorize scanning until
   the runner's frozen plan opts the provider into output references.
 
-- Request: `{params, preset?, composition?, system_text?, digest_only?}`
+- Request: `{params, preset?, composition?, system_text?, facts?, digest_only?}`
   (`CatalogRequest`).
   - `params` is the plan item's params, and every key in it is per-provider:
     a provider accepts only the keys it documents, and refuses any other key
@@ -355,6 +355,42 @@ responsibilities, not behaviors checked by this provider kit.
       `system_text_preset_required` with `detail: {provider}` naming the
       provider module id, writing nothing and forwarding nothing. This
       refusal is terminal and never timed.
+### Plan-carried system-text facts
+
+- A provider declares `system-text-facts/v1` (`SYSTEM_TEXT_FACTS_V1`) in its
+  module manifest's `capabilities.provides` only when it accepts optional
+  `tool.catalog.facts`. Consumers read that exact token from the daemon catalog,
+  never infer support from a version or another capability. They omit `facts`
+  entirely for a non-declarer, so providers refusing unknown request members
+  remain compatible. `CatalogRequest::with_system_text_facts` performs this
+  selection. Facts sit beside `system_text`, not inside its original item type.
+- When present, facts have exactly the shape
+  `{model: {provider, id}, harness: {id, facts: [string]}, tools: [string],
+  idle_start: [string]}` (`SystemTextFacts`). All members are required, including
+  empty lists. `tools` lists every tool the plan serves, by catalog name, across
+  all providers. `idle_start` lists every sender module allowed to start a turn.
+  `harness.facts` lists only the host-fact names the runner explicitly declares
+  for that session's harness; no other capability implies a host fact.
+- The three lists are strictly ascending in UTF-8 byte order, unique, with no
+  nulls or empty strings. A decoder refuses unsorted or duplicate lists instead
+  of normalizing them. Wrong types, missing members, unknown members and a
+  present null facts value are refused as `invalid_request {field: "facts"}`.
+  Constructors normalize sets; `SystemTextFacts::canonical_json` emits compact
+  JSON with sorted object keys and canonical lists. Composers use those bytes
+  in the frozen plan, and all fetches of that item use those same facts.
+- `system-text-facts.schema.json` ships with the crate; the public
+  `SYSTEM_TEXT_FACTS_SCHEMA` constant contains its identical text. Standard JSON
+  Schema constraints describe the shape, uniqueness and nonempty names.
+  `x-sorted: true` is a CortexKit annotation standard validators ignore: the
+  Rust decoder enforces the order separately.
+- Rendering uses the plan-carried facts plus the provider's own `preset` and
+  `module` switches. Variant, effort, time, count and session state are
+  deliberately absent from facts. A provider adds no time- or state-based
+  inputs, so the composer and runner obtain identical text bytes and text
+  changes only with a plan generation. Missing facts keep the provider's
+  existing rendering contract; declaring support does not require a caller
+  to send facts.
+
 - Answer (`CatalogAnswer`): `{generation, catalog_digest, composition_digest?,
   tools: [...], system_text?, capabilities?, user_commands?, presets?}`.
   `user_commands` is §4.2; `presets` is §4.3.

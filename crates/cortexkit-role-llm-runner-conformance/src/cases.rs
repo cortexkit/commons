@@ -181,6 +181,11 @@ where
             name if name.starts_with("system_text_default_") => {
                 crate::system_text_default::run(self, name).await
             }
+            name if name.starts_with("system_text_facts_")
+                || name == "system_text_host_facts_describe" =>
+            {
+                crate::system_text_facts::run(self, name).await
+            }
             name if name.starts_with("output_refs_") => crate::output_refs::run(self, name).await,
             name if name.starts_with("held_calls_") => crate::held_calls::run(self, name).await,
             "media_only_send" => crate::attachments::media_only_send(self).await,

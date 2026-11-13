@@ -9,6 +9,36 @@ use cortexkit_role_tool_provider_conformance::{
 };
 use fake::{Defects, FakeSubject, LateCustodyDefect, SystemTextDefect, REFUSED_LISTED_PRESET};
 
+#[tokio::test]
+async fn system_text_facts_checks_reject_incorrect_providers_by_name() {
+    for (defects, case) in [
+        (
+            Defects {
+                refuse_system_text_facts: true,
+                ..Defects::default()
+            },
+            "system_text_facts_accepted",
+        ),
+        (
+            Defects {
+                accept_malformed_system_text_facts: true,
+                ..Defects::default()
+            },
+            "system_text_facts_malformed_refused",
+        ),
+    ] {
+        let report = run(&FakeSubject::new(defects)).await;
+        failed(&report, case);
+    }
+    let mut subject = FakeSubject::new(Defects {
+        refuse_system_text_facts: true,
+        ..Defects::default()
+    });
+    subject.capabilities.remove(&Capability::SystemTextFacts);
+    let report = run(&subject).await;
+    assert_passed(&report, "system_text_facts_legacy_omitted");
+}
+
 async fn run(subject: &FakeSubject) -> SuiteReport {
     let dir = tempfile::tempdir().unwrap();
     run_suite(subject, dir.path()).await.unwrap()

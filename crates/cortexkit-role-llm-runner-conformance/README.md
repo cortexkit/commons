@@ -1,5 +1,16 @@
 # cortexkit-role-llm-runner-conformance
 
+Version **0.17.60** pins runner **0.8.50**. Runners declaring `plans` provide
+`prepare_system_text_facts` (by default sharing `prepare_system_text_default`)
+and `system_text_default_observation`. The fixture installs a named system-text
+item, including its facts, and the exact provider manifest tokens supplied by
+the case. Capture actual `tool.catalog.facts` bytes independently of the plan in
+`SystemTextDefaultObservation.provider_facts`, one entry per fetch, using `None`
+for an omitted member. Never reconstruct observations from fixture inputs.
+The cases check exact forwarding for opt-in providers, omission for legacy
+providers, and malformed refusal before any fetch or state write. The host-fact
+describe case validates the runner's per-harness declarations even without plans.
+
 Version **0.17.45** pins runner **0.8.36**. Four `host_start_*` cases run only
 when the live describe lists `harness.host_start` in its top-level `extensions`.
 Opt-in adapters provide `host_start_model`, both original and alternate

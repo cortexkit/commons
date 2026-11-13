@@ -204,6 +204,15 @@ pub struct CatalogRequest {
     /// The provider's system-prompt item, when the plan has one for it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub system_text: Option<SystemTextItem>,
+    /// Plan-carried rendering facts, beside (not inside) `system_text` to keep
+    /// the original item type source-compatible. Send only to a provider whose
+    /// manifest declares [`crate::SYSTEM_TEXT_FACTS_V1`].
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::system_text_facts::decode_optional"
+    )]
+    pub facts: Option<crate::SystemTextFacts>,
     /// Ask for `{generation, catalog_digest}` only, for a cheap change check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub digest_only: Option<bool>,
@@ -234,6 +243,21 @@ impl CatalogRequest {
     /// Fetch the provider's system-prompt item alongside the catalog.
     pub fn with_system_text(mut self, system_text: SystemTextItem) -> Self {
         self.system_text = Some(system_text);
+        self
+    }
+
+    /// Include facts only when the provider's manifest opts in; older providers
+    /// may refuse unknown request members. Call for every destination, including
+    /// when reusing a request previously built for another provider.
+    pub fn with_system_text_facts(
+        mut self,
+        facts: crate::SystemTextFacts,
+        provides: &[String],
+    ) -> Self {
+        self.facts = provides
+            .iter()
+            .any(|token| token == crate::SYSTEM_TEXT_FACTS_V1)
+            .then_some(facts);
         self
     }
 

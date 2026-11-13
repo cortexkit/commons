@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.50
+
+- Add per-harness `RoleDescribe.harnesses` and non-exhaustive `HarnessDescribe`
+  with sorted unique `host_facts` tokens. Missing declarations imply no facts;
+  this map is independent of routing's hosted-harness declaration.
+- Admit optional plan system-text facts using the existing tool-provider
+  dependency's shared type. Add a JSON-preserving validation/selection helper,
+  require byte-identical forwarding only for providers declaring
+  `system-text-facts/v1`, and pin refusal before fetches or writes.
+
 ## 0.8.49
 
 - Add optional `cache_write_5m_tokens` and `cache_write_1h_tokens` to

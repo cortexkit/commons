@@ -8009,6 +8009,65 @@ fn system_text_default_subject(defects: Defects) -> FakeSubject {
 }
 
 #[tokio::test]
+async fn system_text_facts_conforming_runner_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.insert(Capability::Plans);
+    let report = run(&subject).await;
+    for name in [
+        "system_text_host_facts_describe",
+        "system_text_facts_forwarded_unchanged",
+        "system_text_facts_legacy_omitted",
+        "system_text_facts_malformed_refused",
+    ] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{}",
+            report.render()
+        );
+    }
+}
+
+#[tokio::test]
+async fn system_text_facts_incorrect_runners_fail_by_name() {
+    for (defects, name) in [
+        (
+            Defects {
+                system_text_facts_rewrites: true,
+                ..Defects::default()
+            },
+            "system_text_facts_forwarded_unchanged",
+        ),
+        (
+            Defects {
+                system_text_facts_ignores_opt_in: true,
+                ..Defects::default()
+            },
+            "system_text_facts_legacy_omitted",
+        ),
+        (
+            Defects {
+                system_text_facts_accepts_malformed: true,
+                ..Defects::default()
+            },
+            "system_text_facts_malformed_refused",
+        ),
+        (
+            Defects {
+                system_text_host_facts_malformed: true,
+                ..Defects::default()
+            },
+            "system_text_host_facts_describe",
+        ),
+    ] {
+        let mut subject = FakeSubject::new(defects);
+        subject.capabilities.insert(Capability::Plans);
+        let report = run(&subject).await;
+        failed(&report, name);
+    }
+}
+
+#[tokio::test]
 async fn system_text_default_forwarded_unchanged() {
     let report = run(&system_text_default_subject(Defects::default())).await;
     assert_eq!(

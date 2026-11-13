@@ -1,5 +1,14 @@
 # Tool-provider conformance
 
+Version **0.15.8** pins provider **0.15.7**. Adapters declare
+`Capability::SystemTextFacts` only when the module manifest provides the exact
+`system-text-facts/v1` token. The facts cases use the existing
+`system_text_catalog_arguments` fixture. A declarer must accept valid facts and
+refuse malformed facts as `invalid_request` naming `facts`; the legacy request
+case omits the member altogether, including for providers that reject unknown
+request members. The token is a manifest fact, not inferred from a crate version
+or another capability.
+
 Run `run_suite` against a live provider using its `ToolProviderSubject`, real
 `Harness`, and `ToolRoute` adapter. Each case is reported by name as `PASS`,
 `FAIL`, `SKIP`, or `N/A`; missing capabilities never count as passes. Simulated

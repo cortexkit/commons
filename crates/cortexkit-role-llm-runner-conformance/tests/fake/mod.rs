@@ -304,6 +304,10 @@ pub struct Defects {
     pub step_events_content_member: Option<&'static str>,
     pub step_events_wrong_publisher: bool,
     pub system_text_default_invents_preset: bool,
+    pub system_text_facts_rewrites: bool,
+    pub system_text_facts_ignores_opt_in: bool,
+    pub system_text_facts_accepts_malformed: bool,
+    pub system_text_host_facts_malformed: bool,
     pub system_text_default_ignores_catalog: bool,
     pub incarnation_changes_on_cut: bool,
     pub incarnation_reused_on_recreation: bool,
@@ -3614,6 +3618,18 @@ impl Module {
                 cortexkit_role_llm_runner::describe::SessionClass::new(vec![]),
             );
         }
+        describe.harnesses.insert(
+            "host".into(),
+            cortexkit_role_llm_runner::describe::HarnessDescribe::new(vec![
+                "files".into(),
+                "shell".into(),
+            ])
+            .unwrap(),
+        );
+        let mut describe = serde_json::to_value(describe).unwrap();
+        if self.world.defects.system_text_host_facts_malformed {
+            describe["harnesses"]["host"]["host_facts"] = json!(["shell", "files"]);
+        }
         respond(describe)
     }
 
@@ -5500,9 +5516,12 @@ impl Module {
     }
 
     fn head_supported_modes(&self) -> Vec<String> {
-        let Reply::Response(value) = self.describe() else {
+        let Reply::Response(mut value) = self.describe() else {
             unreachable!()
         };
+        // Mode selection does not use harness facts. A malformed outward
+        // declaration must reach the conformance case, not panic inside the fake.
+        value.as_object_mut().unwrap().remove("harnesses");
         let describe: RoleDescribe = serde_json::from_value(value).unwrap();
         [
             Mode::ToolResult,

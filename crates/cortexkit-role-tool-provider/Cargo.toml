@@ -9,7 +9,7 @@
 # production build never pulls in the suite.
 [package]
 name = "cortexkit-role-tool-provider"
-version = "0.15.6"
+version = "0.15.7"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -18,7 +18,7 @@ description = "Wire contract of the CortexKit tool-provider/v1 role: role.descri
 publish = true
 # Ship the shared vector files with the crate so the optional `vectors` module
 # works for consumers who install this package without a repository checkout.
-include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "README.md", "src/**", "tests/**", "test-vectors/**"]
+include = ["Cargo.toml", "CONTRACT.md", "CHANGELOG.md", "README.md", "src/**", "tests/**", "test-vectors/**", "system-text-facts.schema.json"]
 
 [features]
 # Compiles the shared vectors into the public `vectors` module.
@@ -33,6 +33,7 @@ sha2 = "0.10"
 subc-protocol = ">=0.34.1, <0.37"
 
 [dev-dependencies]
+jsonschema = { version = "0.33", default-features = false }
 cortexkit-role-tool-display = { version = "0.1.5", path = "../cortexkit-role-tool-display", features = ["test-vectors"] }
 
 [[test]]

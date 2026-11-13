@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.60
+
+- Pin the role contract to `=0.8.50`. Add per-harness host-fact validation and
+  plan facts cases for exact forwarding, legacy omission and malformed refusal
+  before writes or fetches. Add a shared system-text facts fixture hook and
+  independent provider facts bytes to the observation type.
+- Exercise incorrect runners rewriting facts, ignoring provider opt-in,
+  accepting malformed facts or declaring malformed host-fact names; require
+  the corresponding named check to reject each one.
+
 ## 0.17.59
 
 - Pin the role contract to `=0.8.49`. Cover optional cache-write lifetime

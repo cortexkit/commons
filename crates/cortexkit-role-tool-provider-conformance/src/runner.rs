@@ -471,6 +471,9 @@ where
             "catalog_model_malformed_refused" => self.catalog_model_malformed_refused().await,
             "catalog_filter_model_refused" => self.catalog_filter_model_refused().await,
             "system_text_digests_match_text" => self.system_text_digests_match_text().await,
+            "system_text_facts_accepted"
+            | "system_text_facts_malformed_refused"
+            | "system_text_facts_legacy_omitted" => self.system_text_facts(name).await,
             "system_text_preflight_digest_stable" => {
                 self.system_text_preflight_digest_stable().await
             }
@@ -1282,6 +1285,53 @@ where
             );
         }
         Ok(arguments)
+    }
+
+    async fn system_text_facts(&self, name: &str) -> CaseResult {
+        use cortexkit_role_tool_provider::{
+            catalog::CatalogRequest, SystemTextFacts, SYSTEM_TEXT_FACTS_V1,
+        };
+        let facts: SystemTextFacts = serde_json::from_value(json!({"model":{"provider":"vendor","id":"model"},"harness":{"id":"host","facts":["files","shell"]},"tools":["read","write"],"idle_start":["sender"]})).map_err(|e| e.to_string())?;
+        let arguments = self.system_text_arguments()?;
+        let route = self.plain_route().await?;
+        if name == "system_text_facts_legacy_omitted" {
+            let request: CatalogRequest =
+                serde_json::from_value(arguments).map_err(|e| e.to_string())?;
+            let request = request.with_system_text_facts(facts, &[]);
+            let arguments = serde_json::to_value(request).map_err(|e| e.to_string())?;
+            if arguments.get("facts").is_some() {
+                return Err("non-declarer received facts".into());
+            }
+            self.system_text_catalog(&route, arguments).await?;
+            return Ok(());
+        }
+        let request: CatalogRequest =
+            serde_json::from_value(arguments).map_err(|e| e.to_string())?;
+        let mut arguments = serde_json::to_value(
+            request.with_system_text_facts(facts, &[SYSTEM_TEXT_FACTS_V1.into()]),
+        )
+        .map_err(|e| e.to_string())?;
+        if name == "system_text_facts_accepted" {
+            self.system_text_catalog(&route, arguments).await?;
+        } else {
+            for malformed in [
+                json!(null),
+                json!({}),
+                json!(["wrong"]),
+                json!({"model":{"provider":"vendor","id":"model"},"harness":{"id":"host","facts":[]},"tools":["z","a"],"idle_start":[]}),
+                json!({"model":{"provider":"vendor","id":"model"},"harness":{"id":"host","facts":[]},"tools":["a","a"],"idle_start":[]}),
+                json!({"model":{"provider":"vendor","id":"model"},"harness":{"id":"host","facts":[]},"tools":[""],"idle_start":[]}),
+            ] {
+                arguments["facts"] = malformed;
+                let error = expect_error(
+                    "malformed system-text facts",
+                    crate::runner::request(&route, op_body(ops::TOOL_CATALOG, arguments.clone()))
+                        .await?,
+                )?;
+                expect_invalid_field(&error, "facts")?;
+            }
+        }
+        Ok(())
     }
 
     async fn system_text_catalog(

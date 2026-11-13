@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.8
+
+- Pin the provider contract to `=0.15.7`. Add `SystemTextFacts` manifest fixture
+  capability and named cases for accepting facts, refusing malformed facts and
+  omitting facts for legacy providers. Exercise intentionally incorrect
+  providers and assert rejection by case name.
+
 ## 0.15.7
 
 - Add `catalog_schemas_portable`, which requires nothing and fails when any
