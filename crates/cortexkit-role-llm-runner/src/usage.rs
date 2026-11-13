@@ -77,7 +77,8 @@ fn add(total: &mut Option<u64>, step: Option<u64>) {
 
 /// The `usage` member of `run.result` and `run.status`: the run's step
 /// counts and token totals, and the same per model in `by_model`. Decoded
-/// leniently.
+/// leniently. Readers use [`RunUsage::cache_write_split`] to ignore malformed
+/// optional breakdowns without losing the run's state or token totals.
 ///
 /// Non-exhaustive so later optional members are additive: build one with
 /// [`RunUsage::new`] and [`RunUsage::record_step`], or decode one.
@@ -95,6 +96,14 @@ pub struct RunUsage {
     pub cached_input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_tokens: Option<u64>,
+    /// Cache-write counters split by TTL, never additional tokens. Both are
+    /// present only when every counted step reported a complete, summing pair;
+    /// otherwise both are absent, meaning unknown, never all five-minute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_5m_tokens: Option<u64>,
+    /// The one-hour part of the same complete cache-write breakdown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_1h_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -112,6 +121,22 @@ pub struct RunUsage {
     /// Never inferred from the applied level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier_served: Option<String>,
+}
+
+fn check_cache_write_split(
+    total: Option<u64>,
+    five_minute: Option<u64>,
+    one_hour: Option<u64>,
+) -> Result<(), &'static str> {
+    match (five_minute, one_hour) {
+        (None, None) => Ok(()),
+        (Some(five), Some(hour))
+            if five.checked_add(hour).is_some_and(|sum| Some(sum) == total) =>
+        {
+            Ok(())
+        }
+        _ => Err("cache_write_5m_tokens and cache_write_1h_tokens must both be present and sum to cache_write_tokens"),
+    }
 }
 
 /// Durable session spend on `session.head`, across runs, rewinds and cuts.
@@ -195,6 +220,14 @@ pub struct ModelUsage {
     pub cached_input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cache_write_tokens: Option<u64>,
+    /// Cache-write counters split by TTL, never additional tokens. Both are
+    /// present only when every counted step reported a complete, summing pair;
+    /// otherwise both are absent, meaning unknown, never all five-minute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_5m_tokens: Option<u64>,
+    /// The one-hour part of the same complete cache-write breakdown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_1h_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -202,6 +235,19 @@ pub struct ModelUsage {
 }
 
 impl ModelUsage {
+    /// The complete five-minute and one-hour breakdown of `cache_write_tokens`.
+    /// An absent, partial, non-summing or overflowing split is unknown: price
+    /// the total as before rather than rejecting the usage or its message.
+    pub fn cache_write_split(&self) -> Option<(u64, u64)> {
+        check_cache_write_split(
+            self.cache_write_tokens,
+            self.cache_write_5m_tokens,
+            self.cache_write_1h_tokens,
+        )
+        .ok()?;
+        self.cache_write_5m_tokens.zip(self.cache_write_1h_tokens)
+    }
+
     /// An entry with no steps yet and every total absent.
     pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
@@ -213,6 +259,8 @@ impl ModelUsage {
             input_tokens: None,
             cached_input_tokens: None,
             cache_write_tokens: None,
+            cache_write_5m_tokens: None,
+            cache_write_1h_tokens: None,
             output_tokens: None,
             reasoning_tokens: None,
         }
@@ -223,8 +271,21 @@ impl ModelUsage {
         self
     }
 
-    /// Count one completed step of this selection.
+    pub fn with_cache_write_5m_tokens(mut self, value: u64) -> Self {
+        self.cache_write_5m_tokens = Some(value);
+        self
+    }
+
+    pub fn with_cache_write_1h_tokens(mut self, value: u64) -> Self {
+        self.cache_write_1h_tokens = Some(value);
+        self
+    }
+
+    /// Count one completed step of this selection. Since `StepUsage` carries
+    /// no lifetimes, clear any split; fill a complete split after recording.
     pub fn record_step(&mut self, step: StepUsage) {
+        self.cache_write_5m_tokens = None;
+        self.cache_write_1h_tokens = None;
         self.steps = self.steps.saturating_add(1);
         if !step.is_reported() {
             self.unreported_steps = self.unreported_steps.saturating_add(1);
@@ -248,6 +309,29 @@ impl ModelUsage {
 }
 
 impl RunUsage {
+    /// The complete five-minute and one-hour breakdown of `cache_write_tokens`.
+    /// An absent, partial, non-summing or overflowing split is unknown: price
+    /// the total as before rather than rejecting the usage or its message.
+    pub fn cache_write_split(&self) -> Option<(u64, u64)> {
+        check_cache_write_split(
+            self.cache_write_tokens,
+            self.cache_write_5m_tokens,
+            self.cache_write_1h_tokens,
+        )
+        .ok()?;
+        self.cache_write_5m_tokens.zip(self.cache_write_1h_tokens)
+    }
+
+    pub fn with_cache_write_5m_tokens(mut self, value: u64) -> Self {
+        self.cache_write_5m_tokens = Some(value);
+        self
+    }
+
+    pub fn with_cache_write_1h_tokens(mut self, value: u64) -> Self {
+        self.cache_write_1h_tokens = Some(value);
+        self
+    }
+
     /// Producer-side tier validation; readers keep unknown record levels.
     pub fn check_service_tier(&self) -> Result<(), crate::service_tier::TierProblem> {
         crate::service_tier::check_applied(self.service_tier_applied.as_deref())
@@ -293,6 +377,8 @@ impl RunUsage {
     /// Count one completed step served by `provider`/`model`/`variant`,
     /// adding it to the run's totals and to that selection's `by_model`
     /// entry, which is appended on the selection's first use.
+    /// Since `StepUsage` carries no lifetimes, clear any split; fill a complete
+    /// split after recording all steps.
     pub fn record_step(
         &mut self,
         provider: &str,
@@ -300,6 +386,8 @@ impl RunUsage {
         variant: Option<&str>,
         step: StepUsage,
     ) {
+        self.cache_write_5m_tokens = None;
+        self.cache_write_1h_tokens = None;
         self.steps = self.steps.saturating_add(1);
         if !step.is_reported() {
             self.unreported_steps = self.unreported_steps.saturating_add(1);
@@ -340,11 +428,23 @@ impl RunUsage {
     /// (provider, model, variant), every entry with at least one step, the
     /// entries' step counts and totals summing to the top-level ones (a
     /// total absent from every entry is absent at the top), and every total
-    /// absent wherever every step was unreported. Saying nothing about the
-    /// values a provider reported, it cannot tell an absent total written as
-    /// `0` from a reported zero; a consumer treats an inconsistent usage as
-    /// malformed.
+    /// absent wherever every step was unreported. It also checks that each cache-write
+    /// split is either absent or complete and sums to its cache-write total.
+    /// Without the provider's reports, it cannot verify split completeness
+    /// over steps or tell an absent total written as
+    /// `0` from a reported zero. A malformed split makes this false for
+    /// producers and conformance checks; readers ignore only that split via
+    /// [`Self::cache_write_split`], retaining the usage and its message.
     pub fn consistent(&self) -> bool {
+        if check_cache_write_split(
+            self.cache_write_tokens,
+            self.cache_write_5m_tokens,
+            self.cache_write_1h_tokens,
+        )
+        .is_err()
+        {
+            return false;
+        }
         if self.unreported_steps > self.steps {
             return false;
         }
@@ -355,6 +455,15 @@ impl RunUsage {
         let mut unreported = 0u64;
         let mut sums: [Option<u64>; 5] = [None; 5];
         for (index, entry) in self.by_model.iter().enumerate() {
+            if check_cache_write_split(
+                entry.cache_write_tokens,
+                entry.cache_write_5m_tokens,
+                entry.cache_write_1h_tokens,
+            )
+            .is_err()
+            {
+                return false;
+            }
             if entry.steps == 0 || entry.unreported_steps > entry.steps {
                 return false;
             }
@@ -777,5 +886,73 @@ mod tests {
             damage(&mut usage);
             assert!(!usage.consistent(), "{what}");
         }
+    }
+
+    #[test]
+    fn cache_write_split_builders_and_consistency() {
+        let step = StepUsage::unreported().with_cache_write_tokens(10);
+        let mut usage = RunUsage::new();
+        usage.record_step("p", "m", None, step);
+        usage = usage
+            .with_cache_write_5m_tokens(3)
+            .with_cache_write_1h_tokens(7);
+        usage.by_model[0] = usage.by_model[0]
+            .clone()
+            .with_cache_write_5m_tokens(3)
+            .with_cache_write_1h_tokens(7);
+        assert!(usage.consistent());
+        let wire = serde_json::to_value(&usage).unwrap();
+        assert_eq!(usage.cache_write_split(), Some((3, 7)));
+        assert_eq!(usage.by_model[0].cache_write_split(), Some((3, 7)));
+        assert_eq!(wire["cache_write_5m_tokens"], 3);
+        assert_eq!(wire["cache_write_1h_tokens"], 7);
+        assert_eq!(wire["by_model"][0]["cache_write_5m_tokens"], 3);
+        assert_eq!(wire["by_model"][0]["cache_write_1h_tokens"], 7);
+        assert_eq!(serde_json::from_value::<RunUsage>(wire).unwrap(), usage);
+
+        for (five, hour) in [(Some(10), None), (None, Some(10)), (Some(3), Some(8))] {
+            let mut broken = usage.clone();
+            broken.cache_write_5m_tokens = five;
+            broken.cache_write_1h_tokens = hour;
+            assert!(!broken.consistent());
+            assert_eq!(broken.cache_write_split(), None);
+            let mut broken = usage.clone();
+            broken.by_model[0].cache_write_5m_tokens = five;
+            broken.by_model[0].cache_write_1h_tokens = hour;
+            assert!(!broken.consistent());
+            assert_eq!(broken.by_model[0].cache_write_split(), None);
+        }
+    }
+
+    #[test]
+    fn recording_without_step_lifetimes_clears_cache_write_split() {
+        let mut usage = RunUsage::new();
+        usage.record_step(
+            "p",
+            "m",
+            None,
+            StepUsage::unreported().with_cache_write_tokens(10),
+        );
+        usage = usage
+            .with_cache_write_5m_tokens(3)
+            .with_cache_write_1h_tokens(7);
+        usage.by_model[0] = usage.by_model[0]
+            .clone()
+            .with_cache_write_5m_tokens(3)
+            .with_cache_write_1h_tokens(7);
+
+        usage.record_step(
+            "p",
+            "m",
+            None,
+            StepUsage::unreported().with_cache_write_tokens(2),
+        );
+        assert_eq!(usage.cache_write_tokens, Some(12));
+        assert_eq!(usage.cache_write_5m_tokens, None);
+        assert_eq!(usage.cache_write_1h_tokens, None);
+        assert_eq!(usage.by_model[0].cache_write_tokens, Some(12));
+        assert_eq!(usage.by_model[0].cache_write_5m_tokens, None);
+        assert_eq!(usage.by_model[0].cache_write_1h_tokens, None);
+        assert!(usage.consistent());
     }
 }

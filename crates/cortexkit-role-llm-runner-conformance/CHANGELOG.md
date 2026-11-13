@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.17.59
+
+- Pin the role contract to `=0.8.49`. Cover optional cache-write lifetime
+  splits in `run.status` and `run.result` decoding, at both run and per-model
+  scope: malformed splits decode without losing state or totals, return no
+  pricing breakdown, and fail consistency checks. Complete splits expose both
+  lifetimes. Exercise deliberately incorrect runners emitting partial or
+  non-summing splits and require the usage check to fail by name.
+
 ## 0.17.58
 
 - Pin the role contract to `=0.8.48`. Accept native synthetic host marks and

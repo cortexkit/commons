@@ -92,8 +92,9 @@ fn check_usage(what: &str, usage: &RunUsage, steps: &[ScriptedUsage]) -> Check {
     }
     if usage.by_model.is_empty() || !usage.consistent() {
         return Err(format!(
-            "{what} usage's by_model does not sum to its steps and totals (one entry per \
-             provider, model and variant, each with a step): {usage:?}"
+            "{what} usage has inconsistent counts, by_model totals or cache-write split \
+             (one entry per provider, model and variant, each with a step; any split \
+             must carry both lifetimes summing to cache_write_tokens): {usage:?}"
         ));
     }
     Ok(())
@@ -183,6 +184,9 @@ where
                 .await?,
             )?,
         )?;
+        if let Some(status_usage) = &status.usage {
+            check_usage("run.status", status_usage, reported)?;
+        }
         if status.usage.as_ref() != Some(usage) {
             return Err(format!(
                 "run.status of the ended run carries usage {:?}, but run.result carries \

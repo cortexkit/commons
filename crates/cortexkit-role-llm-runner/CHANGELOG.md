@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.49
+
+- Add optional `cache_write_5m_tokens` and `cache_write_1h_tokens` to
+  `RunUsage` and `ModelUsage`, with matching builders. Both types remain
+  non-exhaustive, and absent fields preserve existing wire bytes.
+- Require aggregate splits to be complete breakdowns of `cache_write_tokens`,
+  not additional tokens: both lifetimes must have been reported and summed
+  correctly for every counted step. Otherwise omit both; readers keep their
+  existing pricing for an absent split. Step events remain permissive about
+  partial splits. Keep aggregate decoding lenient: readers use
+  `cache_write_split()` to price a complete, summing pair or ignore a malformed
+  split without losing the usage or its containing message. Producers MUST NOT
+  emit malformed splits; `RunUsage::consistent()` flags them for conformance.
+
 ## 0.8.48
 
 - Allow optional host marks, read `host_parts` and tag-read host codes on native

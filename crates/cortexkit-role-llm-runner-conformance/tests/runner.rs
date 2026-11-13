@@ -4553,6 +4553,41 @@ async fn run_status_carries_the_same_usage_as_run_result() {
     assert_passed(&report, "run_usage_counts_reported_steps");
 }
 
+async fn cache_write_split_defect_fails_by_name(partial: bool, by_model: bool) {
+    only_these_fail(
+        Capability::RunUsage,
+        USAGE_PREFIXES,
+        Defects {
+            usage_partial_cache_write_split: partial,
+            usage_non_summing_cache_write_split: !partial,
+            usage_model_cache_write_split: by_model,
+            ..Defects::default()
+        },
+        &[("run_usage_counts_reported_steps", "cache-write split")],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn run_usage_partial_cache_write_split_fails_by_name() {
+    cache_write_split_defect_fails_by_name(true, false).await;
+}
+
+#[tokio::test]
+async fn run_usage_non_summing_cache_write_split_fails_by_name() {
+    cache_write_split_defect_fails_by_name(false, false).await;
+}
+
+#[tokio::test]
+async fn run_usage_partial_model_cache_write_split_fails_by_name() {
+    cache_write_split_defect_fails_by_name(true, true).await;
+}
+
+#[tokio::test]
+async fn run_usage_non_summing_model_cache_write_split_fails_by_name() {
+    cache_write_split_defect_fails_by_name(false, true).await;
+}
+
 /// A host turn that creates no run fails the adopt host-turn case by name.
 #[tokio::test]
 async fn host_turns_are_runs_and_one_without_a_run_fails_by_name() {

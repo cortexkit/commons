@@ -669,7 +669,7 @@ pub const CASES: &[CaseSpec] = &[
     case("run_tool_calls_indeterminate_until_result", &[Capability::RunToolCalls, Queue, TranscriptReads, HoldToolCalls],
         "a held call lists as indeterminate with no stored result, then as succeeded with one once released"),
     case("run_usage_counts_reported_steps", USAGE,
-        "after a two-step run whose scripted model reports input, cache-read, cache-write and output counts but no reasoning, run.result carries usage with steps 2, no unreported step, exactly the scripted totals, by_model summing to them, and reasoning_tokens absent rather than 0; run.status, where served, carries the same usage"),
+        "after a two-step run whose scripted model reports input, cache-read, cache-write and output counts but no reasoning, run.result carries usage with steps 2, no unreported step, exactly the scripted totals, by_model summing to them, and reasoning_tokens absent rather than 0; any cache-write lifetime split must be complete and sum to cache_write_tokens; run.status, where served, carries the same consistent usage"),
     case("delivery_order_never_starts_a_run", ORDER_STEER,
         "a list without idle_start on an idle session answers pending and changes nothing, then rides the owner's next turn as a steer, delivered once"),
     case("delivery_order_declared_modes_respected", ORDER,

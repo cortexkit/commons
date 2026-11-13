@@ -2590,7 +2590,8 @@ reported for a run's steps as `usage` on `run.result` (§6) and `run.status`
 whichever runner served it.
 
 - [pinned] `usage` is `{steps, unreported_steps, input_tokens?,
-  cached_input_tokens?, cache_write_tokens?, output_tokens?,
+  cached_input_tokens?, cache_write_tokens?, cache_write_5m_tokens?,
+  cache_write_1h_tokens?, output_tokens?,
   reasoning_tokens?, by_model}` (`usage::RunUsage`), decoded leniently:
   - `steps` is the number of completed model steps in the run;
   - `unreported_steps` is the number of those steps whose provider reported
@@ -2599,7 +2600,8 @@ whichever runner served it.
     field;
   - `by_model` is `[{provider, model, variant?, steps, unreported_steps,
     input_tokens?, cached_input_tokens?, cache_write_tokens?,
-    output_tokens?, reasoning_tokens?}]` (`usage::ModelUsage`), the same
+    cache_write_5m_tokens?, cache_write_1h_tokens?, output_tokens?,
+    reasoning_tokens?}]` (`usage::ModelUsage`), the same
     counts and totals per model selection.
 - [pinned] A step counts as reported if its provider reported any usage
   field, even `output_tokens: 0`. A step that reported nothing counts in
@@ -2634,6 +2636,24 @@ whichever runner served it.
   (§14.3). The conformance kit cannot observe provider normalization because
   its scripted usage supplies canonical counts; each runner's parser tests
   must cover the conversion from raw provider usage.
+- [pinned] In `RunUsage` and each `ModelUsage`, `cache_write_5m_tokens` and
+  `cache_write_1h_tokens` are a lifetime breakdown of `cache_write_tokens`,
+  never an addition to it. Both are present only when every step counted in
+  that aggregate carried both lifetimes and each step's pair summed exactly
+  to that step's `cache_write_tokens`; then the aggregate pair sums exactly
+  to its `cache_write_tokens`. Any step with a partial or non-summing split,
+  or no split, makes that aggregate omit both. These counters have the same
+  lifetime meanings as `step.finished.v1` (§14.3), whose per-step reports
+  remain permissive about partial splits; the aggregate rule is stricter.
+  Runners MUST NOT emit one lifetime without the other, a pair without
+  `cache_write_tokens`, or a pair whose sum differs from it. Such a split is
+  malformed: `RunUsage::consistent()` returns false, but usage still decodes
+  leniently. A reader that meets a malformed split ignores it, treating it as
+  absent, and never rejects the usage or the message carrying it because of
+  that split. Readers price from `RunUsage::cache_write_split()` or
+  `ModelUsage::cache_write_split()`, which return the complete, summing pair
+  or `None`. An absent split means unknown, never "all five-minute". Readers
+  price an absent or malformed split as they price `cache_write_tokens` today.
 - [pinned] `reasoning_tokens` is a breakdown of `output_tokens`, never an
   addition to it: it counts output the provider reports as reasoning, and
   that output is already inside `output_tokens`. So `reasoning_tokens <=

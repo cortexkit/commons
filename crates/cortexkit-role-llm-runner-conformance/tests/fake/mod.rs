@@ -494,6 +494,12 @@ pub struct Defects {
     /// count, as a runner that reads it as an addition rather than a
     /// breakdown would.
     pub usage_reasoning_added_to_output: bool,
+    /// Emit only the five-minute cache-write part, omitting the one-hour part.
+    pub usage_partial_cache_write_split: bool,
+    /// Emit both cache-write parts with a sum greater than the total.
+    pub usage_non_summing_cache_write_split: bool,
+    /// Apply the cache-write split defect to each model rather than the run.
+    pub usage_model_cache_write_split: bool,
     /// After a restart, `send.status` answers a queued send that was
     /// delivered before it `pending` again, as a status kept only in memory
     /// would; a re-send still answers from the durable record.
@@ -5634,6 +5640,27 @@ impl Module {
                 usage.reasoning_tokens.get_or_insert(0);
                 for entry in &mut usage.by_model {
                     entry.reasoning_tokens.get_or_insert(0);
+                }
+            }
+            if self.world.defects.usage_partial_cache_write_split
+                || self.world.defects.usage_non_summing_cache_write_split
+            {
+                if self.world.defects.usage_model_cache_write_split {
+                    for entry in &mut usage.by_model {
+                        entry.cache_write_5m_tokens = Some(1);
+                        entry.cache_write_1h_tokens = self
+                            .world
+                            .defects
+                            .usage_non_summing_cache_write_split
+                            .then_some(entry.cache_write_tokens.unwrap_or(0));
+                    }
+                } else {
+                    usage.cache_write_5m_tokens = Some(1);
+                    usage.cache_write_1h_tokens = self
+                        .world
+                        .defects
+                        .usage_non_summing_cache_write_split
+                        .then_some(usage.cache_write_tokens.unwrap_or(0));
                 }
             }
             result = result.with_usage(usage);
