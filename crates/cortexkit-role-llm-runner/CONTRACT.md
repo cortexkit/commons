@@ -5677,7 +5677,11 @@ its host's file storage, not a second copy of the host's media store.
   activity: sends, adopt and run lifecycle, never cache warms or maintenance.
   An archived session's reads return exactly what they returned before archive;
   only storage changes, unless `archive_prunes_reasoning` is declared and
-  §9.14.1's exception applies. Nothing is deleted while a run is active or a send is
+  §9.14.1's exception applies. Archiving permits moving a session to other
+  storage; it promises nothing a reader can observe. A runner with a single
+  storage tier therefore honours any valid `archive_after_days` by keeping the
+  session where it is, and still validates the value as above. Nothing is
+  deleted while a run is active or a send is
   queued, whether deletion is due to days expiry, release or the fallback hold.
 - [pinned] No session's content is deleted less than `min_hold_days` after the
   later of its last durable activity and its release. The floor is a minimum,
@@ -5766,6 +5770,19 @@ its host's file storage, not a second copy of the host's media store.
   accepts and silently skips backup. A session with `backup: false` is absent
   after a restore, never half there. A restore never brings back a deleted
   incarnation, and never deletes a later incarnation under the same name.
+  A runner whose backup captures its whole store cannot leave one session out,
+  so it meets `backup: false` at restore time instead: when it installs a
+  capture restored from the backup service, it removes every session whose
+  frozen policy in that capture says `backup: false`, everything the session
+  owns as for deletion, before it serves anything from the restored store. It
+  does this only on an explicit restore from the backup service, never by
+  inferring a restore from the store's state when it opens, so putting back
+  a snapshot the operator took of the same store on the same computer before
+  installing a new runner build (a rollback) keeps every session. Such a session's bytes remain in
+  the backup service's captures until that service's own retention drops
+  them, just as release frees live data only; `backup: false` then promises
+  absence after any restore, not that the bytes were never copied. Such a
+  runner does not refuse `backup: false`.
 
 ### 9.14.1 `archive_prunes_reasoning`: in-place pruning at rest
 
