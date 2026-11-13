@@ -326,11 +326,35 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   Measurement roles are open: readers preserve unknown names unchanged, so
   readers need not adopt 0.1.5 before engines emit these names. Pricing a name
   still requires its matching catalog rate.
-  Closed measure is billed/observed; source is vendor_reply/provider_measured.
-  Report the vendor's raw billed quantities, or measured duration as observed
-  only when absent; observed stays unpriced. Bias tokens are reported only if
-  in the vendor reply. Missing is not zero, unpriced is not free; no rounding,
-  floors or minimums.
+  Closed measure is billed/observed; closed source is
+  vendor_reply/provider_measured/request_derived. `vendor_reply` reports the
+  vendor's raw billed quantities. `provider_measured` is a quantity the provider
+  measures itself, such as duration when vendor usage is absent, and stays
+  `observed`. `request_derived` is a quantity the provider module computes from
+  the request exactly as sent to the vendor, after any truncation or
+  normalization the module applies, under the vendor's first-party documented
+  billing rule for that unit. The module counts by the vendor's documented
+  definition; for a text-character rule with no finer definition, the default is
+  Unicode scalar values of the text as sent. A vendor's stated definition wins.
+  `request_derived` may be `billed` only when the vendor's reply reports no
+  defined billed quantity for that role and unit; otherwise use `vendor_reply`.
+  A record must not carry both `vendor_reply` billed and `request_derived` billed
+  measurements for the same role and unit; record checks refuse with
+  `invalid_usage_record` and field `measurements`.
+  A billed `request_derived` measurement is allowed only on a record with status
+  `done`. Failed, cancelled and ended records may carry it only as `observed`;
+  record checks refuse a billed one with `invalid_usage_record` and field
+  `status`. `request_derived` is also allowed as `observed` on a done record.
+  Observed measurements stay unpriced. A billed `request_derived` measurement
+  prices against the same catalog rate as any billed measurement of that role
+  and unit, for example `input` with unit `character` uses
+  `rate.input.per_character`; the source does not change pricing.
+  Readers first: because source is closed, the usage reader must decode
+  `request_derived` before any provider emits it. An older reader exposes
+  undecodable records as `raw` in the usage feed, not as priced records.
+  Tokens a vendor charges for applying bias terms (`bias_packs`) are reported
+  only if the vendor reply reports them. Missing is not zero,
+  unpriced is not free; no rounding, floors or minimums.
 - [pinned] `media.feed.admission`: Only configured usage_reader may read/ack;
   other principals receive feed_not_admitted.
 - [pinned] `media.feed.read`: usage.read `{after_seq?, limit}` returns

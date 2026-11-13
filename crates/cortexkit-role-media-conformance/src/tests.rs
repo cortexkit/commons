@@ -101,6 +101,7 @@ case_tests! {
     media_kit_core_usage_output_image,
     media_kit_core_usage_output_video,
     media_kit_core_usage_cache_read,
+    media_kit_core_usage_request_derived,
     media_kit_core_usage_record_bounds,
     media_kit_core_usage_feed_redelivers_until_ack,
     media_kit_core_usage_feed_admits_only_reader,
@@ -171,6 +172,7 @@ fn media_kit_rule_map_covers_all_pinned_ids() {
         ("media.usage.decimal", "usage_output_image"),
         ("media.usage.decimal", "usage_output_video"),
         ("media.usage.decimal", "usage_cache_read"),
+        ("media.usage.decimal", "usage_request_derived"),
         ("media.usage.decimal", "usage_quantity_bounds"),
         ("media.usage.decimal", "usage_quantity_coefficient_bounds"),
     ] {

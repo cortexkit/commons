@@ -45,6 +45,7 @@ pub const CASES: &[&str] = &[
     "usage_output_image",
     "usage_output_video",
     "usage_cache_read",
+    "usage_request_derived",
     "usage_quantity_bounds",
     "usage_quantity_coefficient_bounds",
     "usage_record_bounds",
@@ -714,11 +715,16 @@ async fn run_more<S: MediaSubject>(
         | "usage_output_image"
         | "usage_output_video"
         | "usage_cache_read"
+        | "usage_request_derived"
         | "usage_quantity_bounds"
         | "usage_quantity_coefficient_bounds"
         | "usage_record_bounds" => {
             let measurements = if name == "usage_absent_is_not_zero" {
                 vec![]
+            } else if name == "usage_request_derived" {
+                vec![
+                    json!({"role":"input", "unit":"character", "quantity":"12", "measure":"billed", "source":"request_derived"}),
+                ]
             } else {
                 let role = match name {
                     "usage_input_image" => "input_image",
@@ -769,7 +775,7 @@ async fn run_more<S: MediaSubject>(
             } else {
                 require(
                     rs[0]["measurements"] == json!(measurements),
-                    "vendor measurements changed",
+                    "measurements changed",
                 )
             }
         }

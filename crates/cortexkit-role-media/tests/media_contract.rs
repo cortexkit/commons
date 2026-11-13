@@ -503,6 +503,86 @@ fn basic_record() -> UsageRecord {
     decode(&vector("usage.json")["records"][0])
 }
 
+fn request_derived_record() -> UsageRecord {
+    basic_record().with_measurements(vec![Measurement::new(
+        MeasurementRole::Input,
+        Unit::Character,
+        "12".into(),
+        Measure::Billed,
+        Source::RequestDerived,
+    )])
+}
+
+#[test]
+fn media_contract_usage_request_derived_round_trip() {
+    let source: Source = round_trip(&json!("request_derived"));
+    assert_eq!(source, Source::RequestDerived);
+    let value = vector("usage.json")["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|value| value["record_id"] == "r-request-derived")
+        .unwrap()
+        .clone();
+    let record: UsageRecord = round_trip(&value);
+    assert_eq!(record.measurements[0].source, Source::RequestDerived);
+    assert_eq!(record.measurements[0].measure, Measure::Billed);
+    check_usage_record(&record).unwrap();
+}
+
+#[test]
+fn media_contract_usage_request_derived_refuses_non_done_billing() {
+    for status in [
+        UsageStatus::Failed,
+        UsageStatus::Cancelled,
+        UsageStatus::Ended,
+    ] {
+        let mut record = request_derived_record();
+        record.status = status;
+        if status == UsageStatus::Failed {
+            record.failure = Some(Failure::new(
+                "engine_crashed".into(),
+                RefusalClass::Permanent,
+                "Failed request".into(),
+            ));
+        }
+        let error = check_usage_record(&record).expect_err("non-done request-derived billing");
+        assert_eq!(error.code, "invalid_usage_record", "{status:?}");
+        assert_eq!(error.field.as_deref(), Some("status"), "{status:?}");
+        record.measurements[0].measure = Measure::Observed;
+        check_usage_record(&record).unwrap();
+    }
+    let mut record = request_derived_record();
+    record.measurements[0].measure = Measure::Observed;
+    check_usage_record(&record).unwrap();
+}
+
+#[test]
+fn media_contract_usage_request_derived_refuses_vendor_reply_billing() {
+    let mut record = request_derived_record();
+    let mut vendor = record.measurements[0].clone();
+    vendor.source = Source::VendorReply;
+    record.measurements.push(vendor);
+    for _ in 0..2 {
+        let error = check_usage_record(&record).expect_err("duplicate billed role and unit");
+        assert_eq!(error.code, "invalid_usage_record");
+        assert_eq!(error.field.as_deref(), Some("measurements"));
+        record.measurements.reverse();
+    }
+    let valid = record.clone();
+    record.measurements[1].measure = Measure::Observed;
+    check_usage_record(&record).unwrap();
+    record = valid.clone();
+    record.measurements[0].measure = Measure::Observed;
+    check_usage_record(&record).unwrap();
+    record = valid.clone();
+    record.measurements[1].role = MeasurementRole::Output;
+    check_usage_record(&record).unwrap();
+    record = valid;
+    record.measurements[1].unit = Unit::Token;
+    check_usage_record(&record).unwrap();
+}
+
 fn usage_role_round_trip(role: &str) -> MeasurementRole {
     let mut value = serde_json::to_value(basic_record()).unwrap();
     value["measurements"] = json!([{

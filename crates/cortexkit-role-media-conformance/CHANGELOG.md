@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.3
+
+- Pin media `=0.1.6` with the closed measurement source `request_derived`, billed
+  only on done records without a vendor-reported billed quantity for that role
+  and unit. Failed, cancelled and ended records carry it only as observed.
+- Add a request-derived usage-preservation case. A faulty subject that
+  rewrites the measurement's source fails that case, and the kit's own tests
+  check that it does.
+- Readers first: upgrade the usage reader to decode `request_derived` before
+  any provider emits it; an older reader exposes undecodable records as `raw`
+  in the usage feed.
+
 ## 0.2.2
 
 - Pin media `=0.1.5` with the token measurement roles `input_image`,

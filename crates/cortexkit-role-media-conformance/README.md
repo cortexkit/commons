@@ -5,7 +5,7 @@ Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.
 decoded answer. STREAM_DATA event bodies and referenced output-object contents
 stay unwrapped.
 
-Version 0.2.2 pins `cortexkit-role-media` exactly to 0.1.5. Implement `MediaSubject`
+Version 0.2.3 pins `cortexkit-role-media` exactly to 0.1.6. Implement `MediaSubject`
 in an adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
 Each case needs an isolated, empty provider store and a Tokio runtime with time
 enabled. `Outcome::Failed` includes the case name; `NotApplicable` names an

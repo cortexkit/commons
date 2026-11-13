@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.6
+
+- Add `Source::RequestDerived` (`request_derived`) for quantities computed from
+  the request as sent under the vendor's first-party documented billing rule.
+  The vendor's counting definition wins; an otherwise undefined text-character
+  count defaults to Unicode scalar values after truncation or normalization.
+- Allow billed request-derived usage only on `done` records and only when the
+  vendor reply has no defined billed quantity for the same role and unit.
+  Failed, cancelled and ended records carry it only as observed. Record checks
+  reject non-done billing and concurrent vendor-reply/request-derived billing
+  for the same role and unit. Observed usage stays unpriced; billed usage uses
+  the same catalog rate, such as `rate.input.per_character`, regardless of source.
+- Readers first: the source set is closed. Upgrade the usage reader to decode
+  `request_derived` before any provider emits it; older readers expose
+  undecodable records as `raw` in the usage feed. Add a shared usage vector and
+  round-trip and refusal tests.
+
 ## 0.1.5
 
 - Add open measurement roles `input_image`, `output_image`, `output_video` and

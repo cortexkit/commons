@@ -45,6 +45,7 @@ pub enum Measure {
 pub enum Source {
     VendorReply,
     ProviderMeasured,
+    RequestDerived,
 }
 
 wire_struct!(Measurement {
@@ -194,6 +195,19 @@ pub fn check_usage_record(record: &UsageRecord) -> CheckResult {
     for measurement in &record.measurements {
         if !decimal_is_valid(&measurement.quantity) {
             return Err(CheckError::new("invalid_usage_record").with_field("quantity"));
+        }
+        if measurement.source == Source::RequestDerived && measurement.measure == Measure::Billed {
+            if record.status != UsageStatus::Done {
+                return Err(CheckError::new("invalid_usage_record").with_field("status"));
+            }
+            if record.measurements.iter().any(|other| {
+                other.source == Source::VendorReply
+                    && other.measure == Measure::Billed
+                    && other.role == measurement.role
+                    && other.unit == measurement.unit
+            }) {
+                return Err(CheckError::new("invalid_usage_record").with_field("measurements"));
+            }
         }
     }
     // Inspect the serialized tree so future open enum values and nested keys

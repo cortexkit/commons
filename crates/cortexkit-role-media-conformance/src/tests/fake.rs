@@ -169,6 +169,13 @@ impl State {
                 m["quantity"] = json!("9007199254740993.0");
             }
         }
+        if self.fault("usage_request_derived") {
+            for m in &mut ms {
+                if m["source"] == "request_derived" {
+                    m["source"] = json!("provider_measured");
+                }
+            }
+        }
         for role in ["input_image", "output_image", "output_video", "cache_read"] {
             if self.fault(&format!("usage_{role}")) {
                 for m in &mut ms {
