@@ -1,5 +1,8 @@
 # cortexkit-role-routing
 
+Version 0.7.21 pins `caller_runner` placement to a catalog runner attested as
+the caller, or otherwise to the single runner in the select request (§16).
+
 Version 0.7.20 adds `account_continue_signed_out` for continuing a run paused
 for sign-in onto a compatible account (CONTRACT.md §9.1.1).
 
@@ -43,14 +46,14 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-role-routing = "0.7.20"
+cortexkit-role-routing = "0.7.21"
 ```
 
 To include the shared vector bytes in your build, enable `test-vectors`:
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing = { version = "0.7.20", features = ["test-vectors"] }
+cortexkit-role-routing = { version = "0.7.21", features = ["test-vectors"] }
 ```
 
 The feature exposes `cortexkit_role_routing::vectors::FILES` and a constant

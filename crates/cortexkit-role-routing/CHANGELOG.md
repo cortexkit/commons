@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.21
+
+- Pin `caller_runner` resolution to an attested catalog runner caller, or
+  otherwise the request's singleton catalog-runner filter. Refuse unresolved
+  placement with non-timed `no_route {reason: "caller_runner_unresolved"}`;
+  never infer a runner from a non-runner caller's principal. Placement only
+  narrows admitted consumer work within settings, not selection authority.
+
 ## 0.7.20
 
 - Clarify that gateway routes keep the gateway provider id and borrow catalog

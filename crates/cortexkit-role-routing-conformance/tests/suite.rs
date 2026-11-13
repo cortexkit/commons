@@ -1987,3 +1987,42 @@ async fn placement_faulty_routers_fail_by_check_name() {
         );
     }
 }
+
+#[tokio::test]
+async fn placement_consumer_declarations_without_select_kind_passes() {
+    let report = run_suite(&FakeSubject::with_placement(Defects {
+        extension: Some("placement_without_select_kind"),
+        ..Defects::default()
+    }))
+    .await;
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+    assert!(matches!(
+        report.outcome("placement_consumer_declarations"),
+        Some(CheckOutcome::Passed)
+    ));
+    assert!(matches!(
+        report.outcome("placement_select_kind"),
+        Some(CheckOutcome::NotApplicable { .. })
+    ));
+}
+
+#[tokio::test]
+async fn placement_caller_runner_and_kind_faults_fail_by_check_name() {
+    for fault in [
+        "placement_caller_runner_from_principal",
+        "placement_caller_runner_guesses",
+        "placement_ignores_select_kind_gate",
+    ] {
+        let report = run_suite(&FakeSubject::with_placement(Defects {
+            extension: Some(fault),
+            ..Defects::default()
+        }))
+        .await;
+        assert_eq!(
+            report.failing(),
+            ["placement_consumer_declarations"],
+            "{fault}: {}",
+            report.render()
+        );
+    }
+}

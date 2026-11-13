@@ -86,16 +86,14 @@ impl FakeRoute {
         let original_catalog = state.catalog.clone();
         let original_resolved = state.catalog_resolved;
         let original_ladders = state.ladders.clone();
-        if let Some(runners) = &requested.runners {
-            catalog
-                .runners
-                .retain(|runner| runners.contains(&runner.module));
-        }
         let kind = requested
             .kind
             .as_ref()
             .or(defaults.kind.as_ref())
             .map_or("llm", |kind| kind.as_str());
+        if kind != "llm" && self.fault("placement_without_select_kind") {
+            return Err(Refusal::no_route(NoRouteReason::AllInadequate, None));
+        }
         if !self.fault("placement_select_kind") {
             catalog.models.retain(|model| {
                 state
@@ -121,7 +119,34 @@ impl FakeRoute {
         if !self.fault("placement_consumer_declarations") {
             let placement = match &defaults.placement {
                 Some(Placement::Module { module }) => Some(module.clone()),
-                Some(Placement::CallerRunner(_)) => state.selection_facts.caller_runner.clone(),
+                Some(Placement::CallerRunner(_)) => {
+                    let is_runner =
+                        |module: &str| catalog.runners.iter().any(|runner| runner.module == module);
+                    let resolved = if is_runner(&self.stamp.principal)
+                        || self.fault("placement_caller_runner_from_principal")
+                    {
+                        Some(self.stamp.principal.clone())
+                    } else {
+                        requested.runners.as_deref().and_then(|runners| {
+                            if (runners.len() == 1
+                                || (runners.len() > 1
+                                    && self.fault("placement_caller_runner_guesses")))
+                                && is_runner(&runners[0])
+                            {
+                                Some(runners[0].clone())
+                            } else {
+                                None
+                            }
+                        })
+                    };
+                    Some(resolved.ok_or_else(|| {
+                        Refusal::with(
+                            RefusalCode::NoRoute,
+                            "cannot resolve caller_runner placement",
+                            &json!({"reason":"caller_runner_unresolved"}),
+                        )
+                    })?)
+                }
                 _ => None,
             };
             if let Some(module) = placement {
@@ -133,6 +158,11 @@ impl FakeRoute {
                     .entry(consumer.clone())
                     .or_insert(ladder.clone());
             }
+        }
+        if let Some(runners) = &requested.runners {
+            catalog
+                .runners
+                .retain(|runner| runners.contains(&runner.module));
         }
         let mut harnesses = std::collections::BTreeMap::new();
         for runner in &mut catalog.runners {

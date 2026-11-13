@@ -2116,7 +2116,21 @@ Replacement params and answer:
   that do not parse are invalid; no second ladder grammar is introduced.
 - [pinned] `"caller_runner"` means the same runner **module** as the caller's
   session, on any harness of that module that can host the task. It does not
-  bind the caller's harness. `{module}` limits the task to that module for a
+  bind the caller's harness. Resolve the module from `route.select`'s attested
+  `reserved:<m>` caller when `<m>` is a catalog runner (it declares the routing
+  runner slot). Otherwise use the single entry of the request's `runners`
+  filter, which must name a catalog runner. With no filter, zero or multiple
+  entries, or a non-runner entry, refuse `no_route` with
+  `{reason: "caller_runner_unresolved"}`; this cause is not timed. The router
+  never guesses. The attested runner takes precedence over the filter, but the
+  filter still narrows eligible runners: a filter excluding that runner yields
+  no route. Settings and the resolved runner's own declaration still apply.
+- [pinned] `caller_runner` only narrows where a task of a consumer the caller
+  is admitted to select will run. The consumer's owner chose who may select it,
+  and declarations never widen settings, so a misstated runner can only
+  misplace that task inside what settings allow. The value is not an authority
+  input.
+- [pinned] `{module}` limits the task to that module for a
   selector opening the session itself. Settings cannot move a consumer away
   from a declared placement. A head keeps its current placement; these facts
   govern session creation, not live head moves.

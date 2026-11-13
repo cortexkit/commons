@@ -63,7 +63,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
         match name {
             "placement_consumer_declarations" => {
                 let declared = "example-consumer.task";
-                let mut facts = crate::SelectionFacts::new().with_caller_runner(RUNNER_TWO);
+                let mut facts = crate::SelectionFacts::new();
                 let search_route = format!("{SUBSCRIPTION_PROVIDER}/model-d");
                 facts.kinds.insert(search_route.clone(), "search".into());
                 self.subject.configure_selection_facts(&facts).await?;
@@ -71,7 +71,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 self.subject
                     .configure_catalog_declarations(&[slot(CONSUMER, body)])
                     .await?;
-                let params = json!({"consumer":declared,"requirements":{}});
+                let params = json!({"consumer":declared,"requirements":{},"runners":[RUNNER_TWO]});
                 let selected: SelectAnswer =
                     answer(&route, ops::ROUTE_SELECT, &params, "declared iq and ladder").await?;
                 if selected.route.route_key() != key_b || selected.runner.module != RUNNER_TWO {
@@ -79,15 +79,50 @@ impl<S: RoutingSubject> Suite<'_, S> {
                         "declared ladder or caller_runner placement was not honoured".into(),
                     );
                 }
-                let search: SelectAnswer = answer(
-                    &route,
-                    ops::ROUTE_SELECT,
-                    &json!({"consumer":"example-consumer.search","requirements":{}}),
-                    "declared search kind",
-                )
-                .await?;
-                if search.route.route_key() != search_route {
-                    return Err("declared kind escaped its route kind".into());
+                for runners in [
+                    None,
+                    Some(json!([])),
+                    Some(json!([RUNNER_ONE, RUNNER_TWO])),
+                    Some(json!([CONSUMER])),
+                ] {
+                    let mut unresolved = params.clone();
+                    match runners {
+                        Some(runners) => unresolved["runners"] = runners,
+                        None => {
+                            unresolved.as_object_mut().unwrap().remove("runners");
+                        }
+                    }
+                    let refusal = refused(
+                        &route,
+                        ops::ROUTE_SELECT,
+                        &unresolved,
+                        RefusalCode::NoRoute,
+                        "unresolved caller_runner placement",
+                    )
+                    .await?;
+                    if refusal.detail.get("reason") != Some(&json!("caller_runner_unresolved"))
+                        || refusal.detail.contains_key("reset_at_ms")
+                    {
+                        return Err(
+                            "unresolved caller_runner placement must name its non-timed cause"
+                                .into(),
+                        );
+                    }
+                }
+                let search_params = json!({"consumer":"example-consumer.search","requirements":{}});
+                if describe.serves(capabilities::SELECT_KIND) {
+                    let search: SelectAnswer = answer(
+                        &route,
+                        ops::ROUTE_SELECT,
+                        &search_params,
+                        "declared search kind",
+                    )
+                    .await?;
+                    if search.route.route_key() != search_route {
+                        return Err("declared kind escaped its route kind".into());
+                    }
+                } else {
+                    no_route(&route, &search_params).await?;
                 }
                 let mut child = params.clone();
                 child["consumer"] = json!(format!("{declared}.child"));
@@ -139,10 +174,40 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 )
                 .await?;
                 self.subject.configure_catalog_declarations(&[slot(CONSUMER, json!({"consumers":[{"name":declared,"iq":40,"placement":{"module":RUNNER_ONE}}]}))]).await?;
+                no_route(&route, &params).await?;
+                let mut params = params;
+                params.as_object_mut().unwrap().remove("runners");
                 let selected: SelectAnswer =
                     answer(&route, ops::ROUTE_SELECT, &params, "module placement").await?;
                 if selected.runner.module != RUNNER_ONE {
                     return Err("module placement was not honoured".into());
+                }
+                let runner_consumer = format!("{RUNNER_ONE}.task");
+                self.subject.configure_catalog_declarations(&[slot(RUNNER_ONE, json!({"runner":{"pairs":[{"wire_api":"messages","auth_method":"api_key"}]},"consumers":[{"name":runner_consumer,"iq":40,"placement":"caller_runner"}]}))]).await?;
+                let runner_route = self.route_as(RUNNER_ONE).await?;
+                let mut runner_params = json!({"consumer":runner_consumer,"requirements":{}});
+                for runners in [
+                    None,
+                    Some(json!([RUNNER_ONE])),
+                    Some(json!([RUNNER_TWO, RUNNER_ONE])),
+                ] {
+                    if let Some(runners) = runners {
+                        runner_params["runners"] = runners;
+                    }
+                    let selected: SelectAnswer = answer(
+                        &runner_route,
+                        ops::ROUTE_SELECT,
+                        &runner_params,
+                        "attested caller_runner placement",
+                    )
+                    .await?;
+                    if selected.runner.module != RUNNER_ONE {
+                        return Err("caller_runner did not use the attested catalog runner".into());
+                    }
+                }
+                for runners in [json!([]), json!([RUNNER_TWO]), json!([CONSUMER])] {
+                    runner_params["runners"] = runners;
+                    no_route(&runner_route, &runner_params).await?;
                 }
             }
             "placement_harness_facts" => {

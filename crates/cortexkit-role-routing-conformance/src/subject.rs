@@ -22,7 +22,9 @@ pub struct ScopeStamp {
 /// The caller identity and scope stamp a route carries.
 ///
 /// `principal` is the module the route is opened as: a consumer module for
-/// `route.select` and `route.report`, a runner module for the runner ops.
+/// `route.select` and `route.report` (including a runner selecting its own
+/// declared consumer), a runner module for the runner ops. The adapter opens
+/// the route with that module's attested `reserved:<module>` identity.
 /// `project_id`, when present, is the project the route is bound to; a
 /// route without either project or scope is unscoped. Declaration admission
 /// accepts the declaring module's `principal` or `scope.owner`, independently
@@ -316,9 +318,10 @@ impl ModelInputFacts {
 /// same state answers the same route and runner.
 #[async_trait]
 pub trait RoutingSubject: Send + Sync {
-    /// Test-only route kinds, catalog list rates, subscription value multipliers
-    /// and caller-session runner. A router declaring the new groups must support
-    /// these fixtures; no production configuration format is prescribed.
+    /// Test-only route kinds, catalog list rates and subscription value multipliers.
+    /// A router declaring a capability group these facts feed (such as
+    /// `select_kind` or `select_price`) must support them; no production
+    /// configuration format is prescribed.
     async fn configure_selection_facts(&self, _facts: &SelectionFacts) -> Result<(), String> {
         Err("selection facts are not supported by this subject".into())
     }
@@ -494,16 +497,11 @@ pub struct SelectionFacts {
     pub list_rates: std::collections::BTreeMap<String, crate::wire::price::RatesPerMtok>,
     pub multipliers: std::collections::BTreeMap<String, serde_json::Number>,
     pub estimates: std::collections::BTreeMap<String, serde_json::Number>,
-    pub caller_runner: Option<String>,
 }
 
 impl SelectionFacts {
     pub fn new() -> Self {
         Self::default()
-    }
-    pub fn with_caller_runner(mut self, runner: impl Into<String>) -> Self {
-        self.caller_runner = Some(runner.into());
-        self
     }
 }
 

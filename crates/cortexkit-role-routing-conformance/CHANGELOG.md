@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.10.23
+
+- Pin routing `=0.7.21`. Drive caller-runner placement through attested caller
+  principals and request `runners`, including absent, empty, ambiguous and
+  non-runner refusal cases. Reject principal-derived and guessing faulty
+  routers by the `placement_consumer_declarations` check name.
+- Gate declared non-llm kind selection on `select_kind`; without that group,
+  consumer declarations still constrain kind and the check expects `no_route`.
+  Cover both capability combinations and reject a router ignoring the gate.
+- Breaking kit API: remove `SelectionFacts::with_caller_runner` and its public
+  `caller_runner` field. Adapters resolve placement from real route and request
+  inputs instead of injecting a caller-session runner as a fixture fact.
+
 ## 0.10.22
 
 - Correct gateway fixtures to keep catalog rows under their original providers

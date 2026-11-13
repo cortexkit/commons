@@ -991,6 +991,12 @@ impl FakeRoute {
         let mut describe = RoleDescribe::new(consumers, true);
         if self.policy_control {
             for group in placement::GROUPS {
+                if *group == cortexkit_role_routing_conformance::wire::capabilities::SELECT_KIND
+                    && (self.fault("placement_without_select_kind")
+                        || self.fault("placement_ignores_select_kind_gate"))
+                {
+                    continue;
+                }
                 describe = describe.with_capability(*group);
             }
         }

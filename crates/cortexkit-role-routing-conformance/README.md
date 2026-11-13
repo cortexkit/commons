@@ -1,10 +1,11 @@
 # cortexkit-role-routing-conformance
 
-Version 0.10.22 pins routing `=0.7.20`. The seven `placement_*` checks each
+Version 0.10.23 pins routing `=0.7.21`. The seven `placement_*` checks each
 discover their own capability group before sending its members. Declaring
 adapters supply `configure_selection_facts(&SelectionFacts)` where needed:
 catalog list rates (never pre-divided), subscription value multipliers,
-per-task estimates, route kinds and the caller-session runner module.
+per-task estimates and route kinds. Caller-runner placement uses the attested
+runner principal or the request's singleton `runners` filter, not fixture facts.
 These fixture facts are not a production settings schema. Missing fixture
 support fails a declaring router's check explicitly; absent groups are reported
 not applicable. Existing adapters need no new hook until they declare a group.
@@ -34,7 +35,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.10.22"
+cortexkit-role-routing-conformance = "0.10.23"
 ```
 
 ```rust,ignore

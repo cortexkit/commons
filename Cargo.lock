@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing"
-version = "0.7.20"
+version = "0.7.21"
 dependencies = [
  "cortexkit-role-llm-runner 0.8.47",
  "cortexkit-role-media",
@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing-conformance"
-version = "0.10.22"
+version = "0.10.23"
 dependencies = [
  "async-trait",
  "cortexkit-role-routing",

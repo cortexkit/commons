@@ -4,7 +4,7 @@ use crate::wire::price::RatesPerMtok;
 use crate::{fixture, SelectionFacts};
 
 pub(crate) fn facts() -> SelectionFacts {
-    let mut facts = SelectionFacts::new().with_caller_runner(fixture::RUNNER_TWO);
+    let mut facts = SelectionFacts::new();
     facts.kinds.insert(
         format!("{}/model-b", fixture::PRICED_PROVIDER),
         "search".into(),
