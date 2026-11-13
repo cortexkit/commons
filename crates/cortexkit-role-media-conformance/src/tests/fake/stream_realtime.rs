@@ -5,6 +5,7 @@ pub(super) struct Extras {
     pub vendor: RecordingVendor,
     pub speech_check: bool,
     pub packs: BTreeMap<(String, String), Value>,
+    pub front_unavailable: BTreeMap<String, String>,
     streams: BTreeMap<(String, String), Stream>,
     seen: BTreeSet<(String, String)>,
     refuse_stream: bool,
@@ -250,6 +251,9 @@ impl State {
             .push(json!({"seq":self.usage.len()+1,"record":v}));
     }
     fn mint(&mut self, p: &str, mut req: Value) -> SubjectResult<Value> {
+        if self.fault("realtime_front_check_order") {
+            self.front_ready(&req)?;
+        }
         if !self.allowed(p, &req["agent_id"])
             && !self.fault("realtime_token_refuses_unadmitted_principal")
         {
@@ -270,6 +274,9 @@ impl State {
         }
         if self.fault("realtime_token_uses_requested_model") {
             req["model"] = json!("realtime-a");
+        }
+        if !self.fault("realtime_front_unavailable") {
+            self.front_ready(&req)?;
         }
         let lease = self.extra_admit(p, &id, &req, false)?;
         let admission = lease.admission.clone();
@@ -301,6 +308,19 @@ impl State {
             json!({"token":token,"token_ref":reference,"expires_at_ms":expiry,"model":req["model"],"provider":"fixture"}),
         )
     }
+    fn front_ready(&self, req: &Value) -> SubjectResult<()> {
+        if req["purpose"] == "voice_front" || self.fault("realtime_front_dictation") {
+            if let Some(reason) = req["agent_id"]
+                .as_str()
+                .and_then(|id| self.extra.front_unavailable.get(id))
+            {
+                let mut error = refuse("front_unavailable", None);
+                error.refusal.as_mut().unwrap()["detail"]["reason"] = json!(reason);
+                return Err(error);
+            }
+        }
+        Ok(())
+    }
     pub(super) fn watch_open(&mut self, p: &str, id: &str) -> SubjectResult<()> {
         let key = (p.into(), id.into());
         if !self.extra.calls.contains_key(&key) {
@@ -323,15 +343,19 @@ impl State {
         let pending = self.extra.vendor.take_tool_calls(session);
         let now = self.now();
         let wrong_id = self.fault("realtime_watch");
+        let invalid_tool = self.fault("realtime_watch_tool_not_string");
         let events = self
             .extra
             .watches
             .get_mut(&key)
             .ok_or_else(|| refuse("unknown_call", None))?;
         for _ in 0..pending {
-            events.push(
-                json!({"type":"tool_call","call_id":if wrong_id {"wrong"} else {id},"at_ms":now}),
-            );
+            let mut event =
+                json!({"type":"tool_call","call_id":if wrong_id {"wrong"} else {id},"at_ms":now});
+            if invalid_tool {
+                event["tool"] = json!(true);
+            }
+            events.push(event);
         }
         Ok(std::mem::take(events))
     }
@@ -404,8 +428,13 @@ impl State {
                 self.extra_observe(&c.token.admission, "run_finished")?;
                 c.ended = true;
                 let now = self.now();
+                let misplaced_tool = self.fault("realtime_watch_tool_outside_call");
                 if let Some(events) = self.extra.watches.get_mut(key) {
-                    events.push(json!({"type":"ended","call_id":key.1,"at_ms":now}));
+                    let mut event = json!({"type":"ended","call_id":key.1,"at_ms":now});
+                    if misplaced_tool {
+                        event["tool"] = json!("ask");
+                    }
+                    events.push(event);
                 }
                 self.extra.ended.insert(key.clone());
             }

@@ -31,6 +31,9 @@ cases! {
     media_kit_stream_realtime_realtime_token_bound_to_call,
     media_kit_stream_realtime_realtime_token_within_max_ttl,
     media_kit_stream_realtime_realtime_token_refuses_recorded_call,
+    media_kit_stream_realtime_realtime_front_unavailable,
+    media_kit_stream_realtime_realtime_front_check_order,
+    media_kit_stream_realtime_realtime_front_dictation,
     media_kit_stream_realtime_call_started_replay_after_expiry,
     media_kit_stream_realtime_call_started_refuses_swapped_vendor_call,
     media_kit_stream_realtime_call_started_refuses_other_principal,
@@ -41,6 +44,20 @@ cases! {
     media_kit_stream_realtime_call_id_bounds,
     media_kit_stream_realtime_stream_realtime_admission_lifecycle,
     media_kit_stream_realtime_stream_realtime_renewal_lapse,
+}
+
+#[tokio::test]
+async fn media_kit_stream_realtime_watch_tool_shape_is_checked() {
+    for fault in [
+        "realtime_watch_tool_not_string",
+        "realtime_watch_tool_outside_call",
+    ] {
+        let bad = run_case(&Fake::new(Some(fault), true, true), "realtime_watch").await;
+        assert!(
+            matches!(bad, Outcome::Failed(ref reason) if reason.starts_with("realtime_watch:")),
+            "{bad:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -109,6 +126,13 @@ fn media_kit_stream_realtime_rule_map() {
 async fn media_kit_stream_realtime_default_hooks_fail_by_name() {
     let empty = Empty;
     let errors = [
+        (
+            "configure_voice_front",
+            empty
+                .configure_voice_front("agent", None)
+                .await
+                .unwrap_err(),
+        ),
         (
             "open_stream",
             empty.open_stream("alice", json!({})).await.unwrap_err(),

@@ -955,6 +955,81 @@ fn media_contract_realtime_stream_vectors_and_redacted_debug() {
 }
 
 #[test]
+fn media_contract_live_call_tool_values_round_trip() {
+    let v = vector("realtime.json");
+    for value in v["tool_events"].as_array().unwrap() {
+        let event: WatchEvent = round_trip(value);
+        check_watch_event(&event).unwrap();
+        assert_eq!(
+            event.tool.unwrap().as_str(),
+            value["tool"].as_str().unwrap()
+        );
+    }
+    assert_eq!(WatchTool::new("ask"), WatchTool::Ask);
+    assert_eq!(WatchTool::new("hand_off"), WatchTool::HandOff);
+    assert_eq!(
+        WatchTool::new("future_tool"),
+        WatchTool::Unknown("future_tool".into())
+    );
+}
+
+#[test]
+fn media_contract_live_call_watch_without_tool_keeps_old_bytes() {
+    let bytes = r#"{"type":"tool_call","call_id":"call-1","at_ms":1}"#;
+    let event: WatchEvent = serde_json::from_str(bytes).unwrap();
+    assert_eq!(serde_json::to_string(&event).unwrap(), bytes);
+    let mut value: Value = serde_json::from_str(bytes).unwrap();
+    value["future_member"] = json!(true);
+    let event: WatchEvent = serde_json::from_value(value).unwrap();
+    assert_eq!(serde_json::to_string(&event).unwrap(), bytes);
+}
+
+#[test]
+fn media_contract_live_call_refusal_reasons() {
+    let refusals = vector("refusals.json");
+    for reason in ["fork_unsupported", "fork_refused", "future_reason"] {
+        let value = refusals
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|value| {
+                value["code"] == "front_unavailable" && value["detail"]["reason"] == reason
+            })
+            .expect("front_unavailable reason vector missing");
+        let refusal: Refusal = round_trip(value);
+        assert_eq!(refusal.detail.members["reason"], reason);
+        assert!(format!("{refusal:?}").contains(reason));
+        assert!(!refusal.detail.class.is_retryable());
+    }
+}
+
+#[test]
+fn media_contract_live_call_operation_names_are_pinned() {
+    let contract = include_str!("../CONTRACT.md");
+    assert!(contract.contains("`media.stream.frames`: `media.stream_transcribe`"));
+}
+
+#[test]
+fn media_contract_live_call_watch_operation_name_is_pinned() {
+    let contract = include_str!("../CONTRACT.md");
+    assert!(contract.contains("`media.realtime.watch`: `realtime.watch`"));
+}
+
+#[test]
+fn media_contract_live_call_tool_only_on_tool_call() {
+    for event_type in [
+        WatchType::Started,
+        WatchType::Ended,
+        WatchType::new("future_type"),
+    ] {
+        let event = WatchEvent::new(event_type, "call-1".into(), 1).with_tool(WatchTool::Ask);
+        let error = check_watch_event(&event).unwrap_err();
+        assert_eq!(error.code, "invalid_params");
+        assert_eq!(error.field.as_deref(), Some("tool"));
+    }
+}
+
+#[test]
 fn media_contract_requests_reject_unknown_members_and_ids_count_scalars() {
     macro_rules! closed {
         ($ty:ty, $value:expr) => {{

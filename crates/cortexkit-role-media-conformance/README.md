@@ -5,7 +5,7 @@ Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.
 decoded answer. STREAM_DATA event bodies and referenced output-object contents
 stay unwrapped.
 
-Version 0.2.3 pins `cortexkit-role-media` exactly to 0.1.6. Implement `MediaSubject`
+Version 0.2.4 pins `cortexkit-role-media` exactly to 0.1.7. Implement `MediaSubject`
 in an adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
 Each case needs an isolated, empty provider store and a Tokio runtime with time
 enabled. `Outcome::Failed` includes the case name; `NotApplicable` names an
@@ -41,6 +41,15 @@ call; `poll_watch` drains pushes without blocking. The case opens a watch after
 attachment, scripts a vendor tool call using `RecordingVendor::push_tool_call`,
 and then ends the call. Forward notifications drained by `take_tool_calls` through
 the provider's normal vendor-event handling, not a fabricated watch answer.
+
+`configure_voice_front(agent_id, unavailable_reason)` sets up head fork readiness:
+`None` makes it ready, `fork_unsupported` means its runner lacks fork answers,
+and `fork_refused` means preparing the fork was refused. Configure the real head
+fixture, not a fabricated token refusal. The cases check token refusal order,
+reason preservation, no admission/usage/call, same-id retry and dictation
+independence. The default hook fails by name until an adapter implements it.
+`open_stream` uses `media.stream_transcribe`; `open_watch` opens a long-lived push
+watch, not a serial request.
 
 `refuse_next_stream` injects one pre-acceptance `realtime_lane_full` ERROR and
 rejects any other code with an error naming the hook. The first-frame case checks
@@ -96,7 +105,8 @@ unknown-value round-trip tests cover those other enum paths, not this provider
 case.
 
 The watch case checks principal admission, tool-call then ended push order,
-call ids, timestamps, and absence of the synthetic token in pushes and admission
-refusals. It does not observe the timing of `started`: watch admission requires
+call ids, timestamps, optional string tools only on tool_call pushes, and that
+the vendor token the case first obtains from `realtime.token` never appears in a
+push or an admission refusal. It does not observe the timing of `started`: watch admission requires
 an already recorded call, and the contract does not require replay on subscription.
 The adapter boundary does not capture provider logs or Debug output.

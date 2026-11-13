@@ -7,6 +7,11 @@
   "ended_answer":{"call_id":"call-1","status":"ended"},
   "watch":{"call_id":"call-1"},
   "event":{"type":"tool_call","call_id":"call-1","at_ms":1},
+  "tool_events":[
+    {"type":"tool_call","call_id":"call-1","at_ms":1,"tool":"ask"},
+    {"type":"tool_call","call_id":"call-1","at_ms":2,"tool":"hand_off"},
+    {"type":"tool_call","call_id":"call-1","at_ms":3,"tool":"future_tool"}
+  ],
   "stream_request":{"stream_id":"stream-1","model":"speech","decision_id":"d-1","format":"audio/L16;rate=16000;channels=1"},
   "audio_frame":{"seq":0,"data":"YQ=="},
   "end_frame":{"seq":1,"end":true},

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.7
+
+- Refuse voice-front tokens with permanent `front_unavailable {reason}` when
+  the head runner lacks fork answers (`fork_unsupported`) or fork preparation
+  was refused (`fork_refused`). Check after principal, reused id and members,
+  before routing; write nothing and allow the same call id to retry. Dictation
+  is unaffected. Unknown reasons remain visible verbatim.
+- Add optional open `WatchTool` (`ask`, `hand_off`) to `WatchEvent` and
+  `check_watch_event` for tool-only-on-tool-call validation. Missing tool keeps
+  the old wire bytes unchanged. Rust 0.1.6 readers already tolerate and discard
+  tool; producers must check other-language readers before sending it.
+- Pin `media.stream_transcribe` and `realtime.watch` wire operation names and
+  explain that watch is a long-lived push operation, not a serial request.
+- Extend shared realtime/refusal vectors and regression tests.
+
 ## 0.1.6
 
 - Add `Source::RequestDerived` (`request_derived`) for quantities computed from

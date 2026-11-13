@@ -42,11 +42,12 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   this contract defines is permanent. A code this contract doesn't define,
   such as a provider's own, takes the class its refusal or failure carries,
   and a caller never infers a class from such a code. Queue-full refusals
-  include `retry_after_ms`.
+  include `retry_after_ms`. `front_unavailable {reason}` is permanent; its open
+  reason string is kept and shown verbatim, including unknown values.
 - [pinned] `media.wire.extension`: Groups, engine kind, latency class, bias unit,
   job status, refusal class, charge basis, authentication method, measurement
-  unit and role, and realtime watch type are open enums: unknown strings decode
-  and re-encode unchanged. Other enums are closed. Request objects reject
+  unit and role, realtime watch type and tool, and front-unavailable reason are
+  open enums: unknown strings decode and re-encode unchanged. Other enums are closed. Request objects reject
   unknown fields. New optional members are sent only to providers declaring the
   group defining them. Times are epoch milliseconds (`_at_ms`) or durations
   (`_ms`, `_s`) on the provider's clock. Provider keys never appear on the wire.
@@ -374,7 +375,7 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 
 ## Streaming
 
-- [pinned] `media.stream.frames`: stream_transcribe is a multi-frame call with
+- [pinned] `media.stream.frames`: `media.stream_transcribe` is a multi-frame call with
   first `{stream_id, model, decision_id?, format, language?, bias?}`; submit
   refusals apply. Accepted stream ids stay remembered across restart for 3,600
   seconds, repeats give stream_id_reuse. A refused first frame, including
@@ -408,7 +409,14 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   decision_id}` returns `{token, token_ref, expires_at_ms, provider, model}`.
   Purpose is voice_front/dictation. Admit owner/context_readers first (unknown
   agent or other caller gives unknown_agent without any read/admission), then
-  check call_id_reuse, then members, then admission. Require decision_id;
+  check call_id_reuse, then members, then voice-front availability, then routing
+  admission. For voice_front only, refuse `front_unavailable {reason}` if the
+  head session cannot serve forked questions: `fork_unsupported` means its runner
+  does not declare `fork_answer`; `fork_refused` means preparing the fork was
+  refused. Unknown reasons are kept and shown, never mapped to another code.
+  This refusal holds no admission, writes nothing, records no call and does not
+  consume call_id; the same id may retry. Dictation never gets this refusal.
+  Require decision_id;
   unsupported model names model. Answer and admission use requested model.
   Expiry is no later than issue plus token_max_ttl_ms or admission validity.
 - [pinned] `media.realtime.token_ref`: Token_ref is opaque, non-secret and
@@ -435,10 +443,19 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   session, recorded answer and authentication key survive restart and remain
   at least 3,600 seconds after end. Restart ends live calls; unrecorded attaches
   opened none. One principal cannot answer, refuse or end another's call.
-- [pinned] `media.realtime.watch`: watch `{call_id}` pushes `{type, call_id,
-  at_ms}` with open type started/tool_call/ended, admitted only for recorded
+- [pinned] `media.realtime.watch`: `realtime.watch` `{call_id}` pushes `{type, call_id,
+  at_ms, tool?}` with open type started/tool_call/ended. The optional open string
+  tool is present only when type is tool_call: `ask` is a question forked to the
+  head; `hand_off` is a labelled message passed to the head. Unknown tool values
+  are kept. The watch is admitted only for recorded
   principal; all others/unknown calls give unknown_call. Refusals, logs, Debug
   and vectors never quote a real token.
+- [informative] `media.realtime.watch_transport`: `realtime.watch` is a long-lived
+  push operation. Providers deliver it as a watch, not a serial request.
+- [informative] `media.realtime.watch_compatibility`: Rust WatchEvent readers on
+  0.1.6 already tolerate unknown members and discard tool; 0.1.7 preserves it.
+  Producers must check other-language readers for compatibility before sending
+  tool. Omitting tool leaves the 0.1.6-shaped wire bytes unchanged.
 
 ## Voice front helpers
 

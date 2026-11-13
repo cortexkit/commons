@@ -193,6 +193,15 @@ impl StreamObservation {
 
 #[async_trait]
 pub trait MediaSubject: Send + Sync {
+    /// Set the agent head's fork readiness: None is ready; fork_unsupported means
+    /// its runner lacks fork answers, and fork_refused means fork preparation was refused.
+    async fn configure_voice_front(
+        &self,
+        _agent_id: &str,
+        _unavailable_reason: Option<&str>,
+    ) -> SubjectResult<()> {
+        Err(SubjectError::unsupported("configure_voice_front"))
+    }
     /// Subscribe to real realtime.watch pushes for an already recorded call.
     async fn open_watch(&self, _principal: &str, _call_id: &str) -> SubjectResult<()> {
         Err(SubjectError::unsupported("open_watch"))
@@ -201,7 +210,7 @@ pub trait MediaSubject: Send + Sync {
     async fn poll_watch(&self, _principal: &str, _call_id: &str) -> SubjectResult<Vec<Value>> {
         Err(SubjectError::unsupported("poll_watch"))
     }
-    /// Open the multi-frame stream_transcribe transport; first-frame ERROR is a refusal.
+    /// Open the multi-frame media.stream_transcribe transport; first-frame ERROR is a refusal.
     async fn open_stream(&self, _principal: &str, _first_frame: Value) -> SubjectResult<()> {
         Err(SubjectError::unsupported("open_stream"))
     }

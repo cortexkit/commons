@@ -33,6 +33,9 @@ Hand-off message expected strings are literal output bytes, not computed by the
 helper under test. Each listed line break occurs in framing and transcript text.
 The two send ids share one call id but have different principals. Usage feed
 vectors deliberately include entries with both record/raw and with neither.
+Realtime vectors keep the original watch event without tool and add ask, hand_off
+and an unknown tool. Refusal vectors include both known front_unavailable reasons
+and an unknown reason, all preserved verbatim as permanent refusals.
 
 Generated synthetic WAV fixtures and their generator belong to the conformance
 kit, not the wire-contract crate. No recorded voice is shipped here.

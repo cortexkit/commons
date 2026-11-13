@@ -877,6 +877,22 @@ impl State {
 
 #[async_trait]
 impl MediaSubject for Fake {
+    async fn configure_voice_front(
+        &self,
+        agent_id: &str,
+        reason: Option<&str>,
+    ) -> SubjectResult<()> {
+        let mut state = self.state.lock().unwrap();
+        if let Some(reason) = reason {
+            state
+                .extra
+                .front_unavailable
+                .insert(agent_id.into(), reason.into());
+        } else {
+            state.extra.front_unavailable.remove(agent_id);
+        }
+        Ok(())
+    }
     fn capabilities(&self) -> Capabilities {
         self.capabilities.clone()
     }

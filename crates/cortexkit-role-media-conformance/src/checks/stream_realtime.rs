@@ -22,6 +22,9 @@ pub const CASES: &[&str] = &[
     "realtime_token_bound_to_call",
     "realtime_token_within_max_ttl",
     "realtime_token_refuses_recorded_call",
+    "realtime_front_unavailable",
+    "realtime_front_check_order",
+    "realtime_front_dictation",
     "call_started_replay_after_expiry",
     "call_started_refuses_swapped_vendor_call",
     "call_started_refuses_other_principal",
@@ -703,6 +706,9 @@ async fn realtime<S: MediaSubject>(
     name: &str,
 ) -> Result<(), String> {
     match name {
+        "realtime_front_unavailable"
+        | "realtime_front_check_order"
+        | "realtime_front_dictation" => front_readiness(s, r, vendor, name).await,
         "realtime_token_uses_requested_model" => {
             for model in ["realtime-b", "realtime-a"] {
                 let t = token(s, "alice", model, model).await?;
@@ -939,6 +945,127 @@ async fn realtime<S: MediaSubject>(
         _ => Err("unimplemented realtime case".into()),
     }
 }
+
+async fn front_readiness<S: MediaSubject>(
+    s: &S,
+    r: &RecordingRoutingPeer,
+    vendor: &RecordingVendor,
+    name: &str,
+) -> Result<(), String> {
+    for reason in ["fork_unsupported", "fork_refused"] {
+        let id = format!("front-{reason}");
+        let mut req = token_request(&id, "realtime-a");
+        req["purpose"] = json!("voice_front");
+        if name == "realtime_front_check_order" {
+            let t = token(s, "alice", &id, "realtime-a").await?;
+            attach(s, vendor, "alice", &id, &t, &id).await?;
+            req["call_id"] = json!(format!("retry-{reason}"));
+        }
+        s.configure_voice_front("agent", Some(reason))
+            .await
+            .map_err(err)?;
+        let before = r.calls().len();
+        let count = feed(s).await?["entries"].as_array().unwrap().len();
+        if name == "realtime_front_dictation" {
+            let t = token(s, "alice", &id, "realtime-a").await?;
+            attach(s, vendor, "alice", &id, &t, &id).await?;
+            end_call(s, "alice", &id).await?;
+            continue;
+        }
+        if name == "realtime_front_check_order" {
+            refusal(
+                s,
+                "mallory",
+                "realtime.token",
+                req.clone(),
+                "unknown_agent",
+                None,
+            )
+            .await?;
+            let mut missing_agent = req.clone();
+            missing_agent["agent_id"] = json!("missing");
+            refusal(
+                s,
+                "alice",
+                "realtime.token",
+                missing_agent,
+                "unknown_agent",
+                None,
+            )
+            .await?;
+            let mut invalid = req.clone();
+            invalid.as_object_mut().unwrap().remove("decision_id");
+            refusal(
+                s,
+                "alice",
+                "realtime.token",
+                invalid,
+                "invalid_params",
+                Some("decision_id"),
+            )
+            .await?;
+            end_call(s, "alice", "ended-front").await?;
+            let mut ended = req.clone();
+            ended["call_id"] = json!("ended-front");
+            refusal(s, "alice", "realtime.token", ended, "call_id_reuse", None).await?;
+            let mut recorded = req.clone();
+            recorded["call_id"] = json!(&id);
+            refusal(
+                s,
+                "alice",
+                "realtime.token",
+                recorded,
+                "call_id_reuse",
+                None,
+            )
+            .await?;
+            r.refuse_next(json!({"code":"account_hold","detail":{"until_ms":1000}}));
+        }
+        let body = refusal(
+            s,
+            "alice",
+            "realtime.token",
+            req.clone(),
+            "front_unavailable",
+            None,
+        )
+        .await?;
+        require(
+            body["detail"]["reason"] == reason,
+            "front refusal lost its reason",
+        )?;
+        require(
+            body["detail"]["class"] == "permanent",
+            "front refusal class",
+        )?;
+        no_effect(s, r, before, count).await?;
+        let retry_id = req["call_id"].as_str().ok_or("call_id missing")?;
+        match s.open_watch("alice", retry_id).await {
+            Err(e)
+                if e.refusal
+                    .as_ref()
+                    .is_some_and(|body| body["code"] == "unknown_call") => {}
+            _ => return Err("front refusal recorded a call".into()),
+        }
+        s.configure_voice_front("agent", None).await.map_err(err)?;
+        if name == "realtime_front_check_order" {
+            refusal(
+                s,
+                "alice",
+                "realtime.token",
+                req.clone(),
+                "routing_refused",
+                None,
+            )
+            .await?;
+        }
+        let retry_id = retry_id.to_string();
+        let t = call(s, "alice", "realtime.token", req).await?;
+        attach(s, vendor, "alice", &retry_id, &t, &retry_id).await?;
+        end_call(s, "alice", &retry_id).await?;
+    }
+    Ok(())
+}
 async fn watch<S: MediaSubject>(s: &S, vendor: &RecordingVendor) -> Result<(), String> {
     let t = token(s, "alice", "watch", "realtime-a").await?;
     let secret = t["token"].as_str().ok_or("token missing")?;
@@ -980,6 +1107,9 @@ async fn wait_watch<S: MediaSubject>(s: &S, secret: &str, expected: &str) -> Res
             .map_err(err)?;
         let mut found = false;
         for event in events {
+            let typed: cortexkit_role_media::realtime::WatchEvent =
+                serde_json::from_value(event.clone()).map_err(err)?;
+            cortexkit_role_media::realtime::check_watch_event(&typed).map_err(err)?;
             require(
                 !event.to_string().contains(secret),
                 "watch push quoted the token",

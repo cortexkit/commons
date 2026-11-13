@@ -88,6 +88,7 @@ wire_struct!(
     WatchRequest { call_id: String }
 );
 open_enum!(WatchType { Started => "started", ToolCall => "tool_call", Ended => "ended" });
+open_enum!(WatchTool { Ask => "ask", HandOff => "hand_off" });
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct WatchEvent {
@@ -95,6 +96,8 @@ pub struct WatchEvent {
     pub event_type: WatchType,
     pub call_id: String,
     pub at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<WatchTool>,
 }
 impl WatchEvent {
     pub fn new(event_type: WatchType, call_id: String, at_ms: u64) -> Self {
@@ -102,6 +105,19 @@ impl WatchEvent {
             event_type,
             call_id,
             at_ms,
+            tool: None,
         }
     }
+    pub fn with_tool(mut self, tool: WatchTool) -> Self {
+        self.tool = Some(tool);
+        self
+    }
+}
+
+/// Validate the tool/type relationship without closing the decoder to future members.
+pub fn check_watch_event(event: &WatchEvent) -> crate::CheckResult {
+    if event.tool.is_some() && event.event_type != WatchType::ToolCall {
+        return Err(crate::CheckError::new("invalid_params").with_field("tool"));
+    }
+    Ok(())
 }

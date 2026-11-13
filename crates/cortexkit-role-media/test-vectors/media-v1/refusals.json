@@ -34,6 +34,9 @@
   {"code":"token_call_mismatch","message":"Token does not match call","detail":{"class":"permanent"}},
   {"code":"vendor_call_mismatch","message":"Vendor session does not match token","detail":{"class":"permanent"}},
   {"code":"unknown_call","message":"Unknown call","detail":{"class":"permanent"}},
+  {"code":"front_unavailable","message":"Head runner cannot answer forks","detail":{"class":"permanent","reason":"fork_unsupported"}},
+  {"code":"front_unavailable","message":"Head fork preparation refused","detail":{"class":"permanent","reason":"fork_refused"}},
+  {"code":"front_unavailable","message":"Head unavailable","detail":{"class":"permanent","reason":"future_reason"}},
   {"code":"model_loading","message":"Model loading","detail":{"class":"transient"}},
   {"code":"engine_crashed","message":"Engine crashed","detail":{"class":"transient"}},
   {"code":"lane_paused","message":"Lane paused","detail":{"class":"transient"}}

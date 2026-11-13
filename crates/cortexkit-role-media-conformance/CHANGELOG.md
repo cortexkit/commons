@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4
+
+- Pin media `=0.1.7` for voice-front availability refusals, optional open watch
+  tools and pinned `media.stream_transcribe` / `realtime.watch` operation names.
+- Add `configure_voice_front` to set agent-head fork readiness. Its default
+  returns a named hook error, so adapters cannot silently skip coverage.
+- Check refusal reasons, ordering before routing and after identity/id/member
+  checks, no admission or usage writes, no recorded call, same-id retries, and
+  dictation independence, with deliberately faulty subjects for each case.
+- Validate watch tool shape and presence only on tool_call pushes, with faulty
+  subjects for non-string tools and tools on ended pushes.
+
 ## 0.2.3
 
 - Pin media `=0.1.6` with the closed measurement source `request_derived`, billed
