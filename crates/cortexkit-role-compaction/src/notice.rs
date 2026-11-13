@@ -156,8 +156,9 @@ pub enum Event, "event" {
     },
     /// A view the runner refused when it came to apply it: a ride's answer,
     /// or an accepted view that no longer fits the transcript at the next step
-    /// boundary. Otherwise a view handed over with `session.apply_view` is
-    /// refused in that call's answer.
+    /// boundary, including a host rendering failure. `render_failed` is sent
+    /// only to declaring providers, once per version (W6.6a). Otherwise a view
+    /// handed over with `session.apply_view` is refused in that call's answer.
     ViewRefused => "view_refused" {
         #[serde(deserialize_with = "crate::integer::required")]
         version: u64,
@@ -204,6 +205,21 @@ impl NoticeRequest {
 
     pub fn with_events(mut self, events: Vec<Event>) -> Self {
         self.events = events;
+        self
+    }
+
+    /// Append a refusal notice, omitting `render_failed` unless the provider
+    /// declares its capability. The runner still records its fallback and
+    /// reports each failed view version at most once (CONTRACT.md W6.6a).
+    pub fn with_view_refused(
+        mut self,
+        version: u64,
+        refusal: ViewRefusal,
+        render_failed_declared: bool,
+    ) -> Self {
+        if render_failed_declared || !matches!(&refusal, ViewRefusal::RenderFailed { .. }) {
+            self.events.push(Event::ViewRefused { version, refusal });
+        }
         self
     }
 

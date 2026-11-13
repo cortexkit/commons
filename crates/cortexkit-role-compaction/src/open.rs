@@ -127,4 +127,21 @@ mod tests {
         ));
         assert_eq!(serde_json::to_value(decoded).unwrap(), raw);
     }
+
+    #[test]
+    fn older_reader_preserves_render_failed_as_unknown() {
+        for raw in [
+            json!({"code":"render_failed"}),
+            json!({"code":"render_failed", "mid":"m"}),
+            json!({"code":"render_failed", "mid":"m", "part":"p"}),
+            json!({"code":"render_failed", "mid":"m", "part":"p", "field":"output"}),
+        ] {
+            let decoded: OlderViewRefusal = serde_json::from_value(raw.clone()).unwrap();
+            assert!(matches!(
+                &decoded,
+                OlderViewRefusal::Unknown { name, .. } if name == "render_failed"
+            ));
+            assert_eq!(serde_json::to_value(decoded).unwrap(), raw);
+        }
+    }
 }

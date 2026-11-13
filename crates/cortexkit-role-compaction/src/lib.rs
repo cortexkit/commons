@@ -94,6 +94,19 @@ pub const COMPACTION_NOTES_TOKENS_PROVIDES: &str = "compaction-notes-tokens/v1";
 /// After-read page ceilings and first-notice deltas need no declaration.
 pub const COMPACTION_LIMITS_PROVIDES: &str = "compaction-limits/v1";
 
+/// Additional provider manifest capability enabling the `render_failed`
+/// refusal in `view_refused` notices. Deploy providers that understand the
+/// code before they declare it and runners send it. The runner's durable
+/// rendering fallback applies even without this declaration.
+pub const COMPACTION_RENDER_FAILED_PROVIDES: &str = "compaction-render-failed/v1";
+
+/// Whether a provider declares support for host rendering failure notices.
+pub fn provides_render_failed(provides: &[String]) -> bool {
+    provides
+        .iter()
+        .any(|capability| capability == COMPACTION_RENDER_FAILED_PROVIDES)
+}
+
 /// Whether a provider declares support for runner-owned named-read and window bounds.
 pub fn provides_limits(provides: &[String]) -> bool {
     provides

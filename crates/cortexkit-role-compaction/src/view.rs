@@ -289,7 +289,8 @@ pub struct InsertedImage {
 }
 
 open_tagged! {
-/// Why a runner refuses a view. The runner keeps applying its previous view.
+/// Why a runner refuses a view. The runner keeps applying its previous view,
+/// except for `render_failed`, which uses the durable fallback in W6.6a.
 /// A refusal of a handed-over view is that call's answer; a refusal of a
 /// ride's view, or of an accepted view at a step boundary, goes in the next
 /// notice.
@@ -322,6 +323,18 @@ pub enum ViewRefusal, "code" {
         mid: String,
         part: String,
         field: String,
+    },
+    /// The host could not render an accepted view. `mid` and `part` identify
+    /// the part whose replaces are skipped; `field` optionally narrows the
+    /// diagnosis. `mid` alone names a message mismatch; no fields means the
+    /// host cannot locate the failure. Neither case identifies a skippable part.
+    RenderFailed => "render_failed" {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mid: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        part: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        field: Option<String>,
     },
     /// Two edits target the same part in ways that cannot both hold, such as
     /// a drop and a replace, or two replaces of one field.
@@ -370,6 +383,41 @@ pub enum ViewRefusal, "code" {
         index: u64,
     },
 }
+}
+
+impl ViewRefusal {
+    /// A host rendering failure with no known location. Carries no message text.
+    pub fn render_failed() -> Self {
+        Self::RenderFailed {
+            mid: None,
+            part: None,
+            field: None,
+        }
+    }
+
+    /// A mismatch between a host message and the plan's covered messages.
+    pub fn render_failed_message(mid: impl Into<String>) -> Self {
+        Self::RenderFailed {
+            mid: Some(mid.into()),
+            part: None,
+            field: None,
+        }
+    }
+
+    /// A part the host could not edit. The runner skips all replaces of this
+    /// part, even when `field` diagnoses one field (CONTRACT.md W6.6a).
+    /// Field names are those accepted by `replace`, as with `bad_field`.
+    pub fn render_failed_edit(
+        mid: impl Into<String>,
+        part: impl Into<String>,
+        field: Option<String>,
+    ) -> Self {
+        Self::RenderFailed {
+            mid: Some(mid.into()),
+            part: Some(part.into()),
+            field,
+        }
+    }
 }
 
 /// The largest view, as serialized JSON, a provider may hand over (W6.7).

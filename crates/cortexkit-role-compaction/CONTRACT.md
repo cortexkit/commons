@@ -221,6 +221,20 @@ runners that project these capability members and advertise the cause in Setup's
 `detects`. Setup's `limits` and the `after` page ceiling apply to all providers
 (W5.1, W5.4); the first-notice delta rule also needs no declaration (N6).
 
+For the `render_failed` refusal in a `view_refused` notice, the provider
+declares `compaction-render-failed/v1` (`COMPACTION_RENDER_FAILED_PROVIDES`;
+`provides_render_failed`). Deploy providers that understand `render_failed`
+before they declare the capability and runners start sending the code. The
+runner captures the provider's catalog declaration at every Setup and keeps it until the next
+Setup; a provider must not withdraw it while serving a session without
+restarting. The runner sends this code only to declaring providers. The
+fallback in W6.6a applies even to a non-declaring provider, which is simply not
+told. The 0.4.1 wire decoder preserves an unknown W6.5 code and its fields as
+`ViewRefusal::Unknown`, rather than failing to decode it; preserving a code
+does not mean understanding it, so W1.4 still requires the declaration.
+`NoticeRequest::with_view_refused` projects this gate; direct event construction
+must apply the same gate.
+
 For `Entry.speaks_for`, the provider declares the additional manifest capability
 `compaction-entry-speaks-for/v1` alongside `compaction-provider/v2`
 (`COMPACTION_ENTRY_SPEAKS_FOR_PROVIDES`; `provides_entry_speaks_for`). The runner
@@ -589,7 +603,7 @@ notice sweeping.
 | `input` | any JSON | The call's arguments, as the model wrote them. |
 | `provider_executed` | boolean | The model provider ran the tool itself (hosted web search, code execution, image generation); its result is part of the assistant message. Absent means `false`. |
 | `status` | `running`, `completed`, `error`, `denied` | `running` also covers a call waiting for approval. `denied`: the call was not executed. |
-| `output` | string, optional | The result's text: the output when completed, the error text on `error`, the reason on `denied`. Absent while running, and in compact form. |
+| `output` | string, optional | The result's text: the output when completed, the error text on `error`, the reason on `denied`. Absent while running, and in compact form. Replacing result text and attachments follows W6.2, preserving stored attachment positions. |
 | `output_format` | `text`, `json` | `json`: `output` is the JCS text (W7) of a JSON result. Absent means `text`. |
 | `output_bytes` | integer, optional | The size of `output` in bytes, in both forms. Absent while running. |
 | `attachments` | array of `Attachment` | Files and opaque items the result carries besides its text; may be left out when empty. |
@@ -829,7 +843,7 @@ Events, each an object with an `event` field:
 | `event` | Fields | Meaning |
 |---|---|---|
 | `transcript_changed` | `from_ordinal` | Entries from this ordinal on may differ from what earlier notices and reads said: a revert, a branch switch, or a host edit of stored messages. Sent in the first notice after the change. A runner whose host never reverts, switches branch, or changes stored messages beyond what W4.9 allows never sends it. |
-| `view_refused` | `version`, `refusal` (W6.5) | A view the runner refused when it came to apply it: a ride's answer, or an accepted view that no longer fits the transcript at the next step boundary. |
+| `view_refused` | `version`, `refusal` (W6.5) | A view the runner refused when it came to apply it: a ride's answer, or an accepted view that no longer fits the transcript at the next step boundary, including a host rendering failure (W6.6a). |
 | `marker_written` | `version` | The runner wrote its host's compaction marker for this view's cut. |
 
 Answer: `{"answer": "received"}`, or `{"answer": "setup_required"}` when the provider holds no session for the route (it restarted), or drops the notice under W3.5 (foreign epoch, mismatched epoch presence, or stamp without epoch); the runner then calls Setup before its next notice. Refusals: `invalid_params`.
@@ -966,6 +980,18 @@ A runner gets this strip behaviour through the view library's view-aware plannin
 | `insert` | `at`, `message` | Render a message the transcript does not hold, such as the history head. `at`: `"start"` (before the first rendered message) or `{"before": mid}` (immediately before that entry, even if it is dropped). `message`: `id` (unique in the view, kept the same while the message is unchanged), `role`, `texts` (array of strings), `images` (array of images; may be left out when empty). Each image has `media_type` (string, currently only `image/png`) and `data` (string, standard padded base64 of the bytes). Only a `user`-role inserted message may carry images, and a provider inserts them only when `accepts_images` is `true`. Inserted messages are never numbered. |
 | `cut` | `through` (mid) | Leave out every entry up to and including `through`: the entries the history head replaces. At most one per view. |
 
+A tool part's `replace` edits of `output` and `attachments` apply together,
+as one edit of the stored result, in either order. When `output` is replaced,
+the new text takes the place of the result's first text item, or goes at the
+front if there is none; the result's other text items are removed. When
+`attachments` is replaced, the result keeps the attachments whose ids are
+listed and drops the others. A field the view does not replace stays as stored:
+an `output` replacement alone keeps every attachment in its stored position,
+not necessarily after the text. An id in `attachments` that the stored result
+does not hold makes the edit one the runner cannot render. A runner that
+detects this at handover refuses `bad_field`; if the host discovers it while
+building a request from an accepted view, it is `render_failed` (W6.6a).
+
 Rides follow their carrying output. Replacing a tool part's `output` without
 an edit naming its `delivered` list suppresses all that part's rides; dropping
 the output suppresses them too. If the view names `delivered`, its choice
@@ -989,7 +1015,7 @@ What could mislead the model is a number in bytes the provider writes, such as a
 - An inserted message's texts may contain none (`tagged_insert`). The provider strips them before it renders the history head.
 - A replace value may contain the part's own number (a placeholder needs it) and any number the field's original text already contains, and no other (`foreign_tag`). This needs the original text, so a runner reads each replaced message in full when it checks a view.
 
-**W6.5 `ViewRefusal`:** why a runner refuses a view. An object with `code` and the listed fields.
+**W6.5 `ViewRefusal`:** why a runner refuses a view. An object with `code` and the listed fields. `render_failed` reports a host failure after acceptance, not a refusal at handover.
 
 | `code` | Fields | When |
 |---|---|---|
@@ -1000,6 +1026,7 @@ What could mislead the model is a number in bytes the provider writes, such as a
 | `unknown_part` | `mid`, `part` | |
 | `stale_part` | `mid`, `part` | The part's `digest` differs from the edit's `expect`. |
 | `bad_field` | `mid`, `part`, `field` | The field does not exist for that kind, the value has the wrong shape, an attachment or delivered index does not exist or repeats, or the part is sealed or provider-executed (PR5). |
+| `render_failed` | `mid`, `part`, `field` (all optional) | The host could not render an accepted view while building a request. `mid` and `part` name the part it could not edit; optional `field` names `text`, `output`, `attachments`, `delivered` or `input.<name>`, as for `replace` and `bad_field`. `mid` alone means the host cannot account for a message: its request holds one the plan does not cover, or the reverse. With none of these fields, the host cannot locate the failure. No message text is included. Sent only in `view_refused`, to providers declaring `compaction-render-failed/v1` (W1.4). |
 | `conflict` | `mid`, `part` | Two edits cannot both hold: a drop and a replace of one part, or two replaces of one field. |
 | `running_tool` | `mid`, `part` | A tool still running cannot be dropped, replaced or cut. |
 | `unknown_anchor` | `mid` | An insert anchors before an entry not on the active path. |
@@ -1014,6 +1041,55 @@ What could mislead the model is a number in bytes the provider writes, such as a
 An insert with images is refused as `unsupported_edit` when its role is not `user`, any image's `media_type` is not `image/png`, or any image's `data` is not valid standard padded base64. Each case carries the same detail: `index` names the insert's zero-based position in `edits`; no image-specific detail field is added. The runner checks the standard base64 alphabet, length, padding placement and zero padding bits; inspecting PNG contents is not required by this contract. A conforming runner performs these checks before applying the view. This wire crate preserves the strings without decoding or validating them; image checks and image entries in the render plan are the view library's (W6.3), which adds them in a release after this one.
 
 **W6.6 After a revert.** Until a newer view arrives, the runner renders with the edits whose messages still exist (the view library's `view::edits_for_transcript`): drops, replaces and inserts naming a removed entry are skipped, a cut through a removed entry is skipped, and inserts at the start stay.
+
+**W6.6a After a host rendering failure.** Passing the handover and step-boundary
+checks does not guarantee that the host can apply the plan to its stored
+messages. At the first failing step for an accepted view version, the runner
+chooses its rendering fallback once. If the failure identifies a `replace` by
+`mid` and `part`, it skips every `replace` of that part and applies the rest of
+the view, just as W6.6 skips edits that no longer apply. The part is the skip
+unit, including all its field replacements: `field` narrows the diagnosis,
+never the skip. In particular, `output` and `attachments` are not retried or
+skipped independently. Only `replace` edits may be skipped by this rule. If
+this one-skip candidate still cannot be rendered or fails a provider rule,
+choose the no-view fallback at that same first failing step, rather than
+trying further skips.
+
+If the failure names no replaceable part (`mid` alone or no location), the
+runner renders with no view, under the existing session, move and size rules.
+A failure of a `drop`, `cut` or `insert` also takes this no-view fallback, not
+an independently skipped edit. A `part` requires `mid`, and `field` requires
+both; send one of the three shapes in W6.5, not a partial locator.
+
+Skipping the replaces of a part only shows that stored original part. It
+cannot remove a protected final part (PR6), replace a sealed part (PR5), or
+restore a signed part the view dropped (PR2). In a valid view, removing these
+replacements cannot introduce an earlier edit before a kept signed part.
+Skipping a `drop` is not generally safe: it can restore a signed part with an
+edited prefix, or leave the omitted signed parts in a forbidden middle run
+(PR2). Skipping a `cut` can likewise restore invalidated signed parts and can
+expose history the move's cut must hide (MV7). Skipping an `insert` does not
+remove PR6's protected stored parts, but it can remove the history head while
+retaining its companion cut, including the head required by MV1. These edits
+are therefore not eligible. The runner still plans and checks the fallback
+with the session's rules, including PR2 and W6.1's stripping permission;
+fallback never authorizes an invalid request.
+
+The decision lasts for as long as that view version is applied. Do not retry
+the failing edit or accumulate different skips on later steps: unchanged
+transcript and request inputs must render the same bytes on every step. The
+runner stores the skipped part (or the no-view decision) durably with the
+applied view before sending a fallback request, so a restart uses the same
+decision. Keep the accepted view, version, checksum and edit `since` values
+unchanged; the fallback is separate runner state, not a rewritten view.
+Reverts still use W6.6 in addition to this recorded skip.
+
+The runner reports `view_refused` with `render_failed` in its next notice,
+once per view version, never once per step, and only when the provider declares
+`compaction-render-failed/v1`. It durably records that report with the fallback
+so restarting does not produce another report for the same version. The
+provider can then rebuild the view. A non-declaring provider receives no such
+report, but gets exactly the same fallback rendering.
 
 **W6.7 Rendering and size.** The runner renders each inserted image as an image part after the message's texts, in array order and in its host's own form. Like inserted texts, images get no tag number. A provider sends no view over 3 MiB (3,145,728 bytes) of JSON (V5); image fields, including their base64 data, count toward that limit.
 

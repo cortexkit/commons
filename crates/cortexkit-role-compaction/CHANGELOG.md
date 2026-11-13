@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.2
+
+- Add W6.5 `render_failed` on `view_refused` notices for host failures after a
+  view passed validation. Optional `mid`, `part` and `field` identify an edit,
+  a message mismatch, or no known location, without message text. Add refusal
+  constructors, capability detection and a gated notice builder.
+- Add `COMPACTION_RENDER_FAILED_PROVIDES` (`compaction-render-failed/v1`):
+  deploy providers that understand the code before declaring support, then
+  runners that send the notice only to declarers. The non-exhaustive refusal
+  enum and unknown-code preservation keep this a patch-compatible wire addition.
+- Specify a once-per-view-version, restart-stable rendering fallback: skip all
+  replaces of the failed part, or use no view when no replaceable part is
+  identified or the one-skip candidate still fails. Keep the accepted view
+  intact and report the failure only once.
+  Drops, cuts and inserts are not independently skippable; retain provider
+  rules and move protections when choosing a fallback.
+- Clarify atomic `output`/`attachments` replacement of a stored tool result:
+  replace its first text item (or prepend text), remove other text items, and
+  keep untouched attachments in their stored positions. Unknown attachment
+  ids make the edit unrenderable.
+
 ## 0.4.1
 
 - Add optional entry-level `host_parts: [{part, host_code?}]`, identifying
