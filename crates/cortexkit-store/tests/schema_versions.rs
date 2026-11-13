@@ -177,6 +177,68 @@ fn assert_unavailable(result: Result<Option<BTreeMap<String, u64>>, StoreError>)
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn same_process_inspection_preserves_sqlite_shm_lock() {
+    use std::os::fd::AsRawFd;
+
+    const SHM_PATH: &str = "CORTEXKIT_SCHEMA_VERSIONS_LOCK_SHM";
+    const OWNER_PID: &str = "CORTEXKIT_SCHEMA_VERSIONS_LOCK_PID";
+    if let Some(path) = std::env::var_os(SHM_PATH) {
+        // Only the observer process opens a plain handle: it owns no SQLite locks.
+        let shm = fs::File::open(path).unwrap();
+        // All fields in libc's platform-specific flock layout are integer fields.
+        let mut lock: libc::flock = unsafe { std::mem::zeroed() };
+        lock.l_type = libc::F_WRLCK as _;
+        lock.l_whence = libc::SEEK_SET as _;
+        // SQLite's UNIX_SHM_DMS lock protects the lifetime of the shared mapping.
+        lock.l_start = 128;
+        lock.l_len = 1;
+        let result = unsafe { libc::fcntl(shm.as_raw_fd(), libc::F_GETLK, &mut lock) };
+        assert_eq!(result, 0, "F_GETLK: {}", std::io::Error::last_os_error());
+        assert_ne!(
+            lock.l_type,
+            libc::F_UNLCK as libc::c_short,
+            "SQLite shared-memory lifetime byte is unlocked"
+        );
+        let expected_pid: libc::pid_t = std::env::var(OWNER_PID).unwrap().parse().unwrap();
+        assert_eq!(
+            lock.l_pid, expected_pid,
+            "lock must belong to the store holder"
+        );
+        return;
+    }
+
+    let db = TestDb::new();
+    let store = db.migrated();
+    assert!(fs::metadata(db.sidecar("-wal")).unwrap().len() > 0);
+    assert!(fs::metadata(db.sidecar("-shm")).unwrap().len() >= 32768);
+    assert_eq!(
+        read_schema_versions(&db.descriptor).unwrap(),
+        Some(expected())
+    );
+
+    // F_GETLK ignores the caller's own process locks, so inspect from a child.
+    let observer = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "same_process_inspection_preserves_sqlite_shm_lock",
+            "--nocapture",
+        ])
+        .env(SHM_PATH, db.sidecar("-shm"))
+        .env(OWNER_PID, std::process::id().to_string())
+        .output()
+        .unwrap();
+    assert!(
+        observer.status.success(),
+        "lock observer failed: {}\n{}\n{}",
+        observer.status,
+        String::from_utf8_lossy(&observer.stdout),
+        String::from_utf8_lossy(&observer.stderr)
+    );
+    drop(store);
+}
+
 #[test]
 fn schema_versions_reads_namespace_maxima_from_migrations_and_wal() {
     let db = TestDb::new();
@@ -208,13 +270,29 @@ fn schema_versions_missing_file_and_parent_create_nothing() {
 #[test]
 fn schema_versions_without_table_returns_empty_without_creating_files() {
     let db = TestDb::new();
-    drop(Connection::open(db.path()).unwrap());
-    assert_eq!(unchanged_read(&db).unwrap(), Some(BTreeMap::new()));
     let conn = Connection::open(db.path()).unwrap();
-    conn.execute_batch("CREATE TABLE unrelated (id INTEGER);")
+    conn.execute_batch("PRAGMA journal_mode=WAL; CREATE TABLE unrelated (id INTEGER);")
         .unwrap();
-    drop(conn);
     assert_eq!(unchanged_read(&db).unwrap(), Some(BTreeMap::new()));
+}
+
+#[test]
+fn schema_versions_rollback_journal_database_is_unavailable_without_creation() {
+    let db = TestDb::new();
+    let conn = Connection::open(db.path()).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE cortexkit_schema_version (namespace, version); \
+         INSERT INTO cortexkit_schema_version VALUES ('alpha', 3);",
+    )
+    .unwrap();
+    drop(conn);
+    assert_unavailable(unchanged_read(&db));
+    for suffix in ["-wal", "-shm"] {
+        assert_eq!(
+            fs::metadata(db.sidecar(suffix)).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
 }
 
 #[test]
@@ -240,6 +318,12 @@ fn schema_versions_cleanly_closed_wal_store_never_creates_shared_memory() {
         StoreError::SchemaVersionsUnavailable { .. }
     ));
     assert!(error.to_string().contains("no shared memory"), "{error}");
+    for suffix in ["-wal", "-shm"] {
+        assert_eq!(
+            fs::metadata(db.sidecar(suffix)).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+    }
 }
 
 #[test]
@@ -298,10 +382,9 @@ fn schema_versions_unreadable_and_invalid_data_are_errors_without_changes() {
          INSERT INTO cortexkit_schema_version VALUES ('alpha', NULL);",
     ] {
         let db = TestDb::new();
-        Connection::open(db.path())
-            .unwrap()
-            .execute_batch(sql)
-            .unwrap();
+        let conn = Connection::open(db.path()).unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+        conn.execute_batch(sql).unwrap();
         assert_unavailable(unchanged_read(&db));
     }
     let db = TestDb::new();
@@ -366,10 +449,18 @@ fn schema_versions_lock_contention_is_an_error_without_changes() {
     let db = TestDb::new();
     let conn = Connection::open(db.path()).unwrap();
     conn.execute_batch(
-        "CREATE TABLE unrelated (id); BEGIN EXCLUSIVE; INSERT INTO unrelated VALUES (1);",
+        "PRAGMA journal_mode=WAL; CREATE TABLE unrelated (id); \
+         PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; INSERT INTO unrelated VALUES (1);",
     )
     .unwrap();
-    assert_unavailable(unchanged_read(&db));
+    assert!(fs::metadata(db.sidecar("-wal")).unwrap().is_file());
+    assert!(fs::metadata(db.sidecar("-shm")).unwrap().len() >= 32768);
+    let error = unchanged_read(&db).unwrap_err();
+    assert!(matches!(
+        error,
+        StoreError::SchemaVersionsUnavailable { .. }
+    ));
+    assert!(error.to_string().contains("database is locked"), "{error}");
     conn.execute_batch("ROLLBACK;").unwrap();
 }
 

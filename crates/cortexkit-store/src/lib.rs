@@ -240,7 +240,6 @@ mod sqlite_backend {
     use super::*;
     use std::{
         collections::BTreeMap,
-        io::Read,
         path::{Path, PathBuf},
         sync::{Arc, Condvar, Mutex},
         time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -829,10 +828,17 @@ mod sqlite_backend {
     /// checkpoint is performed. SQLite read locks are nonblocking; contention
     /// and unreadable or invalid data return an error, never an empty map.
     ///
-    /// A WAL database must have a readable `-wal` and initialized `-shm` file at
+    /// It is safe to call from a process that already has the store open. This
+    /// function never opens a plain file handle on the database or its sidecars:
+    /// closing one would drop that process's SQLite advisory locks. Only SQLite
+    /// opens those files; filesystem prechecks use metadata alone.
+    ///
+    /// The database must have an existing `-wal` and initialized `-shm` file at
     /// the precheck; otherwise this returns [`StoreError::SchemaVersionsUnavailable`]
-    /// without opening SQLite. A cleanly closed WAL store therefore returns that
-    /// error. With no running holder, take the lease and open normally instead.
+    /// without opening SQLite. A cleanly closed store therefore reports unavailable,
+    /// and rollback-journal databases without these sidecars are not read. Normal
+    /// store opens enable WAL. With no running holder, take the lease and open
+    /// normally instead. SQLite checks readability during its read-only open.
     /// This function never creates the database, directories, lease, or journal.
     /// There is one sidecar race: if a writer closes and removes WAL sidecars
     /// between the precheck and the open, SQLite may create its own `-wal`/`-shm`
@@ -857,10 +863,7 @@ mod sqlite_backend {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(unavailable(format!("database path: {error}"))),
         };
-        let file = std::fs::File::open(&path)
-            .map_err(|error| unavailable(format!("database file: {error}")))?;
-        if file
-            .metadata()
+        if std::fs::metadata(&path)
             .map_err(|error| unavailable(format!("database metadata: {error}")))?
             .len()
             < 512
@@ -879,27 +882,23 @@ mod sqlite_backend {
                 Err(error) => return Err(unavailable(format!("WAL metadata: {error}"))),
             }
         }
-        let mut header = Vec::with_capacity(20);
-        file.take(20)
-            .read_to_end(&mut header)
-            .map_err(|error| unavailable(format!("database header: {error}")))?;
-        if header.len() == 20 && (header[18] == 2 || header[19] == 2) {
-            for suffix in ["-wal", "-shm"] {
-                let mut sidecar = path.as_os_str().to_os_string();
-                sidecar.push(suffix);
-                let metadata = std::fs::metadata(&sidecar)
-                    .map_err(|error| unavailable(format!("no usable existing {suffix} file (no shared memory may be present): {error}")))?;
-                // An empty WAL is valid after a checkpoint, but SQLite needs at
-                // least one complete shared-memory region for its WAL index.
-                let minimum_len = if suffix == "-wal" { 0 } else { 32768 };
-                if !metadata.is_file() || metadata.len() < minimum_len {
-                    return Err(unavailable(format!(
-                        "no usable existing {suffix} file (no shared memory may be present)"
-                    )));
-                }
-                std::fs::File::open(&sidecar).map_err(|error| {
-                    unavailable(format!("no usable existing {suffix} file: {error}"))
-                })?;
+        // Metadata cannot distinguish a closed WAL database from rollback mode.
+        // Require both sidecars before SQLite can create any on a read-only open.
+        for suffix in ["-wal", "-shm"] {
+            let mut sidecar = path.as_os_str().to_os_string();
+            sidecar.push(suffix);
+            let metadata = std::fs::metadata(&sidecar).map_err(|error| {
+                unavailable(format!(
+                    "no usable existing {suffix} file (no shared memory may be present): {error}"
+                ))
+            })?;
+            // An empty WAL is valid after a checkpoint, but SQLite needs at
+            // least one complete shared-memory region for its WAL index.
+            let minimum_len = if suffix == "-wal" { 0 } else { 32768 };
+            if !metadata.is_file() || metadata.len() < minimum_len {
+                return Err(unavailable(format!(
+                    "no usable existing {suffix} file (no shared memory may be present)"
+                )));
             }
         }
         // Request existing shared memory read-only. Unlike immutable=1, this

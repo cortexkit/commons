@@ -1,6 +1,6 @@
 [package]
 name = "cortexkit-store"
-version = "0.4.3"
+version = "0.4.4"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -16,3 +16,6 @@ cortexkit-store-types = { version = "0.2.1", path = "../cortexkit-store-types" }
 cortexkit-lease = { version = "0.1.4", path = "../cortexkit-lease" }
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
 serde_json = { version = "1", optional = true }
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

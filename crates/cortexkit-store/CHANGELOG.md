@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.4
+
+- Fix a process losing its SQLite locks when it called `read_schema_versions`
+  while it already had the store open. Plain file handles used by the prechecks
+  dropped SQLite's process-wide advisory locks when closed, including the
+  shared-memory lifetime lock; another process could then truncate the mapped
+  shared memory and crash the store holder. Prechecks now use metadata only,
+  and only SQLite opens the database and its WAL/shared-memory sidecars.
+- Require existing WAL and initialized shared-memory sidecars for schema-version
+  inspection. Closed stores still report `SchemaVersionsUnavailable` without
+  creating sidecars; rollback-journal databases without sidecars now also report
+  unavailable, because metadata alone cannot distinguish them from closed WAL
+  stores. Normal store opens enable WAL. The public API is unchanged.
+
 ## 0.4.3
 
 - Stop creating lease files or directories for in-memory and temporary SQLite
