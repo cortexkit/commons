@@ -1,5 +1,12 @@
 # cortexkit-role-routing
 
+Version 0.7.26 adds readers-first `account_observe_success` for reporting a
+successful retest without a select decision. Send `attempt_outcome` on an
+`attempt` observation only after the router advertises the group. It also adds
+`select_media`'s synthesize-only `input_characters` Unicode-scalar count for
+per-character price estimates; routers list it in `requirement_fields` when
+read and otherwise refuse it by name (CONTRACT.md §§9.2 and 16.4.1).
+
 Version 0.7.22 clarifies `decision_harness`: decisions name a program only
 when the selected runner declares programs, and omit the harness otherwise.
 Use `check_answer_serving_with_harnesses` with that runner's declared list to

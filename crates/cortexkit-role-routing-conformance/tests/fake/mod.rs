@@ -19,6 +19,7 @@ mod continuation;
 mod extensions;
 #[cfg(test)]
 mod gateway_catalog;
+mod observe_success;
 mod placement;
 mod select_engine;
 mod select_media;
@@ -273,8 +274,15 @@ struct ConversationPin {
     account: usize,
 }
 
+type ObservePair = (String, String);
+type ObserveBlock = (String, u64);
+type ObserveRetest = (ObservePair, ObserveBlock);
+
 #[derive(Default)]
 struct State {
+    observe_blocks: HashMap<ObservePair, ObserveBlock>,
+    observe_retest_next: Option<ObservePair>,
+    observe_retests: HashMap<(String, String), ObserveRetest>,
     selection_facts: cortexkit_role_routing_conformance::SelectionFacts,
     runner_declarations:
         BTreeMap<String, cortexkit_role_routing_conformance::wire::RunnerDeclaration>,
@@ -814,6 +822,22 @@ impl RoutingSubject for FakeSubject {
         Ok(())
     }
 
+    async fn configure_observe_retest_block(
+        &self,
+        account_id: &str,
+        credential_id: &str,
+        kind: &str,
+        recorded_at_ms: u64,
+    ) -> Result<(), String> {
+        let mut state = self.state.lock().unwrap();
+        let pair = (account_id.to_owned(), credential_id.to_owned());
+        state
+            .observe_blocks
+            .insert(pair.clone(), (kind.into(), recorded_at_ms));
+        state.observe_retest_next = Some(pair);
+        Ok(())
+    }
+
     async fn route(&self, stamp: &RouteStamp) -> Result<FakeRoute, String> {
         Ok(FakeRoute {
             policy_control: self.policy_control,
@@ -1033,7 +1057,7 @@ impl FakeRoute {
             describe = describe
                 .with_capability("select_media")
                 .with_capability("select_kind");
-            describe.kinds = ["transcribe", "video"].map(Into::into).into();
+            describe.kinds = ["transcribe", "video", "synthesize"].map(Into::into).into();
             describe = describe.with_capability("report_attempt_outcomes");
             describe = describe
                 .with_capability("select_eligible_routes")
@@ -2328,11 +2352,16 @@ impl FakeRoute {
                 })
             })
             .filter(|(_, account)| {
+                let pair = (account.account_id.clone(), account.credential_id.clone());
+                !state.observe_blocks.contains_key(&pair)
+                    || state.observe_retest_next.as_ref() == Some(&pair)
+            })
+            .filter(|(_, account)| {
                 request.candidates.as_ref().is_none_or(|candidates| {
-                    candidates
-                        .accounts
-                        .iter()
-                        .any(|c| c.account_id == account.account_id)
+                    candidates.accounts.iter().any(|c| {
+                        c.account_id == account.account_id
+                            && c.credential_id == account.credential_id
+                    })
                 })
             })
             .map(|(index, _)| index)
@@ -2605,6 +2634,15 @@ impl FakeRoute {
             if defects.repeated_decision_tier_wrong && request.service_tier.is_some() {
                 answer.service_tier_chosen = Some("standard".into());
             }
+        }
+        let pair = (chosen.account_id.clone(), chosen.credential_id.clone());
+        if state.observe_retest_next.as_ref() == Some(&pair) {
+            if let Some(block) = state.observe_blocks.get(&pair) {
+                state
+                    .observe_retests
+                    .insert(key.clone(), (pair, block.clone()));
+            }
+            state.observe_retest_next = None;
         }
         state.admissions.insert(key, (request, answer.clone()));
         to_value(answer)

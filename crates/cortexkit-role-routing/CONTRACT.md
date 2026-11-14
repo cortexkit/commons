@@ -412,6 +412,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
   - `select_eligible_routes`: the per-call route subset (§16.4).
   - `select_price`: value-estimate rates on select answers (§16.5).
   - `report_attempt_outcomes`: authoritative attempt statuses on reports (§16.6).
+  - `account_observe_success`: successful attempts on admissions without a select
+    decision (§9.2).
   - `service_tier`: tier-aware selection and tier metadata in report usage
     (§5.5). A caller sends these members only to a declaring provider.
   - `account_continue`: `route.account_for` reads `mode: "continue"` for a
@@ -1533,6 +1535,34 @@ What a runner saw on an account, so the provider's headroom stays current.
   limit. A subscription's spending or credit wall, which renews on the same
   credential, uses `account_limit_exhausted` with `limit_window: "credit"`
   instead (§9.3).
+- [pinned] `account_observe_success` adds optional
+  `attempt_outcome: {status}` to `kind: "attempt"`, reusing §16.6's status
+  vocabulary. A router holding an account or credential behind a block lets
+  one test request through (every fifteen minutes for quota without a fresh
+  reading, and at most once an hour for other blocks), and that test needs a
+  way to report success when its run carries no select decision.
+  This version admits only `served` and `served_empty`; the other known
+  statuses (`quota`, `throttled`, `credential`, `unavailable`, `rejected`) are
+  `invalid_request {field: "attempt_outcome.status"}`, because failures already
+  have their own observe kinds. An unknown status decodes and counts nothing,
+  as in §16.6. `retry_after_ms` is refused as `invalid_request
+  {field: "attempt_outcome.retry_after_ms"}`. On any kind other than `attempt`,
+  `attempt_outcome` is `invalid_request {field: "attempt_outcome"}`.
+  With the member, `admission_id`, `served_account_id` and `credential_id`
+  are required; each missing companion is `invalid_request` naming that field.
+- [pinned] A served outcome bound to an admission ends only the block that
+  admission was retesting, for exactly that account and credential. It never
+  ends a block recorded after the admission started, another credential's
+  block on the same account, or another account's block. An unbound observation
+  (`bound: false`) changes nothing. The existing duplicate `event_id` rule
+  applies: no effect on replay. `effects` names the block ended, in the
+  provider's own words, like other observe effects. Served outcomes on
+  unblocked accounts are observational only.
+- [pinned] Readers first: `parse_account_observe_request_serving(params,
+  capabilities)` refuses `attempt_outcome` by name without
+  `account_observe_success`. The legacy parser supplies no groups; a 0.6.0
+  parser ignores unknown observe members instead. Callers send the member
+  only to routers advertising the group, never to either non-declaring router.
 - [pinned] On a declaring router, resolve `ObserveArm` from trusted state and
   call `observe::check_observe_authorization(arm, request)`:
   - `Runner`: the caller holds the admission or is otherwise authorized by
@@ -2346,7 +2376,16 @@ breaking release, after callers have migrated to `route.select`.
   video's `output_duration_ms` (unsigned milliseconds, no greater than the
   catalog's output-duration limit), `aspect_ratio` (`"W:H"`, positive integer
   components, a catalog-supported ratio), and `audio` (bool, matching catalog
-  support). An absent fact fails a stated requirement. These media members
+  support). It also admits `input_characters`, an unsigned count of Unicode
+  scalar values in the text to synthesize, only for `synthesize`. A router
+  pricing per character prefers this count over `input_bytes`; without it,
+  bytes remain the ceiling. Either count gives only an estimate until the
+  vendor's measured count arrives, because some vendors bill fewer characters
+  than the text holds. `input_characters` is refused for `llm` and every other
+  media kind as `invalid_requirements {field: "input_characters"}`. It needs no
+  new group: a router that does not read it refuses it by name under §5.1,
+  and `requirement_fields` lists it when read.
+  An absent fact fails a stated requirement. These media members
   are refused for `llm`. Conversely, non-llm kinds refuse `eq`,
   `context_window`, `max_output_tokens`, `tools`, `tool_capabilities`,
   `modalities`, `structured_output`, `questions`, `input_tokens`, and

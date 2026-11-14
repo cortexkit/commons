@@ -398,7 +398,12 @@ impl<S: RoutingSubject> Suite<'_, S> {
         Ok(())
     }
 
-    async fn invalid_field(route: &S::Route, op: &str, params: &Value, field: &str) -> Check {
+    pub(super) async fn invalid_field(
+        route: &S::Route,
+        op: &str,
+        params: &Value,
+        field: &str,
+    ) -> Check {
         let refusal = refused(route, op, params, RefusalCode::InvalidRequest, field).await?;
         if refusal.detail.get("field") != Some(&json!(field)) {
             return Err(format!("refusal must name {field}: {refusal}"));

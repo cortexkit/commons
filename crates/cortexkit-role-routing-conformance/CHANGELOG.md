@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.29
+
+- Pin routing `=0.7.26`. Add readers-first `account_observe_success` checks for
+  exact retest-block clearing, newer and other-credential/account block safety,
+  unbound and unknown no-ops, duplicate events and named-field refusals. Require
+  the test-only `configure_observe_retest_block` fixture only when advertised;
+  observe its effects through real account admissions.
+- Check advertised synthesize `input_characters`, per-character estimate
+  preference and byte fallback, unsigned values and kind-specific refusals.
+  Update the reference fake and reject intentionally incorrect routers by
+  every new check's name.
+
 ## 0.10.28
 
 - Pin routing `=0.7.25`. Check continuation from a select-less admission's

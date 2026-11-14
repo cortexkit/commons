@@ -15,6 +15,50 @@ fn parse(value: &Value) -> Result<SelectMediaRequest, cortexkit_role_routing::er
 }
 
 #[test]
+fn input_characters_is_an_unsigned_synthesize_only_requirement() {
+    let mut value = request(json!({"input_characters":4,"input_bytes":9}));
+    value["kind"] = json!("synthesize");
+    let parse = |v: &Value| {
+        parse_select_media_request(
+            v,
+            capabilities::KNOWN,
+            &["synthesize", "video", "transcribe", "image", "realtime"],
+        )
+    };
+    for count in [0, 4, u64::MAX] {
+        value["requirements"]["input_characters"] = json!(count);
+        let parsed = parse(&value).unwrap();
+        assert_eq!(parsed.requirements.input_characters, Some(count));
+        assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+    }
+    for count in [json!(-1), json!(1.5), json!("4"), json!(false)] {
+        value["requirements"]["input_characters"] = count;
+        let refusal = parse(&value).unwrap_err();
+        assert_eq!(
+            refusal.code,
+            cortexkit_role_routing::errors::RefusalCode::InvalidRequirements
+        );
+        assert_eq!(refusal.detail["field"], "input_characters");
+    }
+    value["requirements"]["input_characters"] = json!(4);
+    for kind in ["video", "transcribe", "image", "realtime"] {
+        value["kind"] = json!(kind);
+        assert_eq!(
+            parse(&value).unwrap_err().detail["field"],
+            "input_characters"
+        );
+    }
+    let llm = json!({"consumer":"example.task","requirements":{"iq":50,"input_characters":4}});
+    assert_eq!(
+        cortexkit_role_routing::select::parse_select_request(&llm)
+            .unwrap_err()
+            .detail["field"],
+        "input_characters"
+    );
+    assert!(REQUIREMENT_FIELDS.contains(&"input_characters"));
+}
+
+#[test]
 fn media_requirements_reuse_engine_types_and_round_trip_one_object() {
     let value = request(
         json!({"iq":0,"language":"en","voice":"alto","format":"video/mp4","duration_ms":1,"input_bytes":2,"reference_formats":["image/png"],"bias":false,"size":"large","resolution":"1080p","quality":"high","latency_class":"batch","metric":"score","output_duration_ms":3000,"aspect_ratio":"16:9","audio":true,"metric_limit":{"metric":"score","at_least":0.9}}),

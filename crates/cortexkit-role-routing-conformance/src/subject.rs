@@ -485,6 +485,24 @@ pub trait RoutingSubject: Send + Sync {
         Err("account blocks are not supported by this subject".into())
     }
 
+    /// Test seam for `account_observe_success` only: install a block of `kind`
+    /// on exactly this account and credential at `recorded_at_ms`, and make
+    /// the pair the next `account_for` admission's retest, preserving admissions.
+    /// A real router reaches the same state through its own block and retest
+    /// rules; this hook must not change what a real request would be admitted to.
+    /// Kinds used by the kit are `quota`, `credit`, `credential_refused` and
+    /// `transient_backoff`. Required only when the group is advertised.
+    async fn configure_observe_retest_block(
+        &self,
+        account_id: &str,
+        credential_id: &str,
+        kind: &str,
+        recorded_at_ms: u64,
+    ) -> Result<(), String> {
+        let _ = (account_id, credential_id, kind, recorded_at_ms);
+        Err("configure_observe_retest_block is not supported by this subject".into())
+    }
+
     /// Open a route to the provider under `stamp`.
     async fn route(&self, stamp: &RouteStamp) -> Result<Self::Route, String>;
 }

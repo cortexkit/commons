@@ -26,7 +26,7 @@ impl FakeRoute {
         let mut request = media::parse_select_media_request(
             &params,
             capabilities::KNOWN,
-            &["transcribe", "video"],
+            &["transcribe", "video", "synthesize"],
         )?;
         if self.fault("select_media_privacy") {
             request.privacy = engine::Privacy::RemoteAllowed;
@@ -261,6 +261,22 @@ impl FakeRoute {
             .media
             .get(&key(&candidate.engine))
             .and_then(|f| f.price.clone());
+        if request.kind == engine::Kind::Synthesize {
+            if let Some(price) = &mut answer.price {
+                let count = if self.fault("select_media_input_characters") {
+                    request.requirements.engine.input_bytes
+                } else {
+                    request
+                        .requirements
+                        .input_characters
+                        .or(request.requirements.engine.input_bytes)
+                };
+                if let Some((count, rate)) = count.zip(price.rate("input.per_character")) {
+                    price.estimated_task_usd =
+                        serde_json::Number::from_f64(count as f64 * rate.rate.as_f64().unwrap());
+                }
+            }
+        }
         if self.fault("select_media_price") {
             answer.price = None;
         }

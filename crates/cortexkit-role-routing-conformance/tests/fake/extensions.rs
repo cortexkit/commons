@@ -20,6 +20,7 @@ pub(super) const GROUPS: &[&str] = &[
     "select_settings",
     "observe_backoff",
     "observe_credential_refused",
+    "account_observe_success",
     "report_outcomes",
     "report_usage_run_id",
     "consumer_models",
@@ -290,6 +291,12 @@ impl FakeRoute {
         state: &mut State,
         params: &Value,
     ) -> Result<Value, Refusal> {
+        if params
+            .get("attempt_outcome")
+            .is_some_and(|value| !value.is_null())
+        {
+            return self.observe_success(state, params);
+        }
         let mut params = params.clone();
         if self.fault("credential_refused_retry_at_ms_refused")
             && params["kind"] == "credential_refused"

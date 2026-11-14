@@ -14,6 +14,19 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("account_observe_success_clears", "account_observe_success: served retests end only their captured block"),
+    check("account_observe_success_newer_block", "account_observe_success: a block recorded after admission survives"),
+    check("account_observe_success_other_credential", "account_observe_success: another credential on the same account stays blocked"),
+    check("account_observe_success_other_account", "account_observe_success: another account stays blocked"),
+    check("account_observe_success_unbound", "account_observe_success: unbound success changes nothing"),
+    check("account_observe_success_unknown", "account_observe_success: unknown status counts nothing"),
+    check("account_observe_success_status_refusals", "account_observe_success: known failures are refused by status"),
+    check("account_observe_success_companions", "account_observe_success: admission, account and credential are required by name"),
+    check("account_observe_success_kind", "account_observe_success: only attempt carries an outcome"),
+    check("account_observe_success_retry", "account_observe_success: retry_after_ms is refused by its field path"),
+    check("account_observe_success_duplicate", "account_observe_success: duplicate events apply nothing"),
+    check("account_observe_success_undeclared", "without account_observe_success: attempt_outcome is refused by name"),
+    check("select_media_input_characters", "select_media: synthesize admits unsigned character counts and prefers them for per-character estimates"),
     check("select_media_privacy", "select_media: required privacy, local-only filtering and validated caller-local engines"),
     check("select_media_requirements", "select_media: admit and match media requirements through route.select"),
     check("select_media_video", "select_media: video duration, aspect ratio and audio are hard catalog requirements"),

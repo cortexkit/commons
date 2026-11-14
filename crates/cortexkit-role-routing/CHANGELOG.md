@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.26
+
+- Add readers-first `account_observe_success`: served attempt outcomes on
+  admissions can end only the exact block being retested, without a select
+  decision. Require the admission, served account and credential; refuse known
+  failure statuses and retry delays by field, and preserve unknown-status,
+  unbound, newer-block and duplicate no-effect rules.
+- Add `select_media`'s synthesize-only `input_characters` Unicode-scalar count.
+  Per-character pricing prefers it to the byte ceiling, still an estimate until
+  vendor measurement. No new group: readers advertise the requirement field and
+  routers that do not read it refuse it by name.
+
 ## 0.7.25
 
 - Resolve continuation predecessors in both select and account decisions so a

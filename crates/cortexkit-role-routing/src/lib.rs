@@ -167,6 +167,8 @@ pub mod capabilities {
     pub const SELECT_PRICE: &str = "select_price";
     /// Provider attempt statuses, authoritative over legacy report outcomes.
     pub const REPORT_ATTEMPT_OUTCOMES: &str = "report_attempt_outcomes";
+    /// Successful attempts reported on admissions without a select decision.
+    pub const ACCOUNT_OBSERVE_SUCCESS: &str = "account_observe_success";
     /// Media engine selection through `route.select_engine`.
     pub const SELECT_ENGINE: &str = "select_engine";
     /// Per-job engine speed reports. Requires `SELECT_ENGINE`.
@@ -253,6 +255,7 @@ pub mod capabilities {
         SELECT_ELIGIBLE_ROUTES,
         SELECT_PRICE,
         REPORT_ATTEMPT_OUTCOMES,
+        ACCOUNT_OBSERVE_SUCCESS,
         SELECT_ENGINE,
         ENGINE_REPORTS,
         ENGINE_EVALS,

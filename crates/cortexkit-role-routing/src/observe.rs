@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
+    attempt::{AttemptOutcome, AttemptStatus},
     errors::{Refusal, RefusalCode},
     members::Members,
 };
@@ -156,6 +157,10 @@ pub struct AccountObserveRequest {
     /// Verbatim provider code, 1–128 characters. Requires `observe_backoff`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_code: Option<String>,
+    /// A successful provider attempt on an admission, without a select decision.
+    /// Requires `account_observe_success`; only served statuses have effects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_outcome: Option<AttemptOutcome>,
 }
 
 impl AccountObserveRequest {
@@ -178,6 +183,7 @@ impl AccountObserveRequest {
             decision_id: None,
             retry_at_ms: None,
             provider_code: None,
+            attempt_outcome: None,
         }
     }
 
@@ -265,6 +271,11 @@ impl AccountObserveRequest {
 
     pub fn with_provider_code(mut self, provider_code: impl Into<String>) -> Self {
         self.provider_code = Some(provider_code.into());
+        self
+    }
+
+    pub fn with_attempt_outcome(mut self, attempt_outcome: AttemptOutcome) -> Self {
+        self.attempt_outcome = Some(attempt_outcome);
         self
     }
 }
@@ -386,12 +397,14 @@ pub fn parse_account_observe_request(params: &Value) -> Result<AccountObserveReq
 /// Without `observe_backoff`, the added members are refused by name and
 /// `transient_backoff` remains an advisory unknown kind with no retry rule.
 /// Without `observe_credential_refused`, `credential_refused` is advisory too.
+/// Without `account_observe_success`, `attempt_outcome` is refused by name.
 /// Null optional members are treated as absent.
 pub fn parse_account_observe_request_serving<C: AsRef<str>>(
     params: &Value,
     capabilities: &[C],
 ) -> Result<AccountObserveRequest, Refusal> {
     let members = Members::of(params)?;
+    let attempt_outcome = parse_observe_attempt_outcome(&members, capabilities)?;
     let backoff = capabilities
         .iter()
         .any(|cap| cap.as_ref() == "observe_backoff");
@@ -442,7 +455,19 @@ pub fn parse_account_observe_request_serving<C: AsRef<str>>(
         decision_id: members.optional_text("decision_id", None)?,
         retry_at_ms: members.optional("retry_at_ms")?,
         provider_code: members.optional_text("provider_code", Some(128))?,
+        attempt_outcome,
     };
+    if request.attempt_outcome.is_some() {
+        for (field, value) in [
+            ("admission_id", &request.admission_id),
+            ("served_account_id", &request.served_account_id),
+            ("credential_id", &request.credential_id),
+        ] {
+            if value.is_none() {
+                return Err(members.refuse(field, "attempt_outcome requires this member"));
+            }
+        }
+    }
     if request.kind == ObserveKind::CredentialRefused
         && request.credential_id.is_none()
         && request.admission_id.is_none()
@@ -480,6 +505,53 @@ pub fn parse_account_observe_request_serving<C: AsRef<str>>(
     Ok(request)
 }
 
+fn parse_observe_attempt_outcome<C: AsRef<str>>(
+    members: &Members<'_>,
+    capabilities: &[C],
+) -> Result<Option<AttemptOutcome>, Refusal> {
+    let Some(value) = members
+        .object
+        .get("attempt_outcome")
+        .filter(|v| !v.is_null())
+    else {
+        return Ok(None);
+    };
+    if !capabilities
+        .iter()
+        .any(|cap| cap.as_ref() == crate::capabilities::ACCOUNT_OBSERVE_SUCCESS)
+    {
+        return Err(members.refuse("attempt_outcome", "member requires account_observe_success"));
+    }
+    if members.required::<ObserveKind>("kind")? != ObserveKind::Attempt {
+        return Err(members.refuse("attempt_outcome", "attempt_outcome requires kind attempt"));
+    }
+    let object = value
+        .as_object()
+        .ok_or_else(|| members.refuse("attempt_outcome", "attempt_outcome must be an object"))?;
+    if object.contains_key("retry_after_ms") {
+        return Err(members.refuse(
+            "attempt_outcome.retry_after_ms",
+            "observe success has no retry delay",
+        ));
+    }
+    let status: AttemptStatus =
+        serde_json::from_value(object.get("status").cloned().unwrap_or(Value::Null))
+            .map_err(|_| members.refuse("attempt_outcome.status", "status must be a string"))?;
+    if status.is_known() && !matches!(status, AttemptStatus::Served | AttemptStatus::ServedEmpty) {
+        return Err(members.refuse(
+            "attempt_outcome.status",
+            "failures use their own observe kinds",
+        ));
+    }
+    if let Some(field) = object.keys().find(|field| field.as_str() != "status") {
+        return Err(members.refuse(
+            &format!("attempt_outcome.{field}"),
+            "unknown attempt member",
+        ));
+    }
+    Ok(Some(AttemptOutcome::new(status)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,6 +569,116 @@ mod tests {
         let refusal = result.unwrap_err();
         assert_eq!(refusal.code, RefusalCode::InvalidRequest);
         assert_eq!(refusal.detail["field"], field);
+    }
+
+    fn success() -> Value {
+        json!({"event_id":"success", "kind":"attempt", "admission_id":"a",
+            "served_account_id":"account", "credential_id":"credential",
+            "attempt_outcome":{"status":"served"}})
+    }
+
+    fn parse_success(params: &Value) -> Result<AccountObserveRequest, Refusal> {
+        parse_account_observe_request_serving(
+            params,
+            &[crate::capabilities::ACCOUNT_OBSERVE_SUCCESS],
+        )
+    }
+
+    #[test]
+    fn account_observe_success_requires_group_even_for_malformed_outcomes() {
+        for value in [json!({"status":"served"}), json!(false)] {
+            let mut params = success();
+            params["attempt_outcome"] = value;
+            assert_invalid(parse_account_observe_request(&params), "attempt_outcome");
+            assert_invalid(parse_backoff(&params), "attempt_outcome");
+        }
+        let mut params = success();
+        params["attempt_outcome"] = Value::Null;
+        assert!(parse_account_observe_request(&params).is_ok());
+    }
+
+    #[test]
+    fn account_observe_success_round_trips_served_and_unknown_statuses() {
+        for status in ["served", "served_empty", "future_status"] {
+            let mut params = success();
+            params["attempt_outcome"]["status"] = json!(status);
+            let request = parse_success(&params).unwrap();
+            assert_eq!(
+                request.attempt_outcome.as_ref().unwrap().status.as_str(),
+                status
+            );
+            assert_eq!(serde_json::to_value(request).unwrap(), params);
+        }
+        let request = AccountObserveRequest::new("success", ObserveKind::Attempt)
+            .with_admission_id("a")
+            .with_served_account_id("account")
+            .with_credential_id("credential")
+            .with_attempt_outcome(AttemptOutcome::new(AttemptStatus::Served));
+        assert_eq!(parse_success(&success()).unwrap(), request);
+    }
+
+    #[test]
+    fn account_observe_success_refuses_failure_statuses_and_retry_delay() {
+        for status in [
+            "quota",
+            "throttled",
+            "credential",
+            "unavailable",
+            "rejected",
+        ] {
+            let mut params = success();
+            params["attempt_outcome"]["status"] = json!(status);
+            assert_invalid(parse_success(&params), "attempt_outcome.status");
+        }
+        for value in [json!(0), json!("bad"), Value::Null] {
+            let mut params = success();
+            params["attempt_outcome"]["retry_after_ms"] = value;
+            assert_invalid(parse_success(&params), "attempt_outcome.retry_after_ms");
+        }
+        for value in [Value::Null, json!(7), json!({})] {
+            let mut params = success();
+            params["attempt_outcome"]["status"] = value;
+            assert_invalid(parse_success(&params), "attempt_outcome.status");
+        }
+        let mut params = success();
+        params["attempt_outcome"] = json!(7);
+        assert_invalid(parse_success(&params), "attempt_outcome");
+        params["attempt_outcome"] = json!({"status":"served", "extra":true});
+        assert_invalid(parse_success(&params), "attempt_outcome.extra");
+    }
+
+    #[test]
+    fn account_observe_success_requires_attempt_and_all_binding_members() {
+        for kind in [
+            "run_finished",
+            "admission_started",
+            "account_limit_exhausted",
+            "transient_backoff",
+            "credential_refused",
+            "future_kind",
+        ] {
+            let mut params = success();
+            params["kind"] = json!(kind);
+            for outcome in [
+                json!({"status":"served"}),
+                json!({"status":"quota"}),
+                json!({"status":"served","retry_after_ms":0}),
+                json!(false),
+            ] {
+                params["attempt_outcome"] = outcome;
+                assert_invalid(parse_success(&params), "attempt_outcome");
+            }
+        }
+        for field in ["admission_id", "served_account_id", "credential_id"] {
+            for value in [Value::Null, json!(""), json!(7)] {
+                let mut params = success();
+                params[field] = value;
+                assert_invalid(parse_success(&params), field);
+            }
+            let mut params = success();
+            params.as_object_mut().unwrap().remove(field);
+            assert_invalid(parse_success(&params), field);
+        }
     }
 
     #[test]

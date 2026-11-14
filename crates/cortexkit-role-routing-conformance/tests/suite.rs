@@ -9,6 +9,8 @@
 //! requires the named check to fail even when another panel check also detects it.
 
 mod fake;
+#[path = "suite/observe_success.rs"]
+mod observe_success_contract;
 
 fn legacy_not_applicable(
     report: &cortexkit_role_routing_conformance::SuiteReport,
@@ -26,6 +28,7 @@ fn legacy_not_applicable(
         .not_applicable()
         .into_iter()
         .filter(|name| !name.starts_with("select_media_"))
+        .filter(|name| *name != "account_observe_success_undeclared")
         .collect()
 }
 
@@ -793,7 +796,10 @@ async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_pa
         report.render()
     );
     for check in &report.checks {
-        if !not_applicable.contains(&check.check) && !check.check.starts_with("select_media_") {
+        if !not_applicable.contains(&check.check)
+            && !check.check.starts_with("select_media_")
+            && check.check != "account_observe_success_undeclared"
+        {
             assert_eq!(check.outcome, CheckOutcome::Passed, "{}", check.check);
         }
     }
@@ -1188,6 +1194,7 @@ async fn passes_every_check(subject: &FakeSubject) {
             continue;
         }
         if [
+            "account_observe_success_undeclared",
             "placement_consumer_declarations",
             "placement_harness_facts",
             "placement_decision_harness",

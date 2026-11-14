@@ -33,7 +33,7 @@ async fn selected<R: RoutingRoute>(route: &R, params: &Value) -> Result<Value, S
     let request = crate::wire::select_media::parse_select_media_request(
         params,
         capabilities::KNOWN,
-        &["transcribe", "video"],
+        &["transcribe", "video", "synthesize"],
     )
     .map_err(|e| e.to_string())?;
     crate::wire::select_media::check_answer(&request, &decoded).map_err(|e| e.to_string())?;
@@ -69,7 +69,9 @@ impl<S: RoutingSubject> Suite<'_, S> {
         if describe.kinds.iter().any(|kind| kind.as_str() == "llm") {
             return Err("select_media kinds must list only non-llm kinds".into());
         }
-        let kind = if name == "select_media_video" {
+        let kind = if name == "select_media_input_characters" {
+            "synthesize"
+        } else if name == "select_media_video" {
             "video"
         } else {
             "transcribe"
@@ -82,6 +84,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
             )));
         }
         let required_fields: &[&str] = match name {
+            "select_media_input_characters" => &["input_characters"],
             "select_media_video" => &["output_duration_ms", "aspect_ratio", "audio"],
             "select_media_metric_limit" | "select_media_ranking" => &["metric_limit"],
             _ => &[],
@@ -101,6 +104,80 @@ impl<S: RoutingSubject> Suite<'_, S> {
             .await?;
         let mut params = request();
         match name {
+            "select_media_input_characters" => {
+                let mut speech = entry("model-c", false);
+                speech["kind"] = json!("synthesize");
+                speech["max_input_bytes"] = json!(100);
+                self.subject
+                    .configure_catalog_declarations(&[module(vec![speech])])
+                    .await?;
+                let mut facts = crate::SelectionFacts::new();
+                let mut media = crate::MediaRouteFacts::new();
+                media.price = Some(
+                    serde_json::from_value(
+                        json!({"basis":"metered","rates":{"input.per_character":{"rate":1}}}),
+                    )
+                    .unwrap(),
+                );
+                facts
+                    .media
+                    .insert(format!("{}/model-c", fixture::SUBSCRIPTION_PROVIDER), media);
+                self.subject.configure_selection_facts(&facts).await?;
+                params["kind"] = json!("synthesize");
+                // The text "é🙂á" has four Unicode scalars and nine UTF-8 bytes.
+                params["requirements"] = json!({"input_characters":4,"input_bytes":9});
+                if selected(&route, &params).await?["price"]["estimated_task_usd"].as_f64()
+                    != Some(4.0)
+                {
+                    return Err(
+                        "per-character estimate did not prefer input_characters over bytes".into(),
+                    );
+                }
+                params["requirements"] = json!({"input_bytes":9});
+                if selected(&route, &params).await?["price"]["estimated_task_usd"].as_f64()
+                    != Some(9.0)
+                {
+                    return Err(
+                        "missing input_characters did not retain bytes as the ceiling".into(),
+                    );
+                }
+                for value in [json!(-1), json!(1.5), json!("4"), json!(true)] {
+                    params["requirements"] = json!({"input_characters":value});
+                    invalid(
+                        &route,
+                        &params,
+                        RefusalCode::InvalidRequirements,
+                        "input_characters",
+                    )
+                    .await?;
+                }
+                for kind in describe
+                    .kinds
+                    .iter()
+                    .map(|kind| kind.as_str())
+                    .chain(std::iter::once("llm"))
+                {
+                    if kind == "synthesize" {
+                        continue;
+                    }
+                    params["kind"] = json!(kind);
+                    params["requirements"] = if kind == "llm" {
+                        json!({"iq":50,"input_characters":4})
+                    } else {
+                        json!({"input_characters":4})
+                    };
+                    if kind == "llm" {
+                        params.as_object_mut().unwrap().remove("privacy");
+                    }
+                    invalid(
+                        &route,
+                        &params,
+                        RefusalCode::InvalidRequirements,
+                        "input_characters",
+                    )
+                    .await?;
+                }
+            }
             "select_media_ungraded_level" => self.media_ungraded_level(&route, &describe).await?,
             "select_media_privacy" => {
                 params.as_object_mut().unwrap().remove("privacy");

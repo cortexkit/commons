@@ -8,6 +8,7 @@ mod decision_inputs;
 mod extensions;
 mod gateway;
 mod harness_limits;
+mod observe_success;
 mod placement;
 mod requires_wire_api;
 mod select_engine;
@@ -287,6 +288,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         }
         if name.starts_with("select_engine_") {
             return self.select_engine_check(name).await;
+        }
+        if name.starts_with("account_observe_success_") {
+            return self.observe_success_check(name).await;
         }
         if name.starts_with("select_media_") {
             return self.select_media_check(name).await;

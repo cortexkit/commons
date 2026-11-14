@@ -17,6 +17,7 @@ pub const REQUIREMENT_FIELDS: &[&str] = &[
     "format",
     "duration_ms",
     "input_bytes",
+    "input_characters",
     "reference_formats",
     "bias",
     "size",
@@ -99,6 +100,9 @@ impl MetricLimit {
 pub struct MediaRequirements {
     #[serde(flatten)]
     pub engine: engine::EngineRequirements,
+    /// Unicode scalar values in speech-synthesis input; a pricing estimate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_characters: Option<u64>,
     /// Relative catalog grade demand, not an engine accuracy score.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iq: Option<u8>,
@@ -223,6 +227,7 @@ pub fn parse_select_media_request<C: AsRef<str>, K: AsRef<str>>(
         .and_then(Value::as_object_mut)
         .ok_or_else(|| Refusal::invalid_requirements("requirements", "expected an object"))?;
     let extra: serde_json::Map<String, Value> = [
+        "input_characters",
         "iq",
         "output_duration_ms",
         "aspect_ratio",
@@ -237,6 +242,7 @@ pub fn parse_select_media_request<C: AsRef<str>, K: AsRef<str>>(
         refuse: |field, message| Refusal::invalid_requirements(field, message),
     };
     let iq: Option<u8> = extra.optional("iq")?;
+    let input_characters: Option<u64> = extra.optional("input_characters")?;
     if iq.is_some_and(|n| n > 100) {
         return Err(extra.refuse("iq", "expected 0 to 100"));
     }
@@ -254,6 +260,9 @@ pub fn parse_select_media_request<C: AsRef<str>, K: AsRef<str>>(
         limit.check()?;
     }
     let parsed = engine::parse_select_engine_request(&legacy)?;
+    if input_characters.is_some() && parsed.kind != engine::Kind::Synthesize {
+        return Err(extra.refuse("input_characters", "input_characters requires synthesize"));
+    }
     let mut common = value.clone();
     let common_object = common.as_object_mut().unwrap();
     common_object.remove("privacy");
@@ -276,6 +285,7 @@ pub fn parse_select_media_request<C: AsRef<str>, K: AsRef<str>>(
         kind: parsed.kind,
         requirements: MediaRequirements {
             engine: parsed.requirements,
+            input_characters,
             iq,
             output_duration_ms,
             aspect_ratio,
