@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.29
+
+- Add readers-first `account_head_turn` and optional `head_turn` to every
+  `route.account_for` mode, including continuation. Only attested runners may
+  identify an owner's daemon-stamped head scope this way. The flag exempts
+  concurrency refusal only; head turns still count toward the cap. False
+  serializes as absent, preserving legacy request bytes.
+- Add request builders and `RoleDescribe::serves_account_head_turn` for discovery.
+- **Upgrading:** routers advertise `account_head_turn` first; runners send
+  `head_turn` only after discovering it.
+
 ## 0.7.28
 
 - Contract wording only, no wire change. `select_media.price`: a matching rate

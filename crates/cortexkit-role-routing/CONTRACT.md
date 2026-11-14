@@ -414,6 +414,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
   - `report_attempt_outcomes`: authoritative attempt statuses on reports (§16.6).
   - `account_observe_success`: successful attempts on admissions without a select
     decision (§9.2).
+  - `account_head_turn`: attested runners identify head turns on
+    `route.account_for`, including `continue` (§9.1).
   - `service_tier`: tier-aware selection and tier metadata in report usage
     (§5.5). A caller sends these members only to a declaring provider.
   - `account_continue`: `route.account_for` reads `mode: "continue"` for a
@@ -727,7 +729,9 @@ That group's additive defaults, attested namespace and selector rules are in §1
   unstarted admission also counts during its validity window, so simultaneous
   admissions cannot all take the last slot. Interactive head turns count toward
   the cap but are never refused for concurrency; the router recognizes them
-  from the attested caller's head scope, not a declaration claiming priority.
+  from the attested caller's head scope, or from `head_turn` sent by an
+  attested runner under §9.1's `account_head_turn` rules, never from a
+  consumer's priority declaration.
 - [pinned] `route.select` passes over a route whose every eligible account is
   at its cap for the next adequate route, without widening the candidate set.
   When every eligible account for every adequate route is full, it answers
@@ -1112,6 +1116,27 @@ the routing provider allocates (subscription logins).
 `account::AccountForRequest`, validated by
 `account::parse_account_for_request`:
 
+- [pinned] The `account_head_turn` capability group means the router reads
+  `head_turn`. Runners send the member only after the router advertises the
+  group: readers come first. Without the group, the member is unknown and
+  refused by name under §2.
+- [pinned] `head_turn` (optional boolean, default false) is valid in every
+  mode, including `continue`. Absent or false means not a head turn; false
+  serializes as absent.
+- [pinned] A runner sets `head_turn: true` only when the session's
+  daemon-stamped scope, as stamped on the owner's route to that runner, is
+  a head scope. It never derives from a session class, a consumer declaration
+  or any other request field.
+- [pinned] A router honours `head_turn` only when the caller's attested
+  principal is `reserved:<module>` and that module is in the router's runner
+  set. From any other caller the member is ignored, not itself refused, and
+  does not make the call a head turn. The other authorization and refusal
+  rules still apply. A call whose route carries a head scope remains a head
+  turn independently of the member.
+- [pinned] A head turn counts toward the provider concurrency cap but is
+  never refused for concurrency (§5.3.1). `head_turn` changes only that
+  refusal: it never raises priority, widens eligibility, changes account
+  choice or affects any other refusal.
 - [pinned] `provider`, `model` (required, non-empty): the route about to be
   called, as routing names it (§2), never the runner's own name for the
   vendor. A runner acting on a select answer sends exactly that answer's
@@ -1159,7 +1184,7 @@ the routing provider allocates (subscription logins).
   Bodies are compared with defaults applied
   (`AccountForRequest::same_body`): a member left out and the same member
   sent with its default value are the same body.
-  `pool`, `parent_conversation_key`, `service_tier` and `warm_credential` are
+  `pool`, `parent_conversation_key`, `service_tier`, `head_turn` and `warm_credential` are
   part of the body; an absent tier and explicit `standard` compare equal.
   The same id with a different hint is `admission_conflict`. Omitting
   `warm_credential` leaves existing request bodies and fingerprints unchanged.

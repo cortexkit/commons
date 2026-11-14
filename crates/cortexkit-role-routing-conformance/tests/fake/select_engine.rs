@@ -244,10 +244,11 @@ impl FakeRoute {
         if self.fault("select_media_admission_unknown_mode") && parsed["mode"] == "new" {
             parsed["mode"] = json!("admit");
         }
-        cortexkit_role_routing_conformance::wire::account::parse_account_for_request_serving(
-            &parsed,
-            cortexkit_role_routing_conformance::wire::capabilities::KNOWN,
-        )?;
+        let request =
+            cortexkit_role_routing_conformance::wire::account::parse_account_for_request_serving(
+                &parsed,
+                cortexkit_role_routing_conformance::wire::capabilities::KNOWN,
+            )?;
         let fault = self.defects.engine_fault;
         let provider = params["provider"].as_str().unwrap();
         let model = params["model"].as_str().unwrap();
@@ -301,6 +302,7 @@ impl FakeRoute {
             }
         }
         let chosen = &Self::catalog(state).accounts[0];
+        self.check_account_concurrency(state, &request, &chosen.account_id)?;
         let answer = AccountForAnswer::new(
             Admission {
                 id: key.1.clone(),
@@ -337,6 +339,7 @@ impl FakeRoute {
                 quota_age_band: "unknown".into(),
             },
         );
+        self.reserve_account_concurrency(state, &request, &answer);
         let value = serde_json::to_value(answer).unwrap();
         state
             .engine

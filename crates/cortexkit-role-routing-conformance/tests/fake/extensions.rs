@@ -21,6 +21,7 @@ pub(super) const GROUPS: &[&str] = &[
     "observe_backoff",
     "observe_credential_refused",
     "account_observe_success",
+    "account_head_turn",
     "report_outcomes",
     "report_usage_run_id",
     "consumer_models",

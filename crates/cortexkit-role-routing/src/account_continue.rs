@@ -85,6 +85,10 @@ pub enum ContinueMode {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct ContinueRequest {
+    /// The owner's daemon-stamped session scope is a head scope. Send only
+    /// with `account_head_turn`; routers trust this only from attested runners.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub head_turn: bool,
     pub mode: ContinueMode,
     pub run_id: String,
     pub admission_id: String,
@@ -107,6 +111,7 @@ impl ContinueRequest {
     ) -> Self {
         Self {
             mode: ContinueMode::Continue,
+            head_turn: false,
             run_id: run_id.into(),
             admission_id: admission_id.into(),
             conversation_key: conversation_key.into(),
@@ -121,11 +126,18 @@ impl ContinueRequest {
     /// a changed question is `invalid_request` naming `selection_id` and must
     /// not replace the first answer.
     pub fn same_question(&self, other: &Self) -> bool {
-        self.run_id == other.run_id
+        self.head_turn == other.head_turn
+            && self.run_id == other.run_id
             && self.admission_id == other.admission_id
             && self.conversation_key == other.conversation_key
             && self.previous_decision_id == other.previous_decision_id
             && self.exhausted == other.exhausted
+    }
+
+    /// Set whether the owner's daemon-stamped session scope is a head scope.
+    pub fn with_head_turn(mut self, head_turn: bool) -> Self {
+        self.head_turn = head_turn;
+        self
     }
 }
 
@@ -251,6 +263,7 @@ pub fn parse_continue_request(
         refusal
     })?;
     Ok(ContinueRequest {
+        head_turn: crate::account::parse_head_turn(&members, &describe.capabilities)?,
         mode,
         run_id: members.text("run_id", None)?,
         admission_id: members.text("admission_id", Some(ADMISSION_ID_MAX_CHARS))?,

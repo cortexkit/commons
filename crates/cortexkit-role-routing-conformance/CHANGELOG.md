@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.33
+
+- Pin routing `=0.7.29`. Add `account_head_turn`-gated checks for a runner's
+  head-turn concurrency exemption, slot accounting and a non-runner's ignored
+  flag. The non-runner is an attested media provider admitting its own remote
+  engine, so account authorization is unchanged.
+- Add the defaulted `RoutingSubject::configure_account_concurrency` fixture
+  hook. Adapters for declaring routers install an account cap; checks fill it
+  through real admissions.
+- **Upgrading:** routers advertise `account_head_turn` first; runners send
+  `head_turn` only after discovering it.
+
 ## 0.10.32
 
 - Pin routing `=0.7.28`. The media price, caller-local grade and caller-local

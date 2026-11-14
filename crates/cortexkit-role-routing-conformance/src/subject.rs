@@ -408,6 +408,19 @@ pub trait RoutingSubject: Send + Sync {
         Err("service-tier plan fixtures are not supported by this subject".into())
     }
 
+    /// Set the concurrency cap for this catalog account, preserving admissions.
+    /// An adapter must install the cap as a plan fact or operator override and
+    /// count real `account_for` reservations against it; this hook must not
+    /// fabricate occupied slots. Required only with `account_head_turn`.
+    async fn configure_account_concurrency(
+        &self,
+        account_id: &str,
+        cap: u64,
+    ) -> Result<(), String> {
+        let _ = (account_id, cap);
+        Err("account concurrency fixtures are not supported by this subject".into())
+    }
+
     /// Supply module entries through the daemon catalog, never request params.
     /// Older adapters fail declaration checks explicitly until they implement
     /// this hook; checks that use only the original catalog need no change.

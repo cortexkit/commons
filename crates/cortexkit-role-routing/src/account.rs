@@ -87,6 +87,10 @@ pub struct RequestedAccount {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AccountForRequest {
+    /// The owner's daemon-stamped session scope is a head scope. Send only
+    /// with `account_head_turn`; routers trust this only from attested runners.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub head_turn: bool,
     /// Send only to a router declaring `service_tier`; absence means standard.
     #[serde(
         default,
@@ -155,6 +159,7 @@ impl AccountForRequest {
     ) -> Self {
         Self {
             provider: provider.into(),
+            head_turn: false,
             service_tier: None,
             model: model.into(),
             affinity_model: None,
@@ -177,6 +182,12 @@ impl AccountForRequest {
     /// Set the model used for conversation account affinity.
     pub fn with_affinity_model(mut self, affinity_model: impl Into<String>) -> Self {
         self.affinity_model = Some(affinity_model.into());
+        self
+    }
+
+    /// Set whether the owner's daemon-stamped session scope is a head scope.
+    pub fn with_head_turn(mut self, head_turn: bool) -> Self {
+        self.head_turn = head_turn;
         self
     }
 
@@ -393,7 +404,8 @@ pub fn parse_account_for_request(params: &Value) -> Result<AccountForRequest, Re
     parse_account_for_request_serving::<&str>(params, &[])
 }
 
-/// Capability-aware admission. An undeclared `warm_credential` is refused by name.
+/// Capability-aware admission. Undeclared `warm_credential` and `head_turn`
+/// members are refused by name.
 /// Without `service_tier`,
 /// preserve the legacy parser's treatment of that unknown member: ignore it.
 pub fn parse_account_for_request_serving<C: AsRef<str>>(
@@ -417,6 +429,7 @@ pub fn parse_account_for_request_serving<C: AsRef<str>>(
         return Err(members.refuse("warm_credential", "warm_credential is only valid on admit"));
     }
     let request = AccountForRequest {
+        head_turn: parse_head_turn(&members, capabilities)?,
         service_tier: if capabilities
             .iter()
             .any(|cap| cap.as_ref() == crate::capabilities::SERVICE_TIER)
@@ -457,6 +470,23 @@ pub fn parse_account_for_request_serving<C: AsRef<str>>(
         }
     }
     Ok(request)
+}
+
+pub(crate) fn parse_head_turn<C: AsRef<str>>(
+    members: &Members<'_>,
+    capabilities: &[C],
+) -> Result<bool, Refusal> {
+    if members
+        .object
+        .get("head_turn")
+        .is_some_and(|v| !v.is_null())
+        && !capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::ACCOUNT_HEAD_TURN)
+    {
+        return Err(members.refuse("head_turn", "account_head_turn is not declared"));
+    }
+    Ok(members.optional("head_turn")?.unwrap_or(false))
 }
 
 #[cfg(test)]

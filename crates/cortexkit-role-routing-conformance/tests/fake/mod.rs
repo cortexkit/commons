@@ -324,6 +324,8 @@ struct State {
         ),
     >,
     tier_plans: BTreeMap<String, Vec<ServiceTier>>,
+    concurrency_caps: HashMap<String, u64>,
+    concurrency_reservations: HashMap<(String, String), (String, u64)>,
     decision_tiers: HashMap<String, ServiceTier>,
     held_credentials: Vec<String>,
     ineligible: Vec<(String, Option<String>)>,
@@ -632,6 +634,22 @@ impl RoutingSubject for FakeSubject {
         state.gateway_sources = FakeRoute::gateway_sources(&catalog);
         state.catalog_resolved = false;
         state.catalog = Some(catalog);
+        Ok(())
+    }
+
+    async fn configure_account_concurrency(
+        &self,
+        account_id: &str,
+        cap: u64,
+    ) -> Result<(), String> {
+        if cap == 0 {
+            return Err("concurrency caps must be positive".into());
+        }
+        self.state
+            .lock()
+            .unwrap()
+            .concurrency_caps
+            .insert(account_id.into(), cap);
         Ok(())
     }
 
@@ -2268,6 +2286,10 @@ impl FakeRoute {
                 cortexkit_role_routing_conformance::wire::capabilities::ACCOUNT_WARM_CREDENTIAL,
             );
         }
+        if self.extensions {
+            declared
+                .push(cortexkit_role_routing_conformance::wire::capabilities::ACCOUNT_HEAD_TURN);
+        }
         let mut params = params.clone();
         if self.fault("warm_credential_non_admit_refused")
             && params.get("mode").is_some_and(|m| m != "admit")
@@ -2584,6 +2606,7 @@ impl FakeRoute {
                 ),
             },
         };
+        self.check_account_concurrency(state, &request, &catalog.accounts[account].account_id)?;
         let code = if request.decision_id.is_some() {
             AccountReasonCode::Decision
         } else {
@@ -2678,8 +2701,54 @@ impl FakeRoute {
             }
             state.observe_retest_next = None;
         }
+        self.reserve_account_concurrency(state, &request, &answer);
         state.admissions.insert(key, (request, answer.clone()));
         to_value(answer)
+    }
+
+    fn check_account_concurrency(
+        &self,
+        state: &State,
+        request: &AccountForRequest,
+        account_id: &str,
+    ) -> Result<(), Refusal> {
+        let Some(cap) = state.concurrency_caps.get(account_id) else {
+            return Ok(());
+        };
+        let occupied = state
+            .concurrency_reservations
+            .values()
+            .filter(|(account, until)| account == account_id && *until > now_ms())
+            .count() as u64;
+        let head_turn = request.head_turn
+            && self.extensions
+            && (self.is_runner(state) || self.fault("account_head_turn_non_runner"))
+            && !self.fault("account_head_turn_runner");
+        if occupied >= *cap && !head_turn {
+            return Err(Refusal::no_route(
+                cortexkit_role_routing_conformance::wire::errors::NoRouteReason::ConcurrencyFull,
+                Some(now_ms() + 30_000),
+            ));
+        }
+        Ok(())
+    }
+
+    fn reserve_account_concurrency(
+        &self,
+        state: &mut State,
+        request: &AccountForRequest,
+        answer: &AccountForAnswer,
+    ) {
+        if request.head_turn && self.fault("account_head_turn_not_counted") {
+            return;
+        }
+        state.concurrency_reservations.insert(
+            (self.principal().into(), request.admission_id.clone()),
+            (
+                answer.account.account_id.clone(),
+                answer.pin.admission_valid_until_ms,
+            ),
+        );
     }
 
     fn observe(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {

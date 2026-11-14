@@ -169,6 +169,8 @@ pub mod capabilities {
     pub const REPORT_ATTEMPT_OUTCOMES: &str = "report_attempt_outcomes";
     /// Successful attempts reported on admissions without a select decision.
     pub const ACCOUNT_OBSERVE_SUCCESS: &str = "account_observe_success";
+    /// Attested runners identify head turns for concurrency admission only.
+    pub const ACCOUNT_HEAD_TURN: &str = "account_head_turn";
     /// Media engine selection through `route.select_engine`.
     pub const SELECT_ENGINE: &str = "select_engine";
     /// Per-job engine speed reports. Requires `SELECT_ENGINE`.
@@ -256,6 +258,7 @@ pub mod capabilities {
         SELECT_PRICE,
         REPORT_ATTEMPT_OUTCOMES,
         ACCOUNT_OBSERVE_SUCCESS,
+        ACCOUNT_HEAD_TURN,
         SELECT_ENGINE,
         ENGINE_REPORTS,
         ENGINE_EVALS,

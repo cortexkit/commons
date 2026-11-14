@@ -82,6 +82,11 @@ impl RoleDescribe {
         self.capabilities.iter().any(|listed| listed == capability)
     }
 
+    /// Whether a runner may send `route.account_for.head_turn` to this router.
+    pub fn serves_account_head_turn(&self) -> bool {
+        self.serves(crate::capabilities::ACCOUNT_HEAD_TURN)
+    }
+
     /// The consumer entry for `id`.
     pub fn consumer(&self, id: &str) -> Option<&ConsumerEntry> {
         self.consumers.iter().find(|entry| entry.id == id)

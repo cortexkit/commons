@@ -14,6 +14,8 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("account_head_turn_runner", "account_head_turn: an attested runner's head turn counts toward the cap but is never refused for concurrency"),
+    check("account_head_turn_non_runner", "account_head_turn: a non-runner's declaration does not bypass concurrency"),
     check("account_observe_success_clears", "account_observe_success: served retests end only their captured block"),
     check("account_observe_success_newer_block", "account_observe_success: a block recorded after admission survives"),
     check("account_observe_success_other_credential", "account_observe_success: independent credential-scoped or other-account quota blocks survive"),

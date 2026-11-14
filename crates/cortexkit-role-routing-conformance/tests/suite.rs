@@ -9,6 +9,8 @@
 //! requires the named check to fail even when another panel check also detects it.
 
 mod fake;
+#[path = "suite/head_turn.rs"]
+mod head_turn_contract;
 #[path = "suite/observe_success.rs"]
 mod observe_success_contract;
 
