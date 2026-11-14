@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.6
+
+- Accept subc-protocol 0.37.
+
 ## 0.1.5
 
 - Accept `subc-protocol >=0.34.1, <0.37` so consumers pinned to 0.36 can share

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.63
+
+- Accept subc-protocol 0.37.
+
 ## 0.17.62
 
 - Pin the role contract to `=0.8.52`. Add `plan_facts_admitted`, checking that a

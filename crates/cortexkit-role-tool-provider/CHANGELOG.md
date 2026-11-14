@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.8
+
+- Accept subc-protocol 0.37.
+
 ## 0.15.7
 
 - Add plan-carried `SystemTextFacts`, constructors with canonical set ordering,

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.34
+
+- Accept subc-protocol 0.37.
+
 ## 0.10.33
 
 - Pin routing `=0.7.29`. Add `account_head_turn`-gated checks for a runner's

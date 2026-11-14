@@ -690,7 +690,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier"
-version = "0.6.4"
+version = "0.6.5"
 dependencies = [
  "cortexkit-model-batch",
  "cortexkit-role-routing",
@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-classifier-conformance"
-version = "0.8.4"
+version = "0.8.5"
 dependencies = [
  "async-trait",
  "cortexkit-role-classifier",
@@ -740,7 +740,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "cortexkit-model-batch",
  "indexmap",
@@ -752,7 +752,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-extractor-conformance"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "async-trait",
  "cortexkit-role-extractor",
@@ -797,7 +797,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-llm-runner-conformance"
-version = "0.17.62"
+version = "0.17.63"
 dependencies = [
  "async-trait",
  "base64",
@@ -840,7 +840,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing"
-version = "0.7.29"
+version = "0.7.30"
 dependencies = [
  "cortexkit-role-llm-runner 0.8.52",
  "cortexkit-role-media",
@@ -853,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-routing-conformance"
-version = "0.10.33"
+version = "0.10.34"
 dependencies = [
  "async-trait",
  "cortexkit-role-routing",
@@ -874,7 +874,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-display"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "serde",
  "serde_jcs",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider"
-version = "0.15.7"
+version = "0.15.8"
 dependencies = [
  "cortexkit-role-tool-display",
  "jsonschema",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-tool-provider-conformance"
-version = "0.15.8"
+version = "0.15.9"
 dependencies = [
  "async-trait",
  "cortexkit-role-harness",
@@ -912,7 +912,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-user-commands"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "serde",
  "serde_jcs",

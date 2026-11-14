@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.7.30
+
+- Accept subc-protocol 0.37.
+
 ## 0.7.29
 
 - Add readers-first `account_head_turn` and optional `head_turn` to every

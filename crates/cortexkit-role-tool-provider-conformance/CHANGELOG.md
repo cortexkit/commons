@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.15.9
+
+- Accept subc-protocol 0.37.
+
 ## 0.15.8
 
 - Pin the provider contract to `=0.15.7`. Add `SystemTextFacts` manifest fixture

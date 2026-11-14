@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Accept subc-protocol 0.37.
+
 ## 0.1.3
 
 - Make the `unavailable` fact state neutral and add the danger-toned `failed`

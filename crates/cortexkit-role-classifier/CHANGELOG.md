@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.5
+
+- Accept subc-protocol 0.37.
+
 ## 0.6.4
 
 - Accept `subc-protocol` 0.34.1 through 0.36.x, so a module on the 0.36 line
