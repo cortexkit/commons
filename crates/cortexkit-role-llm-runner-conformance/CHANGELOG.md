@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.17.62
+
+- Pin the role contract to `=0.8.52`. Add `plan_facts_admitted`, checking that a
+  declaring runner accepts valid system-text plan facts and admits the plan.
+- Gate every plan-facts case on the runner's explicit `plan_facts` declaration;
+  leave non-declaring runners untested on facts. Keep host-fact discovery
+  validation independent of that group.
+- Upgrading: composers gate `facts` on `plan_facts`; runners declare the group
+  only in a build that forwards facts. The facts fixture is now required for
+  `plan_facts`, not for `plans` alone.
+
 ## 0.17.61
 
 - Pin runner `=0.8.51`. Add wait/account-wait truth tables over all named

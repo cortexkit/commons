@@ -113,6 +113,15 @@ The optional send_status group serves session.send_status and the send.status
 alias until the next breaking release.
 ## Plan-carried system-text facts (0.8.50)
 
+- [pinned] A runner declaring `plan_facts` accepts `facts` on plan items and
+  forwards it as described below. The group adds no operation or group dependency.
+- [pinned] A composer puts `facts` on a plan item only for a runner whose
+  `role.describe` declares `plan_facts`. For any other runner it sends the item
+  with no `facts` member. Declaring `harnesses` or `host_facts` alone is not that
+  declaration.
+- [pinned] A runner that does not declare `plan_facts` may refuse a plan item
+  carrying `facts` as `invalid_params` naming the field. A composer that sent it
+  anyway is the non-conforming side.
 - [pinned] `role.describe.harnesses` is an optional object keyed by the same
   harness ids used in a session's `harness` identity. Each value is a
   `HarnessDescribe` object with optional `host_facts: [string]`. An absent map,
@@ -148,6 +157,8 @@ alias until the next breaking release.
   original JSON value without rewriting it. It does not fetch or write state;
   the caller handles admission ordering and copies the selected value into
   the provider request, not into its `params` or `system_text` members.
+- [informative] `system_text_facts::for_runner` removes system-text item facts
+  from a composer's plan unless the checked describe answer declares `plan_facts`.
 
 ## 1. Role identity and addressing
 
@@ -308,6 +319,7 @@ alias until the next breaking release.
 | `fork_answer` | `session.fork_prepare`, `session.fork_ask`, `session.fork_end`; no group dependencies | §9.20 |
 | `output_refs` | `session.output_refs`, `session.output_ref_read` | §9.13 |
 | `tool_upfront` | `session.send` with per-plan-item `upfront`; no added op | §9.18 |
+| `plan_facts` | `session.send`, `session.refresh` with plan items carrying `facts`; no added op or group dependencies | Plan-carried system-text facts |
 | `transcript_reads` | `session.read`, `session.head` | §4 |
 | `host_history` | `session.history` | §4.6 |
 | `history_display` | `session.history` with `form: "display"` | §4.7 |

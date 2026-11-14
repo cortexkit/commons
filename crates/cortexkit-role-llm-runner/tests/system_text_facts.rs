@@ -6,6 +6,83 @@ fn describe(host_facts: Value) -> Value {
 }
 
 #[test]
+fn plan_facts_describe_has_no_group_dependencies() {
+    use cortexkit_role_llm_runner::{capabilities, describe::DescribeProblem, ops};
+
+    assert_eq!(
+        capabilities::group_ops(capabilities::PLAN_FACTS),
+        Some([ops::SESSION_SEND, ops::SESSION_REFRESH].as_slice())
+    );
+    let mut wire = describe(json!([]));
+    wire["capabilities"] = json!([capabilities::PLAN_FACTS]);
+    wire["majors"][0]["ops"] =
+        json!([REQUIRED_OPS, &[ops::SESSION_SEND, ops::SESSION_REFRESH]].concat());
+    let parsed = check_describe(&wire).unwrap();
+    assert!(parsed.declares(capabilities::PLAN_FACTS));
+    assert_eq!(parsed.capabilities, [capabilities::PLAN_FACTS]);
+    for op in [ops::SESSION_SEND, ops::SESSION_REFRESH] {
+        let mut partial = wire.clone();
+        partial["majors"][0]["ops"]
+            .as_array_mut()
+            .unwrap()
+            .retain(|value| value != op);
+        assert!(check_describe(&partial).unwrap_err().contains(
+            &DescribeProblem::GroupIncomplete {
+                capability: capabilities::PLAN_FACTS,
+                op,
+            }
+        ));
+    }
+}
+
+#[test]
+fn plan_facts_for_runner_keeps_only_explicitly_declared_facts() {
+    use cortexkit_role_llm_runner::{capabilities, ops, system_text_facts::for_runner};
+
+    let plan = json!({
+        "system_text_items": [
+            {"provider":"example.text", "facts":{"model":{"provider":"vendor","id":"model"},"harness":{"id":"host","facts":["files"]},"tools":[],"idle_start":[]}},
+            {"provider":"example.optional", "optional":true, "facts":null},
+            {"provider":"example.legacy", "params":{"facts":"keep nested"}}
+        ],
+        "tool_items":[{"provider":"example.tools", "facts":"keep other items"}],
+        "other":"keep"
+    });
+    let mut wire = describe(json!(["files"]));
+    let without_facts = json!({
+        "system_text_items": [
+            {"provider":"example.text"},
+            {"provider":"example.optional", "optional":true},
+            {"provider":"example.legacy", "params":{"facts":"keep nested"}}
+        ],
+        "tool_items":[{"provider":"example.tools", "facts":"keep other items"}],
+        "other":"keep"
+    });
+    wire["majors"][0]["ops"] =
+        json!([REQUIRED_OPS, &[ops::SESSION_SEND, ops::SESSION_REFRESH]].concat());
+    for declared in [false, true] {
+        wire["capabilities"] = if declared {
+            json!([capabilities::PLAN_FACTS])
+        } else {
+            json!([])
+        };
+        let runner = check_describe(&wire).unwrap();
+        let mut actual = plan.clone();
+        for_runner(&mut actual, &runner);
+        let expected = if declared { &plan } else { &without_facts };
+        assert_eq!(
+            serde_json::to_vec(&actual).unwrap(),
+            serde_json::to_vec(expected).unwrap()
+        );
+        for mut empty in [json!({}), json!({"system_text_items":[]})] {
+            let before = empty.clone();
+            for_runner(&mut empty, &runner);
+            assert_eq!(empty, before);
+        }
+    }
+}
+
+#[test]
 fn system_text_host_facts_preserved() {
     let parsed = check_describe(&describe(json!(["files", "shell"]))).unwrap();
     assert_eq!(

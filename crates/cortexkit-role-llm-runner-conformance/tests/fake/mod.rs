@@ -307,6 +307,7 @@ pub struct Defects {
     pub system_text_facts_rewrites: bool,
     pub system_text_facts_ignores_opt_in: bool,
     pub system_text_facts_accepts_malformed: bool,
+    pub system_text_facts_refuses: bool,
     pub system_text_host_facts_malformed: bool,
     pub system_text_default_ignores_catalog: bool,
     pub incarnation_changes_on_cut: bool,
@@ -6338,6 +6339,7 @@ pub struct FakeSubject {
     /// Declare `rich_ui_stamp`: runs carry their plan's rich UI stamp.
     pub rich_ui_stamp_group: bool,
     pub upfront_group: bool,
+    pub plan_facts_group: bool,
     pub upfront_plan_fixture: bool,
     /// Declare the submit-step variant that permits earlier streamed calls.
     pub submit_streamed_siblings_group: bool,
@@ -6488,6 +6490,7 @@ impl FakeSubject {
             call_identity_group: false,
             rich_ui_stamp_group: false,
             upfront_group: false,
+            plan_facts_group: false,
             upfront_plan_fixture: true,
             submit_streamed_siblings_group: false,
             structured_output_per_session_group: false,
@@ -6625,6 +6628,7 @@ impl FakeSubject {
                                 .then(|| groups::RICH_UI_STAMP.to_owned()),
                         )
                         .chain(self.upfront_group.then(|| groups::TOOL_UPFRONT.to_owned()))
+                        .chain(self.plan_facts_group.then(|| groups::PLAN_FACTS.to_owned()))
                         .chain(
                             self.submit_streamed_siblings_group
                                 .then(|| groups::SUBMIT_STREAMED_SIBLINGS.to_owned()),

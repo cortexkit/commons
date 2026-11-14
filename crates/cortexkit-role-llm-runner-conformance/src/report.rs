@@ -440,6 +440,7 @@ pub const CASES: &[CaseSpec] = &[
     case("system_text_default_forwarded_unchanged", &[],
          "when system_text_default is declared and the provider advertises system-text-default/v1, a preset-less item is admitted and reaches the provider byte-equal"),
     case("system_text_host_facts_describe", &[], "per-harness host facts decode as sorted unique bounded tokens"),
+    case("plan_facts_admitted", &[], "a runner declaring plan_facts accepts valid facts on a system-text plan item and admits the plan"),
     case("system_text_facts_forwarded_unchanged", &[Capability::Plans], "a declaring provider receives the exact plan-carried facts"),
     case("system_text_facts_legacy_omitted", &[Capability::Plans], "a provider without the exact facts token receives no facts member"),
     case("system_text_facts_malformed_refused", &[Capability::Plans], "malformed facts are refused before writes or provider calls"),

@@ -69,6 +69,12 @@ impl FakeSubject {
 impl Module {
     pub(super) fn admit_system_text_default(&self, session: &str, params: &Value) -> Option<Reply> {
         let entry = params.get("plan")?.get("system_text")?;
+        if self.world.defects.system_text_facts_refuses && entry["item"].get("facts").is_some() {
+            return Some(refuse(
+                errors::INVALID_PARAMS,
+                Some(json!({"field":"plan.system_text_items[0].facts"})),
+            ));
+        }
         let mut providers = self.world.system_text_default.lock().unwrap();
         let provider = providers.get_mut(session)?;
         if entry["item"].get("preset").is_none()

@@ -226,6 +226,9 @@ pub mod capabilities {
     /// Per-item hints that keep selected offered tool definitions loaded.
     pub const TOOL_UPFRONT: &str = "tool_upfront";
 
+    /// Plan-carried system-text facts accepted and forwarded to opt-in providers.
+    pub const PLAN_FACTS: &str = "plan_facts";
+
     /// Session-scoped uploads, upload references on sends and media by digest.
     pub const ATTACHMENTS: &str = "attachments";
     /// Non-template sends may omit or empty `prompt` when `content` is
@@ -481,6 +484,7 @@ pub mod capabilities {
             ],
         ),
         (TOOL_UPFRONT, &[ops::SESSION_SEND]),
+        (PLAN_FACTS, &[ops::SESSION_SEND, ops::SESSION_REFRESH]),
         (SERVICE_TIER, &[ops::SESSION_SEND]),
         (HEAD_SELECTION, &[ops::SESSION_SEND, ops::SESSION_HEAD]),
         (

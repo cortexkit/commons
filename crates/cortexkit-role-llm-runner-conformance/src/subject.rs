@@ -1240,7 +1240,7 @@ pub trait LlmRunnerSubject: Harness {
     }
 
     /// Install a system-text plan item with optional facts and a named preset.
-    /// Required for `plans`. The provider journal must capture the actual
+    /// Required for `plan_facts`. The provider journal must capture the actual
     /// `tool.catalog.facts` bytes separately from `system_text`, without
     /// reconstructing them from the plan. The default shares the system-text
     /// fixture; adapters may override it for a separate provider.

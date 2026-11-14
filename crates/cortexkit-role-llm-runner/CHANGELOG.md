@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.52
+
+- Add the dependency-free `plan_facts` capability group for plan-item facts on
+  `session.send` and `session.refresh`, with no new operation. Expose it through
+  `capabilities::PLAN_FACTS` and the existing group lookup and describe helpers.
+- Add `system_text_facts::for_runner` to keep facts unchanged for a declaring
+  runner and strip the member from system-text items for other runners.
+- Upgrading: composers gate `facts` on `plan_facts`; `harnesses` or `host_facts`
+  alone is not sufficient. Runners declare the group only in a build that
+  forwards facts. Undeclared runners may refuse the field as `invalid_params`;
+  a composer sending it anyway is non-conforming.
+
 ## 0.8.51
 
 - Add `errors::is_wait` for account waits plus `concurrency_full`, keeping

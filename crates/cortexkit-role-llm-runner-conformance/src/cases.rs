@@ -181,7 +181,8 @@ where
             name if name.starts_with("system_text_default_") => {
                 crate::system_text_default::run(self, name).await
             }
-            name if name.starts_with("system_text_facts_")
+            name if name == "plan_facts_admitted"
+                || name.starts_with("system_text_facts_")
                 || name == "system_text_host_facts_describe" =>
             {
                 crate::system_text_facts::run(self, name).await

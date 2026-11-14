@@ -1,7 +1,7 @@
 //! Plan facts are forwarded unchanged only to providers that opt in.
 
 use cortexkit_role_llm_runner::{
-    errors, ops, send::SendReply, system_text_facts::SYSTEM_TEXT_FACTS_V1,
+    capabilities as groups, errors, ops, send::SendReply, system_text_facts::SYSTEM_TEXT_FACTS_V1,
 };
 use serde_json::{json, Value};
 
@@ -20,6 +20,11 @@ where
     if name == "system_text_host_facts_describe" {
         case.checked_describe().await?;
         return Ok(Ending::Passed);
+    }
+    if !case.checked_describe().await?.declares(groups::PLAN_FACTS) {
+        return Ok(Ending::Inapplicable(
+            "runner does not declare plan_facts".into(),
+        ));
     }
     let session = case.open(name, Script::default()).await?;
     let declared = name != "system_text_facts_legacy_omitted";
@@ -40,6 +45,17 @@ where
         .prepare_system_text_facts(&session.name, &provides, &item)
         .await
         .map_err(|e| e.to_string())?;
+    let mut params = Value::Object(fields);
+    params["prompt"] = json!("admit system text facts");
+    params["send_id"] = json!(case.mint.next(name));
+    if name == "plan_facts_admitted" {
+        let reply = call(&session.route, ops::SESSION_SEND, params).await?;
+        let _: SendReply = decode(
+            "system-text facts admission",
+            expect_ok("system-text facts admission", reply)?,
+        )?;
+        return Ok(Ending::Passed);
+    }
     let before = case
         .subject
         .system_text_default_observation(case.handle.inner(), &session.name)
@@ -48,9 +64,6 @@ where
     if before.provider_calls != 0 || !before.provider_facts.is_empty() {
         return Err("fixture fetched before admission".into());
     }
-    let mut params = Value::Object(fields);
-    params["prompt"] = json!("admit system text facts");
-    params["send_id"] = json!(case.mint.next(name));
     let reply = call(&session.route, ops::SESSION_SEND, params).await?;
     if malformed {
         let error = expect_error("malformed system-text facts", reply)?;

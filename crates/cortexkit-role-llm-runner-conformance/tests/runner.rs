@@ -1553,6 +1553,12 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    if (case == "plan_facts_admitted" || case.starts_with("system_text_facts_"))
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "runner does not declare plan_facts")
+    {
+        return;
+    }
     // Older fixtures have no confirmed clearing route. Keep their explicit
     // skip separate from the opt-in fixture's required passing coverage.
     if case.starts_with("cleared_ride_") {
@@ -8012,9 +8018,11 @@ fn system_text_default_subject(defects: Defects) -> FakeSubject {
 async fn system_text_facts_conforming_runner_passes() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.capabilities.insert(Capability::Plans);
+    subject.plan_facts_group = true;
     let report = run(&subject).await;
     for name in [
         "system_text_host_facts_describe",
+        "plan_facts_admitted",
         "system_text_facts_forwarded_unchanged",
         "system_text_facts_legacy_omitted",
         "system_text_facts_malformed_refused",
@@ -8062,9 +8070,64 @@ async fn system_text_facts_incorrect_runners_fail_by_name() {
     ] {
         let mut subject = FakeSubject::new(defects);
         subject.capabilities.insert(Capability::Plans);
+        subject.plan_facts_group = true;
         let report = run(&subject).await;
         failed(&report, name);
     }
+}
+
+#[tokio::test]
+async fn plan_facts_checks_require_explicit_group() {
+    for declared in [false, true] {
+        let mut subject = FakeSubject::new(Defects {
+            system_text_facts_refuses: !declared,
+            ..Defects::default()
+        });
+        subject.capabilities.insert(Capability::Plans);
+        subject.plan_facts_group = declared;
+        let report = run(&subject).await;
+        for name in [
+            "plan_facts_admitted",
+            "system_text_facts_forwarded_unchanged",
+            "system_text_facts_legacy_omitted",
+            "system_text_facts_malformed_refused",
+        ] {
+            if declared {
+                assert_eq!(
+                    report.outcome(name),
+                    Some(&CaseOutcome::Passed),
+                    "{name}\n{}",
+                    report.render()
+                );
+            } else {
+                assert!(
+                    matches!(report.outcome(name), Some(CaseOutcome::Inapplicable { reason }) if reason == "runner does not declare plan_facts"),
+                    "{name}: {:?}",
+                    report.outcome(name)
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn plan_facts_refusing_runner_fails_by_name() {
+    let mut subject = FakeSubject::new(Defects {
+        system_text_facts_refuses: true,
+        ..Defects::default()
+    });
+    subject.capabilities.insert(Capability::Plans);
+    subject.plan_facts_group = true;
+    let report = run(&subject).await;
+    assert!(failed(&report, "plan_facts_admitted").contains("system-text facts admission"));
+    assert_none_failed_but(
+        &report,
+        &[
+            "plan_facts_admitted",
+            "system_text_facts_forwarded_unchanged",
+            "system_text_facts_legacy_omitted",
+        ],
+    );
 }
 
 #[tokio::test]
