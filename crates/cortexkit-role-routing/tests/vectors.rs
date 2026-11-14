@@ -13,9 +13,9 @@ use cortexkit_role_routing::{
     capabilities,
     describe::{check_describe, RoleDescribe},
     errors::{
-        AccountHoldDetail, ConsumerNotOwnedDetail, FieldDetail, NoRouteDetail, NoRouteReason,
-        PinUnavailableDetail, Refusal, RefusalCode, RoutingAmbiguousDetail, UnknownConsumerDetail,
-        CONSUMER_CODES,
+        AccountHoldDetail, AccountUnservableDetail, ConsumerNotOwnedDetail, FieldDetail,
+        NoRouteDetail, NoRouteReason, PinUnavailableDetail, Refusal, RefusalCode,
+        RoutingAmbiguousDetail, UnknownConsumerDetail, CONSUMER_CODES,
     },
     observe::{parse_account_observe_request, AccountObserveAnswer, AccountObserveRequest},
     parse_consumer_declarations,
@@ -727,6 +727,9 @@ fn every_refusal_code_has_a_vector() {
                 .detail_as::<cortexkit_role_routing::errors::NoEngineDetail>()
                 .is_some(),
             RefusalCode::AccountHold => refusal.detail_as::<AccountHoldDetail>().is_some(),
+            RefusalCode::AccountUnservable => {
+                refusal.detail_as::<AccountUnservableDetail>().is_some()
+            }
             RefusalCode::RoutingAmbiguous => {
                 refusal.detail_as::<RoutingAmbiguousDetail>().is_some()
             }

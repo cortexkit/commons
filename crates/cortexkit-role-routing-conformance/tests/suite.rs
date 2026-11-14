@@ -1691,6 +1691,12 @@ account_case!(
     "another model after eligibility report was refused account_hold"
 );
 account_case!(
+    account_for_candidates_disjoint,
+    transient_account_for_candidates_disjoint_fails,
+    transient_candidates_disjoint,
+    "refused account_selection_unavailable, not account_unservable"
+);
+account_case!(
     unknown_pool_accepted,
     refusing_unknown_pool_fails,
     refuses_unknown_pool,

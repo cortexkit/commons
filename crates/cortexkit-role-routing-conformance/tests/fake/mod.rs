@@ -103,6 +103,8 @@ pub struct Defects {
     pub ignores_parent_preference: bool,
     /// Refuses rather than falling back to the sole eligible parent account.
     pub refuses_parent_fallback: bool,
+    /// Treats disjoint runner candidates as a transient allocator failure.
+    pub transient_candidates_disjoint: bool,
     /// Turns model ineligibility into an account hold.
     pub holds_on_eligibility: bool,
     /// Refuses a well-formed pool that has no recorded block.
@@ -2389,6 +2391,35 @@ impl FakeRoute {
             });
         }
         let gateway = state.gateway_sources.contains_key(&request.provider);
+        let eligible: Vec<_> = catalog
+            .accounts
+            .iter()
+            .filter(|account| {
+                account.provider == request.provider && (!gateway || account.method == "gateway")
+            })
+            .collect();
+        if let Some(candidates) = &request.candidates {
+            if !eligible.is_empty()
+                && !eligible.iter().any(|account| {
+                    candidates.accounts.iter().any(|candidate| {
+                        candidate.account_id == account.account_id
+                            && candidate.credential_id == account.credential_id
+                    })
+                })
+            {
+                if defects.transient_candidates_disjoint {
+                    return Err(Refusal::new(
+                        RefusalCode::AccountSelectionUnavailable,
+                        "allocator unavailable",
+                    ));
+                }
+                return Err(Refusal::account_unservable(
+                    cortexkit_role_routing_conformance::wire::errors::AccountUnservableReason::CandidatesDisjoint,
+                    candidates.accounts.iter().map(|account| account.credential_id.clone()).collect(),
+                    eligible.iter().map(|account| account.credential_id.clone()).collect(),
+                ));
+            }
+        }
         let usable: Vec<usize> = catalog
             .accounts
             .iter()
@@ -2415,9 +2446,9 @@ impl FakeRoute {
             })
             .filter(|(_, account)| {
                 request.candidates.as_ref().is_none_or(|candidates| {
-                    candidates.accounts.iter().any(|c| {
-                        c.account_id == account.account_id
-                            && c.credential_id == account.credential_id
+                    candidates.accounts.iter().any(|candidate| {
+                        candidate.account_id == account.account_id
+                            && candidate.credential_id == account.credential_id
                     })
                 })
             })

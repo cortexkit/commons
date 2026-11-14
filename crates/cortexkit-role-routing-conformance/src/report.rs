@@ -161,6 +161,7 @@ pub const CHECKS: &[CheckSpec] = &[
     check("service_tier_report_members_accepted", "service_tier: a declaring router accepts both tier members in report usage"),
     check("parent_account_preference", "an eligible account other than the parent's is preferred"),
     check("parent_account_fallback", "the parent's account is used when it is the only eligible one"),
+    check("account_for_candidates_disjoint", "disjoint runner candidates are permanently account_unservable with the offered and eligible credential ids"),
     check("eligibility_never_holds_or_exhausts", "a model eligibility report never holds or exhausts the account for another model"),
     check("unknown_pool_accepted", "unseen well-formed pools are accepted in account_for, account_observe and report"),
     check("malformed_pool_refused_by_field", "malformed pools are invalid_request with detail.field pool on all three ops"),

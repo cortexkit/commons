@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.31
+
+- Add permanent, untimed `account_unservable` for account requests that retrying
+  cannot fix, including disjoint candidates and unavailable bound tiers. These
+  causes refuse continuation instead of holding and never start a sign-in pause.
+- Add typed refusal construction and detail decoding with open reasons and
+  credential-id-only diagnostic lists, sorted and capped at 64 with full counts.
+  Reject malformed diagnostic detail without changing terminal refusal handling.
+- **Upgrading:** routers may emit the code immediately, without a capability;
+  runners already treat unknown untimed refusal codes as final.
+
 ## 0.7.30
 
 - Accept subc-protocol 0.37.

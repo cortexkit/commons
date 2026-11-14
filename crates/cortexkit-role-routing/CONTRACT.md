@@ -1275,8 +1275,9 @@ The answer (`account::AccountForAnswer`):
   (timed), `account_quota_unknown`, `account_pool_exhausted
   {reset_at_ms?}` (timed when the reset is known),
   `account_pool_reserve_limited`, `account_selection_disabled` (not timed),
-  `account_selection_unavailable`
-  (transient, not timed), `admission_conflict`, `pin_generation_conflict`.
+  `account_selection_unavailable` (transient, not timed),
+  `account_unservable {reason, ...}` (permanent, not timed),
+  `admission_conflict`, `pin_generation_conflict`.
 - [pinned] `account_selection_disabled` means account selection is off on
   this router; use your own credential. The switch is module-wide, never
   per provider or per pool. The refusal is untimed and carries no
@@ -1450,6 +1451,13 @@ The answer (`account::AccountForAnswer`):
   sign-in, waiting for a person as before. The runner does not ask again for
   this pause. A later
   pause of the same run may ask again with a new selection id.
+- [pinned] The permanent causes in §10's `account_unservable` refusal answer
+  `kind: "refuse", routing_code: "account_unservable"`, never `hold`:
+  disjoint candidates, a bound service tier unavailable on every eligible
+  account with no known hold time, unreadable stored tier state, an allocator
+  invariant failure, or the legacy `no_eligible_account` condition. These
+  causes do not start a sign-in pause. `account_selection_unavailable` is only
+  for temporary conditions that a later retry can fix, never these causes.
 
 ### 9.2 `route.account_observe`
 
@@ -1701,11 +1709,35 @@ What a runner saw on an account, so the provider's headroom stays current.
 | `account_pool_reserve_limited` | `route.account_for` (§9.1) | `{}` | no |
 | `account_selection_disabled` | `route.account_for` (§9.1) | `{}` | no (module-wide; use your own credential) |
 | `account_selection_unavailable` | `route.account_for` (§9.1) | `{}` | no (transient) |
+| `account_unservable` | `route.account_for` (§9.1, including continuation) | `{reason, offered_credential_ids?, eligible_credential_ids?, offered_credential_count?, eligible_credential_count?}` | no (permanent; no sign-in pause) |
 | `admission_conflict` | `route.account_for` (§9.1) | `{}` | no |
 | `pin_generation_conflict` | `route.account_for` (§9.1) | `{}` | no |
 | `routing_unavailable` | a consumer, for its own work (§1) | `{}` | no |
 | `routing_ambiguous` | a consumer, for its own work (§1) | `{modules}` | no |
 
+- [pinned] `account_unservable` means retrying the request cannot fix its
+  cause. `detail.reason` is an open set: `candidates_disjoint` (well-formed
+  runner candidates do not intersect the credentials eligible for the
+  requested provider), `bound_tier_unavailable` (the decision's bound service
+  tier is unavailable on every eligible account, with no known hold time),
+  `stored_state_invalid` (stored tier state cannot be read),
+  `allocator_invariant` (an internal allocator invariant failed), and
+  `no_eligible_account` (the legacy no-eligible-account condition). Unknown
+  reasons mean plain unservable. The code is always permanent and untimed,
+  never a sign-in pause. `account_selection_unavailable` is only for temporary
+  conditions that a later retry can fix.
+- [pinned] For `candidates_disjoint`, both `offered_credential_ids` and
+  `eligible_credential_ids` and their unsigned integer totals
+  `offered_credential_count` and `eligible_credential_count` are required.
+  Each list contains credential ids only, never credentials or secrets, and
+  at most 64 entries. To construct this detail, sort each full list in
+  ascending string order, keep its first 64 ids, and record its full length
+  in the corresponding count. The decoder rejects a list longer than 64 or
+  a count smaller than its list's length. Malformed detail does not change
+  refusal handling: treat it as plain `account_unservable` without diagnostic
+  lists. Other reasons need no lists or counts.
+- [pinned] Routers may emit `account_unservable` immediately, with no new
+  capability: readers already treat unknown untimed codes as terminal.
 - [pinned] `refusals::retry_class(code, detail)` classifies an answered
   refusal as `RetryAt(t)` exactly when `Refusal::wait_until_ms` returns
   `Some(t)`: every timed row in the table above retries at the time it names,

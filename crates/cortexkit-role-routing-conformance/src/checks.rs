@@ -25,8 +25,8 @@ use cortexkit_role_routing::{
     },
     describe::{check_describe, RoleDescribe},
     errors::{
-        NoRouteDetail, NoRouteReason, PinUnavailableDetail, PinUnavailableReason, Refusal,
-        RefusalCode,
+        AccountUnservableDetail, AccountUnservableReason, NoRouteDetail, NoRouteReason,
+        PinUnavailableDetail, PinUnavailableReason, Refusal, RefusalCode,
     },
     observe::AccountObserveAnswer,
     ops,
@@ -432,6 +432,7 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             "tool_capabilities_matched_by_tag" => self.tool_capabilities_matched_by_tag().await,
             "parent_account_preference" => self.parent_account_preference(false).await,
             "parent_account_fallback" => self.parent_account_preference(true).await,
+            "account_for_candidates_disjoint" => self.account_for_candidates_disjoint().await,
             "eligibility_never_holds_or_exhausts" => {
                 self.eligibility_never_holds_or_exhausts().await
             }
@@ -1442,6 +1443,43 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 "picked the parent's account despite another eligible account"
             }
             .into());
+        }
+        Ok(())
+    }
+
+    async fn account_for_candidates_disjoint(&self) -> Check {
+        let runner = self.route_as(fixture::RUNNER_ONE).await?;
+        let mut request = Self::account_for("disjoint-admission", "disjoint", "model-c");
+        request["candidates"] = json!({
+            "view_digest": "disjoint-view",
+            "accounts": [{"account_id": "offered-account", "credential_id": "offered-credential"}]
+        });
+        let refusal = refused(
+            &runner,
+            ops::ROUTE_ACCOUNT_FOR,
+            &request,
+            RefusalCode::AccountUnservable,
+            "disjoint candidates",
+        )
+        .await?;
+        let detail = refusal
+            .detail_as::<AccountUnservableDetail>()
+            .ok_or("account_unservable has malformed diagnostic detail")?;
+        let mut eligible: Vec<_> = fixture::catalog()
+            .accounts
+            .into_iter()
+            .filter(|account| account.provider == fixture::SUBSCRIPTION_PROVIDER)
+            .map(|account| account.credential_id)
+            .collect();
+        eligible.sort();
+        if detail.reason != AccountUnservableReason::CandidatesDisjoint
+            || detail.offered_credential_ids != Some(vec!["offered-credential".into()])
+            || detail.offered_credential_count != Some(1)
+            || detail.eligible_credential_count != Some(eligible.len() as u64)
+            || detail.eligible_credential_ids != Some(eligible)
+            || refusal.wait_until_ms().is_some()
+        {
+            return Err("disjoint candidates must name the reason, both credential-id lists and counts, without a retry time".into());
         }
         Ok(())
     }

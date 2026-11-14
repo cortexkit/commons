@@ -59,6 +59,7 @@ mod tests {
             ("account_pool_reserve_limited", RetryClass::Permanent),
             ("account_selection_disabled", RetryClass::Permanent),
             ("account_selection_unavailable", RetryClass::Transient),
+            ("account_unservable", RetryClass::Permanent),
             ("admission_conflict", RetryClass::Permanent),
             ("pin_generation_conflict", RetryClass::Permanent),
             ("routing_unavailable", RetryClass::Permanent),

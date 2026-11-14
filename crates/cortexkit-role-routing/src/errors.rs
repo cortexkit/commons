@@ -70,9 +70,12 @@ open_set! {
         /// every provider and pool. Use your own credential; never timed,
         /// not exhaustion or a hold, and not a reason to try another provider.
         AccountSelectionDisabled => "account_selection_disabled",
-        /// `route.account_for`: the allocator cannot choose right now;
-        /// transient, but not timed.
+        /// `route.account_for`: a temporary allocator condition that a later
+        /// retry can fix; transient, but not timed.
         AccountSelectionUnavailable => "account_selection_unavailable",
+        /// `route.account_for`: the request cannot be served by retrying.
+        /// Permanent, untimed, and never a reason to pause for sign-in.
+        AccountUnservable => "account_unservable",
         /// `route.account_for`: the admission id was already used with a
         /// different body.
         AdmissionConflict => "admission_conflict",
@@ -142,6 +145,24 @@ open_set! {
         AccountsBlocked => "accounts_blocked",
     }
 }
+
+/// Why an account request cannot be served. Unknown reasons remain terminal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum AccountUnservableReason {
+    CandidatesDisjoint,
+    BoundTierUnavailable,
+    StoredStateInvalid,
+    AllocatorInvariant,
+    NoEligibleAccount,
+    /// An unfamiliar reason, preserved without changing refusal handling.
+    #[serde(untagged)]
+    Unknown(String),
+}
+
+/// Maximum credential ids in each `account_unservable` diagnostic list.
+pub const MAX_UNSERVABLE_CREDENTIAL_IDS: usize = 64;
 
 /// A refusal body: `{code, message, detail}`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -291,6 +312,21 @@ impl Refusal {
         )
     }
 
+    /// Permanent `account_unservable`, never timed or a sign-in pause.
+    /// For `candidates_disjoint`, sorts and caps each diagnostic list at 64
+    /// credential ids while preserving its full count. Pass ids, never secrets.
+    pub fn account_unservable(
+        reason: AccountUnservableReason,
+        offered_credential_ids: Vec<String>,
+        eligible_credential_ids: Vec<String>,
+    ) -> Self {
+        Self::with(
+            RefusalCode::AccountUnservable,
+            "the account request cannot be served",
+            &AccountUnservableDetail::new(reason, offered_credential_ids, eligible_credential_ids),
+        )
+    }
+
     /// `routing_ambiguous {modules}`: a consumer's own refusal.
     pub fn routing_ambiguous(modules: Vec<String>) -> Self {
         Self::with(
@@ -382,6 +418,96 @@ impl NoEngineDetail {
     }
 }
 
+/// The detail of `account_unservable`. Credential ids are diagnostics, not secrets.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct AccountUnservableDetail {
+    pub reason: AccountUnservableReason,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offered_credential_ids: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eligible_credential_ids: Option<Vec<String>>,
+    /// Total before truncation; always present for `candidates_disjoint`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offered_credential_count: Option<u64>,
+    /// Total before truncation; always present for `candidates_disjoint`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eligible_credential_count: Option<u64>,
+}
+
+impl AccountUnservableDetail {
+    /// Sort and cap the diagnostic lists, recording their original lengths.
+    /// Lists and counts are omitted for reasons other than `candidates_disjoint`.
+    pub fn new(
+        reason: AccountUnservableReason,
+        mut offered_credential_ids: Vec<String>,
+        mut eligible_credential_ids: Vec<String>,
+    ) -> Self {
+        let disjoint = reason == AccountUnservableReason::CandidatesDisjoint;
+        let offered_credential_count = offered_credential_ids.len() as u64;
+        let eligible_credential_count = eligible_credential_ids.len() as u64;
+        offered_credential_ids.sort();
+        eligible_credential_ids.sort();
+        offered_credential_ids.truncate(MAX_UNSERVABLE_CREDENTIAL_IDS);
+        eligible_credential_ids.truncate(MAX_UNSERVABLE_CREDENTIAL_IDS);
+        Self {
+            reason,
+            offered_credential_ids: disjoint.then_some(offered_credential_ids),
+            eligible_credential_ids: disjoint.then_some(eligible_credential_ids),
+            offered_credential_count: disjoint.then_some(offered_credential_count),
+            eligible_credential_count: disjoint.then_some(eligible_credential_count),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AccountUnservableDetail {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Detail {
+            reason: AccountUnservableReason,
+            offered_credential_ids: Option<Vec<String>>,
+            eligible_credential_ids: Option<Vec<String>>,
+            offered_credential_count: Option<u64>,
+            eligible_credential_count: Option<u64>,
+        }
+        let detail = Detail::deserialize(deserializer)?;
+        for (ids, count) in [
+            (
+                &detail.offered_credential_ids,
+                detail.offered_credential_count,
+            ),
+            (
+                &detail.eligible_credential_ids,
+                detail.eligible_credential_count,
+            ),
+        ] {
+            if detail.reason == AccountUnservableReason::CandidatesDisjoint
+                && (ids.is_none() || count.is_none())
+            {
+                return Err(serde::de::Error::custom(
+                    "candidates_disjoint requires both lists and counts",
+                ));
+            }
+            if let Some(ids) = ids {
+                if ids.len() > MAX_UNSERVABLE_CREDENTIAL_IDS
+                    || count.is_some_and(|count| count < ids.len() as u64)
+                {
+                    return Err(serde::de::Error::custom(
+                        "invalid account_unservable list or count",
+                    ));
+                }
+            }
+        }
+        Ok(Self {
+            reason: detail.reason,
+            offered_credential_ids: detail.offered_credential_ids,
+            eligible_credential_ids: detail.eligible_credential_ids,
+            offered_credential_count: detail.offered_credential_count,
+            eligible_credential_count: detail.eligible_credential_count,
+        })
+    }
+}
+
 /// The detail of `account_hold`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountHoldDetail {
@@ -405,6 +531,130 @@ pub struct RoutingAmbiguousDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn account_unservable_round_trips_open_reasons_and_bounded_ids() {
+        use crate::refusals::{retry_class, RetryClass};
+        use serde_json::json;
+
+        for (reason, wire_reason) in [
+            (
+                AccountUnservableReason::CandidatesDisjoint,
+                "candidates_disjoint",
+            ),
+            (
+                AccountUnservableReason::BoundTierUnavailable,
+                "bound_tier_unavailable",
+            ),
+            (
+                AccountUnservableReason::StoredStateInvalid,
+                "stored_state_invalid",
+            ),
+            (
+                AccountUnservableReason::AllocatorInvariant,
+                "allocator_invariant",
+            ),
+            (
+                AccountUnservableReason::NoEligibleAccount,
+                "no_eligible_account",
+            ),
+            (
+                AccountUnservableReason::Unknown("future_reason".into()),
+                "future_reason",
+            ),
+        ] {
+            let mut refusal = Refusal::account_unservable(reason.clone(), vec![], vec![]);
+            assert_eq!(refusal.code, RefusalCode::AccountUnservable);
+            assert!(RefusalCode::parse("account_unservable").is_known());
+            assert_eq!(refusal.detail["reason"], wire_reason);
+            let decoded: Refusal = serde_json::from_value(json!(refusal)).unwrap();
+            assert_eq!(decoded, refusal);
+            let detail = decoded.detail_as::<AccountUnservableDetail>().unwrap();
+            assert_eq!(detail.reason, reason);
+            assert_eq!(
+                detail.offered_credential_ids.is_some(),
+                wire_reason == "candidates_disjoint"
+            );
+            for key in ["until_ms", "reset_at_ms"] {
+                refusal.detail.insert(key.into(), json!(99));
+            }
+            assert_eq!(refusal.wait_until_ms(), None);
+            assert_eq!(
+                retry_class("account_unservable", &json!(refusal.detail)),
+                RetryClass::Permanent
+            );
+        }
+
+        let offered: Vec<_> = (0..66).rev().map(|n| format!("offered-{n:03}")).collect();
+        let eligible: Vec<_> = (0..65).rev().map(|n| format!("eligible-{n:03}")).collect();
+        let refusal = Refusal::account_unservable(
+            AccountUnservableReason::CandidatesDisjoint,
+            offered,
+            eligible,
+        );
+        let detail = refusal.detail_as::<AccountUnservableDetail>().unwrap();
+        assert_eq!(detail.offered_credential_count, Some(66));
+        assert_eq!(detail.eligible_credential_count, Some(65));
+        assert_eq!(
+            detail.offered_credential_ids,
+            Some((0..64).map(|n| format!("offered-{n:03}")).collect())
+        );
+        assert_eq!(
+            detail.eligible_credential_ids,
+            Some((0..64).map(|n| format!("eligible-{n:03}")).collect())
+        );
+        assert_eq!(serde_json::to_value(detail).unwrap(), json!(refusal.detail));
+    }
+
+    #[test]
+    fn account_unservable_rejects_malformed_diagnostics_but_stays_terminal() {
+        use crate::refusals::{retry_class, RetryClass};
+        use serde_json::json;
+
+        let valid = json!({
+            "reason": "candidates_disjoint",
+            "offered_credential_ids": ["offered"], "offered_credential_count": 1,
+            "eligible_credential_ids": ["eligible"], "eligible_credential_count": 1
+        });
+        for key in [
+            "offered_credential_ids",
+            "eligible_credential_ids",
+            "offered_credential_count",
+            "eligible_credential_count",
+        ] {
+            let mut invalid = valid.clone();
+            invalid.as_object_mut().unwrap().remove(key);
+            assert!(
+                serde_json::from_value::<AccountUnservableDetail>(invalid).is_err(),
+                "missing {key}"
+            );
+        }
+        for (list, count) in [
+            ("offered_credential_ids", "offered_credential_count"),
+            ("eligible_credential_ids", "eligible_credential_count"),
+        ] {
+            for (ids, total) in [
+                (json!(vec!["id"; 65]), json!(65)),
+                (json!(["id"]), json!(0)),
+                (json!(["id"]), json!(-1)),
+                (json!(["id"]), json!("1")),
+            ] {
+                let mut invalid = valid.clone();
+                invalid[list] = ids;
+                invalid[count] = total;
+                let refusal = Refusal::with(RefusalCode::AccountUnservable, "unservable", &invalid);
+                assert!(
+                    refusal.detail_as::<AccountUnservableDetail>().is_none(),
+                    "{list}: {invalid}"
+                );
+                assert_eq!(refusal.wait_until_ms(), None);
+                assert_eq!(
+                    retry_class("account_unservable", &invalid),
+                    RetryClass::Permanent
+                );
+            }
+        }
+    }
 
     #[test]
     fn consumer_not_owned_names_the_consumer_and_is_terminal() {

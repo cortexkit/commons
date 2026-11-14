@@ -271,6 +271,24 @@
       "wait_until_ms": null
     },
     {
+      "name": "account_unservable",
+      "ops": [
+        "route.account_for"
+      ],
+      "body": {
+        "code": "account_unservable",
+        "message": "the account request cannot be served",
+        "detail": {
+          "reason": "candidates_disjoint",
+          "offered_credential_ids": ["offered-credential"],
+          "eligible_credential_ids": ["eligible-credential"],
+          "offered_credential_count": 1,
+          "eligible_credential_count": 1
+        }
+      },
+      "wait_until_ms": null
+    },
+    {
       "name": "admission_conflict",
       "ops": [
         "route.account_for"

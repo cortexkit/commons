@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.35
+
+- Pin routing `=0.7.31`. Check that disjoint runner candidates are refused with
+  `account_unservable`, `candidates_disjoint`, and both credential-id lists and
+  counts. Include a faulty router answering transient `account_selection_unavailable`
+  that the kit rejects by check name.
+- **Upgrading:** routers may emit `account_unservable` immediately, without a
+  capability; runners already treat unknown untimed refusal codes as final.
+
 ## 0.10.34
 
 - Accept subc-protocol 0.37.

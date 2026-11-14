@@ -283,12 +283,25 @@ sends it only after `role.describe` declares the group.
 `route.account_for` may refuse with `invalid_request`, `unknown_decision`,
 `account_not_authorized`, `auth_required`, `account_hold`,
 `account_quota_unknown`, `account_pool_exhausted`, `account_pool_reserve_limited`,
-`account_selection_disabled`, `account_selection_unavailable`,
+`account_selection_disabled`, `account_selection_unavailable`, `account_unservable`,
 `admission_conflict` or `pin_generation_conflict`. `account_selection_disabled`
 means account selection is off on this router; use your own credential. It is
 module-wide, never per provider or per pool, and untimed: it carries no
 `reset_at_ms`. A caller must not treat it as exhaustion or a hold, or retry
 against another provider expecting a different answer.
+
+`account_unservable` is permanent and untimed, never a sign-in pause. Its open
+reason set includes runner candidates that share no credential with the eligible
+provider accounts, and a decision's fixed service tier unavailable on every
+eligible account with no known hold time (CONTRACT §10).
+Unknown reasons remain plain unservable. Use `Refusal::account_unservable` to
+construct it and `detail_as::<AccountUnservableDetail>()` to decode its detail.
+For disjoint candidates, credential-id-only lists are sorted and capped at 64,
+with full counts preserved. Routers may emit the code without introducing a
+capability for discovery:
+older readers already treat unknown untimed refusal codes as final.
+`account_selection_unavailable` is reserved for temporary conditions a later
+retry can fix.
 
 With `pin_fallback` (`SelectRequest::with_pin_fallback`) beside a pin, an
 unservable pin routes normally instead of refusing `pin_unavailable`. The
