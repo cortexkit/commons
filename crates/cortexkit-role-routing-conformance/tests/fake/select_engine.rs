@@ -233,6 +233,21 @@ impl FakeRoute {
     }
 
     fn media_account(&self, state: &mut State, params: &Value) -> Result<Value, Refusal> {
+        let mut parsed = params.clone();
+        if self.fault("select_media_admission_missing_conversation") {
+            parsed
+                .as_object_mut()
+                .unwrap()
+                .entry("conversation_key")
+                .or_insert(json!("accepted-missing-conversation"));
+        }
+        if self.fault("select_media_admission_unknown_mode") && parsed["mode"] == "new" {
+            parsed["mode"] = json!("admit");
+        }
+        cortexkit_role_routing_conformance::wire::account::parse_account_for_request_serving(
+            &parsed,
+            cortexkit_role_routing_conformance::wire::capabilities::KNOWN,
+        )?;
         let fault = self.defects.engine_fault;
         let provider = params["provider"].as_str().unwrap();
         let model = params["model"].as_str().unwrap();

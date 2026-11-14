@@ -762,7 +762,7 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 )
                 .await?;
                 let media = self.route_as(MEDIA).await?;
-                let admission = json!({"decision_id":selected["decision_id"],"provider":fixture::SUBSCRIPTION_PROVIDER,"model":"model-c","admission_id":"media-admission","mode":"new"});
+                let admission = json!({"decision_id":selected["decision_id"],"provider":fixture::SUBSCRIPTION_PROVIDER,"model":"model-c","admission_id":"media-admission","conversation_key":"select-media-report-admission-conversation","mode":"admit"});
                 let _: Value = answer(
                     &media,
                     ops::ROUTE_ACCOUNT_FOR,
@@ -770,6 +770,26 @@ impl<S: RoutingSubject> Suite<'_, S> {
                     "media admission",
                 )
                 .await?;
+                for field in ["conversation_key", "mode"] {
+                    let mut malformed = admission.clone();
+                    malformed["admission_id"] = json!(format!("invalid-media-{field}"));
+                    if field == "conversation_key" {
+                        malformed.as_object_mut().unwrap().remove(field);
+                    } else {
+                        malformed[field] = json!("new");
+                    }
+                    let refusal = refused(
+                        &media,
+                        ops::ROUTE_ACCOUNT_FOR,
+                        &malformed,
+                        RefusalCode::InvalidRequest,
+                        &format!("media admission invalid {field}"),
+                    )
+                    .await?;
+                    if refusal.detail.get("field") != Some(&json!(field)) {
+                        return Err(format!("media admission refusal must name {field}"));
+                    }
+                }
                 let other = self.route_as("other-media").await?;
                 refused(
                     &other,
@@ -1011,6 +1031,38 @@ mod tests {
         select_media_policy,
         select_media_report_admission
     );
+
+    #[tokio::test]
+    async fn select_media_report_admission_rejects_missing_conversation_acceptance() {
+        rejects_malformed_admission(
+            "select_media_admission_missing_conversation",
+            "conversation_key",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn select_media_report_admission_rejects_unknown_mode_acceptance() {
+        rejects_malformed_admission("select_media_admission_unknown_mode", "mode").await;
+    }
+
+    async fn rejects_malformed_admission(fault: &'static str, field: &str) {
+        let subject = FakeSubject::with_media(Defects {
+            extension: Some(fault),
+            ..Defects::default()
+        });
+        let spec = crate::CHECKS
+            .iter()
+            .find(|spec| spec.name == "select_media_report_admission")
+            .unwrap();
+        let report = crate::runner::run_check(&Suite::new(&subject), spec).await;
+        assert_eq!(report.check, "select_media_report_admission");
+        assert!(
+            matches!(&report.outcome, crate::CheckOutcome::Failed { reason }
+                if reason.contains(&format!("media admission invalid {field}"))),
+            "{report:?}"
+        );
+    }
 
     #[tokio::test]
     async fn select_media_faulty_routers_fail_by_check_name() {

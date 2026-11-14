@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.31
+
+- Respect the advertised `select_media` kinds in the consumer-declaration search
+  check, including a named-field refusal when search is not served. Use a
+  distinct conversation and `admit` mode for retained media decision admission.
+  Validate malformed admissions with the routing parser in the reference fake
+  and add negative self-tests for permissive kind and admission handling.
+  Keep the routing pin at `=0.7.27`.
+
 ## 0.10.30
 
 - Pin routing `=0.7.27`. Correct `account_observe_success_other_credential`

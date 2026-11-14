@@ -132,15 +132,33 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 }
                 let search_params = json!({"consumer":"example-consumer.search","requirements":{}});
                 if describe.serves(capabilities::SELECT_KIND) {
-                    let search: SelectAnswer = answer(
-                        &route,
-                        ops::ROUTE_SELECT,
-                        &search_params,
-                        "declared search kind",
-                    )
-                    .await?;
-                    if search.route.route_key() != search_route {
-                        return Err("declared kind escaped its route kind".into());
+                    if describe.serves(capabilities::SELECT_MEDIA)
+                        && !describe
+                            .kinds
+                            .contains(&crate::wire::placement::Kind::Search)
+                    {
+                        let refusal = refused(
+                            &route,
+                            ops::ROUTE_SELECT,
+                            &search_params,
+                            RefusalCode::InvalidRequest,
+                            "unserved declared search kind",
+                        )
+                        .await?;
+                        if refusal.detail.get("field") != Some(&json!("kind")) {
+                            return Err("unserved search refusal must name kind".into());
+                        }
+                    } else {
+                        let search: SelectAnswer = answer(
+                            &route,
+                            ops::ROUTE_SELECT,
+                            &search_params,
+                            "declared search kind",
+                        )
+                        .await?;
+                        if search.route.route_key() != search_route {
+                            return Err("declared kind escaped its route kind".into());
+                        }
                     }
                 } else {
                     no_route(&route, &search_params).await?;
@@ -440,6 +458,36 @@ impl<S: RoutingSubject> Suite<'_, S> {
 mod tests {
     use super::*;
     use crate::checks::select_engine::fake::{Defects, FakeSubject};
+
+    #[tokio::test]
+    async fn placement_consumer_declarations_with_media_unserved_search_passes() {
+        let subject = FakeSubject::with_media_declarations(Defects::default());
+        assert_eq!(
+            Suite::new(&subject)
+                .run("placement_consumer_declarations")
+                .await,
+            Ok(Ending::Passed)
+        );
+    }
+
+    #[tokio::test]
+    async fn placement_consumer_declarations_rejects_unserved_search_acceptance() {
+        let subject = FakeSubject::with_media_declarations(Defects {
+            extension: Some("placement_accepts_unserved_kind"),
+            ..Defects::default()
+        });
+        let spec = crate::CHECKS
+            .iter()
+            .find(|spec| spec.name == "placement_consumer_declarations")
+            .unwrap();
+        let report = crate::runner::run_check(&Suite::new(&subject), spec).await;
+        assert_eq!(report.check, "placement_consumer_declarations");
+        assert!(
+            matches!(&report.outcome, crate::CheckOutcome::Failed { reason }
+                if reason.contains("unserved declared search kind")),
+            "{report:?}"
+        );
+    }
 
     #[tokio::test]
     async fn placement_harness_facts_uses_matching_runner_pairs() {

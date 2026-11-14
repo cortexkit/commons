@@ -94,6 +94,15 @@ impl FakeRoute {
         if kind != "llm" && self.fault("placement_without_select_kind") {
             return Err(Refusal::no_route(NoRouteReason::AllInadequate, None));
         }
+        if self.media_control && kind != "llm" && !self.fault("placement_accepts_unserved_kind") {
+            let describe: RoleDescribe = serde_json::from_value(self.describe(state)?).unwrap();
+            if !describe.kinds.iter().any(|served| served.as_str() == kind) {
+                return Err(Refusal::invalid_request(
+                    "kind",
+                    "kind is not served by select_media",
+                ));
+            }
+        }
         if !self.fault("placement_select_kind") {
             catalog.models.retain(|model| {
                 state
