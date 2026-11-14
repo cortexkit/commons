@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.15
+
+- `cargo_profile_dir()` and `cargo_profile_bin(name)` work with a Cargo build
+  folder kept apart from the target folder (`CARGO_BUILD_BUILD_DIR` or
+  `build.build-dir`). The test executable then sits under the build folder
+  while the binaries stay in the target folder, so when `CARGO_TARGET_DIR` or
+  `CARGO_BUILD_TARGET_DIR` names a target folder with the same profile, that
+  folder is returned.
+
 ## 0.1.14
 
 - Add `cargo_profile_dir()`, `cargo_profile_dir_of(exe)` and
