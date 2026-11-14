@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.27
+
+- Correct 0.7.26's `account_observe_success` wording for quota blocks: a quota
+  block and its retest slot are shared by every credential on the account and
+  quota pool. Credential-scoped blocks remain independent. No wire change.
+
 ## 0.7.26
 
 - Add readers-first `account_observe_success`: served attempt outcomes on

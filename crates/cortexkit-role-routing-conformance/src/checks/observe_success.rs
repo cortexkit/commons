@@ -166,12 +166,74 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 )
                 .await?;
             }
+            "account_observe_success_quota_shared" => {
+                for (index, status) in ["served", "served_empty"].iter().enumerate() {
+                    self.fresh().await?;
+                    self.subject.configure_catalog(&catalog).await?;
+                    let route = self.route_as(fixture::RUNNER_ONE).await?;
+                    let id = format!("quota-retest-{index}");
+                    self.success_seed(
+                        &format!("quota-other-{index}"),
+                        &other.account_id,
+                        &other.credential_id,
+                        "quota",
+                        now_ms().saturating_sub(1000),
+                    )
+                    .await?;
+                    self.success_seed(
+                        &id,
+                        account,
+                        credential,
+                        "quota",
+                        now_ms().saturating_sub(1000),
+                    )
+                    .await?;
+                    self.success_blocked(
+                        &format!("quota-sibling-blocked-{index}"),
+                        account,
+                        &sibling.credential_id,
+                    )
+                    .await?;
+                    params = success(&id, account, credential);
+                    params["event_id"] = json!(format!("quota-success-{index}"));
+                    params["attempt_outcome"]["status"] = json!(status);
+                    let observed: AccountObserveAnswer = answer(
+                        &route,
+                        ops::ROUTE_ACCOUNT_OBSERVE,
+                        &params,
+                        "successful quota retest",
+                    )
+                    .await?;
+                    if !observed.observation.bound || observed.observation.effects.is_empty() {
+                        return Err("successful quota retest did not name its ended block".into());
+                    }
+                    // Two fresh admissions distinguish a cleared block from another retest slot.
+                    for probe in 0..2 {
+                        self.success_admit(
+                            &format!("quota-sibling-cleared-{index}-{probe}"),
+                            account,
+                            &sibling.credential_id,
+                        )
+                        .await?;
+                    }
+                    self.success_blocked(
+                        &format!("quota-other-blocked-{index}"),
+                        &other.account_id,
+                        &other.credential_id,
+                    )
+                    .await?;
+                }
+            }
             _ => {
                 for (index, kind) in ["quota", "credit", "credential_refused", "transient_backoff"]
                     .iter()
                     .enumerate()
                 {
+                    // Surviving blocks of one kind must not affect the next kind's case.
+                    self.fresh().await?;
                     self.subject.configure_catalog(&catalog).await?;
+                    let route = self.route_as(fixture::RUNNER_ONE).await?;
+                    let independent = if *kind == "quota" { &other } else { &sibling };
                     let id = format!("retest-{index}");
                     self.success_seed(
                         &id,
@@ -200,8 +262,8 @@ impl<S: RoutingSubject> Suite<'_, S> {
                         "account_observe_success_other_credential" => {
                             self.success_seed(
                                 &format!("sibling-{index}"),
-                                account,
-                                &sibling.credential_id,
+                                &independent.account_id,
+                                &independent.credential_id,
                                 kind,
                                 now_ms(),
                             )
@@ -260,8 +322,8 @@ impl<S: RoutingSubject> Suite<'_, S> {
                         if name == "account_observe_success_other_credential" {
                             self.success_blocked(
                                 &format!("sibling-probe-{index}"),
-                                account,
-                                &sibling.credential_id,
+                                &independent.account_id,
+                                &independent.credential_id,
                             )
                             .await?;
                         }

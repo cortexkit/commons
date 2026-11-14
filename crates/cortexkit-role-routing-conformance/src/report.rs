@@ -16,7 +16,8 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 pub const CHECKS: &[CheckSpec] = &[
     check("account_observe_success_clears", "account_observe_success: served retests end only their captured block"),
     check("account_observe_success_newer_block", "account_observe_success: a block recorded after admission survives"),
-    check("account_observe_success_other_credential", "account_observe_success: another credential on the same account stays blocked"),
+    check("account_observe_success_other_credential", "account_observe_success: independent credential-scoped or other-account quota blocks survive"),
+    check("account_observe_success_quota_shared", "account_observe_success: quota blocks and retests are shared by an account's credentials, not other accounts"),
     check("account_observe_success_other_account", "account_observe_success: another account stays blocked"),
     check("account_observe_success_unbound", "account_observe_success: unbound success changes nothing"),
     check("account_observe_success_unknown", "account_observe_success: unknown status counts nothing"),

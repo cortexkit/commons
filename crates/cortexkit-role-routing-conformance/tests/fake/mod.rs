@@ -276,11 +276,26 @@ struct ConversationPin {
 
 type ObservePair = (String, String);
 type ObserveBlock = (String, u64);
-type ObserveRetest = (ObservePair, ObserveBlock);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum ObserveScope {
+    Quota(String, Option<String>),
+    Credential(ObservePair),
+}
+
+impl ObserveScope {
+    fn account(&self) -> &str {
+        match self {
+            Self::Quota(account, _) | Self::Credential((account, _)) => account,
+        }
+    }
+}
+
+type ObserveRetest = (ObserveScope, ObserveBlock);
 
 #[derive(Default)]
 struct State {
-    observe_blocks: HashMap<ObservePair, ObserveBlock>,
+    observe_blocks: HashMap<ObserveScope, ObserveBlock>,
     observe_retest_next: Option<ObservePair>,
     observe_retests: HashMap<(String, String), ObserveRetest>,
     selection_facts: cortexkit_role_routing_conformance::SelectionFacts,
@@ -355,6 +370,19 @@ struct State {
 const DEFAULT_HOLD_S: u64 = 900;
 
 impl State {
+    fn observe_block(
+        &self,
+        pair: &ObservePair,
+        pool: &Option<String>,
+    ) -> Option<(&ObserveScope, &ObserveBlock)> {
+        self.observe_blocks
+            .get_key_value(&ObserveScope::Credential(pair.clone()))
+            .or_else(|| {
+                self.observe_blocks
+                    .get_key_value(&ObserveScope::Quota(pair.0.clone(), pool.clone()))
+            })
+    }
+
     fn meets_input(
         &self,
         requirements: &Requirements,
@@ -831,9 +859,16 @@ impl RoutingSubject for FakeSubject {
     ) -> Result<(), String> {
         let mut state = self.state.lock().unwrap();
         let pair = (account_id.to_owned(), credential_id.to_owned());
+        let scope = if kind == "quota"
+            && self.defects.extension != Some("account_observe_success_quota_shared")
+        {
+            ObserveScope::Quota(account_id.to_owned(), None)
+        } else {
+            ObserveScope::Credential(pair.clone())
+        };
         state
             .observe_blocks
-            .insert(pair.clone(), (kind.into(), recorded_at_ms));
+            .insert(scope, (kind.into(), recorded_at_ms));
         state.observe_retest_next = Some(pair);
         Ok(())
     }
@@ -2353,7 +2388,7 @@ impl FakeRoute {
             })
             .filter(|(_, account)| {
                 let pair = (account.account_id.clone(), account.credential_id.clone());
-                !state.observe_blocks.contains_key(&pair)
+                state.observe_block(&pair, &request.pool).is_none()
                     || state.observe_retest_next.as_ref() == Some(&pair)
             })
             .filter(|(_, account)| {
@@ -2637,10 +2672,9 @@ impl FakeRoute {
         }
         let pair = (chosen.account_id.clone(), chosen.credential_id.clone());
         if state.observe_retest_next.as_ref() == Some(&pair) {
-            if let Some(block) = state.observe_blocks.get(&pair) {
-                state
-                    .observe_retests
-                    .insert(key.clone(), (pair, block.clone()));
+            if let Some((scope, block)) = state.observe_block(&pair, &request.pool) {
+                let retest = (scope.clone(), block.clone());
+                state.observe_retests.insert(key.clone(), retest);
             }
             state.observe_retest_next = None;
         }

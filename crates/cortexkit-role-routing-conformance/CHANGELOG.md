@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.30
+
+- Pin routing `=0.7.27`. Correct `account_observe_success_other_credential`
+  to keep quota isolation on a different account, while credit, refused
+  credential and backoff blocks remain credential-scoped. Add
+  `account_observe_success_quota_shared` to check the shared quota block and
+  retest slot, its removal for sibling credentials, and other-account safety.
+  Update the reference fake and negative self-tests for both checks.
+
 ## 0.10.29
 
 - Pin routing `=0.7.26`. Add readers-first `account_observe_success` checks for

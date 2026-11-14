@@ -71,9 +71,14 @@ impl FakeRoute {
         let served = matches!(status, AttemptStatus::Served | AttemptStatus::ServedEmpty)
             || self.fault("account_observe_success_unknown");
         let captured = state.observe_retests.get(&admission);
-        let matching = captured.is_some_and(|(original_pair, block)| {
-            original_pair == &pair && state.observe_blocks.get(&pair) == Some(block)
-        });
+        let pool = state
+            .admissions
+            .get(&admission)
+            .and_then(|(request, _)| request.pool.clone());
+        let current = state
+            .observe_block(&pair, &pool)
+            .map(|(scope, block)| (scope.clone(), block.clone()));
+        let matching = captured.is_some_and(|block| Some(block) == current.as_ref());
         let wrong_scope = self.fault("account_observe_success_newer_block")
             || self.fault("account_observe_success_unbound")
             || self.fault("account_observe_success_duplicate");
@@ -83,16 +88,21 @@ impl FakeRoute {
             && (matching || wrong_scope)
             && !self.fault("account_observe_success_clears")
         {
-            if let Some((kind, _)) = state.observe_blocks.remove(&pair) {
+            if let Some((scope, (kind, _))) = current {
+                state.observe_blocks.remove(&scope);
                 effects.push(format!("ended {kind} block"));
-            }
-            if self.fault("account_observe_success_other_credential") {
-                state
-                    .observe_blocks
-                    .retain(|(account, _), _| account != &pair.0);
-            }
-            if self.fault("account_observe_success_other_account") {
-                state.observe_blocks.clear();
+                if self.fault("account_observe_success_other_credential") {
+                    if kind == "quota" {
+                        state.observe_blocks.clear();
+                    } else {
+                        state
+                            .observe_blocks
+                            .retain(|scope, _| scope.account() != pair.0);
+                    }
+                }
+                if self.fault("account_observe_success_other_account") {
+                    state.observe_blocks.clear();
+                }
             }
         }
         let observation = Observation {

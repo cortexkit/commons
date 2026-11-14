@@ -4,6 +4,7 @@ const CASES: &[&str] = &[
     "account_observe_success_clears",
     "account_observe_success_newer_block",
     "account_observe_success_other_credential",
+    "account_observe_success_quota_shared",
     "account_observe_success_other_account",
     "account_observe_success_unbound",
     "account_observe_success_unknown",
@@ -55,6 +56,14 @@ async fn wrong_router(name: &'static str) {
         report.render()
     );
     println!("rejected wrong router: {name}: {:?}", report.outcome(name));
+    if name == "account_observe_success_other_credential" {
+        assert!(
+            matches!(report.outcome(name), Some(CheckOutcome::Failed { reason })
+                if reason.contains("success-other-account")),
+            "quota success must not clear another account's block: {}",
+            report.render()
+        );
+    }
     assert!(
         report.failing().iter().all(|failed| CASES.contains(failed)),
         "unrelated failure: {}",
@@ -75,6 +84,7 @@ rejects_wrong_routers! {
     account_observe_success_clears,
     account_observe_success_newer_block,
     account_observe_success_other_credential,
+    account_observe_success_quota_shared,
     account_observe_success_other_account,
     account_observe_success_unbound,
     account_observe_success_unknown,

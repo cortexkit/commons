@@ -486,8 +486,10 @@ pub trait RoutingSubject: Send + Sync {
     }
 
     /// Test seam for `account_observe_success` only: install a block of `kind`
-    /// on exactly this account and credential at `recorded_at_ms`, and make
-    /// the pair the next `account_for` admission's retest, preserving admissions.
+    /// at `recorded_at_ms`, and make this account and credential the next
+    /// `account_for` admission's retest, preserving admissions. Quota blocks
+    /// belong to the account with `pool` omitted, shared by its credentials;
+    /// other kinds belong only to this account and credential.
     /// A real router reaches the same state through its own block and retest
     /// rules; this hook must not change what a real request would be admitted to.
     /// Kinds used by the kit are `quota`, `credit`, `credential_refused` and

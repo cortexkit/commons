@@ -1551,9 +1551,12 @@ What a runner saw on an account, so the provider's headroom stays current.
   With the member, `admission_id`, `served_account_id` and `credential_id`
   are required; each missing companion is `invalid_request` naming that field.
 - [pinned] A served outcome bound to an admission ends only the block that
-  admission was retesting, for exactly that account and credential. It never
-  ends a block recorded after the admission started, another credential's
-  block on the same account, or another account's block. An unbound observation
+  admission was retesting. A quota block belongs to that account and quota pool
+  and is shared by every credential on the account, with one retest slot. A
+  credential-scoped block (credit, refused credential or backoff) belongs only
+  to that account and credential. A served outcome never ends a block recorded
+  after the admission started, another credential's credential-scoped block on
+  the same account, or any block on another account. An unbound observation
   (`bound: false`) changes nothing. The existing duplicate `event_id` rule
   applies: no effect on replay. `effects` names the block ended, in the
   provider's own words, like other observe effects. Served outcomes on
