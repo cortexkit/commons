@@ -261,6 +261,14 @@ impl FakeRoute {
             .media
             .get(&key(&candidate.engine))
             .and_then(|f| f.price.clone());
+        // A real router computes rates as f64, so an integral rate goes out as
+        // `2.0`, not `2`. Emit rates the same way so a check that compares the
+        // integer spelling fails here first.
+        if let Some(price) = &mut answer.price {
+            for unit in price.rates.values_mut() {
+                unit.rate = serde_json::Number::from_f64(unit.rate.as_f64().unwrap()).unwrap();
+            }
+        }
         if request.kind == engine::Kind::Synthesize {
             if let Some(price) = &mut answer.price {
                 let count = if self.fault("select_media_input_characters") {

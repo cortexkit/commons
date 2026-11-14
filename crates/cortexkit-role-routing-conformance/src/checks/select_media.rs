@@ -572,13 +572,18 @@ impl<S: RoutingSubject> Suite<'_, S> {
                     .insert(format!("{}/model-c", fixture::SUBSCRIPTION_PROVIDER), media);
                 self.subject.configure_selection_facts(&facts).await?;
                 let value = selected(&route, &params).await?;
-                if value["price"]["rates"]["input.per_audio_second"]["rate"] != 2
+                let price: crate::wire::select_media::UnitPrice =
+                    serde_json::from_value(value["price"].clone()).map_err(|e| e.to_string())?;
+                // Compare the number's value: a router may write the rate as
+                // `2` or `2.0`, and both are the same JSON number.
+                if price
+                    .rate("input.per_audio_second")
+                    .and_then(|unit| unit.rate.as_f64())
+                    != Some(2.0)
                     || value["price"]["rates"].get("output.per_image").is_some()
                 {
                     return Err("unit price keys were renamed or invented".into());
                 }
-                let price: crate::wire::select_media::UnitPrice =
-                    serde_json::from_value(value["price"].clone()).map_err(|e| e.to_string())?;
                 if price.rate("input.per_second").is_some()
                     || price.rate("output.per_image").is_some()
                 {

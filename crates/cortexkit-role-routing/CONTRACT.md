@@ -2427,6 +2427,20 @@ breaking release, after callers have migrated to `route.select`.
   order. If no routable route of the kind is graded, the level maps to nothing
   and selection uses this ungraded order, including for caller-local engines
   and consumers with a declared default level.
+  A caller-local engine takes its catalog row's `quality.grade` when the catalog
+  has a row for that kind and model, since the grade belongs to the engine
+  wherever it runs; without one it is ungraded. Its expected job cost is a
+  known zero: nothing is billed to anyone in the fleet.
+  When the request carries no quantity for the job's unit, order expected job
+  cost by the matching unit rate (`<role>.per_<unit>` for the job's role and
+  unit), lower rate first. Within a group of routes with equal rates, the
+  lower `minimum` comes first (an absent `minimum` counts as zero) when every
+  route in the group has a known minimum; otherwise the whole group falls
+  through to the next ranking key, so the comparison stays transitive.
+  For a linear price this is the job-cost order at any quantity; a `minimum`
+  or `step` can reorder small jobs, which a caller avoids by stating the
+  quantity. A module engine with no rate in that role and unit has unknown
+  cost and ranks after known costs. A caller-local engine stays a known zero.
   With neither request level nor declared default, rank grade descending
   (graded before ungraded), then measured result descending (measured before
   unmeasured), then expected job cost ascending (known before unknown), then
@@ -2458,7 +2472,14 @@ breaking release, after callers have migrated to `route.select`.
   Section 16.5's basis, multiplier, finiteness, division for subscription
   equivalent, estimate-not-money and `price_unknown` rules apply unchanged.
   Rates and minimums are finite and non-negative; steps are finite and
-  positive. Omit `price` when the router cannot price the job.
+  positive. Omit `price` only when no catalog rate matches the job's role and
+  unit. When a rate matches but the request carries no quantity (for example a
+  transcribe with no `duration_ms`), the answer carries `price` with the
+  matching `rates` and omits `estimated_task_usd`; the caller multiplies by its
+  own quantity. A caller-local selection carries no `price`, and the dollar-cap
+  rule (a caller holding a dollar cap refuses to send without a price) applies
+  to module engines only: a caller-local selection costs nothing and is never
+  refused for lacking a price.
 - [pinned] `select_media.policy`: Pins, ladders, `exclude`,
   `exclude_providers`, `eligible_routes` and `not_for` apply to module engines
   by `provider/model`. A pin is one fixed model, whoever serves it. A pin

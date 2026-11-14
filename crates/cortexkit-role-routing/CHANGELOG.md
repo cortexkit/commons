@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.28
+
+- Contract wording only, no wire change. `select_media.price`: a matching rate
+  with no quantity in the request still yields `price` with `rates` and no
+  `estimated_task_usd`; `price` is omitted only when no rate matches. A
+  caller-local engine takes its catalog row's grade when one exists, its
+  expected job cost is a known zero, its selection carries no `price`, and the
+  dollar-cap rule applies to module engines only. With no quantity in the
+  request, ranking compares the matching unit rate, then (for a whole group of
+  equal rates with known minimums) the minimum; an engine with no rate in that
+  unit has unknown cost.
+
 ## 0.7.27
 
 - Correct 0.7.26's `account_observe_success` wording for quota blocks: a quota

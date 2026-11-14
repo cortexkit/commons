@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.32
+
+- Pin routing `=0.7.28`. The media price, caller-local grade and caller-local
+  cost checks already expect what 0.7.28 now states.
+- `select_media_price` compares a rate's numeric value, so a router writing
+  `2.0` passes like one writing `2`. The reference fake now writes rates as
+  floating-point numbers, as real routers do.
+
 ## 0.10.31
 
 - Respect the advertised `select_media` kinds in the consumer-declaration search
