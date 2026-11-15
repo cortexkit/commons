@@ -3,6 +3,12 @@
 JSON files are UTF-8. Test quantities are decimal strings, never numbers.
 Tokens are placeholders, not credentials. `SHA256SUMS` covers every other file.
 
+`call-usage.json` is one attached voice-front call with routed realtime token
+usage and billed companion transcription seconds. Both records carry the same
+admission decision; the companion is not the model named by that decision.
+Record ids are derived from the call/provider/model tuple and redeliver unchanged.
+The duplicate-model refusal recipe selects records by zero-based `record_indices`.
+
 Large examples are deterministic expansion recipes, not abbreviated wire values:
 
 - chunks: generate exactly `decoded_bytes` copies of the byte `byte`, then

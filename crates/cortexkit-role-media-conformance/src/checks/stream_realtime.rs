@@ -41,6 +41,8 @@ pub const CASES: &[&str] = &[
     "call_ended_unrecorded",
     "ended_call_never_reattaches",
     "call_end_writes_one_record",
+    "call_usage_per_billed_model",
+    "call_usage_duplicate_model",
     "call_id_bounds",
     "stream_realtime_admission_lifecycle",
     "stream_realtime_renewal_lapse",
@@ -1267,6 +1269,9 @@ async fn realtime<S: MediaSubject>(
             no_effect(s, r, before, 0).await
         }
         "realtime_watch" => watch(s, vendor).await,
+        "call_usage_per_billed_model" | "call_usage_duplicate_model" => {
+            call_usage(s, r, vendor).await
+        }
         "ended_call_never_reattaches" | "call_end_writes_one_record" => {
             call_ends(s, r, vendor).await
         }
@@ -1467,6 +1472,102 @@ async fn wait_watch<S: MediaSubject>(s: &S, secret: &str, expected: &str) -> Res
         }
         tokio::time::sleep(POLL_INTERVAL).await;
     }
+}
+
+async fn call_usage<S: MediaSubject>(
+    s: &S,
+    r: &RecordingRoutingPeer,
+    vendor: &RecordingVendor,
+) -> Result<(), String> {
+    s.configure_voice_front("agent", None).await.map_err(err)?;
+    let tokens = json!([{"role":"input_audio","unit":"token","quantity":"120","measure":"billed","source":"vendor_reply"}]);
+    let billed = json!([{"role":"input_audio","unit":"second","quantity":"3.125","measure":"billed","source":"vendor_reply"}]);
+    let observed = json!([{"role":"input_audio","unit":"second","quantity":"3.125","measure":"observed","source":"provider_measured"}]);
+    let zero = json!([{"role":"input_audio","unit":"second","quantity":"0.000","measure":"billed","source":"vendor_reply"}]);
+    let mut count = 0;
+    for (i, (id, purpose, routed, companion, has_companion)) in [
+        (
+            "billed",
+            "voice_front",
+            tokens.clone(),
+            billed.clone(),
+            true,
+        ),
+        ("observed", "voice_front", json!([]), observed, false),
+        ("zero", "voice_front", json!([]), zero, false),
+        ("dictation", "dictation", tokens, billed, false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut req = token_request(id, "realtime-a");
+        req["purpose"] = json!(purpose);
+        let t = call(s, "alice", "realtime.token", req).await?;
+        vendor.open_session(
+            id,
+            t["token_ref"].as_str().ok_or("missing token_ref")?,
+            json!({"models":[
+                {"provider":"fixture","model":"realtime-a","measurements":routed},
+                {"provider":"fixture","model":"companion-transcribe","measurements":companion}
+            ]}),
+        );
+        call(
+            s,
+            "alice",
+            "realtime.call_started",
+            attach_request(id, &t, id),
+        )
+        .await?;
+        end_call(s, "alice", id).await?;
+        count += 1 + usize::from(has_companion);
+        let all = wait_records(s, count).await?;
+        require(all.len() == count, "extra call usage records")?;
+        let rs: Vec<_> = all
+            .iter()
+            .filter(|record| record["call_id"] == id)
+            .collect();
+        require(
+            rs.len() == 1 + usize::from(has_companion),
+            "call usage record count",
+        )?;
+        let routed_record = rs
+            .iter()
+            .find(|record| record["model"] == "realtime-a")
+            .ok_or("missing routed-model record")?;
+        require(
+            routed_record["measurements"] == routed,
+            "routed model quantities changed",
+        )?;
+        if has_companion {
+            let companion_record = rs
+                .iter()
+                .find(|record| record["model"] == "companion-transcribe")
+                .ok_or("missing companion-model record")?;
+            require(
+                companion_record["measurements"] == companion,
+                "companion model quantities changed",
+            )?;
+            require(
+                companion_record["record_id"] != routed_record["record_id"],
+                "call models reused a record id",
+            )?;
+        }
+        for record in rs {
+            require(
+                record["status"] == "ended" && record["decision_id"] == "decision",
+                "call status or admission decision attribution",
+            )?;
+        }
+        let before = feed(s).await?;
+        end_call(s, "alice", id).await?;
+        s.restart().await.map_err(err)?;
+        require(
+            feed(s).await? == before,
+            "call redelivery changed record ids or content",
+        )?;
+        balanced(r, i + 1, i + 1)?;
+    }
+    Ok(())
 }
 
 async fn call_ends<S: MediaSubject>(

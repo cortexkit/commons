@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.7
+
+- Pin media 0.1.10 and check attached-call usage per billed model, including
+  routed token usage and companion transcription seconds, stable redelivery,
+  admission decision attribution and duplicate-model rejection.
+
 ## 0.2.6
 
 - Pin media `=0.1.9` with per-frame invalid-data refusals and optional token

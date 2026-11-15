@@ -321,7 +321,18 @@ impl State {
         failure: Option<Value>,
         usage: Option<Value>,
     ) {
-        let record_id = self.id("record");
+        let record_id = if work == "call_id" {
+            format!(
+                "call-record:{}",
+                sha256(
+                    serde_json::to_string(&json!([id, "fixture", req["model"]]))
+                        .unwrap()
+                        .as_bytes()
+                )
+            )
+        } else {
+            self.id("record")
+        };
         let mut v = json!({"record_id":record_id,"principal":p,"provider":"fixture","model":req["model"],"decision_id":req["decision_id"],"charge_basis":"vendor","credential_ref":"fixture-credential","auth_method":"api_key","started_at_ms":self.now(),"finished_at_ms":self.now(),"status":status,"selectors":{},"measurements":usage.unwrap_or(json!([]))});
         v[work] = json!(id);
         if let Some(f) = failure {
@@ -501,7 +512,19 @@ impl State {
     fn end_call_key(&mut self, key: &(String, String)) -> SubjectResult<()> {
         if let Some(mut c) = self.extra.calls.remove(key) {
             if !c.ended {
-                let mut usage = c.usage.clone();
+                let models = c.usage.get("models").and_then(Value::as_array);
+                let mut usage = models.map_or_else(
+                    || c.usage.clone(),
+                    |models| {
+                        models
+                            .iter()
+                            .find(|model| {
+                                model["provider"] == "fixture"
+                                    && model["model"] == c.token.request["model"]
+                            })
+                            .map_or(json!([]), |model| model["measurements"].clone())
+                    },
+                );
                 if self.fault("call_end_writes_one_record") {
                     usage[0]["quantity"] = json!("2");
                 }
@@ -513,6 +536,40 @@ impl State {
                     None,
                     Some(usage),
                 );
+                if c.token.request["purpose"] == "voice_front" {
+                    for model in models.into_iter().flatten() {
+                        if model["provider"] == "fixture"
+                            && model["model"] == c.token.request["model"]
+                        {
+                            continue;
+                        }
+                        let billed = model["measurements"].as_array().unwrap().iter().any(|m| {
+                            m["measure"] == "billed"
+                                && m["quantity"]
+                                    .as_str()
+                                    .unwrap()
+                                    .bytes()
+                                    .any(|b| matches!(b, b'1'..=b'9'))
+                        });
+                        if !billed || self.fault("call_usage_per_billed_model") {
+                            continue;
+                        }
+                        let mut request = c.token.request.clone();
+                        request["model"] = if self.fault("call_usage_duplicate_model") {
+                            c.token.request["model"].clone()
+                        } else {
+                            model["model"].clone()
+                        };
+                        self.extra_record(
+                            &key.0,
+                            ("call_id", &key.1),
+                            &request,
+                            "ended",
+                            None,
+                            Some(model["measurements"].clone()),
+                        );
+                    }
+                }
                 self.extra_observe(&c.token.admission, "run_finished")?;
                 c.ended = true;
                 let now = self.now();

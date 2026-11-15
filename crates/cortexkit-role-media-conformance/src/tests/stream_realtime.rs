@@ -53,9 +53,24 @@ cases! {
     media_kit_stream_realtime_call_ended_unrecorded,
     media_kit_stream_realtime_ended_call_never_reattaches,
     media_kit_stream_realtime_call_end_writes_one_record,
+    media_kit_stream_realtime_call_usage_per_billed_model,
     media_kit_stream_realtime_call_id_bounds,
     media_kit_stream_realtime_stream_realtime_admission_lifecycle,
     media_kit_stream_realtime_stream_realtime_renewal_lapse,
+}
+
+#[tokio::test]
+async fn media_kit_stream_realtime_call_usage_duplicate_model() {
+    let case = "call_usage_duplicate_model";
+    assert_eq!(
+        run_case(&Fake::new(None, true, true), case).await,
+        Outcome::Passed
+    );
+    let bad = run_case(&Fake::new(Some(case), true, true), case).await;
+    assert!(
+        matches!(bad, Outcome::Failed(ref reason) if reason.starts_with(&format!("{case}:")) && reason.contains("invalid_usage_record") && reason.contains("model")),
+        "{bad:?}"
+    );
 }
 
 #[tokio::test]

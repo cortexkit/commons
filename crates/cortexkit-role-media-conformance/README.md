@@ -106,6 +106,15 @@ before returning. Status polling uses a separate wall clock (30 seconds, every
 50 ms), never advancing provider time to make work finish. The vendor peer maps
 synthetic session ids to the token references opening them and scripted usage.
 
+`RecordingVendor::open_session` accepts either a plain measurement array, meaning
+routed-model usage only, or an object
+`{"models":[{"provider":"fixture","model":"realtime-a","measurements":[...]}]}`.
+The object scripts per-model billing for attached voice-front calls: write the
+routed model's record even without billed usage, and write a companion's record
+only when it has a nonzero billed quantity. All records keep the call's admission
+decision id. Dictation still writes one record. Adapters that receive only the
+plain array behave as before; only the new per-model cases use the object form.
+
 ## Current coverage
 
 This kit covers job, object, usage/feed, stream, bias/pack, realtime token/call/watch

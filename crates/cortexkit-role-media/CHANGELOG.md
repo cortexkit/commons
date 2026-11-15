@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.10
+
+- Attached voice-front calls write one ended usage record per billed model,
+  always including the routed model and including billed companion models.
+  Derive stable record ids from call, provider and model, and carry the admission's
+  decision id on every record, even when a companion model differs from the
+  decision's model. Jobs, streams and dictation retain one record per attempt.
+- Add `check_call_usage_records` for one call's record set, rejecting duplicate
+  provider/model pairs with `invalid_usage_record` on `model` without changing
+  usage-feed validation. Include two-model call and duplicate-model vectors.
+
 ## 0.1.9
 
 - Refuse oversize or invalidly encoded stream audio with `invalid_params` on

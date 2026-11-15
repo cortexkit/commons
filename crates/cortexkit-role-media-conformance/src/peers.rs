@@ -107,6 +107,9 @@ impl RecordingVendor {
     pub fn new() -> Self {
         Self::default()
     }
+    /// Script usage as a measurement array for the routed model, or as
+    /// `{ "models": [{ "provider": ..., "model": ..., "measurements": [...] }] }`
+    /// for a call with model-attributed billing. Legacy arrays keep their meaning.
     pub fn open_session(&self, session: &str, token_ref: &str, usage: Value) {
         self.0
             .lock()

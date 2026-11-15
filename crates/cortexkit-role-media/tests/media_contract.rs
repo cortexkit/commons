@@ -515,6 +515,90 @@ fn media_contract_message_budget_vectors() {
     assert!(check_message_budget(&json!("a".repeat(MESSAGE_MAX - 1))).is_err());
 }
 
+#[test]
+fn media_contract_call_usage_two_models() {
+    let cases = vector("call-usage.json");
+    let records: Vec<UsageRecord> = cases["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(round_trip)
+        .collect();
+    check_call_usage_records(&records).unwrap();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].model, "openai/gpt-realtime-2.1");
+    assert_eq!(records[1].model, "openai/gpt-live-transcribe");
+    assert_ne!(records[0].record_id, records[1].record_id);
+    assert_eq!(records[0].measurements[0].unit, Unit::Token);
+    assert_eq!(records[1].measurements[0].unit, Unit::Second);
+    assert_eq!(records[1].measurements[0].quantity, "3.125");
+    for record in &records {
+        assert_eq!(record.status, UsageStatus::Ended);
+        assert_eq!(record.call_id.as_deref(), Some("call-two-models"));
+        assert_eq!(record.decision_id.as_deref(), Some("decision-realtime"));
+    }
+    check_call_usage_records(&records[..1]).unwrap();
+}
+
+#[test]
+fn media_contract_call_usage_duplicate_model_refused() {
+    let cases = vector("call-usage.json");
+    let mut records: Vec<UsageRecord> = cases["duplicate_model"]["record_indices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|index| decode(&cases["records"][index.as_u64().unwrap() as usize]))
+        .collect();
+    records[1].record_id = "different-record-id".into();
+    let error = check_call_usage_records(&records).unwrap_err();
+    assert_eq!(error.code, "invalid_usage_record");
+    assert_eq!(error.field.as_deref(), Some("model"));
+    assert_eq!(error.code, cases["duplicate_model"]["refusal_code"]);
+    assert_eq!(
+        error.field.unwrap(),
+        cases["duplicate_model"]["refusal_field"]
+    );
+    records[1].provider = "another-provider".into();
+    check_call_usage_records(&records).unwrap();
+}
+
+#[test]
+fn media_contract_call_usage_set_boundary() {
+    let records: Vec<UsageRecord> = decode(&vector("call-usage.json")["records"]);
+    let error = check_call_usage_records(&[]).unwrap_err();
+    assert_eq!(error.code, "invalid_usage_record");
+    assert_eq!(error.field.as_deref(), Some("call_id"));
+    let mut other_call = records.clone();
+    other_call[1].call_id = Some("another-call".into());
+    let error = check_call_usage_records(&other_call).unwrap_err();
+    assert_eq!(error.code, "invalid_usage_record");
+    assert_eq!(error.field.as_deref(), Some("call_id"));
+    for work_field in ["job_id", "stream_id"] {
+        let mut value = serde_json::to_value(&records[0]).unwrap();
+        value.as_object_mut().unwrap().remove("call_id");
+        value[work_field] = json!("not-a-call");
+        let error = check_call_usage_records(&[decode(&value)]).unwrap_err();
+        assert_eq!(error.code, "invalid_usage_record");
+        assert_eq!(error.field.as_deref(), Some("call_id"));
+    }
+    let mut malformed = records.clone();
+    malformed[1].measurements[0].quantity = "-1".into();
+    let error = check_call_usage_records(&malformed).unwrap_err();
+    assert_eq!(error.code, "invalid_usage_record");
+    assert_eq!(error.field.as_deref(), Some("quantity"));
+}
+
+#[test]
+fn media_contract_call_usage_feed_allows_redelivery() {
+    let record: UsageRecord = decode(&vector("call-usage.json")["records"][0]);
+    let answer = UsageReadAnswer::new(vec![
+        UsageEntry::new(1).with_record(record.clone()),
+        UsageEntry::new(2).with_record(record),
+    ])
+    .with_last_seq(2);
+    check_usage_answer(&answer).unwrap();
+}
+
 fn basic_record() -> UsageRecord {
     decode(&vector("usage.json")["records"][0])
 }

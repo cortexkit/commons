@@ -1,0 +1,42 @@
+{
+  "records": [
+    {
+      "record_id": "call-two-models/openai/openai/gpt-realtime-2.1",
+      "principal": "alice",
+      "call_id": "call-two-models",
+      "decision_id": "decision-realtime",
+      "provider": "openai",
+      "model": "openai/gpt-realtime-2.1",
+      "charge_basis": "vendor",
+      "started_at_ms": 1000,
+      "finished_at_ms": 4125,
+      "status": "ended",
+      "selectors": {},
+      "measurements": [
+        {"role": "input_audio", "unit": "token", "quantity": "120", "measure": "billed", "source": "vendor_reply"},
+        {"role": "output_audio", "unit": "token", "quantity": "240", "measure": "billed", "source": "vendor_reply"}
+      ]
+    },
+    {
+      "record_id": "call-two-models/openai/openai/gpt-live-transcribe",
+      "principal": "alice",
+      "call_id": "call-two-models",
+      "decision_id": "decision-realtime",
+      "provider": "openai",
+      "model": "openai/gpt-live-transcribe",
+      "charge_basis": "vendor",
+      "started_at_ms": 1000,
+      "finished_at_ms": 4125,
+      "status": "ended",
+      "selectors": {},
+      "measurements": [
+        {"role": "input_audio", "unit": "second", "quantity": "3.125", "measure": "billed", "source": "vendor_reply"}
+      ]
+    }
+  ],
+  "duplicate_model": {
+    "record_indices": [0, 0],
+    "refusal_code": "invalid_usage_record",
+    "refusal_field": "model"
+  }
+}

@@ -2,7 +2,10 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use cortexkit_role_media::{
     describe::{check_describe, Describe, Engine},
     jobs::{check_status, StatusAnswer},
-    usage::{check_usage_answer, check_usage_record, UsageReadAnswer, UsageRecord},
+    usage::{
+        check_call_usage_records, check_usage_answer, check_usage_record, UsageReadAnswer,
+        UsageRecord,
+    },
 };
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
@@ -107,6 +110,8 @@ pub const CASES: &[&str] = &[
     "call_ended_unrecorded",
     "ended_call_never_reattaches",
     "call_end_writes_one_record",
+    "call_usage_per_billed_model",
+    "call_usage_duplicate_model",
     "call_id_bounds",
     "stream_realtime_admission_lifecycle",
     "stream_realtime_renewal_lapse",
@@ -334,6 +339,7 @@ async fn records<S: MediaSubject>(s: &S) -> Result<Vec<Value>, String> {
     let f = feed(s).await?;
     let entries = f["entries"].as_array().ok_or("missing entries")?;
     let mut out = Vec::new();
+    let mut calls = std::collections::BTreeMap::<String, Vec<UsageRecord>>::new();
     for e in entries {
         let r = e.get("record").ok_or("expected record entry")?;
         if r["model"] == "local" {
@@ -341,11 +347,17 @@ async fn records<S: MediaSubject>(s: &S) -> Result<Vec<Value>, String> {
         }
         let typed: UsageRecord = serde_json::from_value(r.clone()).map_err(err)?;
         check_usage_record(&typed).map_err(err)?;
+        if let Some(call_id) = &typed.call_id {
+            calls.entry(call_id.clone()).or_default().push(typed);
+        }
         require(
             r["principal"] == "alice" && r["provider"] == "fixture",
             "usage attribution",
         )?;
         out.push(r.clone());
+    }
+    for records in calls.values() {
+        check_call_usage_records(records).map_err(err)?;
     }
     Ok(out)
 }

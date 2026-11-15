@@ -284,17 +284,27 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 
 ## Usage and feed
 
-- [pinned] `media.usage.attempt`: Each remote engine attempt (job attempt,
-  stream or attached call) writes exactly one immutable record after its engine
-  stops, covering all work. Local work need not write records; if supplied,
-  they follow the same rules. Refused/unstarted work, repeats, unattached tokens
-  and released never-started admissions write none.
+- [pinned] `media.usage.attempt`: Each remote job attempt, stream or dictation
+  call writes exactly one immutable record after its engine stops, covering all
+  work. An attached voice-front call writes one ended record per billed model,
+  at most one per (provider, model), all with the same call_id. Always write the
+  routed model's record; write a companion model's record only when that model
+  billed something. Record checks accept distinct (provider, model) pairs for
+  one call_id and refuse a duplicate pair with `invalid_usage_record`, field
+  `model`. They still refuse more than one record for a job attempt or stream.
+  Local work need not write records; if supplied, they follow the same rules.
+  Refused/unstarted work, repeats, unattached tokens and released never-started
+  admissions write none.
 - [pinned] `media.usage.record`: A record is `{record_id, principal, job_id |
   stream_id | call_id, decision_id?, provider, model, charge_basis,
   credential_ref?, auth_method?, vendor_request_id?, started_at_ms,
   finished_at_ms, status, failure?, selectors, measurements}` with exactly one
-  work id. Record ids differ between attempts and stay equal across redelivery;
-  principal is the caller, decision_id exists exactly when admission carried it.
+  work id. Record ids differ between attempts and stay equal across redelivery.
+  For attached calls, derive record_id from (call_id, provider, model). Never
+  reuse a record_id with different content: readers quarantine contradictions.
+  Principal is the caller; every record of a call carries decision_id exactly
+  when the admission carried it, including companion records whose model
+  differs from the decision's model.
   Closed status is done, failed (failure required), cancelled (including a
   finished unit after cancellation) or ended (every call). Other statuses forbid
   failure. Open charge_basis is vendor/local; local records have no credential
@@ -488,8 +498,9 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 - [pinned] `media.realtime.end`: call_ended `{call_id}` returns `{call_id,
   status: "ended"}` idempotently. Unknown calls answer equally, write/release
   nothing and mark ended for at least 3,600 seconds, preventing later attach or
-  token. Silence timeout also ends recorded calls. Every end path writes one
-  ended record and releases once. Recorded/ended calls, admission, vendor
+  token. Silence timeout also ends recorded calls. Every end path writes ended
+  records according to `media.usage.attempt` and releases once. Recorded/ended
+  calls, admission, vendor
   session, recorded answer and authentication key survive restart and remain
   at least 3,600 seconds after end. Restart ends live calls; unrecorded attaches
   opened none. One principal cannot answer, refuse or end another's call.

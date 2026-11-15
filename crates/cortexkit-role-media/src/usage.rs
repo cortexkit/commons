@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use base64::Engine as _;
 use sha2::{Digest, Sha256};
@@ -264,6 +264,29 @@ wire_struct!(
 wire_struct!(UsageAckAnswer {
     acked_through_seq: u64
 });
+
+/// Check the records for one attached call before the producer writes them.
+///
+/// The nonempty set must share one `call_id`, contain distinct `(provider, model)`
+/// pairs, and pass [`check_usage_record`] for every record. This is not a feed
+/// check: a feed can legitimately contain multiple attempts and redeliveries.
+pub fn check_call_usage_records(records: &[UsageRecord]) -> CheckResult {
+    let call_id = records
+        .first()
+        .and_then(|record| record.call_id.as_deref())
+        .ok_or_else(|| CheckError::new("invalid_usage_record").with_field("call_id"))?;
+    let mut models = BTreeSet::new();
+    for record in records {
+        check_usage_record(record)?;
+        if record.call_id.as_deref() != Some(call_id) {
+            return Err(CheckError::new("invalid_usage_record").with_field("call_id"));
+        }
+        if !models.insert((&record.provider, &record.model)) {
+            return Err(CheckError::new("invalid_usage_record").with_field("model"));
+        }
+    }
+    Ok(())
+}
 
 pub fn check_usage_entry(entry: &UsageEntry) -> CheckResult {
     if entry.seq == 0 || entry.record.is_some() == entry.raw.is_some() {
