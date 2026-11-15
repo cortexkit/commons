@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.67
+
+- Declare `send_promote` and `delivery_order` on the faithful default fake so
+  full-suite reports execute promotion checks. Verify every promotion defect
+  fails only its named case, and exercise unsupported behavior on separate
+  no-group and no-steer fixtures rather than counting it as supported coverage.
+- Pin the runner contract to `=0.8.56` and add nine `send_promote_*` checks:
+  next-step steering, a turn ending first, next-turn fallback after promotion,
+  parked queues, sender isolation, steer admission, durable request replay and
+  reuse refusal, undeclared-operation refusal and the steer prerequisite.
+- Exercise the real queue and model boundary in the fake runner, retaining send
+  identity and receipts. Deliberately incorrect fakes must fail each named
+  check, including cross-sender promotion and replay lost on restart.
+
 ## 0.17.66
 
 - Pin the role contract to `=0.8.55` and accept its optional rewrite facts in

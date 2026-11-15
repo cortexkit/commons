@@ -69,6 +69,7 @@ mod output_refs;
 mod plan_notes;
 mod plan_view;
 pub mod progress;
+mod promote;
 mod read_contract;
 mod read_display_facts;
 mod report;

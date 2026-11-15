@@ -67,6 +67,15 @@ const KEEP_WARM: &[Capability] = &[
 const RUNS: &[Capability] = &[RunOps, Queue];
 const DISPATCH: &[Capability] = &[DispatchAttribution, Queue, TranscriptReads];
 const SENDS: &[Capability] = &[Queue, TranscriptReads];
+const PROMOTE: &[Capability] = &[
+    Capability::SendPromote,
+    Steer,
+    Queue,
+    TranscriptReads,
+    RunOps,
+    HoldToolCalls,
+    Capability::RenderedModelInput,
+];
 const RETAINED: &[Capability] = &[Retention, Queue, TranscriptReads, RunOps];
 const SESSION_RETAINED: &[Capability] =
     &[Capability::SessionRetention, Queue, TranscriptReads, RunOps];
@@ -167,6 +176,15 @@ const STRUCTURED_RESTART: &[Capability] = &[
 const HISTORY: &[Capability] = &[Capability::HostHistory, Queue, TranscriptReads];
 /// Every case, in the order the runner runs them.
 pub const CASES: &[CaseSpec] = &[
+    case("send_promote_active_next_step", PROMOTE, "A queued send is promoted and reaches the active run at its next step exactly once."),
+    case("send_promote_turn_ended_first", PROMOTE, "A send delivered after the turn ended answers delivered without another delivery."),
+    case("send_promote_run_ends_before_step", &[Capability::SendPromote, Steer, Queue, TranscriptReads, RunOps, HoldToolCalls, RunCancel], "A promoted send whose run ends before another step starts the next turn and has a turn receipt."),
+    case("send_promote_parked", &[Capability::SendPromote, Steer, Queue, TranscriptReads, RunOps], "A queued send without an active run stays pending, then runs when the session can run again."),
+    case("send_promote_sender_namespace", &[Capability::SendPromote, Steer, Queue, TranscriptReads, RunOps, HoldToolCalls, Capability::DeliveryOrder], "Unknown and other-sender sends are both not_queued; terminal withdrawn sends are not_queued too."),
+    case("send_promote_steer_admission", PROMOTE, "A caller without a current steer grant is refused before any queue move."),
+    case("send_promote_request_replay", &[Capability::SendPromote, Steer, Queue, TranscriptReads, RunOps], "The first request-id answer survives delivery and restart; reuse for another send is refused request_id_reuse naming send_id."),
+    case("send_promote_unsupported", &[], "Without the group, or without steer on this harness, promotion refuses unsupported."),
+    case("send_promote_requires_steer", &[], "send_promote is declared only where steer is declared."),
     case("keep_warm_auto_warms_idle_session", KEEP_WARM, "auto touches the last real request before cache expiry without recording a step or changing the transcript"),
     case("keep_warm_auto_stops_at_one_rewrite", KEEP_WARM, "auto sends exactly one rewrite's cost of idle warms, neither one fewer nor one more"),
     case("keep_warm_auto_rearms_after_real_request", KEEP_WARM, "a real request resets auto's exhausted cost cap and warms resume with the new prefix"),

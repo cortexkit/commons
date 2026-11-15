@@ -192,6 +192,10 @@ where
                     crate::interrupt_reason::shutdown(subject, work_dir, &declared, &mint)
                         .await
                         .map(|()| Ending::Passed)
+                } else if spec.name == crate::promote::REPLAY {
+                    crate::promote::restart(subject, &mut driver, work_dir, &declared, &mint)
+                        .await
+                        .map(|()| Ending::Passed)
                 } else if spec.name == crate::follow::RESEND_CASE
                     || spec.name == crate::follow::STATUS_CASE
                 {

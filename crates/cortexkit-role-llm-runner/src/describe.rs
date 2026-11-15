@@ -27,6 +27,7 @@ pub mod steer_receipt {
 
 /// Named discovery refusals carried by [`DescribeProblem::Undecodable`].
 pub mod problem_names {
+    pub const SEND_PROMOTE_WITHOUT_STEER: &str = "send_promote_without_steer";
     pub const RESTART_SURVIVAL_WITHOUT_INTERRUPT_REASON: &str =
         "restart_survival_without_interrupt_reason";
     pub const RESTART_SURVIVAL_WITHOUT_LIVE_EVENTS: &str = "restart_survival_without_live_events";
@@ -872,6 +873,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
             capabilities::STOP_ALL,
             capabilities::RUN_CANCEL_BY_INTERRUPT,
             problem_names::STOP_ALL_WITHOUT_RUN_CANCEL_BY_INTERRUPT,
+        ),
+        (
+            capabilities::SEND_PROMOTE,
+            capabilities::STEER,
+            problem_names::SEND_PROMOTE_WITHOUT_STEER,
         ),
         (
             capabilities::RESTART_SURVIVAL,

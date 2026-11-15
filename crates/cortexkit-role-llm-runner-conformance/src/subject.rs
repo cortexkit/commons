@@ -79,6 +79,8 @@ pub enum Capability {
     Streaming,
     /// The `steer` delivery mode of `session.send`.
     Steer,
+    /// Atomically move the caller's queued send into the running turn; requires steer.
+    SendPromote,
     /// The `queue` delivery mode of `session.send`. Cases start every
     /// session it writes with a `queue` send (the mode an absent `delivery`
     /// means), so every case that needs a written session requires it.
@@ -239,6 +241,7 @@ impl Capability {
         Self::DispatchAttribution,
         Self::Streaming,
         Self::Steer,
+        Self::SendPromote,
         Self::Queue,
         Self::Plans,
         Self::Interrupt,
@@ -325,6 +328,7 @@ impl Capability {
             Self::DispatchAttribution => groups::DISPATCH_ATTRIBUTION,
             Self::Streaming => groups::STREAMING,
             Self::Steer => groups::STEER,
+            Self::SendPromote => groups::SEND_PROMOTE,
             Self::Queue => groups::QUEUE,
             Self::Plans => groups::PLANS,
             Self::Interrupt => groups::INTERRUPT,

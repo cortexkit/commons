@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.6
+
+- Restrict pre-send `over_limit` rides and `context_ceiling` refusals to exact
+  counts; estimates may trigger only the soft window-budget ride. After a model
+  provider's length refusal, ride for a smaller view and resend the step once,
+  including when the host runs the model loop.
+- Define `request_tokens` as the provider's stated count after a length refusal
+  or an exact pre-send count, never an estimate. No wire shapes change.
+
 ## 0.4.5
 
 - Add provider capability `compaction-numbers-unknown/v1` and the true-only

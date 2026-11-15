@@ -186,6 +186,7 @@ async fn message_senders_without_live_observer_still_checks_buffered_rows() {
 async fn message_senders_without_a_steerable_hold_checks_start_only() {
     let mut subject = subject(Defects::default());
     subject.capabilities.remove(&Capability::Steer);
+    subject.capabilities.remove(&Capability::SendPromote);
     let report = run(&subject).await;
     assert!(
         matches!(report.outcome(NAME), Some(CaseOutcome::PassedWithInapplicableRule { reason }) if reason.contains("message_senders_join") && !reason.contains("message_senders_timing")),

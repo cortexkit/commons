@@ -39,7 +39,16 @@ pub fn intercept_send(
 }
 
 fn module(subject: &FakeSubject) -> Arc<Module> {
-    subject.modules.lock().unwrap().last().unwrap().clone()
+    // A dedicated restart experiment may be newer than the shared live runner.
+    subject
+        .modules
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|module| module.alive.load(Ordering::SeqCst))
+        .unwrap()
+        .clone()
 }
 
 pub fn begin(subject: &FakeSubject, session: &str, texts: &[String]) -> Result<bool, HarnessError> {

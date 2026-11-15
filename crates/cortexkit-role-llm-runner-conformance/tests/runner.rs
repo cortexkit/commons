@@ -939,6 +939,129 @@ async fn run(subject: &FakeSubject) -> SuiteReport {
     run_suite(subject, dir.path()).await.unwrap()
 }
 
+const SEND_PROMOTE_CASES: &[&str] = &[
+    "send_promote_active_next_step",
+    "send_promote_turn_ended_first",
+    "send_promote_run_ends_before_step",
+    "send_promote_parked",
+    "send_promote_sender_namespace",
+    "send_promote_steer_admission",
+    "send_promote_request_replay",
+    "send_promote_requires_steer",
+];
+
+#[tokio::test]
+async fn send_promote_faithful_full_suite_executes_every_supported_case() {
+    let report = run(&FakeSubject::new(Defects::default())).await;
+    for name in SEND_PROMOTE_CASES {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}\n{}",
+            report.render()
+        );
+    }
+    assert_eq!(
+        report.outcome("send_promote_unsupported"),
+        Some(&CaseOutcome::Inapplicable {
+            reason: "send_promote and steer are declared".into(),
+        })
+    );
+    assert_none_failed_but(&report, &[]);
+}
+
+#[tokio::test]
+async fn send_promote_full_suite_defects_fail_exactly_their_own_case() {
+    for (fault, name, expected) in [
+        (
+            "no_delivery",
+            "send_promote_active_next_step",
+            "step receipt",
+        ),
+        (
+            "ended_first",
+            "send_promote_turn_ended_first",
+            "expected Delivered",
+        ),
+        (
+            "drop_at_end",
+            "send_promote_run_ends_before_step",
+            "turn receipt",
+        ),
+        ("parked", "send_promote_parked", "expected NotPromoted"),
+        (
+            "foreign",
+            "send_promote_sender_namespace",
+            "expected NotQueued",
+        ),
+        (
+            "unknown",
+            "send_promote_sender_namespace",
+            "expected NotQueued",
+        ),
+        ("admission", "send_promote_steer_admission", "not refused"),
+        (
+            "replay",
+            "send_promote_request_replay",
+            "expected NotPromoted",
+        ),
+        ("reuse", "send_promote_request_replay", "not refused"),
+        (
+            "volatile",
+            "send_promote_request_replay",
+            "expected NotPromoted",
+        ),
+    ] {
+        let report = run(&FakeSubject::new(Defects {
+            promote: Some(fault),
+            ..Defects::default()
+        }))
+        .await;
+        let reason = failed(&report, name);
+        assert!(reason.contains(expected), "{name}: {reason}");
+        assert_none_failed_but(&report, &[name]);
+        for other in SEND_PROMOTE_CASES {
+            if *other != name {
+                assert_eq!(
+                    report.outcome(other),
+                    Some(&CaseOutcome::Passed),
+                    "{other}\n{}",
+                    report.render()
+                );
+            }
+        }
+        println!("{fault}: {name}: {reason}; no other case failed");
+    }
+}
+
+#[tokio::test]
+async fn send_promote_full_suite_unsupported_is_exercised_without_group_or_steer() {
+    for steer in [true, false] {
+        for fault in [None, Some("unsupported")] {
+            let mut subject = FakeSubject::new(Defects {
+                promote: fault,
+                ..Defects::default()
+            });
+            subject.capabilities.remove(&Capability::SendPromote);
+            if !steer {
+                subject.capabilities.remove(&Capability::Steer);
+            }
+            let report = run(&subject).await;
+            if fault.is_some() {
+                let reason = failed(&report, "send_promote_unsupported");
+                assert!(reason.contains("not refused"), "{reason}");
+                assert_none_failed_but(&report, &["send_promote_unsupported"]);
+            } else {
+                assert_eq!(
+                    report.outcome("send_promote_unsupported"),
+                    Some(&CaseOutcome::Passed)
+                );
+                assert_none_failed_but(&report, &[]);
+            }
+        }
+    }
+}
+
 #[tokio::test]
 async fn run_awaits_faithful_surfaces() {
     let report = run(&head_error_subject(Defects::default())).await;
@@ -1626,6 +1749,29 @@ fn assert_passed(report: &SuiteReport, case: &str) {
     {
         return;
     }
+    // A supported runner cannot exercise an unsupported operation. Separate
+    // no-group and no-steer fixtures must pass this check rather than skip it.
+    if case == "send_promote_unsupported"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "send_promote and steer are declared")
+    {
+        return;
+    }
+    if case == "send_promote_requires_steer"
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "send_promote not declared")
+    {
+        return;
+    }
+    if (case == DECLARED_MODES_CASE
+        && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+            if reason == "role.describe does not advertise delivery_order_modes"))
+        || (case == "delivery_order_list_refused_without_group"
+            && matches!(report.outcome(case), Some(CaseOutcome::Inapplicable { reason })
+                if reason == "the subject declares every one of delivery_order, so none is left to refuse"))
+    {
+        return;
+    }
     assert_eq!(
         report.outcome(case),
         Some(&CaseOutcome::Passed),
@@ -1643,6 +1789,7 @@ fn failed(report: &SuiteReport, case: &str) -> String {
 
 /// Optional groups the fake leaves undeclared unless a test declares them.
 const OPTIONAL_GROUPS: &[Capability] = &[
+    Capability::SendPromote,
     Capability::SendIds,
     Capability::CachePolicy,
     Capability::ForkAnswer,
@@ -2294,7 +2441,6 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::RunToolCalls,
                     Capability::RunUsage,
                     Capability::SessionUsage,
-                    Capability::DeliveryOrder,
                     Capability::SendStatus,
                     Capability::UserCommands,
                     Capability::HistoryDisplay,
@@ -2512,6 +2658,7 @@ async fn an_unstable_resend_steer_receipt_fails() {
 async fn a_runner_without_steer_reports_steer_checks_as_inapplicable() {
     let mut subject = FakeSubject::new(Defects::default());
     subject.capabilities.remove(&Capability::Steer);
+    subject.capabilities.remove(&Capability::SendPromote);
     let report = run(&subject).await;
     for case in [
         "guaranteed_steer_never_pending_or_unknown",
@@ -2670,7 +2817,6 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::RunToolCalls,
                     Capability::RunUsage,
                     Capability::SessionUsage,
-                    Capability::DeliveryOrder,
                     Capability::SendStatus,
                     Capability::UserCommands,
                     Capability::HistoryDisplay,
@@ -3806,6 +3952,7 @@ fn declaring(capability: Capability, defects: Defects) -> FakeSubject {
 fn delivery_order_without_steer(defects: Defects) -> FakeSubject {
     let mut subject = declaring(Capability::DeliveryOrder, defects);
     subject.capabilities.remove(&Capability::Steer);
+    subject.capabilities.remove(&Capability::SendPromote);
     subject
 }
 
@@ -4463,8 +4610,8 @@ async fn a_steer_reply_with_state_step_fails_only_the_no_run_ops_case() {
 }
 
 /// A delivered steer answered without the run it joined while the fake
-/// declares `run_ops`: the re-send case and the `send.status` case both fail
-/// by name, each naming the joined run, and nothing else fails.
+/// declares `run_ops`: both follow cases and the promotion receipt check must
+/// reject the missing run, and nothing else fails.
 #[tokio::test]
 async fn a_delivered_steer_without_its_run_while_declaring_run_ops_fails_both_follow_cases() {
     let report = run(&following(Defects {
@@ -4481,7 +4628,15 @@ async fn a_delivered_steer_without_its_run_while_declaring_run_ops_fails_both_fo
             "{name}: {reason}"
         );
     }
-    assert_none_failed_but(&report, &[RESEND_CASE, STATUS_CASE]);
+    let reason = failed(&report, "send_promote_active_next_step");
+    assert!(
+        reason.contains("expected a step receipt") && reason.contains("run_id: None"),
+        "{reason}"
+    );
+    assert_none_failed_but(
+        &report,
+        &[RESEND_CASE, STATUS_CASE, "send_promote_active_next_step"],
+    );
     assert_passed(&report, UNKNOWN_SEND_CASE);
 }
 
@@ -4711,16 +4866,24 @@ async fn without_turn_system_a_template_goes_out_as_the_same_text_at_user_author
 
 #[tokio::test]
 async fn a_runner_without_the_group_refuses_a_list_and_one_accepting_it_fails_by_name() {
-    let report = run(&FakeSubject::new(Defects::default())).await;
-    assert_passed(&report, "delivery_order_list_refused_without_group");
-    let report = run(&FakeSubject::new(Defects {
-        order_list_accepted_without_group: true,
-        ..Defects::default()
-    }))
-    .await;
-    let reason = failed(&report, "delivery_order_list_refused_without_group");
-    assert!(reason.contains("not refused"), "{reason}");
-    assert_others_passed(&report, &["delivery_order_list_refused_without_group"]);
+    for faulty in [false, true] {
+        let mut subject = FakeSubject::new(Defects {
+            order_list_accepted_without_group: faulty,
+            ..Defects::default()
+        });
+        subject.capabilities.remove(&Capability::DeliveryOrder);
+        let report = run(&subject).await;
+        if faulty {
+            let reason = failed(&report, "delivery_order_list_refused_without_group");
+            assert!(reason.contains("not refused"), "{reason}");
+            assert_others_passed(&report, &["delivery_order_list_refused_without_group"]);
+        } else {
+            assert_eq!(
+                report.outcome("delivery_order_list_refused_without_group"),
+                Some(&CaseOutcome::Passed)
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -4851,7 +5014,9 @@ async fn the_last_possible_mode_winning_fails_the_order_cases() {
 
 #[tokio::test]
 async fn without_the_new_groups_their_cases_skip_by_name() {
-    let report = run(&FakeSubject::new(Defects::default())).await;
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.capabilities.remove(&Capability::DeliveryOrder);
+    let report = run(&subject).await;
     // The default fake declares `tags`, which `compaction` requires, so
     // the optional groups below are left undeclared here.
     for (capability, prefixes) in [

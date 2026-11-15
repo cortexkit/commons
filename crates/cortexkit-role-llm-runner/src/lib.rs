@@ -50,6 +50,7 @@ pub mod output_refs;
 pub mod plan_notes;
 pub mod plan_view;
 pub mod points;
+pub mod promote;
 pub mod read;
 pub mod retract;
 pub mod rich_ui;
@@ -184,6 +185,8 @@ pub mod ops {
     /// What a re-send of a `send_id` would answer, from the runner's durable
     /// record of the send, without its body. In `send_status`.
     pub const SESSION_SEND_STATUS: &str = "session.send_status";
+    /// Atomically move the caller's queued send into the active run. In `send_promote`.
+    pub const SESSION_PROMOTE: &str = "session.promote";
     /// Compatibility alias, served with `session.send_status` until the next breaking release.
     pub const SEND_STATUS: &str = "send.status";
 }
@@ -361,6 +364,8 @@ pub mod capabilities {
     pub const STREAMING: &str = "streaming";
     /// `session.send` with `delivery: "steer"` from the session's owner.
     pub const STEER: &str = "steer";
+    /// Promote the caller's queued send; declared only where [`STEER`] is declared.
+    pub const SEND_PROMOTE: &str = "send_promote";
     /// `session.send` with `delivery: "queue"` from the session's owner.
     pub const QUEUE: &str = "queue";
     /// `session.send` with `delivery: "interrupt"` from the session's owner:
@@ -477,6 +482,7 @@ pub mod capabilities {
         (CALL_YIELD, &[ops::SESSION_SEND]),
         (NOTICE_YIELD, &[ops::SESSION_SEND]),
         (STOP_ALL, &[ops::SESSION_STOP_ALL]),
+        (SEND_PROMOTE, &[ops::SESSION_PROMOTE]),
         (
             FORK_ANSWER,
             &[

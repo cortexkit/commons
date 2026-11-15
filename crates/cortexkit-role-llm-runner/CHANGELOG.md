@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.8.56
+
+- Add the `deadline-missed` warming stop reason for timing failures, distinct
+  from the `auto` cost cap. Readers must accept the new reason before any
+  producer emits it.
+- Add opt-in `send_promote` and session-bound `session.promote`: atomically move
+  the caller's still-queued send into the running turn under the existing steer
+  rules, without a second send or a new send state. Require steer support at the
+  same declaration level and the caller's current steer admission.
+- Pin all four promotion outcomes, durable request-id replay, and terminal
+  `request_id_reuse` naming `send_id`. Unsupported runners or harnesses refuse
+  `unsupported`. Ship strict request and non-exhaustive outcome/reason types,
+  discovery checks and request/reply vectors.
+
 ## 0.8.55
 
 - Add optional content-free rewrite facts to `step.finished.v1`: opaque

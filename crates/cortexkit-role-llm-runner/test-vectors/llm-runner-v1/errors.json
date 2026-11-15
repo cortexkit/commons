@@ -1,5 +1,7 @@
 {
   "codes": [
+    {"code": "request_id_reuse", "retryable": false, "detail": {"field": "send_id"}},
+    {"code": "unsupported", "retryable": false},
     {"code": "no_plan", "retryable": false},
     {"code": "too_large", "retryable": false},
     {"code": "unknown_fork", "retryable": false},

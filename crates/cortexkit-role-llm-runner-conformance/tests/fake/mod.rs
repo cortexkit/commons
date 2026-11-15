@@ -84,6 +84,7 @@ mod message_senders;
 mod not_delivered;
 mod notices;
 mod output_refs;
+mod promote;
 mod rich_ui;
 mod send_identity;
 mod service_tier;
@@ -184,6 +185,8 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    /// Break one promotion decision, admission, durable replay or queue move.
+    pub promote: Option<&'static str>,
     /// Break the terminal pre-delivery failure or parked-queue contract.
     pub not_delivered: Option<&'static str>,
     pub awaits_malformed: bool,
@@ -1106,6 +1109,7 @@ struct Sess {
     /// Accepted `delivery_order` sends, keyed by sender and `send_id`, and
     /// those keys in arrival order.
     ordered: BTreeMap<String, Queued>,
+    promotions: BTreeMap<String, Value>,
     queue: Vec<String>,
     /// Host-side metadata changes made outside the role.
     host_meta: u64,
@@ -1968,6 +1972,7 @@ impl Module {
                     .filter(|stamp| !stamp.is_null())
                     .cloned();
             }
+            "promote" => promote::apply(sess, record, self.world.defects.promote),
             "ordered" => {
                 let id = text("id");
                 sess.queue.push(id.clone());
@@ -3368,6 +3373,7 @@ impl Module {
                 self.user_command(stamp, session, method, params)
             }
             ops::SESSION_SEND => self.send(stamp, session, params),
+            ops::SESSION_PROMOTE => promote::handle(self, stamp, session, &params),
             ops::HARNESS_HOST_START if self.world.defects.host_start.is_some() => {
                 host_start::handle(self, stamp, session, params)
             }
@@ -4122,6 +4128,9 @@ impl Module {
                 Ok(Some(wanted)) => return self.ordered_send(stamp, session, &request, wanted),
                 Ok(None) => {}
             }
+        }
+        if let Some(reply) = promote::queue(self, stamp, session, &request)? {
+            return Ok(reply);
         }
         let delivery = request.delivery().as_str().to_owned();
         let old = self.sessions.lock().unwrap().get(session).cloned();
@@ -6472,6 +6481,8 @@ pub fn served() -> BTreeSet<Capability> {
         Capability::Streaming,
         // `compaction` requires `tags`, whose ops the group lists.
         Capability::Steer,
+        Capability::SendPromote,
+        Capability::DeliveryOrder,
         Capability::Queue,
         Capability::Retract,
         Capability::HoldToolCalls,

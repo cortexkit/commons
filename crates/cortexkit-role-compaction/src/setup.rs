@@ -63,8 +63,8 @@ pub struct SetupRequest {
     /// The model's context window in tokens.
     #[serde(deserialize_with = "crate::integer::required")]
     pub context_window: u64,
-    /// Tokens the runner keeps free for the reply. The runner never sends a
-    /// request larger than `context_window - output_reserve`.
+    /// Tokens the runner keeps free for the reply. The usable window is
+    /// `context_window - output_reserve`; estimates never cause a refusal (W3.4).
     #[serde(deserialize_with = "crate::integer::required")]
     pub output_reserve: u64,
     pub rules: ProviderRules,

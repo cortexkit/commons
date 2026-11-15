@@ -1,5 +1,14 @@
 # cortexkit-role-llm-runner-conformance
 
+Version **0.17.67** pins runner **0.8.56**. Adapters declaring `send_promote`
+also declare `steer` at the same level. The `send_promote_*` checks use held
+tool calls, captured model requests, ordinary send receipts, named plan senders,
+and `hold_retention_queue` / `release_retention_queue` to park an idle queue.
+Promotion replay runs on its own state root and restarts the runner. These
+observations must come from the runner and provider, never reconstructed
+promotion replies. Without the group or without steer on the session's harness,
+the operation must refuse `unsupported`.
+
 Version **0.17.62** pins runner **0.8.52**. Runners declaring `plan_facts` provide
 `prepare_system_text_facts` (by default sharing `prepare_system_text_default`)
 and `system_text_default_observation`. The fixture installs a named system-text

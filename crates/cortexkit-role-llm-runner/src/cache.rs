@@ -259,6 +259,7 @@ impl Report {
                         reason.as_str(),
                         "cost-cap"
                             | "count-cap"
+                            | "deadline-missed"
                             | "outside-hours"
                             | "session-ended"
                             | "unsupported"
@@ -295,5 +296,18 @@ impl Warming {
             on: false,
             stop_reason: Some(reason.into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Report, Warming};
+
+    #[test]
+    fn warming_report_accepts_deadline_missed_and_rejects_unknown_reason() {
+        let report = Report::explicit(300_000).with_warming(Warming::stopped("deadline-missed"));
+        assert_eq!(report.check(), Ok(()));
+        let unknown = Report::explicit(300_000).with_warming(Warming::stopped("unknown-reason"));
+        assert_eq!(unknown.check(), Err("cache.warming.stop_reason"));
     }
 }

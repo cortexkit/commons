@@ -114,7 +114,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | RD1 | Before a model request that rewrites the model provider's cache anyway, or that would not fit, the runner calls `compaction.ride` (W5.3) with every cause that applies, and waits up to its deadline. For providers declaring `compaction-limits/v1`, it also rides on the soft window-budget schedule in W3.5; that cause does not imply a lost cache. |
 | RD2 | The answer is a view or nothing. A late or missing answer means the request goes out with the view the runner has. |
 | RD3 | Cache expiry is the runner's knowledge (W5.3), and `cache_expired` means proven expiry. A runner may report it only when it holds every cache touch for the session since its own start, warms included, and its own clock shows that the newest touch plus that touch's reported lifetime has passed. After a runner start, expiry is unknown until a touch arrives; an older durable request record alone is not proof. A cache touch proves nothing about another model's cache: the runner keeps one cache clock per session, touches recorded before the serving model changed do not count (even when switching away and back after a content-filter fallback), and after a change it reports no `cache_expired` until it records a touch on the model now serving. An `implicit` cache is never reported expired. When warming stops, expiry follows at the last touch plus its lifetime, not at the time warming stopped. A runner missing any touch or its reported lifetime, including behind a host that warms without reporting touches, sends no `cache_expired`: the cache may still be warm, and a compaction provider treats `cache_expired` as a rebuild that costs nothing extra. |
-| RD4 | The runner's hard model-request limit is its own usable window (W3.4). When the next request would exceed it, the runner rides with `over_limit`. If the request still does not fit, it refuses the turn with `context_ceiling`. It never sends over its limit. The separate runner-owned window budget (W3.5) is soft and never refuses or ends a step. |
+| RD4 | The runner's hard model-request limit is its own usable window (W3.4). It rides with `over_limit` only on an exact count above that window before sending, or after the model provider refuses a request for length. After a length refusal it applies the answer and resends the step once; a second length refusal ends the run with `context_ceiling` and the provider's numbers. An estimate may trigger the soft window-budget ride (W3.5), never a refusal, an `over_limit` ride, or a pre-send `context_ceiling`. |
 | RD5 | Setup lists the causes the runner can detect (`detects`). A cause the runner cannot detect is unknown to the provider, never "did not happen". A runner lists `cache_expired` only for routes where it can meet RD3; a route that cannot leaves it out. If `cache_expired` is absent from `detects`, the provider treats expiry as unknown. If it is listed but absent from a ride's causes, expiry was not proven for that ride; that does not certify the cache is warm. |
 | RD6 | A one-step fallback is not a model change: a resend to another model after a refusal, or a model provider's own server-side fallback. The session's model stays as it was in the conditions, and no ride happens. |
 
@@ -157,7 +157,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| F1 | Provider unreachable: the runner keeps applying its last view. An `over_limit` ride with no answer ends in `context_ceiling`. |
+| F1 | Provider unreachable: the runner keeps applying its last view. An `over_limit` ride with no answer after a length refusal ends in `context_ceiling`. |
 | F2 | Provider restart: notices answer `setup_required`, rides are refused `unknown_session`, the runner calls Setup again, and the provider rebuilds from its store and one read from its last cut (the last transcript range it compacted). Statements dropped by the epoch check (W3.5) use the same answers to trigger Setup again. |
 | F3 | Runner restart: it reloads its stored applied view and transcript and keeps applying them, and calls Setup again. Cache expiry is unknown until a cache touch arrives after that start. It reports `cache_expired` only with every touch since its own start and the newest touch's reported lifetime passed; never for an `implicit` cache (RD3). |
 | F4 | One session's slow or silent runner never delays another session. |
@@ -389,7 +389,13 @@ On routes the runner opens, the provider keys session state by (`runner`, `harne
 
 The view library (`cortexkit-compaction-view`) gives the default values for known model families, from the route's provider and model; a runner overrides them only with what it knows better (an account it knows is not bound, a chained route).
 
-**W3.4 Windows.** `context_window` is the tokens the model takes for prompt and reply together: the runner's configured limit, or the model's maximum from the model catalog. `output_reserve` is the tokens the runner keeps free for the reply. The usable window is `context_window − output_reserve`; the runner never sends a prompt larger than that.
+**W3.4 Windows.** `context_window` is the tokens the model takes for prompt and reply together: the runner's configured limit, or the model's maximum from the model catalog. `output_reserve` is the tokens the runner keeps free for the reply. The usable window is `context_window − output_reserve` and remains the hard model-request limit.
+
+- Before sending, the runner rides with `over_limit` only when an exact count exceeds the usable window: its own exact tokenizer for that model, or the model provider's count for the same prefix.
+- After the model provider refuses a request for length, the runner rides with `over_limit`, applies the answer and resends the step once. A second length refusal ends the run with `context_ceiling` and the provider's numbers.
+- An estimate may trigger the soft window-budget ride (W3.5), never a refusal, an `over_limit` ride, or a pre-send `context_ceiling`.
+
+A runner whose host runs the model loop meets the resend rule when the host's next request for the step, its own retry or the next run, carries the applied view. If the host makes no further request, the run ends `context_ceiling` with the provider's numbers. Either way, the ride after the refusal carries the provider's count, so the provider's next view fits.
 
 **W3.5 `Conditions`:** what the session runs under now. Notices and rides both carry it, so a change reaches the provider with the next one.
 
@@ -419,7 +425,7 @@ it in Setup's `detects` (RD5). This budget is soft: the runner never refuses or
 ends a step for it, even when the provider returns no view. Non-declaring
 providers receive neither the flag nor the cause.
 
-Informative for providers: when `last_prompt_view` is present, a reading counts toward a compaction decision only when `last_prompt_view` equals the newest view the runner accepted and has not since refused; a lower version, or `0` once any view is accepted, is stale. This holds even while the runner's `applied_view` still names an older view: `applied_view` names the view in force, and an accepted view takes force only at the next step boundary, so a reading can arrive between acceptance and the first request rendered with the new view. A reading that is stale only against an accepted view that hasn't yet taken force is normal runner behaviour, not a fault. The provider should wait for a reading under the current view rather than base a compaction decision on a stale reading. When `last_prompt_view` is absent, a provider may treat a reading that repeats exactly the reading its newest accepted view was built from as already acted on, because a runner re-sends its last measurement until a new request is measured. W6.5's `stale_version` means a runner refuses any view whose version is not greater than the latest it accepted, so a version a runner reports names exactly one view in that session. Over-limit rides still act on their own estimate.
+Informative for providers: when `last_prompt_view` is present, a reading counts toward a compaction decision only when `last_prompt_view` equals the newest view the runner accepted and has not since refused; a lower version, or `0` once any view is accepted, is stale. This holds even while the runner's `applied_view` still names an older view: `applied_view` names the view in force, and an accepted view takes force only at the next step boundary, so a reading can arrive between acceptance and the first request rendered with the new view. A reading that is stale only against an accepted view that hasn't yet taken force is normal runner behaviour, not a fault. The provider should wait for a reading under the current view rather than base a compaction decision on a stale reading. When `last_prompt_view` is absent, a provider may treat a reading that repeats exactly the reading its newest accepted view was built from as already acted on, because a runner re-sends its last measurement until a new request is measured. W6.5's `stale_version` means a runner refuses any view whose version is not greater than the latest it accepted, so a version a runner reports names exactly one view in that session. Over-limit rides still act on their own exact count or length refusal (W3.4).
 
 **Signed floor.** The runner contract's tool-set-change rule records a durable,
 monotonic floor at the session's newest entry when a tool change invalidates
@@ -895,7 +901,7 @@ Request:
 | `deadline_ms` | integer | How long the runner waits for the answer. Its choice; a ride that may make the provider read the transcript from scratch, for example after either side restarts, can get a longer one. This never implies `cache_expired`, which RD3 alone governs. |
 | `conditions` | `Conditions` | W3.5. |
 | `applied_view` | `AppliedView`, optional | As in a notice. |
-| `request_tokens` | integer, optional | With `over_limit`: the runner's estimate of the prompt it is about to send. |
+| `request_tokens` | integer, optional | With `over_limit`: the model provider's stated count after a length refusal (for example, "prompt is too long: N tokens > M maximum" or "resulted in N tokens"), or the runner's exact count before sending. Absent when neither is known; never an estimate. |
 
 Causes:
 
@@ -907,12 +913,12 @@ Causes:
 | `tier_change` | A different service tier. |
 | `account_change` | A different account. |
 | `surface_change` | A different system prompt or tool definitions. |
-| `over_limit` | Its estimate of the next request exceeds the usable window (W3.4). |
+| `over_limit` | Before sending, an exact count exceeds the usable window, or the model provider has refused the request for length (W3.4). |
 | `window_over_budget` | The soft window-budget schedule in W3.5 asks for a view. Only to providers declaring `compaction-limits/v1`, and listed in `detects` when the runner can detect it. May accompany other causes; it does not imply a lost cache. |
 
 A cause says what changed at the runner, not what the provider must do. Only `over_limit` needs a smaller request. With every other cause, `nothing` is a valid answer, and a provider decides from its own policy whether that cause makes edits cheap to land. `window_over_budget` alone is a valid ride with no cache-loss cause; it never ends or refuses a step for exceeding the budget.
 
-Answer: `{"answer": "view", "view": View}` or `{"answer": "nothing"}`. The runner checks a returned view like one handed over with `session.apply_view` (W6.5). If accepted, it applies the view to this very request and stores it as its latest; if refused, it keeps its view and reports `view_refused` in its next notice. With `over_limit`, it then estimates again, and refuses the turn with `context_ceiling` if the request still does not fit.
+Answer: `{"answer": "view", "view": View}` or `{"answer": "nothing"}`. The runner checks a returned view like one handed over with `session.apply_view` (W6.5). If accepted, it applies the view to this very request and stores it as its latest; if refused, it keeps its view and reports `view_refused` in its next notice. With a pre-send `over_limit`, it refuses the turn with `context_ceiling` only if an exact count still exceeds the usable window. After a length refusal, it follows W3.4's resend rule.
 
 Refusals: `unknown_session` when the provider holds no Setup or drops the ride
 under W3.5 (foreign epoch, mismatched epoch presence, or stamp without epoch);

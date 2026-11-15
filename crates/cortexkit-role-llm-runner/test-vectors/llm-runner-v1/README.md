@@ -1,4 +1,8 @@
-# llm-runner/v1 vectors for runner 0.8.45
+# llm-runner/v1 vectors for runner 0.8.56
+
+`send-promote.json` pins session-bound promotion requests, all four outcomes,
+strict request refusals and the request-id reuse refusal. The `send_promote`
+wire tests round-trip these samples; promotion never adds a send state.
 
 `run-awaits.json` pins reader-facing waits across status, head, subscribe and
 applicable terminal results, including open strings and malformed bounded fields.

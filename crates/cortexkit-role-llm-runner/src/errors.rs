@@ -376,6 +376,10 @@ impl Default for RetentionInvalidDetail {
 /// a `session.adopt` reused one with another plan. `detail.field` names the
 /// first field that differs, for example `delivery` or `plan`.
 pub const SEND_ID_REUSE: &str = "send_id_reuse";
+/// A promotion request id was reused for another send. Detail: `{field: "send_id"}`.
+pub const REQUEST_ID_REUSE: &str = "request_id_reuse";
+/// The operation is not supported by this runner or the session's harness.
+pub const UNSUPPORTED: &str = "unsupported";
 
 /// A retry of a durably retracted send. Nothing is written and it never starts.
 pub const SEND_RETRACTED: &str = "send_retracted";
@@ -637,6 +641,8 @@ pub const CODES: &[&str] = &[
     CONTEXT_CEILING,
     EXPIRED,
     SEND_ID_REUSE,
+    REQUEST_ID_REUSE,
+    UNSUPPORTED,
     SEND_RETRACTED,
     DELIVERY_UNSUPPORTED,
     RUN_PAUSED,
@@ -756,13 +762,15 @@ pub fn ending_awaits(error: &crate::run::RunError, since_ms: u64) -> crate::awai
     wait
 }
 
-/// The field an `invalid_params`, `send_id_reuse`, or scoped-send mismatch
-/// refusal names, or `None` for any other code or a detail without `field`.
+/// The field an `invalid_params`, `send_id_reuse`, `request_id_reuse`, or
+/// scoped-send mismatch refusal names, or `None` for any other code or a
+/// detail without `field`.
 pub fn refused_field<'a>(code: &str, detail: Option<&'a Value>) -> Option<&'a str> {
     if !matches!(
         code,
         INVALID_PARAMS
             | SEND_ID_REUSE
+            | REQUEST_ID_REUSE
             | SCOPE_SENDER_MISMATCH
             | SCOPE_FLOW_ID_MISMATCH
             | SCOPE_RUN_ID_MISMATCH

@@ -392,6 +392,7 @@ alias until the next breaking release.
 | `delivery_order` | `session.send` with a list in `delivery`, plan-named senders and plan templates | §9.7 |
 | `app_readers` | Plan-named read admission; adds no operation of its own | §9.19 |
 | `send_status` | `session.send_status` | §9.8 |
+| `send_promote` | `session.promote`; only where `steer` is declared | §9.24 |
 | `user_commands` | `session.user_command`, `session.user_command_status` | §9.10 |
 | `turn_directives` | `session.send` with `directives`; its answer on `run.result` and `run.status` where served | §9.9 |
 | `interrupt_reason` | `run.result` with durable `reason`; the same on `run.status` and `last_run_state` where served | §6.5 |
@@ -4123,7 +4124,12 @@ A runner that declares `retract` serves `session.retract`.
 - [pinned] `always` and `hours` stop after 24 warms without a real request.
   Any real request resets that count and resets the `auto` cost cap too.
   When warming stops, its reason in the step cache report (§14.3) is one of
-  `cost-cap`, `count-cap`, `outside-hours`, `session-ended` or `unsupported`.
+  `cost-cap`, `count-cap`, `deadline-missed`, `outside-hours`, `session-ended`
+  or `unsupported`. `deadline-missed` means a warm that was due could not
+  complete before the cached prefix's lifetime ended (it would have landed
+  inside the skip margin, it was not sent in time, or its send did not finish
+  before expiry), so warming stopped. This is a timing failure; `cost-cap`
+  means only the `auto` cost cap.
   Real-time warming schedules, cost/count caps and local-time transitions
   are not exercised by the conformance kit.
 
@@ -6702,6 +6708,67 @@ provider's breakpoint limit (four on Anthropic).
   delivery list, and nothing is yielded. Hand-back changes neither the send's
   delivery modes nor its notice or speaker marks.
 
+### 9.24 `send_promote`: move a queued send into the running turn
+
+- [pinned] `send_promote` is opt-in and declared at the same level as `steer`:
+  where steer support is per harness, promotion support is per harness too.
+  A runner may declare `send_promote` only where it declares `steer`;
+  `check_describe` refuses a group without that prerequisite as
+  `send_promote_without_steer`. Callers check the applicable group before
+  offering promotion. Without `send_promote`, or on a harness without
+  `steer`, `session.promote` refuses terminal `unsupported` and changes nothing.
+- [pinned] The request is `{send_id, request_id}` (`promote::PromoteRequest`)
+  on the same session-bound management route as `session.send_status` (§9.8).
+  There is no body session address and no repeated send body. Unknown or
+  malformed members refuse `invalid_params` naming the field. `request_id`
+  is 1–128 printable ASCII characters, as for `session.stop_all` (§9.22).
+- [pinned] Admission uses the same current-plan `steer` delivery grant as
+  `session.send`, checked against the route's attested caller on every call,
+  including replay. A caller without that grant is refused
+  `scope_owner_mismatch` before any write. Resolve `send_id` only in the
+  caller's own send-id space, exactly as `session.send_status` (§9.8),
+  including its declared one-hop succession lookup. Another sender's send
+  is indistinguishable from a missing send.
+- [pinned] The runner decides atomically with its queue and the turn boundary,
+  and returns one of these answers (`promote::PromoteReply`):
+  - `{outcome: "promoted"}`: the send was still queued and a run was active.
+    It is moved into that run and follows **§9's steer rule** exactly,
+    including its no-active-run rule. As a consequence, a promoted send
+    whose run ends before its next step boundary is delivered as the next
+    turn, exactly as it would have been without promotion, and is never
+    dropped. Its final receipt is `delivered: {as: "turn", ref}` under §9's
+    queued-send receipt rules.
+  - `{outcome: "delivered"}`: the turn ended first and the send already
+    started or joined a turn. Nothing changes and no second delivery runs.
+  - `{outcome: "not_promoted", reason: "no_active_run"}`: the send is still
+    queued but no run is active, including a parked session with a `pending`
+    send. It stays queued and is sent when the next turn starts.
+  - `{outcome: "not_queued"}`: no send exists in the caller's applicable
+    namespace, or the send ended without delivery, such as withdrawn or
+    `not_delivered`. Nothing changes and no other sender's information is
+    revealed.
+- [pinned] The runner durably records the complete first answer under the
+  session, caller and `request_id` before acknowledging, in the same atomic
+  decision as any queue move. A repeat returns that answer unchanged,
+  including after restart, without acting again. Reusing `request_id` with a
+  different `send_id` refuses terminal `request_id_reuse` with
+  `detail.field: "send_id"`, before any write. This is promotion's counterpart
+  of §9's `send_id_reuse`; the reused key here is the request id, not the send
+  id. A new request id makes a new decision about the send's current fate.
+- [pinned] Promotion preserves the original `send_id`, send payload and retry
+  identity: ordinary re-sends, dedupe, receipts and `session.send_status`
+  continue unchanged under §9. No send state is added. The promotion outcome
+  describes the atomic decision, not a replacement for the send's receipt.
+  Outcomes and `not_promoted` reasons are non-exhaustive; an unknown value
+  never confirms promotion or delivery.
+
+Informatively, `promoted` means the queued words now follow the running turn's
+steer path. `delivered` settles whether those words were sent: they already
+started or joined a turn and must not be sent again. `not_promoted` with
+`no_active_run` means they remain scheduled for the next turn, not that they
+were lost. `not_queued` gives no new delivery confirmation; follow any known
+send receipt rather than sending its words again blindly.
+
 ## 10. `session.baseline` and the admission reply
 
 - [pinned] `session.baseline` is required of every runner and answered only
@@ -7449,6 +7516,8 @@ treats it as a terminal refusal of that one request.
 | `session_released` | send while release deletion is pending (§9.14) | — | **yes** |
 | `backup_unsupported` | runner cannot back up a single session (§9.14) | `reason` | no |
 | `send_id_reuse` | a `send_id` reused with another payload or mode (another list in `delivery` included, §9.7), a `session.adopt` `send_id` reused with another plan (§9.5), or a `session.refresh_policy` `send_id` reused with another `generation` or `policy` (§10.2) | `field` when the runner can identify it; `plan` on `session.adopt` | no |
+| `request_id_reuse` | a `session.promote` `request_id` reused with another `send_id` (§9.24) | `field: "send_id"` | no |
+| `unsupported` | `session.promote` without `send_promote`, or on a harness without `steer` (§9.24) | — | no |
 | `send_retracted` | a re-send of a send whose submission `session.retract` withdrew (§9.2) | — | no |
 | `delivery_unsupported` | a send whose legacy delivery mode is undeclared, or a `delivery_order` list with no declared member (§9.7) | `delivery`: the mode string or the ordered list as sent | no |
 | `run_paused` | a send behind a paused run that the runner refuses rather than queues (§9) | `{run_id, reason}` | no |

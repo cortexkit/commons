@@ -20,6 +20,8 @@ pub const CALL_YIELD_JSON: &str = include_str!("../test-vectors/llm-runner-v1/ca
 pub const NOTICE_YIELD_JSON: &str = include_str!("../test-vectors/llm-runner-v1/notice-yield.json");
 /// Session-wide stop addressing and durable replay reply shape.
 pub const STOP_ALL_JSON: &str = include_str!("../test-vectors/llm-runner-v1/stop-all.json");
+/// Atomic queued-send promotion requests and all four decisions.
+pub const SEND_PROMOTE_JSON: &str = include_str!("../test-vectors/llm-runner-v1/send-promote.json");
 
 /// Every vector file as `(file name, contents)`, in the order
 /// [`SHA256SUMS`] lists them.
@@ -54,6 +56,7 @@ pub const FILES: &[(&str, &str)] = &[
     ),
     ("restart-survival.json", RESTART_SURVIVAL_JSON),
     ("stop-all.json", STOP_ALL_JSON),
+    ("send-promote.json", SEND_PROMOTE_JSON),
     ("call-yield.json", CALL_YIELD_JSON),
     ("notice-yield.json", NOTICE_YIELD_JSON),
     (

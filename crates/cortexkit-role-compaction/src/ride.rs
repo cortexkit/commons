@@ -1,6 +1,7 @@
 //! `compaction.ride`, served by the provider. The runner asks for a view now,
-//! just before a request that rewrites its prompt cache anyway, or that would
-//! not fit, or when the runner's window budget is crossed. The provider answers
+//! before a request that rewrites its prompt cache anyway, on an exact count
+//! above the usable window, after a length refusal, or when the runner's window
+//! budget is crossed. The provider answers
 //! within the deadline with a view to apply, or with nothing. A budget ride is
 //! soft: it never refuses or ends a step, and does not imply a lost cache.
 
@@ -9,8 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::notice::Conditions;
 use crate::view::{AppliedView, View};
 
-/// The refusal code a runner gives a run whose next request still does not
-/// fit after an `over_limit` ride. It never sends a request over its limit.
+/// The refusal code for an exact pre-send count still above the usable window,
+/// a length refusal with no ride answer, or a second length refusal after the
+/// runner applies a view and resends once. An estimate never causes it.
 pub const CONTEXT_CEILING: &str = "context_ceiling";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -28,8 +30,9 @@ pub struct RideRequest {
     pub conditions: Conditions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub applied_view: Option<AppliedView>,
-    /// For [`RideCause::OverLimit`]: the runner's estimate, in tokens, of the
-    /// request it is about to send.
+    /// For [`RideCause::OverLimit`]: the model provider's stated count after a
+    /// length refusal, or the runner's exact count before sending. Absent when
+    /// neither is known; never an estimate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::integer::optional")]
     pub request_tokens: Option<u64>,
@@ -69,7 +72,8 @@ pub enum RideCause {
     AccountChange,
     /// The system prompt or the tool definitions changed.
     SurfaceChange,
-    /// The next request would exceed `context_window - output_reserve`.
+    /// An exact count exceeds `context_window - output_reserve` before sending,
+    /// or the model provider refused the request for length. Never an estimate.
     OverLimit,
     /// The runner's window exceeds its Setup budget. Only for providers
     /// declaring `compaction-limits/v1`; unlike cache changes, this is soft.

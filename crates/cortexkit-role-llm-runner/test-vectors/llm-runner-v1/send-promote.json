@@ -1,0 +1,21 @@
+{
+  "cases": [
+    {"name":"queued_with_active_run","request":{"send_id":"send-1","request_id":"promote-1"},"reply":{"outcome":"promoted"}},
+    {"name":"turn_ended_first","request":{"send_id":"send-2","request_id":"promote-2"},"reply":{"outcome":"delivered"}},
+    {"name":"parked_queue","request":{"send_id":"send-3","request_id":"promote-3"},"reply":{"outcome":"not_promoted","reason":"no_active_run"}},
+    {"name":"unknown_or_other_sender","request":{"send_id":"send-4","request_id":"promote-4"},"reply":{"outcome":"not_queued"}}
+  ],
+  "refused_requests": [
+    {"request":{"send_id":"send-1"},"field":"request_id"},
+    {"request":{"request_id":"promote-1"},"field":"send_id"},
+    {"request":{"send_id":null,"request_id":"promote-1"},"field":"send_id"},
+    {"request":{"send_id":"send-1","request_id":""},"field":"request_id"},
+    {"request":{"send_id":"send-1","request_id":"bad\nkey"},"field":"request_id"},
+    {"request":{"send_id":"send-1","request_id":"promote-1","session":"other"},"field":"session"}
+  ],
+  "refusals": [
+    {"code":"request_id_reuse","detail":{"field":"send_id"}},
+    {"code":"unsupported"},
+    {"code":"scope_owner_mismatch"}
+  ]
+}
