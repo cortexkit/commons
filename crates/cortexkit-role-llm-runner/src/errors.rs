@@ -19,6 +19,11 @@ use serde_json::Value;
 
 /// Named runner-side run error classes. Classes remain open strings.
 pub mod run_error_classes {
+    /// Plain host-side prompt hand-over failed. The run ends `error`, never
+    /// `interrupted` or `cancelled`, with `provider_code: provider_error` and
+    /// the existing top-level `cause` naming the failure (an open string).
+    /// Emit only after callers' readers accept this class.
+    pub const HANDOVER_FAILED: &str = "handover_failed";
     /// A required refresh could not start the session host with its new plan.
     pub const HOST_RELAUNCH_FAILED: &str = "host_relaunch_failed";
 }
@@ -150,7 +155,9 @@ pub const UNKNOWN_MID: &str = "unknown_mid";
 
 /// The tag selector's call key was not minted by this session's runner.
 pub const UNKNOWN_CALL: &str = "unknown_call";
-/// The call's request did not show this runner-assigned tag.
+/// The call's request did not show this runner-assigned tag. If the runner
+/// cannot establish the part number, it adds
+/// `detail.cause: "numbers_unknown"`; readers ignore unknown detail members.
 pub const UNKNOWN_TAG: &str = "unknown_tag";
 
 /// A `session.history` cursor no longer names a place in the session's

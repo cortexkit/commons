@@ -1000,6 +1000,40 @@ mod tests {
     }
 
     #[test]
+    fn handover_failed_error_class_and_causes_round_trip() {
+        for cause in [
+            "host_unreachable",
+            "nothing_written",
+            "no_stdin",
+            "host_exited",
+            "future_cause",
+        ] {
+            let wire = serde_json::json!({
+                "class": "handover_failed",
+                "message": "prompt hand-over failed",
+                "provider_code": "provider_error",
+                "cause": cause
+            });
+            let error: RunError = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(
+                error.class,
+                crate::errors::run_error_classes::HANDOVER_FAILED
+            );
+            assert_eq!(error.cause.as_deref(), Some(cause));
+            assert_eq!(serde_json::to_value(&error).unwrap(), wire);
+            assert_eq!(
+                error,
+                RunError::new(
+                    crate::errors::run_error_classes::HANDOVER_FAILED,
+                    "prompt hand-over failed",
+                    crate::errors::provider_codes::PROVIDER_ERROR
+                )
+                .with_cause(cause)
+            );
+        }
+    }
+
+    #[test]
     fn run_status_wire_bytes_open_reason_and_unknown_run() {
         for (request, bytes) in [
             (RunStatusRequest::new(), "{}"),

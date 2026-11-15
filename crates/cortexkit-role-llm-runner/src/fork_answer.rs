@@ -1,4 +1,6 @@
-//! Isolated question-answering branches of the head's last served request.
+//! Isolated question-answering branches of the head's newest served request,
+//! including its finished no-tool-call answer when present. The prepared base
+//! stays fixed when the head advances.
 //!
 //! These wire types and admission helpers do not implement branch storage,
 //! model execution or recovery. Runners implement those rules in CONTRACT.md §9.20.

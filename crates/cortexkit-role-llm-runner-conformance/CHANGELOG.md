@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.65
+
+- Pin the role contract to `=0.8.54` for final withdrawal proofs, retryable
+  `not_delivered` sends, plain hand-over run errors and the `tag_read`
+  `numbers_unknown` cause. Existing `handover_failed` and `routing_refused`
+  fixtures and checks are unchanged.
+
 ## 0.17.64
 
 - Pin the role contract to `=0.8.53` for clarified `pending` replies and the

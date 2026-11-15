@@ -113,7 +113,8 @@ pub mod ops {
     /// Start a head with a frozen plan and model, without a message or run.
     /// Advertised only through `role.describe.extensions`.
     pub const HARNESS_HOST_START: &str = "harness.host_start";
-    /// Freeze the last served head request as a question-answering branch.
+    /// Freeze the newest served head request, plus its finished no-tool-call
+    /// answer when present, as a question-answering branch.
     pub const SESSION_FORK_PREPARE: &str = "session.fork_prepare";
     /// Ask on a prepared branch without running tools or changing the head.
     pub const SESSION_FORK_ASK: &str = "session.fork_ask";
@@ -208,7 +209,8 @@ pub mod capabilities {
     pub const NOTICE_YIELD: &str = "notice_yield";
     /// Session-wide work stop, admitted like interrupt-granted cancellation.
     pub const STOP_ALL: &str = "stop_all";
-    /// Questions on an isolated branch of the head's last served request.
+    /// Questions on an isolated, prepared base of the head's newest served
+    /// request, including its finished no-tool-call answer when present.
     pub const FORK_ANSWER: &str = "fork_answer";
     /// Provider service levels, route support and truthful served-tier usage.
     pub const SERVICE_TIER: &str = "service_tier";

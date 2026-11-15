@@ -1359,22 +1359,33 @@ pub mod states {
     /// delivered. A re-send of its `send_id` answers this state, with `slot`
     /// naming the slot (`crate::errors::TEMPLATE_PART_GONE`).
     pub const TEMPLATE_PART_GONE: &str = "template_part_gone";
-    /// The send provably never reached the host or a provider. Terminal for
-    /// its `send_id`, with a required open `reason` and no `delivered` receipt.
+    /// The send's words never ran and can no longer run. Proven from the
+    /// runner's durable record or a typed answer from the prompt hand-over
+    /// process, and retired in the same write so they can never land later.
+    /// Terminal for its `send_id`, with a required open `reason` and no
+    /// `delivered` receipt. Unproven delivery stays `delivered.as: unknown`.
+    /// Callers retry as a new send on a backoff, so a new send must be able
+    /// to succeed later; repeatable failures keep the ordinary receipt.
     pub const NOT_DELIVERED: &str = "not_delivered";
 }
 
-/// The runner proves from its own durable record, including any record kept
-/// by the process that hands prompts to its host, that the prompt was never
-/// handed to a host. A post was tried and failed, or the host could not be
-/// reached or relaunched when the send's own run was due.
-/// That run ends `error` with its own cause code; this reason stays coarse.
-/// Callers act on the state, not the cause. A queued send whose own run never
-/// started stays queued while its session is parked and runs when it can;
-/// it is never `not_delivered` merely because the host is unavailable.
+/// Host-side hand-over was tried and failed when the send's run was due,
+/// with durable proof or a typed answer from the prompt hand-over process
+/// that the prompt never reached the host. The run ends `error` with its own
+/// class and cause; this reason stays coarse. While the run is due, the
+/// runner may retry under the same `send_id` only if every earlier attempt
+/// provably never left the runner or its prompt hand-over process. It reports
+/// `not_delivered` only once it stops trying. An unavailable host instead
+/// keeps the send queued and `pending`, never `not_delivered`.
 pub const REASON_HANDOVER_FAILED: &str = "handover_failed";
 /// Routing refused the account before any provider attempt.
 pub const REASON_ROUTING_REFUSED: &str = "routing_refused";
+/// A handed prompt was provably never used and can no longer run. The send's
+/// own run took no model step, and the runner's record of every request proves
+/// none carried the words, including in other runs. Withdrawal was acknowledged,
+/// or the host holding the words is proven gone and its stored history lacks
+/// them. Emit only after callers' readers accept this reason.
+pub const REASON_WITHDRAWN: &str = "withdrawn";
 
 /// A send state, classified without rejecting a runner's additional states.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1672,6 +1683,25 @@ mod tests {
             SendState::Unknown("future_state".into())
         );
         assert_eq!(future.reason.as_deref(), Some("future_reason"));
+    }
+
+    #[test]
+    fn withdrawn_reason_round_trips_with_no_delivery_receipt() {
+        let bytes = r#"{"state":"not_delivered","run_id":"run-8","reason":"withdrawn"}"#;
+        let reply: SendReply = serde_json::from_str(bytes).unwrap();
+        assert_eq!(reply.send_state(), SendState::NotDelivered);
+        assert_eq!(reply.reason.as_deref(), Some(REASON_WITHDRAWN));
+        assert!(reply.delivered.is_none());
+        assert_eq!(serde_json::to_string(&reply).unwrap(), bytes);
+        assert_eq!(
+            serde_json::to_string(
+                &SendReply::new(states::NOT_DELIVERED)
+                    .with_run_id("run-8")
+                    .with_reason(REASON_WITHDRAWN)
+            )
+            .unwrap(),
+            bytes
+        );
     }
 
     #[test]

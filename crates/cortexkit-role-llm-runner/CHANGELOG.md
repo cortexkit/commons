@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.8.54
+
+- Define `not_delivered` by durable proof that the words never ran and can no
+  longer run, with retirement in the same write. Add the open `withdrawn`
+  reason for an unused host-held prompt whose withdrawal is proven final.
+- Limit `not_delivered` to cases where retrying as a new send on a backoff can
+  succeed later. Repeatable failures end the run with their own error and keep
+  the send's ordinary receipt. Allow proven-unsent hand-over retries under the
+  same send id until the runner stops trying; an unavailable host and a send
+  queued behind an interrupted turn stay `pending`.
+- Name plain host-side hand-over failures with run-error class
+  `handover_failed`, `provider_code: "provider_error"` and the existing
+  top-level open `cause`, never `interrupted` or `cancelled`. Keep
+  `host_relaunch_failed` separate. Upgrade readers before emitting the new
+  reason or class.
+- Add `detail.cause: "numbers_unknown"` to a `tag_read` `unknown_tag` refusal
+  when the runner cannot establish the named part number.
+- Fix a fork's prepared base to the head's newest served model request,
+  appending its finished answer only when it requests no tool calls, rendered
+  as the head's next request would carry it. Exclude unrun later messages and
+  refuse an unprovable newest base rather than falling back to an older one.
+  The prepared base stays fixed when the head advances; preparing a new fork
+  shares the prefix.
+- Add send-reason and run-error round-trip coverage without changing the wire
+  shape or closing unknown strings.
+
 ## 0.8.53
 
 - Clarify that `pending` means durable and not yet delivered, including an

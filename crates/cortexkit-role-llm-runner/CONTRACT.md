@@ -2236,10 +2236,11 @@ exclusion no longer applies. An id and an ordinal never derive from each other.
   or does not belong to the model the request was sent to. It comes with
   `provider_code: "request_invalid"` and is not retryable as is: resending
   the same request fails the same way.
-- [pinned] A runner emits `cause` only from a recognizer anchored to the
-  provider's whole message under the specific provider error type, never
-  from a substring match on free text. It emits no cause when the message
-  does not match.
+- [pinned] A runner derives a `cause` from a provider's error text only through
+  a recognizer anchored to the provider's whole message under the specific
+  provider error type, test-pinned and failing safe to no cause. Runner-side
+  causes, such as those of `handover_failed`, come from the runner's own
+  records and typed answers, never from provider text.
 - [pinned] An unknown `run_id` is refused `unknown_run`, by `run.result`
   and `run.tool_calls` alike (§6.3).
 - [pinned] **Run attribution.** Each message records which run and episode
@@ -3403,20 +3404,44 @@ Model-view reads and replacement-entry pages are not part of this contract.
   `run.status` and the event stream, and never infer a running turn from it.
   Nothing requires a runner to attempt hand-over before answering: the reply
   follows the durable sync, as above.
-- [pinned] `not_delivered` (`send::states::NOT_DELIVERED`) means the send
-  provably never reached the host or a provider. `reason` is required, an open
-  string whose unknown values decoders keep; `delivered` is absent. The initial
-  reasons are:
+- [pinned] `not_delivered` (`send::states::NOT_DELIVERED`) means the send's
+  words never ran and can no longer run, so the owner may deliver them again as
+  a new send. The runner proves this from its own durable record or a typed
+  answer of the process that hands prompts to the host, and retires the send
+  in the same write so it can never land later. Anything it cannot prove stays
+  `delivered.as: "unknown"`. `reason` is required, an open string whose unknown
+  values decoders keep; `delivered` is absent. The reasons are:
   - `handover_failed` (`send::REASON_HANDOVER_FAILED`): the runner proves from
-    its own durable record, including any record kept by the process that hands
-    prompts to its host, that the prompt was never handed to a host. A post was
-    tried and failed, or the host could not be reached or relaunched when the
-    send's run was due. The specific cause
-    stays on the run: that run ends `error` with its own code (for example
-    `host_relaunch_failed`), and `reason` stays coarse. Callers act on the
-    state, not the cause;
+    its own durable record or the typed answer above that the prompt was never
+    handed to a host. This reason is about the host side: hand-over was tried
+    and failed when the send's run was due. A plain hand-over failure ends that
+    run `error`, never `interrupted` or `cancelled`, with
+    `class: "handover_failed"`, `provider_code: "provider_error"` and the
+    existing top-level `cause` naming the specific failure (`host_unreachable`,
+    `nothing_written`, `no_stdin`, `host_exited`; an open string).
+    `host_relaunch_failed` stays its own run-error class (§12.2); `reason` stays
+    coarse. Callers act on the send state, not the cause.
+    While the send's run is still due, the runner may hand the same send over
+    again itself, under the same `send_id`, when every earlier attempt is
+    proven not to have left the runner or the process that hands prompts to
+    the host. It reports `not_delivered` only once it stops trying. A host
+    that is not available now keeps the send queued and `pending`, as below;
+    that is not a hand-over failure;
   - `routing_refused` (`send::REASON_ROUTING_REFUSED`): routing refused the
-    account before any provider attempt.
+    account before any provider attempt;
+  - `withdrawn` (`send::REASON_WITHDRAWN`): the prompt was handed to the host
+    but provably never used, and can no longer run. Both halves are required:
+    no model request carried the words, proven from the runner's record of
+    what each request carried, and the words can no longer reach the host
+    because withdrawal was acknowledged, or the host holding them is proven
+    gone and its stored history lacks them. The send's own run took no model
+    step; the no-request proof also covers requests in any other run.
+
+  Callers retry a `not_delivered` send as a new send on a backoff, so a runner
+  reports it only when a new send can succeed later. A cause that would fail
+  the same way again (compaction unavailable before any post, a host that can
+  never be relaunched, or a model the host refuses) ends the run `error` with
+  its own code, and the send keeps its ordinary receipt.
 
   The state is final for that `send_id`: a re-send or `session.send_status`
   answers it again. The owner may deliver the same words again only as a new
@@ -3425,12 +3450,18 @@ Model-view reads and replacement-entry pages are not part of this contract.
   ended on. This differs from `delivered.as: unknown`, whose outcome is unknown
   and must never be resent. An older reader keeps `not_delivered` as an unknown
   state string, which callers treat as outcome unknown, the safe side. Runners
-  emit it only after their callers' readers accept it (readers first).
+  emit it only after their callers' readers accept it (readers first). The
+  `withdrawn` reason and the `handover_failed` run-error class are likewise
+  emitted only after those readers accept them.
 - [pinned] `not_delivered` applies only to a send whose own run ended before
-  hand-over, or that routing refused. A queued send whose run never started
+  hand-over, or before the host used a withdrawn prompt, or that routing
+  refused. A queued send whose run never started
   stays queued while its session is parked (for example, its host cannot be
   relaunched yet), and runs when the session can run again. It is never marked
-  `not_delivered` for that.
+  `not_delivered` for that. An interrupt or `run.cancel` ends only the running
+  turn (§9, §9.22). A send queued for a later turn stays `pending` even if the
+  host's own queue dropped it; the runner hands it over again itself under the
+  same `send_id`. That is never `unknown` or `not_delivered`.
 - [pinned] A send behind a paused run MAY be queued, answering `pending`,
   or refused `run_paused`. Both conform.
 - [pinned] `delivered` (`send::Delivered`) is optional: `{as, ref?, call_key?, call_carrier?}`:
@@ -4560,6 +4591,12 @@ Opaque per-part identities are carried by `part_digests` or, for an
   this read. A tag not shown in the model request that produced that call, or
   never assigned by this runner, refuses `unknown_tag`. These are named
   refusals, not empty answers.
+- [pinned] When the runner refuses `unknown_tag` because it cannot establish
+  the part number the tag named (the [compaction contract's tag-number
+  rules](../cortexkit-role-compaction/CONTRACT.md#a3-tag-numbers), T9,
+  `numbers_unknown`),
+  it adds `detail.cause: "numbers_unknown"`. This is additive: readers ignore
+  unknown detail members.
 - [pinned] Answer `{entry: ReadMessage, part: u32, host?: true, host_code?: string}` (`read::TagReadAnswer`):
   exactly one ordinary read row, with display facts always on (including
   sender, message marks and app `client_message_id` when present), plus the
@@ -6347,11 +6384,28 @@ froze for a run to every assistant reply the run writes.
   unknown members in `runner_params` nor `run.cancel`'s existing decoding.
 - [pinned] `fork_answer.prepare`: `session.fork_prepare {}` returns
   `{fork_id}`, unique across the runner and never reused. It fixes the base
-  at the head's last served request, identified by the digest recorded over
-  its request bytes when served, plus the head's tools byte for byte, model,
-  thinking and effort, speed, service tier, tool choice and credential. A
-  runner declaring the group records that digest for every served request.
-  Without a served request prepare refuses `fork_base_unavailable`.
+  at the head's newest served model request, identified by the digest recorded
+  over its request bytes when served, plus the head's tools byte for byte,
+  model, thinking and effort, speed, service tier, tool choice and credential.
+  A runner declaring the group records that digest for every served request.
+  Without a served request, or when the runner cannot prove that the request
+  is the head's newest served request, prepare refuses `fork_base_unavailable`.
+  It never answers from an older request.
+  If that request's answer finished and requests no tool calls, the runner
+  appends it, rendered as the head's next request would render it: part
+  numbers and reply cleaning (§9.6), and signed reasoning (§11.1.1), are as
+  that request would carry them. The prepared base is then a prefix of the
+  head's next request, so the cache the fork writes for that answer is the one
+  the head reads next. An
+  answer that requests tool calls, or did not finish (cut off, errored or still
+  streaming), is not appended: the base is the request alone. Providers refuse
+  a tool call without its result. Messages delivered after that request, which
+  the head has not run on, are not in the base.
+  At prepare the runner also fixes the prepared-base digest, over the request
+  plus any appended answer as rendered at prepare. The served-request digest
+  proves that the base starts from the head's newest served request; the
+  prepared-base digest is used for the rebuild comparison below. Without an
+  appended answer, the two digests cover the same bytes.
 - [pinned] `fork_answer.ask`: `session.fork_ask {fork_id, ask_id, question}`
   returns `{answer, finish, usage}`. `ask_id` is 1–256 Unicode scalar values
   and `question` is a non-empty string, otherwise `invalid_params {field}`
@@ -6385,13 +6439,15 @@ froze for a run to every assistant reply the run writes.
   restart. Only an ask passing step 5 counts; replays and refusals do not
   reset expiry. An ask in flight holds expiry off until it completes.
 - [pinned] `fork_answer.base`: on every new ask the runner rebuilds the base
-  and compares it with its digest. A mismatch or a gone base (a revert,
-  prune or new compaction view whose rebuild differs) refuses
-  `fork_base_unavailable`; the runner never sends near-identical bytes.
-  Head steps after prepare never move the base. The request an ask sends is
-  the base's bytes followed by the fork's appended messages, with one
-  exception: on a route whose wire format marks cache breakpoints explicitly
-  (such as `cache_control` on Anthropic Messages content blocks), the runner
+  and compares it with the prepared-base digest fixed at prepare. A mismatch
+  or a gone base (a revert, prune or new compaction view whose rebuild differs)
+  refuses `fork_base_unavailable`; the runner never sends near-identical bytes.
+  Head steps after prepare never move the base. A caller that needs the head's
+  later turns prepares a new fork; this is cheap because the prefix is shared.
+  The request an ask sends is the base's bytes followed by the fork's appended
+  messages, with one exception: on a route whose wire format marks cache
+  breakpoints explicitly (such as `cache_control` on Anthropic Messages content
+  blocks), the runner
   may remove the head's last breakpoint marker and add one on the fork's
   newest message. It never uses more breakpoints than the head's request did
   or the provider allows. No other byte of the base may differ.
@@ -7592,11 +7648,12 @@ refuses the caller's decision as unknown_decision (including expiration).
 reports the caller's decision (§9.3.3).
 
 Runner-side error classes are open strings, not a closed enum. In addition
-to the provider codes below, this role names the following runner-side class
+to the provider codes below, this role names the following runner-side classes
 (`errors::run_error_classes`):
 
 | Error class | When |
 |---|---|
+| `handover_failed` | the send's run ends `error` because plain hand-over failed: the host was unreachable, nothing was written, no stdin was available, or the host exited before taking the prompt; never `interrupted` or `cancelled`. Use `provider_code: "provider_error"` and the existing top-level `cause` (`host_unreachable`, `nothing_written`, `no_stdin`, `host_exited`; an open string). A host that is not available now instead keeps the send queued and `pending` (§9) |
 | `host_relaunch_failed` | the run ends `error` with no further model request because a required `refresh_relaunch` change could not be installed and verified on the host, a failed relaunch's fallback could not restore and verify the previous surface, a request's surface that someone else changed mid-run was not restored, or a runner-initiated host restart or rebuild could not reinstall and verify the stored effective surface; a pending change stays pending and the session is never ended (§10.2) |
 
 [pinned] A run that ends `error` because of a provider names the code
