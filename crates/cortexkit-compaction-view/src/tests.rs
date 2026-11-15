@@ -1314,6 +1314,18 @@ mod vector_file {
                 part.tag = None;
             }
         }
+        let mut unknown_cut = t.clone();
+        for entry in unknown_cut.iter_mut().take(2) {
+            entry.numbers_unknown = true;
+            for part in &mut entry.parts {
+                part.tag = None;
+            }
+            entry.digest = cortexkit_role_compaction::read::entry_digest(
+                entry.role.clone(),
+                entry.notice.as_ref(),
+                &entry.parts,
+            );
+        }
         let pasted = vec![
             entry(
                 1,
@@ -2594,7 +2606,38 @@ mod vector_file {
                 "clean_reply_for_plan",
                 json!({"plan_version": 4, "text": "a\u{a0}§3§\u{a0}b"}),
             ),
+            (
+                "a cut omits unknown-number entries with tagless numbered-kind parts",
+                "plan",
+                json!({"entries": unknown_cut, "edits": [head(1), cut(1, "a1")]}),
+            ),
         ]
+    }
+
+    #[test]
+    fn numbers_unknown_entries_in_the_cut_do_not_render() {
+        let (_, function, input) = cases()
+            .into_iter()
+            .find(|(name, _, _)| {
+                *name == "a cut omits unknown-number entries with tagless numbered-kind parts"
+            })
+            .unwrap();
+        for entry in input["entries"].as_array().unwrap().iter().take(2) {
+            assert_eq!(entry["numbers_unknown"], true);
+            assert!(entry["parts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|part| part.get("tag").is_none()));
+        }
+        assert_eq!(
+            call(function, input)["ok"]["items"],
+            json!([
+                {"item": "insert", "id": "m0", "role": "user", "texts": ["<session-history>summary</session-history>"]},
+                {"item": "entry", "mid": "u2", "ordinal": 3, "parts": [{"id": "t4", "tag": 4, "prefix": true}]},
+                {"item": "entry", "mid": "a2", "ordinal": 4, "parts": [{"id": "r2", "prefix": false}, {"id": "t5", "tag": 5, "prefix": true}]},
+            ]),
+        );
     }
 
     /// A step with two finished calls, then the empty entries a runner can
@@ -2791,6 +2834,10 @@ mod vector_file {
                 (
                     217,
                     "4adaad2b75e91164ada699e529991673c5666bf1ca10224e26a62fbdfae1f33c",
+                ),
+                (
+                    218,
+                    "be1c1192c739f81b8ad3cecec87f99073170d1c76c81c8bdc67373d49a15cc1f",
                 ),
             ],
         ),

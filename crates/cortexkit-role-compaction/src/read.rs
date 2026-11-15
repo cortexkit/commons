@@ -73,6 +73,12 @@ pub struct Entry {
     /// from every checksum. Use [`Self::with_host_parts`] to project the gate.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_parts: Vec<HostPart>,
+    /// Numbered-kind parts have no tag because their numbers cannot be
+    /// established, not because they take none. Sent only to providers
+    /// declaring `compaction-numbers-unknown/v1`, on every such entry in
+    /// reads and notices. Excluded from every checksum (W7).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub numbers_unknown: bool,
     /// When the host first stored the message, in milliseconds since the Unix
     /// epoch. It does not change when the entry is updated. For a message the
     /// runner did not store itself (history from before the runner, a moved
@@ -105,6 +111,10 @@ pub struct Entry {
     pub generated_under: Option<AppliedView>,
 }
 
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
 // Decode the same wire fields before checking facts against the whole entry.
 // A field-level deserializer cannot validate membership or stored part order.
 #[derive(Deserialize)]
@@ -120,6 +130,8 @@ struct EntryFields {
     speaks_for: Option<SpeaksFor>,
     #[serde(default)]
     host_parts: Vec<HostPart>,
+    #[serde(default)]
+    numbers_unknown: bool,
     #[serde(deserialize_with = "crate::integer::required")]
     written_at: u64,
     #[serde(default, deserialize_with = "crate::integer::optional")]
@@ -378,7 +390,8 @@ pub struct Head {
 /// parts, each part with its `id`, `tag` and `digest`, as [`Entry::digest`]
 /// carries it. The ordinal, `mid`, `written_at`, `completed_at`, usage and
 /// `generated_under`, reasoning counts, part `tokens` and delivered-item
-/// `tokens` and entry `speaks_for` and `host_parts` are not hashed.
+/// `tokens` and entry `speaks_for`, `host_parts` and `numbers_unknown` are not hashed.
+/// Tags absent from the served parts never enter the checksum.
 /// Pass full parts: compact parts hash to a
 /// different value.
 pub fn entry_digest(role: Role, notice: Option<&NoticeOrigin>, parts: &[Part]) -> Digest {
@@ -423,6 +436,7 @@ impl Entry {
             notice: None,
             speaks_for: None,
             host_parts: Vec::new(),
+            numbers_unknown: false,
             written_at,
             completed_at: None,
             digest,

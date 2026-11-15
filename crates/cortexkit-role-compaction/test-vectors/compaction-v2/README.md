@@ -1,5 +1,18 @@
 # Compaction wire examples
 
+`entries-numbers-unknown.json` and `notice-numbers-unknown-request.json` serve
+tagless numbered-kind parts with `numbers_unknown: true` to a provider declaring
+`compaction-numbers-unknown/v1`. `numbers-unknown-transition.json` pairs a
+previously numbered entry with its marked form: role, notice and part digests
+stay the same, while the entry digest changes because the tags are absent.
+`checksum-numbers-unknown-marker.json` isolates the marker's exclusion from
+checksums; its unmarked form is a checksum input, not a served entry.
+`refusal-numbers-unknown.json` permanently refuses the whole tag selection
+covering the requested numbers in its detail; `view-cut-before-numbers.json`
+names the last unknown-number entry that an accepted view must cut through.
+The view library's `vectors/cases.json` includes a plan that cuts out tagless
+unknown-number entries and keeps the numbered entries after them.
+
 `entries-host-parts.json` includes a mixed user entry with a whole-block
 interrupt marker and a host-only retry entry, marked by stable part id. The
 retry entry has no code. `entries-host-parts-legacy.json` carries the same entries

@@ -136,6 +136,16 @@ impl Refusal {
         )
     }
 
+    /// Refuse an entire tag selection when these requested numbers cannot
+    /// be placed. Permanent for the session: the provider never retries them.
+    pub fn numbers_unknown(tags: Vec<u64>) -> Self {
+        Self::new(
+            codes::NUMBERS_UNKNOWN,
+            "the runner cannot establish these part numbers",
+            Some(json!({"tags": tags})),
+        )
+    }
+
     /// The route's role does not serve this method. A bug in the caller.
     pub fn unknown_method(method: &str) -> Self {
         Self::new(
@@ -198,6 +208,8 @@ pub mod codes {
     /// The runner cannot answer this read yet, but will (W1.3).
     /// `detail.cause` says why; `detail.retry_after_ms` is an optional delay.
     pub const TRANSIENT: &str = "transient";
+    /// Requested tag numbers cannot be placed; never transient (W1.3).
+    pub const NUMBERS_UNKNOWN: &str = "numbers_unknown";
 }
 
 /// The open `detail.cause` strings defined for a `transient` read refusal.

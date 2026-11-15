@@ -63,6 +63,16 @@ fn samples() -> Vec<(&'static str, Value)> {
     .with_template("reminder")]);
     let entry = Entry::new(1, "message-a", Role::User, 1_700_000_000_000, vec![part])
         .with_notice(NoticeOrigin::new("example-notifier").with_template("example"));
+    let mut unknown = entry.clone();
+    unknown.numbers_unknown = true;
+    for part in &mut unknown.parts {
+        part.tag = None;
+    }
+    unknown.digest = cortexkit_role_compaction::read::entry_digest(
+        unknown.role.clone(),
+        unknown.notice.as_ref(),
+        &unknown.parts,
+    );
     let assistant = Entry::new(
         2,
         "message-b",
@@ -469,6 +479,39 @@ fn samples() -> Vec<(&'static str, Value)> {
         (
             "entries-host-parts.json",
             value(ReadPage::new(host_entries.clone(), Head::new())),
+        ),
+        (
+            "entries-numbers-unknown.json",
+            value(ReadPage::new(vec![unknown.clone()], Head::new())),
+        ),
+        (
+            "notice-numbers-unknown-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(2, conditions.clone()).with_entries(vec![unknown.clone()]),
+            ),
+        ),
+        (
+            "numbers-unknown-transition.json",
+            json!({"numbered": entry, "marked": unknown}),
+        ),
+        ("checksum-numbers-unknown-marker.json", {
+            let mut without_marker = value(&unknown);
+            without_marker
+                .as_object_mut()
+                .unwrap()
+                .remove("numbers_unknown");
+            json!({"with_marker": unknown, "without_marker": without_marker, "checksum": unknown.digest})
+        }),
+        (
+            "refusal-numbers-unknown.json",
+            value(Refusal::numbers_unknown(vec![7, 8])),
+        ),
+        (
+            "view-cut-before-numbers.json",
+            value(ViewRefusal::CutBeforeNumbers {
+                unknown_through: "message-a".into(),
+            }),
         ),
         (
             "entries-host-parts-legacy.json",
@@ -1147,6 +1190,47 @@ fn check(name: &str, json: Value) {
                 json["checksum"].as_str().unwrap()
             );
         }
+    } else if name == "checksum-numbers-unknown-marker.json" {
+        assert_eq!(json["with_marker"]["numbers_unknown"], true);
+        assert!(json["without_marker"].get("numbers_unknown").is_none());
+        for form in ["with_marker", "without_marker"] {
+            let entry: Entry = serde_json::from_value(json[form].clone()).unwrap();
+            assert_eq!(entry.digest, json["checksum"].as_str().unwrap());
+            assert_eq!(
+                cortexkit_role_compaction::read::entry_digest(
+                    entry.role,
+                    entry.notice.as_ref(),
+                    &entry.parts,
+                ),
+                json["checksum"].as_str().unwrap(),
+            );
+            round_trip::<Entry>(json[form].clone());
+        }
+    } else if name == "numbers-unknown-transition.json" {
+        let numbered: Entry = serde_json::from_value(json["numbered"].clone()).unwrap();
+        let marked: Entry = serde_json::from_value(json["marked"].clone()).unwrap();
+        assert!(!numbered.numbers_unknown);
+        assert!(marked.numbers_unknown);
+        assert_eq!(numbered.role, marked.role);
+        assert_eq!(numbered.notice, marked.notice);
+        assert_ne!(numbered.digest, marked.digest);
+        for entry in [&numbered, &marked] {
+            assert_eq!(
+                entry.digest,
+                cortexkit_role_compaction::read::entry_digest(
+                    entry.role.clone(),
+                    entry.notice.as_ref(),
+                    &entry.parts,
+                ),
+            );
+        }
+        for (before, after) in numbered.parts.iter().zip(&marked.parts) {
+            assert!(before.tag.is_some());
+            assert!(after.tag.is_none());
+            assert_eq!(before.digest, after.digest);
+        }
+        round_trip::<Entry>(json["numbered"].clone());
+        round_trip::<Entry>(json["marked"].clone());
     } else if name.ends_with("-request.json") {
         let (method, params) = wire::decode(&serde_json::to_vec(&json).unwrap()).unwrap();
         match method.as_str() {

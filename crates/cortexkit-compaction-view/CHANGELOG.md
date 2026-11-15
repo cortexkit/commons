@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+- Adopt compaction contract 0.4.5 and add a render-plan vector proving that
+  a cut leaves out unknown-number entries with tagless numbered-kind parts.
+  Rendering is unchanged; `cut_before_numbers`, like `cut_before_move`, is
+  checked by the runner, not the view library. `PLAN_VERSION` stays 4.
+
 ## 0.4.0 (breaking)
 
 - **Behaviour change, `PLAN_VERSION` 4:** `clean_reply` no longer leaves a

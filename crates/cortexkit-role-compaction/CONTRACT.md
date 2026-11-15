@@ -33,21 +33,24 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | P2 | The part model covers every content type of the AI SDK's provider prompt (LanguageModelV4), so every model provider's history maps to it (W4.2 to W4.5, W4.10). |
 | P3 | A tool part is one item at the call's position, holding both call and result even when the host stores them apart. Dropping it removes both. |
 | P4 | Compact detail keeps what the provider plans with and leaves out the bulk (W4.8). Checksums use the full-detail projections defined in W7, minus the metadata W7 lists. |
-| P5 | A stored entry changes only when a tool call in it gets its result (even when the host stores that result in a later message) or a send is delivered with one of its results (W4.9). It may also gain a previously absent `completed_at`, stored `speaks_for` attribution or `host_parts` facts, none of which is a transcript change (W4.9, W7). Count metadata updates alone (W4.11) are not entry changes; an update that also includes a notice trigger still sends the notice normally. Any other change is a transcript change. |
+| P5 | A stored entry changes only when a tool call in it gets its result (even when the host stores that result in a later message) or a send is delivered with one of its results (W4.9). It may also gain a previously absent `completed_at`, stored `speaks_for` attribution or `host_parts` facts, none of which is a transcript change (W4.9, W7). Count metadata updates alone (W4.11) are not entry changes; an update that also includes a notice trigger still sends the notice normally. Any other change is a transcript change. Adopting unknown-number stretches is also not a transcript change (T9–T10, W7). |
 | P6 | Within a session, a message id is never given to a different message, even after a revert or branch switch; the same message keeps its id if it returns to the active path. A part's id is unique within its message, so within the session's state a provider identifies a part by `(mid, part id)` and keys durable part state on both. |
 
 ## A3. Tag numbers
 
 | Id | Rule |
 |---|---|
-| T1 | Only the runner counts. A part's number is the checkpoint of the session's latest compaction marker on the active path, plus the part's position (counting from 1) among the numbered parts from the marker's first kept entry on. Hosts append markers at the tail and point at the first kept entry, so the count starts there, not where the marker sits. Which parts are numbered: W4.7. |
-| T2 | The checkpoint a runner writes on a marker is the highest number before the marker's first kept entry. The first numbered part from there then gets checkpoint + 1, which is the number it already had, so a cut never changes a number. With no marker on the active path the checkpoint is 0; for a session moved in, it is the number handed over at the move (A13). |
-| T3 | The runner stores the checkpoint durably together with its marker: in OpenCode 2's compaction row metadata, in OpenCode 1's marker compaction part (or the runner's own store keyed by the marker's message id, written before the marker is reported), in Pi's compaction entry under `details.cortexkit_checkpoint`, in a host’s own marker record. If a revert removes the latest marker, the previous one applies again, and recounting gives the same numbers as before. |
-| T4 | Numbers are contiguous on the active path. After a revert or a branch switch, counting continues from what remains, so a removed number is given to the next new part. |
+| T1 | Only the runner counts. A part's number is the checkpoint of the session's latest compaction marker on the active path, plus the part's position (counting from 1) among the numbered parts from the marker's first kept entry on. Hosts append markers at the tail and point at the first kept entry, so the count starts there, not where the marker sits. Which parts are numbered: W4.7. T9–T10 govern stretches whose numbers the runner cannot establish. |
+| T2 | The checkpoint a runner writes on a marker is the highest number before the marker's first kept entry. The first numbered part from there then gets checkpoint + 1, which is the number it already had, so a cut never changes a number. With no marker on the active path the checkpoint is 0; for a session moved in, it is the number handed over at the move (A13). T9–T10 govern stretches whose numbers the runner cannot establish. |
+| T3 | The runner stores the checkpoint durably together with its marker: in OpenCode 2's compaction row metadata, in OpenCode 1's marker compaction part (or the runner's own store keyed by the marker's message id, written before the marker is reported), in Pi's compaction entry under `details.cortexkit_checkpoint`, in a host’s own marker record. If a revert removes the latest marker, the previous one applies again, and recounting gives the same numbers as before. T9–T10 govern stretches whose numbers the runner cannot establish. |
+| T4 | Numbers are contiguous on the active path. After a revert or a branch switch, counting continues from what remains, so a removed number is given to the next new part. In a `numbers_unknown` stretch (T9–T10), the numbers still exist and stay contiguous, but the runner cannot serve them and never gives them to other parts. |
 | T5 | The provider never computes a number. It keys its state by part identity, and refuses a context-management tool call (`ctx_*`) whose own message is no longer in the transcript, so a reused number never reaches another part. |
 | T6 | The runner renders the prefix (W4.7) in front of every numbered part's text. Neutral text never carries it. Bytes from a `replace` edit are final and get no prefix. |
 | T7 | A model reply's text is cleaned of tag notation (W4.6) when the runner maps it to neutral text and when it renders it. Whether the runner also cleans what it stores is its own choice. If the model's leading prefix named exactly the number the runner assigns and the reply holds no other tag notation, and cleaning changes nothing else, the reply renders byte for byte as the model wrote it. |
 | T8 | The numbering rules of this contract apply to a session from a marker on. A session that ran under other rules switches only at a new marker whose checkpoint is the highest number its model has seen, which the move (A13) writes. The marker records only the checkpoint; ordinals need nothing from it (MV4). |
+| T9 | Numbers are defined per stretch between two stored checkpoints; bounds are a stored marker checkpoint, the session start (0), a move's checkpoint (A13), or the window's base. A stretch keeps its numbers only when counting its numbered parts up from the checkpoint below lands exactly on the checkpoint above. Otherwise the whole stretch is `numbers_unknown`: part of it was counted differently when its requests were sent, and nothing identifies which part. Stretches that land exactly keep their numbers, including those below a failing stretch. |
+| T10 | Before serving its first read after the start that adopts unknown-number stretches, the runner fixes the unknown range durably. It serves those entries the same way for the session's life: the range never shrinks or grows, so every entry's digest is the same on every subsequent read. Adoption is not a transcript change and needs no notice, even when entry digests change; W7 defines provider recognition of previously numbered entries. |
+| T11 | Every view the runner accepts carries a `cut` through the last `numbers_unknown` entry or a later entry on the active path, so no such entry renders numbered text without its prefix (T6). The runner checks this wherever it checks a view (`session.apply_view`, a ride's answer, and each step boundary), refusing a view with no cut or an earlier cut as `cut_before_numbers` (W6.5). It keeps the view already in force; at a step boundary it reports `view_refused`. Like MV7, this is a runner-owned check, not a view-library check. |
 
 ## A4. Setup
 
@@ -64,7 +67,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. An entry only gaining `completed_at`, stored `speaks_for` attribution or `host_parts` facts does not require a notice; neither do count metadata updates alone (W4.9, W4.11). An update that also includes a notice trigger still sends the notice normally. The only notice allowed without a change is one wake notice for a session whose read was refused `transient`, once the runner can answer it: the next `seq`, current conditions and applied view, and no entries or events (W5.2). N3 still applies. |
+| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. An entry only gaining `completed_at`, stored `speaks_for` attribution or `host_parts` facts does not require a notice; neither do count metadata updates alone (W4.9, W4.11). An update that also includes a notice trigger still sends the notice normally. The only notice allowed without a change is one wake notice for a session whose read was refused `transient`, once the runner can answer it: the next `seq`, current conditions and applied view, and no entries or events (W5.2). N3 still applies. Adopting unknown-number stretches requires no notice (T9–T10, W7). |
 | N2 | The provider answers at once and does the work afterwards. The runner never waits on that work. |
 | N3 | The runner sends a session's notices one at a time: the next only after the previous one was answered. Changes made while a notice is unanswered go into the next notice, so a slow provider never builds a queue. Before a ride, the runner sends any change not yet noticed. |
 | N4 | A notice is a convenience, not the source of truth. On every notice, the provider keeps its own position and reads any gap with `session.entries`. A conforming provider therefore needs nothing new to handle a content-free wake notice (N1). |
@@ -181,6 +184,7 @@ Codes and what the caller does next:
 | `unknown_session` | | A ride for a session the provider holds no Setup for, or one dropped by W3.5's epoch check: a foreign epoch, mismatched epoch presence, or a stamp without an epoch. | The runner treats it as `nothing`, then calls Setup before its next notice. |
 | `compaction_not_permitted` | `reason` | The runner refuses a `compaction-runner/v1` route or call from a caller that is not the session's selected provider (W2.5). | The provider suspends work for that session until a new Setup answers `ready` (W2.5). |
 | `transient` | `{cause, retry_after_ms?}` | The runner cannot answer this read yet, but will. It never means the session is gone or `compaction_not_permitted`. | Ask again after `retry_after_ms` if given, or at the session's next notice. |
+| `numbers_unknown` | `{"tags": [<requested tags covered>]}` | A `session.entries` tag selection names numbers the runner cannot place (T9); the whole read is refused. Permanent for the session, never `transient` and never a silent leave-out. | The provider never asks for those tags again in that session. |
 
 For `transient`, `cause` is an open string; the first defined value is
 `index_filling`, for a part-number index still being filled. `retry_after_ms`
@@ -267,6 +271,19 @@ entries. `Entry::with_host_parts(facts, declared)` projects this gate, clearing
 previous marks when false. Direct field construction must apply the same gate.
 Deploy providers that apply the reading rules in W4.1 before runners emit the
 member: ignoring an unknown member is not host-part support.
+
+For `Entry.numbers_unknown`, the provider declares
+`compaction-numbers-unknown/v1` alongside `compaction-provider/v2`
+(`COMPACTION_NUMBERS_UNKNOWN_PROVIDES`; `provides_numbers_unknown`). The runner
+reads the provider's catalog at every Setup and retains the declaration until
+the next Setup; the provider must not withdraw it while serving a session
+without restarting. This is not a runner-sent Setup flag. Only to a declaring
+provider may the runner serve numbered-kind parts without `tag`, and only on
+an entry marked `numbers_unknown: true` (W4.1, T9–T10). Without the declaration,
+the runner omits the marker and refuses reads that would return such an entry;
+it never serves wrong numbers or silently leaves that entry out. Declaring
+providers MUST apply W7's identity-continuity rule when a previously numbered
+entry becomes marked, despite its changed entry digest.
 
 **W1.5 Unknown values.** The sets below may grow in later versions. A receiver decodes a value it does not know and keeps it, so one unknown value never fails the whole request, then acts on it on the safe side. It logs each unknown value it meets. A fallback never waives another check: PR2 and the running-tool rule still apply.
 
@@ -515,6 +532,7 @@ An entry is every record on the active path that the model sees or that holds pa
 | `notice` | `NoticeOrigin`, optional | Origin of a user-role notice delivered by a module or the runner (a reminder, a wake, an automatic message). Independent of `speaks_for`; its absence does not prove the person wrote the entry. `sender`: the module id. `template`: the plan template it was rendered from, when it was. `keep`: boolean, defaults to false and is omitted when false. True means the session owner marked this notice as carrying the person's own words; a compaction provider never drops it automatically. An agent's own explicit drop still may. |
 | `speaks_for` | `{agent_id: string, name?: string}`, optional | The text is the named agent's words carried verbatim, never the person's words. Providers label it as that agent in summaries and context maps. `agent_id` is identity; `name` is only the agent's registry name as known when sent, never identity. The runner copies the id and name, when sent, from the stored llm-runner mark, subject to W1.4. Independent of `notice`: alone it is not a notice and is never swept automatically (for example a head's brief to its worker); with `notice` it may be swept like any other notice, subject to `notice.keep`. |
 | `host_parts` | `[{part: string, host_code?: string}]`, optional | Host-written parts of a `user` or `assistant` entry, in stored part order. `part` names a stable id in this entry's `parts`, never an index. Listing the id is the mark; no `host` member is needed. May be left out when empty; serializers omit it when empty. Subject to W1.4's provider declaration and the validation and reading rules below. |
+| `numbers_unknown` | boolean, optional | True means this entry's numbered-kind parts carry no `tag` because the runner cannot establish their numbers, never that they take none. Absent means false; serialize only when true. Sent only under W1.4's `compaction-numbers-unknown/v1` declaration, on every entry in the T9–T10 range holding at least one numbered-kind part, in `session.entries` answers and notices alike. Outside every W7 checksum and every part `body_digest`. |
 | `written_at` | integer | When the host first stored the message. It does not change when the entry is updated. For a message the runner did not store itself (history from before the runner, a moved session), the host's own write time. |
 | `completed_at` | integer, optional | When the host marked the message finished, from the host's own stamp, in epoch milliseconds under the same integer rules as `written_at` (W1.2). Absent while the entry is unfinished, when the host never marks that kind of message finished (for example a user message), or when imported history has no such stamp. Readers that need a time then use `written_at`. |
 | `digest` | string | Checksum of the full-detail projection of `role`, `notice` and `parts` defined in W7, minus the metadata W7 lists. |
@@ -700,6 +718,8 @@ under W4.9; every other content change remains a transcript change except
 the result/delivery updates already allowed above. Count and timing metadata
 keep their existing rules below.
 
+Adopting unknown-number stretches is also not a transcript change and needs no notice, even when entry digests change (T9–T10, W7).
+
 A stored entry may also gain a previously absent `completed_at`. That alone is not a transcript change: `completed_at` enters none of the W7 checksums, and adding it alone needs no notice. When the same update also changes a tool result or delivers a send, the rules above still apply and the notice carries the entry with its `completed_at`. A `completed_at` once served does not change. Likewise, previously stored `speaks_for` attribution may first appear under W1.4 without a transcript change or notice (W7); its identity and optional sent name never change. Known `host_parts` facts may likewise first appear on an already stored entry without a transcript change or notice (W7). If the same update also includes a notice trigger, the runner sends the notice normally.
 
 Count metadata updates alone (W4.11) are not entry changes, never divergence, and require no notice; they enter none of the W7 checksums. A changed count under the same family is an update, not a transcript change. If the same update includes a notice trigger, the runner sends the notice normally.
@@ -832,6 +852,8 @@ Answer: `{"answer": "ready"}`. Refusals: `unknown_preset`, `invalid_params`.
 
 When the runner sends one: after a message is stored (a user, notice or system entry; an assistant entry at the end of its model step, never while it streams); after an entry changes (W4.9; an entry only gaining `completed_at`, stored `speaks_for` attribution or `host_parts` facts, or count metadata updates alone, does not count); after a revert or branch switch; after it refused a view at a step boundary; after it wrote a host marker. If an update also includes a notice trigger, send the notice normally. Changes made while a notice is unanswered go into the next one (N3).
 
+Adopting unknown-number stretches requires no notice (T9–T10, W7).
+
 After refusing a session's read `transient`, the runner sends that session one
 wake notice once it can answer the read, even if nothing changed. This is the
 only case where a notice may carry no change: it takes the next `seq`, the
@@ -923,6 +945,16 @@ waits up to the runner's bounded read wait, then is refused with
 `cause: index_filling` if the runner still cannot answer it. Once it can answer,
 the runner sends the wake notice required by W5.2. A read reaches the whole
 active path, including entries a cut leaves out.
+
+A `select` with `by: tags` naming any number the runner cannot place is refused
+as a whole with `numbers_unknown` and detail `{"tags": [<the requested tags it
+covers>]}` (W1.3). This is permanent for that session, never `transient` and
+never a silent leave-out: leave-out means the number is not on the active path.
+For a provider without `compaction-numbers-unknown/v1`, the runner also refuses
+any read that would return an entry with unknown numbers (W1.4: a sender uses
+a field only when the receiver declared its capability), with the same
+code and no `tags` detail. Such a provider retries it like any read error it
+doesn't know, so it can't read that history until it declares the capability.
 
 **Page ceiling, all providers.** An `after` read returns at most Setup's
 `limits.page`, whatever its `limit` and `max_bytes` ask for, and continues with
@@ -1053,6 +1085,7 @@ What could mislead the model is a number in bytes the provider writes, such as a
 | `duplicate_insert` | `id` | Two inserts share an id. |
 | `duplicate_cut` | | More than one cut. |
 | `cut_before_move` | `moved_through` | The session was moved in, and the view has no cut or cuts before the entry the move's cut goes through (MV7). `moved_through` is that entry's `mid`. |
+| `cut_before_numbers` | `unknown_through` | The view has no cut or cuts before the last `numbers_unknown` entry on the active path (T11). `unknown_through` is that entry's `mid`, so the detail is `{"unknown_through": "<mid>"}`. No capability is needed: W1.5 already forbids resending a view with an unknown refusal code. |
 | `tagged_insert` | `id` | An inserted message's text contains a tag prefix (W6.4). |
 | `foreign_tag` | `mid`, `part`, `field`, `tag` | A replace value contains a tag prefix the part neither owns nor already contained (W6.4). |
 | `rule` | `rule`, and its fields | The view breaks a provider rule: `{"rule": "signed_part_invalid", "mid", "part"}` (PR2), or `{"rule": "final_turn_removed", "index"}` (PR6), where `index` is the zero-based position in `edits` of the edit after which nothing that must stay of the final turn is left. |
@@ -1150,6 +1183,18 @@ view and is not a transcript change. It needs no notice by itself. Later reads
 and otherwise-triggered notices include the facts only under W1.4's
 `compaction-host-parts/v1` declaration. Stored and model-bound bytes do not
 change; these facts describe authorship, not a content edit.
+
+Entry `numbers_unknown` is likewise outside every W7 checksum and every
+part's `body_digest`. The entry digest is computed over the parts as served,
+without `tag` in an unknown-number stretch: W7's formula does not change,
+because absent fields never enter a checksum. Part digests never include
+`tag`. Adopting the durable range under T10 is not a transcript change and
+requires no notice, even though removing previously served tags changes entry
+digests; a stretch can exceed any notice's budget. A provider declaring
+`compaction-numbers-unknown/v1` MUST recognize a marked entry as the same entry
+it stored when its `role`, `notice` and parts' `digest`s are unchanged, and
+MUST NOT treat that entry as reverted or edited. Cursor comparison stays as
+defined in W3.6: a changed entry digest still makes the provider reread.
 
 `notice.keep` enters the entry digest only when true. False is normalized to
 absent before hashing, so every entry predating the field keeps its digest.

@@ -30,7 +30,8 @@ pub struct Part {
     /// `cortexkit-compaction-view` crate). The runner counts it: the
     /// checkpoint of the session's latest compaction marker plus the part's
     /// position among the numbered parts from the marker's first kept entry
-    /// on (T1).
+    /// on (T1). A numbered-kind part has no tag when its entry is marked
+    /// `numbers_unknown` (W4.1); it still takes a number.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "crate::integer::optional")]
     pub tag: Option<u64>,

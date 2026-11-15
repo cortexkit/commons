@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.5
+
+- Add provider capability `compaction-numbers-unknown/v1` and the true-only
+  entry marker `numbers_unknown` for numbered-kind parts whose numbers the
+  runner cannot establish. Reads returning them require the declaration.
+- Define exact checkpoint-to-checkpoint stretch validation and durable,
+  session-long unknown ranges. Adoption needs no notice: providers recognize
+  unchanged role, notice and part digests despite tag-dependent entry digests.
+- Add permanent `numbers_unknown` tag-read refusals and runner-owned
+  `cut_before_numbers` view refusals, with round-trip, checksum and transition
+  vectors. The marker is excluded from every checksum; absent tags are hashed
+  as absent without changing W7's formula.
+
 ## 0.4.4
 
 - Add the `transient` read refusal with an open `cause` and optional

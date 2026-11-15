@@ -359,6 +359,10 @@ pub enum ViewRefusal, "code" {
     CutBeforeMove => "cut_before_move" {
         moved_through: String,
     },
+    /// The view has no cut or cuts before the last unknown-number entry.
+    CutBeforeNumbers => "cut_before_numbers" {
+        unknown_through: String,
+    },
     /// An inserted message's text contains a tag prefix.
     TaggedInsert => "tagged_insert" {
         id: String,
