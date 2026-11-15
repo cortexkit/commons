@@ -1,0 +1,7 @@
+{
+  "code": "transient",
+  "detail": {
+    "cause": "index_filling"
+  },
+  "message": "History index is filling; ask again shortly"
+}

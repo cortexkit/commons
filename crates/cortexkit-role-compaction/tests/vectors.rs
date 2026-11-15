@@ -16,7 +16,7 @@ use cortexkit_role_compaction::{
         AppliedViewAnswer, AppliedViewRequest, ApplyViewAnswer, ApplyViewRequest, Edit, EditOp,
         InsertAt, InsertedImage, InsertedMessage, View, ViewRefusal,
     },
-    wire::{self, codes, not_permitted_reasons, Refusal},
+    wire::{self, codes, not_permitted_reasons, transient_causes, Refusal},
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
@@ -200,6 +200,15 @@ fn samples() -> Vec<(&'static str, Value)> {
         ))
     };
     let mut samples = vec![
+        (
+            "notice-transient-read-wake-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(2, conditions.clone())
+                    .with_newest(cursor.clone())
+                    .with_applied_view(view.applied()),
+            ),
+        ),
         (
             "notice-render-failed-part-request.json",
             request(
@@ -754,6 +763,25 @@ fn samples() -> Vec<(&'static str, Value)> {
     ));
     samples.extend([
         (
+            "refusal-transient-index-filling.json",
+            value(Refusal::new(
+                codes::TRANSIENT,
+                "History index is filling; ask again shortly",
+                Some(json!({"cause": transient_causes::INDEX_FILLING})),
+            )),
+        ),
+        (
+            "refusal-transient-index-filling-retry-after.json",
+            value(Refusal::new(
+                codes::TRANSIENT,
+                "History index is filling; ask again shortly",
+                Some(json!({
+                    "cause": transient_causes::INDEX_FILLING,
+                    "retry_after_ms": 250
+                })),
+            )),
+        ),
+        (
             "refusal-invalid-params.json",
             value(Refusal::invalid_params(
                 "context_window",
@@ -1153,6 +1181,47 @@ fn check(name: &str, json: Value) {
     } else {
         panic!("unrecognized vector name: {name}");
     }
+}
+
+#[test]
+fn transient_read_refusal_details_decode() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-vectors/compaction-v2");
+    for (name, retry_after_ms) in [
+        ("refusal-transient-index-filling.json", None),
+        (
+            "refusal-transient-index-filling-retry-after.json",
+            Some(json!(250)),
+        ),
+    ] {
+        let bytes = std::fs::read(root.join(name)).unwrap();
+        let refusal: Refusal = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(refusal.code, "transient");
+        assert_eq!(refusal.code, codes::TRANSIENT);
+        let detail = refusal.detail.unwrap();
+        assert_eq!(detail["cause"], "index_filling");
+        assert_eq!(detail["cause"], transient_causes::INDEX_FILLING);
+        assert_eq!(detail.get("retry_after_ms"), retry_after_ms.as_ref());
+    }
+}
+
+#[test]
+fn transient_read_wake_notice_is_content_free() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-vectors/compaction-v2");
+    let previous: Value =
+        serde_json::from_slice(&std::fs::read(root.join("notice-request.json")).unwrap()).unwrap();
+    let wake = std::fs::read(root.join("notice-transient-read-wake-request.json")).unwrap();
+    let (method, params) = wire::decode(&wake).unwrap();
+    assert_eq!(method, ops::COMPACTION_NOTICE);
+    assert_eq!(params["seq"], 2);
+    assert_eq!(previous["params"]["seq"], 1);
+    for field in ["newest", "conditions", "applied_view"] {
+        assert_eq!(params[field], previous["params"][field]);
+    }
+    assert!(params.get("entries").is_none());
+    assert!(params.get("events").is_none());
+    let decoded: NoticeRequest = wire::params(params).unwrap();
+    assert!(decoded.entries.is_empty());
+    assert!(decoded.events.is_empty());
 }
 
 #[test]

@@ -1,0 +1,8 @@
+{
+  "code": "transient",
+  "detail": {
+    "cause": "index_filling",
+    "retry_after_ms": 250
+  },
+  "message": "History index is filling; ask again shortly"
+}

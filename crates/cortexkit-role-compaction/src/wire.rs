@@ -195,6 +195,15 @@ pub mod codes {
     /// A `compaction-runner/v1` route or call whose attested caller the runner
     /// cannot authorize for the bound session (W2.5). `detail.reason` says why.
     pub const COMPACTION_NOT_PERMITTED: &str = "compaction_not_permitted";
+    /// The runner cannot answer this read yet, but will (W1.3).
+    /// `detail.cause` says why; `detail.retry_after_ms` is an optional delay.
+    pub const TRANSIENT: &str = "transient";
+}
+
+/// The open `detail.cause` strings defined for a `transient` read refusal.
+pub mod transient_causes {
+    /// The runner is still filling the requested history's part-number index.
+    pub const INDEX_FILLING: &str = "index_filling";
 }
 
 /// The `detail.reason` strings defined today for a `compaction_not_permitted`

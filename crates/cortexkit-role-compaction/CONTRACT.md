@@ -64,10 +64,10 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. An entry only gaining `completed_at`, stored `speaks_for` attribution or `host_parts` facts does not require a notice; neither do count metadata updates alone (W4.9, W4.11). An update that also includes a notice trigger still sends the notice normally. |
+| N1 | After every durable change to the transcript (W5.2 "When"), the runner calls `compaction.notice` with the new and changed entries in compact form. An entry only gaining `completed_at`, stored `speaks_for` attribution or `host_parts` facts does not require a notice; neither do count metadata updates alone (W4.9, W4.11). An update that also includes a notice trigger still sends the notice normally. The only notice allowed without a change is one wake notice for a session whose read was refused `transient`, once the runner can answer it: the next `seq`, current conditions and applied view, and no entries or events (W5.2). N3 still applies. |
 | N2 | The provider answers at once and does the work afterwards. The runner never waits on that work. |
 | N3 | The runner sends a session's notices one at a time: the next only after the previous one was answered. Changes made while a notice is unanswered go into the next notice, so a slow provider never builds a queue. Before a ride, the runner sends any change not yet noticed. |
-| N4 | A notice is a convenience, not the source of truth. The provider keeps its own position, and reads any gap with `session.entries`. |
+| N4 | A notice is a convenience, not the source of truth. On every notice, the provider keeps its own position and reads any gap with `session.entries`. A conforming provider therefore needs nothing new to handle a content-free wake notice (N1). |
 | N5 | Check the statement epoch first (W3.5). A dropped foreign-epoch notice advances nothing, including the held notice `seq`. Of notices that pass that check, one whose `seq` is not greater than the last one handled since the latest Setup is ignored. |
 | N6 | The first notice after Setup carries only entries newer than the entry Setup named in `newest`, plus entries changed since that Setup, subject to the ordinary notice budget (W4.11). Like every later notice, it is a delta, not a replay. The provider pages with `session.entries` for older entries (N4); providers were already required to do so. No capability is needed. |
 
@@ -180,6 +180,13 @@ Codes and what the caller does next:
 | `unknown_preset` | `preset` | Setup names a preset the provider does not know. | The runner logs it and handles it as a refused Setup (W1.3a). |
 | `unknown_session` | | A ride for a session the provider holds no Setup for, or one dropped by W3.5's epoch check: a foreign epoch, mismatched epoch presence, or a stamp without an epoch. | The runner treats it as `nothing`, then calls Setup before its next notice. |
 | `compaction_not_permitted` | `reason` | The runner refuses a `compaction-runner/v1` route or call from a caller that is not the session's selected provider (W2.5). | The provider suspends work for that session until a new Setup answers `ready` (W2.5). |
+| `transient` | `{cause, retry_after_ms?}` | The runner cannot answer this read yet, but will. It never means the session is gone or `compaction_not_permitted`. | Ask again after `retry_after_ms` if given, or at the session's next notice. |
+
+For `transient`, `cause` is an open string; the first defined value is
+`index_filling`, for a part-number index still being filled. `retry_after_ms`
+is an optional integer delay in milliseconds. No capability is needed because
+older providers retry unknown read errors. Runners send `transient` only after
+the provider's reader has been checked against the refusal samples.
 
 **W1.3a A refused or unanswered Setup.** When `compaction.setup` is refused, with any code (`invalid_params`, `unknown_method` and `unknown_preset` included), or gets no answer within the runner's deadline, the runner gets no new views from that Setup:
 
@@ -825,6 +832,14 @@ Answer: `{"answer": "ready"}`. Refusals: `unknown_preset`, `invalid_params`.
 
 When the runner sends one: after a message is stored (a user, notice or system entry; an assistant entry at the end of its model step, never while it streams); after an entry changes (W4.9; an entry only gaining `completed_at`, stored `speaks_for` attribution or `host_parts` facts, or count metadata updates alone, does not count); after a revert or branch switch; after it refused a view at a step boundary; after it wrote a host marker. If an update also includes a notice trigger, send the notice normally. Changes made while a notice is unanswered go into the next one (N3).
 
+After refusing a session's read `transient`, the runner sends that session one
+wake notice once it can answer the read, even if nothing changed. This is the
+only case where a notice may carry no change: it takes the next `seq`, the
+current `conditions` and `applied_view` (absent when no view applies), and no
+entries or events. The one-notice-at-a-time rule (N3) still applies; the provider
+already reads any gap on every notice (N4), so a conforming provider needs
+nothing new.
+
 Request:
 
 | Field | Type | Meaning |
@@ -902,7 +917,12 @@ Answer:
 | `unanswered` | array of strings or integers, optional | For named reads, the remaining held mids or tags, in request order. Only to providers declaring `compaction-limits/v1`; the provider asks again for these names. Missing names are never listed. |
 | `head` | object | `newest` (`Cursor`, optional) and `applied_view` (`AppliedView`, optional) at the moment of the read. |
 
-Refusals: `invalid_params`. A read reaches the whole active path, including entries a cut leaves out.
+Refusals: `invalid_params`; `transient` when the runner cannot answer the read
+yet but will (W1.3). A read that reaches a part-number index still being filled
+waits up to the runner's bounded read wait, then is refused with
+`cause: index_filling` if the runner still cannot answer it. Once it can answer,
+the runner sends the wake notice required by W5.2. A read reaches the whole
+active path, including entries a cut leaves out.
 
 **Page ceiling, all providers.** An `after` read returns at most Setup's
 `limits.page`, whatever its `limit` and `max_bytes` ask for, and continues with

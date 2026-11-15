@@ -23,6 +23,15 @@ states and both surface-count exactness values. The page's `token_family_exact`
 is `true` and the notice's is `false`. Digests inside those examples
 are unchanged when count metadata is removed (W7).
 
+`refusal-transient-index-filling.json` and
+`refusal-transient-index-filling-retry-after.json` are `session.entries`
+refusals while the requested history's part-number index is filling, without
+and with an optional retry delay. Once the runner can answer the refused read,
+`notice-transient-read-wake-request.json` wakes the session with the next `seq`
+after `notice-request.json`, unchanged conditions, newest cursor and applied
+view, and no entries or events. It is the only notice allowed without a change;
+the provider still reads any gap on every notice (N4).
+
 `view-rule-final-turn.json` is the `rule` refusal a runner sends for a view
 that removes the turn the request ends on (PR6).
 

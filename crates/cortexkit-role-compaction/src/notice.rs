@@ -2,6 +2,9 @@
 //! the runner sends where the transcript stands, plus new and changed entries
 //! in compact form. Count metadata updates alone do not trigger a notice;
 //! an update that also includes a trigger sends the notice normally.
+//! After a `transient` read refusal, the runner sends one wake notice once it
+//! can answer, even without a change: the next sequence number, current
+//! conditions and applied view, and no entries or events. Notices remain serial.
 //! The provider acknowledges at once and does
 //! its work afterwards, so the runner never waits on it.
 //!

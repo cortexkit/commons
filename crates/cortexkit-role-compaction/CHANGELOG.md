@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.4
+
+- Add the `transient` read refusal with an open `cause` and optional
+  `retry_after_ms`, initially for `index_filling`. Callers retry after the
+  suggested delay or at the next notice; no capability negotiation is needed.
+- Require one content-free `compaction.notice` once a transiently refused read
+  can be answered, using the next sequence number and current conditions and
+  applied view while preserving the one-notice-at-a-time rule.
+- Add refusal detail decoder tests and vectors with and without a retry delay,
+  plus a wake notice vector.
+
 ## 0.4.3
 
 - Pin W6.5/W6.6a `render_failed` report shapes to the fallback actually served:
