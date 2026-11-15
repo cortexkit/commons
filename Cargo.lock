@@ -817,7 +817,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-media"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "base64",
  "serde",
@@ -828,7 +828,7 @@ dependencies = [
 
 [[package]]
 name = "cortexkit-role-media-conformance"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "async-trait",
  "base64",

@@ -322,13 +322,14 @@ impl State {
         usage: Option<Value>,
     ) {
         let record_id = if work == "call_id" {
+            let identity = if self.fault("call_usage_record_principal") {
+                json!([id, "fixture", req["model"]])
+            } else {
+                json!([p, id, "fixture", req["model"]])
+            };
             format!(
                 "call-record:{}",
-                sha256(
-                    serde_json::to_string(&json!([id, "fixture", req["model"]]))
-                        .unwrap()
-                        .as_bytes()
-                )
+                sha256(serde_json::to_string(&identity).unwrap().as_bytes())
             )
         } else {
             self.id("record")
@@ -440,6 +441,13 @@ impl State {
             .ok_or_else(|| refuse("unknown_call", None))?;
         let session = call.request["vendor_session_id"].as_str().unwrap();
         let pending = self.extra.vendor.take_tool_calls(session);
+        let pending = if call.token.request["purpose"] == "voice_front"
+            || self.fault("realtime_watch_dictation_tool")
+        {
+            pending
+        } else {
+            0
+        };
         let now = self.now();
         let wrong_id = self.fault("realtime_watch");
         let invalid_tool = self.fault("realtime_watch_tool_not_string");

@@ -300,8 +300,8 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   credential_ref?, auth_method?, vendor_request_id?, started_at_ms,
   finished_at_ms, status, failure?, selectors, measurements}` with exactly one
   work id. Record ids differ between attempts and stay equal across redelivery.
-  For attached calls, derive record_id from (call_id, provider, model). Never
-  reuse a record_id with different content: readers quarantine contradictions.
+  For attached calls, derive record_id from (principal, call_id, provider, model).
+  Never reuse a record_id with different content: readers quarantine contradictions.
   Principal is the caller; every record of a call carries decision_id exactly
   when the admission carried it, including companion records whose model
   differs from the decision's model.
@@ -508,9 +508,10 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   at_ms, tool?}` with open type started/tool_call/ended. The optional open string
   tool is present only when type is tool_call: `ask` is a question forked to the
   head; `hand_off` is a labelled message passed to the head. Unknown tool values
-  are kept. The watch is admitted only for recorded
-  principal; all others/unknown calls give unknown_call. Refusals, logs, Debug
-  and vectors never quote a real token.
+  are kept. `tool_call` events occur only on `voice_front` calls; providers never
+  send a `tool_call` event for a dictation call. The watch is admitted only for
+  recorded principal; all others/unknown calls give unknown_call. Refusals, logs,
+  Debug and vectors never quote a real token.
 - [informative] `media.realtime.watch_transport`: `realtime.watch` is a long-lived
   push operation. Providers deliver it as a watch, not a serial request.
 - [informative] `media.realtime.watch_compatibility`: Rust WatchEvent readers on

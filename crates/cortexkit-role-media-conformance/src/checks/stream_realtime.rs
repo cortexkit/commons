@@ -1238,7 +1238,52 @@ async fn realtime<S: MediaSubject>(
             )?;
             end_call(s, "alice", "shared").await?;
             balanced(r, 1, 1)?;
-            token(s, "carol", "shared", "realtime-a").await?;
+            let other = token(s, "carol", "shared", "realtime-a").await?;
+            attach(s, vendor, "carol", "shared", &other, "carol-session").await?;
+            end_call(s, "carol", "shared").await?;
+            let started = Instant::now();
+            let usage = loop {
+                let remaining = STATUS_POLL_TIMEOUT.saturating_sub(started.elapsed());
+                let answer = tokio::time::timeout(remaining, feed(s))
+                    .await
+                    .map_err(|_| "principal-scoped usage.read timed out")??;
+                let usage: Vec<_> = answer["entries"]
+                    .as_array()
+                    .ok_or("missing usage entries")?
+                    .iter()
+                    .filter_map(|entry| entry.get("record").cloned())
+                    .collect();
+                if usage.len() >= 2 {
+                    break usage;
+                }
+                require(
+                    started.elapsed() < STATUS_POLL_TIMEOUT,
+                    "missing principal-scoped call usage",
+                )?;
+                tokio::time::sleep(POLL_INTERVAL).await;
+            };
+            require(usage.len() == 2, "principal-scoped call usage count")?;
+            let alice = usage
+                .iter()
+                .find(|record| record["principal"] == "alice")
+                .ok_or("missing alice call usage")?;
+            let carol = usage
+                .iter()
+                .find(|record| record["principal"] == "carol")
+                .ok_or("missing carol call usage")?;
+            for record in [&alice, &carol] {
+                require(
+                    record["call_id"] == "shared"
+                        && record["provider"] == "fixture"
+                        && record["model"] == "realtime-a",
+                    "principal-scoped call usage attribution",
+                )?;
+            }
+            require(
+                alice["record_id"] != carol["record_id"],
+                "different principals reused a call usage record id",
+            )?;
+            balanced(r, 2, 2)?;
             refusal(
                 s,
                 "bob",
@@ -1400,7 +1445,10 @@ async fn front_readiness<S: MediaSubject>(
     Ok(())
 }
 async fn watch<S: MediaSubject>(s: &S, vendor: &RecordingVendor) -> Result<(), String> {
-    let t = token(s, "alice", "watch", "realtime-a").await?;
+    s.configure_voice_front("agent", None).await.map_err(err)?;
+    let mut req = token_request("watch", "realtime-a");
+    req["purpose"] = json!("voice_front");
+    let t = call(s, "alice", "realtime.token", req).await?;
     let secret = t["token"].as_str().ok_or("token missing")?;
     attach(s, vendor, "alice", "watch", &t, "watch-session").await?;
     for (principal, id) in [("bob", "watch"), ("mallory", "watch"), ("alice", "missing")] {
@@ -1425,16 +1473,40 @@ async fn watch<S: MediaSubject>(s: &S, vendor: &RecordingVendor) -> Result<(), S
     }
     s.open_watch("alice", "watch").await.map_err(err)?;
     vendor.push_tool_call("watch-session").map_err(err)?;
-    wait_watch(s, secret, "tool_call").await?;
+    wait_watch(s, secret, "watch", "voice_front", "tool_call").await?;
     end_call(s, "alice", "watch").await?;
-    wait_watch(s, secret, "ended").await
+    wait_watch(s, secret, "watch", "voice_front", "ended").await?;
+
+    let t = token(s, "alice", "dictation-watch", "realtime-a").await?;
+    let secret = t["token"].as_str().ok_or("token missing")?;
+    attach(
+        s,
+        vendor,
+        "alice",
+        "dictation-watch",
+        &t,
+        "dictation-session",
+    )
+    .await?;
+    s.open_watch("alice", "dictation-watch")
+        .await
+        .map_err(err)?;
+    vendor.push_tool_call("dictation-session").map_err(err)?;
+    end_call(s, "alice", "dictation-watch").await?;
+    wait_watch(s, secret, "dictation-watch", "dictation", "ended").await
 }
 
-async fn wait_watch<S: MediaSubject>(s: &S, secret: &str, expected: &str) -> Result<(), String> {
+async fn wait_watch<S: MediaSubject>(
+    s: &S,
+    secret: &str,
+    id: &str,
+    purpose: &str,
+    expected: &str,
+) -> Result<(), String> {
     let started = Instant::now();
     loop {
         let remaining = STATUS_POLL_TIMEOUT.saturating_sub(started.elapsed());
-        let events = tokio::time::timeout(remaining, s.poll_watch("alice", "watch"))
+        let events = tokio::time::timeout(remaining, s.poll_watch("alice", id))
             .await
             .map_err(|_| format!("watch did not push {expected}"))?
             .map_err(err)?;
@@ -1447,15 +1519,19 @@ async fn wait_watch<S: MediaSubject>(s: &S, secret: &str, expected: &str) -> Res
                 !event.to_string().contains(secret),
                 "watch push quoted the token",
             )?;
-            require(
-                event["call_id"] == "watch",
-                "watch push has the wrong call_id",
-            )?;
+            require(event["call_id"] == id, "watch push has the wrong call_id")?;
             require(
                 event["at_ms"].as_u64().is_some(),
                 "watch push omitted epoch at_ms",
             )?;
-            if expected == "tool_call" && !found && event["type"] == "started" {
+            require(
+                purpose != "dictation" || event["type"] != "tool_call",
+                "dictation watch pushed tool_call",
+            )?;
+            if (expected == "tool_call" || purpose == "dictation")
+                && !found
+                && event["type"] == "started"
+            {
                 continue;
             }
             require(

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.8
+
+- Pin media `=0.1.11` and include the principal in attached-call usage record ids
+  in the reference provider. Check distinct record ids for the same call under
+  different principals.
+- Exercise realtime watch tools on voice-front calls rather than dictation
+  calls, preserving principal isolation, refusal redaction and end events.
+- Reject providers that forward vendor tool calls through a dictation watch.
+
 ## 0.2.7
 
 - Pin media 0.1.10 and check attached-call usage per billed model, including

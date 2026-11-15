@@ -1,7 +1,7 @@
 {
   "records": [
     {
-      "record_id": "call-two-models/openai/openai/gpt-realtime-2.1",
+      "record_id": "alice/call-two-models/openai/openai/gpt-realtime-2.1",
       "principal": "alice",
       "call_id": "call-two-models",
       "decision_id": "decision-realtime",
@@ -18,7 +18,7 @@
       ]
     },
     {
-      "record_id": "call-two-models/openai/openai/gpt-live-transcribe",
+      "record_id": "alice/call-two-models/openai/openai/gpt-live-transcribe",
       "principal": "alice",
       "call_id": "call-two-models",
       "decision_id": "decision-realtime",

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.11
+
+- Include the principal when deriving attached-call usage record ids so calls
+  with the same id under different principals cannot collide.
+- Clarify that realtime watch `tool_call` events occur only on voice-front
+  calls, never on dictation calls.
+
 ## 0.1.10
 
 - Attached voice-front calls write one ended usage record per billed model,

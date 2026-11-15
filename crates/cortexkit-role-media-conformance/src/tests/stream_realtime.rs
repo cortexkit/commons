@@ -103,6 +103,32 @@ async fn media_kit_stream_realtime_watch_tool_shape_is_checked() {
 }
 
 #[tokio::test]
+async fn media_kit_stream_realtime_watch_dictation_tools_are_rejected() {
+    let bad = run_case(
+        &Fake::new(Some("realtime_watch_dictation_tool"), true, true),
+        "realtime_watch",
+    )
+    .await;
+    assert!(
+        matches!(bad, Outcome::Failed(ref reason) if reason.starts_with("realtime_watch:") && reason.contains("dictation watch pushed tool_call")),
+        "{bad:?}"
+    );
+}
+
+#[tokio::test]
+async fn media_kit_stream_realtime_call_usage_ids_include_principal() {
+    let bad = run_case(
+        &Fake::new(Some("call_usage_record_principal"), true, true),
+        "calls_scoped_by_principal",
+    )
+    .await;
+    assert!(
+        matches!(bad, Outcome::Failed(ref reason) if reason.starts_with("calls_scoped_by_principal:") && reason.contains("different principals reused a call usage record id")),
+        "{bad:?}"
+    );
+}
+
+#[tokio::test]
 async fn media_kit_stream_realtime_speech_check_capability() {
     let case = "stream_empty_result_needs_speech_check";
     assert_eq!(
