@@ -196,6 +196,7 @@ pub fn parse_select_media_request<C: AsRef<str>, K: AsRef<str>>(
     if !serves(crate::capabilities::SELECT_MEDIA)
         || !serves(crate::capabilities::SELECT_KIND)
         || kind == "llm"
+        || kind == "search"
         || !kinds.iter().any(|k| k.as_ref() == kind)
     {
         return Err(members.refuse("kind", "kind is not served by select_media"));

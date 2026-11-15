@@ -171,6 +171,14 @@ pub fn check_describe(describe: &RoleDescribe) -> Result<(), DescribeProblem> {
     }
     for (group, requires) in [
         (
+            crate::capabilities::SELECT_SEARCH,
+            crate::capabilities::SELECT_KIND,
+        ),
+        (
+            crate::capabilities::SELECT_SEARCH,
+            crate::capabilities::SELECT_MEDIA,
+        ),
+        (
             crate::capabilities::SELECT_MEDIA,
             crate::capabilities::SELECT_KIND,
         ),

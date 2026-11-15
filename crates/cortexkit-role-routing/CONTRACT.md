@@ -409,6 +409,9 @@ That group's additive defaults, attested namespace and selector rules are in §1
   - `decision_harness`: decisions bind `{module, harness}` in the existing
     `runner` object (§16.3); no member changes type.
   - `select_kind`: workload `kind` on selects (§16.4).
+  - `select_media`: media selection, demand and catalog unit prices (§16.4.1).
+  - `select_search`: search selection and per-call free allowance (§16.4.2);
+    requires `select_kind` and `select_media`.
   - `select_eligible_routes`: the per-call route subset (§16.4).
   - `select_price`: value-estimate rates on select answers (§16.5).
   - `report_attempt_outcomes`: authoritative attempt statuses on reports (§16.6).
@@ -502,8 +505,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
     which the provider maps onto its own model facts.
     For a consumer whose router does not rank by iq (such as a classifier
     consumer), callers send `0` and the router ignores it; it remains
-    required on the wire. Only `select_media` relaxes `iq` for a non-llm
-    kind (§16.4.1); the llm request and answer are unchanged.
+    required on the wire. `select_media` and `select_search` relax `iq` for
+    their kinds (§16.4.1–§16.4.2); the llm request and answer are unchanged.
   - `context_window` and `max_output_tokens`: floors, in tokens.
   - `tools`: `"none"` (only runner and model pairs that run with no tools
     offered) or `"required"` (only routes that accept tool calls). Absent
@@ -2427,9 +2430,9 @@ breaking release, after callers have migrated to `route.select`.
   group refuses an unlisted non-llm kind with `invalid_request {field: "kind"}`,
   never a silent fallback. Without the group, today's `select_kind` behaviour
   is unchanged. This is the one selection operation for non-llm kinds, media
-  now and search when a router advertises it later.
+  now and search when a router advertises `select_search` (§16.4.2).
 - [pinned] `select_media.requirements`: The request still uses one
-  `requirements` object. A non-llm kind admits §13's requirement members
+  `requirements` object. A media kind admits §13's requirement members
   verbatim: `language`, `voice`, `format`, `duration_ms`, `input_bytes`,
   `reference_formats`, `bias`, `size`, `resolution`, `quality`, `latency_class`,
   and `metric`, with the same types and matching rules. It additionally admits
@@ -2550,6 +2553,61 @@ breaking release, after callers have migrated to `route.select`.
   `report_attempt_outcomes`. `route.account_for` admits a media decision under
   `select_engine.decision_admission`'s module-binding, expiry and replay rule;
   caller-local decisions cannot be admitted by a module.
+
+#### 16.4.2 `select_search`
+
+- [pinned] `select_search.advertisement`: The `select_search` group requires
+  `select_kind` and `select_media`. A router advertising it lists `search` in
+  `role.describe.kinds`. Callers send `kind: "search"` only to a router listing
+  it. Without the group the router refuses search as §16.4.1 specifies, never
+  falling back to media or llm selection.
+- [pinned] `select_search.declarations`: Routes are learned only from the daemon
+  catalog's `role_declarations["search-provider/v1"]` slot. The slot is an object
+  with required `routes: [{provider, model}]`; each route names a catalog search
+  row, with 1 to 256 Unicode scalar values in each provider and model. The
+  account or connection held by a provider module sits under the route and is
+  never in the slot. Only nonce-verified entries count; the daemon relays slots
+  unread. A route's engine identity is `(module, provider, model)`, as for media
+  module engines. For example, module `example-search` may declare routes for
+  consumer `example-search.web_search` without declaring any account identity.
+- [pinned] `select_search.declarations_atomic`: `parse_search_declarations`
+  rejects the whole slot when `routes` is absent, any member is unknown, any
+  provider or model is empty or overlong, or a route is malformed. A repeated
+  `(provider, model)` within one slot is `duplicate_route`. Apply none of a
+  refused slot and report the problem on health, as §13's `declarations_atomic`
+  requires.
+- [pinned] `select_search.requirements`: For `kind: "search"`, `requirements`
+  is an object admitting only optional `iq`, the §16.4.1 `select_media.demand`
+  level mapped onto the kind's catalog `quality.grade`. Every other member,
+  whether media or llm, is `invalid_requirements {field}` under §5.1. Top-level
+  `privacy` is required as in §16.4.1. Search routes are remote, so `local_only`
+  leaves no route and answers `no_route`. `caller_local` is refused as
+  `invalid_request {field: "caller_local"}`. `eligible_routes` works as §16.4.
+  The separate `select_search::SelectSearchRequest` decoding type admits the
+  shared `consumer`, `pin`, `exclude` and `exclude_providers` members that
+  §16.4.1 admits, without loosening `SelectRequest`, `SelectMediaRequest` or
+  `MediaRequirements`. Dispatch by the kind the caller sent.
+- [pinned] `select_search.allowance_left`: Top-level
+  `allowance_left?: [{provider, model}]` is admitted only for `kind: "search"`
+  under this group. On every other kind it is
+  `invalid_request {field: "allowance_left"}`. Every entry must appear in
+  `eligible_routes`, which must then be present; otherwise refuse
+  `invalid_request {field: "allowance_left[<i>]"}` naming that entry's index.
+  Repeated entries have no further effect. A listed route has free allowance
+  for this call: its expected job cost is a known zero, exactly like a
+  caller-local engine under `select_media.demand`. The quality level still
+  comes first: a graded route below it remains ineligible. Allowance therefore
+  wins only among adequate routes. With neither request level nor declared
+  default, the zero participates at the cost key's position in that ordering,
+  after grade and measured result. The answer still carries the route's catalog
+  `price`, because a caller holding a dollar cap reads it.
+- [pinned] `select_search.answer`: Reuse `SelectMediaAnswer`; §16.4.1's `answer`,
+  `price`, `policy` and `decisions` rules apply unchanged. Catalog unit keys are
+  carried verbatim, including per-request or per-result keys, without borrowing
+  another unit's rate. `engine.local` and `engine.caller_local` are false, and
+  `engine.module` names the declaring module. Reports use §16.6's closed status
+  set as written: a search provider reports zero results as `served_empty` and
+  reports a provider-named wait only on `throttled`.
 
 ### 16.5 `select_price`
 

@@ -76,7 +76,14 @@ impl FakeRoute {
             ops::ROUTE_REPORT if decision.is_some() => {
                 let (principal, _) = decision.unwrap();
                 Some(
-                    if principal != self.principal()
+                    if self.fault("select_search_reports")
+                        && params["attempt_outcome"]["status"] == "served_empty"
+                    {
+                        Err(Refusal::invalid_request(
+                            "attempt_outcome.status",
+                            "empty search results are not supported",
+                        ))
+                    } else if principal != self.principal()
                         && self.defects.engine_fault != "select_engine_report"
                     {
                         Err(Refusal::unknown_decision())

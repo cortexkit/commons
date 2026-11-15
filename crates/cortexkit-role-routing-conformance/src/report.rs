@@ -14,6 +14,14 @@ const fn check(name: &'static str, checks: &'static str) -> CheckSpec {
 
 /// Every check, in the order the kit runs them.
 pub const CHECKS: &[CheckSpec] = &[
+    check("select_search_advertisement", "select_search: requires select_kind/select_media and advertises search before accepting it"),
+    check("select_search_declarations", "select_search: search-provider slots are atomic and nonce verified"),
+    check("select_search_nonce", "select_search: only nonce-verified search-provider slots supply routes"),
+    check("select_search_requirements", "select_search: only optional iq is admitted; other requirements refuse by name"),
+    check("select_search_privacy", "select_search: required privacy, remote-only routes and caller_local refusal"),
+    check("select_search_allowance", "select_search: allowance routes must be eligible; other kinds refuse the member"),
+    check("select_search_ranking", "select_search: allowance zero wins only among adequate routes; grade leads without a level"),
+    check("select_search_reports", "select_search: attempt statuses and provider-named waits apply to search decisions"),
     check("account_head_turn_runner", "account_head_turn: an attested runner's head turn counts toward the cap but is never refused for concurrency"),
     check("account_head_turn_non_runner", "account_head_turn: a non-runner's declaration does not bypass concurrency"),
     check("account_observe_success_clears", "account_observe_success: served retests end only their captured block"),

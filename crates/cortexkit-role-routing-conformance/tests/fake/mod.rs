@@ -23,6 +23,7 @@ mod observe_success;
 mod placement;
 mod select_engine;
 mod select_media;
+mod select_search;
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -297,6 +298,7 @@ type ObserveRetest = (ObserveScope, ObserveBlock);
 
 #[derive(Default)]
 struct State {
+    search: select_search::SearchState,
     observe_blocks: HashMap<ObserveScope, ObserveBlock>,
     observe_retest_next: Option<ObservePair>,
     observe_retests: HashMap<(String, String), ObserveRetest>,
@@ -458,6 +460,7 @@ impl State {
 }
 
 pub struct FakeSubject {
+    search_control: bool,
     media_control: bool,
     policy_control: bool,
     model_input_hook: bool,
@@ -481,6 +484,13 @@ pub struct FakeSubject {
 }
 
 impl FakeSubject {
+    #[allow(dead_code)] // Used by search unit checks, not every shared fake test target.
+    pub fn with_search(defects: Defects) -> Self {
+        Self {
+            search_control: true,
+            ..Self::with_media_declarations(defects)
+        }
+    }
     pub fn with_media(defects: Defects) -> Self {
         Self {
             media_control: true,
@@ -520,6 +530,7 @@ impl FakeSubject {
     }
     pub fn new(defects: Defects) -> Self {
         Self {
+            search_control: false,
             media_control: false,
             policy_control: false,
             model_input_hook: true,
@@ -717,6 +728,7 @@ impl RoutingSubject for FakeSubject {
         state.declarations.clear();
         state.runner_declarations.clear();
         state.engine.configure(modules, self.defects.engine_fault);
+        state.search.configure(modules, self.defects.extension);
         for module in modules
             .iter()
             .filter(|module| module.nonce_verified || self.defects.trusts_unverified_declarations)
@@ -895,6 +907,7 @@ impl RoutingSubject for FakeSubject {
 
     async fn route(&self, stamp: &RouteStamp) -> Result<FakeRoute, String> {
         Ok(FakeRoute {
+            search_control: self.search_control,
             policy_control: self.policy_control,
             media_control: self.media_control,
             extensions: self.extensions,
@@ -917,6 +930,7 @@ impl RoutingSubject for FakeSubject {
 
 /// A route to the fake, carrying the caller and scope it was opened under.
 pub struct FakeRoute {
+    search_control: bool,
     media_control: bool,
     policy_control: bool,
     extensions: bool,
@@ -944,6 +958,11 @@ impl RoutingRoute for FakeRoute {
         } else {
             match method {
                 ops::ROLE_DESCRIBE => self.describe(&state),
+                ops::ROUTE_SELECT
+                    if params.get("kind") == Some(&json!("search")) && self.media_control =>
+                {
+                    self.select_search_route(&mut state, params)
+                }
                 ops::ROUTE_SELECT if self.fault("select_media_llm_refuses_media") => {
                     let mut params = params.clone();
                     params["requirements"] = json!({"iq":0});
@@ -1108,11 +1127,17 @@ impl FakeRoute {
             }
         }
         let mut describe = RoleDescribe::new(consumers, true);
+        if self.search_control {
+            describe = describe.with_capability("select_search");
+        }
         if self.media_control {
             describe = describe
                 .with_capability("select_media")
                 .with_capability("select_kind");
             describe.kinds = ["transcribe", "video", "synthesize"].map(Into::into).into();
+            if self.search_control && !self.fault("select_search_advertisement") {
+                describe.kinds.push("search".into());
+            }
             describe = describe.with_capability("report_attempt_outcomes");
             describe = describe
                 .with_capability("select_eligible_routes")

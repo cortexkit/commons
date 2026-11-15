@@ -1,4 +1,10 @@
 [
+  {"id":"select_search.advertisement","cases":["select_search_advertisement"],"bug_shaped":false},
+  {"id":"select_search.declarations","cases":["select_search_declarations","select_search_nonce"],"bug_shaped":false},
+  {"id":"select_search.declarations_atomic","cases":["select_search_declarations"],"bug_shaped":false},
+  {"id":"select_search.requirements","cases":["select_search_requirements","select_search_privacy"],"bug_shaped":false},
+  {"id":"select_search.allowance_left","cases":["select_search_allowance","select_search_ranking"],"bug_shaped":false},
+  {"id":"select_search.answer","cases":["select_search_ranking","select_search_reports"],"bug_shaped":false},
   {"id":"select_media.advertisement","cases":["select_media_unlisted_kind"],"bug_shaped":false},
   {"id":"select_media.requirements","cases":["select_media_requirements","select_media_video","select_media_llm_refuses_media","select_media_refuses_llm","select_media_input_characters"],"bug_shaped":false},
   {"id":"select_media.metric_limit","cases":["select_media_metric_limit","select_media_ranking"],"bug_shaped":false},

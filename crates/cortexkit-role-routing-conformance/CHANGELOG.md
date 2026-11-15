@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.36
+
+- Pin routing `=0.7.32` and add search checks for advertisement, atomic attested
+  slots, strict requirements, privacy, allowance membership and kind refusal,
+  quality-before-allowance ranking, catalog prices and attempt statuses.
+- Add search catalog grade, unit-price and exclusion fixtures through the
+  existing selection-facts hook. The strict reference router and named incorrect
+  routers exercise each new check family.
+
 ## 0.10.35
 
 - Pin routing `=0.7.31`. Check that disjoint runner candidates are refused with

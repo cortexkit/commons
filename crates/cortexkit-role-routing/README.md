@@ -1,5 +1,13 @@
 # cortexkit-role-routing
 
+Version 0.7.32 adds `select_search`, requiring `select_kind` and `select_media`
+and an advertised `search` kind (CONTRACT.md §16.4.2). Read atomic search-provider
+slots with `parse_search_declarations` and dispatch caller-sent search requests
+to `select_search::parse_select_search_request`. Search requirements admit only
+optional `iq`; answers reuse `SelectMediaAnswer`. Free `allowance_left` routes
+must appear in `eligible_routes` and still clear the quality level before their
+zero expected cost can win. Answers retain catalog unit prices verbatim.
+
 Version 0.7.26 adds readers-first `account_observe_success` for reporting a
 successful retest without a select decision. Send `attempt_outcome` on an
 `attempt` observation only after the router advertises the group. It also adds

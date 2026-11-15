@@ -18,7 +18,7 @@ fn legacy_not_applicable(
     report: &cortexkit_role_routing_conformance::SuiteReport,
 ) -> Vec<&'static str> {
     for check in &report.checks {
-        if check.check.starts_with("select_media_") {
+        if check.check.starts_with("select_media_") || check.check.starts_with("select_search_") {
             assert!(
                 matches!(&check.outcome, CheckOutcome::NotApplicable { reason } if !reason.is_empty()),
                 "{}",
@@ -30,6 +30,7 @@ fn legacy_not_applicable(
         .not_applicable()
         .into_iter()
         .filter(|name| !name.starts_with("select_media_"))
+        .filter(|name| !name.starts_with("select_search_"))
         .filter(|name| *name != "account_observe_success_undeclared")
         .collect()
 }
@@ -800,6 +801,7 @@ async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_pa
     for check in &report.checks {
         if !not_applicable.contains(&check.check)
             && !check.check.starts_with("select_media_")
+            && !check.check.starts_with("select_search_")
             && check.check != "account_observe_success_undeclared"
         {
             assert_eq!(check.outcome, CheckOutcome::Passed, "{}", check.check);
@@ -1191,7 +1193,7 @@ async fn passes_every_check(subject: &FakeSubject) {
     let report = run_suite(subject).await;
     assert_eq!(report.checks.len(), CHECKS.len());
     for check in &report.checks {
-        if check.check.starts_with("select_media_") {
+        if check.check.starts_with("select_media_") || check.check.starts_with("select_search_") {
             assert!(matches!(check.outcome, CheckOutcome::NotApplicable { .. }));
             continue;
         }
@@ -2131,6 +2133,12 @@ async fn placement_groups_pass_and_are_not_applicable_without_declaration() {
 #[tokio::test]
 async fn select_media_group_passes_alongside_legacy_checks() {
     let report = run_suite(&FakeSubject::with_media(Defects::default())).await;
+    assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
+}
+
+#[tokio::test]
+async fn select_search_group_passes_alongside_legacy_checks() {
+    let report = run_suite(&FakeSubject::with_search(Defects::default())).await;
     assert_eq!(report.verdict, SuiteVerdict::Passed, "{}", report.render());
 }
 

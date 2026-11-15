@@ -1,6 +1,6 @@
 # cortexkit-role-routing-conformance
 
-Version 0.10.29 pins routing `=0.7.26`. The `account_observe_success_*` checks
+Version 0.10.36 pins routing `=0.7.32`. The `account_observe_success_*` checks
 send successful attempt outcomes only after discovering the group; without it,
 they require refusal by name. Declaring adapters provide the test-only
 `configure_observe_retest_block` hook to seed exact account/credential blocks
@@ -8,8 +8,19 @@ and retest admissions, without changing production admission rules. Checks
 probe later admissions, not just effect strings. The advertised
 `input_characters` requirement is checked for synthesize pricing and refusals.
 
+The `select_search_*` checks exercise advertised search selection, all-or-nothing
+search-provider declarations from daemon-verified modules, named requirement
+refusals, remote-only privacy, allowance subsets, quality-before-allowance ranking and attempt
+statuses. Adapters supply search grades, unit prices and exclusions through
+`SelectionFacts.search` using the existing selection-facts hook. Free allowance
+changes ranking cost, not the catalog price returned to the caller. For each
+check family, a self-test enables a deliberately incorrect fake-router behavior
+and asserts that the conformance runner fails the named check. Slot rejection
+is observed through selection; the checks do not read the provider's health
+diagnostics for the rejected slot.
+
 The `select_media_*` checks exercise
-non-llm `route.select` with distinct request and answer types. Adapters provide
+media `route.select` with distinct request and answer types. Adapters provide
 media grades, unit prices and video facts through `SelectionFacts.media`,
 expected job costs through `configure_engine_facts`, and reference evaluations
 through `route.engine_eval`; catalog accuracy fixtures never supply evaluations.
@@ -48,7 +59,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.10.29"
+cortexkit-role-routing-conformance = "0.10.36"
 ```
 
 ```rust,ignore

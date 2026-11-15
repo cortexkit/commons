@@ -35,5 +35,5 @@ pub use subject::{
     Catalog, CatalogAccount, CatalogModel, CatalogModule, CatalogRunner, ConsumerConfig,
     ConsumerMode, ContinueCredential, EngineFacts, HoldLimits, ModelInputFacts,
     OperatorRequirements, ReachableToolProvider, RouteStamp, RoutingSubject, RunnerRouteFacts,
-    ScopeStamp,
+    ScopeStamp, SearchRouteFacts,
 };

@@ -8,6 +8,9 @@ use crate::subject::{
 use cortexkit_role_routing::ROLE_DECLARATIONS_KEY;
 use serde_json::json;
 
+/// Verbatim unit key in the search test catalog, not a normalization rule.
+pub const SEARCH_PRICE_KEY: &str = "request.per_request";
+
 /// The consumer module most checks select as.
 pub const CONSUMER: &str = "example-consumer";
 /// A second consumer module, which must not see the first one's decisions.

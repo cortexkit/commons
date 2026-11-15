@@ -527,10 +527,27 @@ pub trait RoutingSubject: Send + Sync {
 #[non_exhaustive]
 pub struct SelectionFacts {
     pub media: std::collections::BTreeMap<String, MediaRouteFacts>,
+    /// Catalog search facts, separate from media-only limits and capabilities.
+    pub search: std::collections::BTreeMap<String, SearchRouteFacts>,
     pub kinds: std::collections::BTreeMap<String, String>,
     pub list_rates: std::collections::BTreeMap<String, crate::wire::price::RatesPerMtok>,
     pub multipliers: std::collections::BTreeMap<String, serde_json::Number>,
     pub estimates: std::collections::BTreeMap<String, serde_json::Number>,
+}
+
+/// Catalog facts for one search provider/model, independent of its declaration.
+#[derive(Clone, Debug, Default)]
+#[non_exhaustive]
+pub struct SearchRouteFacts {
+    pub grade: Option<u64>,
+    pub price: Option<crate::wire::select_media::UnitPrice>,
+    pub not_for: Vec<String>,
+}
+
+impl SearchRouteFacts {
+    pub fn new() -> Self {
+        Self::default()
+    }
 }
 
 /// Catalog facts for one media provider/model, independent of its declaration.

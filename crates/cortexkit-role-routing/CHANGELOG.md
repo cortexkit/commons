@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.32
+
+- Add `select_search` (§16.4.2), requiring `select_kind` and `select_media`:
+  nonce-verified, atomic search-provider route declarations and a separate
+  search request parser with optional quality demand and strict named refusals.
+- Route free allowance only among adequate search routes, retaining catalog unit
+  prices in the shared media answer. Search decisions use the existing attempt
+  statuses, including `served_empty` for zero results.
+
 ## 0.7.31
 
 - Add permanent, untimed `account_unservable` for account requests that retrying

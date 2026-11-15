@@ -729,6 +729,9 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
     capabilities: &[C],
 ) -> Result<SelectRequest, Refusal> {
     let members = Members::of(params)?;
+    if members.object.contains_key("allowance_left") {
+        return Err(members.refuse("allowance_left", "admitted only by the search parser"));
+    }
     for field in ["privacy", "caller_local"] {
         if members
             .object

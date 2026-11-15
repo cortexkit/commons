@@ -68,6 +68,7 @@ pub mod route_spec;
 pub mod select;
 pub mod select_engine;
 pub mod select_media;
+pub mod select_search;
 pub mod service_tier;
 pub mod spellings;
 #[cfg(any(test, feature = "test-vectors"))]
@@ -82,6 +83,7 @@ pub use declarations::{
 pub use engine_declarations::{
     parse_engine_declarations, EngineDeclarationError, EngineDeclarations,
 };
+pub use select_search::{parse_search_declarations, SearchDeclarations, SearchDeclarationsError};
 
 /// The role name, as `role.describe` states it.
 pub const ROLE: &str = "routing";
@@ -161,6 +163,8 @@ pub mod capabilities {
     pub const SELECT_KIND: &str = "select_kind";
     /// Non-llm engines selected through `route.select`. Requires `SELECT_KIND`.
     pub const SELECT_MEDIA: &str = "select_media";
+    /// Search selection and free allowance. Requires `SELECT_KIND` and `SELECT_MEDIA`.
+    pub const SELECT_SEARCH: &str = "select_search";
     /// Caller-computed route eligibility, including an empty subset.
     pub const SELECT_ELIGIBLE_ROUTES: &str = "select_eligible_routes";
     /// Estimated value rates on selection answers.
@@ -254,6 +258,7 @@ pub mod capabilities {
         DECISION_HARNESS,
         SELECT_KIND,
         SELECT_MEDIA,
+        SELECT_SEARCH,
         SELECT_ELIGIBLE_ROUTES,
         SELECT_PRICE,
         REPORT_ATTEMPT_OUTCOMES,
