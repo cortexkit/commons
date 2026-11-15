@@ -1121,6 +1121,20 @@ async fn falling_back_in_ladder_order_fails() {
 }
 
 #[tokio::test]
+async fn an_early_accounts_blocked_recheck_passes() {
+    let mut subject = FakeSubject::new(Defects::default());
+    subject.accounts_blocked_rechecks_early = true;
+    let report = run_suite(&subject).await;
+    assert_eq!(
+        report.outcome("hold_nothing_within_limit_accounts_blocked"),
+        Some(&CheckOutcome::Passed),
+        "{}",
+        report.render()
+    );
+    assert!(report.failing().is_empty(), "{}", report.render());
+}
+
+#[tokio::test]
 async fn an_accounts_blocked_reset_from_the_first_entry_fails() {
     breaks(
         Defects {
@@ -1128,7 +1142,20 @@ async fn an_accounts_blocked_reset_from_the_first_entry_fails() {
             ..Defects::default()
         },
         "hold_nothing_within_limit_accounts_blocked",
-        "not the earliest known reset",
+        "expected now <= reset_at_ms <= earliest known reset + 1000 ms",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn an_accounts_blocked_recheck_before_select_fails() {
+    breaks(
+        Defects {
+            accounts_blocked_reset_in_past: true,
+            ..Defects::default()
+        },
+        "hold_nothing_within_limit_accounts_blocked",
+        "expected now <= reset_at_ms <= earliest known reset + 1000 ms",
     )
     .await;
 }

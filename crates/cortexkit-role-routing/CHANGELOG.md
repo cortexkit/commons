@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.33
+
+- Clarify that a quota refusal's `reset_at_ms` means when to ask again, not a
+  promise that capacity returns then. It may precede, but must not exceed, the
+  earliest known reset; an unknown reset is still omitted. Other timed causes
+  keep their own meaning. No wire change.
+- **Upgrading:** readers that displayed this refusal value as an account's reset
+  time should read account status instead.
+
 ## 0.7.32
 
 - Add `select_search` (§16.4.2), requiring `select_kind` and `select_media`:

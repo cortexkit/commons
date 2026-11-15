@@ -708,7 +708,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
   open set: `invalid`, `unknown_provider`, `unknown_model`,
   `invalid_variant`, `excluded`, `not_available`, `credential_unentitled`,
   `credential_billing_exhausted`, `cooldown`, `quota_exhausted`, `backoff`,
-  `unknown_slot` (§5.6).
+  `unknown_slot` (§5.6). For exhausted quota, `reset_at_ms` follows the recheck
+  rule below, not a promise of capacity at that time.
 - [pinned] `no_route {reason, reset_at_ms?}`. `reason` is an open set:
   `no_available_model`, `missing_capability`, `context_too_small`,
   `quota_or_cooldown`, `all_inadequate`, `accounts_blocked` (§5.4),
@@ -717,9 +718,20 @@ That group's additive defaults, attested namespace and selector rules are in §1
   requested harness in the message; this cause is not timed. Other existing
   refusals (including `pin_unavailable` for an unservable pin) are unchanged.
 - [pinned] **A timed cause carries `reset_at_ms`**: a cooldown, a backoff, or
-  exhausted quota whose reset is known. A consumer waits until then and
-  asks again, rather than failing its work. A refusal without `reset_at_ms`
-  is not timed. `reset_at_ms` alone decides whether a consumer waits.
+  exhausted quota whose reset is known. A consumer waits until `reset_at_ms`
+  and asks again, rather than failing its work. A refusal without
+  `reset_at_ms` is not timed. `reset_at_ms` alone decides whether a consumer
+  waits.
+- [pinned] `reset_at_ms` is when the consumer asks again, not a promise that
+  capacity returns then. For a refusal caused by exhausted quota (for example
+  `quota_exhausted`, `accounts_blocked` (§5.4) or a quota-caused
+  `account_pool_exhausted` (§9.1)), it is no later than the earliest known
+  reset. A router may name an earlier time when a fresh quota reading could
+  free capacity sooner, and the consumer then gets a fresh answer. A quota
+  refusal whose reset is unknown still carries no `reset_at_ms`. Other timed
+  causes (a cooldown, a backoff, `concurrency_full`, a hold's `until_ms`) keep
+  their own meaning. A reader that shows a person when an account's limit
+  ends reads `route.account_status` (§11.4), not this value.
 
 ### 5.3.1 Provider concurrency
 
@@ -804,8 +816,8 @@ This section binds a provider declaring `select_hold_control` (§4).
   runner holds at `route.account_for`.
 - [pinned] When every entry is blocked and none resets within the limit,
   the provider refuses `no_route` with reason `accounts_blocked`.
-  `reset_at_ms` is the earliest known reset across those entries, and is
-  left out when none is known (§5.3).
+  `reset_at_ms` is no later than the earliest known reset across those entries,
+  under §5.3's recheck rule, and is left out when none is known (§5.3).
 - [pinned] The provider records the request's `hold_wait_max_s` on the
   decision. A `route.account_for` naming that decision applies it too
   (§9.1).
@@ -1276,7 +1288,8 @@ The answer (`account::AccountForAnswer`):
   `account_not_authorized`, `auth_required`, `account_hold {until_ms}`
   (timed), `no_route {reason: "concurrency_full", reset_at_ms}` (§5.3.1)
   (timed), `account_quota_unknown`, `account_pool_exhausted
-  {reset_at_ms?}` (timed when the reset is known),
+  {reset_at_ms?}` (timed when the reset is known; for exhausted quota, the
+  recheck time follows §5.3),
   `account_pool_reserve_limited`, `account_selection_disabled` (not timed),
   `account_selection_unavailable` (transient, not timed),
   `account_unservable {reason, ...}` (permanent, not timed),
@@ -1698,8 +1711,8 @@ What a runner saw on an account, so the provider's headroom stays current.
 | `invalid_requirements` | `route.select` (§5.1), `route.select_panel` (§11.1), `route.select_engine` (§13) | `{field}` | no |
 | `unknown_consumer` | `route.select`, `route.select_panel`, `route.select_engine` | `{consumer}` | no |
 | `consumer_not_owned` | `route.select`, `route.select_panel` (§1.1), `route.select_engine` | `{consumer}` | no (terminal) |
-| `pin_unavailable` | `route.select` (§5.3) | `{pin, reason, reset_at_ms?}` | when `reset_at_ms` is present |
-| `no_route` | `route.select` (§5.3), `route.account_for` (capacity, §5.3.1) | `{reason, reset_at_ms?}` | when `reset_at_ms` is present; required for `concurrency_full` |
+| `pin_unavailable` | `route.select` (§5.3) | `{pin, reason, reset_at_ms?}` | when `reset_at_ms` is present; quota rechecks follow §5.3 |
+| `no_route` | `route.select` (§5.3), `route.account_for` (capacity, §5.3.1) | `{reason, reset_at_ms?}` | when `reset_at_ms` is present; required for `concurrency_full`; quota rechecks follow §5.3 |
 | `no_engine` | `route.select_engine` (§13) | `{filter}` | no |
 | `engine_not_declared_by_caller` | `route.engine_report`, `route.engine_eval` | `{}` | no |
 | `unknown_decision` | `route.report` (§6), `route.account_for` (§9.1), panel replacement (§11.1), `route.budget_quote`, `route.explain` (§11) | `{}` | no |
@@ -1708,7 +1721,7 @@ What a runner saw on an account, so the provider's headroom stays current.
 | `auth_required` | `route.account_for` (§9.1) | `{}` | no |
 | `account_hold` | `route.account_for` (§9.1) | `{until_ms}` | yes, by `until_ms` |
 | `account_quota_unknown` | `route.account_for` (§9.1) | `{}` | no |
-| `account_pool_exhausted` | `route.account_for` (§9.1) | `{reset_at_ms?}` | when `reset_at_ms` is present |
+| `account_pool_exhausted` | `route.account_for` (§9.1) | `{reset_at_ms?}` | when `reset_at_ms` is present; quota rechecks follow §5.3 |
 | `account_pool_reserve_limited` | `route.account_for` (§9.1) | `{}` | no |
 | `account_selection_disabled` | `route.account_for` (§9.1) | `{}` | no (module-wide; use your own credential) |
 | `account_selection_unavailable` | `route.account_for` (§9.1) | `{}` | no (transient) |

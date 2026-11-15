@@ -310,7 +310,7 @@ pub const CHECKS: &[CheckSpec] = &[
     ),
     check(
         "hold_nothing_within_limit_accounts_blocked",
-        "select_hold_control: when every entry is blocked and none resets within the limit, select is no_route accounts_blocked with reset_at_ms the earliest known reset, and without reset_at_ms when no reset is known",
+        "select_hold_control: when every entry is blocked and none resets within the limit, select is no_route accounts_blocked with a recheck from now through the earliest known reset (one-second upper tolerance), and without reset_at_ms when no reset is known",
     ),
     check(
         "hold_demand_mode_skips_blocked_model",

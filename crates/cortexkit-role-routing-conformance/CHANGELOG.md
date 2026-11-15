@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.38
+
+- Pin routing `=0.7.33`. Accept an earlier quota recheck in
+  `hold_nothing_within_limit_accounts_blocked`, while rejecting times before the
+  select or after the earliest known reset (with a one-second upper tolerance).
+  Unknown resets must still be omitted.
+- A quota refusal's `reset_at_ms` now means when to ask again, not when capacity
+  is guaranteed to return. Readers that displayed it as an account's reset time
+  should read account status instead.
+
 ## 0.10.37
 
 - Fix the consumer-declaration search placement check for routers advertising

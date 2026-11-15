@@ -2370,6 +2370,7 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
             } else {
                 "a select with hold_ok false whose ladder entries are blocked with unknown resets"
             };
+            let select_now = now_ms();
             let refusal = refused(
                 &route,
                 ops::ROUTE_SELECT,
@@ -2391,11 +2392,11 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
                 ));
             }
             match (known, detail.reset_at_ms) {
-                (true, Some(reset)) if reset.abs_diff(earliest) <= 1_000 => {}
+                (true, Some(reset)) if select_now <= reset && reset <= earliest + 1_000 => {}
                 (true, other) => {
                     return Err(format!(
-                    "{what} carries reset_at_ms {other:?}, not the earliest known reset {earliest}"
-                ))
+                        "{what} carries reset_at_ms {other:?}; expected now <= reset_at_ms <= earliest known reset + 1000 ms (now={select_now}, earliest={earliest})"
+                    ))
                 }
                 (false, None) => {}
                 (false, Some(reset)) => {

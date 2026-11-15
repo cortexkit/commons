@@ -198,9 +198,11 @@ pub struct Defects {
     /// With hold_ok false and nothing usable now, falls back to the first
     /// holdable entry in ladder order instead of the soonest.
     pub fallback_in_ladder_order: bool,
-    /// accounts_blocked carries the first blocked entry's reset, not the
-    /// earliest.
+    /// accounts_blocked carries the first blocked entry's reset even when it
+    /// is later than the earliest known reset.
     pub accounts_blocked_reset_from_first_entry: bool,
+    /// accounts_blocked carries a recheck time before the select.
+    pub accounts_blocked_reset_in_past: bool,
     /// accounts_blocked carries a reset even when none is known.
     pub accounts_blocked_invents_reset: bool,
     /// A demand-mode consumer is answered a model whose accounts are all
@@ -460,6 +462,8 @@ impl State {
 }
 
 pub struct FakeSubject {
+    /// Recheck exhausted quota after 900 seconds even if its known reset is later.
+    pub accounts_blocked_rechecks_early: bool,
     search_control: bool,
     media_control: bool,
     policy_control: bool,
@@ -530,6 +534,7 @@ impl FakeSubject {
     }
     pub fn new(defects: Defects) -> Self {
         Self {
+            accounts_blocked_rechecks_early: false,
             search_control: false,
             media_control: false,
             policy_control: false,
@@ -916,6 +921,7 @@ impl RoutingSubject for FakeSubject {
 
     async fn route(&self, stamp: &RouteStamp) -> Result<FakeRoute, String> {
         Ok(FakeRoute {
+            accounts_blocked_rechecks_early: self.accounts_blocked_rechecks_early,
             search_control: self.search_control,
             policy_control: self.policy_control,
             media_control: self.media_control,
@@ -939,6 +945,7 @@ impl RoutingSubject for FakeSubject {
 
 /// A route to the fake, carrying the caller and scope it was opened under.
 pub struct FakeRoute {
+    accounts_blocked_rechecks_early: bool,
     search_control: bool,
     media_control: bool,
     policy_control: bool,
@@ -1989,6 +1996,15 @@ impl FakeRoute {
                             defects
                                 .accounts_blocked_invents_reset
                                 .then_some(now + 60_000)
+                        });
+                        let known = known.map(|reset| {
+                            if defects.accounts_blocked_reset_in_past {
+                                now.saturating_sub(60_000)
+                            } else if self.accounts_blocked_rechecks_early {
+                                reset.min(now + 900_000)
+                            } else {
+                                reset
+                            }
                         });
                         return Err(Refusal::no_route(
                             NoRouteReason::AccountsBlocked,

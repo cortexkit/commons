@@ -411,7 +411,7 @@ provider declares `select_harness`.
 | `hold_moves_beyond_caller_cap` | §5.4: a wait beyond the request's smaller `hold_wait_max_s` moves |
 | `hold_ok_false_moves_to_usable_entry` | §5.4: `hold_ok: false` moves to an entry usable now |
 | `hold_ok_false_falls_back_to_soonest_entry` | §5.4: with nothing usable now, the soonest reset within the limit is answered |
-| `hold_nothing_within_limit_accounts_blocked` | §5.4: nothing within the limit is `no_route` `accounts_blocked` with the earliest known reset, or none |
+| `hold_nothing_within_limit_accounts_blocked` | §5.4: nothing within the limit is `no_route` `accounts_blocked` with a recheck no earlier than the select and no later than the earliest known reset (one-second upper tolerance), or none when unknown |
 | `hold_demand_mode_skips_blocked_model` | §5.4: a demand-mode consumer skips a blocked model |
 | `hold_account_for_applies_recorded_cap` | §9.1: `account_for` naming a decision applies the cap its select recorded |
 | `pin_fallback_routes_and_labels` | §5: an unservable pin with `pin_fallback: route` routes with `pin_outcome fell_back` and `detail pin_reason`; a servable pin is `pinned` |
