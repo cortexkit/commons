@@ -238,3 +238,38 @@ fn wake_lookup_vectors_cover_moved_rows_and_ambiguity() {
         );
     }
 }
+
+#[test]
+fn peer_message_ids_follow_the_opaque_field_rule_not_a_prefix() {
+    // Core delivers room invites, removals and some other peer messages with
+    // ids that are not `pm_…`; their wake items must still check.
+    let agent = || Some(WakeAgent::new("agent_a1b2c3d4"));
+    for id in [
+        "pm_a1b2",
+        "room-invite-12c0fb20ce16e7a793cc738b7f4dc104",
+        "room-removal-12c0fb20ce16e7a793cc738b7f4dc104",
+        "scenario-peer:n0nce",
+        "ad_0123456789abcdef",
+    ] {
+        let mut item = WakeItem::new(
+            "peer_message",
+            json!({"id": id}).as_object().unwrap().clone(),
+            0,
+            "hi",
+        );
+        item.from = agent();
+        item.to = agent();
+        item.check().unwrap_or_else(|e| panic!("{id}: {e:?}"));
+    }
+    for bad in ["", "has space", &"x".repeat(257)] {
+        let mut item = WakeItem::new(
+            "peer_message",
+            json!({"id": bad}).as_object().unwrap().clone(),
+            0,
+            "hi",
+        );
+        item.from = agent();
+        item.to = agent();
+        assert!(item.check().is_err(), "{bad:?} must be refused");
+    }
+}

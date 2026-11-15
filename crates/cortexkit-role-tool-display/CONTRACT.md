@@ -371,7 +371,7 @@ by readers; required strings obey the opaque-field rule unless stated below.
 
 | Kind | `refs` | Additional rules |
 | --- | --- | --- |
-| `peer_message` | `{id}` | `id` starts `pm_`; `from` and `to` required |
+| `peer_message` | `{id}` | `id` is the delivered message's id under the opaque-field rule, not only `pm_…` (core also delivers room invites and removals as peer messages); `from` and `to` required |
 | `room_post` | `{room, first_seq, last_seq}` | u64 integer sequences, `first_seq <= last_seq`; one item covers a fold of posts from one room |
 | `worker_question` | `{ask, task}` | both required |
 | `work_result` | `{task, run?, item?}` | optional refs are validated when present |

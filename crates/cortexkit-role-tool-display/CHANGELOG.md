@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.7
+
+- A `peer_message` wake item's `refs.id` follows the opaque-field rule instead of
+  requiring a `pm_` prefix, so wake records for room invites, removals and other
+  non-`pm_` peer deliveries are no longer refused. Readers first: a reader on
+  0.1.6 refuses such items, so readers move to 0.1.7 before a writer emits them.
+
 ## 0.1.6
 
 - Accept subc-protocol 0.37.

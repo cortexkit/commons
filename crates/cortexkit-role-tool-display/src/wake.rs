@@ -86,10 +86,9 @@ impl WakeItem {
         }
         match self.kind.as_str() {
             "peer_message" => {
-                let id = self.id("id")?;
-                if !id.starts_with("pm_") || id.len() == 3 {
-                    return Err(InvalidParams::new("refs.id"));
-                }
+                // Any opaque id: core also delivers room invites and removals as peer
+                // messages, and their ids are not `pm_…`.
+                self.id("id")?;
                 if self.from.is_none() {
                     return Err(InvalidParams::new("from"));
                 }
