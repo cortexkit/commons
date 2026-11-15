@@ -13,6 +13,8 @@ mod fake;
 mod head_turn_contract;
 #[path = "suite/observe_success.rs"]
 mod observe_success_contract;
+#[path = "suite/pin_origin.rs"]
+mod pin_origin_contract;
 
 fn legacy_not_applicable(
     report: &cortexkit_role_routing_conformance::SuiteReport,
@@ -1468,6 +1470,7 @@ async fn letting_first_declarer_win_conflict_fails() {
 async fn ignoring_exclude_fails() {
     // The every-provider exclusion check compares its no_route with the one
     // an exclude of every route key gets, so ignoring exclude fails it too.
+    // A user pin exempts only the reserve, so its exclusion probe also detects it.
     breaks_all(
         Defects {
             ignores_exclude: true,
@@ -1476,6 +1479,7 @@ async fn ignoring_exclude_fails() {
         &[
             "exclude_honoured",
             "exclude_providers_every_provider_no_route",
+            "select_pin_origin_enrolled",
         ],
         "route \"example-provider/model-a\" is in the request's exclude",
     )

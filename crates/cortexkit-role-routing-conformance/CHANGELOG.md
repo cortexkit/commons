@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.39
+
+- Pin routing `=0.7.34`. Add `select_pin_origin`-gated checks for an enrolled
+  caller's reserve exemption, an unenrolled caller's ignored marker, and
+  `pin_origin` refusals for a missing pin or an unknown value.
+- Add a defaulted fixture hook to set reserve-limited subscription accounts
+  and enrolled caller principals. Route stamps carry the callers' identities.
+  Named incorrect routers verify that the kit rejects
+  each missing behaviour.
+- Reserve-limited pins keep reason `quota_exhausted`, echo the pin and omit
+  an unknown reset. Accept absent `detail.cause` for existing routers or
+  `subscription_reserve` when present; reject wrong reasons and cause values
+  with named incorrect-router controls. The fixture model must not already
+  qualify for an agent-own or operator-pin reserve exemption.
+
 ## 0.10.38
 
 - Pin routing `=0.7.33`. Accept an earlier quota recheck in

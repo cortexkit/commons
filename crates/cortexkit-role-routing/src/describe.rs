@@ -87,6 +87,11 @@ impl RoleDescribe {
         self.serves(crate::capabilities::ACCOUNT_HEAD_TURN)
     }
 
+    /// Whether a caller may send `route.select.pin_origin` to this router.
+    pub fn serves_select_pin_origin(&self) -> bool {
+        self.serves(crate::capabilities::SELECT_PIN_ORIGIN)
+    }
+
     /// The consumer entry for `id`.
     pub fn consumer(&self, id: &str) -> Option<&ConsumerEntry> {
         self.consumers.iter().find(|entry| entry.id == id)

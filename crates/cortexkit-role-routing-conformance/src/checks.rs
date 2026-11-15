@@ -10,6 +10,7 @@ mod gateway;
 mod harness_limits;
 mod head_turn;
 mod observe_success;
+mod pin_origin;
 mod placement;
 mod requires_wire_api;
 mod select_engine;
@@ -296,6 +297,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         }
         if name.starts_with("account_head_turn_") {
             return self.head_turn_check(name).await;
+        }
+        if name.starts_with("select_pin_origin_") {
+            return self.pin_origin_check(name).await;
         }
         if name.starts_with("select_media_") {
             return self.select_media_check(name).await;

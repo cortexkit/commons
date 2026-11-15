@@ -1,5 +1,17 @@
 # cortexkit-role-routing
 
+Version 0.7.34 adds `select_pin_origin`. Send `pin_origin: "user"` beside
+`pin` only after discovering that group. Routers honour the marker only from
+operator-enrolled callers (by default the full `reserved:prefrontal-core`
+principal); other callers' markers are treated as absent. An honoured user pin
+exempts the pinned model's subscription accounts from the keep-free reserve,
+not from eligibility, holds, concurrency caps or exclusions. Use
+`SelectRequest::with_pin_origin(PinOrigin::User)` beside `with_pin`; legacy
+requests omit the member.
+Agents' own models and models pinned in operator settings are also exempt.
+Reserve-limited pins keep reason `quota_exhausted`; optional informative
+`detail.cause: "subscription_reserve"` does not change reader wait behaviour.
+
 Version 0.7.32 adds `select_search`, requiring `select_kind` and `select_media`
 and an advertised `search` kind (CONTRACT.md §16.4.2). Read atomic search-provider
 slots with `parse_search_declarations` and dispatch caller-sent search requests

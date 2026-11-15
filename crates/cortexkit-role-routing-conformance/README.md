@@ -1,5 +1,18 @@
 # cortexkit-role-routing-conformance
 
+Version 0.10.39 pins routing `=0.7.34`. The `select_pin_origin_*` checks run
+only after discovering `select_pin_origin`. Declaring adapters supply the
+`RoutingSubject::configure_pin_origin_reserve` fixture hook:
+the pinned model has subscription accounts inside the keep-free reserve,
+and the same marker is exercised from enrolled and unenrolled principals.
+Pass full `reserved:<module>` principals through the route stamp unchanged.
+The checks also require named-field refusals for an origin without a pin and
+an unknown origin. Named incorrect fake routers exercise every new check.
+Reserve refusals keep `reason: "quota_exhausted"`. The optional cause may be
+absent or `"subscription_reserve"`; incorrect-router controls reject wrong
+reason and cause values. The fixture model has no agent-own or operator-pin
+reserve exemption.
+
 Version 0.10.36 pins routing `=0.7.32`. The `account_observe_success_*` checks
 send successful attempt outcomes only after discovering the group; without it,
 they require refusal by name. Declaring adapters provide the test-only
@@ -59,7 +72,7 @@ real routes. It is never run against a double; the in-process fake under
 
 ```toml
 [dev-dependencies]
-cortexkit-role-routing-conformance = "0.10.36"
+cortexkit-role-routing-conformance = "0.10.39"
 ```
 
 ```rust,ignore

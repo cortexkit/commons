@@ -20,6 +20,7 @@ mod extensions;
 #[cfg(test)]
 mod gateway_catalog;
 mod observe_success;
+mod pin_origin;
 mod placement;
 mod select_engine;
 mod select_media;
@@ -300,6 +301,7 @@ type ObserveRetest = (ObserveScope, ObserveBlock);
 
 #[derive(Default)]
 struct State {
+    pin_origin_reserve: Option<(String, Vec<String>)>,
     search: select_search::SearchState,
     observe_blocks: HashMap<ObserveScope, ObserveBlock>,
     observe_retest_next: Option<ObservePair>,
@@ -671,6 +673,16 @@ impl RoutingSubject for FakeSubject {
         Ok(())
     }
 
+    async fn configure_pin_origin_reserve(
+        &self,
+        provider: &str,
+        enrolled_principals: &[String],
+    ) -> Result<(), String> {
+        self.state.lock().unwrap().pin_origin_reserve =
+            Some((provider.into(), enrolled_principals.to_vec()));
+        Ok(())
+    }
+
     async fn configure_model_input_facts(
         &self,
         facts: &[cortexkit_role_routing_conformance::ModelInputFacts],
@@ -995,7 +1007,7 @@ impl RoutingRoute for FakeRoute {
                 {
                     self.select_media_route(&mut state, params)
                 }
-                ops::ROUTE_SELECT => self.select_placement(&mut state, params),
+                ops::ROUTE_SELECT => self.select_pin_origin(&mut state, params),
                 ops::ROUTE_SELECT_PANEL => self.panel(&mut state, params),
                 ops::ROUTE_BUDGET_QUOTE
                 | ops::ROUTE_EXPLAIN
@@ -1181,6 +1193,7 @@ impl FakeRoute {
                 .map(|field| (*field).to_owned()),
         );
         if self.extensions {
+            describe = describe.with_capability("select_pin_origin");
             describe = describe.with_capability("select_engine");
             if self.defects.engine_fault != "without_measurements" {
                 describe = describe

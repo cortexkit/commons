@@ -358,6 +358,10 @@ pub const CHECKS: &[CheckSpec] = &[
         "select_exclude_providers: a select excluding every provider is refused no_route, with the reason and reset_at_ms of a select excluding every route key",
     ),
     check("undeclared_exclude_providers_group_refuses_member", "a provider without select_exclude_providers refuses exclude_providers as invalid_request naming the field"),
+    check("select_pin_origin_enrolled", "select_pin_origin: an enrolled caller's user pin bypasses only the subscription reserve"),
+    check("select_pin_origin_unenrolled", "select_pin_origin: other callers' valid markers are ignored, not refused as invalid requests"),
+    check("select_pin_origin_without_pin", "select_pin_origin: an origin without pin is refused by field"),
+    check("select_pin_origin_unknown", "select_pin_origin: an unknown origin is refused by field"),
     check(
         "task_ref_never_changes_selection",
         "select_task_ref: the same select with and without task_ref answers the same route",

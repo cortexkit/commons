@@ -387,7 +387,9 @@ pub struct ConsumerNotOwnedDetail {
     pub consumer: String,
 }
 
-/// The detail of `pin_unavailable`.
+/// The reason and timing of `pin_unavailable`. Informative members such as
+/// `cause` are intentionally ignored; readers decide how to wait from `reason`
+/// and `reset_at_ms`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PinUnavailableDetail {
     /// The pin as the request sent it.
@@ -742,6 +744,33 @@ mod tests {
             serde_json::from_str(r#"{"pin":"p/m","reason":"retired","reset_at_ms":null}"#).unwrap();
         assert_eq!(detail.reason, PinUnavailableReason::Other("retired".into()));
         assert_eq!(detail.reset_at_ms, None);
+    }
+
+    #[test]
+    fn pin_unavailable_reserve_cause_does_not_change_reason_or_waiting() {
+        use serde_json::json;
+
+        for cause in [
+            None,
+            Some(json!("subscription_reserve")),
+            Some(json!("future_cause")),
+            Some(json!({"future":true})),
+        ] {
+            let mut refusal =
+                Refusal::pin_unavailable("p/m", PinUnavailableReason::QuotaExhausted, Some(9));
+            if let Some(cause) = cause {
+                refusal.detail.insert("cause".into(), cause);
+            }
+            let decoded: PinUnavailableDetail = refusal.detail_as().unwrap();
+            assert_eq!(decoded.pin, "p/m");
+            assert_eq!(decoded.reason, PinUnavailableReason::QuotaExhausted);
+            assert_eq!(decoded.reset_at_ms, Some(9));
+            assert_eq!(refusal.wait_until_ms(), Some(9));
+            assert_eq!(
+                serde_json::to_value(decoded).unwrap(),
+                json!({"pin":"p/m", "reason":"quota_exhausted", "reset_at_ms":9})
+            );
+        }
     }
 
     #[test]

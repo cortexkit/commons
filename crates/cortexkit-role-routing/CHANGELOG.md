@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.34
+
+- Add readers-first `select_pin_origin` and optional `pin_origin: "user"` on
+  `route.select`. Only operator-enrolled callers can mark a person's pin; the
+  default enrollment is the full `reserved:prefrontal-core` principal. Other
+  callers' markers are ignored without exposing enrollment.
+- An honoured user pin exempts the pinned model's subscription accounts from
+  the keep-free reserve, just like an agent's own model or a model pinned in
+  operator settings (including consumer, project and slot pins, ladder steps,
+  and matching request pins). All other selection, account and pin constraints
+  remain in force.
+- Keep `quota_exhausted` as the `pin_unavailable` reason for a reserve-limited
+  pin, preserving existing wait behaviour. Optional informative `detail.cause`
+  may identify `subscription_reserve`; readers ignore it and still key on the
+  reason and quota recheck time. The existing typed detail remains unchanged.
+- **Upgrading:** advertise `select_pin_origin` before sending the marker. Use
+  `SelectRequest::with_pin_origin(PinOrigin::User)` beside `with_pin`; requests
+  without the marker retain their wire bytes. `SelectRequest` remains
+  non-exhaustive and constructor-built.
+
 ## 0.7.33
 
 - Clarify that a quota refusal's `reset_at_ms` means when to ask again, not a

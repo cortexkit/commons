@@ -25,6 +25,8 @@ pub struct ScopeStamp {
 /// `route.select` and `route.report` (including a runner selecting its own
 /// declared consumer), a runner module for the runner ops. The adapter opens
 /// the route with that module's attested `reserved:<module>` identity.
+/// A value already prefixed with `reserved:` names the full principal and
+/// must not receive a second prefix.
 /// `project_id`, when present, is the project the route is bound to; a
 /// route without either project or scope is unscoped. Declaration admission
 /// accepts the declaring module's `principal` or `scope.owner`, independently
@@ -419,6 +421,22 @@ pub trait RoutingSubject: Send + Sync {
     ) -> Result<(), String> {
         let _ = (account_id, cap);
         Err("account concurrency fixtures are not supported by this subject".into())
+    }
+
+    /// Set this provider's subscription keep-free reserve to 30%, with every
+    /// catalog account at 20% remaining and no known reset. Accounts remain
+    /// otherwise eligible and unblocked; the model is neither an agent's own
+    /// model nor operator-pinned for the tested request.
+    /// Enroll exactly `enrolled_principals` (full reserved principals) to honour
+    /// user-pin markers. Caller identities arrive through `route` stamps, never
+    /// request members. Required only with `select_pin_origin`.
+    async fn configure_pin_origin_reserve(
+        &self,
+        provider: &str,
+        enrolled_principals: &[String],
+    ) -> Result<(), String> {
+        let _ = (provider, enrolled_principals);
+        Err("pin origin reserve fixtures are not supported by this subject".into())
     }
 
     /// Supply module entries through the daemon catalog, never request params.

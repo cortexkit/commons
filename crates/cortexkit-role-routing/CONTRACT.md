@@ -463,6 +463,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
   - `engine_reports`: `route.engine_report` (§14); requires `select_engine`.
   - `engine_evals`: `route.engine_eval` (§15); requires `select_engine`.
   - `select_pin_slot`: operator-policy slot pins (§5.6).
+  - `select_pin_origin`: enrolled callers mark a person's pin for the
+    subscription keep-free reserve exemption (§§5.1, 9.1).
   - `select_available_routes`: caller-reachable route restriction (§5.6).
   - `select_prefer_prompt_cache`: prompt-cache tie-breaking (§5.6).
   - `select_settings`: project and service-tier settings lookup (§5.6).
@@ -545,8 +547,22 @@ That group's additive defaults, attested namespace and selector rules are in §1
   before the first `/`; a variant is what follows the last `:` after it. A
   pin that cannot be served is `pin_unavailable`; a malformed one is
   `pin_unavailable` with reason `invalid`.
+  The subscription keep-free reserve and its user-pin exemption are defined
+  in §9.1.
   With no fallback, routing chooses only an account for that model and
   refuses if none can serve it; it never substitutes another model.
+- [pinned] `pin_origin` (optional, only with `select_pin_origin`): the closed
+  value set contains only `"user"`. Absent or null means not a user pin.
+  Without `pin`, or with any other value, it is
+  `invalid_request {field: "pin_origin"}`. A caller sends the member only
+  after the router advertises the group; a router without the group refuses
+  it as an unknown member under §2.
+- [pinned] A router honours `pin_origin: "user"` only from callers enrolled
+  for it in the router's operator settings. The default enrollment is
+  `reserved:prefrontal-core` alone, matched as the full reserved principal,
+  never a module-name suffix or a scope owner. From any other caller a valid
+  marker is treated as absent, never itself refused, so the member cannot
+  probe enrollment. All other authorization and validation rules still apply.
 - [pinned] `pin_fallback`: `"route"` beside a pin. When the pin cannot be
   served, the provider routes normally instead of refusing
   `pin_unavailable`. Routing still decides, since only it knows why the pin
@@ -704,12 +720,18 @@ That group's additive defaults, attested namespace and selector rules are in §1
 - [pinned] `invalid_request {field}`, `invalid_requirements {field}`,
   `unknown_consumer {consumer}`, `consumer_not_owned {consumer}` (terminal,
   never timed).
-- [pinned] `pin_unavailable {pin, reason, reset_at_ms?}`. `reason` is an
+- [pinned] `pin_unavailable {pin, reason, reset_at_ms?, cause?}`. `reason` is an
   open set: `invalid`, `unknown_provider`, `unknown_model`,
   `invalid_variant`, `excluded`, `not_available`, `credential_unentitled`,
   `credential_billing_exhausted`, `cooldown`, `quota_exhausted`, `backoff`,
   `unknown_slot` (§5.6). For exhausted quota, `reset_at_ms` follows the recheck
   rule below, not a promise of capacity at that time.
+- [pinned] `pin_unavailable`'s optional `detail.cause` is informative. Its only
+  defined value is `"subscription_reserve"`, set when every eligible subscription
+  account of the pinned model is inside the operator's keep-free reserve (§9.1).
+  Such a refusal keeps `reason: "quota_exhausted"` and follows the same
+  `reset_at_ms` recheck rule as any quota refusal. Readers ignore `cause` and
+  key on `reason`; absent `cause` remains valid.
 - [pinned] `no_route {reason, reset_at_ms?}`. `reason` is an open set:
   `no_available_model`, `missing_capability`, `context_too_small`,
   `quota_or_cooldown`, `all_inadequate`, `accounts_blocked` (§5.4),
@@ -718,15 +740,15 @@ That group's additive defaults, attested namespace and selector rules are in §1
   requested harness in the message; this cause is not timed. Other existing
   refusals (including `pin_unavailable` for an unservable pin) are unchanged.
 - [pinned] **A timed cause carries `reset_at_ms`**: a cooldown, a backoff, or
-  exhausted quota whose reset is known. A consumer waits until `reset_at_ms`
-  and asks again, rather than failing its work. A refusal without
-  `reset_at_ms` is not timed. `reset_at_ms` alone decides whether a consumer
-  waits.
+  exhausted quota whose reset is known. A consumer
+  waits until `reset_at_ms` and asks again, rather than failing its work. A
+  refusal without `reset_at_ms` is not timed. `reset_at_ms` alone decides
+  whether a consumer waits.
 - [pinned] `reset_at_ms` is when the consumer asks again, not a promise that
   capacity returns then. For a refusal caused by exhausted quota (for example
-  `quota_exhausted`, `accounts_blocked` (§5.4) or a quota-caused
-  `account_pool_exhausted` (§9.1)), it is no later than the earliest known
-  reset. A router may name an earlier time when a fresh quota reading could
+  `quota_exhausted`, `accounts_blocked` (§5.4) or a
+  quota-caused `account_pool_exhausted` (§9.1)), it is no later than the
+  earliest known reset. A router may name an earlier time when a fresh quota reading could
   free capacity sooner, and the consumer then gets a fresh answer. A quota
   refusal whose reset is unknown still carries no `reset_at_ms`. Other timed
   causes (a cooldown, a backoff, `concurrency_full`, a hold's `until_ms`) keep
@@ -907,6 +929,7 @@ This section binds a provider declaring `select_hold_control` (§4).
 | Member | Group | Meaning and validation |
 |---|---|---|
 | `pin_slot` | `select_pin_slot` | A §1.2 token naming an operator-policy slot. Sending both `pin` and `pin_slot` is `invalid_request {field: "pin_slot"}`. |
+| `pin_origin` | `select_pin_origin` | Only `"user"`, beside `pin`; other values or a missing pin are `invalid_request {field: "pin_origin"}`. Caller enrollment and the reserve exemption are defined in §§5.1 and 9.1. |
 | `available_routes` | `select_available_routes` | Non-empty list of `provider/model` route keys reachable by the caller's runners. Malformed entries or an empty list are `invalid_request {field: "available_routes"}`; repeated entries are allowed. |
 | `prefer_prompt_cache` | `select_prefer_prompt_cache` | Boolean; breaks ties among adequate routes only, never admits a route. |
 | `settings` | `select_settings` | `{project_id?, tier_consumer?}`; any other member is `invalid_request {field: "settings.<member>"}`. |
@@ -1235,6 +1258,19 @@ the routing provider allocates (subscription logins).
   its rejection; an unknown or ineligible hinted credential is never itself
   a refusal. When honoured, the hinted account becomes the conversation's
   affinity exactly as a cold pick would.
+- [pinned] The subscription keep-free reserve is an operator setting that
+  keeps a share of each subscription pool free for agents' own models. It is
+  the same reserve that `warm_credential` never overrides. An agent's own
+  model, and a model the operator pinned in the router's settings, are exempt
+  from that reserve. Operator pins include a consumer, project or slot pin,
+  a ladder step, or a request pin equal to one of those.
+- [pinned] For an honoured `pin_origin: "user"` (§5.1), the reserve does not
+  limit the pinned model's subscription accounts, exactly as for those.
+  This changes only whether the reserve applies to the pinned
+  model, not route choice: eligibility, holds, concurrency caps, exclusions
+  and the pin's own validity apply unchanged. Without an honoured user marker,
+  a request pin gains no exemption of its own; the agent-own and operator-pin
+  exemptions still apply.
 - [pinned] `hold_wait_max_s` (optional, default 900): the longest the
   runner waits out a short hold instead of being refused. When the
   request's `decision_id` names a decision that recorded a caller's

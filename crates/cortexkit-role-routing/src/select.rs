@@ -40,6 +40,14 @@ pub const EXPLANATION_MAX_CHARS: usize = 200;
 /// The most entries a `prefer` list may carry.
 pub const PREFER_MAX_ENTRIES: usize = 16;
 
+/// Who chose a request's pinned model. Only `"user"` is defined.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PinOrigin {
+    /// A person chose the pin; honoured only for operator-enrolled callers.
+    User,
+}
+
 open_set! {
     /// The `tools` requirement.
     pub enum ToolsRequirement {
@@ -233,6 +241,11 @@ pub struct SelectRequest {
     /// `provider/model[:variant]`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin: Option<String>,
+    /// Sent beside `pin` only with `select_pin_origin`. An enrolled caller's
+    /// user pin exempts the pinned model's subscription accounts from the
+    /// keep-free reserve only. Other callers' markers are treated as absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_origin: Option<PinOrigin>,
     /// Route keys (`provider/model`) the caller will not take; each
     /// excludes every variant of that key.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -324,6 +337,7 @@ impl SelectRequest {
             service_tier: None,
             requirements,
             pin: None,
+            pin_origin: None,
             exclude: None,
             exclude_providers: None,
             runners: None,
@@ -369,6 +383,12 @@ impl SelectRequest {
     /// Set the pin, `provider/model[:variant]`.
     pub fn with_pin(mut self, pin: impl Into<String>) -> Self {
         self.pin = Some(pin.into());
+        self
+    }
+
+    /// Identify who chose `pin`; send only after discovering `select_pin_origin`.
+    pub fn with_pin_origin(mut self, origin: PinOrigin) -> Self {
+        self.pin_origin = Some(origin);
         self
     }
 
@@ -722,6 +742,8 @@ pub fn parse_select_request(params: &Value) -> Result<SelectRequest, Refusal> {
 /// `pin_slot`, `available_routes`, `prefer_prompt_cache` and `settings` require
 /// `select_pin_slot`, `select_available_routes`, `select_prefer_prompt_cache`
 /// and `select_settings`, respectively.
+/// `pin_origin` requires `select_pin_origin` and a `pin`. Enrollment is checked
+/// by the provider after parsing, never inferred from request members.
 /// Whether the consumer is known and owned, and
 /// whether anything can serve, is the provider's to answer after this.
 pub fn parse_select_request_serving<C: AsRef<str>>(
@@ -748,6 +770,7 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
             crate::capabilities::SELECT_ELIGIBLE_ROUTES,
         ),
         ("pin_slot", "select_pin_slot"),
+        ("pin_origin", crate::capabilities::SELECT_PIN_ORIGIN),
         ("available_routes", "select_available_routes"),
         ("prefer_prompt_cache", "select_prefer_prompt_cache"),
         ("settings", "select_settings"),
@@ -795,6 +818,10 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
     }
     let requirements = parse_requirements(members.object.get("requirements"))?;
     let pin = members.optional_text("pin", None)?;
+    let pin_origin: Option<PinOrigin> = members.optional("pin_origin")?;
+    if pin_origin.is_some() && pin.is_none() {
+        return Err(members.refuse("pin_origin", "pin_origin needs pin"));
+    }
     let pin_slot = members.optional_text("pin_slot", None)?;
     if let Some(slot) = &pin_slot {
         if pin.is_some() {
@@ -973,6 +1000,7 @@ pub fn parse_select_request_serving<C: AsRef<str>>(
         service_tier,
         requirements,
         pin: pin.clone(),
+        pin_origin,
         exclude,
         exclude_providers,
         runners,
@@ -1628,6 +1656,56 @@ mod tests {
             .unwrap()
             .extend(additions.as_object().unwrap().clone());
         params
+    }
+
+    #[test]
+    fn pin_origin_is_closed_requires_pin_and_its_group() {
+        let groups = [crate::capabilities::SELECT_PIN_ORIGIN];
+        let request = SelectRequest::new("example.task", Requirements::iq(50))
+            .with_pin("provider/model")
+            .with_pin_origin(PinOrigin::User);
+        let params = serde_json::to_value(&request).unwrap();
+        assert_eq!(params["pin_origin"], json!("user"));
+        assert_eq!(
+            parse_select_request_serving(&params, &groups).unwrap(),
+            request
+        );
+        assert_eq!(
+            field(&parse_select_request(&params).unwrap_err()),
+            "pin_origin"
+        );
+        for additions in [
+            json!({"pin_origin":"user"}),
+            json!({"pin_slot":"head", "pin_origin":"user"}),
+            json!({"pin":"provider/model", "pin_origin":"agent"}),
+            json!({"pin":"provider/model", "pin_origin":""}),
+            json!({"pin":"provider/model", "pin_origin":true}),
+            json!({"pin":"provider/model", "pin_origin":{}}),
+        ] {
+            let refusal = parse_select_request_serving(
+                &select_with(additions),
+                &[
+                    crate::capabilities::SELECT_PIN_ORIGIN,
+                    crate::capabilities::SELECT_PIN_SLOT,
+                ],
+            )
+            .unwrap_err();
+            assert_eq!(refusal.code, crate::errors::RefusalCode::InvalidRequest);
+            assert_eq!(field(&refusal), "pin_origin");
+        }
+        let absent = SelectRequest::new("example.task", Requirements::iq(50));
+        assert!(serde_json::to_value(&absent)
+            .unwrap()
+            .get("pin_origin")
+            .is_none());
+        let null = select_with(json!({"pin_origin":null}));
+        assert_eq!(parse_select_request(&null).unwrap().pin_origin, None);
+        let describe = crate::describe::RoleDescribe::new(vec![], false);
+        assert!(!describe.serves_select_pin_origin());
+        assert!(describe
+            .with_capability(groups[0])
+            .serves_select_pin_origin());
+        assert!(crate::capabilities::KNOWN.contains(&groups[0]));
     }
 
     fn answer() -> SelectAnswer {

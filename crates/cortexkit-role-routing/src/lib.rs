@@ -35,7 +35,7 @@
 //! string it was sent as. Optional members are omitted when absent, and a
 //! member sent as `null` decodes the same as one left out.
 //! Continuation answers are instead a closed tagged union of three outcomes;
-//! model-choice [`billing::Billing`] values are also closed.
+//! model-choice [`billing::Billing`] values and [`select::PinOrigin`] are also closed.
 
 #![forbid(unsafe_code)]
 
@@ -206,6 +206,9 @@ pub mod capabilities {
     /// `route.select` reads `task_ref` for attribution, never selection.
     pub const SELECT_TASK_REF: &str = "select_task_ref";
 
+    /// Enrolled callers mark a person's pin for the subscription reserve exemption.
+    pub const SELECT_PIN_ORIGIN: &str = "select_pin_origin";
+
     /// Multi-model panels and seat replacements.
     pub const SELECT_PANEL: &str = "select_panel";
     /// Read-only panel sizing without decisions or reservations.
@@ -276,6 +279,7 @@ pub mod capabilities {
         SELECT_PREFER,
         SELECT_EXCLUDE_PROVIDERS,
         SELECT_TASK_REF,
+        SELECT_PIN_ORIGIN,
         SELECT_PANEL,
         SELECT_PANEL_ESTIMATE,
         BUDGET_QUOTE,
