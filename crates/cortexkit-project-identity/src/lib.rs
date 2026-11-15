@@ -134,16 +134,16 @@ impl<T: Serialize> Serialize for Presence<T> {
 }
 
 macro_rules! wire_struct {
-    ($(#[$doc:meta])* $name:ident { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? }) => {
+    ($(#[$doc:meta])* $name:ident { $($(#[$attr:meta])* $field:ident: $ty:ty),* $(,)? } $(optional { $($(#[$opt_attr:meta])* $opt_field:ident: $opt_ty:ty),* $(,)? })?) => {
         $(#[$doc])*
         #[non_exhaustive]
         #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
         #[serde(rename_all = "camelCase")]
-        pub struct $name { $($(#[$attr])* pub $field: $ty,)* }
+        pub struct $name { $($(#[$attr])* pub $field: $ty,)* $($($(#[$opt_attr])* pub $opt_field: Option<$opt_ty>,)*)? }
         impl $name {
             /// Constructs data without checking cross-field writer invariants.
             #[allow(clippy::too_many_arguments)]
-            pub fn new($($field: $ty),*) -> Self { Self { $($field,)* } }
+            pub fn new($($field: $ty),*) -> Self { Self { $($field,)* $($($opt_field: None,)*)? } }
         }
     };
 }
@@ -360,6 +360,11 @@ impl<'de> Deserialize<'de> for ResolveRemoteStatus {
 
 wire_struct!(Workspace {
     workspace_id: String, name: String, root: Option<String>,
+} optional {
+    /// Opaque filesystem identity, compared only for equality. Its format is
+    /// `unix:<dev>:<ino>` or `windows:<volumeSerial>:<fileIndex>`, with decimal numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file_id: String,
 });
 wire_struct!(Project {
     project_id: String, name: String, roots: Vec<String>, implicit: bool, ref_kind: RefKind,
@@ -382,7 +387,38 @@ wire_struct!(RootRecord {
     root_key_mismatch: Option<bool>,
     incarnation: Option<RootIncarnation>, registration_epoch: Option<String>,
     identity: RootIdentity, approval: Approval,
+} optional {
+    /// Opaque filesystem identity, compared only for equality. Its format is
+    /// `unix:<dev>:<ino>` or `windows:<volumeSerial>:<fileIndex>`, with decimal numbers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file_id: String,
 });
+
+impl Workspace {
+    /// Sets the optional filesystem identity of the workspace root.
+    pub fn with_file_id(mut self, file_id: Option<String>) -> Self {
+        self.file_id = file_id;
+        self
+    }
+}
+
+impl RootRecord {
+    /// Sets the optional filesystem identity of the root.
+    pub fn with_file_id(mut self, file_id: Option<String>) -> Self {
+        self.file_id = file_id;
+        self
+    }
+}
+
+/// Formats a Unix filesystem identity for equality comparison.
+pub fn file_id_unix(dev: u64, ino: u64) -> String {
+    format!("unix:{dev}:{ino}")
+}
+
+/// Formats a Windows filesystem identity for equality comparison.
+pub fn file_id_windows(volume_serial: u32, file_index: u64) -> String {
+    format!("windows:{volume_serial}:{file_index}")
+}
 wire_struct!(RootIncarnation {
     kind: RootIncarnationKind,
     value: String

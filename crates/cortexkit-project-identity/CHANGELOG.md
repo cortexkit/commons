@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.5
+
+- Add optional filesystem `fileId` values to workspace roots and root records,
+  with formatting helpers and builders that preserve existing constructors.
+
 ## 0.1.4
 
 - Name `RefusalCode::NotFound` (`not_found`) for session lookup misses from the

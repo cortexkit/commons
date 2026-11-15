@@ -11,6 +11,100 @@ where
     assert_eq!(&decoded, value);
 }
 
+// Mirrors the 0.1.4 wire shapes, before either type had a file_id field.
+mod legacy_file_id_readers {
+    use super::*;
+    use serde::Deserialize;
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct Workspace {
+        pub workspace_id: String,
+        pub name: String,
+        pub root: Option<String>,
+    }
+
+    #[derive(Serialize, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RootRecord {
+        pub root: String,
+        pub remotes: Vec<GitRemote>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub remotes_error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub root_key: Option<RootKey>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub root_key_mismatch: Option<bool>,
+        pub incarnation: Option<RootIncarnation>,
+        pub registration_epoch: Option<String>,
+        pub identity: RootIdentity,
+        pub approval: Approval,
+    }
+}
+
+#[test]
+fn file_id_wire_compatibility_and_builders() {
+    let workspace = Workspace::new("w".into(), "name".into(), Some("/w".into()));
+    let root = RootRecord::new(
+        "/r".into(),
+        vec![],
+        None,
+        None,
+        None,
+        None,
+        None,
+        RootIdentity::Unbound,
+        Approval::new(ApprovalState::Unapproved, None),
+    );
+    let workspace_old = json!({"workspaceId":"w", "name":"name", "root":"/w"});
+    let root_old = json!({"root":"/r", "remotes":[], "incarnation":null,
+        "registrationEpoch":null, "identity":"unbound",
+        "approval":{"state":"unapproved", "journalSeq":null}});
+    assert_eq!(serde_json::to_value(&workspace).unwrap(), workspace_old);
+    assert_eq!(serde_json::to_value(&root).unwrap(), root_old);
+    assert_eq!(
+        serde_json::from_value::<Workspace>(workspace_old.clone()).unwrap(),
+        workspace
+    );
+    assert_eq!(
+        serde_json::from_value::<RootRecord>(root_old.clone()).unwrap(),
+        root
+    );
+
+    let workspace = workspace.with_file_id(Some(file_id_unix(3, u64::MAX)));
+    let root = root.with_file_id(Some(file_id_windows(u32::MAX, u64::MAX)));
+    let workspace_json = serde_json::to_string(&workspace).unwrap();
+    let root_json = serde_json::to_string(&root).unwrap();
+    assert_eq!(
+        serde_json::from_str::<Workspace>(&workspace_json).unwrap(),
+        workspace
+    );
+    assert_eq!(
+        serde_json::from_str::<RootRecord>(&root_json).unwrap(),
+        root
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&workspace_json).unwrap()["fileId"],
+        "unix:3:18446744073709551615"
+    );
+    assert_eq!(
+        serde_json::from_str::<Value>(&root_json).unwrap()["fileId"],
+        "windows:4294967295:18446744073709551615"
+    );
+    let legacy_workspace: legacy_file_id_readers::Workspace =
+        serde_json::from_str(&workspace_json).unwrap();
+    let legacy_root: legacy_file_id_readers::RootRecord = serde_json::from_str(&root_json).unwrap();
+    assert_eq!(
+        serde_json::to_value(legacy_workspace).unwrap(),
+        workspace_old
+    );
+    assert_eq!(serde_json::to_value(legacy_root).unwrap(), root_old);
+    assert_eq!(workspace.with_file_id(None).file_id, None);
+    assert_eq!(root.with_file_id(None).file_id, None);
+    assert_eq!(file_id_unix(0, 0), "unix:0:0");
+    assert_eq!(file_id_windows(0, 0), "windows:0:0");
+}
+
 macro_rules! string_test {
     ($test:ident, $ty:ident, {$($variant:ident => $wire:literal),+ $(,)?}) => {
         #[test]
