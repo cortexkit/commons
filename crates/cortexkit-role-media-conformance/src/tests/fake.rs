@@ -936,8 +936,15 @@ impl MediaSubject for Fake {
         Ok(())
     }
     async fn call_as(&self, principal: &str, request: Request) -> SubjectResult<Value> {
-        let mut st = self.state.lock().unwrap();
-        let answer = st.call(principal, &request.method, request.params)?;
+        let answer = if request.method == "media.stream_audio" {
+            self.stream_audio_call(principal, request.params).await?
+        } else {
+            self.state
+                .lock()
+                .unwrap()
+                .call(principal, &request.method, request.params)?
+        };
+        let st = self.state.lock().unwrap();
         if st.fault("reply_envelope") {
             Ok(answer)
         } else if st.fault("reply_envelope_extra_keys") {
@@ -961,7 +968,11 @@ impl MediaSubject for Fake {
         Ok(())
     }
     async fn open_stream(&self, p: &str, first: Value) -> SubjectResult<()> {
-        self.state.lock().unwrap().open_stream(p, first)
+        let id = first["stream_id"].as_str().unwrap_or("").to_string();
+        let mut st = self.state.lock().unwrap();
+        let result = st.open_stream(p, first);
+        st.release_waiting_audio(p, &id, result.is_ok());
+        result
     }
     async fn open_watch(&self, p: &str, id: &str) -> SubjectResult<()> {
         self.state.lock().unwrap().watch_open(p, id)

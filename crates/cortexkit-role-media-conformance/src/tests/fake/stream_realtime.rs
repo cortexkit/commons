@@ -8,12 +8,69 @@ pub(super) struct Extras {
     pub front_unavailable: BTreeMap<String, String>,
     streams: BTreeMap<(String, String), Stream>,
     seen: BTreeSet<(String, String)>,
+    waiting: BTreeMap<(String, String), Vec<HeldAudio>>,
     refuse_stream: bool,
     tokens: BTreeMap<String, Token>,
     calls: BTreeMap<(String, String), Call>,
     ended: BTreeSet<(String, String)>,
     watches: BTreeMap<(String, String), Vec<Value>>,
 }
+struct HeldAudio {
+    frame: Value,
+    expires: tokio::time::Instant,
+    reply: tokio::sync::oneshot::Sender<SubjectResult<Value>>,
+}
+
+impl Fake {
+    pub(super) async fn stream_audio_call(&self, p: &str, frame: Value) -> SubjectResult<Value> {
+        let receiver = {
+            let mut st = self.state.lock().unwrap();
+            let id = frame["stream_id"].as_str().unwrap_or("").to_string();
+            let key = (p.to_string(), id.clone());
+            let known = st.extra.seen.contains(&key);
+            let ended_grace = known && st.fault("stream_audio_ended_no_grace");
+            if (known && !ended_grace)
+                || st.fault("stream_audio_before_open")
+                || st.fault("stream_audio_open_grace")
+                || (st.fault("stream_audio_principal_scope")
+                    && st.extra.streams.keys().any(|(_, sid)| sid == &id))
+            {
+                return st.call(p, "media.stream_audio", frame);
+            }
+            st.prune_waiting_audio();
+            if !st.extra.waiting.contains_key(&key)
+                && st
+                    .extra
+                    .waiting
+                    .keys()
+                    .filter(|(owner, _)| owner == p)
+                    .count()
+                    >= 4
+            {
+                return Err(refuse("stream_closed", None));
+            }
+            let waiting = st.extra.waiting.entry(key).or_default();
+            if waiting.len() >= 8 {
+                return Err(refuse("stream_seq_mismatch", None));
+            }
+            let (reply, receiver) = tokio::sync::oneshot::channel();
+            waiting.push(HeldAudio {
+                frame,
+                expires: tokio::time::Instant::now() + std::time::Duration::from_millis(2000),
+                reply,
+            });
+            receiver
+        };
+        match tokio::time::timeout(std::time::Duration::from_millis(2000), receiver).await {
+            Ok(Ok(answer)) => answer,
+            _ => {
+                self.state.lock().unwrap().prune_waiting_audio();
+                Err(refuse("stream_closed", None))
+            }
+        }
+    }
+}
+
 struct Stream {
     lease: Lease,
     first: Value,
@@ -56,6 +113,27 @@ struct Call {
 }
 
 impl State {
+    fn prune_waiting_audio(&mut self) {
+        let now = tokio::time::Instant::now();
+        self.extra.waiting.retain(|_, frames| {
+            frames.retain(|held| !held.reply.is_closed() && held.expires > now);
+            !frames.is_empty()
+        });
+    }
+
+    pub(super) fn release_waiting_audio(&mut self, p: &str, id: &str, accepted: bool) {
+        if let Some(mut frames) = self.extra.waiting.remove(&(p.into(), id.into())) {
+            frames.sort_by_key(|held| held.frame["seq"].as_u64().unwrap_or(0));
+            for held in frames {
+                let answer = if accepted && held.expires > tokio::time::Instant::now() {
+                    self.call(p, "media.stream_audio", held.frame)
+                } else {
+                    Err(refuse("stream_closed", None))
+                };
+                let _ = held.reply.send(answer);
+            }
+        }
+    }
     pub(super) fn extra_times(&self) -> Vec<u64> {
         self.extra
             .streams
@@ -631,10 +709,24 @@ impl State {
         {
             return Err(refuse("stream_seq_mismatch", None));
         }
-        let bytes = frame["data"]
-            .as_str()
-            .map(|d| STANDARD.decode(d).unwrap().len() as u64)
-            .unwrap_or(0);
+        let bytes = if frame["end"] == true {
+            0
+        } else {
+            let decoded = frame["data"]
+                .as_str()
+                .and_then(|data| STANDARD.decode(data).ok())
+                .filter(|data| data.len() <= 2_097_152);
+            let Some(decoded) = decoded else {
+                if self.fault("stream_audio_invalid_data") {
+                    st.seq += 1;
+                }
+                if self.fault("stream_audio_invalid_data_closes_stream") {
+                    st.closed = true;
+                }
+                return Err(refuse("invalid_params", Some("data")));
+            };
+            decoded.len() as u64
+        };
         st.bytes += bytes;
         let e = self.engines.iter().find(|e| e.model == "stream").unwrap();
         let limit = if st.bytes > e.max_input_bytes.unwrap_or(u64::MAX) {

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.1.9
+
+- Refuse oversize or invalidly encoded stream audio with `invalid_params` on
+  `data`, without holding, transcribing, counting or consuming its sequence;
+  keep the stream open so the same sequence can be retried with valid audio.
+  Distinguish this refusal from terminal cumulative input limits.
+- Add optional HTTPS `connect_url` to token answers, bounded to 2,048 bytes and
+  derived from the token's catalog base. Keep absent-member compatibility,
+  constructor-based creation and token Debug redaction; deploy phone readers
+  before providers send the new member.
+- Extend shared realtime vectors and decoder regression coverage.
+- Hold audio arriving before its open for up to 2,000 ms, scoped by principal
+  and stream id. Apply sequence and limit rules on acceptance; refuse held
+  requests if the open is refused or the grace expires. Ended ids have no grace;
+  waiting frames share the eight-request window, with at most four unopened ids
+  held per principal.
+
 ## 0.1.8
 
 - Replace multi-frame streaming input with an open `media.stream_transcribe`

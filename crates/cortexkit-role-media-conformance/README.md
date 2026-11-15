@@ -5,7 +5,7 @@ Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.
 decoded answer. STREAM_DATA event bodies and referenced output-object contents
 stay unwrapped.
 
-Version 0.2.5 pins `cortexkit-role-media` exactly to 0.1.8. Implement `MediaSubject`
+Version 0.2.6 pins `cortexkit-role-media` exactly to 0.1.9. Implement `MediaSubject`
 in an adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
 Each case needs an isolated, empty provider store and a Tokio runtime with time
 enabled. `Outcome::Failed` includes the case name; `NotApplicable` names an
@@ -52,6 +52,18 @@ request: preserve principal lookup, not route-local stream state. Unknown,
 closed and foreign streams all refuse with `stream_closed`. The crossing frame
 gets its own `input_too_large` ERROR and never reaches the engine; the open
 request also ends with that failure and the prior finals.
+
+Audio can arrive before the separate open request. For a never-accepted
+`(principal, stream_id)`, hold it for up to 2,000 ms; an accepted open releases
+held frames in seq order under the normal window and limit rules. A refused
+open or grace expiry answers each held frame `stream_closed`. Ended ids refuse
+immediately, with no grace. Waiting frames count toward the eight-unanswered
+window, and at most four unopened ids per principal may hold frames; a fifth id
+refuses immediately. Another principal's stream never changes these rules.
+
+An oversize or invalidly encoded audio frame instead gets `invalid_params` on
+`data`, leaves the stream open and does not consume its sequence or count toward
+cumulative limits. The caller may retry the same sequence with valid audio.
 
 Both stream operations are `mutate` management operations, available only to
 local callers on the computer. A phone dictates directly to the vendor with a

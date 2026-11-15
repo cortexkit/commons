@@ -944,6 +944,79 @@ fn media_contract_usage_feed_entries_ack_answers_and_bounds() {
 }
 
 #[test]
+fn media_contract_token_connect_url_absent() {
+    let v = vector("realtime.json");
+    let answer: TokenAnswer = round_trip(&v["token_answer"]);
+    assert_eq!(answer.connect_url, None);
+    assert_eq!(
+        serde_json::to_value(TokenAnswer::new(
+            answer.token,
+            answer.token_ref,
+            answer.expires_at_ms,
+            answer.provider,
+            answer.model,
+        ))
+        .unwrap(),
+        v["token_answer"]
+    );
+}
+
+#[test]
+fn media_contract_token_connect_url_valid() {
+    let v = vector("realtime.json");
+    let answer: TokenAnswer = round_trip(&v["token_answer_with_connect_url"]);
+    let url = "https://api.openai.com/v1/realtime/calls";
+    assert_eq!(answer.connect_url.as_deref(), Some(url));
+    assert!(!format!("{answer:?}").contains(&answer.token));
+    let built = TokenAnswer::new(
+        answer.token.clone(),
+        answer.token_ref.clone(),
+        answer.expires_at_ms,
+        answer.provider.clone(),
+        answer.model.clone(),
+    )
+    .with_connect_url(url.into());
+    assert_eq!(built, answer);
+    assert!(!format!("{built:?}").contains(&built.token));
+}
+
+#[test]
+fn media_contract_token_connect_url_non_https_refused() {
+    let v = vector("realtime.json");
+    for url in v["invalid_connect_urls"].as_array().unwrap() {
+        let mut answer = v["token_answer"].clone();
+        answer["connect_url"] = url.clone();
+        assert!(
+            serde_json::from_value::<TokenAnswer>(answer).is_err(),
+            "accepted invalid connect_url: {url}"
+        );
+    }
+}
+
+#[test]
+fn media_contract_token_connect_url_over_length_refused() {
+    let v = vector("realtime.json");
+    let recipe = &v["connect_url_limit"]["over_length"];
+    let prefix = recipe["prefix"].as_str().unwrap();
+    let url = format!(
+        "{prefix}{}",
+        recipe["fill"]
+            .as_str()
+            .unwrap()
+            .repeat(recipe["total_bytes"].as_u64().unwrap() as usize - prefix.len())
+    );
+    assert_eq!(url.len(), 2049);
+    let mut answer = v["token_answer"].clone();
+    answer["connect_url"] = json!(url);
+    assert!(serde_json::from_value::<TokenAnswer>(answer.clone()).is_err());
+    answer["connect_url"] = json!(url[..2048].to_string());
+    let decoded: TokenAnswer = round_trip(&answer);
+    assert_eq!(decoded.connect_url.as_ref().unwrap().len(), 2048);
+    answer["connect_url"] = json!(format!("{prefix}{}", "é".repeat(1024)));
+    assert!(serde_json::from_value::<TokenAnswer>(answer).is_err());
+}
+
+#[test]
 #[allow(deprecated)]
 fn media_contract_realtime_stream_vectors_and_redacted_debug() {
     let v = vector("realtime.json");

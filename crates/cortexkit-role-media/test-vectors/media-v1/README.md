@@ -36,6 +36,10 @@ vectors deliberately include entries with both record/raw and with neither.
 Realtime vectors keep the original watch event without tool and add ask, hand_off
 and an unknown tool. Refusal vectors include both known front_unavailable reasons
 and an unknown reason, all preserved verbatim as permanent refusals.
+Realtime token answers cover absent and HTTPS connect_url members; the URL
+over-length recipe fills to total_bytes, including the prefix. Stream invalid
+data expands decoded_bytes copies of byte, then standard padded base64-encodes
+them; each invalid frame refuses on data without consuming retry_seq.
 
 Generated synthetic WAV fixtures and their generator belong to the conformance
 kit, not the wire-contract crate. No recorded voice is shipped here.

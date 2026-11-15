@@ -1,6 +1,9 @@
 {
   "token_request":{"call_id":"call-1","agent_id":"agent-1","purpose":"voice_front","model":"live","decision_id":"d-1"},
   "token_answer":{"token":"PLACEHOLDER_NOT_A_TOKEN","token_ref":"opaque-reference","expires_at_ms":1000,"provider":"example","model":"live"},
+  "token_answer_with_connect_url":{"token":"PLACEHOLDER_NOT_A_TOKEN","token_ref":"opaque-reference","expires_at_ms":1000,"provider":"openai","model":"live","connect_url":"https://api.openai.com/v1/realtime/calls"},
+  "invalid_connect_urls":["http://api.openai.com/v1/realtime/calls","https://"],
+  "connect_url_limit":{"max_bytes":2048,"over_length":{"prefix":"https://example.com/","fill":"a","total_bytes":2049}},
   "call_started":{"call_id":"call-1","token_ref":"opaque-reference","vendor_session_id":"vendor-session-1"},
   "started_answer":{"call_id":"call-1","vendor_session_id":"vendor-session-1"},
   "call_ended":{"call_id":"call-1"},
@@ -18,6 +21,7 @@
   "stream_audio_request":{"stream_id":"stream-1","seq":0,"data":"YQ=="},
   "stream_end_request":{"stream_id":"stream-1","seq":1,"end":true},
   "stream_audio_answer":{},
+  "stream_audio_invalid_data":{"oversize":{"decoded_bytes":2097153,"byte":0},"invalid_encoding":["!not-base64!","YQ","YQ==\n"],"refusal":{"code":"invalid_params","message":"Invalid data","detail":{"class":"permanent","field":"data"}},"retry_seq":0},
   "partial":{"type":"partial","segment":0,"text":"A"},
   "final":{"type":"final","segment":0,"text":"Ada","words":[]},
   "stream_answer":{"segments":[{"segment":0,"text":"Ada","words":[]}],"no_speech":false},

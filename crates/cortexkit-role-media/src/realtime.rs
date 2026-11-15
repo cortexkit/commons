@@ -25,7 +25,30 @@ pub struct TokenAnswer {
     pub expires_at_ms: u64,
     pub provider: String,
     pub model: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_connect_url"
+    )]
+    pub connect_url: Option<String>,
 }
+fn deserialize_connect_url<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = <Option<String> as serde::Deserialize>::deserialize(deserializer)?;
+    if let Some(value) = &value {
+        if value.len() > 2048
+            || !url::Url::parse(value)
+                .is_ok_and(|url| url.scheme() == "https" && url.host_str().is_some())
+        {
+            return Err(serde::de::Error::custom(
+                "connect_url must be an HTTPS URL of at most 2048 bytes",
+            ));
+        }
+    }
+    Ok(value)
+}
+
 impl TokenAnswer {
     pub fn new(
         token: String,
@@ -40,7 +63,12 @@ impl TokenAnswer {
             expires_at_ms,
             provider,
             model,
+            connect_url: None,
         }
+    }
+    pub fn with_connect_url(mut self, connect_url: String) -> Self {
+        self.connect_url = Some(connect_url);
+        self
     }
 }
 impl std::fmt::Debug for TokenAnswer {
@@ -51,6 +79,7 @@ impl std::fmt::Debug for TokenAnswer {
             .field("expires_at_ms", &self.expires_at_ms)
             .field("provider", &self.provider)
             .field("model", &self.model)
+            .field("connect_url", &self.connect_url)
             .finish()
     }
 }

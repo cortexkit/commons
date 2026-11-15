@@ -9,6 +9,10 @@ pub const CASES: &[&str] = &[
     "stream_audio_outside_window",
     "stream_audio_principal_scope",
     "stream_audio_crossing_frame",
+    "stream_audio_invalid_data",
+    "stream_audio_before_open",
+    "stream_audio_open_grace",
+    "stream_audio_ended_no_grace",
     "stream_id_reuse_refused",
     "stream_first_frame_refused",
     "stream_restart",
@@ -254,6 +258,149 @@ async fn streams<S: MediaSubject>(
                     == json!({"segments":[segment(0,"words")],"no_speech":false}),
                 "stream answer changed",
             )
+        }
+        "stream_audio_before_open" => {
+            script(s, "stream", vec![ScriptStep::Final(segment(0, "ordered"))]).await?;
+            let id = "audio-before-open";
+            let delayed_open = async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                open(s, id).await
+            };
+            let (one, zero, opened) = tokio::time::timeout(Duration::from_secs(3), async {
+                tokio::join!(
+                    send_audio(
+                        s,
+                        "alice",
+                        json!({"stream_id":id,"seq":1,"data":STANDARD.encode([2;2])})
+                    ),
+                    send_audio(
+                        s,
+                        "alice",
+                        json!({"stream_id":id,"seq":0,"data":STANDARD.encode([1;2])})
+                    ),
+                    delayed_open,
+                )
+            })
+            .await
+            .map_err(|_| "audio waiting for its open exceeded grace ceiling".to_string())?;
+            opened?;
+            one?;
+            zero?;
+            answer(s, &finish(s, id, 2).await?).await?;
+            require(
+                s.stream_audio_inputs("alice", id)
+                    .await
+                    .map_err(err)?
+                    .concat()
+                    == vec![1, 1, 2, 2],
+                "audio held before open was not transcribed in seq order",
+            )?;
+            balanced(r, 1, 1)
+        }
+        "stream_audio_open_grace" => {
+            let began = Instant::now();
+            tokio::time::timeout(
+                Duration::from_secs(3),
+                refusal(
+                    s,
+                    "alice",
+                    cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                    json!({"stream_id":"never-opened","seq":0,"data":STANDARD.encode([0;2])}),
+                    "stream_closed",
+                    None,
+                ),
+            )
+            .await
+            .map_err(|_| "unknown stream audio exceeded open grace ceiling".to_string())??;
+            // Allow 100 ms of transport and timer measurement tolerance around 2,000 ms.
+            require(
+                began.elapsed() >= Duration::from_millis(1900),
+                "unknown stream audio was refused before the open grace expired",
+            )?;
+            require(
+                r.calls().is_empty() && records(s).await?.is_empty(),
+                "unopened audio admitted or wrote usage",
+            )
+        }
+        "stream_audio_ended_no_grace" => {
+            script(s, "stream", vec![ScriptStep::Final(segment(0, "ended"))]).await?;
+            let id = "ended-no-grace";
+            open(s, id).await?;
+            audio(s, id, 0, 2).await?;
+            answer(s, &finish(s, id, 1).await?).await?;
+            tokio::time::timeout(
+                Duration::from_millis(500),
+                refusal(
+                    s,
+                    "alice",
+                    cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                    json!({"stream_id":id,"seq":2,"data":STANDARD.encode([0;2])}),
+                    "stream_closed",
+                    None,
+                ),
+            )
+            .await
+            .map_err(|_| "ended stream audio incorrectly waited for an open grace".to_string())??;
+            balanced(r, 1, 1)
+        }
+        "stream_audio_invalid_data" => {
+            let e = es.iter_mut().find(|e| e.model == "stream").unwrap();
+            e.max_input_bytes = Some(64);
+            e.max_duration_ms = Some(2);
+            s.configure_engines(es).await.map_err(err)?;
+            script(s, "stream", vec![ScriptStep::Final(segment(0, "kept"))]).await?;
+            let id = "invalid-data";
+            open(s, id).await?;
+            for (seq, data) in [
+                STANDARD.encode(vec![0; 2_097_153]),
+                "!not-base64!".into(),
+                "YQ".into(),
+                "YQ==\n".into(),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                refusal(
+                    s,
+                    "alice",
+                    cortexkit_role_media::streams::STREAM_AUDIO_OP,
+                    json!({"stream_id":id,"seq":seq,"data":data}),
+                    "invalid_params",
+                    Some("data"),
+                )
+                .await?;
+                let out = observe(s, id, false).await?;
+                require(
+                    !out.closed && out.answer.is_none(),
+                    "invalid data closed or advanced the stream",
+                )?;
+                require(
+                    s.stream_audio_inputs("alice", id)
+                        .await
+                        .map_err(err)?
+                        .concat()
+                        == vec![0; seq * 16]
+                        && records(s).await?.is_empty(),
+                    "invalid data reached the engine or wrote usage",
+                )?;
+                audio(s, id, seq as u64, 16).await?;
+            }
+            let v = answer(s, &finish(s, id, 4).await?).await?;
+            require(
+                v["segments"] == json!([segment(0, "kept")])
+                    && v["no_speech"] == false
+                    && v.get("failure").is_none(),
+                "valid retry did not end normally at the exact cumulative limit",
+            )?;
+            require(
+                s.stream_audio_inputs("alice", id)
+                    .await
+                    .map_err(err)?
+                    .concat()
+                    == vec![0; 64],
+                "invalid data was held or valid retry audio was lost",
+            )?;
+            balanced(r, 1, 1)
         }
         "stream_audio_reorders_window" => {
             script(s, "stream", vec![ScriptStep::Final(segment(0, "ordered"))]).await?;

@@ -21,6 +21,10 @@ cases! {
     media_kit_stream_realtime_stream_audio_outside_window,
     media_kit_stream_realtime_stream_audio_principal_scope,
     media_kit_stream_realtime_stream_audio_crossing_frame,
+    media_kit_stream_realtime_stream_audio_invalid_data,
+    media_kit_stream_realtime_stream_audio_before_open,
+    media_kit_stream_realtime_stream_audio_open_grace,
+    media_kit_stream_realtime_stream_audio_ended_no_grace,
     media_kit_stream_realtime_stream_id_reuse_refused,
     media_kit_stream_realtime_stream_first_frame_refused,
     media_kit_stream_realtime_stream_restart,
@@ -52,6 +56,21 @@ cases! {
     media_kit_stream_realtime_call_id_bounds,
     media_kit_stream_realtime_stream_realtime_admission_lifecycle,
     media_kit_stream_realtime_stream_realtime_renewal_lapse,
+}
+
+#[tokio::test]
+async fn media_kit_stream_realtime_stream_audio_invalid_data_closes_stream() {
+    let case = "stream_audio_invalid_data";
+    let bad = run_case(
+        &Fake::new(Some("stream_audio_invalid_data_closes_stream"), true, true),
+        case,
+    )
+    .await;
+    eprintln!("faulty close after invalid data: {bad:?}");
+    assert!(
+        matches!(bad, Outcome::Failed(ref reason) if reason.starts_with(&format!("{case}:")) && reason.contains("closed")),
+        "{bad:?}"
+    );
 }
 
 #[tokio::test]

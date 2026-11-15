@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.6
+
+- Pin media `=0.1.9` with per-frame invalid-data refusals and optional token
+  `connect_url`, preserving absent-member compatibility and readers-first rollout.
+- Check that oversize and invalidly encoded audio frames refuse on `data`,
+  leave the stream and sequence open for a valid retry, never reach the engine
+  and do not count toward cumulative limits. Reject faulty providers that
+  consume the refused sequence or close the stream.
+- Check audio arriving before its open, unknown-id grace expiry and immediate
+  refusal for ended ids. Extend the reference provider with principal-scoped
+  open waiting, ordered release, the eight-request window and four-id cap.
+
 ## 0.2.5
 
 - Pin media 0.1.8 and change stream adapters to open a long-lived request and

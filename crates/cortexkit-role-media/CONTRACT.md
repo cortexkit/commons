@@ -391,14 +391,32 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
   `{stream_id, seq, end: true}` to end. Each is an ordinary request answering `{}`
   once the provider holds that frame. Seq begins zero without gaps or repeats;
   otherwise refuse that request with stream_seq_mismatch.
+  A frame over the decoded-byte cap, or whose data is not valid standard padded
+  base64, is refused in its own reply with `invalid_params {field: "data"}`.
+  The provider neither holds nor transcribes it, does not count it toward
+  media.stream.limits, and leaves the next expected seq unchanged: the caller
+  may resend that seq with valid data without it being a repeat. The stream
+  stays open. Unlike this per-frame refusal, crossing a cumulative limit under
+  media.stream.limits ends the stream with input_too_large.
 - [pinned] `media.stream.window`: A caller may have at most 8 stream_audio
   requests unanswered per stream. The provider orders frames by seq within the
   window from the next expected seq through that seq plus 7 inclusive; seq
   outside that window is stream_seq_mismatch. Buffered frames do not advance
   the next expected seq until all preceding frames have arrived.
+  Audio held while waiting for an open under media.stream.scope counts toward
+  the same eight-unanswered-request window. Once the open is accepted, process
+  those frames in seq order as if they arrived at that moment; apply the window
+  and cumulative limit rules then.
 - [pinned] `media.stream.scope`: Look up streams by `(principal, stream_id)`,
-  never by route. Audio for an unknown or closed stream, including another
-  principal's stream, answers stream_closed without revealing its existence.
+  never by route. For an id never accepted for that principal, hold stream_audio
+  requests for up to 2,000 ms waiting for its open to be accepted. If the open
+  is refused or the grace expires first, answer each held request stream_closed,
+  exactly as for an unknown stream, without revealing another principal's
+  streams. If the open is accepted within the grace, process the held frames
+  under media.stream.window. An id accepted and since ended, including the
+  remembered ids of media.stream.open, answers stream_closed immediately with
+  no grace. Hold frames for at most four not-yet-opened stream ids per principal;
+  frames for a fifth id answer stream_closed immediately.
 - [pinned] `media.stream.local`: media.stream_transcribe and media.stream_audio
   are mutate management operations, callable only on the computer by local
   callers. The phone dictates directly to the vendor with a token.
@@ -432,7 +450,13 @@ bias packs and realtime calls. Bounds in characters count Unicode scalar values.
 ## Realtime
 
 - [pinned] `media.realtime.token`: token `{call_id, agent_id, purpose, model,
-  decision_id}` returns `{token, token_ref, expires_at_ms, provider, model}`.
+  decision_id}` returns `{token, token_ref, expires_at_ms, provider, model,
+  connect_url?}`. Optional connect_url is the full HTTPS URL to which the phone
+  posts its WebRTC SDP offer, derived from the same catalog base under which the
+  token was minted (for OpenAI, `<base>/realtime/calls`). It is at most 2,048
+  bytes and its scheme is https only. Readers must accept its absence. Roll out
+  readers first: a provider sends connect_url only once its phone reader accepts
+  that member.
   Purpose is voice_front/dictation. Admit owner/context_readers first (unknown
   agent or other caller gives unknown_agent without any read/admission), then
   check call_id_reuse, then members, then voice-front availability, then routing
