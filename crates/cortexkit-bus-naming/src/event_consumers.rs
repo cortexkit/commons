@@ -19,9 +19,28 @@ pub struct EventConsumer {
 }
 
 impl EventConsumer {
-    /// Uses the same module-durable namespace as the flow engine's `m_basal`.
+    /// The declared durable must be `m_{module_id}` or `m_{module_id}_{suffix}`,
+    /// where a nonempty suffix contains only lowercase letters, digits or `_`.
     pub fn durable_name(&self) -> Result<String, NamingError> {
-        AccountNames::module_consumer_name(self.module_id)
+        let base = AccountNames::module_consumer_name(self.module_id)?;
+        if self.durable != base
+            && !self
+                .durable
+                .strip_prefix(&format!("{base}_"))
+                .is_some_and(|suffix| {
+                    !suffix.is_empty()
+                        && suffix.bytes().all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                        })
+                })
+        {
+            return Err(NamingError::new(
+                TokenKind::ModuleId,
+                self.durable,
+                "durable must belong to the module's m_{module}[_suffix] namespace",
+            ));
+        }
+        Ok(self.durable.to_owned())
     }
 }
 
@@ -38,6 +57,11 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
             "event.basal.flow_instance_ended.v1",
             "event.basal.flow_instance_expired.v1",
             "event.basal.flow_instance_rescheduled.v1",
+            "event.aft.late_result_ready.v1.prefrontal-core",
+            "event.basal.late_result_ready.v1.prefrontal-core",
+            "event.cerebellum.late_result_ready.v1.prefrontal-core",
+            "event.fusiform.catalog_changed.v1",
+            "event.basal.flow_owner_notice.v1",
         ],
     },
     EventConsumer {
@@ -58,7 +82,15 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
     EventConsumer {
         module_id: "striatum",
         durable: "m_striatum",
-        filter_subjects: &["event.insula.>"],
+        filter_subjects: &[
+            "event.insula.>",
+            "event.broca.route_fact.v1",
+            "event.thalamus-harness.route_fact.v1",
+            "event.colliculus.route_fact.v1",
+            "event.prefrontal-core.route_fact.v1",
+            "event.plexus.route_fact.v1",
+            "event.fusiform.catalog_changed.v1",
+        ],
     },
     EventConsumer {
         module_id: "magic-context",
@@ -94,6 +126,55 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         durable: "m_cerebellum",
         filter_subjects: &[
             "event.thalamus-harness.turn_started.v1",
+            "event.thalamus-harness.turn_ended.v1",
+        ],
+    },
+    EventConsumer {
+        module_id: "thalamus-harness",
+        durable: "m_thalamus-harness_late_results",
+        filter_subjects: &[
+            "event.aft.late_result_ready.v1.thalamus-harness",
+            "event.cerebellum.late_result_ready.v1.thalamus-harness",
+            "event.basal.late_result_ready.v1.thalamus-harness",
+        ],
+    },
+    EventConsumer {
+        module_id: "astrocyte",
+        durable: "m_astrocyte_payer",
+        filter_subjects: &["event.thalamus-harness.payer_row.v1"],
+    },
+    EventConsumer {
+        module_id: "astrocyte",
+        durable: "m_astrocyte_media_usage",
+        filter_subjects: &["event.colliculus.usage_recorded.v1"],
+    },
+    EventConsumer {
+        module_id: "astrocyte",
+        durable: "m_astrocyte_catalog",
+        filter_subjects: &["event.fusiform.catalog_changed.v1"],
+    },
+    EventConsumer {
+        module_id: "aft",
+        durable: "m_aft_sendstate",
+        filter_subjects: &["event.thalamus-harness.send_state.v1"],
+    },
+    EventConsumer {
+        module_id: "plexus",
+        durable: "m_plexus",
+        filter_subjects: &["event.prefrontal-core.agent_changed.v1"],
+    },
+    EventConsumer {
+        module_id: "wernicke",
+        durable: "m_wernicke_agents",
+        filter_subjects: &["event.prefrontal-core.agent_changed.v1"],
+    },
+    EventConsumer {
+        module_id: "colliculus",
+        durable: "m_colliculus_events",
+        filter_subjects: &[
+            "event.fusiform.catalog_changed.v1",
+            "event.prefrontal-core.board_changed.v1",
+            "event.magic-context.memory_changed.v1",
             "event.thalamus-harness.turn_ended.v1",
         ],
     },
@@ -136,6 +217,7 @@ pub const LIVE_HINT_READERS: &[LiveHintReader] = &[
             "event.thalamus-harness.step.finished.v1",
         ],
     ),
+    LiveHintReader::new("magic-context", &["event.astrocyte.steps_committed.v1"]),
 ];
 
 /// Sorted, deduplicated live subscriptions from both reviewed reader tables.
@@ -361,7 +443,9 @@ impl fmt::Display for EventConsumerError {
             Self::Limits(error) => error.fmt(f),
             Self::DuplicateModule(id) => write!(f, "duplicate event-consumer module {id:?}"),
             Self::DuplicateDurable(name) => write!(f, "duplicate event-consumer durable {name:?}"),
-            Self::DurableMismatch(id) => write!(f, "event-consumer durable must be m_{id}"),
+            Self::DurableMismatch(id) => {
+                write!(f, "event-consumer durable must be m_{id} or m_{id}_suffix")
+            }
             Self::InvalidFilters(id) => {
                 write!(
                     f,
@@ -398,22 +482,36 @@ pub fn event_consumer_specs(
     validate_table(EVENT_CONSUMERS)?;
     EVENT_CONSUMERS
         .iter()
-        .map(|entry| module_event_spec(account, entry.module_id, entry.filter_subjects))
+        .map(|entry| {
+            let mut spec = module_event_spec(account, entry.module_id, entry.filter_subjects)?;
+            spec.consumer.durable = entry.durable_name().map_err(EventConsumerError::Naming)?;
+            validate_consumer(&spec.consumer, &crate::shipped_streams(account))
+                .map_err(EventConsumerError::Limits)?;
+            Ok(spec)
+        })
         .collect()
 }
 
 fn validate_table(entries: &[EventConsumer]) -> Result<(), EventConsumerError> {
-    let mut modules = BTreeSet::new();
     let mut durables = BTreeSet::new();
     for entry in entries {
-        if !modules.insert(entry.module_id) {
-            return Err(EventConsumerError::DuplicateModule(entry.module_id));
-        }
         if !durables.insert(entry.durable) {
             return Err(EventConsumerError::DuplicateDurable(entry.durable));
         }
-        if entry.durable_name().map_err(EventConsumerError::Naming)? != entry.durable {
+        if entry.durable_name().is_err() {
             return Err(EventConsumerError::DurableMismatch(entry.module_id));
+        }
+        // Module ids may contain underscores, which also separate suffixes.
+        // A longer declared module id owns its namespace, not its prefix owner.
+        for other in entries
+            .iter()
+            .filter(|other| other.module_id.len() > entry.module_id.len())
+        {
+            let base = AccountNames::module_consumer_name(other.module_id)
+                .map_err(EventConsumerError::Naming)?;
+            if entry.durable == base || entry.durable.starts_with(&format!("{base}_")) {
+                return Err(EventConsumerError::DurableMismatch(entry.module_id));
+            }
         }
         validate_filters(entry.module_id, entry.filter_subjects)?;
     }
@@ -539,17 +637,17 @@ mod tests {
     }
 
     #[test]
-    fn event_consumer_table_rejects_duplicate_modules() {
+    fn event_consumer_table_accepts_multiple_owned_durables_per_module() {
         let entry = EVENT_CONSUMERS[0];
         assert_eq!(
             validate_table(&[
                 entry,
                 EventConsumer {
-                    durable: "m_other",
+                    durable: "m_prefrontal-core_other",
                     ..entry
                 }
             ]),
-            Err(EventConsumerError::DuplicateModule("prefrontal-core"))
+            Ok(())
         );
     }
 
@@ -577,6 +675,36 @@ mod tests {
         assert_eq!(
             validate_table(&[entry]),
             Err(EventConsumerError::DurableMismatch("prefrontal-core"))
+        );
+        for durable in [
+            "m_prefrontal-core_",
+            "m_prefrontal-core_Bad",
+            "m_prefrontal-core_bad-name",
+            "m_astrocyte_payer",
+        ] {
+            assert!(validate_table(&[EventConsumer {
+                durable,
+                ..EVENT_CONSUMERS[0]
+            }])
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn event_consumer_table_refuses_another_modules_underscore_namespace() {
+        let owner = EventConsumer {
+            module_id: "owner",
+            durable: "m_owner_child_stolen",
+            filter_subjects: &["event.aft.run.v1"],
+        };
+        let child = EventConsumer {
+            module_id: "owner_child",
+            durable: "m_owner_child",
+            filter_subjects: &["event.aft.run.v1"],
+        };
+        assert_eq!(
+            validate_table(&[owner, child]),
+            Err(EventConsumerError::DurableMismatch("owner"))
         );
     }
 
@@ -629,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn prefrontal_core_filter_is_exact_for_basal_lifecycle_events() {
+    fn prefrontal_core_filter_keeps_lifecycle_and_adds_delivery_events() {
         let names = AccountNames::derive("box_readers").unwrap();
         let reader = event_consumer_specs(&names)
             .unwrap()
@@ -646,6 +774,11 @@ mod tests {
                 "ck.box_readers.event.basal.flow_instance_ended.v1",
                 "ck.box_readers.event.basal.flow_instance_expired.v1",
                 "ck.box_readers.event.basal.flow_instance_rescheduled.v1",
+                "ck.box_readers.event.aft.late_result_ready.v1.prefrontal-core",
+                "ck.box_readers.event.basal.late_result_ready.v1.prefrontal-core",
+                "ck.box_readers.event.cerebellum.late_result_ready.v1.prefrontal-core",
+                "ck.box_readers.event.fusiform.catalog_changed.v1",
+                "ck.box_readers.event.basal.flow_owner_notice.v1",
             ]
         );
     }

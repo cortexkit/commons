@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0
+
+- Adopt bus-naming 0.4 for reader-token event subjects and declared module KV
+  buckets. Callers sharing naming types must update their direct dependency.
+
 ## 0.4.0
 
 - Require a suitable server for every live test when `CK_REQUIRE_NATS_SERVER=1`;

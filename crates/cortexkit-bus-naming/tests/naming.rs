@@ -280,6 +280,82 @@ fn event_versions_are_v_then_a_positive_integer() {
 }
 
 #[test]
+fn event_subject_parser_round_trips_both_reader_forms() {
+    let names = AccountNames::derive("box_events").unwrap();
+    for event in ["late_result_ready", "run.worker.step.finished"] {
+        for version in [1, 42, u32::MAX] {
+            let plain = names.event_subject("aft", event, version).unwrap();
+            let parsed = names.parse_event_subject(&plain).unwrap();
+            assert_eq!(parsed.module, "aft");
+            assert_eq!(parsed.event, event);
+            assert_eq!(parsed.version, version);
+            assert_eq!(parsed.reader, None);
+            for reader in ["prefrontal-core", "thalamus-harness", "v2"] {
+                let subject = names
+                    .event_subject_with_reader("aft", event, version, reader)
+                    .unwrap();
+                assert_eq!(subject, format!("{plain}.{reader}"));
+                let parsed = names.parse_event_subject(&subject).unwrap();
+                assert_eq!(parsed.module, "aft");
+                assert_eq!(parsed.event, event);
+                assert_eq!(parsed.version, version);
+                assert_eq!(parsed.reader.as_deref(), Some(reader));
+            }
+        }
+    }
+    assert_eq!(
+        names
+            .event_subject_with_reader("aft", "late_result_ready", 1, "thalamus-harness")
+            .unwrap(),
+        "ck.box_events.event.aft.late_result_ready.v1.thalamus-harness"
+    );
+}
+
+#[test]
+fn event_subject_parser_refuses_misplaced_versions_extra_tokens_and_invalid_modules() {
+    let names = AccountNames::derive("box_events").unwrap();
+    for bad in [
+        "ck.box_events.event.aft.run.v1.step.finished",
+        "ck.box_events.event.aft.run.v1.reader.extra",
+        "ck.box_events.event.aft.run.v1.reader.v2",
+        "ck.box_events.event.aft.run.v01.reader",
+        "ck.box_events.event.aft.run.v0",
+        "ck.box_events.event.aft.run.v4294967296",
+        "ck.box_events.event.aft.a.b.c.d.e.v1",
+        "ck.box_events.event.aft.v1",
+        "ck.box_events.event.Aft.run.v1",
+        "ck.box_events.event.aft.run.v1.Reader",
+        "ck.box_events.event.aft.run.v1.",
+        "ck.box_events.event.aft.run.v1.*",
+        "ck.box_events.event.aft.run.v1.>",
+        "ck.box_events.event.aft.run.v1.reader.module",
+        "ck.box_events.event.aft.run.v1a",
+        "ck.box_events.event.aft.run",
+        "ck.box_events.event.aft..v1",
+        "ck.box_events.event.aft.run.*.v1",
+        "ck.other.event.aft.run.v1",
+        "ck.box_events.live.aft.run.v1",
+        "event.aft.run.v1",
+    ] {
+        assert!(names.parse_event_subject(bad).is_err(), "{bad}");
+    }
+    for module in ["", "Aft", "aft.other", "*", ">", "bad id"] {
+        assert!(names
+            .event_subject_with_reader(module, "run", 1, "reader")
+            .is_err());
+        assert!(names
+            .event_subject_with_reader("aft", "run", 1, module)
+            .is_err());
+    }
+    assert!(names
+        .event_subject_with_reader("aft", "run", 0, "reader")
+        .is_err());
+    assert!(names
+        .event_subject_with_reader("aft", "run.v2", 1, "reader")
+        .is_err());
+}
+
+#[test]
 fn the_event_stream_is_the_sixth_stream_and_holds_module_durables() {
     let names = AccountNames::derive("box_events").unwrap();
     let streams = names.streams();

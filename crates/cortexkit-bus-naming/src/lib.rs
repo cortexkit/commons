@@ -3,6 +3,7 @@
 mod event_consumers;
 mod grants;
 mod limits;
+mod module_buckets;
 mod names;
 mod token;
 
@@ -23,9 +24,13 @@ pub use limits::{
     validate_store_retention, validate_streams, BodyRetention, ConsumerSpec, DiscardPolicy,
     LimitError, StreamKind, StreamSpec, DEAD_LETTER_DUPLICATE_WINDOW, GIB, HOUR, MIB,
 };
+pub use module_buckets::{
+    validate_module_bucket_name, validate_module_buckets, ModuleBucket, MODULE_BUCKETS,
+};
 pub use names::{
-    root_credential_id, validate_tenancy_name, AccountNames, BucketNames, NamingExemption,
-    NamingRule, RootCredentialKind, StreamNames, TenancyNameError, CLOSED_NAMING_EXEMPTIONS,
+    root_credential_id, validate_tenancy_name, AccountNames, BucketNames, EventSubject,
+    NamingExemption, NamingRule, RootCredentialKind, StreamNames, TenancyNameError,
+    CLOSED_NAMING_EXEMPTIONS,
 };
 pub use token::{
     validate_account_token, validate_event_version, validate_token, NamingError, TokenKind,

@@ -6,7 +6,7 @@ Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-cortexkit-bus-naming = "0.3"
+cortexkit-bus-naming = "0.4"
 ```
 
 See the [crate source](src/lib.rs) for `validate_token`, `TokenKind`, and topology validators.
@@ -29,3 +29,29 @@ In 0.3.2, `prefrontal-routing`'s durable is narrowed back to Insula
 Bootstrap should narrow `m_prefrontal-routing` in place and leave the removed,
 now-unlisted `m_thalamus-pi` durable alone. `thalamus-pi` no longer appears in
 either reader table or the generated permission fixture.
+
+In 0.4, EVENT readers may own several durables. Each name is `m_{module}` or
+`m_{module}_{suffix}`, with suffix `[a-z0-9_]+`. Grants include all of a module's
+declared durables, and no other module's. Bootstrap must use each row's explicit
+name, not synthesize one name per module. The existing `m_prefrontal-core` and
+`m_striatum` gain filters in place; mutable filter updates preserve their cursors.
+
+`AccountNames::event_subject_with_reader` appends the intended reader module
+after the version. `AccountNames::parse_event_subject` parses both forms for
+the account and returns the publisher, event path, version and optional reader.
+Readers must not assume the version is the last token.
+
+## Declared module KV buckets
+
+`MODULE_BUCKETS` declares owner-only writers, explicit readers, value caps,
+history, optional TTL in seconds, and total byte caps. Derive each name with
+`AccountNames::module_bucket_name`: `CK_{ACCT}_{OWNER}_{NAME}`, uppercased with
+hyphens and dots changed to underscores. `validate_module_buckets` checks the
+declarations, including normalized-name collisions.
+
+The caps budget maximum-sized values for 1,024 AFT status keys (2 MiB), 128
+Astrocyte multipliers (1 MiB), 65,536 read marks (16 MiB), 65,536 Entorhinal
+changes (32 MiB), and 16,384 session-liveness keys (16 MiB). All have history 1;
+only status expires, after 10 seconds. The bus service must provision the
+buckets and derive writer/read permissions from these declarations; this crate
+does not provision them or add KV grants by itself.

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.0
+
+- Add optional reader-module event subjects and a shared account-scoped parser
+  for both forms, including hierarchical event names.
+- Declare five owner-written KV buckets, their readers and retention/size caps,
+  with normalized bucket names and validation.
+- Add late-result, route-fact, payer, media, catalog, send-state and agent/event
+  reader rows, plus the versioned Astrocyte steps-committed live hint.
+- Allow multiple reviewed EVENT durables per module, named `m_{module}` or
+  `m_{module}_{suffix}`, and grant every declared durable, never another owner's.
+  The bootstrap planner updates filters without resetting cursors, so extend
+  `m_prefrontal-core` and `m_striatum` in place. Other existing filters are unchanged.
+
 ## 0.3.4
 
 - Add `striatum` (the routing module's new id) with the same reads as

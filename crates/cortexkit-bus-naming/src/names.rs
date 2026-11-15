@@ -2,7 +2,19 @@ use std::error::Error;
 use std::fmt;
 use std::num::NonZeroU32;
 
-use crate::token::{validate_account_token, validate_token, NamingError, TokenKind};
+use crate::token::{
+    validate_account_token, validate_event_version, validate_token, NamingError, TokenKind,
+};
+
+/// A validated module event, with an optional module designated to act on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct EventSubject {
+    pub module: String,
+    pub event: String,
+    pub version: u32,
+    pub reader: Option<String>,
+}
 
 /// All stream names owned by one account. Construct with [`Self::new`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -230,9 +242,9 @@ impl AccountNames {
     /// `ck.{acct}.event.{module_id}.{event}.v{version}`.
     ///
     /// The event name is one to four dot-separated tokens and the version at
-    /// least 1. Readers must take the version from the last token and the event
-    /// name from everything between the module id and that version, rather
-    /// than splitting at fixed positions.
+    /// least 1. Use [`Self::event_subject_with_reader`] to designate one reader,
+    /// and [`Self::parse_event_subject`] to parse either form rather than
+    /// assuming the version is always the final token.
     pub fn event_subject(
         &self,
         module_id: &str,
@@ -247,6 +259,68 @@ impl AccountNames {
             "ck.{}.event.{module_id}.{event}.{version_token}",
             self.account
         ))
+    }
+
+    /// An event designating the one module meant to act on it:
+    /// `ck.{acct}.event.{module_id}.{event}.v{version}.{reader}`.
+    /// Both module ids must be validated single tokens; the reader is optional
+    /// only in the unsuffixed form produced by [`Self::event_subject`].
+    pub fn event_subject_with_reader(
+        &self,
+        module_id: &str,
+        event: &str,
+        version: u32,
+        reader: &str,
+    ) -> Result<String, NamingError> {
+        validate_token(TokenKind::ModuleId, reader)?;
+        Ok(format!(
+            "{}.{reader}",
+            self.event_subject(module_id, event, version)?
+        ))
+    }
+
+    /// Parses either event form for this account, refusing extra tokens,
+    /// wildcards, noncanonical versions, and invalid event or module names.
+    /// Version-shaped event-name levels are reserved, so the first such level
+    /// identifies the version even when the reader itself is named `v2`.
+    pub fn parse_event_subject(&self, subject: &str) -> Result<EventSubject, NamingError> {
+        let refuse = || {
+            NamingError::new(
+                TokenKind::EventName,
+                subject,
+                "expected an event subject for this account with at most one reader token",
+            )
+        };
+        let prefix = format!("ck.{}.event.", self.account);
+        let relative = subject.strip_prefix(&prefix).ok_or_else(refuse)?;
+        let (module, tail) = relative.split_once('.').ok_or_else(refuse)?;
+        validate_token(TokenKind::ModuleId, module)?;
+        let tokens = tail.split('.').collect::<Vec<_>>();
+        let index = tokens
+            .iter()
+            .position(|token| {
+                token.strip_prefix('v').is_some_and(|digits| {
+                    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+                })
+            })
+            .ok_or_else(refuse)?;
+        let version = validate_event_version(tokens[index])?;
+        let event = tokens[..index].join(".");
+        validate_token(TokenKind::EventName, &event)?;
+        let reader = match &tokens[index + 1..] {
+            [] => None,
+            [reader] => {
+                validate_token(TokenKind::ModuleId, reader)?;
+                Some((*reader).to_owned())
+            }
+            _ => return Err(refuse()),
+        };
+        Ok(EventSubject {
+            module: module.to_owned(),
+            event,
+            version,
+            reader,
+        })
     }
 
     /// The publish grant covering every event subject of one module.

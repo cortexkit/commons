@@ -376,9 +376,9 @@ fn add_consumer_permissions(
     }
 
     add_census_read_permissions(entries, principal, account);
-    if let Some(consumer) = EVENT_CONSUMERS
+    for consumer in EVENT_CONSUMERS
         .iter()
-        .find(|entry| entry.module_id == module_id)
+        .filter(|entry| entry.module_id == module_id)
     {
         let durable = consumer.durable_name()?;
         let stream = &account.streams().event;

@@ -676,8 +676,8 @@ fn non_table_modules_keep_the_exact_participant_grant() {
 }
 
 #[test]
-fn event_consumer_grant_is_participant_plus_exactly_three_durable_permissions() {
-    use cortexkit_bus_naming::{participant_permissions, AllowEntry, Operation};
+fn event_consumer_grant_is_participant_plus_three_permissions_per_owned_durable() {
+    use cortexkit_bus_naming::{participant_permissions, AllowEntry, Operation, EVENT_CONSUMERS};
     use std::collections::BTreeSet;
     let account = AccountNames::derive("box_readers").unwrap();
     for module_id in [
@@ -688,6 +688,10 @@ fn event_consumer_grant_is_participant_plus_exactly_three_durable_permissions() 
         "thalamus-harness",
         "thalamus",
         "cerebellum",
+        "aft",
+        "plexus",
+        "wernicke",
+        "colliculus",
     ] {
         let baseline = participant_permissions(&account, "UPFC", "ordinary", &[])
             .unwrap()
@@ -708,18 +712,28 @@ fn event_consumer_grant_is_participant_plus_exactly_three_durable_permissions() 
             .difference(&baseline)
             .cloned()
             .collect::<BTreeSet<_>>();
-        let expected = [
-            format!("$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.m_{module_id}"),
-            format!("$JS.ACK.CK_BOX_READERS_EVENT.m_{module_id}.>"),
-            format!("$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.m_{module_id}"),
-        ]
-        .map(|subject| AllowEntry {
-            principal: Principal::Participant,
-            operation: Operation::Publish,
-            subject: subject.to_owned(),
-        })
-        .into_iter()
-        .collect::<BTreeSet<_>>();
+        let expected = EVENT_CONSUMERS
+            .iter()
+            .filter(|reader| reader.module_id == module_id)
+            .flat_map(|reader| {
+                [
+                    format!(
+                        "$JS.API.CONSUMER.MSG.NEXT.CK_BOX_READERS_EVENT.{}",
+                        reader.durable
+                    ),
+                    format!("$JS.ACK.CK_BOX_READERS_EVENT.{}.>", reader.durable),
+                    format!(
+                        "$JS.API.CONSUMER.INFO.CK_BOX_READERS_EVENT.{}",
+                        reader.durable
+                    ),
+                ]
+            })
+            .map(|subject| AllowEntry {
+                principal: Principal::Participant,
+                operation: Operation::Publish,
+                subject,
+            })
+            .collect::<BTreeSet<_>>();
         assert_eq!(extra, expected);
         assert!(allowed(
             &actual.into_iter().collect::<Vec<_>>(),

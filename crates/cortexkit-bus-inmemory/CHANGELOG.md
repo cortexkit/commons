@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- Adopt bus-naming 0.4 for reader-token event subjects and declared module KV
+  buckets. Callers sharing naming types must update their direct dependency.
+
 ## 0.3.2
 
 - Adopt bus-naming 0.3 and bus-trait 0.3.1 to keep workspace backend dependencies

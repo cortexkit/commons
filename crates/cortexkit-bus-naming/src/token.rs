@@ -20,6 +20,8 @@ pub enum TokenKind {
     DeliveryToken,
     InboxKind,
     CoreWorkFamily,
+    /// A declared KV bucket's local or fully derived name.
+    BucketName,
 }
 
 impl TokenKind {
@@ -38,6 +40,7 @@ impl TokenKind {
             Self::DeliveryToken => "delivery_token",
             Self::InboxKind => "inbox_kind",
             Self::CoreWorkFamily => "core_work_family",
+            Self::BucketName => "bucket_name",
         }
     }
 }
