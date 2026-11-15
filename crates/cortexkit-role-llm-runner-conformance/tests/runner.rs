@@ -8310,6 +8310,48 @@ async fn step_events_undeclared_skips_all_cases_by_name() {
 }
 
 #[tokio::test]
+async fn step_events_malformed_rewrite_facts_are_refused_by_name() {
+    for (member, value) in [
+        ("account_ref", r#""""#),
+        ("account_ref", r#""account name""#),
+        (
+            "account_ref",
+            r#""AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA""#,
+        ),
+        (
+            "account_ref",
+            r#""gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg""#,
+        ),
+        ("tools_digest", r#""bad\ndigest""#),
+        ("system_digest", r#""é""#),
+        ("signed_floor", r#""entry id""#),
+        ("warm_up", r#""true""#),
+        ("view_version", "-1"),
+        ("view_version", "1.5"),
+        ("view_version", "18446744073709551616"),
+    ] {
+        let report = run(&step_event_subject(
+            Defects {
+                step_events_malformed_rewrite_member: Some((member, value)),
+                ..Defects::default()
+            },
+            "per_attempt",
+            "step_ref",
+        ))
+        .await;
+        let names = cases_of(&["step_events_"]);
+        for name in &names {
+            let reason = failed(&report, name);
+            assert!(
+                reason.contains("step.finished.v1"),
+                "{name}: {member}: {reason}"
+            );
+        }
+        assert_none_failed_but(&report, &names);
+    }
+}
+
+#[tokio::test]
 async fn step_events_content_members_are_refused_by_name() {
     for member in ["prompt", "project_root"] {
         let report = run(&step_event_subject(

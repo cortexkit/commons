@@ -220,6 +220,8 @@ fn is_time(value: &str) -> bool {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct Report {
+    /// The shortest lifetime among the request's cache breakpoints, in
+    /// milliseconds; a single breakpoint lifetime is reported unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ttl_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

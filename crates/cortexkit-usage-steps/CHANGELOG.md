@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.8
+
+- Add optional request-start and completion timestamps, opaque account
+  identity, shortest cache TTL and implicit-cache status, keep-warm status,
+  applied view, tool/system digests, signed-floor entry id and rewrite cause
+  to rows. Existing occurrence timestamps keep their meaning.
+- Add the open `Cause` set and shared `cause::rewrite_cause` explanation in
+  account/model, expiry, tool/system, view and signed-floor precedence.
+  Expiry applies to busts and full busts, never warnings; missing facts skip
+  comparisons. Pin cross-language examples with SHA-256 checksums.
+
 ## 0.2.7
 
 - Add `claude_code_step_ref` so runners and providers share Claude Code record

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.17.66
+
+- Pin the role contract to `=0.8.55` and accept its optional rewrite facts in
+  step-event checks. Exercise faithful producers carrying every new member and
+  reject malformed identifiers, booleans and view versions with the failing
+  step-event check's name.
+
 ## 0.17.65
 
 - Pin the role contract to `=0.8.54` for final withdrawal proofs, retryable

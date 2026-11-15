@@ -1,4 +1,31 @@
 {
+  "account_refs": [
+    {
+      "account_id": "account-a",
+      "credential_id": "credential-a",
+      "account_ref": "c8aa15f704bfb7115fbebc3a62cb82447131d314cc2f0d711a5c966a0b560911"
+    },
+    {
+      "account_id": "account-a",
+      "credential_id": "credential-b",
+      "account_ref": "bda39bb972473b6b331ddd3bb19fe49bd7c52914b08a987caee65ae8afacff1f"
+    },
+    {
+      "account_id": "ab",
+      "credential_id": "c",
+      "account_ref": "4f66baa9576b0ac42fe546ef183721ee72f0bdff206d407d107b2ec42d37b550"
+    },
+    {
+      "account_id": "a",
+      "credential_id": "bc",
+      "account_ref": "01dd613842b25227d3b721fd162b877f35c2405512f1c66361975f8695320318"
+    },
+    {
+      "account_id": "compte-é",
+      "credential_id": "clé-雪",
+      "account_ref": "6302fd7cd0a09a1764fb07070686faf3861c0edfd1f56349fec74f5a9e72aa62"
+    }
+  ],
   "full": {
     "runner": "runner_a",
     "session_ref": "runner_session_a",

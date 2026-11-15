@@ -224,6 +224,20 @@ fn published_member_lists_match_what_the_row_encodes() {
     full.route_decision_id = Some("decision_ex".to_owned());
     full.sent_to_last_content_ms = Some(500);
     full.first_to_last_content_ms = Some(400);
+    full.started_at_ms = Some(1000);
+    full.finished_at_ms = Some(1500);
+    full.account_ref = Some(cortexkit_role_llm_runner::step_events::account_ref(
+        "account-a",
+        "credential-a",
+    ));
+    full.cache_ttl_ms = Some(300_000);
+    full.cache_implicit = Some(true);
+    full.warm_up = Some(false);
+    full.view_version = Some(0);
+    full.tools_digest = Some("tools-a".into());
+    full.system_digest = Some("system-a".into());
+    full.signed_floor = Some("entry-a".into());
+    full.cause = Some(cortexkit_usage_steps::Cause::Unexplained);
     assert_eq!(keys(&serde_json::to_value(&full).unwrap()), every);
 
     let mut required: Vec<String> = StepRow::REQUIRED_MEMBERS

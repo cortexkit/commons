@@ -52,6 +52,59 @@ pub struct StepRow {
     pub route_decision_id: Option<String>,
     /// Unix milliseconds. Steps without a time are not in the feed.
     pub occurred_at_ms: u64,
+    /// The step's request start, in Unix milliseconds: the step event's
+    /// `started_at_ms`. Unlike `occurred_at_ms`, this specifically names the start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at_ms: Option<u64>,
+    /// Completion time in Unix milliseconds: the step event's `finished_at_ms`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at_ms: Option<u64>,
+    /// Lowercase hex SHA-256, exactly 64 characters (`[0-9a-f]`), of the UTF-8
+    /// bytes `cortexkit.account_ref.v1`, NUL, routing's admitted `account_id`,
+    /// NUL, routing's admitted `credential_id`, both exactly as admission
+    /// returned them. Use the runner's `step_events::account_ref` helper.
+    /// Absent when routing did not admit the run. Never send raw ids, because
+    /// vault ids can carry account labels.
+    /// Equal exactly for the same account and credential, and stable for at
+    /// least 30 days for that account and credential.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_ref: Option<String>,
+    /// The shortest lifetime among the request's cache breakpoints, in
+    /// milliseconds. Absent is unknown, not zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_ttl_ms: Option<u64>,
+    /// True for an implicit cache, whose lifetime cannot be proved.
+    /// Absent means unknown; producers never emit false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_implicit: Option<bool>,
+    /// True for a keep-warm request the runner sent itself. Runners whose
+    /// warm-ups never become steps never send this member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warm_up: Option<bool>,
+    /// Applied compaction view used to render the request, with the compaction
+    /// contract's `last_prompt_view` meaning: ≥1 names an applied view, 0 means
+    /// no view applied. For hosts that render some requests without asking the
+    /// runner, this is the last request's view that did ask, never the newest view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_version: Option<u64>,
+    /// Opaque per-runner tool-list digest, 1–128 visible ASCII bytes. Equal
+    /// only for byte-identical provider inputs, ignoring cache markers;
+    /// compare only within the same runner and session, never across runners.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools_digest: Option<String>,
+    /// Opaque per-runner system-text digest, with the same grammar and
+    /// comparison scope as `tools_digest`, ignoring cache markers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_digest: Option<String>,
+    /// Stable entry id of the session's newest signed floor, sent on every
+    /// step once a floor exists. Uses the step event's `message_id` grammar:
+    /// 1–256 visible ASCII bytes (`0x21`–`0x7E`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_floor: Option<String>,
+    /// Rewrite explanation computed once by the usage-feed provider with
+    /// [`crate::cause::rewrite_cause`]. Older readers keep unknown values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cause: Option<crate::Cause>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -313,6 +366,17 @@ impl StepRow {
 
     /// Members omitted when unknown.
     pub const OPTIONAL_MEMBERS: &'static [&'static str] = &[
+        "started_at_ms",
+        "finished_at_ms",
+        "account_ref",
+        "cache_ttl_ms",
+        "cache_implicit",
+        "warm_up",
+        "view_version",
+        "tools_digest",
+        "system_digest",
+        "signed_floor",
+        "cause",
         "message_id",
         "run_id",
         "route_decision_id",
@@ -359,6 +423,17 @@ impl StepRow {
             run_id: None,
             route_decision_id: None,
             occurred_at_ms,
+            started_at_ms: None,
+            finished_at_ms: None,
+            account_ref: None,
+            cache_ttl_ms: None,
+            cache_implicit: None,
+            warm_up: None,
+            view_version: None,
+            tools_digest: None,
+            system_digest: None,
+            signed_floor: None,
+            cause: None,
             provider: None,
             model: None,
             service_tier_applied: None,

@@ -30,6 +30,12 @@ fn full_event() -> StepFinished {
         "work_class": "interactive",
         "provider": "example-provider",
         "model": "example-model",
+        "account_ref": cortexkit_role_llm_runner::step_events::account_ref("account-a", "credential-a"),
+        "warm_up": false,
+        "view_version": 1,
+        "tools_digest": "tools-a",
+        "system_digest": "system-a",
+        "signed_floor": "entry-a",
         "input_tokens": 11,
         "cached_input_tokens": 12,
         "cache_write_tokens": 13,
@@ -54,6 +60,12 @@ fn member_names(value: serde_json::Value) -> BTreeSet<String> {
 /// Every event member, and what the row does with it. A new event member
 /// fails here until someone decides whether the row carries it.
 const EVENT_MEMBERS: &[&str] = &[
+    "account_ref",
+    "warm_up",
+    "view_version",
+    "tools_digest",
+    "system_digest",
+    "signed_floor",
     "attempt",
     "attempt_id",
     "cache_write_1h_tokens",
@@ -87,7 +99,21 @@ const EVENT_MEMBERS: &[&str] = &[
 
 /// Members both shapes carry under the same name and with the same meaning:
 /// the row carries the event's value unchanged.
-const SAME_NAME: &[&str] = &["context_limit", "model", "provider", "run_id", "session"];
+const SAME_NAME: &[&str] = &[
+    "context_limit",
+    "model",
+    "provider",
+    "run_id",
+    "session",
+    "started_at_ms",
+    "finished_at_ms",
+    "account_ref",
+    "warm_up",
+    "view_version",
+    "tools_digest",
+    "system_digest",
+    "signed_floor",
+];
 
 /// Members both shapes carry under the same name but not always with the same
 /// meaning. With a host record the row's `harness` is the feed host mapped
@@ -139,6 +165,20 @@ fn shared_member_names_match_the_runner_step_event() {
     full_row.route_decision_id = Some("decision_ex".to_owned());
     full_row.sent_to_last_content_ms = Some(500);
     full_row.first_to_last_content_ms = Some(400);
+    full_row.started_at_ms = Some(20);
+    full_row.finished_at_ms = Some(21);
+    full_row.account_ref = Some(cortexkit_role_llm_runner::step_events::account_ref(
+        "account-a",
+        "credential-a",
+    ));
+    full_row.cache_ttl_ms = Some(300_000);
+    full_row.cache_implicit = Some(true);
+    full_row.warm_up = Some(false);
+    full_row.view_version = Some(1);
+    full_row.tools_digest = Some("tools-a".into());
+    full_row.system_digest = Some("system-a".into());
+    full_row.signed_floor = Some("entry-a".into());
+    full_row.cause = Some(cortexkit_usage_steps::Cause::Unexplained);
     assert_eq!(member_names(serde_json::to_value(full_row).unwrap()), row);
 
     let shared: BTreeSet<String> = event.intersection(&row).cloned().collect();
@@ -347,6 +387,14 @@ fn shared_member_types_match_at_compile_time() {
     same(&row.run_id, &Some(event.run_id.clone()));
     same(&row.provider, &Some(event.provider.clone()));
     same(&row.model, &Some(event.model.clone()));
+    same(&row.started_at_ms, &Some(event.started_at_ms));
+    same(&row.finished_at_ms, &Some(event.finished_at_ms));
+    same(&row.account_ref, &event.account_ref);
+    same(&row.warm_up, &event.warm_up);
+    same(&row.view_version, &event.view_version);
+    same(&row.tools_digest, &event.tools_digest);
+    same(&row.system_digest, &event.system_digest);
+    same(&row.signed_floor, &event.signed_floor);
     same(&row.context_limit, &event.context_limit);
     same(&row.input, &event.input_tokens);
     same(&row.cache_read, &event.cached_input_tokens);

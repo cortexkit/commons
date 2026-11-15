@@ -6444,6 +6444,10 @@ froze for a run to every assistant reply the run writes.
   refuses `fork_base_unavailable`; the runner never sends near-identical bytes.
   Head steps after prepare never move the base. A caller that needs the head's
   later turns prepares a new fork; this is cheap because the prefix is shared.
+  A runner may take the base's bytes at the fork's first ask instead of at
+  prepare, provided they end exactly at the message named at prepare; if the
+  head ran in between or its host was replaced, that ask is refused
+  `fork_base_unavailable` and the fork ends.
   The request an ask sends is the base's bytes followed by the fork's appended
   messages, with one exception: on a route whose wire format marks cache
   breakpoints explicitly (such as `cache_control` on Anthropic Messages content
@@ -8001,6 +8005,11 @@ to the session's whole length.
   | `message_id?` | Optional identifier string: the assistant message's `mid` served by the runner in `session.read` and `session.entries` for this attempt's reply |
   | `harness`, `session` | Required strings: the harness and session the runner received |
   | `work_class?`, `provider`, `model` | Optional open work-class string, required provider identifier and the model actually sent |
+  | `account_ref?` | Optional lowercase hex SHA-256, exactly 64 characters (`[0-9a-f]`), computed by `step_events::account_ref` as defined below. Absent when routing did not admit the run |
+  | `warm_up?` | Optional boolean: true for a keep-warm request the runner sent itself; runners whose warm-ups never become steps never send it |
+  | `view_version?` | Optional unsigned 64-bit applied compaction view version, with exactly the meaning of the compaction contract's `last_prompt_view`: ≥1 names an applied view, 0 means no view was applied. A host that renders some requests without asking the runner reports the view of the last request that did ask, never the newest view |
+  | `tools_digest?`, `system_digest?` | Optional opaque per-runner strings, 1–128 bytes of visible ASCII (`0x21`–`0x7E`): two steps' digests are equal only when the tool list or system text, respectively, received by the provider was byte-identical, ignoring cache markers. Compare only within the same runner and session, never across runners |
+  | `signed_floor?` | Optional stable entry id of the session's newest signed floor (§11.1.1), using the same grammar as `message_id`: 1–256 bytes of visible ASCII (`0x21`–`0x7E`). Sent on every step once the session has a floor |
   | `input_tokens?`, `cached_input_tokens?`, `cache_write_tokens?`, `output_tokens?`, `reasoning_tokens?` | Optional unsigned 64-bit per-step counters; the three input counters are disjoint as in §6.4 |
   | `cache_write_5m_tokens?`, `cache_write_1h_tokens?` | Optional unsigned 64-bit cache-write counters split by TTL; absent is not zero and a partial split need not add up to the total |
   | `reasoning_included_in_output?` | Optional boolean stating whether reasoning tokens are included in output tokens; absence does not imply either convention |
@@ -8010,6 +8019,25 @@ to the session's whole length.
   | `cache?` | Optional closed object: actual cache lifetime as `ttl_ms?` (u64 milliseconds) or `implicit?: true`, and optional session `warming?: {on: boolean, stop_reason?: string}` (§9.3.5). Missing members mean unknown, not zero or off. |
   | `started_at_ms`, `finished_at_ms` | Required unsigned 64-bit Unix epoch millisecond timestamps |
 
+- [pinned] **Readers first for 0.8.55:** every reader of `step.finished.v1`
+  must run runner contract 0.8.55 or later before any runner emits
+  `account_ref`, `warm_up`, `view_version`, `tools_digest`, `system_digest`
+  or `signed_floor`. Today's readers are the event durables and live-hint
+  readers listed in `cortexkit-bus-naming`'s `EVENT_CONSUMERS` and
+  `LIVE_HINT_READERS`. `StepFinished` refuses unknown members, so older
+  readers reject the new members. When absent, existing bodies remain
+  unchanged. Completion time and cache lifetime already exist as
+  `finished_at_ms` and `cache`.
+- [pinned] `account_ref` is the lowercase hex SHA-256 of the UTF-8 bytes
+  `cortexkit.account_ref.v1` + `0x00` + routing's admitted `account_id` +
+  `0x00` + routing's admitted `credential_id`, both exactly as routing's
+  admission returned them. `step_events::account_ref(account_id,
+  credential_id)` computes it. It is absent when routing did not admit the
+  run. Never send the raw ids, because vault ids can carry account labels.
+  References are equal exactly when the same account and credential served
+  both steps, and stay stable for at least 30 days for that account and credential.
+  `StepFinished::check` and the step-event decoder enforce the 64-character
+  lowercase-hex grammar.
 - [pinned] `message_id` is the id the runner serves for the assistant message
   this attempt's reply was placed as, the same `mid` that `session.read` and
   `session.entries` return. It is absent when the attempt placed no message:
@@ -8041,6 +8069,9 @@ to the session's whole length.
   classification values stay open when read. `StepFinished::check` validates
   cache consistency before publication; readers preserve measurements even
   when that producer check would fail, just as for timing faults.
+- [pinned] When a request's cache breakpoints carry different lifetimes,
+  `cache.ttl_ms` reports the shortest of them; with a single lifetime, nothing
+  changes.
 - [pinned] **Readers first for 0.8.19:** every reader of a runner's step hints
   moves to runner contract 0.8.19 or later before that runner emits `cache`.
   `StepFinished` uses `deny_unknown_fields`, so older readers refuse the new

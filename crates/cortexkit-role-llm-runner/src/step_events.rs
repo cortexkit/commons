@@ -128,6 +128,37 @@ pub struct StepFinished {
     pub work_class: Option<String>,
     pub provider: String,
     pub model: String,
+    /// Lowercase hex SHA-256 (64 characters) from [`account_ref`], using the
+    /// account and credential ids exactly as routing's admission returned them.
+    /// Absent when routing did not admit the run. Never send the raw ids:
+    /// vault ids can carry account labels.
+    /// Equal exactly for the same account and credential, and stable for at
+    /// least 30 days for that account and credential.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_ref: Option<String>,
+    /// True for a keep-warm request the runner sent itself. Omitted by runners
+    /// whose warm-ups never become steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warm_up: Option<bool>,
+    /// Applied compaction view used to render the request: the compaction
+    /// contract's `last_prompt_view`, not the newest view. Zero means no view
+    /// applied. For hosts rendering some requests without asking the runner,
+    /// report the view of the last request that did ask.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view_version: Option<u64>,
+    /// Opaque per-runner tool-list digest, 1–128 visible ASCII bytes. Equal
+    /// only for byte-identical provider inputs, ignoring cache markers.
+    /// Compare only within the same runner and session, never across runners.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools_digest: Option<String>,
+    /// Opaque per-runner system-text digest, with the same grammar and
+    /// comparison scope as `tools_digest`, ignoring cache markers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_digest: Option<String>,
+    /// Stable entry id of the session's newest signed floor (§11.1.1), using
+    /// [`valid_message_id`]'s grammar. Sent on every step once a floor exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_floor: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -204,6 +235,12 @@ impl StepFinished {
             message_id: None,
             provider_request_id: None,
             work_class: None,
+            account_ref: None,
+            warm_up: None,
+            view_version: None,
+            tools_digest: None,
+            system_digest: None,
+            signed_floor: None,
             input_tokens: None,
             cached_input_tokens: None,
             cache_write_tokens: None,
@@ -274,6 +311,28 @@ impl StepFinished {
             .is_some_and(|id| !valid_message_id(id))
         {
             return Err("message_id");
+        }
+        if self
+            .account_ref
+            .as_deref()
+            .is_some_and(|value| !crate::content_digest::is_sha256_hex(value))
+        {
+            return Err("account_ref");
+        }
+        for (field, value) in [
+            ("tools_digest", self.tools_digest.as_deref()),
+            ("system_digest", self.system_digest.as_deref()),
+        ] {
+            if value.is_some_and(|value| value.len() > 128 || !valid_message_id(value)) {
+                return Err(field);
+            }
+        }
+        if self
+            .signed_floor
+            .as_deref()
+            .is_some_and(|id| !valid_message_id(id))
+        {
+            return Err("signed_floor");
         }
         Ok(())
     }
@@ -355,6 +414,23 @@ pub fn valid_attempt_id(value: &str) -> bool {
 /// (0x21–0x7E). Equality with a served session message is the runner's to enforce.
 pub fn valid_message_id(value: &str) -> bool {
     (1..=256).contains(&value.len()) && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+}
+
+/// Content-free account-and-credential reference for an admitted run.
+/// Hash the UTF-8 bytes `cortexkit.account_ref.v1`, NUL, the admitted account
+/// id, NUL, and the admitted credential id, without normalizing either id.
+/// Use ids exactly as routing's admission returned them. Callers omit the
+/// reference when routing did not admit the run, and never send raw ids,
+/// because vault ids can carry account labels.
+pub fn account_ref(account_id: &str, credential_id: &str) -> String {
+    let bytes = [
+        b"cortexkit.account_ref.v1\0".as_slice(),
+        account_id.as_bytes(),
+        b"\0",
+        credential_id.as_bytes(),
+    ]
+    .concat();
+    crate::content_digest::sha256_hex(&bytes)
 }
 
 /// Why a live step hint must be dropped rather than used to update a view.
@@ -540,6 +616,106 @@ mod tests {
                 ),
                 "{id:?}"
             );
+        }
+    }
+
+    #[test]
+    fn step_event_account_ref_known_answers_and_grammar() {
+        let subject = "ck.account_a.live.runner_a.step.finished.v1";
+        for vector in vectors()["account_refs"].as_array().unwrap() {
+            let reference = account_ref(
+                vector["account_id"].as_str().unwrap(),
+                vector["credential_id"].as_str().unwrap(),
+            );
+            assert_eq!(reference, vector["account_ref"].as_str().unwrap());
+            let mut body = vectors()["minimal"].clone();
+            body["account_ref"] = json!(reference);
+            let event = decode_step_finished(subject, &serde_json::to_vec(&body).unwrap()).unwrap();
+            assert_eq!(event.check(), Ok(()));
+        }
+        for reference in [
+            "".to_owned(),
+            "a".repeat(63),
+            "a".repeat(65),
+            "A".repeat(64),
+            "g".repeat(64),
+            "0".repeat(63) + " ",
+            "é".repeat(32),
+        ] {
+            let mut body = vectors()["minimal"].clone();
+            body["account_ref"] = json!(reference);
+            let event: StepFinished = serde_json::from_value(body.clone()).unwrap();
+            assert_eq!(event.check(), Err("account_ref"));
+            assert!(matches!(
+                decode_step_finished(subject, &serde_json::to_vec(&body).unwrap()),
+                Err(StepEventDecodeError::InvalidField("account_ref"))
+            ));
+        }
+    }
+
+    #[test]
+    fn step_event_rewrite_facts_round_trip_and_validate_boundaries() {
+        let subject = "ck.account_a.live.runner_a.step.finished.v1";
+        let minimal = vectors()["minimal"].clone();
+        let event: StepFinished = serde_json::from_value(minimal.clone()).unwrap();
+        assert_eq!(event.check(), Ok(()));
+        assert_eq!(serde_json::to_value(event).unwrap(), minimal);
+        for (warm_up, view_version) in [(false, 0), (true, u64::MAX)] {
+            let mut body = minimal.clone();
+            body["account_ref"] = json!(account_ref("account-a", "credential-a"));
+            for field in ["tools_digest", "system_digest"] {
+                body[field] = json!("!~".repeat(64));
+            }
+            body["signed_floor"] = json!("!~".repeat(128));
+            body["warm_up"] = json!(warm_up);
+            body["view_version"] = json!(view_version);
+            let event = decode_step_finished(subject, &serde_json::to_vec(&body).unwrap()).unwrap();
+            assert_eq!(event.check(), Ok(()));
+            assert_eq!(event.warm_up, Some(warm_up));
+            assert_eq!(event.view_version, Some(view_version));
+            assert_eq!(serde_json::to_value(event).unwrap(), body);
+        }
+        for (field, limit) in [
+            ("tools_digest", 128),
+            ("system_digest", 128),
+            ("signed_floor", 256),
+        ] {
+            for value in ["x".to_owned(), "x".repeat(limit)] {
+                let mut body = minimal.clone();
+                body[field] = json!(value);
+                let event =
+                    decode_step_finished(subject, &serde_json::to_vec(&body).unwrap()).unwrap();
+                assert_eq!(event.check(), Ok(()));
+            }
+            for value in [
+                "",
+                "has space",
+                "\n",
+                "\u{1f}",
+                "\u{7f}",
+                "é",
+                &"x".repeat(limit + 1),
+            ] {
+                let mut body = minimal.clone();
+                body[field] = json!(value);
+                let event: StepFinished = serde_json::from_value(body.clone()).unwrap();
+                assert_eq!(event.check(), Err(field));
+                assert!(matches!(
+                    decode_step_finished(subject, &serde_json::to_vec(&body).unwrap()),
+                    Err(StepEventDecodeError::InvalidField(actual)) if actual == field
+                ));
+            }
+        }
+        for (field, value) in [
+            ("warm_up", json!(1)),
+            ("warm_up", json!("true")),
+            ("view_version", json!(-1)),
+            ("view_version", json!(1.5)),
+            ("view_version", json!("1")),
+        ] {
+            let mut body = minimal.clone();
+            body[field] = value;
+            assert!(decode_step_finished(subject, &serde_json::to_vec(&body).unwrap()).is_err());
         }
     }
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.55
+
+- Add optional content-free rewrite facts to `step.finished.v1`: opaque
+  account reference, keep-warm status, applied compaction view, tool and system
+  digests, and newest signed-floor entry id. Validate identifier grammars and
+  require all readers to upgrade before producers emit these members.
+- Pin account references to a domain-separated SHA-256 of routing's admitted
+  account and credential ids, exposed by `step_events::account_ref`, with
+  known-answer vectors. Never send raw ids that may carry account labels.
+- Report the shortest lifetime when a request's cache breakpoints differ.
+  Completion time and cache lifetime remain the existing `finished_at_ms` and
+  `cache` members.
+- Allow taking a fork's fixed base at its first ask, refusing and ending the
+  fork if the head ran meanwhile or its host was replaced.
+
 ## 0.8.54
 
 - Define `not_delivered` by durable proof that the words never ran and can no

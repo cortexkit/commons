@@ -175,6 +175,16 @@ Optional members, omitted when unknown and never zero for unknown:
 | `message_id` | string | The host's own content-free identifier for the message within its session, when the host has one; see below. |
 | `run_id` | string | Runner steps only. |
 | `route_decision_id` | string | The run's routing decision id, absent when the run had none. |
+| `started_at_ms` | unsigned integer, Unix ms | The step's request start: the step event's `started_at_ms`. This is distinct from the general `occurred_at_ms` timestamp. |
+| `finished_at_ms` | unsigned integer, Unix ms | Completion time: the step event's `finished_at_ms`. |
+| `account_ref` | string | Lowercase hex SHA-256, exactly 64 characters (`[0-9a-f]`), of the UTF-8 bytes `cortexkit.account_ref.v1` + `0x00` + routing's admitted `account_id` + `0x00` + routing's admitted `credential_id`, both exactly as admission returned them. Use the runner's `step_events::account_ref` helper. Absent when routing did not admit the run. Never send raw ids, because vault ids can carry account labels. |
+| `cache_ttl_ms` | unsigned integer, ms | The shortest lifetime among the request's cache breakpoints, from the step event's `cache.ttl_ms`. |
+| `cache_implicit` | boolean | The step event's `cache.implicit`: true means an implicit cache with no provable lifetime. Producers never send false. |
+| `warm_up` | boolean | True for a keep-warm request the runner sent itself; runners whose warm-ups never become steps never send it. |
+| `view_version` | unsigned integer | Applied compaction view used to render the request, exactly the compaction contract's `last_prompt_view`: ≥1 names an applied view, 0 means no view applied. A host rendering some requests without asking the runner reports the view of the last request that did ask, never the newest view. |
+| `tools_digest`, `system_digest` | string | Opaque per-runner digests, 1–128 visible ASCII bytes (`0x21`–`0x7E`). Equal only when the tool list or system text, respectively, received by the provider was byte-identical, ignoring cache markers. Compare only within the same runner and session, never across runners. |
+| `signed_floor` | string | Stable entry id of the session's newest signed floor (runner contract §11.1.1), using the step event's `message_id` grammar: 1–256 visible ASCII bytes (`0x21`–`0x7E`). Sent on every step once the session has a floor. |
+| `cause` | string | The rewrite explanation computed once by the usage-feed provider using `cause::rewrite_cause`; see [Rewrite cause](#rewrite-cause). Unknown values are kept as received. |
 | `provider` | string | |
 | `model` | string | |
 | `input` | integer | Input tokens neither read from nor written to the prompt cache. |
@@ -191,6 +201,10 @@ Optional members, omitted when unknown and never zero for unknown:
 | `first_to_last_content_ms` | unsigned integer, ms | From the first to the last content of the same model call. |
 | `retention` | number | Non-negative; never rounded or clamped. See [Verdict](#verdict). |
 | `request_size` | string | `smaller` or `not_smaller`; see [Verdict](#verdict). |
+
+`account_ref` values are equal exactly when the same account and credential
+served both steps, and stay stable for at least 30 days for that account and
+credential.
 
 `message_id` is the host's own message identifier (OpenCode's message id or
 Pi's entry id), present only when the host has such an id. A producer never
@@ -388,9 +402,44 @@ Rules, in order:
 The thresholds 0.95 and 0.80 and the 15,000-token prompt drop are part of this
 contract's version: changing one is a new contract version.
 
+## Rewrite cause
+
+`cause::rewrite_cause(prev: Option<&StepRow>, row: &StepRow) -> Option<Cause>`
+is the shared explanation. `prev` is the same session's previous row in feed
+order, warm-ups included. Compare only rows of the same runner, because
+digests are runner-local. The usage-feed provider runs the function once and
+serves the result as `cause` on each row. Stored `cause` values are not inputs
+to the function.
+
+The function returns none unless the verdict is `warning`, `bust` or
+`full_bust`. For those verdicts the first matching rule wins. A missing fact
+on either row skips that comparison: unknown never counts as changed.
+
+1. `account_or_model_changed`: both providers or both models are present and
+   different, or both account references are present and different.
+2. `cache_expired`: only for `bust` or `full_bust`, with `row.started_at_ms`,
+   `prev.finished_at_ms` and `prev.cache_ttl_ms` present, and the start minus
+   the previous completion strictly exceeds the previous shortest cache TTL.
+   A start before completion does not establish expiry. `occurred_at_ms` is
+   not a substitute for a missing request start.
+3. `tools_or_system_changed`: both tool digests or both system digests are
+   present and different.
+4. `view_changed`: both applied view versions are present and different.
+5. `signed_floor_moved`: both signed-floor entry ids are present and different.
+6. `unexplained`, including when no previous row exists.
+
+A changed account or model empties the whole cache. Expiry can empty it too,
+or expire a shorter conversation breakpoint while a longer-lived tools and
+system prefix survives. These explanations precede comparisons of the
+prompt prefix from its head: tools/system, applied view, then signed floor.
+An expiry fact never explains a `warning` by itself. `Cause` is an open set
+like `Verdict`: unfamiliar strings round-trip unchanged.
+
 ## Vectors
 
 `test-vectors/usage-steps-v1/` holds the normative bytes, indexed by
 `cases.json` and pinned by `SHA256SUMS`; its README describes each case.
 `test-vectors/pi-step-ref-v1/` pins the shared Pi key derivation, including
 timestamp parsing and the distinction between absent and zero usage counts.
+`test-vectors/rewrite-cause-v1/cases.json` holds previous/current row pairs
+and their expected cause or null, pinned by its `SHA256SUMS`.

@@ -148,6 +148,8 @@ where
         .published
         .iter()
         .map(|p| {
+            // The shared decoder checks the closed body and the rewrite-fact
+            // identifier grammars, including optional facts on newer producers.
             decode_step_finished(
                 &p.subject,
                 &serde_json::to_vec(&p.body).expect("a captured JSON body serializes"),

@@ -90,6 +90,19 @@ open_set! {
 }
 
 open_set! {
+    /// The first known explanation for a prompt rewrite, selected by
+    /// [`crate::cause::rewrite_cause`]. Unknown values are kept as received.
+    pub enum Cause {
+        AccountOrModelChanged => "account_or_model_changed",
+        CacheExpired => "cache_expired",
+        ToolsOrSystemChanged => "tools_or_system_changed",
+        ViewChanged => "view_changed",
+        SignedFloorMoved => "signed_floor_moved",
+        Unexplained => "unexplained",
+    }
+}
+
+open_set! {
     /// Where the provider learned of a step.
     pub enum StepSource {
         /// Read from a harness store or a runner's durable log.

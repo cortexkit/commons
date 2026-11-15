@@ -7,7 +7,7 @@
 //! `test-vectors/usage-steps-v1/` holds the pinned bytes.
 //!
 //! Readers are lenient toward a newer provider: an unknown member on a reply,
-//! notice or row is ignored, and an unknown [`Verdict`], [`StepSource`] or
+//! notice or row is ignored, and an unknown [`Cause`], [`Verdict`], [`StepSource`] or
 //! [`RequestSize`] value decodes as `Other`. Requests are strict: the
 //! provider refuses an unknown request member `malformed`, so the request
 //! types refuse one too.
@@ -15,6 +15,7 @@
 //! [`LatestRows`] applies rows in the order reads return them and keeps the
 //! last row per identity (`harness` plus `step_ref`).
 
+pub mod cause;
 mod claude_code;
 mod cursor;
 mod latest;
@@ -26,7 +27,7 @@ mod row;
 pub use claude_code::claude_code_step_ref;
 pub use cursor::Cursor;
 pub use latest::{Applied, LatestRows};
-pub use open_set::{RequestSize, StepSource, Verdict};
+pub use open_set::{Cause, RequestSize, StepSource, Verdict};
 pub use ops::{Notice, ReadReply, ReadRequest, Refusal, SubscribeRequest};
 pub use pi::{pi_step_ref, PiEntry};
 pub use row::{

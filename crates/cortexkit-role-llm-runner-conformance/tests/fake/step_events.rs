@@ -91,6 +91,15 @@ pub(super) fn publish(module: &Module, session: &str, record: &Value, durable: b
         20,
     )
     .with_attempt_id(record["attempt_id"].as_str().unwrap());
+    event.account_ref = Some(cortexkit_role_llm_runner::step_events::account_ref(
+        "account-a",
+        "credential-a",
+    ));
+    event.warm_up = Some(false);
+    event.view_version = Some(0);
+    event.tools_digest = Some("tools-a".into());
+    event.system_digest = Some("system-a".into());
+    event.signed_floor = Some("entry-a".into());
     if module.world.step_event_policy.history_key == "harness" && record["kind"] == "step" {
         event = event.with_harness_step_ref(format!(
             "host-{}",
@@ -113,6 +122,9 @@ pub(super) fn publish(module: &Module, session: &str, record: &Value, durable: b
     }
     if let Some(member) = defects.step_events_content_member {
         body[member] = json!("forbidden-content");
+    }
+    if let Some((member, value)) = defects.step_events_malformed_rewrite_member {
+        body[member] = serde_json::from_str(value).unwrap();
     }
     let publisher = if defects.step_events_wrong_publisher {
         "runner-b"
