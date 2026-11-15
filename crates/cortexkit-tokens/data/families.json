@@ -104,5 +104,29 @@
       ]
     },
     "ignore_merges": true
+  },
+  "gemma4": {
+    "source": "google/gemma-4-12B-it tokenizer.json at 43c9d014b231474fa7212dbb48a762566c2b255d, sha256 9788bdb6a021b3170357cd3587b5d622b1177561ad3c5bf43d73728fd71aeacb; packed in this crate by tools/pack-gemma.py, not by Oh My Pi",
+    "vocab": 262144,
+    "merges": 514667,
+    "normalizer": {
+      "type": "Replace",
+      "pattern": {
+        "String": " "
+      },
+      "content": "\u2581"
+    },
+    "pre": {
+      "type": "Split",
+      "pattern": {
+        "String": " "
+      },
+      "behavior": "MergedWithPrevious",
+      "invert": false
+    },
+    "model": "BPE over characters, byte_fallback true, ignore_merges false; merge priority is the merges list order",
+    "note": "The pre-tokenizer splits on a space after the normalizer has turned every space into U+2581, so the whole text is one word.",
+    "vocab_container": "GVOCAB1: magic 'GVOCAB1\\n' (8B), u32le piece count, then each piece's UTF-8 bytes followed by a NUL; index = token id; an empty piece is a slot no count uses. Whole file zstd -19 -> data/gemma4_vocab.bin.zst",
+    "merges_container": "GMERGE1: magic 'GMERGE1\\n' (8B), u32le merge count, then per merge in rank order varint(zigzag(produced id - previous produced id, starting from 0)) + varint(byte length of the left half of the produced piece). Whole file zstd -19 -> data/gemma4_merges.bin.zst"
   }
 }

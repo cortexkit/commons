@@ -98,6 +98,7 @@ mod revision_pins {
             ("deepseek-v3/1", 36),
             ("kimi-k2/1", 35),
             ("glm5/1", 36),
+            ("gemini/1", 44),
         ]
         .into_iter()
         .filter(|(name, _)| {

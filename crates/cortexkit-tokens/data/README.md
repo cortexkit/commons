@@ -4,7 +4,9 @@
 > `../NOTICE.md`; "this repository" below means Oh My Pi. The generator
 > scripts and `cache/` paths are upstream-only: regenerate in
 > `crates/pi-natives` of that pinned upstream checkout, then copy the
-> resulting files here.
+> resulting files here. The exception is the Gemma 4 section at the end,
+> which is this crate's own: its scripts are the only ones in this crate's
+> `../tools/`.
 
 `ctok_v3.bin.zst` and `ctok_v4_7.bin.zst` are **generated** — do not
 hand-edit. They are compacted from the measured vocabulary files of
@@ -38,4 +40,32 @@ If the upstream pin moves, also regenerate
 
 The other `*.bin.zst` files here are the UTOK1 BPE rank tables packed by
 the per-family scripts in `../tools/` (container format and per-family
-split specs: `families.json` in this directory).
+split specs: `families.json` in this directory), except the Gemma 4 tables
+below.
+
+## Gemma 4 (`gemma4_vocab.bin.zst`, `gemma4_merges.bin.zst`)
+
+Not from Oh My Pi. These are **generated** in this crate from Gemma 4's
+published `tokenizer.json` (source, revision and hash in `../NOTICE.md`),
+Apache-2.0, see `LICENSE.gemma`. Gemma ranks merges by an explicit list
+rather than by vocabulary order, so a UTOK1 rank table cannot hold it: the
+pieces and the merges list are packed as two tables (layouts: `gemma4` in
+`families.json`), about 1.0 MB and 0.23 MB after zstd -19. The vocabulary
+would compress to about 1.15 MB with each piece length-prefixed as in UTOK1;
+NUL terminators compress better.
+
+Regenerate both tables, and the differential fixture
+`../fixtures/gemma4.json`, from the pinned file:
+
+```sh
+cd ../tools
+curl -L -o ../../../target/scratch/gemma4-tokenizer.json --create-dirs \
+  https://huggingface.co/google/gemma-4-12B-it/resolve/43c9d014b231474fa7212dbb48a762566c2b255d/tokenizer.json
+python3 pack-gemma.py ../../../target/scratch/gemma4-tokenizer.json         # needs the zstd CLI
+python3 gen-gemma-fixture.py ../../../target/scratch/gemma4-tokenizer.json  # needs `pip install tokenizers`
+```
+
+Both scripts refuse a file with another hash. `pack-gemma.py` also refuses a
+tokenizer whose normalizer, pre-tokenizer or BPE options differ from what
+`../src/utok/gemma.rs` implements. The download (32 MB) goes under the
+workspace's ignored `target/`.
