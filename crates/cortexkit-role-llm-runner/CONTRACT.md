@@ -3394,8 +3394,43 @@ Model-view reads and replacement-entry pages are not part of this contract.
   differing field.
 - [pinned] The reply is `{state, run_id?, submission_id?, reason?,
   pause_reason?, baseline?, delivered?}` (`SendReply`), `state` decoded open
-  (`send::states`: `active`, `finished`, `pending`, `paused`). A paused
+  (`send::states`: `active`, `finished`, `pending`, `paused`, `not_delivered`,
+  and the terminal delivery-order states in §9.7). A paused
   reply may carry `pause_reason`; it is not renamed to `reason`.
+- [pinned] `pending` says only that the send is durable and not yet delivered:
+  queued behind a run or awaiting hand-over to the host. It may carry the
+  allocated `run_id`. Callers follow it through `session.send_status`,
+  `run.status` and the event stream, and never infer a running turn from it.
+  Nothing requires a runner to attempt hand-over before answering: the reply
+  follows the durable sync, as above.
+- [pinned] `not_delivered` (`send::states::NOT_DELIVERED`) means the send
+  provably never reached the host or a provider. `reason` is required, an open
+  string whose unknown values decoders keep; `delivered` is absent. The initial
+  reasons are:
+  - `handover_failed` (`send::REASON_HANDOVER_FAILED`): the runner proves from
+    its own durable record, including any record kept by the process that hands
+    prompts to its host, that the prompt was never handed to a host. A post was
+    tried and failed, or the host could not be reached or relaunched when the
+    send's run was due. The specific cause
+    stays on the run: that run ends `error` with its own code (for example
+    `host_relaunch_failed`), and `reason` stays coarse. Callers act on the
+    state, not the cause;
+  - `routing_refused` (`send::REASON_ROUTING_REFUSED`): routing refused the
+    account before any provider attempt.
+
+  The state is final for that `send_id`: a re-send or `session.send_status`
+  answers it again. The owner may deliver the same words again only as a new
+  send with a new `send_id`. If the send was given a `run_id`, that run ends
+  with no model step, and its `run.result` is `error` carrying the refusal it
+  ended on. This differs from `delivered.as: unknown`, whose outcome is unknown
+  and must never be resent. An older reader keeps `not_delivered` as an unknown
+  state string, which callers treat as outcome unknown, the safe side. Runners
+  emit it only after their callers' readers accept it (readers first).
+- [pinned] `not_delivered` applies only to a send whose own run ended before
+  hand-over, or that routing refused. A queued send whose run never started
+  stays queued while its session is parked (for example, its host cannot be
+  relaunched yet), and runs when the session can run again. It is never marked
+  `not_delivered` for that.
 - [pinned] A send behind a paused run MAY be queued, answering `pending`,
   or refused `run_paused`. Both conform.
 - [pinned] `delivered` (`send::Delivered`) is optional: `{as, ref?, call_key?, call_carrier?}`:
@@ -3419,7 +3454,8 @@ Model-view reads and replacement-entry pages are not part of this contract.
     absent, and must never be `pending` or `unknown`, except for the narrowly
     scoped inconclusive pre-restart handoff in §14.4 R5;
   - on a `confirm` runner (`role.describe.steer_receipt: confirm`), an absent
-    `delivered` means `pending`, never delivered;
+    `delivered` means `pending`, never delivered, unless the send is terminal
+    `not_delivered`;
   - the owner re-checks a `confirm` runner's undelivered steers by re-sending
     the same `send_id`, only on runner reconnect and on its next send to the
     same session.

@@ -1327,6 +1327,21 @@ pub trait LlmRunnerSubject: Harness {
         Ok(false)
     }
 
+    /// Arrange for the next send in an idle session to provably never reach
+    /// the host or any provider, with the requested `not_delivered` reason.
+    /// The kit asks separately for `handover_failed` and `routing_refused`.
+    /// Return false when the adapter cannot drive that failure or its callers'
+    /// readers do not yet accept the state. A true answer requires a real
+    /// pre-delivery failure, not a fabricated management reply, and independent
+    /// `model_invocations` observation. Later new send ids must remain usable.
+    async fn prepare_not_delivered_send(
+        &self,
+        _session: &str,
+        _reason: &str,
+    ) -> Result<bool, HarnessError> {
+        Ok(false)
+    }
+
     /// Build admission fields whose scripted tool provider declares data:token
     /// and program:source:rich-ui/1 slots and opts into output_refs. Numbered
     /// reference cases require plan.compaction_item; without it they are

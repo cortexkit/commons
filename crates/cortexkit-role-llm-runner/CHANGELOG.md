@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.53
+
+- Clarify that `pending` means durable and not yet delivered, including an
+  idle-session send awaiting host hand-over with an allocated `run_id`. No
+  hand-over attempt is required before the durable reply.
+- Add terminal send state `not_delivered` and its initial open reasons
+  `handover_failed` and `routing_refused`. Require a reason
+  and no delivery receipt when decoding it; preserve unknown reasons and
+  state strings. A same-`send_id` retry stays terminal, and any allocated run
+  ends with the refusal and no model step. Upgrade readers before runners
+  emit the new state.
+
 ## 0.8.52
 
 - Add the dependency-free `plan_facts` capability group for plan-item facts on

@@ -255,6 +255,11 @@ where
             "subscribe_from_head_no_gap_no_duplicate" => passed(self.subscribe_from_head().await),
             "subscribe_resume_refusals" => passed(self.subscribe_resume_refusals().await),
             "send_id_retry_same_answer" => self.send_id_retry().await,
+            "send_not_delivered_handover_failed_final"
+            | "send_not_delivered_routing_refused_final"
+            | "send_queued_without_own_run_stays_pending" => {
+                crate::not_delivered::run(self, name).await
+            }
             "send_id_retry_settled_same_answer" => self.send_id_retry_settled().await,
             "send_id_retry_written_once" => self.send_id_retry_written_once().await,
             "send_id_reuse_refused_naming_field" => self.send_id_reuse().await,

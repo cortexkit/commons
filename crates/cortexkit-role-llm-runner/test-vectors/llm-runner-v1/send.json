@@ -105,6 +105,41 @@
       }
     },
     {
+      "name": "idle-session send is durable before host hand-over",
+      "admitted": false,
+      "reply": {
+        "state": "pending",
+        "run_id": "run-8",
+        "submission_id": "sub-4"
+      }
+    },
+    {
+      "name": "own run ended before hand-over with durable proof the prompt was never handed to a host",
+      "admitted": false,
+      "reply": {
+        "state": "not_delivered",
+        "run_id": "run-8",
+        "submission_id": "sub-4",
+        "reason": "handover_failed"
+      }
+    },
+    {
+      "name": "routing refused the account before any provider attempt",
+      "admitted": false,
+      "reply": {
+        "state": "not_delivered",
+        "reason": "routing_refused"
+      }
+    },
+    {
+      "name": "future not-delivered reason survives",
+      "admitted": false,
+      "reply": {
+        "state": "not_delivered",
+        "reason": "future_refusal"
+      }
+    },
+    {
       "name": "retry after the carrying run ended",
       "admitted": false,
       "reply": {

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.17.64
+
+- Pin the role contract to `=0.8.53` for clarified `pending` replies and the
+  terminal `not_delivered` send state and its `handover_failed` and
+  `routing_refused` reasons.
+- Add optional per-reason `prepare_not_delivered_send` fixtures and named
+  checks for final same-id retries, read-only status, no model invocation,
+  refusal results for allocated runs, and delivery only under a new send id.
+  Fake runners that re-deliver terminal sends are rejected by check name.
+- Check that a queued send with no run of its own stays `pending` until the
+  queue can drain, never `not_delivered`. Reuse the held idle-queue fixture;
+  the check does not make a host unreachable or change retention behavior.
+
 ## 0.17.63
 
 - Accept subc-protocol 0.37.

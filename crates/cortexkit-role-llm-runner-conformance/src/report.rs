@@ -962,6 +962,21 @@ pub const CASES: &[CaseSpec] = &[
         "on a runner that declares queue or steer, and without reading the transcript or waiting: a send retried twice at once with the same send_id and payload names the run_id and submission_id the send was answered with, and its delivered receipt moves only forward (absent or pending to step, turn or unknown, which are final, ref included); the send's state may still move between the retries, so they are not compared whole",
     ),
     case(
+        "send_not_delivered_handover_failed_final",
+        &[Queue, TranscriptReads],
+        "with the optional pre-host failure fixture, handover_failed is final: same-send_id retries and declared send_status retain the reply and write no transcript entries, no model step occurs, any allocated run exposed by run_ops ends error with a refusal, and only a new send_id can deliver the same words",
+    ),
+    case(
+        "send_not_delivered_routing_refused_final",
+        &[Queue, TranscriptReads],
+        "with the optional pre-provider routing refusal fixture, routing_refused is final: same-send_id retries and declared send_status retain the reply and write no transcript entries, no model step occurs, any allocated run exposed by run_ops ends error with a refusal, and only a new send_id can deliver the same words",
+    ),
+    case(
+        "send_queued_without_own_run_stays_pending",
+        &[Queue, TranscriptReads],
+        "with the optional held idle queue (not an unreachable host), a queued send with no run of its own stays pending on retry and send_status, never not_delivered, starts no model request while parked, and runs when released",
+    ),
+    case(
         "send_id_retry_settled_same_answer",
         &[RunOps],
         "on a runner that declares queue or steer, and without reading the transcript: once the send's run has ended, seen through run.result, a send retried twice with the same send_id and payload gets the same answer twice apart from delivered, names the run_id and submission_id the send was answered with, and its delivered receipt moves only forward; inapplicable when the send's reply names no run_id",

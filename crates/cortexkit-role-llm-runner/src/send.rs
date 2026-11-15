@@ -1337,8 +1337,11 @@ pub mod states {
     pub const ACTIVE: &str = "active";
     /// The run that carried the message has ended, with `reason`.
     pub const FINISHED: &str = "finished";
-    /// The message is durably queued as `submission_id` and will start a new
-    /// run of its own.
+    /// The send is durable and not yet delivered: queued behind a run or
+    /// awaiting hand-over to the host. It may carry the allocated `run_id`.
+    /// Callers follow it through `session.send_status`, `run.status` and the
+    /// event stream, and never infer a running turn from it. Nothing requires
+    /// a hand-over attempt before answering: the reply follows the durable sync.
     pub const PENDING: &str = "pending";
     /// The run is paused; `pause_reason` may explain why.
     pub const PAUSED: &str = "paused";
@@ -1356,7 +1359,22 @@ pub mod states {
     /// delivered. A re-send of its `send_id` answers this state, with `slot`
     /// naming the slot (`crate::errors::TEMPLATE_PART_GONE`).
     pub const TEMPLATE_PART_GONE: &str = "template_part_gone";
+    /// The send provably never reached the host or a provider. Terminal for
+    /// its `send_id`, with a required open `reason` and no `delivered` receipt.
+    pub const NOT_DELIVERED: &str = "not_delivered";
 }
+
+/// The runner proves from its own durable record, including any record kept
+/// by the process that hands prompts to its host, that the prompt was never
+/// handed to a host. A post was tried and failed, or the host could not be
+/// reached or relaunched when the send's own run was due.
+/// That run ends `error` with its own cause code; this reason stays coarse.
+/// Callers act on the state, not the cause. A queued send whose own run never
+/// started stays queued while its session is parked and runs when it can;
+/// it is never `not_delivered` merely because the host is unavailable.
+pub const REASON_HANDOVER_FAILED: &str = "handover_failed";
+/// Routing refused the account before any provider attempt.
+pub const REASON_ROUTING_REFUSED: &str = "routing_refused";
 
 /// A send state, classified without rejecting a runner's additional states.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1369,6 +1387,7 @@ pub enum SendState {
     Superseded,
     Expired,
     TemplatePartGone,
+    NotDelivered,
     Unknown(String),
 }
 impl SendState {
@@ -1381,6 +1400,7 @@ impl SendState {
             states::SUPERSEDED => Self::Superseded,
             states::EXPIRED => Self::Expired,
             states::TEMPLATE_PART_GONE => Self::TemplatePartGone,
+            states::NOT_DELIVERED => Self::NotDelivered,
             other => Self::Unknown(other.into()),
         }
     }
@@ -1390,7 +1410,7 @@ impl SendState {
 ///
 /// Non-exhaustive so later optional members are additive: use
 /// [`SendReply::new`] and the `with_*` setters, or decode one.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[non_exhaustive]
 pub struct SendReply {
     /// One of [`states`]; any other value decodes as a plain string. A
@@ -1408,6 +1428,7 @@ pub struct SendReply {
     /// for a delivered `step` receipt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub submission_id: Option<String>,
+    /// Required and decoded open for `not_delivered`; unknown reasons survive.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     /// A paused reply's reason, distinct from the run's terminal `reason`.
@@ -1431,6 +1452,43 @@ pub struct SendReply {
     /// carrying request did not show.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub slot: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for SendReply {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Wire {
+            state: String,
+            run_id: Option<String>,
+            submission_id: Option<String>,
+            reason: Option<String>,
+            pause_reason: Option<String>,
+            baseline: Option<Baseline>,
+            delivered: Option<Delivered>,
+            slot: Option<String>,
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        if wire.state == states::NOT_DELIVERED {
+            if wire.reason.is_none() {
+                return Err(serde::de::Error::custom("not_delivered requires reason"));
+            }
+            if wire.delivered.is_some() {
+                return Err(serde::de::Error::custom(
+                    "not_delivered requires delivered to be absent",
+                ));
+            }
+        }
+        Ok(Self {
+            state: wire.state,
+            run_id: wire.run_id,
+            submission_id: wire.submission_id,
+            reason: wire.reason,
+            pause_reason: wire.pause_reason,
+            baseline: wire.baseline,
+            delivered: wire.delivered,
+            slot: wire.slot,
+        })
+    }
 }
 
 impl SendReply {
@@ -1577,6 +1635,60 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn pending_and_not_delivered_reply_vectors_preserve_meaning() {
+        let file = vectors::load("send.json");
+        let replies: Vec<SendReply> = vectors::cases(&file, "replies")
+            .iter()
+            .map(|case| vectors::round_trip(case["name"].as_str().unwrap(), &case["reply"]))
+            .collect();
+        let pending = replies
+            .iter()
+            .find(|reply| reply.state == states::PENDING && reply.run_id.is_some())
+            .expect("a pending idle-session send can already name its allocated run");
+        assert_eq!(pending.send_state(), SendState::Pending);
+        assert!(pending.submission_id.is_some());
+        assert!(pending.delivered.is_none());
+        for reason in [
+            REASON_HANDOVER_FAILED,
+            REASON_ROUTING_REFUSED,
+            "future_refusal",
+        ] {
+            let reply = replies
+                .iter()
+                .find(|reply| reply.reason.as_deref() == Some(reason))
+                .expect(reason);
+            assert_eq!(reply.send_state(), SendState::NotDelivered);
+            assert!(reply.delivered.is_none());
+        }
+        let future: SendReply = serde_json::from_str(
+            r#"{"state":"future_state","reason":"future_reason","extra":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            future.send_state(),
+            SendState::Unknown("future_state".into())
+        );
+        assert_eq!(future.reason.as_deref(), Some("future_reason"));
+    }
+
+    #[test]
+    fn not_delivered_requires_reason_and_no_delivered_receipt() {
+        for wire in [
+            serde_json::json!({"state": "not_delivered"}),
+            serde_json::json!({"state": "not_delivered", "reason": null}),
+        ] {
+            let error = serde_json::from_value::<SendReply>(wire).unwrap_err();
+            assert!(error.to_string().contains("reason"), "{error}");
+        }
+        let error = serde_json::from_value::<SendReply>(serde_json::json!({
+            "state": "not_delivered", "reason": "handover_failed",
+            "delivered": {"as": "unknown"}
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("delivered"), "{error}");
     }
 
     #[test]

@@ -81,6 +81,7 @@ mod keep_warm;
 mod live_ids;
 mod media;
 mod message_senders;
+mod not_delivered;
 mod notices;
 mod output_refs;
 mod rich_ui;
@@ -183,6 +184,8 @@ const READ_FIELDS: &[&str] = &[
 /// fake violate a rule a case must catch; declaration fields advertise groups.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Defects {
+    /// Break the terminal pre-delivery failure or parked-queue contract.
+    pub not_delivered: Option<&'static str>,
     pub awaits_malformed: bool,
     pub awaits_head_disagrees: bool,
     pub awaits_wrong_ending: bool,
@@ -720,6 +723,7 @@ pub enum StepRecovery {
 /// and the scripted tool provider live outside the runner, so they survive
 /// its kills.
 struct World {
+    pre_delivery_next: Mutex<BTreeMap<String, String>>,
     tool_input_cap: Option<usize>,
     tool_input_refusals: Arc<AtomicUsize>,
     call_yield: call_yield::State,
@@ -1040,6 +1044,7 @@ struct UserCommandRec {
 
 #[derive(Clone, Debug, Default)]
 struct Sess {
+    pre_delivery: BTreeMap<String, Value>,
     tag_read_requests:
         BTreeMap<String, BTreeMap<u64, cortexkit_role_llm_runner::read::TagReadAnswer>>,
     opened_by_adopt: bool,
@@ -1720,6 +1725,22 @@ impl Module {
         let session = text("session");
         let kind = text("kind");
         let mut sessions = self.sessions.lock().unwrap();
+        if kind == "pre_delivery" {
+            sessions
+                .get_mut(&session)
+                .unwrap()
+                .pre_delivery
+                .insert(text("id"), record.clone());
+            return;
+        }
+        if kind == "pre_delivery_forget" {
+            sessions
+                .get_mut(&session)
+                .unwrap()
+                .pre_delivery
+                .remove(&text("id"));
+            return;
+        }
         if kind == "intake_chunk" {
             let sess = sessions.get_mut(&session).unwrap();
             let ordinal = sess.push(record["body"].clone(), "", vec![]);
@@ -3838,6 +3859,9 @@ impl Module {
     }
 
     fn send(&self, stamp: &RouteStamp, session: &str, params: Value) -> Result<Reply, Killed> {
+        if let Some(reply) = not_delivered::intercept(self, stamp, session, &params)? {
+            return Ok(reply);
+        }
         if let Some(reply) = plan_view::admit(self, &params) {
             return Ok(reply);
         }
@@ -5538,6 +5562,9 @@ impl Module {
     }
 
     fn run_result(&self, session: &str, params: Value) -> Reply {
+        if let Some(reply) = not_delivered::run_result(self, session, &params) {
+            return reply;
+        }
         let request: RunResultRequest = match serde_json::from_value(params.clone()) {
             Ok(request) => request,
             Err(_) => {
@@ -5774,6 +5801,9 @@ impl Module {
             return refuse(errors::UNKNOWN_SEND, None);
         };
         let id = format!("{} {}", stamp.principal, request.send_id);
+        if let Some(record) = sess.pre_delivery.get(&id) {
+            return respond(&record["reply"]);
+        }
         let predecessor_key = if self.world.defects.succession == Some("status_hidden") {
             None
         } else {
@@ -6546,6 +6576,7 @@ impl FakeSubject {
             .unwrap()
             .get_or_insert_with(|| {
                 Arc::new(World {
+                    pre_delivery_next: Mutex::new(BTreeMap::new()),
                     tool_input_cap: self.tool_input_cap,
                     tool_input_refusals: self.tool_input_refusals.clone(),
                     fork_ingress: Mutex::new(fork_answer::Ingress::default()),
@@ -6787,6 +6818,37 @@ impl Harness for FakeSubject {
 
 #[async_trait]
 impl LlmRunnerSubject for FakeSubject {
+    async fn prepare_not_delivered_send(
+        &self,
+        session: &str,
+        reason: &str,
+    ) -> Result<bool, HarnessError> {
+        if self.defects.not_delivered == Some("no_fixture") {
+            return Ok(false);
+        }
+        self.world()
+            .pre_delivery_next
+            .lock()
+            .unwrap()
+            .insert(session.into(), reason.into());
+        Ok(true)
+    }
+
+    async fn hold_retention_queue(&self, session: &str) -> Result<bool, HarnessError> {
+        if self.defects.not_delivered == Some("no_fixture") {
+            return Ok(false);
+        }
+        self.world()
+            .pre_delivery_next
+            .lock()
+            .unwrap()
+            .insert(session.into(), "parked".into());
+        Ok(true)
+    }
+
+    async fn release_retention_queue(&self, session: &str) -> Result<(), HarnessError> {
+        not_delivered::release_parked(self, session)
+    }
     fn cache_policy_zone(&self) -> &str {
         &self.cache_policy_zone
     }
