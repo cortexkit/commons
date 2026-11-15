@@ -239,6 +239,11 @@ impl FakeRoute {
         if let Some(price) = &mut answer.price {
             price.estimated_task_usd = None;
         }
+        if self.fault("placement_search_wrong_kind")
+            && request.consumer == "example-consumer.search"
+        {
+            answer.engine.model = "model-c".into();
+        }
         state.engine.decision_kinds.insert(
             answer.decision_id.clone(),
             engine::Kind::Unknown("search".into()),

@@ -3,7 +3,10 @@ use super::*;
 use crate::fixture::{
     OTHER_CONSUMER, PRICED_PROVIDER, RUNNER_ONE, RUNNER_TWO, SUBSCRIPTION_PROVIDER,
 };
-use crate::wire::{price::Price, select::check_answer_serving_with_harnesses, spellings};
+use crate::wire::{
+    price::Price, select::check_answer_serving_with_harnesses, select_media::SelectMediaAnswer,
+    select_search, spellings,
+};
 use crate::RunnerRouteFacts;
 
 pub(super) const CASES: &[(&str, &str)] = &[
@@ -84,14 +87,42 @@ impl<S: RoutingSubject> Suite<'_, S> {
         match name {
             "placement_consumer_declarations" => {
                 let declared = "example-consumer.task";
+                let search_module = "example-search";
+                let serves_search = describe.serves(capabilities::SELECT_KIND)
+                    && describe.serves(capabilities::SELECT_SEARCH)
+                    && describe
+                        .kinds
+                        .contains(&crate::wire::placement::Kind::Search);
                 let mut facts = crate::SelectionFacts::new();
                 let search_route = format!("{SUBSCRIPTION_PROVIDER}/model-d");
                 facts.kinds.insert(search_route.clone(), "search".into());
                 self.subject.configure_selection_facts(&facts).await?;
                 let body = json!({"consumers":[{"name":declared,"iq":40,"eq":10,"ladder":[key_b,key_a],"placement":"caller_runner","selectors":[OTHER_CONSUMER],"kind":"llm"},{"name":"example-consumer.search","iq":40,"kind":"search"},{"name":"foreign.task","iq":40}]});
-                self.subject
-                    .configure_catalog_declarations(&[slot(CONSUMER, body)])
-                    .await?;
+                let mut modules = vec![slot(CONSUMER, body)];
+                if serves_search {
+                    modules.push(crate::CatalogModule {
+                        principal: search_module.into(),
+                        nonce_verified: true,
+                        role_declarations: [(
+                            select_search::ROLE_DECLARATIONS_KEY.into(),
+                            json!({"routes":[{"provider":SUBSCRIPTION_PROVIDER,"model":"model-d"}]}),
+                        )]
+                        .into(),
+                    });
+                }
+                match self.subject.configure_catalog_declarations(&modules).await {
+                    Err(error)
+                        if serves_search
+                            && error
+                                == "catalog declarations are not supported by this subject" =>
+                    {
+                        return Ok(Ending::NotApplicable(
+                            "configure_catalog_declarations is unsupported for declared search routes"
+                                .into(),
+                        ));
+                    }
+                    result => result?,
+                }
                 let params = json!({"consumer":declared,"requirements":{},"runners":[RUNNER_TWO]});
                 let selected: SelectAnswer =
                     answer(&route, ops::ROUTE_SELECT, &params, "declared iq and ladder").await?;
@@ -132,7 +163,26 @@ impl<S: RoutingSubject> Suite<'_, S> {
                 }
                 let search_params = json!({"consumer":"example-consumer.search","requirements":{}});
                 if describe.serves(capabilities::SELECT_KIND) {
-                    if describe.serves(capabilities::SELECT_MEDIA)
+                    if serves_search {
+                        let search_params = json!({"consumer":"example-consumer.search","kind":"search","privacy":"remote_allowed","requirements":{}});
+                        let search: SelectMediaAnswer = answer(
+                            &route,
+                            ops::ROUTE_SELECT,
+                            &search_params,
+                            "declared search kind",
+                        )
+                        .await?;
+                        if search.engine.provider != SUBSCRIPTION_PROVIDER
+                            || search.engine.model != "model-d"
+                        {
+                            return Err("declared kind escaped its route kind".into());
+                        }
+                        if search.engine.module.as_deref() != Some(search_module) {
+                            return Err(
+                                "declared search route did not name its declaring module".into()
+                            );
+                        }
+                    } else if describe.serves(capabilities::SELECT_MEDIA)
                         && !describe
                             .kinds
                             .contains(&crate::wire::placement::Kind::Search)
@@ -580,5 +630,33 @@ mod tests {
                 }
             }
         }
+    }
+    #[tokio::test]
+    async fn placement_search_unsupported_declarations_are_not_applicable() {
+        let subject = FakeSubject::with_search(Defects {
+            extension: Some("placement_search_declarations_unsupported"),
+            ..Defects::default()
+        });
+        let result = Suite::new(&subject)
+            .run("placement_consumer_declarations")
+            .await;
+        assert!(
+            matches!(result, Ok(Ending::NotApplicable(ref reason)) if reason.contains("configure_catalog_declarations")),
+            "{result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn placement_search_declaration_fixture_errors_fail() {
+        let subject = FakeSubject::with_search(Defects {
+            extension: Some("placement_search_declarations_error"),
+            ..Defects::default()
+        });
+        assert_eq!(
+            Suite::new(&subject)
+                .run("placement_consumer_declarations")
+                .await,
+            Err("catalog declaration fixture setup failed".into())
+        );
     }
 }

@@ -2143,6 +2143,43 @@ async fn select_search_group_passes_alongside_legacy_checks() {
 }
 
 #[tokio::test]
+async fn placement_consumer_declarations_select_search_passes() {
+    let report = run_suite(&FakeSubject::with_search(Defects::default())).await;
+    assert!(
+        matches!(
+            report.outcome("placement_consumer_declarations"),
+            Some(CheckOutcome::Passed)
+        ),
+        "{}",
+        report.render()
+    );
+}
+
+#[tokio::test]
+async fn placement_consumer_declarations_select_search_rejects_non_search_route_by_check_name() {
+    let subject = FakeSubject::with_search(Defects {
+        extension: Some("placement_search_wrong_kind"),
+        ..Defects::default()
+    });
+    let report = run_suite(&subject).await;
+    assert_eq!(
+        report.failing(),
+        ["placement_consumer_declarations"],
+        "{}",
+        report.render()
+    );
+    match report.outcome("placement_consumer_declarations") {
+        Some(CheckOutcome::Failed { reason }) => {
+            assert!(
+                reason.contains("declared kind escaped its route kind"),
+                "{reason}"
+            );
+        }
+        other => panic!("non-search route was not rejected: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn placement_faulty_routers_fail_by_check_name() {
     for name in PLACEMENT_CASES {
         let subject = FakeSubject::with_placement(Defects {

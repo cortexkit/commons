@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.37
+
+- Fix the consumer-declaration search placement check for routers advertising
+  `select_search`: declare a nonce-verified `search-provider/v1` route, send the required
+  privacy policy, and validate the selected search engine. Keep legacy router
+  expectations and the routing `=0.7.32` pin unchanged.
+
 ## 0.10.36
 
 - Pin routing `=0.7.32` and add search checks for advertisement, atomic attested

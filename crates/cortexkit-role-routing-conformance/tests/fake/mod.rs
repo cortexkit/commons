@@ -724,6 +724,15 @@ impl RoutingSubject for FakeSubject {
         &self,
         modules: &[CatalogModule],
     ) -> Result<(), String> {
+        match self.defects.extension {
+            Some("placement_search_declarations_unsupported") => {
+                return Err("catalog declarations are not supported by this subject".into());
+            }
+            Some("placement_search_declarations_error") => {
+                return Err("catalog declaration fixture setup failed".into());
+            }
+            _ => {}
+        }
         let mut state = self.state.lock().unwrap();
         state.declarations.clear();
         state.runner_declarations.clear();

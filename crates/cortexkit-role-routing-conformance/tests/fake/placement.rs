@@ -94,6 +94,10 @@ impl FakeRoute {
         if kind != "llm" && self.fault("placement_without_select_kind") {
             return Err(Refusal::no_route(NoRouteReason::AllInadequate, None));
         }
+        if self.search_control && kind == "search" {
+            params["kind"] = json!("search");
+            return self.select_search_route(state, &params);
+        }
         if self.media_control && kind != "llm" && !self.fault("placement_accepts_unserved_kind") {
             let describe: RoleDescribe = serde_json::from_value(self.describe(state)?).unwrap();
             if !describe.kinds.iter().any(|served| served.as_str() == kind) {
