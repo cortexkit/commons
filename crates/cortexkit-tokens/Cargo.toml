@@ -1,32 +1,36 @@
 [package]
 name = "cortexkit-tokens"
-version = "0.1.0"
+version = "0.2.0"
 # The tokenizer module is copied from Oh My Pi, which is written for the 2024
 # edition; keeping it lets the copy stay byte-for-byte close to upstream.
 edition = "2024"
 repository.workspace = true
 readme = "README.md"
 description = "Token counts for CortexKit runners and compaction providers: an offline tokenizer per model family, image token rules, and the measurement of replayed reasoning, so every module counts a part the same way."
-# The code is MIT; the Qwen vocabulary is Apache-2.0 (see NOTICE.md).
+# The code is MIT; the Qwen and Gemma vocabularies are Apache-2.0 (see
+# NOTICE.md).
 license = "MIT AND Apache-2.0"
-include = ["src/**/*", "data/*", "fixtures/*", "Cargo.toml", "README.md", "LICENSE-oh-my-pi", "NOTICE.md"]
+include = ["src/**/*", "data/*", "fixtures/*", "Cargo.toml", "README.md", "CHANGELOG.md", "LICENSE-oh-my-pi", "NOTICE.md"]
 
 [lib]
 name = "cortexkit_tokens"
 
 # Each family's vocabulary is embedded in the binary (o200k ~0.9 MB, Qwen 3
-# ~1.1 MB, the Claude set ~0.1 MB), so a runner can build only the families
-# it serves. o200k is always built: it counts models this crate doesn't know.
+# ~1.1 MB, Gemma 4 ~1.3 MB, the Claude set ~0.1 MB), so a runner can build
+# only the families it serves. o200k is always built: it counts models this
+# crate doesn't know.
 [features]
 # `kimi` is opt-in: Kimi K2's license adds a display term for very large
 # products (see NOTICE.md), and a build only takes it on by choosing it.
-default = ["claude", "cl100k", "qwen", "deepseek", "glm"]
+default = ["claude", "cl100k", "qwen", "deepseek", "glm", "gemma"]
 claude = []
 cl100k = []
 qwen = []
 deepseek = []
 kimi = []
 glm = []
+# The Gemini family, counted with Gemma 4's vocabulary.
+gemma = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

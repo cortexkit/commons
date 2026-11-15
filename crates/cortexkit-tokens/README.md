@@ -7,18 +7,19 @@ each part once with this crate and sends the counts; a compaction provider
 with the same crate.
 
 ```sh
-cargo add cortexkit-tokens@0.1
+cargo add cortexkit-tokens@0.2
 ```
 
 - `count(family, text)`: content tokens of a text, with no message frame.
   Each family is an offline reconstruction of one provider tokenizer (OpenAI
   o200k and cl100k, four Claude generations, Qwen 3, DeepSeek V3, Kimi K2,
-  GLM-5), with no correction ratio on top.
+  GLM-5, and Gemini through Gemma 4's published tokenizer), with no
+  correction ratio on top.
 - `family_for_model(model)`: the family to count a model's text with, from
   name rules. An unrecognized model, including GPT-4o and older GPT models,
   gets o200k with no guaranteed error bound, and the choice says it is not
   exact; so does a known approximation (Haiku 5.5 counted with Sonnet 5's
-  vocabulary).
+  vocabulary, and Gemini before 3 or Gemma before 4 counted with Gemma 4's).
 - `image::rule_for` and `image::tokens`: an estimate of what one image costs
   its reader, by pixel size. Unrecognized models use their API's fallback,
   which is an assumption, not an upper bound.
@@ -32,6 +33,8 @@ cargo add cortexkit-tokens@0.1
   label; callers store it and recompute counts under another. Maintainers bump
   a revision whenever a change can alter its counts, and a test pins one
   sample count per family as a regression guard.
+- `Family` is non-exhaustive: a later release may add a family, so a `match`
+  on it needs a wildcard arm.
 
 Each family's vocabulary is behind a cargo feature, so a runner builds only
 what it serves. o200k is always built. `count` returns `None` for a family
@@ -45,7 +48,14 @@ that isn't built in. The vocabularies carry their own licenses:
 | `qwen` | Qwen 3 | Apache-2.0 | yes |
 | `deepseek` | DeepSeek V3 to V4 | MIT | yes |
 | `glm` | GLM-5 | MIT per the model card; no license file in the release | yes |
+| `gemma` | Gemini 3 onward and Gemma 4 onward (Gemma 4's vocabulary) | Apache-2.0 | yes |
 | `kimi` | Kimi K2 | Modified MIT: a product over 100M monthly users or US$20M monthly revenue must prominently display "Kimi K2" in its UI | no |
+
+Gemini's `countTokens` returned exactly the Gemma 4 count for text, less the
+one token it adds for the user turn, for `gemini-3.8-flash` and
+`gemini-3.1-pro-preview` alike. Gemini counts tool declarations its own way,
+so a count of their JSON text is only an estimate. A special-token string
+written in the text, such as `<bos>`, counts as plain text.
 
 The code is MIT. `NOTICE.md` gives each file's exact source and revision.
 

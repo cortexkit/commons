@@ -13,6 +13,7 @@
 //! | `DeepSeekV3` | `DeepSeek` V3 … V4 | byte-level BPE, 3-stage split chain |
 //! | `KimiK2` | Kimi K2 … K3 | byte-level BPE (tiktoken ranks) |
 //! | `Glm5` | GLM-5.x (exact), GLM-4.x (near-exact) | byte-level BPE, `ignore_merges` |
+//! | `Gemma4` | Gemini 3+ / Gemma 4+ (262k vocab) | character BPE with a merges list and byte fallback (cortexkit-tokens) |
 //!
 //! Semantics are `encode_ordinary`: plain content, no special tokens, no
 //! chat-template frame. This matches budget-estimation use where fragments
@@ -33,6 +34,11 @@ mod bpe;
 // it here).
 #[cfg(feature = "claude")]
 mod claude;
+// cortexkit-tokens: Gemma's tokenizer, for the Gemini family. Not from
+// upstream; its merge priority comes from a merges list, which the rank
+// tables in `bpe.rs` cannot express (see the module).
+#[cfg(feature = "gemma")]
+mod gemma;
 mod pretoken;
 mod scan;
 mod tables;
@@ -70,6 +76,9 @@ pub enum Encoding {
     KimiK2,
     /// GLM-5 (154,820-token vocabulary; ID-preserving superset of GLM-4.x).
     Glm5,
+    /// cortexkit-tokens: Gemma 4 (262,144-token vocabulary), which Gemini 3
+    /// onward also counts with.
+    Gemma4,
 }
 
 impl Encoding {
@@ -90,6 +99,9 @@ impl Encoding {
             Self::ClaudeV5Sonnet => {
                 claude::content_token_count(text.units(), claude::Family::V5Sonnet)
             }
+            // cortexkit-tokens: Gemma has its own engine, gated like Claude.
+            #[cfg(feature = "gemma")]
+            Self::Gemma4 => gemma::count(text.units()),
             _ => tables::bpe_for(self).count(text.units()),
         }
     }
@@ -101,6 +113,8 @@ impl Encoding {
     pub fn encode<T: Utf + ?Sized>(self, text: &T) -> Option<Vec<u32>> {
         match self {
             Self::ClaudeV3 | Self::ClaudeV47 | Self::ClaudeV5 | Self::ClaudeV5Sonnet => None,
+            #[cfg(feature = "gemma")]
+            Self::Gemma4 => Some(gemma::encode(text.units())),
             _ => Some(tables::bpe_for(self).encode(text.units())),
         }
     }
@@ -117,6 +131,9 @@ mod tests {
     #[cfg(feature = "deepseek")]
     #[path = "deepseek.rs"]
     mod deepseek;
+    #[cfg(feature = "gemma")]
+    #[path = "gemma.rs"]
+    mod gemma;
     #[cfg(feature = "glm")]
     #[path = "glm.rs"]
     mod glm;

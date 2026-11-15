@@ -2,16 +2,19 @@
 //!
 //! The mapping follows Oh My Pi's catalog (`model-tokenizer.ts`): Claude by
 //! line and revision, OpenAI from GPT-5, and the open-weight families by name
-//! rules. These are name-based rules, not a check of the provider's
-//! tokenizer. Any model they don't recognize, including GPT-4o and older GPT
-//! models, gets o200k as a stand-in with no guaranteed error bound, and the
-//! choice says so ([`FamilyChoice::exact`] is false).
+//! rules; Gemini and Gemma are added here. These are name-based rules, not a
+//! check of the provider's tokenizer. Any model they don't recognize,
+//! including GPT-4o and older GPT models, gets o200k as a stand-in with no
+//! guaranteed error bound, and the choice says so ([`FamilyChoice::exact`]
+//! is false).
 
 use crate::utok::Encoding;
 
 /// A tokenizer family this crate can count with. Each is an offline
-/// reconstruction of one provider tokenizer.
+/// reconstruction of one provider tokenizer. More families may be added in
+/// a minor release, so a `match` on it needs a wildcard arm.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Family {
     /// OpenAI GPT-4o and GPT-5 onward.
     O200k,
@@ -33,11 +36,17 @@ pub enum Family {
     KimiK2,
     /// GLM-5 onward.
     Glm5,
+    /// Gemini 3 onward and Gemma 4 onward, counted with Gemma 4's published
+    /// vocabulary. Earlier Gemini and Gemma also map here, but not as exact:
+    /// Gemma 3's tokenizer adds about 6,400 tokens it matches whole in the
+    /// text (HTML tags and the like) that Gemma 4 and Gemini 3 lack, so it
+    /// counts HTML-heavy text differently.
+    Gemini,
 }
 
 impl Family {
     /// Every family, in a fixed order.
-    pub const ALL: [Family; 10] = [
+    pub const ALL: [Family; 11] = [
         Family::O200k,
         Family::Cl100k,
         Family::ClaudeV3,
@@ -48,6 +57,7 @@ impl Family {
         Family::DeepSeekV3,
         Family::KimiK2,
         Family::Glm5,
+        Family::Gemini,
     ];
 
     /// The family's stable name, as it appears in a `token_family`.
@@ -63,6 +73,7 @@ impl Family {
             Family::DeepSeekV3 => "deepseek-v3",
             Family::KimiK2 => "kimi-k2",
             Family::Glm5 => "glm5",
+            Family::Gemini => "gemini",
         }
     }
 
@@ -99,7 +110,7 @@ impl Family {
 
     /// Whether this binary holds the family's vocabulary. o200k is always
     /// built. The features are `cl100k`, `claude` (all four Claude families),
-    /// `qwen`, `deepseek`, `kimi` and `glm`.
+    /// `qwen`, `deepseek`, `kimi`, `glm` and `gemma` (Gemini).
     pub fn is_built(self) -> bool {
         match self {
             Family::O200k => true,
@@ -111,6 +122,7 @@ impl Family {
             Family::DeepSeekV3 => cfg!(feature = "deepseek"),
             Family::KimiK2 => cfg!(feature = "kimi"),
             Family::Glm5 => cfg!(feature = "glm"),
+            Family::Gemini => cfg!(feature = "gemma"),
         }
     }
 
@@ -137,6 +149,7 @@ impl Family {
             Family::DeepSeekV3 => Encoding::DeepSeekV3,
             Family::KimiK2 => Encoding::KimiK2,
             Family::Glm5 => Encoding::Glm5,
+            Family::Gemini => Encoding::Gemma4,
         }
     }
 }
@@ -191,10 +204,42 @@ fn known_family(id: &str) -> Option<(Family, bool)> {
     if let Some(revision) = revision_after(id, "glm") {
         return at_least(revision, (5, 0)).then_some(own(Family::Glm5));
     }
+    if let Some(choice) = gemini_family(id) {
+        return Some(choice);
+    }
     if let Some(revision) = revision_after(id, "gpt") {
         return at_least(revision, (5, 0)).then_some(own(Family::O200k));
     }
     None
+}
+
+/// Gemini and Gemma by revision. Gemma 4's published tokenizer reproduces
+/// Gemini's own text counts from Gemini 3 on, so Gemini 3 onward and Gemma 4
+/// onward are exact. Everything else here is an approximation. Gemma 3's
+/// tokenizer shares this vocabulary but adds about 6,400 tokens it matches
+/// whole in the text (HTML tags, runs of `▁`, unused slots) that Gemma 4 and
+/// Gemini lack, so HTML-heavy text counts differently. Gemini before 3 was
+/// never measured; Gemma 3's report says Gemini 2.0 shares Gemma 3's
+/// tokenizer, which makes this vocabulary its nearest stand-in. Gemma 1 and
+/// 2, and ids with no revision (`gemini-flash-latest`), are placed here as
+/// the nearest known vocabulary.
+fn gemini_family(id: &str) -> Option<(Family, bool)> {
+    let (line, floor) = [("gemini", (3, 0)), ("gemma", (4, 0))]
+        .into_iter()
+        .find(|(line, _)| id.contains(line))?;
+    let exact = !names_parameter_count(id, line)
+        && revision_after(id, line).is_some_and(|revision| at_least(revision, floor));
+    Some((Family::Gemini, exact))
+}
+
+/// Whether the number after `line` in `id` is a parameter count, not a
+/// revision: Gemma 1 ids put the size where later ids put the revision
+/// (`gemma-7b-it`, but `gemma-3-27b-it`).
+fn names_parameter_count(id: &str, line: &str) -> bool {
+    let start = id.find(line).map_or(id.len(), |at| at + line.len());
+    let rest = id[start..].trim_start_matches(['-', '_', '.', ' ']);
+    let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+    digits > 0 && rest[digits..].starts_with(['b', 'm'])
 }
 
 /// Claude's tokenizer by line and revision, as in Oh My Pi's catalog, and
@@ -303,15 +348,56 @@ mod tests {
 
     #[test]
     fn unknown_or_older_models_count_with_o200k_marked_inexact() {
-        for model in [
-            "gemini-3-pro",
-            "gpt-4o",
-            "qwen3-coder",
-            "glm-4.6",
-            "grok-4.7",
-            "",
-        ] {
+        for model in ["gpt-4o", "qwen3-coder", "glm-4.6", "grok-4.7", ""] {
             assert_eq!(family(model), (Family::O200k, false), "{model}");
+        }
+    }
+
+    #[test]
+    fn gemini_3_and_gemma_4_onward_are_exact() {
+        for model in [
+            "gemini-3.8-flash",
+            "gemini-3.1-pro-preview",
+            "gemini-3-pro",
+            "google/gemini-3.8-flash",
+            "models/gemini-3.1-pro-preview",
+            "antigravity-gemini-3.8-flash",
+            "gemini-3.8-flash-low",
+            "Gemini-3.8-Flash",
+            "gemini-10-ultra",
+            "gemma-4-12b-it",
+            "google/gemma-4-12B-it",
+            "gemma4:27b",
+            "gemma-4-e4b-it",
+        ] {
+            assert_eq!(family(model), (Family::Gemini, true), "{model}");
+        }
+    }
+
+    #[test]
+    fn earlier_or_unversioned_gemini_and_gemma_are_not_exact() {
+        for model in [
+            // Gemma 3's tokenizer matches HTML tags and the like whole.
+            "gemma-3-27b-it",
+            "google/gemma-3-1b-it",
+            "gemma3:27b",
+            "gemma-3n-e4b-it",
+            // Gemini before 3 was never measured.
+            "gemini-2.5-pro",
+            "google/gemini-2.0-flash",
+            "gemini-1.5-flash-002",
+            // Gemma 1 and 2 have their own, older vocabularies; Gemma 1 ids
+            // carry a parameter count where later ids carry the revision.
+            "gemma-2-27b-it",
+            "gemma-1.1-7b-it",
+            "gemma-7b",
+            "codegemma-7b-it",
+            // No revision at all.
+            "gemini-flash-latest",
+            "gemini-exp-1206",
+            "gemma",
+        ] {
+            assert_eq!(family(model), (Family::Gemini, false), "{model}");
         }
     }
 

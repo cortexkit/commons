@@ -21,6 +21,11 @@ with a `cortexkit-tokens:` comment:
 - **The Jev family is removed.** Its vocabulary was measured from a live API
   rather than published, and no model maps to it here. Its data, tests and
   documentation are removed with it.
+- **A Gemini family is added.** `src/utok/gemma.rs` is new code written for
+  this crate, not upstream: Gemma 4's tokenizer ranks merges by an explicit
+  list, which upstream's rank tables cannot express. `src/utok/mod.rs` routes
+  `Encoding::Gemma4` to it, and the Gemini name rules in `src/family.rs` are
+  new as well.
 
 The image rules in `src/image.rs` and the model-to-family mapping in
 `src/family.rs` are ported from Oh My Pi's model catalog
@@ -50,9 +55,21 @@ packed output itself is checked only by the tests.
 | `kimi_k2.bin.zst` | `tiktoken.model` of <https://huggingface.co/moonshotai/Kimi-K2-Instruct> at `fd1984e2b7a3350dbf7305fe73a4ede25c14de50`, sha256 `b6c497a7469b33ced9c38afb1ad6e47f03f5e5dc05f15930799210ec050c5103` | Modified MIT, `data/LICENSE.kimi` |
 | `glm5.bin.zst` | `tokenizer.json` of <https://huggingface.co/zai-org/GLM-5> at `c183ef8c61faee82855eca1ed9bb3a9a7ce3b0b2` | `mit` in the model card's metadata; the repository has no license file |
 
-The Qwen vocabulary is redistributed under Apache-2.0: `data/LICENSE.qwen`
-is its license, and this notice states the one change made to it, the
-repacking above. The Kimi K2 license adds a term to MIT: a commercial
+The Gemma 4 tables are not from Oh My Pi. `tools/pack-gemma.py` in this
+repository packs them from the source file below, after checking its hash:
+the pieces in id order, with pieces no count can use left as empty slots,
+and the merges list in its own order (layout in `data/families.json`,
+`gemma4`). `tools/gen-gemma-fixture.py` makes `fixtures/gemma4.json` from the
+same file with Hugging Face `tokenizers`.
+
+| File | Source | License |
+|---|---|---|
+| `gemma4_vocab.bin.zst`, `gemma4_merges.bin.zst` | `tokenizer.json` of <https://huggingface.co/google/gemma-4-12B-it> at `43c9d014b231474fa7212dbb48a762566c2b255d`, sha256 `9788bdb6a021b3170357cd3587b5d622b1177561ad3c5bf43d73728fd71aeacb` | Apache-2.0 (`apache-2.0` in the model card; the repository has no license file), `data/LICENSE.gemma` |
+
+The Qwen and Gemma vocabularies are redistributed under Apache-2.0:
+`data/LICENSE.qwen` and `data/LICENSE.gemma` are their licenses, and this
+notice states the one change made to each, the repacking above. The Kimi K2
+license adds a term to MIT: a commercial
 product or service built on the software or a derivative work, with more
 than 100 million monthly active users or more than US$20 million monthly
 revenue, must prominently display "Kimi K2" in its user interface.
