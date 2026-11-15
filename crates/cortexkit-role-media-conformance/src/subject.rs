@@ -12,6 +12,8 @@ pub struct Capabilities {
     pub has_speech_check: bool,
     pub retries_transient: bool,
     pub jobs_survive_restart: bool,
+    /// Run job cases with local engines and optional, contract-checked usage records.
+    pub local_provider: bool,
 }
 
 impl Capabilities {
@@ -28,6 +30,10 @@ impl Capabilities {
     }
     pub fn with_jobs_survive_restart(mut self, value: bool) -> Self {
         self.jobs_survive_restart = value;
+        self
+    }
+    pub fn with_local_provider(mut self, value: bool) -> Self {
+        self.local_provider = value;
         self
     }
 }

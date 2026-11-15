@@ -130,12 +130,17 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
     if !CASES.contains(&name) {
         return Outcome::Failed(format!("{name}: unknown case"));
     }
+    if subject.capabilities().local_provider {
+        if let Some(reason) = local_inapplicable_reason(name) {
+            return Outcome::NotApplicable(format!("local_provider is true: {reason}"));
+        }
+    }
     if name == "running_restart_records_failure" && !subject.capabilities().jobs_survive_restart {
         return Outcome::NotApplicable("jobs_survive_restart is false".into());
     }
     let routing = RecordingRoutingPeer::new();
     let vendor = RecordingVendor::new();
-    let result = async {
+    let result: Result<(), String> = async {
         let configured = if matches!(
             name,
             "describe_matches_engine_declaration" | "describe_checker_codes"
@@ -144,7 +149,10 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
         } else {
             engines()
         };
-        subject.configure_engines(configured).await.map_err(err)?;
+        subject
+            .configure_engines(job_mode_engines(subject, configured))
+            .await
+            .map_err(err)?;
         subject
             .configure_peers(routing.clone(), vendor.clone())
             .await
@@ -165,13 +173,61 @@ pub async fn run_case<S: MediaSubject>(subject: &S, name: &str) -> Outcome {
             stream_realtime::run(subject, &routing, &vendor, name).await
         } else {
             run(subject, &routing, name).await
+        }?;
+        // Local job records are optional, but supplied records still obey the contract.
+        if subject.capabilities().local_provider && !STREAM_REALTIME_CASES.contains(&name) {
+            records(subject).await?;
         }
+        Ok(())
     }
     .await;
     match result {
         Ok(()) => Outcome::Passed,
         Err(reason) => Outcome::Failed(format!("{name}: {reason}")),
     }
+}
+
+fn local_inapplicable_reason(name: &str) -> Option<&'static str> {
+    match name {
+        "remote_submit_requires_decision" => Some("local jobs do not require a routing decision"),
+        "refused_submit_not_remembered" => {
+            Some("this case injects a remote routing admission refusal")
+        }
+        "routing_admission_per_attempt" => {
+            Some("local jobs do not acquire or renew routing admissions")
+        }
+        "renewal_lapse_ends_work" => Some("local jobs have no routing admission lease to lapse"),
+        "usage_absent_is_not_zero"
+        | "usage_no_rounding"
+        | "usage_input_image"
+        | "usage_output_image"
+        | "usage_output_video"
+        | "usage_cache_read"
+        | "usage_request_derived"
+        | "usage_quantity_bounds"
+        | "usage_quantity_coefficient_bounds"
+        | "usage_record_bounds" => {
+            Some("this case requires a remote job usage record and vendor usage metadata")
+        }
+        "usage_feed_redelivers_until_ack"
+        | "usage_feed_admits_only_reader"
+        | "usage_ack_beyond_written_refused"
+        | "usage_ack_answer" => {
+            Some("this case requires a persisted job usage record; local job records are optional")
+        }
+        _ => None,
+    }
+}
+
+fn job_mode_engines<S: MediaSubject>(s: &S, mut engines: Vec<Engine>) -> Vec<Engine> {
+    if s.capabilities().local_provider {
+        for engine in &mut engines {
+            if engine.kind.group() == Some(cortexkit_role_media::describe::Group::Jobs) {
+                engine.local = true;
+            }
+        }
+    }
+    engines
 }
 
 fn describe_engines() -> Vec<Engine> {
@@ -342,7 +398,7 @@ async fn records<S: MediaSubject>(s: &S) -> Result<Vec<Value>, String> {
     let mut calls = std::collections::BTreeMap::<String, Vec<UsageRecord>>::new();
     for e in entries {
         let r = e.get("record").ok_or("expected record entry")?;
-        if r["model"] == "local" {
+        if r["model"] == "local" && !s.capabilities().local_provider {
             continue;
         }
         let typed: UsageRecord = serde_json::from_value(r.clone()).map_err(err)?;
@@ -351,7 +407,11 @@ async fn records<S: MediaSubject>(s: &S) -> Result<Vec<Value>, String> {
             calls.entry(call_id.clone()).or_default().push(typed);
         }
         require(
-            r["principal"] == "alice" && r["provider"] == "fixture",
+            r["principal"] == "alice"
+                && (r["provider"] == "fixture"
+                    || (s.capabilities().local_provider
+                        && r["model"] == "local"
+                        && r["provider"] == "local")),
             "usage attribution",
         )?;
         out.push(r.clone());
@@ -390,7 +450,18 @@ async fn completed<S: MediaSubject>(s: &S, id: &str) -> Result<String, String> {
     .await?;
     let id = submit(s, request(id, "transcribe")).await?;
     expect_status(s, &id, "done").await?;
-    wait_records(s, 1).await?;
+    if s.capabilities().local_provider {
+        let rs = records(s).await?;
+        require(
+            rs.len() <= 1
+                && rs
+                    .iter()
+                    .all(|r| r["job_id"] == id && r["status"] == "done"),
+            "completed local job usage",
+        )?;
+    } else {
+        wait_records(s, 1).await?;
+    }
     Ok(id)
 }
 fn failure(code: &str, class: &str) -> Value {
@@ -414,6 +485,11 @@ async fn run<S: MediaSubject>(s: &S, r: &RecordingRoutingPeer, name: &str) -> Re
     match name {
         "submit_idempotent_on_client_job_id" => {
             let id = completed(s, "replay").await?;
+            let before = if s.capabilities().local_provider {
+                Some(records(s).await?)
+            } else {
+                None
+            };
             require(
                 submit(s, request("replay", "transcribe")).await? == id,
                 "replay changed job",
@@ -422,7 +498,11 @@ async fn run<S: MediaSubject>(s: &S, r: &RecordingRoutingPeer, name: &str) -> Re
                 s.engine_inputs("transcribe").await.map_err(err)?.len() == 1,
                 "replay ran engine",
             )?;
-            require(records(s).await?.len() == 1, "replay wrote usage")
+            let after = records(s).await?;
+            require(
+                before.map_or(after.len() == 1, |before| before == after),
+                "replay wrote usage",
+            )
         }
         "submit_refuses_client_job_id_reuse" => {
             let original = request("reuse", "transcribe");
@@ -604,7 +684,7 @@ async fn run<S: MediaSubject>(s: &S, r: &RecordingRoutingPeer, name: &str) -> Re
             let key = |e: &Engine| (e.kind.clone(), e.provider.clone(), e.model.clone());
             actual.sort_by_key(&key);
             manifest.sort_by_key(&key);
-            let mut expected = describe_engines();
+            let mut expected = job_mode_engines(s, describe_engines());
             expected.sort_by_key(key);
             require(
                 actual == manifest && actual == expected,
@@ -924,9 +1004,17 @@ async fn run_more<S: MediaSubject>(
             script(s, "transcribe", vec![ScriptStep::Failure(f)]).await?;
             let id = submit(s, request("failure", "transcribe")).await?;
             let st = expect_status(s, &id, "failed").await?;
-            let rs = wait_records(s, 1).await?;
+            let local = s.capabilities().local_provider;
+            let rs = if local {
+                records(s).await?
+            } else {
+                wait_records(s, 1).await?
+            };
             require(
-                rs.len() == 1 && st["failure"] == rs[0]["failure"],
+                (if local { rs.len() <= 1 } else { rs.len() == 1 })
+                    && rs
+                        .iter()
+                        .all(|r| r["job_id"] == id && st["failure"] == r["failure"]),
                 "failure differs across status/usage",
             )?;
             require(
@@ -948,9 +1036,18 @@ async fn run_more<S: MediaSubject>(
             expect_status(s, &id, "running").await?;
             cancel(s, &id, "cancelled").await?;
             s.release_engine("transcribe").await.map_err(err)?;
-            let rs = wait_records(s, 1).await?;
+            let local = s.capabilities().local_provider;
+            let rs = if local {
+                expect_status(s, &id, "cancelled").await?;
+                records(s).await?
+            } else {
+                wait_records(s, 1).await?
+            };
             require(
-                rs.len() == 1 && rs[0]["status"] == "cancelled",
+                (if local { rs.len() <= 1 } else { rs.len() == 1 })
+                    && rs
+                        .iter()
+                        .all(|r| r["job_id"] == id && r["status"] == "cancelled"),
                 "cancelled attempt record",
             )?;
             if s.capabilities().retries_transient {
@@ -965,6 +1062,22 @@ async fn run_more<S: MediaSubject>(
                 .await?;
                 let id = submit(s, request("retry-record", "transcribe")).await?;
                 expect_status(s, &id, "done").await?;
+                if local {
+                    let rs = records(s).await?;
+                    let retried: Vec<_> = rs.iter().filter(|r| r["job_id"] == id).collect();
+                    require(
+                        retried.len() <= 2
+                            && retried.iter().filter(|r| r["status"] == "failed").count() <= 1
+                            && retried.iter().filter(|r| r["status"] == "done").count() <= 1
+                            && retried
+                                .iter()
+                                .all(|r| r["status"] == "failed" || r["status"] == "done")
+                            && (retried.len() < 2
+                                || retried[0]["record_id"] != retried[1]["record_id"]),
+                        "local retry attempt records",
+                    )?;
+                    return Ok(());
+                }
                 let rs = wait_records(s, 3).await?;
                 require(
                     rs.len() == 3
@@ -1015,6 +1128,27 @@ async fn run_more<S: MediaSubject>(
                 cancel(s, &id, "cancelled").await?;
             }
             s.restart().await.map_err(err)?;
+            if s.capabilities().local_provider {
+                let expected = if cancelled { "cancelled" } else { "failed" };
+                let st = expect_status(s, &id, expected).await?;
+                if !cancelled {
+                    require(
+                        st["failure"]["code"] == "module_restarted",
+                        "restart failure code",
+                    )?;
+                }
+                let rs = records(s).await?;
+                require(
+                    rs.len() <= 1
+                        && rs.iter().all(|r| {
+                            r["job_id"] == id
+                                && r["status"] == expected
+                                && (cancelled || r["failure"] == st["failure"])
+                        }),
+                    "local restart attempt record",
+                )?;
+                return Ok(());
+            }
             let rs = wait_records(s, 1).await?;
             require(
                 rs.iter().filter(|v| v["job_id"] == id).count() >= 1,

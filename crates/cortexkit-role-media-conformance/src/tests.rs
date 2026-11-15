@@ -126,6 +126,173 @@ case_tests! {
     media_kit_core_renewal_lapse_ends_work,
 }
 
+const LOCAL_JOB_CASES: &[&str] = &[
+    "submit_idempotent_on_client_job_id",
+    "submit_refuses_client_job_id_reuse",
+    "submit_refuses_outside_declared_facts",
+    "input_too_large",
+    "client_job_id_bounds",
+    "describe_matches_engine_declaration",
+    "describe_checker_codes",
+    "deadline_counts_queue_time",
+    "refusal_class_decides_retry",
+    "empty_transcript_is_a_failure",
+    "empty_output_is_a_failure",
+    "usage_feed_oversize_entry_acks",
+    "failure_identical_across_surfaces",
+    "usage_record_per_attempt",
+    "restart_keeps_terminal_jobs",
+    "cancel_then_restart_records_cancelled",
+    "running_restart_records_failure",
+    "chunked_result_checksum",
+    "upload_resumes_at_received",
+    "upload_gone_after_restart",
+    "committed_upload_is_object",
+    "oversize_output_is_object",
+    "objects_retained_for_one_hour",
+    "cancel_after_done_reports_done",
+    "cancel_never_changes_terminal_status",
+    "foreign_job_is_unknown",
+];
+
+#[tokio::test]
+async fn media_kit_local_job_cases_pass_with_optional_records() {
+    assert!(!Capabilities::new().local_provider);
+    for records in [false, true] {
+        for capabilities in [false, true] {
+            for &case in LOCAL_JOB_CASES {
+                if case == "running_restart_records_failure" && !capabilities {
+                    continue;
+                }
+                let subject =
+                    Fake::new(None, capabilities, capabilities).with_local_provider(records);
+                assert_eq!(
+                    run_case(&subject, case).await,
+                    Outcome::Passed,
+                    "local {case}, records={records}, retry/restart={capabilities}"
+                );
+                let declared = subject.engine_declaration().await.unwrap();
+                assert!(declared.iter().all(|engine| {
+                    engine.kind.group() != Some(cortexkit_role_media::describe::Group::Jobs)
+                        || engine.local
+                }));
+                if !records {
+                    let feed = subject
+                        .call_as("reader", Request::new("usage.read", json!({"limit":1000})))
+                        .await
+                        .unwrap();
+                    assert_eq!(feed["result"]["entries"], json!([]), "local {case}");
+                }
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn media_kit_local_mode_preserves_stream_and_realtime_cases() {
+    for case in [
+        "stream_restart",
+        "calls_scoped_by_principal",
+        "stream_realtime_admission_lifecycle",
+    ] {
+        let subject = Fake::new(None, true, true).with_local_provider(true);
+        assert_eq!(run_case(&subject, case).await, Outcome::Passed, "{case}");
+    }
+}
+
+#[tokio::test]
+async fn media_kit_local_valid_usage_record_is_checked() {
+    let subject = Fake::new(None, true, true).with_local_provider(true);
+    assert_eq!(
+        run_case(&subject, "submit_idempotent_on_client_job_id").await,
+        Outcome::Passed
+    );
+    let feed = subject
+        .call_as("reader", Request::new("usage.read", json!({"limit":1000})))
+        .await
+        .unwrap();
+    let entries = feed["result"]["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["record"]["charge_basis"], "local");
+    assert!(entries[0]["record"].get("credential_ref").is_none());
+}
+
+#[tokio::test]
+async fn media_kit_local_malformed_record_is_rejected() {
+    for case in [
+        "empty_transcript_is_a_failure",
+        "submit_idempotent_on_client_job_id",
+        "failure_identical_across_surfaces",
+        "usage_record_per_attempt",
+        "cancel_then_restart_records_cancelled",
+        "running_restart_records_failure",
+    ] {
+        let subject =
+            Fake::new(Some("local_malformed_usage"), true, true).with_local_provider(true);
+        let bad = run_case(&subject, case).await;
+        assert_eq!(
+            bad,
+            Outcome::Failed(format!("{case}: invalid_usage_record: charge_basis")),
+            "local {case}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn media_kit_local_remote_only_cases_are_inapplicable() {
+    for (cases, reason) in [
+        (
+            &["remote_submit_requires_decision"][..],
+            "local jobs do not require a routing decision",
+        ),
+        (
+            &["refused_submit_not_remembered"][..],
+            "this case injects a remote routing admission refusal",
+        ),
+        (
+            &["routing_admission_per_attempt"][..],
+            "local jobs do not acquire or renew routing admissions",
+        ),
+        (
+            &["renewal_lapse_ends_work"][..],
+            "local jobs have no routing admission lease to lapse",
+        ),
+        (
+            &[
+                "usage_absent_is_not_zero",
+                "usage_no_rounding",
+                "usage_input_image",
+                "usage_output_image",
+                "usage_output_video",
+                "usage_cache_read",
+                "usage_request_derived",
+                "usage_quantity_bounds",
+                "usage_quantity_coefficient_bounds",
+                "usage_record_bounds",
+            ][..],
+            "this case requires a remote job usage record and vendor usage metadata",
+        ),
+        (
+            &[
+                "usage_feed_redelivers_until_ack",
+                "usage_feed_admits_only_reader",
+                "usage_ack_beyond_written_refused",
+                "usage_ack_answer",
+            ][..],
+            "this case requires a persisted job usage record; local job records are optional",
+        ),
+    ] {
+        for case in cases {
+            let subject = Fake::new(None, true, true).with_local_provider(false);
+            assert_eq!(
+                run_case(&subject, case).await,
+                Outcome::NotApplicable(format!("local_provider is true: {reason}")),
+                "{case}"
+            );
+        }
+    }
+}
+
 #[tokio::test]
 async fn media_kit_core_usage_quantity_bounds() {
     let case = "usage_quantity_bounds";

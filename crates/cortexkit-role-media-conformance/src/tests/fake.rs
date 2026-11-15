@@ -61,8 +61,14 @@ struct State {
     next_id: u64,
     retries: bool,
     survives: bool,
+    local_records: bool,
 }
 impl Fake {
+    pub(super) fn with_local_provider(mut self, records: bool) -> Self {
+        self.capabilities = self.capabilities.with_local_provider(true);
+        self.state.get_mut().unwrap().local_records = records;
+        self
+    }
     pub(super) fn with_speech_check(mut self, enabled: bool) -> Self {
         self.capabilities.has_speech_check = enabled;
         self.state.get_mut().unwrap().extra.speech_check = enabled;
@@ -103,15 +109,20 @@ impl State {
         self.next_id += 1;
         format!("{prefix}{}", self.next_id)
     }
+    fn local_job(&self, req: &Value) -> bool {
+        self.engines
+            .iter()
+            .any(|e| e.local && req["kind"] == e.kind.as_str() && req["model"] == e.model)
+    }
     fn observe(&self, job: &Job, kind: &str) -> SubjectResult<()> {
-        if job.request["model"] == "local" {
+        if self.local_job(&job.request) {
             return Ok(());
         }
         self.routing.call("route.account_observe",json!({"kind":kind,"admission_id":job.admission,"event_id":format!("{}/{}",job.admission,if kind=="run_finished" {"finished"} else {"started"})}))?;
         Ok(())
     }
     fn admit(&self, id: &str, req: &Value, attempt: u64) -> SubjectResult<Value> {
-        if req["model"] == "local" {
+        if self.local_job(req) {
             return Ok(Value::Null);
         }
         let mut params = json!({"provider":"fixture","model":req["model"],"conversation_key":id,"admission_id":format!("{id}/{attempt}"),"hold_wait_max_s":0});
@@ -153,7 +164,8 @@ impl State {
         }
     }
     fn record(&mut self, id: &str, j: &Job, status: &str, failure: Option<Value>) {
-        if j.request["model"] == "local" {
+        let local = self.local_job(&j.request);
+        if local && !self.local_records {
             return;
         }
         let record_id = self.id("record");
@@ -215,6 +227,19 @@ impl State {
             r["record_id"] = json!("same-record");
             if status == "cancelled" {
                 r["status"] = json!("done");
+            }
+        }
+        if local {
+            r["charge_basis"] = json!("local");
+            let object = r.as_object_mut().unwrap();
+            for field in ["credential_ref", "auth_method", "vendor_request_id"] {
+                object.remove(field);
+            }
+            if j.request["model"] == "local" {
+                r["provider"] = json!("local");
+            }
+            if self.fault("local_malformed_usage") {
+                r["credential_ref"] = json!("forbidden-local-credential");
             }
         }
         self.usage
@@ -468,7 +493,7 @@ impl State {
                 }
             }
         }
-        if req["model"] != "local"
+        if !self.local_job(&req)
             && req.get("decision_id").is_none()
             && !self.fault("remote_submit_requires_decision")
         {
@@ -837,7 +862,7 @@ impl State {
                         "failed",
                         Some(failed("deadline_exceeded", "transient")),
                     )?;
-                } else if j.request["model"] != "local" && j.next_renew <= self.now() {
+                } else if !self.local_job(&j.request) && j.next_renew <= self.now() {
                     if j.pin["lease_valid_until_ms"]
                         .as_u64()
                         .is_some_and(|v| v <= self.now())

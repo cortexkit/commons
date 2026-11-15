@@ -5,7 +5,7 @@ Breaking: `call_as` now returns the raw RESPONSE body; adapters stop unwrapping.
 decoded answer. STREAM_DATA event bodies and referenced output-object contents
 stay unwrapped.
 
-Version 0.2.6 pins `cortexkit-role-media` exactly to 0.1.9. Implement `MediaSubject`
+Version 0.2.9 pins `cortexkit-role-media` exactly to 0.1.11. Implement `MediaSubject`
 in an adapter and call `run_case(&fresh_subject, case_name)` for each entry of `CASES`.
 Each case needs an isolated, empty provider store and a Tokio runtime with time
 enabled. `Outcome::Failed` includes the case name; `NotApplicable` names an
@@ -25,6 +25,20 @@ ends one attempt, and its remaining steps are available to the next attempt.
 `hold_engine` prevents new attempts starting; `Pause` blocks one already started.
 `release_engine` unblocks both. Transcripts come from scripts, not recognition
 accuracy. Engine output scripts may intentionally be malformed or oversized.
+
+For local job providers, return `Capabilities::new().with_local_provider(true)`
+from `MediaSubject::capabilities`, together with any other supported capabilities.
+The mode defaults to false. The kit marks job-kind fixture engines as local while
+keeping their model names and other facts, and runs the same replay, result,
+failure, cancellation, restart and retention assertions without waiting for billing.
+Under the contract's `media.usage.attempt` rule, local work need not write records;
+supplied records must still satisfy the usage rules and are checked, not ignored.
+Remote routing/admission cases and vendor usage/feed cases that require a persisted
+job record report `NotApplicable` with a reason. `usage_feed_oversize_entry_acks`
+still runs: it seeds oversized or undecodable bytes directly into the feed rather
+than requiring a job to write a record.
+The mode does not change streaming or realtime engine fixtures or their billing
+requirements.
 
 `open_stream` opens the real `media.stream_transcribe` request under its route
 principal and returns only after acceptance or an opening ERROR. The request

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.9
+
+- Add the opt-in `Capabilities::with_local_provider(true)` job mode. Job engines
+  are local, terminal and replay cases skip billing waits, and optional supplied
+  usage records still undergo the media contract's record checks.
+- Report remote routing/admission and record-dependent vendor usage/feed cases
+  as not applicable in local mode, with reasons. Remote mode remains the default.
+- Keep the media contract pin at `=0.1.11`, whose `media.usage.attempt` rule allows
+  local work to omit usage records.
+
 ## 0.2.8
 
 - Pin media `=0.1.11` and include the principal in attached-call usage record ids
