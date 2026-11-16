@@ -1000,6 +1000,38 @@ mod tests {
     }
 
     #[test]
+    fn host_unavailable_error_class_and_causes_round_trip() {
+        for cause in ["host_unreachable", "host_start_failed", "future_cause"] {
+            let wire = serde_json::json!({
+                "class": "host_unavailable",
+                "message": "host unavailable for 300 seconds before hand-over",
+                "provider_code": "provider_error",
+                "cause": cause
+            });
+            let error: RunError = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(
+                error.class,
+                crate::errors::run_error_classes::HOST_UNAVAILABLE
+            );
+            assert_eq!(
+                error.provider_code,
+                crate::errors::provider_codes::PROVIDER_ERROR
+            );
+            assert_eq!(error.cause.as_deref(), Some(cause));
+            assert_eq!(serde_json::to_value(&error).unwrap(), wire);
+            assert_eq!(
+                error,
+                RunError::new(
+                    crate::errors::run_error_classes::HOST_UNAVAILABLE,
+                    "host unavailable for 300 seconds before hand-over",
+                    crate::errors::provider_codes::PROVIDER_ERROR
+                )
+                .with_cause(cause)
+            );
+        }
+    }
+
+    #[test]
     fn handover_failed_error_class_and_causes_round_trip() {
         for cause in [
             "host_unreachable",

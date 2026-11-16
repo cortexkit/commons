@@ -3426,8 +3426,25 @@ Model-view reads and replacement-entry pages are not part of this contract.
     again itself, under the same `send_id`, when every earlier attempt is
     proven not to have left the runner or the process that hands prompts to
     the host. It reports `not_delivered` only once it stops trying. A host
-    that is not available now keeps the send queued and `pending`, as below;
-    that is not a hand-over failure;
+    that is not available now keeps the send queued and `pending` until the
+    `host_unavailable` deadline below; that is not a hand-over failure;
+  - `host_unavailable` (`send::REASON_HOST_UNAVAILABLE`): the send's run is due
+    (it would start a turn or join one now if the host were available), and
+    nothing but its session's unreachable host or a host that failed to start
+    this time holds it, where a later attempt can succeed; a known repeatable
+    failure instead follows the unchanged rule below. After 5 minutes (300
+    seconds) of this wait, counted from the later of the send's acceptance and
+    the moment its run became due, the send ends `not_delivered`. The runner
+    computes the deadline from its own durable timestamps so it survives a
+    runner restart, never from an in-memory timer alone. It may report this
+    reason only for a send it never handed to any host, and retires the send
+    in the same durable write so it can never land later. Words already handed
+    over require the `withdrawn` proof below or stay `delivered.as: "unknown"`.
+    If the send was given a `run_id`, that run ends `error` with no model step,
+    with `class: "host_unavailable"`, `provider_code: "provider_error"` and the
+    existing top-level `cause` naming what failed (`host_unreachable` or
+    `host_start_failed`, for example; an open string). A host that comes back
+    within the 5 minutes simply delivers the send; no failure is reported;
   - `routing_refused` (`send::REASON_ROUTING_REFUSED`): routing refused the
     account before any provider attempt;
   - `withdrawn` (`send::REASON_WITHDRAWN`): the prompt was handed to the host
@@ -3439,10 +3456,12 @@ Model-view reads and replacement-entry pages are not part of this contract.
     step; the no-request proof also covers requests in any other run.
 
   Callers retry a `not_delivered` send as a new send on a backoff, so a runner
-  reports it only when a new send can succeed later. A cause that would fail
+  reports it only when a new send can succeed later, including after the
+  `host_unavailable` wait above. A cause that would fail
   the same way again (compaction unavailable before any post, a host that can
   never be relaunched, or a model the host refuses) ends the run `error` with
-  its own code, and the send keeps its ordinary receipt.
+  its own code at once, without the `host_unavailable` wait, and the send keeps
+  its ordinary receipt.
 
   The state is final for that `send_id`: a re-send or `session.send_status`
   answers it again. The owner may deliver the same words again only as a new
@@ -3454,15 +3473,20 @@ Model-view reads and replacement-entry pages are not part of this contract.
   emit it only after their callers' readers accept it (readers first). The
   `withdrawn` reason and the `handover_failed` run-error class are likewise
   emitted only after those readers accept them.
+  The `host_unavailable` reason and run-error class are likewise emitted only
+  after those readers accept them.
 - [pinned] `not_delivered` applies only to a send whose own run ended before
   hand-over, or before the host used a withdrawn prompt, or that routing
-  refused. A queued send whose run never started
-  stays queued while its session is parked (for example, its host cannot be
-  relaunched yet), and runs when the session can run again. It is never marked
-  `not_delivered` for that. An interrupt or `run.cancel` ends only the running
+  refused, including the `host_unavailable` deadline above. Apart from that
+  deadline for a due send held only by its unavailable host, a queued send
+  whose run never started stays queued without a time limit while its session
+  is parked by its owner, or it waits on a running or paused turn, an account
+  or concurrency wait, or a context-ceiling wait, and runs when the session can
+  run again. It is never marked `not_delivered` for those waits. An interrupt
+  or `run.cancel` ends only the running
   turn (§9, §9.22). A send queued for a later turn stays `pending` even if the
   host's own queue dropped it; the runner hands it over again itself under the
-  same `send_id`. That is never `unknown` or `not_delivered`.
+  same `send_id`. That queue drop alone is never `unknown` or `not_delivered`.
 - [pinned] A send behind a paused run MAY be queued, answering `pending`,
   or refused `run_paused`. Both conform.
 - [pinned] `delivered` (`send::Delivered`) is optional: `{as, ref?, call_key?, call_carrier?}`:
@@ -7726,7 +7750,8 @@ to the provider codes below, this role names the following runner-side classes
 
 | Error class | When |
 |---|---|
-| `handover_failed` | the send's run ends `error` because plain hand-over failed: the host was unreachable, nothing was written, no stdin was available, or the host exited before taking the prompt; never `interrupted` or `cancelled`. Use `provider_code: "provider_error"` and the existing top-level `cause` (`host_unreachable`, `nothing_written`, `no_stdin`, `host_exited`; an open string). A host that is not available now instead keeps the send queued and `pending` (§9) |
+| `handover_failed` | the send's run ends `error` because plain hand-over failed: the host was unreachable, nothing was written, no stdin was available, or the host exited before taking the prompt; never `interrupted` or `cancelled`. Use `provider_code: "provider_error"` and the existing top-level `cause` (`host_unreachable`, `nothing_written`, `no_stdin`, `host_exited`; an open string). A host that is not available now instead keeps the send queued and `pending` until the `host_unavailable` deadline (§9) |
+| `host_unavailable` | a due send held only by its session's unreachable host or a host that failed to start this time ends `not_delivered` after the 5-minute wait (§9), where a later attempt can succeed. The send was never handed to any host. Its allocated run ends `error` with no model step, `provider_code: "provider_error"` and the existing top-level `cause` naming what failed (`host_unreachable` or `host_start_failed`, for example; an open string) |
 | `host_relaunch_failed` | the run ends `error` with no further model request because a required `refresh_relaunch` change could not be installed and verified on the host, a failed relaunch's fallback could not restore and verify the previous surface, a request's surface that someone else changed mid-run was not restored, or a runner-initiated host restart or rebuild could not reinstall and verify the stored effective surface; a pending change stays pending and the session is never ended (§10.2) |
 
 [pinned] A run that ends `error` because of a provider names the code
@@ -8245,6 +8270,9 @@ to the session's whole length.
   step's end cannot be observed while the host is unknown; this does not change
   cancellation when the host is known. An interrupting send records and queues
   its new message until reattach while settling the old run `host_unknown`.
+  The new message follows §9's `host_unavailable` deadline when it is due,
+  held only by the unavailable host and never handed to any host; once retired
+  as `not_delivered`, it is never handed over after reattach.
   `stop_all`'s separate provider fan-out (§9.22) remains unchanged; provider
   `tool.stop_session` requests are not host-process stops.
   If the host later proves alive, the runner interrupts that session's turn
@@ -8273,7 +8301,10 @@ to the session's whole length.
 
 - [pinned] **R5 — Sends.** This extends §9's receipt and final-outcome rules,
   §9.8's status replay and §14 property 6. An accepted send never handed to
-  the host stays queued and is handed after reattach. A handed send without
+  the host stays queued and is handed after reattach, unless §9's
+  `host_unavailable` deadline retires the due send held only by its unavailable
+  host as `not_delivered`; it is then never handed over after reattach.
+  A handed send without
   confirmation is settled from host evidence: delivered if the host holds
   the message; not sent if the host proves it never took it. The latter
   remains queued for its first actual delivery, not marked delivered. If the

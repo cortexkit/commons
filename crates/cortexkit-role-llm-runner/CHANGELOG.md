@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.8.57
+
+- Add `not_delivered` reason `host_unavailable` for a due send never handed
+  to any host, held only by an unreachable host or one that failed to start
+  this time, where a later attempt can succeed. End the wait after 5 minutes
+  (300 seconds) from the later of acceptance and becoming due, using durable
+  timestamps across runner restarts, and retire the send in the same write.
+- End an allocated run with no model step, class `host_unavailable`,
+  `provider_code: "provider_error"` and an open top-level `cause`. Upgrade
+  callers' readers before emitting the new reason or class. Known repeatable
+  failures keep their existing immediate errors and ordinary receipts;
+  owner-parked, turn, account, concurrency and context-ceiling waits stay
+  unbounded. Reattach never delivers a send already retired by the deadline.
+- Ship reason and error-class constants, round-trip tests and checksum-pinned
+  send and run-error samples. Runner implementations enforce the deadline.
+
 ## 0.8.56
 
 - Add the `deadline-missed` warming stop reason for timing failures, distinct

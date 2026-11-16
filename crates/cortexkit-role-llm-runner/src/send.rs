@@ -1376,7 +1376,8 @@ pub mod states {
 /// runner may retry under the same `send_id` only if every earlier attempt
 /// provably never left the runner or its prompt hand-over process. It reports
 /// `not_delivered` only once it stops trying. An unavailable host instead
-/// keeps the send queued and `pending`, never `not_delivered`.
+/// keeps the send queued and `pending` until the [`REASON_HOST_UNAVAILABLE`]
+/// deadline.
 pub const REASON_HANDOVER_FAILED: &str = "handover_failed";
 /// Routing refused the account before any provider attempt.
 pub const REASON_ROUTING_REFUSED: &str = "routing_refused";
@@ -1386,6 +1387,13 @@ pub const REASON_ROUTING_REFUSED: &str = "routing_refused";
 /// or the host holding the words is proven gone and its stored history lacks
 /// them. Emit only after callers' readers accept this reason.
 pub const REASON_WITHDRAWN: &str = "withdrawn";
+/// A due send held only by an unreachable host or a host that failed to start
+/// this time, where a later attempt can succeed. After 300 seconds from the
+/// later of acceptance and becoming due, it ends `not_delivered`. Compute the
+/// deadline from durable timestamps so a runner restart preserves it. The send
+/// must never have been handed to any host, and is retired in the same durable
+/// write. Emit only after callers' readers accept this reason and run-error class.
+pub const REASON_HOST_UNAVAILABLE: &str = "host_unavailable";
 
 /// A send state, classified without rejecting a runner's additional states.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1664,6 +1672,7 @@ mod tests {
         assert!(pending.delivered.is_none());
         for reason in [
             REASON_HANDOVER_FAILED,
+            REASON_HOST_UNAVAILABLE,
             REASON_ROUTING_REFUSED,
             "future_refusal",
         ] {
@@ -1698,6 +1707,25 @@ mod tests {
                 &SendReply::new(states::NOT_DELIVERED)
                     .with_run_id("run-8")
                     .with_reason(REASON_WITHDRAWN)
+            )
+            .unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn host_unavailable_reason_round_trips_with_no_delivery_receipt() {
+        let bytes = r#"{"state":"not_delivered","run_id":"run-8","reason":"host_unavailable"}"#;
+        let reply: SendReply = serde_json::from_str(bytes).unwrap();
+        assert_eq!(reply.send_state(), SendState::NotDelivered);
+        assert_eq!(reply.reason.as_deref(), Some(REASON_HOST_UNAVAILABLE));
+        assert!(reply.delivered.is_none());
+        assert_eq!(serde_json::to_string(&reply).unwrap(), bytes);
+        assert_eq!(
+            serde_json::to_string(
+                &SendReply::new(states::NOT_DELIVERED)
+                    .with_run_id("run-8")
+                    .with_reason(REASON_HOST_UNAVAILABLE)
             )
             .unwrap(),
             bytes

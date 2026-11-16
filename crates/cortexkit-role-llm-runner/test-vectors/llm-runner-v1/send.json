@@ -124,6 +124,16 @@
       }
     },
     {
+      "name": "due send never handed to any host ends after 300 seconds waiting only for its unavailable host",
+      "admitted": false,
+      "reply": {
+        "state": "not_delivered",
+        "run_id": "run-8",
+        "submission_id": "sub-4",
+        "reason": "host_unavailable"
+      }
+    },
+    {
       "name": "routing refused the account before any provider attempt",
       "admitted": false,
       "reply": {

@@ -21,6 +21,20 @@
   ],
   "answers": [
     {
+      "name": "due send never handed to any host ends without a model step after its 300-second host wait",
+      "terminal": true,
+      "answer": {
+        "run_id": "run-8",
+        "state": "error",
+        "error": {
+          "class": "host_unavailable",
+          "message": "host unavailable for 300 seconds before hand-over",
+          "provider_code": "provider_error",
+          "cause": "host_unreachable"
+        }
+      }
+    },
+    {
       "name": "routing decision refused before a model call",
       "terminal": true,
       "answer": {

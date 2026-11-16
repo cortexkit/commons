@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.17.68
+
+- Pin the runner contract to `=0.8.57` for the `host_unavailable` send reason
+  and run-error class. No new conformance case: the host-unavailability
+  deadline is enforced by runner implementations.
+
 ## 0.17.67
 
 - Declare `send_promote` and `delivery_order` on the faithful default fake so

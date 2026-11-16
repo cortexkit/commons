@@ -24,6 +24,12 @@ pub mod run_error_classes {
     /// the existing top-level `cause` naming the failure (an open string).
     /// Emit only after callers' readers accept this class.
     pub const HANDOVER_FAILED: &str = "handover_failed";
+    /// A due send waited 300 seconds only for an unreachable host or a host
+    /// that failed to start this time, where a later attempt can succeed.
+    /// The send was never handed to any host. Its run ends `error` with no
+    /// model step, `provider_code: provider_error` and an open top-level `cause`.
+    /// Emit only after callers' readers accept this class and send reason.
+    pub const HOST_UNAVAILABLE: &str = "host_unavailable";
     /// A required refresh could not start the session host with its new plan.
     pub const HOST_RELAUNCH_FAILED: &str = "host_relaunch_failed";
 }
