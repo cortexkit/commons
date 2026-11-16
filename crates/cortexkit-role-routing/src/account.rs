@@ -82,6 +82,22 @@ pub struct RequestedAccount {
     pub credential_id: Option<String>,
 }
 
+/// An earlier admission whose exact account and credential a fork must use.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct ForkOf {
+    pub admission_id: String,
+}
+
+impl ForkOf {
+    pub fn new(admission_id: impl Into<String>) -> Self {
+        Self {
+            admission_id: admission_id.into(),
+        }
+    }
+}
+
 /// The `route.account_for` request.
 /// Build with [`Self::new`] and the `with_*` setters.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,6 +146,10 @@ pub struct AccountForRequest {
     /// Send only to a router declaring `account_warm_credential`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub warm_credential: Option<String>,
+    /// Use an earlier admission's exact account and credential on admit only.
+    /// Send only to a router declaring `account_fork_of`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fork_of: Option<ForkOf>,
     /// The longest the runner waits out a short hold instead of being
     /// refused; defaults to [`DEFAULT_HOLD_WAIT_MAX_S`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -172,6 +192,7 @@ impl AccountForRequest {
             candidates: None,
             requested_account: None,
             warm_credential: None,
+            fork_of: None,
             hold_wait_max_s: None,
             decision_id: None,
             parent_conversation_key: None,
@@ -233,6 +254,12 @@ impl AccountForRequest {
         self
     }
 
+    /// Require the account and credential of an earlier admission.
+    pub fn with_fork_of(mut self, fork_of: ForkOf) -> Self {
+        self.fork_of = Some(fork_of);
+        self
+    }
+
     /// Set the longest time the runner will wait out a hold, in seconds.
     pub fn with_hold_wait_max_s(mut self, hold_wait_max_s: u64) -> Self {
         self.hold_wait_max_s = Some(hold_wait_max_s);
@@ -267,8 +294,9 @@ impl AccountForRequest {
 
     /// The request with canonical defaults, for comparing bodies that share
     /// an `admission_id`. Standard tier is represented by absence so legacy
-    /// normalized requests do not gain a new wire member. An absent warm
-    /// credential stays absent; a present hint participates in comparison.
+    /// normalized requests do not gain a new wire member. Absent warm
+    /// credentials and fork parents stay absent; present values participate
+    /// in comparison.
     pub fn normalized(&self) -> Self {
         let mut normalized = self.clone();
         normalized.service_tier = normalized.service_tier.filter(|tier| !tier.is_standard());
@@ -404,7 +432,7 @@ pub fn parse_account_for_request(params: &Value) -> Result<AccountForRequest, Re
     parse_account_for_request_serving::<&str>(params, &[])
 }
 
-/// Capability-aware admission. Undeclared `warm_credential` and `head_turn`
+/// Capability-aware admission. Undeclared `warm_credential`, `fork_of` and `head_turn`
 /// members are refused by name.
 /// Without `service_tier`,
 /// preserve the legacy parser's treatment of that unknown member: ignore it.
@@ -413,6 +441,36 @@ pub fn parse_account_for_request_serving<C: AsRef<str>>(
     capabilities: &[C],
 ) -> Result<AccountForRequest, Refusal> {
     let members = Members::of(params)?;
+    let fork_of: Option<ForkOf> = members.optional("fork_of")?;
+    if let Some(fork_of) = &fork_of {
+        if !capabilities
+            .iter()
+            .any(|cap| cap.as_ref() == crate::capabilities::ACCOUNT_FORK_OF)
+        {
+            return Err(members.refuse("fork_of", "account_fork_of is not declared"));
+        }
+        if fork_of.admission_id.is_empty()
+            || fork_of.admission_id.chars().count() > ADMISSION_ID_MAX_CHARS
+        {
+            return Err(members.refuse("fork_of", "fork_of admission_id is invalid"));
+        }
+        if members
+            .optional::<AccountMode>("mode")?
+            .is_some_and(|mode| mode != AccountMode::Admit)
+        {
+            return Err(members.refuse("fork_of", "fork_of is only valid on admit"));
+        }
+        for field in [
+            "requested_account",
+            "warm_credential",
+            "parent_conversation_key",
+            "candidates",
+        ] {
+            if members.object.get(field).is_some_and(|v| !v.is_null()) {
+                return Err(members.refuse("fork_of", format!("fork_of excludes {field}")));
+            }
+        }
+    }
     let warm_credential = members.optional_text("warm_credential", None)?;
     if warm_credential.is_some()
         && !capabilities
@@ -450,6 +508,7 @@ pub fn parse_account_for_request_serving<C: AsRef<str>>(
         candidates: members.optional("candidates")?,
         requested_account: members.optional("requested_account")?,
         warm_credential,
+        fork_of,
         hold_wait_max_s: members.optional("hold_wait_max_s")?,
         decision_id: members.optional_text("decision_id", None)?,
         parent_conversation_key: members

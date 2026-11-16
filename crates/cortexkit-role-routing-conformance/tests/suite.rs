@@ -9,6 +9,8 @@
 //! requires the named check to fail even when another panel check also detects it.
 
 mod fake;
+#[path = "suite/fork_of.rs"]
+mod fork_of_contract;
 #[path = "suite/head_turn.rs"]
 mod head_turn_contract;
 #[path = "suite/observe_success.rs"]
@@ -787,6 +789,7 @@ async fn without_the_group_the_hold_checks_are_not_applicable_and_the_verdict_pa
         "undeclared_observe_provider_code_refused",
         "account_for_tier_undeclared",
         "warm_credential_undeclared_refused",
+        "fork_of_undeclared_refused",
         "continue_signed_out_undeclared_refuses_window",
         "continue_undeclared_group_refuses_mode",
         "undeclared_harness_group_refuses_member",
@@ -1009,6 +1012,7 @@ async fn without_harness_group_requests_are_refused() {
             "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
             "warm_credential_undeclared_refused",
+            "fork_of_undeclared_refused",
             "continue_signed_out_undeclared_refuses_window",
             "continue_undeclared_group_refuses_mode",
             "requested_harness_is_hosted_and_echoed",
@@ -1244,6 +1248,7 @@ async fn passes_every_check(subject: &FakeSubject) {
             "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
             "warm_credential_undeclared_refused",
+            "fork_of_undeclared_refused",
             "undeclared_harness_group_refuses_member",
             "undeclared_prefer_group_refuses_member",
             "undeclared_exclude_providers_group_refuses_member",
@@ -1359,6 +1364,7 @@ async fn decision_input_checks_without_fixture_hook_are_not_applicable() {
         "undeclared_observe_provider_code_refused",
         "account_for_tier_undeclared",
         "warm_credential_undeclared_refused",
+        "fork_of_undeclared_refused",
         "undeclared_harness_group_refuses_member",
         "undeclared_prefer_group_refuses_member",
         "undeclared_exclude_providers_group_refuses_member",
@@ -1984,6 +1990,7 @@ async fn without_exclude_providers_group_its_checks_are_not_applicable() {
             "undeclared_observe_provider_code_refused",
             "account_for_tier_undeclared",
             "warm_credential_undeclared_refused",
+            "fork_of_undeclared_refused",
             "continue_signed_out_undeclared_refuses_window",
             "continue_undeclared_group_refuses_mode",
             "undeclared_harness_group_refuses_member",

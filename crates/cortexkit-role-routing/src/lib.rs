@@ -188,6 +188,9 @@ pub mod capabilities {
     pub const ACCOUNT_CONTINUE_SIGNED_OUT: &str = "account_continue_signed_out";
     /// Preserve a fresh conversation's last-used credential on admission.
     pub const ACCOUNT_WARM_CREDENTIAL: &str = "account_warm_credential";
+
+    /// Fork admission on an earlier admission's exact account and credential.
+    pub const ACCOUNT_FORK_OF: &str = "account_fork_of";
     /// Tier-aware selection and tier metadata in report usage. A caller must
     /// check this group before sending any of those members to a router.
     pub const SERVICE_TIER: &str = "service_tier";
@@ -276,6 +279,7 @@ pub mod capabilities {
         ACCOUNT_CONTINUE,
         ACCOUNT_CONTINUE_SIGNED_OUT,
         ACCOUNT_WARM_CREDENTIAL,
+        ACCOUNT_FORK_OF,
         SERVICE_TIER,
         SELECT_HOLD_CONTROL,
         SELECT_HARNESS,

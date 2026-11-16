@@ -506,7 +506,9 @@ pub trait RoutingSubject: Send + Sync {
     /// `reset_at_ms` (Unix milliseconds), or at an unknown time when
     /// `None`. A later call replaces the account's block. Used only against
     /// a provider declaring `select_hold_control`, `account_continue` or
-    /// `account_status`; the default fails those checks.
+    /// `account_status` or `account_fork_of`; the default fails those checks.
+    /// For `account_fork_of`, install a refusal-backed block while preserving
+    /// the account's existing admissions.
     async fn block_account(
         &self,
         account_id: &str,

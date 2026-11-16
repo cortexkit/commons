@@ -505,6 +505,29 @@ suite report to list that check's name as failing.
 These checks observe admission results, not internal rejection logs, reserve
 counts or every hard filter and quota condition.
 
+## Fork admission checks
+
+Routers declaring `account_fork_of` run the `fork_of_*` checks against the
+ordinary two-account catalog. The allocation check starts a parent admission
+and makes an ordinary fresh admission as a scoring control. If the control
+also chooses the parent's account, the check is `NotApplicable` with that
+reason, never a vacuous pass. Otherwise, after finishing the control, the fork
+must keep the parent's exact account and credential and establish its own
+conversation affinity.
+
+The `block_account` hook is required for this group: it installs a refusal-backed
+block while preserving the parent admission. Known and unknown retry times
+must yield `account_hold` with `fork_parent_account_unavailable` and a timed
+recheck within fifteen minutes. Other checks compare complete unknown-parent
+and other-principal refusals, exercise every excluded member and non-admit
+modes, and change the parent under one admission id to require a conflict.
+Same-body replay stability is covered by the ordinary admission check.
+Without the capability, only `fork_of_undeclared_refused`
+applies. Named incorrect routers prove that each check reports its matching
+defect. Retention expiry, reserve exemption, grant-list independence, sign-in
+and pool-specific blocks, and fork concurrency/head-turn accounting are not
+independently exercised by these cases.
+
 ## Account-continuation checks
 
 Routers declaring `account_continue` implement

@@ -419,6 +419,8 @@ That group's additive defaults, attested namespace and selector rules are in §1
     decision (§9.2).
   - `account_head_turn`: attested runners identify head turns on
     `route.account_for`, including `continue` (§9.1).
+  - `account_fork_of`: admit a fork on an earlier admission's exact account
+    and credential (§9.1).
   - `service_tier`: tier-aware selection and tier metadata in report usage
     (§5.5). A caller sends these members only to a declaring provider.
   - `account_continue`: `route.account_for` reads `mode: "continue"` for a
@@ -1251,10 +1253,13 @@ the routing provider allocates (subscription logins).
   Bodies are compared with defaults applied
   (`AccountForRequest::same_body`): a member left out and the same member
   sent with its default value are the same body.
-  `pool`, `parent_conversation_key`, `service_tier`, `head_turn` and `warm_credential` are
+  `pool`, `parent_conversation_key`, `service_tier`, `head_turn`, `warm_credential`
+  and `fork_of` are
   part of the body; an absent tier and explicit `standard` compare equal.
   The same id with a different hint is `admission_conflict`. Omitting
-  `warm_credential` leaves existing request bodies and fingerprints unchanged.
+  `warm_credential` or `fork_of` leaves existing request bodies and fingerprints
+  unchanged. A different `fork_of` under the same `admission_id` is
+  `admission_conflict`.
 - [pinned] `mode`: `admit` (the default), `renew` (extend the current pin)
   or `reassign` (a different account after the current one failed).
   `renew` and `reassign` require `expected_pin {id, generation}`; without
@@ -1293,6 +1298,40 @@ the routing provider allocates (subscription logins).
   model, and a model the operator pinned in the router's settings, are exempt
   from that reserve. Operator pins include a consumer, project or slot pin,
   a ladder step, or a request pin equal to one of those.
+- [pinned] `fork_of` (optional): `{admission_id}`, with no other members.
+  Its `admission_id` uses the same string rules as the request's own
+  `admission_id`. It is valid only in `mode: "admit"` (including the default);
+  any other mode is `invalid_request {field: "fork_of"}`. Combining it with
+  `requested_account`, `warm_credential`, `parent_conversation_key` or
+  `candidates` is also `invalid_request {field: "fork_of"}`.
+  Runners send it only to a router declaring `account_fork_of` in
+  `role.describe.capabilities`. A non-declaring router refuses it as an unknown
+  member with `invalid_request {field: "fork_of"}`: v1 refuses unknown members
+  (§2).
+- [pinned] The parent is an earlier admission this router granted to the same
+  attested caller principal, for the same provider, whether pending, started
+  or finished. Every granted admission remains resolvable for `fork_of` for at
+  least one hour after its pin lapses: `admission_valid_until_ms` if never
+  started, otherwise `lease_valid_until_ms`. Unknown, expired, refused,
+  other-principal and other-provider admissions all answer the identical
+  `invalid_request {field: "fork_of"}`, without a message or other detail that
+  distinguishes those cases. This does not reveal another principal's admissions.
+- [pinned] A fork is admitted on the parent's exact account and credential.
+  There is no grant-list lookup or score comparison, and the parent's own load
+  is not counted against the fork's account choice. The subscription keep-free
+  reserve does not apply, as for an agent's own model. Hard eligibility still
+  applies: a credential the vault reports as needing sign-in, or an active
+  refusal-backed block on that account or its pool for the requested model,
+  refuses `account_hold` with `detail.reason:
+  "fork_parent_account_unavailable"`. The router never falls back to another
+  account. `until_ms` is always present and is a recheck time, following §5.3's
+  quota-recheck rule introduced in 0.7.33: the earlier of the block's retry time
+  and now plus 15 minutes, or now plus 15 minutes when no retry time is known
+  (including a credential needing sign-in).
+- [pinned] The fork counts as an in-flight run on its account under the
+  existing concurrency rules (§5.3.1), and carries `head_turn` when the runner
+  marks it under `account_head_turn` above. The fork's own `conversation_key`
+  gets the parent's account as its affinity exactly as a cold pick would.
 - [pinned] For an honoured `pin_origin: "user"` (§5.1), the reserve does not
   limit the pinned model's subscription accounts, exactly as for those.
   This changes only whether the reserve applies to the pinned
@@ -1784,7 +1823,7 @@ What a runner saw on an account, so the provider's headroom stays current.
 | `report_conflict` | `route.report` (§8) | `{}` | no |
 | `account_not_authorized` | `route.account_for`, `route.account_observe` (§9) | `{}` | no |
 | `auth_required` | `route.account_for` (§9.1) | `{}` | no |
-| `account_hold` | `route.account_for` (§9.1) | `{until_ms}` | yes, by `until_ms` |
+| `account_hold` | `route.account_for` (§9.1) | `{until_ms, reason?}`; fork parent unavailable: `reason: "fork_parent_account_unavailable"` | yes, by `until_ms` |
 | `account_quota_unknown` | `route.account_for` (§9.1) | `{}` | no |
 | `account_pool_exhausted` | `route.account_for` (§9.1) | `{reset_at_ms?}` | when `reset_at_ms` is present; quota rechecks follow §5.3 |
 | `account_pool_reserve_limited` | `route.account_for` (§9.1) | `{}` | no |

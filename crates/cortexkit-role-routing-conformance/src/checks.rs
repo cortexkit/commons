@@ -6,6 +6,7 @@ mod continuation;
 mod credit;
 mod decision_inputs;
 mod extensions;
+mod fork_of;
 mod gateway;
 mod harness_limits;
 mod head_turn;
@@ -315,6 +316,9 @@ impl<'a, S: RoutingSubject> Suite<'a, S> {
         }
         if name.starts_with("warm_credential_") {
             return self.warm_credential_check(name).await;
+        }
+        if name.starts_with("fork_of_") {
+            return self.fork_of_check(name).await;
         }
         if name.starts_with("continue_") {
             return self.continue_check(name).await;

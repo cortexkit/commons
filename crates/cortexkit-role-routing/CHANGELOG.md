@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.36
+
+- Add `account_fork_of` and optional strict `fork_of: {admission_id}` on
+  `route.account_for`. Forks use the same caller's earlier admission's exact
+  account and credential, bypass scoring and the subscription reserve, and
+  never fall back when that account is unavailable.
+- Define parent retention, indistinguishable invalid-parent refusals, conflicting
+  member refusals, concurrency, affinity and admission replay semantics.
+- **Upgrading:** runners send `fork_of` only to routers declaring
+  `account_fork_of`. Build requests with `ForkOf::new` and `with_fork_of`.
+
 ## 0.7.35
 
 - Add `route_fact_stream` for discovery of the whole-router route fact bus

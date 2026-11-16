@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.41
+
+- Pin routing `=0.7.36`. Add `account_fork_of`-gated checks for exact parent
+  allocation despite a better sibling, blocked-parent holds without fallback,
+  indistinguishable unknown and other-principal parents, excluded members and
+  non-admit modes, and conflicting admission replays.
+- Named incorrect routers verify that each fork check rejects its matching
+  defect.
+
 ## 0.10.40
 
 - Pin routing `=0.7.35` and re-export its `route_fact_stream` capability.

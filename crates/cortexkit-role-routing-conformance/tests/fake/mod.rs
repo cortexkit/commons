@@ -17,6 +17,7 @@
 
 mod continuation;
 mod extensions;
+mod fork_of;
 #[cfg(test)]
 mod gateway_catalog;
 mod observe_success;
@@ -357,6 +358,8 @@ struct State {
     reports: HashMap<(String, Option<String>), (ReportRequest, ReportAnswer)>,
     /// (runner, admission id) to its first body and answer.
     admissions: HashMap<(String, String), (AccountForRequest, AccountForAnswer)>,
+    started_admissions: BTreeSet<(String, String)>,
+    finished_admissions: BTreeSet<(String, String)>,
     conversations: HashMap<String, ConversationPin>,
     warm_rejections: Vec<String>,
     /// (runner, event id) to its observation.
@@ -1224,6 +1227,9 @@ impl FakeRoute {
             && !self.fault("warm_credential_undeclared_refused")
         {
             describe = describe.with_capability("account_warm_credential");
+        }
+        if !self.fault("fork_of_without_group") && !self.fault("fork_of_undeclared_refused") {
+            describe = describe.with_capability("account_fork_of");
         }
         if self.service_tier_control {
             describe = describe.with_capability("service_tier");
@@ -2351,11 +2357,29 @@ impl FakeRoute {
                 cortexkit_role_routing_conformance::wire::capabilities::ACCOUNT_WARM_CREDENTIAL,
             );
         }
+        if !self.fault("fork_of_without_group") {
+            declared.push(cortexkit_role_routing_conformance::wire::capabilities::ACCOUNT_FORK_OF);
+        }
         if self.extensions {
             declared
                 .push(cortexkit_role_routing_conformance::wire::capabilities::ACCOUNT_HEAD_TURN);
         }
         let mut params = params.clone();
+        if params.get("fork_of").is_some() {
+            for field in [
+                "requested_account",
+                "warm_credential",
+                "parent_conversation_key",
+                "candidates",
+            ] {
+                if self.fault(&format!("fork_of_excludes_{field}")) {
+                    params.as_object_mut().unwrap().remove(field);
+                }
+            }
+            if self.fault("fork_of_non_admit_refused") {
+                params["mode"] = json!("admit");
+            }
+        }
         if self.fault("warm_credential_non_admit_refused")
             && params.get("mode").is_some_and(|m| m != "admit")
         {
@@ -2384,6 +2408,9 @@ impl FakeRoute {
             }
             if self.fault("warm_credential_admission_conflict") {
                 compared.warm_credential.clone_from(&first.warm_credential);
+            }
+            if self.fault("fork_of_admission_conflict") {
+                compared.fork_of.clone_from(&first.fork_of);
             }
             if defects.ignores_parent_body {
                 compared
@@ -2431,7 +2458,11 @@ impl FakeRoute {
         }
         let catalog = Self::catalog(state);
         let now = now_ms();
-        if let Some(reset) = state.blocked(&catalog, &request.provider, now) {
+        let fork_parent = self.fork_parent(state, &request, &catalog, now)?;
+        if let Some(reset) = state
+            .blocked(&catalog, &request.provider, now)
+            .filter(|_| fork_parent.is_none())
+        {
             // Every account is blocked: hold within the smallest of
             // max_hold, the runner's own cap and the cap the decision's
             // select recorded; beyond it, refuse with the reset.
@@ -2669,36 +2700,82 @@ impl FakeRoute {
                 "unknown warm credential",
             ));
         }
-        let (account, code) = match (&mode, &current) {
-            (AccountMode::Reassign, Some((_, _, held))) => (
-                usable
-                    .iter()
-                    .copied()
-                    .find(|index| index != held)
-                    .unwrap_or(usable[0]),
-                AccountReasonCode::Reassigned,
-            ),
-            (AccountMode::Renew, Some((_, _, held))) => (*held, AccountReasonCode::Renewed),
-            (_, Some((_, _, held)))
-                if usable.contains(held)
-                    && requested.is_none()
-                    && !(self.fault("warm_credential_existing_affinity") && warm.is_some()) =>
-            {
-                (*held, AccountReasonCode::Affinity)
+        let cold = || {
+            if self.defects.continue_signed_out_fresh {
+                // Make the broken sign-in eligibility filter observable even
+                // when load balancing would prefer a healthy credential.
+                if let Some(index) = usable.iter().find(|index| {
+                    state
+                        .signed_out_credentials
+                        .contains(&catalog.accounts[**index].credential_id)
+                }) {
+                    return *index;
+                }
             }
-            _ => match requested {
-                Some(index) => (index, AccountReasonCode::RequestedAccount),
-                None => (
-                    warm.unwrap_or_else(|| {
-                        if defects.ignores_parent_preference {
-                            usable[0]
-                        } else {
-                            away.unwrap_or(usable[0])
-                        }
-                    }),
+            usable
+                .iter()
+                .copied()
+                .min_by_key(|index| {
+                    state
+                        .admissions
+                        .iter()
+                        .filter(|(key, (_, answer))| {
+                            !self.fault("fork_of_no_better_sibling")
+                                && state.started_admissions.contains(*key)
+                                && !state.finished_admissions.contains(*key)
+                                && answer.account.account_id == catalog.accounts[*index].account_id
+                        })
+                        .count()
+                })
+                .unwrap()
+        };
+        let (account, code) = if let Some(parent) = fork_parent {
+            if self.fault("fork_of_parent_account") {
+                (cold(), AccountReasonCode::Headroom)
+            } else if self.fault("fork_of_blocked_parent")
+                && state
+                    .blocks
+                    .contains_key(&catalog.accounts[parent].account_id)
+            {
+                (
+                    *usable.iter().find(|index| **index != parent).unwrap(),
                     AccountReasonCode::Headroom,
+                )
+            } else {
+                (parent, AccountReasonCode::Affinity)
+            }
+        } else {
+            match (&mode, &current) {
+                (AccountMode::Reassign, Some((_, _, held))) => (
+                    usable
+                        .iter()
+                        .copied()
+                        .find(|index| index != held)
+                        .unwrap_or(usable[0]),
+                    AccountReasonCode::Reassigned,
                 ),
-            },
+                (AccountMode::Renew, Some((_, _, held))) => (*held, AccountReasonCode::Renewed),
+                (_, Some((_, _, held)))
+                    if usable.contains(held)
+                        && requested.is_none()
+                        && !(self.fault("warm_credential_existing_affinity") && warm.is_some()) =>
+                {
+                    (*held, AccountReasonCode::Affinity)
+                }
+                _ => match requested {
+                    Some(index) => (index, AccountReasonCode::RequestedAccount),
+                    None => (
+                        warm.unwrap_or_else(|| {
+                            if defects.ignores_parent_preference {
+                                cold()
+                            } else {
+                                away.unwrap_or_else(cold)
+                            }
+                        }),
+                        AccountReasonCode::Headroom,
+                    ),
+                },
+            }
         };
         self.check_account_concurrency(state, &request, &catalog.accounts[account].account_id)?;
         let code = if request.decision_id.is_some() {
@@ -2880,6 +2957,21 @@ impl FakeRoute {
                 .admissions
                 .contains_key(&(self.principal().to_owned(), admission.clone()))
         });
+        if bound {
+            let admission = (
+                self.principal().to_owned(),
+                request.admission_id.clone().unwrap(),
+            );
+            match request.kind {
+                ObserveKind::AdmissionStarted => {
+                    state.started_admissions.insert(admission);
+                }
+                ObserveKind::RunFinished => {
+                    state.finished_admissions.insert(admission);
+                }
+                _ => {}
+            }
+        }
         let effects = if request.kind == ObserveKind::AccountLimitExhausted {
             vec!["account_fenced".to_owned()]
         } else {

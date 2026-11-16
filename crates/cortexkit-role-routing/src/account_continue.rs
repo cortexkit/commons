@@ -236,7 +236,7 @@ impl ContinueAnswer {
 /// Decode the opt-in request. A non-declaring router refuses `mode` exactly
 /// as the legacy parser refuses an unknown mode. Authorization and binding to
 /// the runner's durable pause and currently used decision are the router's checks.
-/// `warm_credential` is refused because it belongs only to admission mode.
+/// `warm_credential` and `fork_of` belong only to admission mode.
 /// Other unread members are the router's own refusal check under contract §2,
 /// as with the legacy parsers.
 pub fn parse_continue_request(
@@ -244,6 +244,9 @@ pub fn parse_continue_request(
     describe: &RoleDescribe,
 ) -> Result<ContinueRequest, Refusal> {
     let members = Members::of(params)?;
+    if members.object.get("fork_of").is_some_and(|v| !v.is_null()) {
+        return Err(members.refuse("fork_of", "fork_of is only valid on admit"));
+    }
     if !describe.serves(capabilities::ACCOUNT_CONTINUE) {
         return Err(members.refuse("mode", "continue is not a declared mode"));
     }
