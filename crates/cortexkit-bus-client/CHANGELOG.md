@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.1
+
+- Add a body-bearing EVENT reader that only attaches to an existing module-owned
+  durable and rebinds it after credential re-issue, leaving the cursor on the
+  server and acknowledgements to the caller after their own commit.
+- Expose parsed subjects, message ids, bodies, delivery metadata and read-only
+  headers (first value wins), with explicit ack, delayed nak and term operations.
+- Return malformed records separately with a reason and a term-only handle.
+- Refuse event bodies larger than 4 KiB; events carry ids, counters and enums,
+  while large content is retrieved through its owner's own call.
+
 ## 0.1.0
 
 - Add a shared credential client for connecting Rust modules to the local bus

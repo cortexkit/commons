@@ -43,8 +43,9 @@ through those refusals too; cancel its future to stop waiting.
 
 Re-issue creates a **new connection with the new key's inbox prefix**.
 `connection()` returns a cloned snapshot, not a permanently updating handle.
-Watch `connection_changes()` and reopen subscriptions and durable pulls on the
-new snapshot whenever it changes. A durable resumes at its server-side cursor.
+Watch `connection_changes()` and reopen raw subscriptions and durable pulls on
+the new snapshot whenever it changes. `EventReader` handles this rebinding for
+you. A durable resumes at its server-side cursor.
 The watch value advances once the replacement is ready; a closed watch means
 the maintenance task stopped (including on a terminal renewal refusal). Dropping
 the client stops its maintenance task. Already held snapshots should not be used
@@ -62,13 +63,45 @@ with `BusClient::connect` or report the module as degraded when this happens.
   need distinct ids, including across subjects in the same stream. Inspect the
   returned receipt's `duplicate()` flag.
 - Bodies carry **no secrets and no tool output**. Publish a safe fact or pointer,
-  not raw execution output.
+  not raw execution output. Event bodies carry ids, counters and enums and are
+  limited to **4 KiB**; retrieve large content through its owner's own call.
 - `publish_event(event, version, qualifier, msg_id, body)` uses naming constructors
   for `ck.{acct}.event.{module}.{event}.v{version}[.{reader}]`. The optional reader
   qualifier is a validated module token. This crate relies on commons' naming
   0.4.0 path dependency and its `event_subject_with_reader` constructor.
 - `live_hint(kind, version, body)` is a plain-NATS, versioned publish on
   `ck.{acct}.live.{module}.{kind}.v{version}`; it is not a stored fact.
+
+### Reading event bodies
+
+`bus.event_reader(durable).await?` attaches to the module's existing EVENT
+durable; ck-bus provisions it, and the client never creates or changes one.
+Names must follow bus-naming's owner rule: `m_{module}` or
+`m_{module}_{suffix}`, with a nonempty lowercase-letter, digit or underscore
+suffix. Ownership does not grant new permissions: the module must already be
+an authorized event reader.
+
+`reader.next().await?` waits for one record and returns `EventItem::Delivery`
+or `EventItem::Malformed`. A valid delivery has a naming-parsed `subject`
+(`module` is the publisher, plus `event`, `version`, optional `reader`),
+`msg_id`, `body: Bytes`, `stream_sequence` and `delivered_count`. Its
+`headers()` accessor returns a read-only `cortexkit_bus_trait::Headers` map;
+`header(name)` looks up a stored header name. Repeated headers retain their
+first value, including `Nats-Msg-Id`.
+
+Call `delivery.ack().await?` **only after your own transaction commits**.
+`nak(delay).await?` requests redelivery, and `term().await?` stops redelivery.
+No read, drop or reconnect acknowledges anything automatically. After a
+credential re-issue, the reader rebinds to the same durable on the new connection;
+the server keeps its cursor and unacknowledged records may redeliver. Keep the
+`BusClient` alive for credential maintenance.
+
+Malformed records (for example, a missing `Nats-Msg-Id` or an invalid EVENT
+subject) carry a raw subject, a reason, and a stream sequence (absent only for
+invalid JetStream metadata). They expose only `term()`: log the reason and
+terminate the record rather than retrying it. They are not terminated
+automatically. `next()` returns `Err` for transport or bind failures, including
+the credential-maintenance change stream closing.
 
 ## TLS and platforms
 

@@ -1,6 +1,9 @@
 #![doc = include_str!("../README.md")]
 
 mod credentials;
+mod events;
+
+pub use events::{EventDelivery, EventItem, EventReader, MalformedDelivery, MalformedReason};
 
 use std::{
     sync::{Arc, RwLock},
@@ -32,6 +35,10 @@ pub enum Error {
     Bus(#[from] cortexkit_bus_trait::BusError),
     #[error("NATS operation failed: {0}")]
     Nats(String),
+    #[error("event body is {size} bytes; the maximum is 4096 bytes")]
+    EventBodyTooLarge { size: usize },
+    #[error("durable {durable} is not owned by module {module}")]
+    DurableNotOwned { durable: String, module: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -199,7 +206,8 @@ impl BusClient {
     }
 
     /// Changes only after a replacement connection with a new inbox is ready.
-    /// Reopen subscriptions and durable pulls when this receiver changes.
+    /// Reopen raw subscriptions and durable pulls when this receiver changes;
+    /// [`EventReader`] handles its own rebinding automatically.
     ///
     /// If credential maintenance can no longer renew or re-issue, its task ends
     /// and drops the sender. The receiver's `changed()` then returns `Err` once
@@ -213,7 +221,21 @@ impl BusClient {
         self.names.account()
     }
 
+    /// Attaches to an existing EVENT durable owned by this module.
+    ///
+    /// ck-bus provisions durables; this method never creates or changes one.
+    /// The name must follow bus-naming's `m_{module}[_suffix]` owner rule.
+    /// The reader rebinds automatically after credential re-issue. Nothing is
+    /// acknowledged automatically: commit your own transaction before `ack()`.
+    pub async fn event_reader(&self, durable: &str) -> Result<EventReader> {
+        EventReader::attach(self, durable).await
+    }
+
     /// Stores an event using the fact's own id for JetStream deduplication.
+    ///
+    /// Event bodies carry ids, counters and enums, not large content. Bodies
+    /// larger than 4 KiB are refused; retrieve large content through its owner's
+    /// own call instead.
     pub async fn publish_event(
         &self,
         event: &str,
@@ -222,6 +244,10 @@ impl BusClient {
         msg_id: &str,
         body: impl Into<Bytes>,
     ) -> Result<PublishReceipt> {
+        let body = body.into();
+        if body.len() > 4096 {
+            return Err(Error::EventBodyTooLarge { size: body.len() });
+        }
         let subject = match qualifier {
             Some(reader) => {
                 self.names
@@ -232,7 +258,7 @@ impl BusClient {
         let mut headers = async_nats::HeaderMap::new();
         headers.insert(async_nats::header::NATS_MESSAGE_ID, msg_id);
         let ack = async_nats::jetstream::new(self.connection().client())
-            .publish_with_headers(subject, headers, body.into())
+            .publish_with_headers(subject, headers, body)
             .await
             .map_err(|error| Error::Nats(error.to_string()))?
             .await

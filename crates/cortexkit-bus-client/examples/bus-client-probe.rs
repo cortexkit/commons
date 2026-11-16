@@ -6,7 +6,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use cortexkit_bus_client::{BusClient, BusClientOptions};
+use cortexkit_bus_client::{BusClient, BusClientOptions, EventItem};
 use serde_json::json;
 use subc_client_rs::{HandlerOutcome, ModuleHandler, RequestCtx, SubcConsumer};
 use subc_protocol::{
@@ -75,24 +75,42 @@ fn main() {
                     .await
                     .unwrap(),
             );
-            let bus = BusClient::connect(consumer.clone(), BusClientOptions::new(module).unwrap())
+            let bus = BusClient::connect(consumer.clone(), BusClientOptions::new(&module).unwrap())
                 .await
                 .unwrap();
             std::fs::write(
-                result.join("ready.json"),
+                result.join(format!("ready-{module}.json")),
                 serde_json::to_vec(
                     &json!({"acct": bus.acct(), "inbox": bus.connection().inbox_prefix()}),
                 )
                 .unwrap(),
             )
             .unwrap();
-            wait_file(&result.join("publish-now")).await;
-            let receipt = bus
-                .publish_event("smoke", 1, None, "fact-before", "before reissue")
-                .await
-                .unwrap();
-            assert!(!receipt.duplicate());
-            std::fs::write(result.join("published"), b"ready").unwrap();
+            if module == "thalamus-harness" {
+                for (signal, msg_id, body) in [
+                    ("publish-now", "fact-before", "before reissue"),
+                    ("publish-after-reissue", "fact-after", "after reissue"),
+                ] {
+                    wait_file(&result.join(signal)).await;
+                    let receipt = bus
+                        .publish_event("step.finished", 1, None, msg_id, body)
+                        .await
+                        .unwrap();
+                    assert!(!receipt.duplicate());
+                }
+                serving.await.unwrap().unwrap();
+                return;
+            }
+            assert_eq!(module, "astrocyte");
+            wait_file(&result.join("read-now")).await;
+            let mut reader = bus.event_reader("m_astrocyte").await.unwrap();
+            let EventItem::Delivery(delivery) = reader.next().await.unwrap() else {
+                panic!("published event must be valid");
+            };
+            assert_eq!(delivery.body.as_ref(), b"before reissue");
+            assert_eq!(delivery.msg_id, "fact-before");
+            delivery.ack().await.unwrap();
+            std::fs::write(result.join("read-before"), b"ready").unwrap();
             wait_file(&result.join("reissue-now")).await;
             let mut changes = bus.connection_changes();
             let old_inbox = bus.connection().inbox_prefix().to_owned();
@@ -119,12 +137,14 @@ fn main() {
                 .unwrap()
                 .unwrap();
             assert_ne!(old_inbox, bus.connection().inbox_prefix());
-            let receipt = bus
-                .publish_event("smoke", 1, None, "fact-after", "after reissue")
-                .await
-                .unwrap();
-            assert!(!receipt.duplicate());
             std::fs::write(result.join("reissued"), b"ready").unwrap();
+            let EventItem::Delivery(delivery) = reader.next().await.unwrap() else {
+                panic!("published event must be valid after reissue");
+            };
+            assert_eq!(delivery.body.as_ref(), b"after reissue");
+            assert_eq!(delivery.msg_id, "fact-after");
+            delivery.ack().await.unwrap();
+            std::fs::write(result.join("read-after"), b"ready").unwrap();
             serving.await.unwrap().unwrap();
         });
 }
