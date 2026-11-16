@@ -9,7 +9,7 @@ use crate::{
     subject::{Capability, LlmRunnerSubject, Script, ScriptedTurn},
 };
 use cortexkit_role_llm_runner::{
-    delivery_order::PlanSender, errors, ops, read::ReadRequest, send::SendReply,
+    delivery_order::PlanSender, errors, ops, read::ReadRequest, send, send::SendReply,
 };
 use serde_json::{json, Value};
 
@@ -358,10 +358,16 @@ where
             call(&session.route, ops::SESSION_SEND, params.clone()).await?,
         )?;
         let replayed: SendReply = decode("identical marks", replay.clone())?;
-        if replay != original
-            || replayed.run_id != accepted.run_id
-            || replayed.submission_id != accepted.submission_id
-        {
+        // The retry names the same send, not a byte copy of its first answer:
+        // the first answer may be `pending`, which may omit `run_id` and
+        // carries `submission_id` only on a `retract` runner, while a later
+        // answer reports delivery. So the run must match only once the first
+        // answer named one, and the submission only while both are pending.
+        let same_run = accepted.run_id.is_none() || replayed.run_id == accepted.run_id;
+        let both_pending =
+            accepted.state == send::states::PENDING && replayed.state == send::states::PENDING;
+        let same_submission = !both_pending || replayed.submission_id == accepted.submission_id;
+        if replay != original || !same_run || !same_submission {
             return Err("identical marks did not replay the accepted send's answer".into());
         }
         let mut resent = params;

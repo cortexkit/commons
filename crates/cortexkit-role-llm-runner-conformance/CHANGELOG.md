@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.17.72
+
+- Fix the identical-marks retry check (`message_marks_retry_changed`,
+  `notice_with_speaks_for_retry`): it required a retry to repeat the
+  `submission_id` of the send's first answer, which a runner answering
+  `pending` with a `submission_id` before the run settles legitimately omits
+  once the send is delivered. The retry must still name the same send: the
+  same run once the first answer named one, the same submission while both
+  answers are pending, and an answer identical to the settled one.
+
 ## 0.17.71
 
 - Pin the runner contract to `=0.8.59` and check optional `fork_effort`:

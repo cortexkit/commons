@@ -215,3 +215,25 @@ async fn message_marks_retry_checks_keep_when_declared() {
     println!("FAIL {name}: {reason}");
     assert_none_failed_but(&report, &[name]);
 }
+
+/// A runner may answer a send `pending` with a `submission_id` right after its
+/// durable write, and report the settled run on retries without one: the
+/// identical-marks retry still names the same send, so both retry cases pass.
+#[tokio::test]
+async fn early_pending_first_answer_passes_mark_retries() {
+    let mut subject = subject(None, true);
+    subject.capabilities.insert(Capability::NoticeWithSpeaksFor);
+    subject.first_answer_pending = true;
+    let report = run(&subject).await;
+    for name in [
+        "message_marks_retry_changed",
+        "notice_with_speaks_for_retry",
+    ] {
+        assert_eq!(
+            report.outcome(name),
+            Some(&CaseOutcome::Passed),
+            "{name}: {}",
+            report.render()
+        );
+    }
+}

@@ -51,8 +51,8 @@ use cortexkit_role_llm_runner_conformance::{
         retract::{RetractReply, RetractRequest},
         run::{FinalMessage, RunResult, RunResultRequest, RunState, RunUsage, StepUsage},
         send::{
-            delivered_as, delivery_unsupported_detail, Delivered, Delivery, SendReply, SendRequest,
-            CLIENT_MESSAGE_ID_FIELD, DELIVERY_FIELD,
+            delivered_as, delivery_unsupported_detail, states as send_states, Delivered, Delivery,
+            SendReply, SendRequest, CLIENT_MESSAGE_ID_FIELD, DELIVERY_FIELD,
         },
         structured_output::{SkippedSibling, StructuredOutputResult, SUBMIT_RESULT_TOOL},
         subscribe::{SubscribeFrom, SubscribeRequest},
@@ -766,6 +766,7 @@ struct World {
     data_url_media: bool,
     step_recovery: StepRecovery,
     queue_receipt_pending_then_unknown: bool,
+    first_answer_pending: bool,
     steer_receipt_confirm: bool,
     omit_first_steer_receipt: bool,
     early_held_steer_receipt: Option<Delivered>,
@@ -3829,6 +3830,11 @@ impl Module {
                     .push(reply.delivered.clone());
             }
         }
+        if self.world.first_answer_pending && send.resend_count == 0 {
+            reply = SendReply::new(send_states::PENDING)
+                .with_run_id(&run.run_id)
+                .with_submission_id(format!("sub-{}", run.run_id));
+        }
         respond(reply)
     }
 
@@ -6452,6 +6458,11 @@ pub struct FakeSubject {
     /// Answer a queued send `delivered: pending` and its retries
     /// `delivered: unknown`: a receipt moving forward, which is allowed.
     pub queue_receipt_pending_then_unknown: bool,
+    /// Answer every send's first request right after its durable write:
+    /// `pending` with the allocated `run_id` and a `submission_id`, as a
+    /// `retract` runner does. Retries report the settled run without a
+    /// `submission_id`, which the contract allows.
+    pub first_answer_pending: bool,
     /// Declare `steer_receipt: confirm` (a steer's receipt may be `pending` or
     /// `unknown` until delivery is confirmed) instead of guaranteed delivery,
     /// where every steer receipt is `step` or `turn`.
@@ -6594,6 +6605,7 @@ impl FakeSubject {
             kill_points: KILL_POINTS.to_vec(),
             claim_process_kill: false,
             queue_receipt_pending_then_unknown: false,
+            first_answer_pending: false,
             steer_receipt_confirm: false,
             omit_first_steer_receipt: false,
             early_held_steer_receipt: None,
@@ -6655,6 +6667,7 @@ impl FakeSubject {
                     data_url_media: self.data_url_media,
                     step_recovery: self.step_recovery,
                     queue_receipt_pending_then_unknown: self.queue_receipt_pending_then_unknown,
+                    first_answer_pending: self.first_answer_pending,
                     steer_receipt_confirm: self.steer_receipt_confirm,
                     omit_first_steer_receipt: self.omit_first_steer_receipt,
                     early_held_steer_receipt: self.early_held_steer_receipt.clone(),
