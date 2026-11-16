@@ -76,11 +76,6 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         ],
     },
     EventConsumer {
-        module_id: "prefrontal-routing",
-        durable: "m_prefrontal-routing",
-        filter_subjects: &["event.insula.>"],
-    },
-    EventConsumer {
         module_id: "striatum",
         durable: "m_striatum",
         filter_subjects: &[
@@ -139,7 +134,7 @@ pub const EVENT_CONSUMERS: &[EventConsumer] = &[
         filter_subjects: &[
             "event.thalamus-harness.send_state.v1.occipital",
             "event.broca.send_state.v1.occipital",
-            "event.cerebellum.tool_display.v1",
+            "event.cerebellum.display_record_ready.v1",
             "event.aft.display_record_ready.v1",
             "event.fusiform.catalog_changed.v1",
         ],
@@ -258,13 +253,6 @@ impl LiveHintReader {
 /// subscribe on `ck.{acct}.live.{module}.{name}.v{N}` only: no durable and no
 /// stream read. These are live hints, not EVENT reader rows.
 pub const LIVE_HINT_READERS: &[LiveHintReader] = &[
-    LiveHintReader::new(
-        "prefrontal-routing",
-        &[
-            "event.broca.step.finished.v1",
-            "event.thalamus-harness.step.finished.v1",
-        ],
-    ),
     LiveHintReader::new(
         "striatum",
         &[
@@ -628,10 +616,10 @@ mod tests {
 
     #[test]
     fn live_hint_reader_table_rejects_duplicate_modules() {
-        let reader = LIVE_HINT_READERS[0];
+        let reader = LiveHintReader::new("sample-reader", &["event.example.changed.v1"]);
         let error = validate_live_hint_readers(&[reader, reader], EVENT_CONSUMERS).unwrap_err();
         assert_eq!(error.kind(), TokenKind::ModuleId);
-        assert_eq!(error.token(), "prefrontal-routing");
+        assert_eq!(error.token(), "sample-reader");
         assert_eq!(error.reason(), "duplicate live-hint reader module");
     }
 
@@ -645,11 +633,22 @@ mod tests {
 
     #[test]
     fn live_hint_reader_table_rejects_overlap_with_own_event_filters() {
-        for reader in [
-            LiveHintReader::new("astrocyte", &["event.broca.step.finished.v1"]),
-            LiveHintReader::new("prefrontal-routing", &["event.insula.quota_sampled.v1"]),
+        let event_readers = [EventConsumer {
+            module_id: "sample-reader",
+            durable: "m_sample-reader",
+            filter_subjects: &["event.insula.>"],
+        }];
+        for (reader, events) in [
+            (
+                LiveHintReader::new("astrocyte", &["event.broca.step.finished.v1"]),
+                EVENT_CONSUMERS,
+            ),
+            (
+                LiveHintReader::new("sample-reader", &["event.insula.quota_sampled.v1"]),
+                &event_readers[..],
+            ),
         ] {
-            let error = validate_live_hint_readers(&[reader], EVENT_CONSUMERS).unwrap_err();
+            let error = validate_live_hint_readers(&[reader], events).unwrap_err();
             assert_eq!(error.token(), reader.subjects[0]);
             assert_eq!(
                 error.reason(),

@@ -24,11 +24,8 @@ The bus module should derive live permissions from
 deduplicated union of both tables under `ck.{account}.live.`. Do not derive live
 permissions by rewriting only `EVENT_CONSUMERS` filters.
 
-In 0.3.2, `prefrontal-routing`'s durable is narrowed back to Insula
-(`event.insula.>`); its two runner step hints remain live-only readers.
-Bootstrap should narrow `m_prefrontal-routing` in place and leave the removed,
-now-unlisted `m_thalamus-pi` durable alone. `thalamus-pi` no longer appears in
-either reader table or the generated permission fixture.
+Bootstrap should leave removed, now-unlisted durables alone. `thalamus-pi` no
+longer appears in either reader table or the generated permission fixture.
 
 In 0.4, EVENT readers may own several durables. Each name is `m_{module}` or
 `m_{module}_{suffix}`, with suffix `[a-z0-9_]+`. Grants include all of a module's

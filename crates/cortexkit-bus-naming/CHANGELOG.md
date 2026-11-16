@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3
+
+- Remove the retired `prefrontal-routing` module id from the event-consumer and
+  live-hint reader tables and the generated permission fixture.
+- Rename the `m_occipital` filter to `event.cerebellum.display_record_ready.v1`.
+
 ## 0.4.2
 
 - Add `m_occipital` with `event.thalamus-harness.send_state.v1.occipital`,

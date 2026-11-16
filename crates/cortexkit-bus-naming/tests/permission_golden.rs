@@ -731,7 +731,6 @@ fn event_consumer_grant_is_participant_plus_three_permissions_per_owned_durable(
     for module_id in [
         "prefrontal-core",
         "astrocyte",
-        "prefrontal-routing",
         "striatum",
         "thalamus-harness",
         "thalamus",
