@@ -188,6 +188,8 @@ pub enum Capability {
     AdmissionReports,
     /// Private read-only model conversations rooted in a head snapshot.
     ForkAnswer,
+    /// Cache-preserving, lowering-only effort hints on fork asks.
+    ForkEffort,
     /// The runner adapter can hold a session's next request at the context
     /// ceiling, as a missing compaction view would, and end the wait either
     /// way. See [`LlmRunnerSubject::hold_context_ceiling`].
@@ -287,6 +289,7 @@ impl Capability {
         Self::AccountRoute,
         Self::AdmissionReports,
         Self::ForkAnswer,
+        Self::ForkEffort,
     ];
 
     /// The name the report prints. A group prints as the role spells it.
@@ -373,6 +376,7 @@ impl Capability {
             Self::AccountRoute => groups::ACCOUNT_ROUTE,
             Self::AdmissionReports => groups::ADMISSION_REPORTS,
             Self::ForkAnswer => groups::FORK_ANSWER,
+            Self::ForkEffort => groups::FORK_EFFORT,
             Self::HoldToolCalls
             | Self::HoldContextCeiling
             | Self::HostMetadataChange

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.17.71
+
+- Pin the runner contract to `=0.8.59` and check optional `fork_effort`:
+  acceptance of `low`, `medium` and `high` on `session.fork_ask`, refusal of
+  invalid values or an `effort` member without that capability, and the value
+  set and hint bound of any reported `effort_applied`.
+- Check unchanged-answer replay for identical hints and `ask_id_reuse` for
+  changed effort hints, including present versus absent. Prove rejection of
+  a fake runner that replays an answer despite a changed effort hint.
+- Prove each new check rejects its named faulty runner: refusing valid hints,
+  accepting invalid or undeclared hints, or reporting unknown or excessive
+  applied effort. Round-trip the checksum-pinned effort samples. Mark cache
+  preservation, recorded evidence that effort changes preserve the cached
+  prefix, and the parent session's own effort as not observable by the kit.
+- Upgrading: callers send `effort` only to runners declaring `fork_effort`;
+  runners declare it only after implementing the contract's lowering-only
+  rule for provider/model pairs with recorded cache-preservation evidence,
+  leaving the prepared fork base's request settings unchanged.
+
 ## 0.17.70
 
 - Wait for a delivered queued send's own run to end before snapshotting its

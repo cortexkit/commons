@@ -40,8 +40,25 @@ impl ForkPrepareReply {
     }
 }
 
+/// Closed effort hint values, ordered from least to most reasoning effort.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ForkEffort {
+    Low,
+    Medium,
+    High,
+}
+
+fn present_effort<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ForkEffort>, D::Error> {
+    ForkEffort::deserialize(deserializer).map(Some)
+}
+
 /// Strict `session.fork_ask` request. Validate bounds with [`Self::check`]
-/// before looking up a fork or making a model call.
+/// and capability support with [`Self::check_effort`] before looking up a fork
+/// or making a model call.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -49,6 +66,13 @@ pub struct ForkAskRequest {
     pub fork_id: String,
     pub ask_id: String,
     pub question: String,
+    /// Send only to runners declaring `fork_effort`. Never raises head effort.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_effort"
+    )]
+    pub effort: Option<ForkEffort>,
 }
 
 impl ForkAskRequest {
@@ -61,6 +85,7 @@ impl ForkAskRequest {
             fork_id: fork_id.into(),
             ask_id: ask_id.into(),
             question: question.into(),
+            effort: None,
         }
     }
 
@@ -72,6 +97,19 @@ impl ForkAskRequest {
         }
         if self.question.is_empty() {
             return Err("question");
+        }
+        Ok(())
+    }
+
+    /// Refuse a hint as an unknown member when `fork_effort` is undeclared.
+    /// Return `invalid_params` naming the returned field before any model call.
+    pub fn check_effort<S: AsRef<str>>(&self, declared: &[S]) -> Result<(), &'static str> {
+        if self.effort.is_some()
+            && !declared
+                .iter()
+                .any(|group| group.as_ref() == capabilities::FORK_EFFORT)
+        {
+            return Err("effort");
         }
         Ok(())
     }
@@ -123,7 +161,7 @@ impl From<ForkFinish> for String {
     }
 }
 
-/// A stored ask answer. Replays return all three members unchanged, including
+/// A stored ask answer. Replays return all members unchanged, including
 /// usage incurred by a tool refusal or a model failure.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[non_exhaustive]
@@ -131,6 +169,13 @@ pub struct ForkAskReply {
     pub answer: String,
     pub finish: ForkFinish,
     pub usage: RunUsage,
+    /// Present only when the hint changed this ask's request effort.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_effort"
+    )]
+    pub effort_applied: Option<ForkEffort>,
 }
 
 impl ForkAskReply {
@@ -139,6 +184,7 @@ impl ForkAskReply {
             answer: answer.into(),
             finish,
             usage,
+            effort_applied: None,
         }
     }
 }
@@ -283,6 +329,56 @@ mod tests {
         ] {
             assert_eq!(ForkFinish::parse(finish.as_str()), finish);
         }
+    }
+
+    #[test]
+    fn fork_effort_wire_values_are_closed_and_absence_preserves_bytes() {
+        let file = vectors::load("fork-answer.json");
+        for (case, effort) in file["effort_asks"].as_array().unwrap().iter().zip([
+            ForkEffort::Low,
+            ForkEffort::Medium,
+            ForkEffort::High,
+        ]) {
+            let ask: ForkAskRequest = vectors::round_trip("effort request", &case["request"]);
+            assert_eq!(ask.effort, Some(effort));
+            assert_eq!(ask.check(), Ok(()));
+            assert_eq!(ask.check_effort(&[capabilities::FORK_EFFORT]), Ok(()));
+            assert_eq!(ask.check_effort::<&str>(&[]), Err("effort"));
+            let _: ForkAskReply = vectors::round_trip("effort reply", &case["reply"]);
+        }
+        for value in file["invalid_efforts"].as_array().unwrap() {
+            let mut request = file["ask"]["request"].clone();
+            request["effort"] = value.clone();
+            assert!(serde_json::from_value::<ForkAskRequest>(request).is_err());
+            let mut reply = file["ask"]["reply"].clone();
+            reply["effort_applied"] = value.clone();
+            assert!(serde_json::from_value::<ForkAskReply>(reply).is_err());
+        }
+        assert_eq!(
+            serde_json::to_string(&ForkAskRequest::new("f", "a", "q")).unwrap(),
+            r#"{"fork_id":"f","ask_id":"a","question":"q"}"#
+        );
+        assert_eq!(
+            ForkAskRequest::new("f", "a", "q").check_effort::<&str>(&[]),
+            Ok(())
+        );
+        assert_eq!(
+            serde_json::to_string(&ForkAskReply::new(
+                "a",
+                ForkFinish::EndTurn,
+                RunUsage::default()
+            ))
+            .unwrap(),
+            r#"{"answer":"a","finish":"end_turn","usage":{"steps":0,"unreported_steps":0,"by_model":[]}}"#
+        );
+        let mut reply = file["ask"]["reply"].clone();
+        reply["effort_applied"] = json!("high");
+        assert_eq!(
+            serde_json::from_value::<ForkAskReply>(reply)
+                .unwrap()
+                .effort_applied,
+            Some(ForkEffort::High)
+        );
     }
 
     #[test]

@@ -91,7 +91,8 @@ and round-trip these shapes; the conformance kit checks creation and repeats.
 ## Fork answer vectors
 
 `fork-answer.json` pins the fork prepare, ask and end wire shapes, per-ask
-usage, open finishes, ask bounds, and valid and malformed `fork_callers`
+usage, open finishes, ask bounds, optional closed effort hints and applied
+effort values, invalid effort shapes, and valid and malformed `fork_callers`
 plans. `fork_answer::tests` checks these vectors, including verbatim plan
 preservation without the group. The eight fork codes and their retry bits
 live in `errors.json`.

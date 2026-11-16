@@ -557,6 +557,13 @@ reports the rule inapplicable by name. Compaction isolation is deliberately
 not observable in this kit. `rule-map.json` records that exception and the
 executable cases for every pinned `fork_answer` rule.
 
+`ForkEffort` adapters declare `fork_effort` only with `fork_answer`. The kit
+checks acceptance of `low`, `medium` and `high`, invalid effort refusal naming
+`effort`, and the value set and hint bound of any `effort_applied`. A runner
+without `fork_effort` must refuse the member. Recorded cache evidence, actual
+cache preservation and the head's own effort are deliberately not observable;
+an absent `effort_applied` is valid when the runner cannot safely lower effort.
+
 The frozen request's conversation prefix, tools and settings are compared
 lexically, including whitespace and member order. Only explicit Anthropic
 content-block `cache_control` markers may relocate; the fork cannot add more

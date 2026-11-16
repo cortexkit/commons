@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.59
+
+- Add opt-in `fork_effort` and closed `low`/`medium`/`high` effort hints on
+  `session.fork_ask`, with optional `effort_applied` on stored answers. Absent
+  members preserve existing wire bytes. Keep strict request decoding.
+- Allow only lowering from the head's own effort, for provider/model pairs
+  with recorded cache-preservation evidence. Preserve base settings, digest,
+  accumulated fork history and parent account routing.
+- Include effort in ask replay identity: changing, adding or removing the
+  hint for an existing ask id refuses `ask_id_reuse`; identical retries keep
+  the original `effort_applied`.
+- Upgrading: callers send `effort` only to runners declaring `fork_effort`;
+  runners declare it only once they enforce the lowering-only,
+  recorded-cache-evidence rule and preserve the base's own request settings.
+
 ## 0.8.58
 
 - Add `not_delivered` reason and run-error class `host_refused` for a

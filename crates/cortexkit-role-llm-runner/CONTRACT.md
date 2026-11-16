@@ -317,6 +317,7 @@ alias until the next breaking release.
 |---|---|---|
 | `restart_survival` | `session.head`, `session.read`, `session.subscribe`, `run.result`, `run.status`; requires `interrupt_reason` and `live_events` | §14.4 |
 | `fork_answer` | `session.fork_prepare`, `session.fork_ask`, `session.fork_end`; no group dependencies | §9.20 |
+| `fork_effort` | `session.fork_ask`; requires `fork_answer` | §9.20 |
 | `output_refs` | `session.output_refs`, `session.output_ref_read` | §9.13 |
 | `tool_upfront` | `session.send` with per-plan-item `upfront`; no added op | §9.18 |
 | `plan_facts` | `session.send`, `session.refresh` with plan items carrying `facts`; no added op or group dependencies | Plan-carried system-text facts |
@@ -6475,17 +6476,56 @@ froze for a run to every assistant reply the run writes.
   `max_tokens`, `tool_call_refused`, `model_error`; unknown strings decode
   and re-encode verbatim. The first question is appended to the base, each
   later question after the fork's earlier questions and answers.
+- [pinned] `fork_answer.effort_values`: a runner declaring `fork_effort` accepts
+  optional `effort` on `session.fork_ask`, one of `low`, `medium` or `high` in
+  that order. Absence keeps today's effort behavior. The hint belongs to this
+  ask, not `session.fork_prepare`.
+- [pinned] `fork_answer.effort_invalid`: any other effort value or type,
+  including null, refuses
+  `invalid_params` with `detail.field: "effort"`. Absence keeps today's
+  effort behavior.
+- [pinned] `fork_answer.effort_undeclared`: callers send `effort` only to a
+  runner declaring `fork_effort` in `role.describe.capabilities`. A runner
+  without that capability refuses the member as an unknown member,
+  `invalid_params` with `detail.field: "effort"`. The capability requires
+  `fork_answer` and is declared only once the runner implements the lowering
+  and cache-preservation rule below.
+- [pinned] `fork_answer.effort_policy`: the runner uses the lower of the hint
+  and the head's frozen effort, and only for a provider and model on its
+  recorded list of models where changing effort is known to preserve the
+  cached prefix. That list comes from recorded evidence, is runner knowledge,
+  and is not a wire member. Otherwise, including when the head's effort
+  cannot be ordered against the hint, the runner keeps the head's own effort.
+  It never guesses and never raises effort. The runner applies lowered effort
+  in a way that leaves the base's own request settings unchanged (for example,
+  on the question turn rather than as a request-wide setting), because a
+  request-wide setting change can itself break the cached prefix. The hint
+  affects only this ask's request: it changes neither the prepared base nor
+  its digest, nor how earlier fork questions and answers are carried. All
+  existing account and credential routing rules below remain unchanged.
+- [pinned] `fork_answer.effort_applied_values`: an ask answer may include
+  `effort_applied`, one of `low`, `medium` or `high`.
+  It is present only when the hint changed the request's effort, so callers
+  can log it; otherwise it is omitted, including when there is no hint.
+  Existing answers without the member serialize identically.
+- [pinned] `fork_answer.effort_applied_bound`: any reported `effort_applied`
+  is no higher than the hint.
 - [pinned] `fork_answer.replay`: the runner decides an ask in this order:
   (1) the caller is the fork's principal and the fork is unrevoked, otherwise
   `unknown_fork`; (2) a stored answer for `(fork_id, ask_id)` with the same
-  question returns `answer`, `finish` and `usage` unchanged, without a model
+  question and effort returns `answer`, `finish`, `usage` and any `effort_applied`
+  unchanged, without a model
   call, even after end, expiry, loss of the base or restart; a different
-  question is `ask_id_reuse`; (3) any ask in flight on the fork, the same
+  question or effort is `ask_id_reuse`; (3) any ask in flight on the fork, the same
   `ask_id` included, makes this call `fork_busy`; (4) an expired fork is
   `unknown_fork`, an ended one `fork_ended`; (5) check the exact base below.
   Stored answers are kept at least 3,600 s after the fork ends or expires.
   Refusals are never stored; retrying one is a new attempt, numbered from 1
   per `(fork_id, ask_id)` and retained in the fork's session across restart.
+- [pinned] `fork_answer.effort_replay`: effort is part of the ask's identity.
+  Reusing `(fork_id, ask_id)` with a different hint, including present versus
+  absent, refuses `ask_id_reuse`, just as a changed question does. An identical
+  retry returns the stored answer, including `effort_applied`, unchanged.
 - [pinned] `fork_answer.model_failure`: after the base and account checks,
   a model call that fails for any reason other than a tool call answers
   `{answer: "", finish: "model_error", usage}` with its incurred usage.
@@ -6593,6 +6633,13 @@ head's next request, in the compaction contract), and updates none
 The following rule is not kit-checked: `fork_answer.compaction_isolation`
 (`not_observable`); the conformance kit does not observe compaction calls or
 the head's prompt-size conditions.
+
+The following rule is not kit-checked: `fork_answer.effort_policy`
+(`not_observable`); the kit cannot verify the runner's recorded cache evidence,
+whether a provider kept the cached prefix, or the head's own effort and its
+ordering against the hint. The kit checks only accepted values, capability
+gating and the reported `effort_applied` value and bound, not whether a change
+was actually applied.
 
 Informative, not a rule: forks are cheap only because the base is the head's
 exact last served request, which the provider has already cached. In a

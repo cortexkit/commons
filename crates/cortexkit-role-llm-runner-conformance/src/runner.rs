@@ -615,6 +615,6 @@ mod fork_answer_gate_tests {
             assert!(gate(spec, &declared).is_none(), "{}", spec.name);
             checked += 1;
         }
-        assert_eq!(checked, 13);
+        assert_eq!(checked, 19);
     }
 }

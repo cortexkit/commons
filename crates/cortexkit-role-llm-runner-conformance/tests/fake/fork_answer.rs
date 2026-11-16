@@ -23,6 +23,12 @@ pub enum ForkDefect {
     BlockedMapping,
     Key,
     Restart,
+    EffortValues,
+    EffortInvalid,
+    EffortAppliedValues,
+    EffortAppliedBound,
+    EffortUndeclared,
+    EffortReplay,
 }
 
 #[derive(Default)]
@@ -55,7 +61,7 @@ struct Fork {
     deadline: u64,
     ended: bool,
     revoked: bool,
-    answers: BTreeMap<String, (String, Value)>,
+    answers: BTreeMap<String, (String, Option<Value>, Value)>,
     attempts: BTreeMap<String, u64>,
     pending: Option<Pending>,
 }
@@ -64,6 +70,7 @@ struct Fork {
 struct Pending {
     id: String,
     question: String,
+    effort: Option<Value>,
     answer: Value,
     admission: Option<String>,
 }
@@ -194,8 +201,10 @@ fn finish(
         fork.ended = true;
     }
     fork.deadline = session.now + 2000;
-    fork.answers
-        .insert(pending.id, (pending.question, answer.clone()));
+    fork.answers.insert(
+        pending.id,
+        (pending.question, pending.effort, answer.clone()),
+    );
     release(module, session_name, &pending.admission);
     if fork.revoked {
         return refuse(errors::UNKNOWN_FORK, None);
@@ -396,12 +405,32 @@ fn begin(route: &FakeRoute, method: &str, params: &Value) -> Reply {
         return respond(json!({"fork_id":id}));
     }
     let fields = if method == ops::SESSION_FORK_ASK {
-        &["fork_id", "ask_id", "question"][..]
+        if module
+            .world
+            .groups
+            .iter()
+            .any(|group| group == groups::FORK_EFFORT)
+            || broken(module, ForkDefect::EffortUndeclared)
+        {
+            &["fork_id", "ask_id", "question", "effort"][..]
+        } else {
+            &["fork_id", "ask_id", "question"][..]
+        }
     } else {
         &["fork_id"][..]
     };
     if let Some(field) = unknown_field(params, fields) {
         return invalid(&field);
+    }
+    if method == ops::SESSION_FORK_ASK {
+        if let Some(effort) = params.get("effort") {
+            if broken(module, ForkDefect::EffortValues)
+                || (!matches!(effort.as_str(), Some("low" | "medium" | "high"))
+                    && !broken(module, ForkDefect::EffortInvalid))
+            {
+                return invalid("effort");
+            }
+        }
     }
     let Some(id) = params["fork_id"].as_str() else {
         return invalid("fork_id");
@@ -431,8 +460,11 @@ fn begin(route: &FakeRoute, method: &str, params: &Value) -> Reply {
     let Some(question) = params["question"].as_str().filter(|s| !s.is_empty()) else {
         return invalid("question");
     };
-    if let Some((q, answer)) = fork.answers.get(ask_id) {
-        if q != question {
+    if let Some((q, effort, answer)) = fork.answers.get(ask_id) {
+        if q != question
+            || (effort.as_ref() != params.get("effort")
+                && !broken(module, ForkDefect::EffortReplay))
+        {
             return refuse(errors::ASK_ID_REUSE, None);
         }
         let mut answer = answer.clone();
@@ -545,7 +577,16 @@ fn begin(route: &FakeRoute, method: &str, params: &Value) -> Reply {
     {
         usage["service_tier_applied"] = json!(tier);
     }
-    let answer = json!({"answer":answer,"finish":finish_reason,"usage":usage});
+    // The synthetic head has no orderable effort, so a faithful fake ignores hints.
+    let mut answer = json!({"answer":answer,"finish":finish_reason,"usage":usage});
+    if params.get("effort").is_some() {
+        if broken(module, ForkDefect::EffortAppliedValues) {
+            answer["effort_applied"] = json!("minimal");
+        }
+        if broken(module, ForkDefect::EffortAppliedBound) {
+            answer["effort_applied"] = json!("high");
+        }
+    }
     if broken(module, ForkDefect::Head) {
         assert!(module
             .commit(
@@ -557,6 +598,7 @@ fn begin(route: &FakeRoute, method: &str, params: &Value) -> Reply {
     fork.pending = Some(Pending {
         id: ask_id.into(),
         question: question.into(),
+        effort: params.get("effort").cloned(),
         answer,
         admission,
     });

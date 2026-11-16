@@ -215,6 +215,9 @@ pub mod capabilities {
     /// Questions on an isolated, prepared base of the head's newest served
     /// request, including its finished no-tool-call answer when present.
     pub const FORK_ANSWER: &str = "fork_answer";
+    /// Cache-preserving, lowering-only effort hints on `session.fork_ask`.
+    /// Requires [`FORK_ANSWER`].
+    pub const FORK_EFFORT: &str = "fork_effort";
     /// Provider service levels, route support and truthful served-tier usage.
     pub const SERVICE_TIER: &str = "service_tier";
     /// Durable owner-selected model and default tier for subsequent runs.
@@ -479,6 +482,7 @@ pub mod capabilities {
                 ops::RUN_STATUS,
             ],
         ),
+        (FORK_EFFORT, &[ops::SESSION_FORK_ASK]),
         (CALL_YIELD, &[ops::SESSION_SEND]),
         (NOTICE_YIELD, &[ops::SESSION_SEND]),
         (STOP_ALL, &[ops::SESSION_STOP_ALL]),

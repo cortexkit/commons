@@ -236,6 +236,7 @@ pub(crate) async fn run<S: LlmRunnerSubject<Route: RunnerRoute>>(
 ) -> Check<Ending> {
     let describe = case.checked_describe().await?;
     match name {
+        name if name.starts_with("fork_answer_effort_") => effort(case, name).await?,
         "fork_answer_base_matches_digest" | "fork_answer_refuses_mismatched_base" => {
             wire_rules(&describe)?;
             let mut session = seed(
@@ -411,6 +412,105 @@ pub(crate) async fn run<S: LlmRunnerSubject<Route: RunnerRoute>>(
         other => return Err(format!("unknown fork case {other}")),
     }
     Ok(Ending::Passed)
+}
+
+fn effort_rank(value: &Value) -> Check<usize> {
+    match value.as_str() {
+        Some("low") => Ok(0),
+        Some("medium") => Ok(1),
+        Some("high") => Ok(2),
+        _ => Err(format!(
+            "effort_applied is not low, medium or high: {value}"
+        )),
+    }
+}
+
+async fn effort<S: LlmRunnerSubject<Route: RunnerRoute>>(case: &Case<'_, S>, name: &str) -> Check {
+    let session = seed(case, name, vec![text("answer"); 4], None).await?;
+    let fork = prepare(&session.route).await?;
+    if name == "fork_answer_effort_ask_id_reuse" {
+        for (index, original_hint) in [None, Some("low"), Some("medium"), Some("high")]
+            .into_iter()
+            .enumerate()
+        {
+            let mut request = params(&fork, &format!("replay-{index}"), "question");
+            if let Some(hint) = original_hint {
+                request["effort"] = json!(hint);
+            }
+            let first = expect_ok(
+                name,
+                call(&session.route, ops::SESSION_FORK_ASK, request.clone()).await?,
+            )?;
+            let _: ForkAskReply = decode(name, first.clone())?;
+            for hint in [None, Some("low"), Some("medium"), Some("high")] {
+                let mut retry = request.clone();
+                retry.as_object_mut().unwrap().remove("effort");
+                if let Some(hint) = hint {
+                    retry["effort"] = json!(hint);
+                }
+                let reply = call(&session.route, ops::SESSION_FORK_ASK, retry).await?;
+                if hint == original_hint {
+                    if expect_ok(name, reply)? != first {
+                        return Err("identical effort retry changed its stored answer".into());
+                    }
+                } else {
+                    expect_code(name, &expect_error(name, reply)?, errors::ASK_ID_REUSE)?;
+                }
+            }
+        }
+        return end(&session.route, &fork).await;
+    }
+    if matches!(
+        name,
+        "fork_answer_effort_invalid" | "fork_answer_effort_undeclared"
+    ) {
+        let values = if name == "fork_answer_effort_invalid" {
+            vec![
+                json!("minimal"),
+                json!("LOW"),
+                json!(""),
+                json!(null),
+                json!(1),
+                json!(true),
+                json!([]),
+                json!({}),
+            ]
+        } else {
+            vec![json!("low"), json!("medium"), json!("high")]
+        };
+        for (index, value) in values.into_iter().enumerate() {
+            let mut request = params(&fork, &format!("refused-{index}"), "question");
+            request["effort"] = value;
+            let error = expect_error(
+                name,
+                call(&session.route, ops::SESSION_FORK_ASK, request).await?,
+            )?;
+            expect_field(name, &error, errors::INVALID_PARAMS, "effort")?;
+        }
+        return Ok(());
+    }
+    if name == "fork_answer_effort_applied_values" {
+        let answer = ask(&session.route, &fork, "no-hint", "question").await?;
+        if answer.get("effort_applied").is_some() {
+            return Err("effort_applied was present without a hint".into());
+        }
+    }
+    for (rank, hint) in ["low", "medium", "high"].into_iter().enumerate() {
+        let mut request = params(&fork, hint, "question");
+        request["effort"] = json!(hint);
+        let answer = expect_ok(
+            name,
+            call(&session.route, ops::SESSION_FORK_ASK, request).await?,
+        )?;
+        let _: ForkAskReply = decode(name, answer.clone())?;
+        if let Some(applied) = answer.get("effort_applied") {
+            let applied_rank = effort_rank(applied)?;
+            if name == "fork_answer_effort_applied_bound" && applied_rank > rank {
+                return Err(format!("effort_applied {applied} exceeds hint {hint}"));
+            }
+        }
+    }
+    end(&session.route, &fork).await
 }
 
 async fn idle<S: LlmRunnerSubject<Route: RunnerRoute>>(case: &Case<'_, S>, seconds: u64) -> Check {

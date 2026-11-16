@@ -42,6 +42,7 @@ pub mod problem_names {
     pub const FORK_IDLE_S_UNDECLARED: &str = "fork_idle_s_undeclared";
     pub const FORK_IDLE_S_INVALID: &str = "fork_idle_s_invalid";
     pub const ACCOUNT_ROUTE_WITHOUT_ROUTED_ACCOUNTS: &str = "account_route_without_routed_accounts";
+    pub const FORK_EFFORT_WITHOUT_FORK_ANSWER: &str = "fork_effort_without_fork_answer";
     pub const ADOPT_OPEN_WITHOUT_ADOPT: &str = "adopt_open_without_adopt";
     pub const ADOPT_OPEN_WITHOUT_PLANS: &str = "adopt_open_without_plans";
     pub const MESSAGE_MARKS_WITHOUT_READ_DISPLAY_FACTS: &str =
@@ -774,6 +775,11 @@ pub fn check_describe(raw: &Value) -> Result<RoleDescribe, Vec<DescribeProblem>>
         }
     }
     for (group, dependency, problem) in [
+        (
+            capabilities::FORK_EFFORT,
+            capabilities::FORK_ANSWER,
+            problem_names::FORK_EFFORT_WITHOUT_FORK_ANSWER,
+        ),
         (
             capabilities::NOTICE_YIELD,
             capabilities::CALL_YIELD,
@@ -2310,6 +2316,21 @@ mod fork_answer_tests {
                 }]
             );
         }
+    }
+
+    #[test]
+    fn fork_effort_requires_fork_answer() {
+        let mut value = serde_json::to_value(describe()).unwrap();
+        value["capabilities"] = json!([capabilities::FORK_ANSWER, capabilities::FORK_EFFORT]);
+        assert!(check_describe(&value).is_ok());
+        value["capabilities"] = json!([capabilities::FORK_EFFORT]);
+        value.as_object_mut().unwrap().remove("fork_idle_s");
+        assert_eq!(
+            check_describe(&value).unwrap_err(),
+            vec![DescribeProblem::Undecodable(
+                problem_names::FORK_EFFORT_WITHOUT_FORK_ANSWER.into()
+            )]
+        );
     }
 }
 

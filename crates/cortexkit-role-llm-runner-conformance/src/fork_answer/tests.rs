@@ -22,6 +22,22 @@ const OUTSIDE_SECTION: &[&str] = &[
     "fork_answer.retryable",
 ];
 
+#[test]
+fn fork_effort_shipped_samples_round_trip() {
+    use cortexkit_role_llm_runner::{fork_answer::ForkAskRequest, vectors};
+    let (_, contents) = vectors::FILES
+        .iter()
+        .find(|(name, _)| *name == "fork-answer.json")
+        .unwrap();
+    let file: Value = serde_json::from_str(contents).unwrap();
+    for case in file["effort_asks"].as_array().unwrap() {
+        let request: ForkAskRequest = serde_json::from_value(case["request"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(request).unwrap(), case["request"]);
+        let reply: ForkAskReply = serde_json::from_value(case["reply"].clone()).unwrap();
+        assert_eq!(serde_json::to_value(reply).unwrap(), case["reply"]);
+    }
+}
+
 fn validate_map(contract: &str, map: &Value) -> Check {
     let map = map.as_object().ok_or("rule map is not an object")?;
     let mut ids = BTreeSet::new();
@@ -139,6 +155,9 @@ async fn case_result(name: &str, defect: ForkDefect) -> Check {
         Capability::RenderedModelInput,
         Capability::ServiceTier,
     ]);
+    if name != "fork_answer_effort_undeclared" {
+        fake.capabilities.insert(Capability::ForkEffort);
+    }
     let root = tempfile::tempdir().unwrap();
     let declared = fake.capabilities().into_iter().collect();
     let mint = Mint::default();
@@ -183,6 +202,12 @@ fn defect(name: &str) -> ForkDefect {
         "fork_answer_account_blocked_refusal" => ForkDefect::BlockedMapping,
         "fork_answer_conversation_key_bounded" => ForkDefect::Key,
         "fork_answer_survives_restart" => ForkDefect::Restart,
+        "fork_answer_effort_values" => ForkDefect::EffortValues,
+        "fork_answer_effort_ask_id_reuse" => ForkDefect::EffortReplay,
+        "fork_answer_effort_invalid" => ForkDefect::EffortInvalid,
+        "fork_answer_effort_applied_values" => ForkDefect::EffortAppliedValues,
+        "fork_answer_effort_applied_bound" => ForkDefect::EffortAppliedBound,
+        "fork_answer_effort_undeclared" => ForkDefect::EffortUndeclared,
         _ => panic!("no faulty fake for {name}"),
     }
 }
@@ -239,6 +264,12 @@ conforming_case!(
     fork_answer_survives_restart,
     fork_answer_account_held_refusal,
     fork_answer_account_blocked_refusal,
+    fork_answer_effort_values,
+    fork_answer_effort_ask_id_reuse,
+    fork_answer_effort_invalid,
+    fork_answer_effort_applied_values,
+    fork_answer_effort_applied_bound,
+    fork_answer_effort_undeclared,
 );
 
 #[tokio::test]

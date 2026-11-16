@@ -1793,6 +1793,7 @@ const OPTIONAL_GROUPS: &[Capability] = &[
     Capability::SendIds,
     Capability::CachePolicy,
     Capability::ForkAnswer,
+    Capability::ForkEffort,
     Capability::HistoryIntake,
     Capability::PlanNotes,
     Capability::MediaRefs,
@@ -1838,9 +1839,9 @@ fn assert_only_session_retention_skipped(report: &SuiteReport) {
         matches!(&report.verdict,
             SuiteVerdict::ConformingForDeclaredCapabilities { declared, skipped }
             if skipped == &if declared.contains(&Capability::RunStatus) {
-                vec![Capability::SessionRetention, Capability::RoutedAccounts, Capability::ForkAnswer, Capability::KillAt(points::RELEASE_PENDING)]
+                vec![Capability::SessionRetention, Capability::RoutedAccounts, Capability::ForkAnswer, Capability::ForkEffort, Capability::KillAt(points::RELEASE_PENDING)]
             } else {
-                vec![Capability::RunStatus, Capability::SessionRetention, Capability::RoutedAccounts, Capability::ForkAnswer, Capability::KillAt(points::RELEASE_PENDING)]
+                vec![Capability::RunStatus, Capability::SessionRetention, Capability::RoutedAccounts, Capability::ForkAnswer, Capability::ForkEffort, Capability::KillAt(points::RELEASE_PENDING)]
             }
         ),
         "{}",
@@ -2450,6 +2451,7 @@ async fn undeclared_capabilities_make_the_run_conforming_only_for_the_declared_o
                     Capability::StepEvents,
                     Capability::RoutedAccounts,
                     Capability::ForkAnswer,
+                    Capability::ForkEffort,
                     Capability::RetentionClock,
                     Capability::HoldToolCalls,
                     Capability::KillAt(points::RELEASE_PENDING)
@@ -2826,6 +2828,7 @@ async fn without_run_ops_the_settled_retry_case_is_skipped_and_nothing_waits() {
                     Capability::StepEvents,
                     Capability::RoutedAccounts,
                     Capability::ForkAnswer,
+                    Capability::ForkEffort,
                     Capability::RetentionClock,
                     Capability::KillAt(points::RELEASE_PENDING)
                 ],
