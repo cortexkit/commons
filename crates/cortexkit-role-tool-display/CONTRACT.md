@@ -134,8 +134,15 @@ It does not require a tool call key, schema pin or provider view.
    `DisplayRecordReady::validate` checks the same opaque identifier rule.
    The display server acks the event only after it has stored the record or
    received a final refusal.
-6. **Retention.** A provider keeps each record readable by `display.read` for at
-   least 7 days, the bus EVENT stream's max age.
+6. **Retention.** A provider keeps each record readable by `display.read` for
+   as long as it would keep that record to push it with `display.write`, and at
+   least 10 minutes after the wake event. Past that window, or after a provider
+   restart that drops it, `display.read` answers `display_record_unknown`, and
+   the display server drops the record. The pull adds no durability beyond the
+   push path. It lets the display server fetch, within the provider's window,
+   records announced while it was down. Keeping records in a bounded in-memory
+   outbox meets this rule; no provider needs a durable store for it. A provider
+   states its window in its own documentation.
 7. **Rollout.** Providers keep `display.write` until the display server's reader
    has run on them. Both paths coexist; `display.write` is unchanged.
 

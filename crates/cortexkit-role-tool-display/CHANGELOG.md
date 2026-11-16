@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.9
+
+- Relax `display.read` retention: a provider keeps a record readable for as
+  long as it would keep it to push with `display.write`, and at least 10 minutes
+  after the wake event, instead of 7 days. Past that window `display.read`
+  answers `display_record_unknown`. A bounded in-memory outbox meets the rule.
+  Contract text only; no code or wire change.
+
 ## 0.1.8
 
 - Add provider management-surface `display.read` and the strict
