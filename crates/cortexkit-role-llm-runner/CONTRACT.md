@@ -3407,11 +3407,12 @@ Model-view reads and replacement-entry pages are not part of this contract.
   follows the durable sync, as above.
 - [pinned] `not_delivered` (`send::states::NOT_DELIVERED`) means the send's
   words never ran and can no longer run, so the owner may deliver them again as
-  a new send. The runner proves this from its own durable record or a typed
-  answer of the process that hands prompts to the host, and retires the send
-  in the same write so it can never land later. Anything it cannot prove stays
-  `delivered.as: "unknown"`. `reason` is required, an open string whose unknown
-  values decoders keep; `delivered` is absent. The reasons are:
+  a new send, subject to the reason below. The runner proves this from its own
+  durable record or a typed answer of the process that hands prompts to the
+  host, and retires the send in the same write so it can never land later.
+  Anything it cannot prove stays `delivered.as: "unknown"`. `reason` is
+  required, an open string whose unknown values decoders keep; `delivered` is
+  absent. The reasons are:
   - `handover_failed` (`send::REASON_HANDOVER_FAILED`): the runner proves from
     its own durable record or the typed answer above that the prompt was never
     handed to a host. This reason is about the host side: hand-over was tried
@@ -3432,19 +3433,41 @@ Model-view reads and replacement-entry pages are not part of this contract.
     (it would start a turn or join one now if the host were available), and
     nothing but its session's unreachable host or a host that failed to start
     this time holds it, where a later attempt can succeed; a known repeatable
-    failure instead follows the unchanged rule below. After 5 minutes (300
+    failure instead follows the rules below. After 5 minutes (300
     seconds) of this wait, counted from the later of the send's acceptance and
-    the moment its run became due, the send ends `not_delivered`. The runner
-    computes the deadline from its own durable timestamps so it survives a
-    runner restart, never from an in-memory timer alone. It may report this
+    the moment its run became due, the send ends `not_delivered`. A send
+    accepted to join the session's active run (a steer) is due from its
+    acceptance and follows this same deadline if never handed to the host.
+    The runner computes the deadline from its own durable timestamps so it
+    survives a runner restart, never from an in-memory timer alone. It may report this
     reason only for a send it never handed to any host, and retires the send
     in the same durable write so it can never land later. Words already handed
     over require the `withdrawn` proof below or stay `delivered.as: "unknown"`.
-    If the send was given a `run_id`, that run ends `error` with no model step,
+    If the send started its own run, that run ends `error` with no model step,
     with `class: "host_unavailable"`, `provider_code: "provider_error"` and the
     existing top-level `cause` naming what failed (`host_unreachable` or
-    `host_start_failed`, for example; an open string). A host that comes back
-    within the 5 minutes simply delivers the send; no failure is reported;
+    `host_start_failed`, for example; an open string). For a steer, only the
+    send ends; the shared active run is left alone and ends only on its host's
+    evidence. A host that comes back within the 5 minutes simply delivers the
+    send; no failure is reported;
+  - `host_refused` (`send::REASON_HOST_REFUSED`): the host, or the process that
+    hands prompts to it, refused this send for a reason that sending the same
+    words again unchanged cannot fix. Examples are an attachment the host
+    cannot read, invalid host configuration, an unsupported host version, or a
+    managed policy that forbids the request. The runner reports this reason
+    only when it proves, from its own durable record or the typed answer of
+    the process that hands prompts to the host, that no model request carried
+    the words. It retires the send in the same durable write so it can never
+    land later. The send's own allocated run, if any, ends `error` with no
+    model step, `class: "host_refused"` and a top-level `cause` naming the
+    refusal. The named causes are `attachment_unreadable`,
+    `host_configuration_invalid`, `host_version_unsupported` and
+    `host_policy_refused` (§12.2); `cause` stays an open string.
+    `provider_code` is `"host_policy_refused"` for a managed-policy refusal,
+    otherwise `"provider_error"`. Callers show the send as not sent, with the
+    run's error, and MUST NOT resend it automatically. The owner may send the
+    words again only as a new send after changing something, such as editing
+    the message or attachment;
   - `routing_refused` (`send::REASON_ROUTING_REFUSED`): routing refused the
     account before any provider attempt;
   - `withdrawn` (`send::REASON_WITHDRAWN`): the prompt was handed to the host
@@ -3455,17 +3478,19 @@ Model-view reads and replacement-entry pages are not part of this contract.
     gone and its stored history lacks them. The send's own run took no model
     step; the no-request proof also covers requests in any other run.
 
-  Callers retry a `not_delivered` send as a new send on a backoff, so a runner
-  reports it only when a new send can succeed later, including after the
-  `host_unavailable` wait above. A cause that would fail
-  the same way again (compaction unavailable before any post, a host that can
-  never be relaunched, or a model the host refuses) ends the run `error` with
-  its own code at once, without the `host_unavailable` wait, and the send keeps
-  its ordinary receipt.
+  Except for `host_refused`, callers retry a `not_delivered` send as a new
+  send on a backoff, so a runner reports it only when a new send can succeed
+  later, including after the `host_unavailable` wait above. A repeatable host
+  refusal of a send proven never sent instead ends `not_delivered` with
+  `host_refused` at once, without that wait. Other repeatable causes
+  (compaction unavailable before any post, a host that can never be
+  relaunched, or a model the host refuses) end the run `error` with their own
+  code at once, without the `host_unavailable` wait, and the send keeps its
+  ordinary receipt.
 
   The state is final for that `send_id`: a re-send or `session.send_status`
   answers it again. The owner may deliver the same words again only as a new
-  send with a new `send_id`. If the send was given a `run_id`, that run ends
+  send with a new `send_id`. If the send started its own run, that run ends
   with no model step, and its `run.result` is `error` carrying the refusal it
   ended on. This differs from `delivered.as: unknown`, whose outcome is unknown
   and must never be resent. An older reader keeps `not_delivered` as an unknown
@@ -3474,11 +3499,17 @@ Model-view reads and replacement-entry pages are not part of this contract.
   `withdrawn` reason and the `handover_failed` run-error class are likewise
   emitted only after those readers accept them.
   The `host_unavailable` reason and run-error class are likewise emitted only
-  after those readers accept them.
+  after those readers accept them. The `host_refused` reason and run-error
+  class are likewise emitted only after those readers accept them. Readers
+  first matters especially for `host_refused`: an older reader treats an
+  unknown reason as resendable and would resend into the same refusal on
+  every backoff.
 - [pinned] `not_delivered` applies only to a send whose own run ended before
   hand-over, or before the host used a withdrawn prompt, or that routing
-  refused, including the `host_unavailable` deadline above. Apart from that
-  deadline for a due send held only by its unavailable host, a queued send
+  refused, or a proven never-sent send the host refused as above. It also
+  applies at the `host_unavailable` deadline above, including to a steer that
+  never reached the host, without ending the shared active run. Apart from
+  that deadline or a proven host refusal, a queued send
   whose run never started stays queued without a time limit while its session
   is parked by its owner, or it waits on a running or paused turn, an account
   or concurrency wait, or a context-ceiling wait, and runs when the session can
@@ -7751,8 +7782,21 @@ to the provider codes below, this role names the following runner-side classes
 | Error class | When |
 |---|---|
 | `handover_failed` | the send's run ends `error` because plain hand-over failed: the host was unreachable, nothing was written, no stdin was available, or the host exited before taking the prompt; never `interrupted` or `cancelled`. Use `provider_code: "provider_error"` and the existing top-level `cause` (`host_unreachable`, `nothing_written`, `no_stdin`, `host_exited`; an open string). A host that is not available now instead keeps the send queued and `pending` until the `host_unavailable` deadline (§9) |
-| `host_unavailable` | a due send held only by its session's unreachable host or a host that failed to start this time ends `not_delivered` after the 5-minute wait (§9), where a later attempt can succeed. The send was never handed to any host. Its allocated run ends `error` with no model step, `provider_code: "provider_error"` and the existing top-level `cause` naming what failed (`host_unreachable` or `host_start_failed`, for example; an open string) |
+| `host_unavailable` | a due send held only by its session's unreachable host or a host that failed to start this time ends `not_delivered` after the 5-minute wait (§9), where a later attempt can succeed. The send was never handed to any host. A run the send started itself ends `error` with no model step, `provider_code: "provider_error"` and the existing top-level `cause` naming what failed (`host_unreachable` or `host_start_failed`, for example; an open string). A steer is due from acceptance; only its send ends, and the shared active run ends only on its host's evidence |
+| `host_refused` | the host or its prompt hand-over process refused the send for a reason that sending the same words unchanged cannot fix, with durable proof or a typed answer that no model request carried the words (§9). The send ends `not_delivered` and is retired in the same durable write. Its own allocated run, if any, ends `error` with no model step and a top-level `cause` using the named values below when they apply; `cause` remains an open string. Use `provider_code: "host_policy_refused"` for a managed-policy refusal, otherwise `"provider_error"`. Callers never resend automatically |
 | `host_relaunch_failed` | the run ends `error` with no further model request because a required `refresh_relaunch` change could not be installed and verified on the host, a failed relaunch's fallback could not restore and verify the previous surface, a request's surface that someone else changed mid-run was not restored, or a runner-initiated host restart or rebuild could not reinstall and verify the stored effective surface; a pending change stays pending and the session is never ended (§10.2) |
+
+[pinned] For a `host_refused` run error, the runner uses these named `cause`
+values when they apply (`errors::causes`). `cause` stays an open string.
+Readers may show a named cause and drop unknown causes from what they show,
+as they do with unknown provider codes.
+
+| Cause | When |
+|---|---|
+| `attachment_unreadable` | the host cannot read an attachment carried by the send |
+| `host_configuration_invalid` | invalid host configuration prevents the request |
+| `host_version_unsupported` | the host version is unsupported |
+| `host_policy_refused` | the host's managed policy, an administrator's setting, forbids the request |
 
 [pinned] A run that ends `error` because of a provider names the code
 callers branch on as `provider_code` in its run error, and any finer
@@ -7770,6 +7814,7 @@ The provider codes this role names:
 | Provider code | When |
 |---|---|
 | `provider_error` | the provider refused or failed and no code this role names applies; callers decide only by `class`; the provider's own code, if any, goes in `provider_detail_code` |
+| `host_policy_refused` | the host's managed policy, an administrator's setting, refused the request; a final failure, not retried. The policy's own code or name, if any, goes in `provider_detail_code` |
 | `pre_user_unavailable` | a user turn's PreUser hook was unavailable under `refuse` |
 | `context_overflow` | the provider refused the request as exceeding the model's context window. Not the ceiling: a stop the runner decides itself before sending is the `context_ceiling` run state or refusal (§6, §12.1), never this code |
 | `output_ceiling` | the provider's output-token ceiling prevents a complete response |
@@ -8303,7 +8348,8 @@ to the session's whole length.
   §9.8's status replay and §14 property 6. An accepted send never handed to
   the host stays queued and is handed after reattach, unless §9's
   `host_unavailable` deadline retires the due send held only by its unavailable
-  host as `not_delivered`; it is then never handed over after reattach.
+  host, or a proven repeatable host refusal retires it with `host_refused`, as
+  `not_delivered`; it is then never handed over after reattach.
   A handed send without
   confirmation is settled from host evidence: delivered if the host holds
   the message; not sent if the host proves it never took it. The latter

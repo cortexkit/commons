@@ -35,6 +35,63 @@
       }
     },
     {
+      "name": "host refused an unreadable attachment before any model request carried the words",
+      "terminal": true,
+      "answer": {
+        "run_id": "run-16",
+        "state": "error",
+        "error": {
+          "class": "host_refused",
+          "message": "host cannot read the attachment",
+          "provider_code": "provider_error",
+          "cause": "attachment_unreadable"
+        }
+      }
+    },
+    {
+      "name": "invalid host configuration refused the send before any model request carried the words",
+      "terminal": true,
+      "answer": {
+        "run_id": "run-17",
+        "state": "error",
+        "error": {
+          "class": "host_refused",
+          "message": "host configuration must be corrected",
+          "provider_code": "provider_error",
+          "cause": "host_configuration_invalid"
+        }
+      }
+    },
+    {
+      "name": "unsupported host version refused the send before any model request carried the words",
+      "terminal": true,
+      "answer": {
+        "run_id": "run-18",
+        "state": "error",
+        "error": {
+          "class": "host_refused",
+          "message": "host version is unsupported",
+          "provider_code": "provider_error",
+          "cause": "host_version_unsupported"
+        }
+      }
+    },
+    {
+      "name": "managed host policy refused the send before any model request carried the words",
+      "terminal": true,
+      "answer": {
+        "run_id": "run-19",
+        "state": "error",
+        "error": {
+          "class": "host_refused",
+          "message": "an administrator policy forbids the request",
+          "provider_code": "host_policy_refused",
+          "provider_detail_code": "attachments_disabled",
+          "cause": "host_policy_refused"
+        }
+      }
+    },
+    {
       "name": "routing decision refused before a model call",
       "terminal": true,
       "answer": {

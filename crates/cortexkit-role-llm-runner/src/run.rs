@@ -376,6 +376,8 @@ pub struct RunError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub routing_code: Option<String>,
     /// Structured cause callers may act on; unknown values are treated as absent.
+    /// Named host refusals use [`crate::errors::causes`]. Readers may show a
+    /// named cause and omit unknown causes without rejecting the run error.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cause: Option<String>,
 }
@@ -1029,6 +1031,56 @@ mod tests {
                 .with_cause(cause)
             );
         }
+    }
+
+    #[test]
+    fn host_refused_error_class_and_causes_round_trip() {
+        for (cause, provider_code) in [
+            (
+                crate::errors::causes::ATTACHMENT_UNREADABLE,
+                "provider_error",
+            ),
+            (
+                crate::errors::causes::HOST_CONFIGURATION_INVALID,
+                "provider_error",
+            ),
+            (
+                crate::errors::causes::HOST_VERSION_UNSUPPORTED,
+                "provider_error",
+            ),
+            (
+                crate::errors::causes::HOST_POLICY_REFUSED,
+                "host_policy_refused",
+            ),
+            ("future_cause", "provider_error"),
+        ] {
+            let wire = serde_json::json!({
+                "class": "host_refused",
+                "message": "host refused the send before any model request carried its words",
+                "provider_code": provider_code,
+                "cause": cause
+            });
+            let error: RunError = serde_json::from_value(wire.clone()).unwrap();
+            assert_eq!(error.class, crate::errors::run_error_classes::HOST_REFUSED);
+            assert_eq!(error.provider_code, provider_code);
+            assert_eq!(error.cause.as_deref(), Some(cause));
+            assert_eq!(serde_json::to_value(&error).unwrap(), wire);
+            assert_eq!(
+                error,
+                RunError::new(
+                    crate::errors::run_error_classes::HOST_REFUSED,
+                    "host refused the send before any model request carried its words",
+                    provider_code
+                )
+                .with_cause(cause)
+            );
+        }
+        assert_eq!(
+            crate::errors::provider_codes::HOST_POLICY_REFUSED,
+            "host_policy_refused"
+        );
+        assert!(crate::errors::provider_codes::CODES
+            .contains(&crate::errors::provider_codes::HOST_POLICY_REFUSED));
     }
 
     #[test]

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.8.58
+
+- Add `not_delivered` reason and run-error class `host_refused` for a
+  repeatable host or prompt hand-over refusal, with durable proof or a typed
+  answer that no model request carried the words. Retire the send in the same
+  write. Its own allocated run, if any, ends `error` with no model step and a
+  top-level `cause` string that accepts future values. Callers show it as not
+  sent with the run's error and never resend automatically; only a new send
+  after a change may try again.
+- Add provider code `host_policy_refused` for a final managed-policy refusal,
+  with the policy's own code or name in `provider_detail_code`. Other host
+  refusals use `provider_error`. Ship constants and checksum-pinned send,
+  send-status and run-error samples for the refusal causes.
+- Name the `host_refused` causes `attachment_unreadable`,
+  `host_configuration_invalid`, `host_version_unsupported` and
+  `host_policy_refused`, with constants in `errors::causes`. Readers may show
+  these named causes and omit unknown causes from the display.
+- Add a `host_unavailable` send-status sample beside `host_refused`, paired
+  with the existing run-error sample carrying cause `host_unreachable` and
+  provider code `provider_error`. The conformance kit round-trips both samples.
+- Require readers to accept `host_refused` before runners emit it: older
+  readers resend unknown reasons into the same refusal on every backoff.
+- Clarify that a never-handed steer is due from acceptance and follows the
+  5-minute `host_unavailable` deadline. Only the send ends at that deadline;
+  the shared active run ends only on its host's evidence. The no-model-step
+  error applies only to a run the send started itself.
+
 ## 0.8.57
 
 - Add `not_delivered` reason `host_unavailable` for a due send never handed

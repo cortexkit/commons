@@ -85,7 +85,8 @@ mod tests {
 
     /// Each pinned answer is a `SendReply`. A delivered queued send names
     /// the run that carried it beside its receipt; a pending one names its
-    /// submission and no run.
+    /// submission and no run. A proven host refusal or expired host wait
+    /// names its reason and carries no delivery receipt.
     #[test]
     fn send_status_replies_are_send_replies() {
         let file = vectors::load("send-status.json");
@@ -108,6 +109,19 @@ mod tests {
                     );
                 }
                 Some(delivered_as::UNKNOWN) => {}
+                None if reply.state == states::NOT_DELIVERED => {
+                    assert_eq!(reply.send_state(), SendState::NotDelivered, "{name}");
+                    assert!(matches!(
+                        reply.reason.as_deref(),
+                        Some(
+                            crate::send::REASON_HOST_REFUSED | crate::send::REASON_HOST_UNAVAILABLE
+                        )
+                    ));
+                    assert!(
+                        reply.run_id.is_some(),
+                        "{name}: the sample names its own run"
+                    );
+                }
                 None => {
                     assert_eq!(reply.send_state(), SendState::Pending, "{name}");
                     assert!(reply.submission_id.is_some(), "{name}");
@@ -119,11 +133,12 @@ mod tests {
                 reply
                     .delivered
                     .as_ref()
-                    .map_or(states::PENDING.to_owned(), |d| d.r#as.clone()),
+                    .map_or_else(|| reply.state.clone(), |d| d.r#as.clone()),
             );
         }
         for wanted in [
             states::PENDING,
+            states::NOT_DELIVERED,
             delivered_as::STEP,
             delivered_as::TURN,
             delivered_as::UNKNOWN,

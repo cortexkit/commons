@@ -39,6 +39,24 @@
   ],
   "replies": [
     {
+      "name": "unavailable host left the due send not sent after its 300-second wait",
+      "reply": {
+        "state": "not_delivered",
+        "run_id": "run-8",
+        "submission_id": "sub-4",
+        "reason": "host_unavailable"
+      }
+    },
+    {
+      "name": "host refusal remains not sent after the runner restarts",
+      "reply": {
+        "state": "not_delivered",
+        "run_id": "run-16",
+        "submission_id": "sub-5",
+        "reason": "host_refused"
+      }
+    },
+    {
       "name": "queued behind a running run, not yet delivered",
       "reply": {
         "state": "pending",

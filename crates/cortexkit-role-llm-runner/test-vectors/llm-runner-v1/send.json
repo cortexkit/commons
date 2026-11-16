@@ -134,6 +134,16 @@
       }
     },
     {
+      "name": "host refused the send permanently with proof no model request carried its words",
+      "admitted": false,
+      "reply": {
+        "state": "not_delivered",
+        "run_id": "run-16",
+        "submission_id": "sub-5",
+        "reason": "host_refused"
+      }
+    },
+    {
       "name": "routing refused the account before any provider attempt",
       "admitted": false,
       "reply": {

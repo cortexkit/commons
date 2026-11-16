@@ -26,10 +26,19 @@ pub mod run_error_classes {
     pub const HANDOVER_FAILED: &str = "handover_failed";
     /// A due send waited 300 seconds only for an unreachable host or a host
     /// that failed to start this time, where a later attempt can succeed.
-    /// The send was never handed to any host. Its run ends `error` with no
-    /// model step, `provider_code: provider_error` and an open top-level `cause`.
+    /// The send was never handed to any host. A run the send started itself
+    /// ends `error` with no model step, `provider_code: provider_error` and an
+    /// open top-level `cause`. A steer is due from acceptance; only its send
+    /// ends, and the shared active run ends only on its host's evidence.
     /// Emit only after callers' readers accept this class and send reason.
     pub const HOST_UNAVAILABLE: &str = "host_unavailable";
+    /// A proven never-sent send was refused by the host or its prompt hand-over
+    /// process for a reason resending unchanged cannot fix. Its own allocated
+    /// run, if any, ends `error` with no model step and an open top-level `cause`.
+    /// Use provider code `host_policy_refused` for a managed-policy refusal,
+    /// otherwise `provider_error`. Never resend automatically. Emit only after
+    /// callers' readers accept this class and send reason.
+    pub const HOST_REFUSED: &str = "host_refused";
     /// A required refresh could not start the session host with its new plan.
     pub const HOST_RELAUNCH_FAILED: &str = "host_relaunch_failed";
 }
@@ -818,11 +827,28 @@ pub mod tool_result_reasons {
     pub const ROUTE_DRAINED: &str = "route_drained";
 }
 
+/// Named top-level `cause` values for a `host_refused` run error.
+/// Causes remain open strings so future values can be decoded.
+pub mod causes {
+    /// The host cannot read an attachment carried by the send.
+    pub const ATTACHMENT_UNREADABLE: &str = "attachment_unreadable";
+    /// Invalid host configuration prevents the request.
+    pub const HOST_CONFIGURATION_INVALID: &str = "host_configuration_invalid";
+    /// The host version is unsupported.
+    pub const HOST_VERSION_UNSUPPORTED: &str = "host_version_unsupported";
+    /// The host's managed policy, an administrator's setting, forbids the request.
+    pub const HOST_POLICY_REFUSED: &str = "host_policy_refused";
+}
+
 /// `provider_code` values a runner writes on a run that ends `error`
 /// because of a provider the session depends on.
 pub mod provider_codes {
     /// The provider failed or refused without a more specific named code.
     pub const PROVIDER_ERROR: &str = "provider_error";
+    /// The host's managed policy, an administrator's setting, refused the
+    /// request. Final, not retried. The policy's own code or name, if any,
+    /// goes in `provider_detail_code`.
+    pub const HOST_POLICY_REFUSED: &str = "host_policy_refused";
     /// Routing refused the caller's decision (including an expired decision).
     /// No model call or independent account allocation is permitted.
     pub const ROUTING_DECISION_REFUSED: &str = "routing_decision_refused";
@@ -874,6 +900,7 @@ pub mod provider_codes {
     /// Every provider code this role names; providers may define others.
     pub const CODES: &[&str] = &[
         PROVIDER_ERROR,
+        HOST_POLICY_REFUSED,
         ROUTING_DECISION_REFUSED,
         PRE_USER_UNAVAILABLE,
         CONTEXT_OVERFLOW,

@@ -1,4 +1,22 @@
-# llm-runner/v1 vectors for runner 0.8.56
+# llm-runner/v1 vectors for runner 0.8.58
+
+`send.json` and `send-status.json` sample a proven never-sent `host_refused`
+send without a delivery receipt. `run-result.json` samples unreadable
+attachments, invalid host configuration, unsupported host versions and
+managed-policy refusals, including the `host_policy_refused` provider code
+and the policy's own detail code. The wire tests and conformance kit decode
+and round-trip these samples; runner implementations enforce the proof,
+retirement and no-automatic-resend rules.
+
+The `host_refused` run-error samples pin the named `errors::causes` values
+`attachment_unreadable`, `host_configuration_invalid`,
+`host_version_unsupported` and `host_policy_refused`. The conformance kit
+checks each constant against its wire name before round-tripping the samples.
+
+`send-status.json` also samples `host_unavailable` beside `host_refused`,
+paired with the `run-result.json` sample carrying cause `host_unreachable`
+and provider code `provider_error`. The conformance kit decodes and
+round-trips both unavailable-host samples.
 
 `send-promote.json` pins session-bound promotion requests, all four outcomes,
 strict request refusals and the request-id reuse refusal. The `send_promote`

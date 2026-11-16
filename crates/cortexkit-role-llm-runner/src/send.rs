@@ -1364,8 +1364,11 @@ pub mod states {
     /// process, and retired in the same write so they can never land later.
     /// Terminal for its `send_id`, with a required open `reason` and no
     /// `delivered` receipt. Unproven delivery stays `delivered.as: unknown`.
-    /// Callers retry as a new send on a backoff, so a new send must be able
-    /// to succeed later; repeatable failures keep the ordinary receipt.
+    /// Except for [`super::REASON_HOST_REFUSED`], callers retry as a new send
+    /// on a backoff, so a new send must be able to succeed later. A proven
+    /// never-sent, repeatable host refusal instead uses that reason and must
+    /// not be resent automatically. Other repeatable failures keep the
+    /// ordinary receipt.
     pub const NOT_DELIVERED: &str = "not_delivered";
 }
 
@@ -1392,8 +1395,22 @@ pub const REASON_WITHDRAWN: &str = "withdrawn";
 /// later of acceptance and becoming due, it ends `not_delivered`. Compute the
 /// deadline from durable timestamps so a runner restart preserves it. The send
 /// must never have been handed to any host, and is retired in the same durable
-/// write. Emit only after callers' readers accept this reason and run-error class.
+/// write. A steer is due from acceptance; only its send ends, not the shared
+/// active run, which ends only on its host's evidence. A run the send started
+/// itself ends `error` with no model step. Emit only after callers' readers
+/// accept this reason and run-error class.
 pub const REASON_HOST_UNAVAILABLE: &str = "host_unavailable";
+/// The host or its prompt hand-over process refused the send for a reason
+/// that resending the same words unchanged cannot fix. Durable proof or a
+/// typed hand-over answer shows no model request carried the words; retire
+/// the send in the same durable write. Its own allocated run, if any, ends
+/// `error` with no model step, class `host_refused` and an open top-level
+/// `cause`. Use provider code `host_policy_refused` for a managed-policy
+/// refusal, otherwise `provider_error`. Callers show it as not sent with the
+/// run's error and never resend automatically. Only a new send after a change
+/// may send the words again. Emit only after callers' readers accept this
+/// reason and class: older readers resend unknown reasons on every backoff.
+pub const REASON_HOST_REFUSED: &str = "host_refused";
 
 /// A send state, classified without rejecting a runner's additional states.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1673,6 +1690,7 @@ mod tests {
         for reason in [
             REASON_HANDOVER_FAILED,
             REASON_HOST_UNAVAILABLE,
+            REASON_HOST_REFUSED,
             REASON_ROUTING_REFUSED,
             "future_refusal",
         ] {
@@ -1726,6 +1744,25 @@ mod tests {
                 &SendReply::new(states::NOT_DELIVERED)
                     .with_run_id("run-8")
                     .with_reason(REASON_HOST_UNAVAILABLE)
+            )
+            .unwrap(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn host_refused_reason_round_trips_with_no_delivery_receipt() {
+        let bytes = r#"{"state":"not_delivered","run_id":"run-8","reason":"host_refused"}"#;
+        let reply: SendReply = serde_json::from_str(bytes).unwrap();
+        assert_eq!(reply.send_state(), SendState::NotDelivered);
+        assert_eq!(reply.reason.as_deref(), Some(REASON_HOST_REFUSED));
+        assert!(reply.delivered.is_none());
+        assert_eq!(serde_json::to_string(&reply).unwrap(), bytes);
+        assert_eq!(
+            serde_json::to_string(
+                &SendReply::new(states::NOT_DELIVERED)
+                    .with_run_id("run-8")
+                    .with_reason(REASON_HOST_REFUSED)
             )
             .unwrap(),
             bytes

@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.17.69
+
+- Pin the runner contract to `=0.8.58` for the `host_refused` send reason and
+  run-error class, the final `host_policy_refused` provider code, and the
+  `host_unavailable` steer deadline clarification.
+- Decode and round-trip the checksum-pinned send, send-status and run-error
+  samples, including managed-policy detail and all four named refusal causes.
+  Check the `errors::causes` constants against the fixed wire names.
+  As for `host_unavailable`, reader-side coverage adds no live-runner case;
+  runner implementations enforce the refusal and retry rules.
+- Decode and round-trip a `host_unavailable` send-status sample and its
+  matching run-error sample, with cause `host_unreachable`, class
+  `host_unavailable` and provider code `provider_error`.
+
 ## 0.17.68
 
 - Pin the runner contract to `=0.8.57` for the `host_unavailable` send reason
