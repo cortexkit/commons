@@ -474,6 +474,7 @@ That group's additive defaults, attested namespace and selector rules are in §1
     requires `observe_backoff`.
   - `report_outcomes`: additional report outcomes and their effects (§8).
   - `report_usage_run_id`: run-attributed report usage (§8).
+  - `route_fact_stream`: the whole-router route fact bus reader (§8.1).
 - [pinned] Each of the nine optional op groups is declared exactly when its op is
   in `ops` (`capabilities::OP_GROUPS`). `describe::check_describe` refuses
   either mismatch as `DescribeProblem::OpGroupMismatch {group}`. The five
@@ -1122,6 +1123,34 @@ pool?, eligibility?, request_input_tokens?, refusal_class?}`.
   `pool`, `eligibility`, `request_input_tokens` and `usage` are part of the body.
 - [pinned] Refusals: `invalid_request {field}`, `unknown_decision`,
   `report_conflict`.
+
+### 8.1 Route fact stream — group `route_fact_stream`
+
+- [pinned] `route_fact_stream` is a whole-router `role.describe` capability.
+  A router advertises it only while its bus reader is bound and its durable's
+  filters cover every `route_fact.v1` subject.
+- [pinned] A publisher sends a route fact as a `route_fact.v1` event. While it
+  last saw the capability present, it sends the fact only as an event, subject
+  to the unacknowledged-publish fallback below. It re-reads `role.describe` at
+  most every 60 seconds. When the capability is absent, or no capability list
+  was answered, it also sends the fact directly as `route.account_observe` or
+  `route.report`. While the router is unreachable, the publisher keeps its
+  last answer.
+- [pinned] If a publish is not acknowledged, the publisher also sends that fact
+  directly. A bus that is down never loses a fact.
+- [pinned] The durable `m_striatum` belongs to the bus, owned by ck-bus. A
+  router that stops its reader leaves the durable in place and reads it when
+  the reader is bound again. Facts published in the up-to-60 seconds before
+  publishers see the capability gone therefore arrive late, never lost. The
+  event stream keeps unacknowledged messages for up to seven days within its
+  size limits.
+- [pinned] A fact sent both ways is applied once. The router deduplicates on
+  the fact body's own keys: an observation's `event_id`; a report's
+  `decision_id` plus its delivery key, `run:<usage.run_id>` when present,
+  otherwise `usage` for usage without a run id, otherwise `outcome`. It never
+  deduplicates on `Nats-Msg-Id`, which only deduplicates within the stream.
+  Application is order-independent: a late fact, including a start arriving
+  after its finish, is applied correctly.
 
 ## 9. Runner ops
 

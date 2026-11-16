@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.35
+
+- Add `route_fact_stream` for discovery of the whole-router route fact bus
+  reader. Define publisher fallback, durable retention and body-key deduplication
+  for observations and reports. No wire shape changes.
+
 ## 0.7.34
 
 - Add readers-first `select_pin_origin` and optional `pin_origin: "user"` on

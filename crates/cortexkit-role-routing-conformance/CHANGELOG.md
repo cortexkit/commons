@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.40
+
+- Pin routing `=0.7.35` and re-export its `route_fact_stream` capability.
+
 ## 0.10.39
 
 - Pin routing `=0.7.34`. Add `select_pin_origin`-gated checks for an enrolled

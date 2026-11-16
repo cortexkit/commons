@@ -149,7 +149,8 @@ pub const RUNNER_OPS: &[&str] = &[ops::ROUTE_ACCOUNT_FOR, ops::ROUTE_ACCOUNT_OBS
 
 /// Optional groups a provider declares in `role.describe`'s `capabilities`.
 /// A caller sends a group's members only to a provider that declares the
-/// group; a provider that does not declare it refuses them as unknown.
+/// group; a provider that does not declare it refuses them as unknown. The
+/// route fact stream group instead describes the router's bus reader.
 pub mod capabilities {
     /// Consumer demand, ladder, placement, selectors and kind declarations.
     pub const CONSUMER_DECLARATIONS: &str = "consumer_declarations";
@@ -239,6 +240,8 @@ pub mod capabilities {
     pub const REPORT_OUTCOMES: &str = "report_outcomes";
     /// Attribute report usage to individual runs of a decision.
     pub const REPORT_USAGE_RUN_ID: &str = "report_usage_run_id";
+    /// The router's bus reader covers every `route_fact.v1` subject.
+    pub const ROUTE_FACT_STREAM: &str = "route_fact_stream";
 
     /// Optional operations and their groups. Each pair must be declared together.
     pub const OP_GROUPS: &[(&str, &str)] = &[
@@ -295,12 +298,19 @@ pub mod capabilities {
         OBSERVE_CREDENTIAL_REFUSED,
         REPORT_OUTCOMES,
         REPORT_USAGE_RUN_ID,
+        ROUTE_FACT_STREAM,
     ];
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn route_fact_stream_capability_is_pinned() {
+        assert_eq!(capabilities::ROUTE_FACT_STREAM, "route_fact_stream");
+        assert!(capabilities::KNOWN.contains(&capabilities::ROUTE_FACT_STREAM));
+    }
 
     #[test]
     fn provides_is_role_slash_version() {
