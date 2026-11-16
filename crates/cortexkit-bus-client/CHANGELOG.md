@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+- Accept `subc-client-rs` 0.41 as well as 0.40, so a module on the 0.41 SDK can
+  use this crate with one SDK version in its lock. No API change.
+
 ## 0.1.1
 
 - Add a body-bearing EVENT reader that only attaches to an existing module-owned
