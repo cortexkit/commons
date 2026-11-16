@@ -1,0 +1,36 @@
+{
+  "method": "compaction.notice",
+  "params": {
+    "conditions": {
+      "context_window": 32768,
+      "last_prompt_tokens": 1024,
+      "model": {
+        "model": "example-model",
+        "provider": "example-provider",
+        "variant": "standard"
+      },
+      "output_reserve": 4096,
+      "rules": {
+        "history_edit_cost": "suffix",
+        "signed_parts": "none"
+      }
+    },
+    "events": [
+      {
+        "event": "view_refused",
+        "refusal": {
+          "code": "unknown_part",
+          "mid": "message-b",
+          "part": "part-missing"
+        },
+        "version": 3
+      }
+    ],
+    "newest": {
+      "digest": "1725aad389e945ae6af74e1eb18c666c7f99def8ca284d8e807a59f814743626",
+      "mid": "message-b",
+      "ordinal": 2
+    },
+    "seq": 1
+  }
+}

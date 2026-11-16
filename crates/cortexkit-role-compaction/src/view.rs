@@ -289,8 +289,9 @@ pub struct InsertedImage {
 }
 
 open_tagged! {
-/// Why a runner refuses a view. The runner keeps applying its previous view,
-/// except for `render_failed`, which uses the durable fallback in W6.6a.
+/// Why a runner refuses a view. A refusal at handover keeps the previous view.
+/// If an applied cut's message is gone, `unknown_message` reports the dropped
+/// view and window (W6.6). `render_failed` uses the durable fallback in W6.6a.
 /// A refusal of a handed-over view is that call's answer; a refusal of a
 /// ride's view, or of an accepted view at a step boundary, goes in the next
 /// notice.

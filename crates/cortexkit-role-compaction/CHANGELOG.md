@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.8
+
+- A provider's length refusal ends the run with llm-runner's `context_overflow`;
+  `context_ceiling` is only the runner's own pre-send stop.
+- When an undo removes an applied cut's message, require the runner to drop
+  the view and its window, report `view_refused` with `unknown_message` and
+  `transcript_changed` from the newest retained message, and wait for a new
+  view. Moved-in sessions (MV2, MV6) and sessions past the host's compaction
+  marker take no step and end `compaction_unavailable`; other sessions render
+  unreduced.
+  Keep filtering non-cut edits whose messages disappeared.
+- Pin provider-facing notice vectors for an undo behind the cut and a stale
+  window refused at a step boundary. No wire shapes or refusal codes change.
+
 ## 0.4.7
 
 - Add the `edit_before_cut` view refusal for edits naming entries removed by

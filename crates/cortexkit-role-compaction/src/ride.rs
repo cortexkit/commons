@@ -10,9 +10,10 @@ use serde::{Deserialize, Serialize};
 use crate::notice::Conditions;
 use crate::view::{AppliedView, View};
 
-/// The refusal code for an exact pre-send count still above the usable window,
-/// a length refusal with no ride answer, or a second length refusal after the
-/// runner applies a view and resends once. An estimate never causes it.
+/// The runner's own pre-send stop when an exact count still exceeds the usable
+/// window after its `over_limit` ride. A runner that cannot count exactly never
+/// reports it. A provider's length refusal instead ends the run `error` with
+/// `provider_code: context_overflow` and the provider's numbers (CONTRACT.md W3.4).
 pub const CONTEXT_CEILING: &str = "context_ceiling";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

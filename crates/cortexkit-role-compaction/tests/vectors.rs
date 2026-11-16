@@ -211,6 +211,41 @@ fn samples() -> Vec<(&'static str, Value)> {
     };
     let mut samples = vec![
         (
+            "notice-undo-behind-cut-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(1, conditions.clone())
+                    .with_newest(Cursor::new(entry.ordinal, &entry.mid, &entry.digest))
+                    .with_entries(vec![entry.clone()])
+                    .with_events(vec![
+                        Event::TranscriptChanged {
+                            from_ordinal: entry.ordinal,
+                        },
+                        Event::ViewRefused {
+                            version: 2,
+                            refusal: ViewRefusal::UnknownMessage {
+                                mid: "message-cut-removed".into(),
+                            },
+                        },
+                    ]),
+            ),
+        ),
+        (
+            "notice-stale-window-request.json",
+            request(
+                ops::COMPACTION_NOTICE,
+                NoticeRequest::new(1, conditions.clone())
+                    .with_newest(cursor.clone())
+                    .with_events(vec![Event::ViewRefused {
+                        version: 3,
+                        refusal: ViewRefusal::UnknownPart {
+                            mid: "message-b".into(),
+                            part: "part-missing".into(),
+                        },
+                    }]),
+            ),
+        ),
+        (
             "notice-transient-read-wake-request.json",
             request(
                 ops::COMPACTION_NOTICE,

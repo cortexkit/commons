@@ -91,8 +91,8 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | V3 | Edits: drop, replace, insert, cut (W6.2). |
 | V4 | The provider hands over a view with `session.apply_view` (W5.5), or inline in a ride's answer. The runner checks it (W6.5), answers in the same call, stores an accepted view durably, and applies it from the next step boundary, never in the middle of a step. How the runner stores views is its own choice; storing each one as the edits new since the previous one is fine. |
 | V5 | A view is always sent whole, in one call. A provider refuses by name (`view_too_large`, logged on its side) to send a view over 3 MiB of JSON. There is no fetch-by-version op. |
-| V6 | A refused view changes nothing: the runner keeps applying its previous view. The provider does not send that view again. |
-| V7 | After a revert, the runner renders with the edits whose messages still exist (W6.6) until the provider sends a view for the new transcript. |
+| V6 | A refused view changes nothing: the runner keeps applying its previous view, except when W6.6 requires dropping an applied view whose cut's message left the active path. The provider does not send a refused view again. |
+| V7 | After a revert removes the message an applied view's cut runs through, the runner drops that view and its window, reports `view_refused` with `unknown_message` and `transcript_changed`, and follows W6.6's no-view rules until the provider sends a new view. Otherwise it renders with the edits whose messages still exist (W6.6). |
 | V8 | Between two views, while the transcript only grows, the runner sends exactly what it sent before plus what is new, so every such request extends the previous one byte for byte; a revert, branch switch or host edit can break that before a newer view arrives (W6.6). Whether the model provider's cache still holds it depends on the cache's lifetime and on the rest of the request staying the same (A9). |
 | V9 | Runners render from the render plan (W6.3) that the view library computes, applied to their own host messages, so kept parts go out byte-identical (signatures, encrypted reasoning, item ids, cache markers). The provider uses the same library to know what the model sees, so the two cannot drift. |
 
@@ -114,7 +114,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 | RD1 | Before a model request that rewrites the model provider's cache anyway, or that would not fit, the runner calls `compaction.ride` (W5.3) with every cause that applies, and waits up to its deadline. For providers declaring `compaction-limits/v1`, it also rides on the soft window-budget schedule in W3.5; that cause does not imply a lost cache. |
 | RD2 | The answer is a view or nothing. A late or missing answer means the request goes out with the view the runner has. |
 | RD3 | Cache expiry is the runner's knowledge (W5.3), and `cache_expired` means proven expiry. A runner may report it only when it holds every cache touch for the session since its own start, warms included, and its own clock shows that the newest touch plus that touch's reported lifetime has passed. After a runner start, expiry is unknown until a touch arrives; an older durable request record alone is not proof. A cache touch proves nothing about another model's cache: the runner keeps one cache clock per session, touches recorded before the serving model changed do not count (even when switching away and back after a content-filter fallback), and after a change it reports no `cache_expired` until it records a touch on the model now serving. An `implicit` cache is never reported expired. When warming stops, expiry follows at the last touch plus its lifetime, not at the time warming stopped. A runner missing any touch or its reported lifetime, including behind a host that warms without reporting touches, sends no `cache_expired`: the cache may still be warm, and a compaction provider treats `cache_expired` as a rebuild that costs nothing extra. |
-| RD4 | The runner's hard model-request limit is its own usable window (W3.4). It rides with `over_limit` only on an exact count above that window before sending, or after the model provider refuses a request for length. After a length refusal it applies the answer and resends the step once; a second length refusal ends the run with `context_ceiling` and the provider's numbers. An estimate may trigger the soft window-budget ride (W3.5), never a refusal, an `over_limit` ride, or a pre-send `context_ceiling`. |
+| RD4 | The runner's hard model-request limit is its own usable window (W3.4). It rides with `over_limit` only on an exact count above that window before sending, or after the model provider refuses a request for length. After a length refusal the ride carries the provider's count, and the runner applies the answer and resends the step once; a second length refusal or an unanswered ride ends the run `error` with `provider_code: context_overflow` and the provider's numbers. An estimate may trigger the soft window-budget ride (W3.5), never a refusal, an `over_limit` ride, or a pre-send `context_ceiling`. |
 | RD5 | Setup lists the causes the runner can detect (`detects`). A cause the runner cannot detect is unknown to the provider, never "did not happen". A runner lists `cache_expired` only for routes where it can meet RD3; a route that cannot leaves it out. If `cache_expired` is absent from `detects`, the provider treats expiry as unknown. If it is listed but absent from a ride's causes, expiry was not proven for that ride; that does not certify the cache is warm. |
 | RD6 | A one-step fallback is not a model change: a resend to another model after a refusal, or a model provider's own server-side fallback. The session's model stays as it was in the conditions, and no ride happens. |
 
@@ -157,7 +157,7 @@ The request, answer and refusal examples in `test-vectors/compaction-v2` round-t
 
 | Id | Rule |
 |---|---|
-| F1 | Provider unreachable: the runner keeps applying its last view. An `over_limit` ride with no answer after a length refusal ends in `context_ceiling`. |
+| F1 | Provider unreachable: the runner keeps applying its last view. An `over_limit` ride with no answer after a length refusal ends the run `error` with `provider_code: context_overflow` and the provider's numbers. |
 | F2 | Provider restart: notices answer `setup_required`, rides are refused `unknown_session`, the runner calls Setup again, and the provider rebuilds from its store and one read from its last cut (the last transcript range it compacted). Statements dropped by the epoch check (W3.5) use the same answers to trigger Setup again. |
 | F3 | Runner restart: it reloads its stored applied view and transcript and keeps applying them, and calls Setup again. Cache expiry is unknown until a cache touch arrives after that start. It reports `cache_expired` only with every touch since its own start and the newest touch's reported lifetime passed; never for an `implicit` cache (RD3). |
 | F4 | One session's slow or silent runner never delays another session. |
@@ -359,7 +359,7 @@ For `session.refresh`, changes to the session's compaction item follow these rul
 
 - Adding an item to a session that has none MUST be accepted. It applies at the next run, and the runner sends Setup to its provider (S1).
 - Removing the item from a session that has one MUST be refused with `invalid_params {field: "plan.compaction_item"}`. Without the item nothing would shrink the session again, and the old provider's notices and records would lose their owner.
-- Any other change to an existing item (another provider, another `preset` or `params`) MAY be refused with that same field, or applied at the next run. A runner that applies it sends a new Setup to the current provider (S1). The session's last applied view stays in force, unchanged, until the current provider applies a view of its own. A runner never drops an applied view on its own: doing so would put the whole history in front of the model at once.
+- Any other change to an existing item (another provider, another `preset` or `params`) MAY be refused with that same field, or applied at the next run. A runner that applies it sends a new Setup to the current provider (S1). Unless W6.6 requires dropping the view because its cut's message left the active path, the session's last applied view stays in force, unchanged, until the current provider applies a view of its own. A runner otherwise never drops an applied view on its own: doing so would put the whole history in front of the model at once.
 
 A refusal of a compaction-item change names `plan.compaction_item`, never `plan`.
 
@@ -392,10 +392,15 @@ The view library (`cortexkit-compaction-view`) gives the default values for know
 **W3.4 Windows.** `context_window` is the tokens the model takes for prompt and reply together: the runner's configured limit, or the model's maximum from the model catalog. `output_reserve` is the tokens the runner keeps free for the reply. The usable window is `context_window − output_reserve` and remains the hard model-request limit.
 
 - Before sending, the runner rides with `over_limit` only when an exact count exceeds the usable window: its own exact tokenizer for that model, or the model provider's count for the same prefix.
-- After the model provider refuses a request for length, the runner rides with `over_limit`, applies the answer and resends the step once. A second length refusal ends the run with `context_ceiling` and the provider's numbers.
+- After the model provider refuses a request for length, the runner rides with `over_limit` carrying the provider's count, applies the answer and resends the step once. A second length refusal ends the run `error` with `provider_code: context_overflow` and the provider's numbers.
 - An estimate may trigger the soft window-budget ride (W3.5), never a refusal, an `over_limit` ride, or a pre-send `context_ceiling`.
 
-A runner whose host runs the model loop meets the resend rule when the host's next request for the step, its own retry or the next run, carries the applied view. If the host makes no further request, the run ends `context_ceiling` with the provider's numbers. Either way, the ride after the refusal carries the provider's count, so the provider's next view fits.
+The runner reports `context_ceiling` only for a stop it decided itself before
+sending. Under this contract, that means an exact count still above the usable
+window after its `over_limit` ride. A runner that cannot count exactly never
+reports `context_ceiling`.
+
+A runner whose host runs the model loop rides with `over_limit` carrying the provider's count at once after a length refusal. It meets the resend rule when the host's next request for the step, its own retry or the next run, carries the applied view. If the host makes no further request, the run ends `error` with `provider_code: context_overflow` and the provider's numbers. Either way, the ride after the refusal carries the provider's count, so the provider's next view fits.
 
 **W3.5 `Conditions`:** what the session runs under now. Notices and rides both carry it, so a change reaches the provider with the next one.
 
@@ -886,7 +891,7 @@ Events, each an object with an `event` field:
 | `event` | Fields | Meaning |
 |---|---|---|
 | `transcript_changed` | `from_ordinal` | Entries from this ordinal on may differ from what earlier notices and reads said: a revert, a branch switch, or a host edit of stored messages. Sent in the first notice after the change. A runner whose host never reverts, switches branch, or changes stored messages beyond what W4.9 allows never sends it. |
-| `view_refused` | `version`, `refusal` (W6.5) | A view the runner refused when it came to apply it: a ride's answer, or an accepted view that no longer fits the transcript at the next step boundary, including a host rendering failure (W6.6a). |
+| `view_refused` | `version`, `refusal` (W6.5) | A view the runner refused when it came to apply it: a ride's answer, or an accepted view that no longer fits the transcript at the next step boundary, including a host rendering failure (W6.6a). Also an applied view dropped because its cut's message left the active path (W6.6). |
 | `marker_written` | `version` | The runner wrote its host's compaction marker for this view's cut. |
 
 Answer: `{"answer": "received"}`, or `{"answer": "setup_required"}` when the provider holds no session for the route (it restarted), or drops the notice under W3.5 (foreign epoch, mismatched epoch presence, or stamp without epoch); the runner then calls Setup before its next notice. Refusals: `invalid_params`.
@@ -999,7 +1004,7 @@ Request: `{}`. Answer:
 | `view` | `View`, optional | The whole view the runner applies now; absent when it applies none. |
 | `applied_by` | string, optional | The module id the daemon attested for the route whose `session.apply_view` installed that view. The runner records it when it accepts the view, never from a request field. Absent when the runner did not record it, such as a view applied before support for this field or a moved-in first view. |
 
-A runner that applies compaction-item changes under W2.5 MUST send `applied_by` for views whose applying module it recorded. A provider treats a view whose `applied_by` is not its own module id as foreign: it takes neither the cut nor the edits, and replaces the view whole with its first apply at a higher version. Until then the runner keeps applying the foreign view unchanged (W2.5). With `applied_by` absent, the provider keeps its current behaviour. Unknown answer fields are ignored (W1.4).
+A runner that applies compaction-item changes under W2.5 MUST send `applied_by` for views whose applying module it recorded. A provider treats a view whose `applied_by` is not its own module id as foreign: it takes neither the cut nor the edits, and replaces the view whole with its first apply at a higher version. Until then the runner keeps applying the foreign view unchanged (W2.5), unless W6.6 requires dropping it. With `applied_by` absent, the provider keeps its current behaviour. Unknown answer fields are ignored (W1.4).
 
 ### W5.7 `session.send` and `run.result` (runner, `llm-runner/v1`)
 
@@ -1100,18 +1105,40 @@ What could mislead the model is a number in bytes the provider writes, such as a
 
 An insert with images is refused as `unsupported_edit` when its role is not `user`, any image's `media_type` is not `image/png`, or any image's `data` is not valid standard padded base64. Each case carries the same detail: `index` names the insert's zero-based position in `edits`; no image-specific detail field is added. The runner checks the standard base64 alphabet, length, padding placement and zero padding bits; inspecting PNG contents is not required by this contract. A conforming runner performs these checks before applying the view. This wire crate preserves the strings without decoding or validating them; image checks and image entries in the render plan are the view library's (W6.3), which adds them in a release after this one.
 
-**W6.6 After a revert.** Until a newer view arrives, the runner renders with the edits whose messages still exist (the view library's `view::edits_for_transcript`): drops, replaces and inserts naming a removed entry are skipped, a cut through a removed entry is skipped, and inserts at the start stay.
+**W6.6 After a revert.** When the message an applied view's cut runs through
+is gone from the session's active path after an undo or revert, the runner
+drops that view and its window. It does not skip the cut and render the
+remaining view.
+In its next notice it reports `view_refused` with that view's `version` and
+`refusal: {"code": "unknown_message", "mid": "<cut's message>"}`, and
+`transcript_changed` with `from_ordinal` set to the ordinal of the newest
+message the change kept. The notice's `newest` is that retained message; if
+none remains, `from_ordinal` is 1 and `newest` is absent (W5.2).
+`applied_view` is absent because no view applies. The provider can then answer
+with a new view.
+
+Until the provider's next view arrives, a session whose history is past its
+host's own compaction marker, or a moved-in session (MV2, MV6), takes no step:
+the runner ends the run `error` with `provider_code: compaction_unavailable`
+before any model call. Any other session renders unreduced.
+
+If the cut's message remains on the active path, or the applied view has no
+cut, the runner keeps rendering with the edits whose messages still exist
+until a newer view arrives (the view library's `view::edits_for_transcript`):
+drops, replaces and inserts naming a removed entry are skipped, and inserts
+at the start stay. This filtering never substitutes for dropping a view whose
+cut's message is gone.
 
 **W6.6a After a host rendering failure.** Passing the handover and step-boundary
 checks does not guarantee that the host can apply the plan to its stored
 messages. At the first failing step for an accepted view version, the runner
 chooses its rendering fallback once. If the failure identifies a `replace` by
 `mid` and `part`, it skips every `replace` of that part and applies the rest of
-the view, just as W6.6 skips edits that no longer apply. The part is the skip
-unit, including all its field replacements: `field` narrows the diagnosis,
-never the skip. In particular, `output` and `attachments` are not retried or
-skipped independently. Only `replace` edits may be skipped by this rule. If
-this one-skip candidate still cannot be rendered or fails a provider rule,
+the view, just as W6.6 skips non-cut edits that no longer apply. The part is
+the skip unit, including all its field replacements: `field` narrows the
+diagnosis, never the skip. In particular, `output` and `attachments` are not
+retried or skipped independently. Only `replace` edits may be skipped by this
+rule. If this one-skip candidate still cannot be rendered or fails a provider rule,
 choose the no-view fallback at that same first failing step, rather than
 trying further skips. Decide which fallback will be served before reporting:
 send one report at this first failing step, with the shape of the fallback
@@ -1148,7 +1175,8 @@ step. The runner stores the skipped part (or the no-view decision) durably
 with the applied view before sending a fallback request, so a restart uses
 the same record. Keep the accepted view, version, checksum and edit `since`
 values unchanged; the fallback is separate runner state, not a rewritten
-view. Reverts still use W6.6 in addition to this recorded skip.
+view. Reverts still use W6.6 in addition to this recorded skip: if the cut's
+message is gone, the runner drops the view and its window instead.
 
 The runner reports `view_refused` with `render_failed` in its next notice,
 once per fallback state the version serves, at most twice per version, never

@@ -144,9 +144,12 @@ pub enum Event, "event" {
     /// Entries from this ordinal on may differ from what the provider saw
     /// before: a revert, a branch switch, or a host that changed stored
     /// messages. The provider re-reads from there; edits naming messages that
-    /// are gone leave its next view. Until that view arrives, the runner
-    /// renders with the edits that still apply
-    /// using the view library's transcript filtering.
+    /// are gone leave its next view. If the applied cut's message is gone,
+    /// the runner drops the view and its window and reports `unknown_message`
+    /// for that message in `view_refused` (CONTRACT.md W6.6). Until a new view
+    /// arrives, a moved-in session (MV2, MV6) or one past its host's compaction
+    /// marker takes no step (`compaction_unavailable`); other sessions render
+    /// unreduced. Otherwise the runner filters non-cut edits against the transcript.
     TranscriptChanged => "transcript_changed" {
         #[serde(deserialize_with = "crate::integer::required")]
         from_ordinal: u64
@@ -159,9 +162,11 @@ pub enum Event, "event" {
     },
     /// A view the runner refused when it came to apply it: a ride's answer,
     /// or an accepted view that no longer fits the transcript at the next step
-    /// boundary, including a host rendering failure. `render_failed` is sent
-    /// only to declaring providers, once per version (W6.6a). Otherwise a view
-    /// handed over with `session.apply_view` is refused in that call's answer.
+    /// boundary, including a host rendering failure. Also reports an applied
+    /// view dropped because its cut's message is gone (W6.6). `render_failed`
+    /// is sent only to providers declaring `compaction-render-failed/v1`,
+    /// once per version (W6.6a). Otherwise a view handed over with
+    /// `session.apply_view` is refused in that call's answer.
     ViewRefused => "view_refused" {
         #[serde(deserialize_with = "crate::integer::required")]
         version: u64,

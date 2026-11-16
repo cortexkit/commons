@@ -48,6 +48,23 @@ the provider still reads any gap on every notice (N4).
 `view-rule-final-turn.json` is the `rule` refusal a runner sends for a view
 that removes the turn the request ends on (PR6).
 
+`notice-undo-behind-cut-request.json` reports an undo that removed the message
+version 2's applied cut ran through (`message-cut-removed`, W6.6). The runner
+drops that view and its window: `applied_view` is absent. `view_refused` names
+the removed cut message with `unknown_message`, and `transcript_changed`
+starts from the newest retained entry (`message-a`, ordinal 1), which is
+also the notice's `newest`. Until a new view arrives, moved-in sessions
+(MV2, MV6) and sessions past the host's compaction marker take no step and
+end `compaction_unavailable`; other sessions render unreduced. Non-cut edits
+still follow W6.6's filtering when the cut's message remains.
+
+`notice-stale-window-request.json` is an independent step-boundary refusal
+of version 3: the window names `message-b`'s missing `part-missing`, so the
+runner reports `view_refused` with `unknown_part`. No view applies, so
+`applied_view` is absent. Unlike the undo case, no transcript change is
+reported and `entries` is absent. Both examples use invented identifiers
+and the existing notice and refusal shapes.
+
 The `notice-render-failed-*-request.json` examples are independent notices to
 a provider declaring `compaction-render-failed/v1`, not three reports for one
 version (W6.5/W6.6a):
