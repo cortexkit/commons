@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.3
+
+- Add `publish_claim_check` for flow-trigger events: an empty payload with a
+  content digest and codec-protected headers. Publishers store the body first
+  and serve it through their own `events_get` query under the reader's scope.
+- Add declared module KV buckets: owners can put and delete values; owners and
+  declared readers can get values and watch current state followed by live changes.
+  Undeclared buckets, unauthorized access, oversized values and exhausted watch
+  consumer slots have named errors. Watches use only unnamed ephemeral consumers.
+- Watches share the event reader's credential rebinding and terminal transport
+  error. After reconnecting they resume after the last delivered revision without
+  repeating it. A key's latest retained value or delete is never missed, but
+  intermediate values overwritten during disconnection are not delivered: readers
+  needing every change must use an event stream, not a history-1 bucket.
+  Delete markers remain the key's latest entry; owners must use delete, not purge.
+- New watches fail immediately when consumer slots are full. Existing watches
+  rebinding after credential reissue log once and retry capacity with 1-to-5-second
+  backoff for up to 60 seconds, then return the named capacity error if still full.
+
 ## 0.1.2
 
 - Accept `subc-client-rs` 0.41 as well as 0.40, so a module on the 0.41 SDK can

@@ -15,6 +15,8 @@ use crate::{
     Error, Result,
 };
 
+mod buckets_live;
+
 pub(crate) struct FakeSubc {
     pub issues: AtomicUsize,
     pub issue_exp: AtomicU64,

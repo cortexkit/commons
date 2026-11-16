@@ -44,8 +44,8 @@ through those refusals too; cancel its future to stop waiting.
 Re-issue creates a **new connection with the new key's inbox prefix**.
 `connection()` returns a cloned snapshot, not a permanently updating handle.
 Watch `connection_changes()` and reopen raw subscriptions and durable pulls on
-the new snapshot whenever it changes. `EventReader` handles this rebinding for
-you. A durable resumes at its server-side cursor.
+the new snapshot whenever it changes. `EventReader` and `BucketWatch` handle this
+rebinding for you. A durable resumes at its server-side cursor.
 The watch value advances once the replacement is ready; a closed watch means
 the maintenance task stopped (including on a terminal renewal refusal). Dropping
 the client stops its maintenance task. Already held snapshots should not be used
@@ -65,10 +65,22 @@ with `BusClient::connect` or report the module as degraded when this happens.
 - Bodies carry **no secrets and no tool output**. Publish a safe fact or pointer,
   not raw execution output. Event bodies carry ids, counters and enums and are
   limited to **4 KiB**; retrieve large content through its owner's own call.
+  Inline bodies reach every reader whose durable matches the subject, with no
+  per-reader visibility check; reserve them for pointers and facts every declared
+  reader may see. Flow triggers must use
+  [`BusClient::publish_claim_check`](https://docs.rs/cortexkit-bus-client/latest/cortexkit_bus_client/struct.BusClient.html#method.publish_claim_check),
+  the `cortexkit_bus_trait::Stream::publish` claim-check path (empty payload plus content digest), with the publisher serving
+  the body under the reading flow's own scope to check which agent may see it.
+  The flow engine refuses inline trigger bodies.
 - `publish_event(event, version, qualifier, msg_id, body)` uses naming constructors
   for `ck.{acct}.event.{module}.{event}.v{version}[.{reader}]`. The optional reader
   qualifier is a validated module token. This crate relies on commons' naming
-  0.4.0 path dependency and its `event_subject_with_reader` constructor.
+  0.4 naming dependency and its `event_subject_with_reader` constructor.
+- `publish_claim_check(event, version, qualifier, msg_id, digest, headers)` uses
+  the same subject naming and the bus-nats codec, sending an empty payload with
+  `Nats-Msg-Id` and `Ck-Content-Digest`. Store the body before publishing and
+  serve it through the publisher's own `events_get` query under the reading
+  flow's scope. Caller headers may not override either reserved codec header.
 - `live_hint(kind, version, body)` is a plain-NATS, versioned publish on
   `ck.{acct}.live.{module}.{kind}.v{version}`; it is not a stored fact.
 
@@ -103,6 +115,43 @@ terminate the record rather than retrying it. They are not terminated
 automatically. `next()` returns `Err` for transport or bind failures, including
 the credential-maintenance change stream closing.
 
+### Module KV buckets
+
+`bus.bucket(owner_module, bucket)?` resolves a declaration in bus-naming's
+`MODULE_BUCKETS`, refusing undeclared buckets and modules that are neither the
+owner nor a declared reader before making any NATS request. The bus service must
+already have provisioned the bucket and grants; this client never provisions it.
+
+- `bucket.get(key).await?` returns `Option<BucketEntry>` with `value: Bytes` and
+  `revision: u64`. Deleted and absent keys return `None`.
+- `bucket.put(key, value).await?` and `bucket.delete(key).await?` return their
+  revisions. Only the owner may write, and put checks the declared value cap
+  before sending. Delete writes a retained tombstone; it does not purge history.
+- `bucket.watch().await?` returns a `BucketWatch`. Its `next().await?` yields
+  `BucketItem::Put { key, revision, value }`, `Delete { key, revision }`, or
+  `CaughtUp`. Current entries come first, followed by exactly one `CaughtUp`
+  (also for an empty bucket), then live changes. No durable name is accepted.
+
+After reconnecting, the watch resumes after its last delivered revision and
+never repeats a delivered revision. With history 1, overwritten intermediate
+values cannot be recovered; every key's latest retained value or delete is
+delivered instead. Use an event stream if every intermediate change matters.
+Owners must use delete, not purge: a removed tombstone cannot inform readers of
+a deletion. Keep the `BusClient` alive; terminal credential maintenance failure
+returns the same `Error::Transport` as the event reader.
+
+`Error::WatchCapacity` means the bucket's shared consumer slots are full. On
+NATS 2.15.0 this maps code 400, JetStream error 10026, `maximum consumers limit
+reached`. Watches are unnamed ephemeral ordered consumers. Their grants cannot
+delete consumers; after a watch drops, its slot is reclaimed by the server's
+30-second inactivity threshold, so rapid reopen attempts can temporarily fill
+the bucket even with fewer live readers.
+New watches fail immediately when capacity is exhausted. An already-open watch
+rebinding after credential reissue logs once and retries with backoff from 1 to
+5 seconds, allowing its old consumer to be reaped; after 60 seconds it returns
+`WatchCapacity` if no slot is available. Terminal credential maintenance failure
+interrupts the wait with `Error::Transport`.
+
 ## TLS and platforms
 
 The local endpoint uses no TLS. However, async-nats 0.50 has unconditional
@@ -117,3 +166,7 @@ Unit tests use a fake subc transport and a loopback NATS protocol server for
 issuance, nonce signing, renewal, refusal handling, backoff, single-flight, fresh
 inboxes and publish helpers. The opt-in real-rig test uses the published testkit;
 see its source for explicit binary paths and the rerun command.
+The `bucket_live` tests reuse the testkit's isolated server with restricted
+owner/reader JWTs matching the bus service's KV grants. Run them against the
+checksummed NATS 2.15.0 binary with `CK_NATS_SERVER_BIN` and
+`CK_REQUIRE_NATS_SERVER=1`; without a binary they report a skip.

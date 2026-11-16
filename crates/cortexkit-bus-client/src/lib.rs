@@ -1,8 +1,11 @@
 #![doc = include_str!("../README.md")]
 
+mod binding;
+mod buckets;
 mod credentials;
 mod events;
 
+pub use buckets::{Bucket, BucketEntry, BucketItem, BucketWatch};
 pub use events::{EventDelivery, EventItem, EventReader, MalformedDelivery, MalformedReason};
 
 use std::{
@@ -13,7 +16,7 @@ use std::{
 use bytes::Bytes;
 use cortexkit_bus_naming::{validate_token, AccountNames, TokenKind};
 use cortexkit_bus_nats::{ConnectConfig, NatsConnection};
-use cortexkit_bus_trait::PublishReceipt;
+use cortexkit_bus_trait::{ContentDigest, Headers, PublishReceipt, Stream};
 use subc_client_rs::SubcConsumer;
 use tokio::sync::watch;
 
@@ -39,6 +42,16 @@ pub enum Error {
     EventBodyTooLarge { size: usize },
     #[error("durable {durable} is not owned by module {module}")]
     DurableNotOwned { durable: String, module: String },
+    #[error("module bucket {owner}.{bucket} is not declared")]
+    BucketNotDeclared { owner: String, bucket: String },
+    #[error("module {module} may not read bucket {bucket}")]
+    BucketNotReadable { module: String, bucket: String },
+    #[error("module {module} does not own bucket {bucket}")]
+    BucketNotOwned { module: String, bucket: String },
+    #[error("bucket value is {size} bytes; the maximum is {cap} bytes")]
+    BucketValueTooLarge { size: usize, cap: u32 },
+    #[error("bucket {bucket} has no watch consumer slots available")]
+    WatchCapacity { bucket: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -231,11 +244,24 @@ impl BusClient {
         EventReader::attach(self, durable).await
     }
 
+    /// Opens a declared module bucket for its owner or a declared reader.
+    /// Does not provision buckets or change their limits.
+    pub fn bucket(&self, owner_module: &str, bucket: &str) -> Result<Bucket> {
+        Bucket::attach(self, owner_module, bucket)
+    }
+
     /// Stores an event using the fact's own id for JetStream deduplication.
     ///
     /// Event bodies carry ids, counters and enums, not large content. Bodies
     /// larger than 4 KiB are refused; retrieve large content through its owner's
     /// own call instead.
+    /// Inline bodies reach every reader whose durable matches the subject, with
+    /// no per-reader visibility check; reserve them for pointers and facts every
+    /// declared reader may see. Flow triggers must use [`Self::publish_claim_check`],
+    /// the `cortexkit_bus_trait::Stream::publish` claim-check path (empty payload plus
+    /// content digest), with the publisher serving the body under the reading
+    /// flow's own scope to check which agent may see it. The flow engine refuses
+    /// inline trigger bodies.
     pub async fn publish_event(
         &self,
         event: &str,
@@ -248,13 +274,7 @@ impl BusClient {
         if body.len() > 4096 {
             return Err(Error::EventBodyTooLarge { size: body.len() });
         }
-        let subject = match qualifier {
-            Some(reader) => {
-                self.names
-                    .event_subject_with_reader(&self.module, event, version, reader)?
-            }
-            None => self.names.event_subject(&self.module, event, version)?,
-        };
+        let subject = self.event_subject(event, version, qualifier)?;
         let mut headers = async_nats::HeaderMap::new();
         headers.insert(async_nats::header::NATS_MESSAGE_ID, msg_id);
         let ack = async_nats::jetstream::new(self.connection().client())
@@ -264,6 +284,40 @@ impl BusClient {
             .await
             .map_err(|error| Error::Nats(error.to_string()))?;
         Ok(PublishReceipt::new(ack.sequence, ack.duplicate))
+    }
+
+    /// Publishes an empty-payload claim check carrying the body's content digest.
+    /// Store the body before publishing and serve it through the publisher's own
+    /// `events_get` query under the reading flow's scope. This is the event shape
+    /// for triggering flows; inline bodies cannot be used as flow triggers.
+    /// The NATS codec writes Nats-Msg-Id and Ck-Content-Digest and refuses caller
+    /// headers spelling either reserved name, including case variants.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn publish_claim_check(
+        &self,
+        event: &str,
+        version: u32,
+        qualifier: Option<&str>,
+        msg_id: &str,
+        digest: ContentDigest,
+        headers: Headers,
+    ) -> Result<PublishReceipt> {
+        let subject = self.event_subject(event, version, qualifier)?;
+        self.connection()
+            .stream(&self.names.streams().event)
+            .publish(&subject, msg_id, digest, headers)
+            .await
+            .map_err(Error::from)
+    }
+
+    fn event_subject(&self, event: &str, version: u32, qualifier: Option<&str>) -> Result<String> {
+        Ok(match qualifier {
+            Some(reader) => {
+                self.names
+                    .event_subject_with_reader(&self.module, event, version, reader)?
+            }
+            None => self.names.event_subject(&self.module, event, version)?,
+        })
     }
 
     /// Publishes an ephemeral, versioned hint, not a stored fact.

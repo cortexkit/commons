@@ -1,17 +1,12 @@
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::time::Duration;
 
 use async_nats::jetstream::{self, consumer::pull, AckKind};
 use bytes::Bytes;
 use cortexkit_bus_naming::{AccountNames, EventSubject};
-use cortexkit_bus_nats::NatsConnection;
 use cortexkit_bus_trait::Headers;
 use futures_util::StreamExt;
-use tokio::sync::watch;
 
-use crate::{BusClient, Error, Result};
+use crate::{binding::ConnectionBinding, BusClient, Error, Result};
 
 /// One EVENT pull result. Malformed records can only be terminated, not acked.
 #[non_exhaustive]
@@ -106,8 +101,7 @@ async fn terminate(message: &jetstream::Message) -> Result<()> {
 /// unacknowledged messages may redeliver. Keep the [`BusClient`] alive so its
 /// credential maintenance continues to run.
 pub struct EventReader {
-    connection: Arc<RwLock<NatsConnection>>,
-    changes: watch::Receiver<u64>,
+    binding: ConnectionBinding,
     names: AccountNames,
     durable: String,
     consumer: Option<jetstream::consumer::Consumer<pull::Config>>,
@@ -134,8 +128,7 @@ impl EventReader {
             });
         }
         let mut reader = Self {
-            connection: client.connection.clone(),
-            changes: client.connection_changes(),
+            binding: ConnectionBinding::new(client),
             names: client.names.clone(),
             durable: durable.into(),
             consumer: None,
@@ -145,22 +138,19 @@ impl EventReader {
     }
 
     async fn bind(&mut self) -> Result<()> {
-        loop {
-            self.changes.borrow_and_update();
-            let connection = self
-                .connection
-                .read()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
-            let result = jetstream::new(connection.client())
-                .get_consumer_from_stream(&self.durable, &self.names.streams().event)
-                .await;
-            if self.changes.has_changed().unwrap_or(false) {
-                continue;
-            }
-            self.consumer = Some(result.map_err(|error| Error::Nats(error.to_string()))?);
-            return Ok(());
-        }
+        let durable = &self.durable;
+        let stream = &self.names.streams().event;
+        self.consumer = Some(
+            self.binding
+                .bind(|connection| async move {
+                    jetstream::new(connection.client())
+                        .get_consumer_from_stream(durable, stream)
+                        .await
+                        .map_err(|error| Error::Nats(error.to_string()))
+                })
+                .await?,
+        );
+        Ok(())
     }
 
     /// Pulls one event, rebinding after credential re-issue if necessary.
@@ -170,14 +160,14 @@ impl EventReader {
     /// can reconnect the client or report degraded credential maintenance.
     pub async fn next(&mut self) -> Result<EventItem> {
         loop {
-            if self.changes.has_changed().unwrap_or(false) || self.consumer.is_none() {
+            if self.binding.has_changed() || self.consumer.is_none() {
                 self.bind().await?;
             }
             let consumer = self.consumer.as_ref().expect("bound consumer");
             tokio::select! {
                 biased;
-                changed = self.changes.changed() => {
-                    changed.map_err(|_| Error::Transport("credential maintenance stopped".into()))?;
+                changed = self.binding.changed() => {
+                    changed?;
                     self.consumer = None;
                 }
                 result = async {

@@ -372,6 +372,223 @@ async fn event_client(server: &Server) -> (BusClient, Arc<CredentialManager>) {
     (client, manager)
 }
 
+#[tokio::test]
+async fn bucket_guards_refuse_undeclared_unreadable_and_nonowner_access() {
+    let server = Server::start().await;
+    let (outsider, _) = event_client(&server).await;
+    assert!(matches!(
+        outsider.bucket("aft", "absent"),
+        Err(Error::BucketNotDeclared { .. })
+    ));
+    assert!(matches!(
+        outsider.bucket("aft", "views"),
+        Err(Error::BucketNotReadable { .. })
+    ));
+    let manager = CredentialManager::start(FakeSubc::new(&server.url))
+        .await
+        .unwrap();
+    let reader = BusClient::connect_manager(manager, BusClientOptions::new("occipital").unwrap())
+        .await
+        .unwrap();
+    for owner in ["aft", "cerebellum"] {
+        let bucket = reader.bucket(owner, "views").unwrap();
+        assert!(matches!(
+            bucket.put("key", "value").await,
+            Err(Error::BucketNotOwned { .. })
+        ));
+        assert!(matches!(
+            bucket.delete("key").await,
+            Err(Error::BucketNotOwned { .. })
+        ));
+    }
+    assert!(
+        server.observed.lock().unwrap().publishes.is_empty(),
+        "guards must not send requests"
+    );
+}
+
+#[tokio::test]
+async fn bucket_value_cap_is_checked_before_sending() {
+    let server = Server::start().await;
+    let manager = CredentialManager::start(FakeSubc::new(&server.url))
+        .await
+        .unwrap();
+    let owner = BusClient::connect_manager(manager, BusClientOptions::new("aft").unwrap())
+        .await
+        .unwrap();
+    let bucket = owner.bucket("aft", "views").unwrap();
+    assert!(matches!(
+        bucket.put("key", vec![0; 262_145]).await,
+        Err(Error::BucketValueTooLarge {
+            size: 262_145,
+            cap: 262_144
+        })
+    ));
+    assert!(server.observed.lock().unwrap().publishes.is_empty());
+}
+
+#[tokio::test]
+async fn bucket_delete_rejects_invalid_keys_before_sending() {
+    let server = Server::start().await;
+    let manager = CredentialManager::start(FakeSubc::new(&server.url))
+        .await
+        .unwrap();
+    let owner = BusClient::connect_manager(manager, BusClientOptions::new("aft").unwrap())
+        .await
+        .unwrap();
+    let bucket = owner.bucket("aft", "views").unwrap();
+    for key in ["", ".key", "key.", "*", ">", "key with space", "key\r\n"] {
+        assert!(
+            matches!(bucket.delete(key).await, Err(Error::Nats(ref error)) if error == "invalid KV key"),
+            "{key:?}"
+        );
+    }
+    assert!(server.observed.lock().unwrap().publishes.is_empty());
+}
+
+#[tokio::test]
+async fn bucket_rebind_capacity_wait_is_bounded_and_logs_once() {
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+    impl std::io::Write for Capture {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let output = Arc::new(Mutex::new(Vec::new()));
+    let writer = output.clone();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_writer(move || Capture(writer.clone()))
+        .finish();
+    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let server = Server::start().await;
+    let (client, _) = event_client(&server).await;
+    let mut binding = crate::binding::ConnectionBinding::new(&client);
+    tokio::time::pause();
+    let start = tokio::time::Instant::now();
+    let mut attempts = Vec::new();
+    let error = crate::buckets::bind_watch(&mut binding, "full-bucket", true, |_| {
+        attempts.push(start.elapsed().as_secs());
+        async {
+            Err::<(), _>(Error::WatchCapacity {
+                bucket: "full-bucket".into(),
+            })
+        }
+    })
+    .await
+    .unwrap_err();
+    assert!(matches!(error, Error::WatchCapacity { .. }));
+    // Tokio's timer wheel rounds deadline wakes up to the next millisecond tick.
+    assert!(
+        start.elapsed() >= Duration::from_secs(60)
+            && start.elapsed() < Duration::from_secs(60) + Duration::from_millis(2)
+    );
+    assert_eq!(
+        attempts,
+        [0, 1, 3, 7, 12, 17, 22, 27, 32, 37, 42, 47, 52, 57, 60]
+    );
+    let logs = String::from_utf8(output.lock().unwrap().clone()).unwrap();
+    assert_eq!(
+        logs.matches("waiting for bucket watch consumer capacity during rebind")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn bucket_rebind_capacity_wait_stops_on_terminal_maintenance() {
+    let server = Server::start().await;
+    let (client, _) = event_client(&server).await;
+    let mut binding = crate::binding::ConnectionBinding::new(&client);
+    client.task.abort();
+    let error = tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::buckets::bind_watch(&mut binding, "full-bucket", true, |_| async {
+            Err::<(), _>(Error::WatchCapacity {
+                bucket: "full-bucket".into(),
+            })
+        }),
+    )
+    .await
+    .expect("terminal maintenance must interrupt capacity backoff")
+    .unwrap_err();
+    assert!(
+        matches!(error, Error::Transport(ref text) if text == "credential maintenance stopped")
+    );
+}
+
+#[tokio::test]
+async fn claim_check_sends_codec_headers_and_empty_payload() {
+    use cortexkit_bus_trait::{ContentDigest, Headers};
+    let server = Server::start().await;
+    let (client, _) = event_client(&server).await;
+    let digest_text = "0123456789abcdef".repeat(4);
+    let digest: ContentDigest = digest_text.parse().unwrap();
+    for qualifier in [None, Some("reader")] {
+        let mut headers = Headers::new();
+        headers.insert("scope".into(), "agent-public".into());
+        let receipt = client
+            .publish_claim_check("fact.created", 2, qualifier, "claim-42", digest, headers)
+            .await
+            .unwrap();
+        assert_eq!(receipt.stream_sequence(), 17);
+        assert!(receipt.duplicate());
+    }
+    client.connection().client().flush().await.unwrap();
+    let seen = server.observed.lock().unwrap();
+    assert_eq!(seen.publishes.len(), 2);
+    assert_eq!(
+        seen.publishes[0].0,
+        "ck.box_test.event.test_module.fact.created.v2"
+    );
+    assert_eq!(
+        seen.publishes[1].0,
+        "ck.box_test.event.test_module.fact.created.v2.reader"
+    );
+    for (_, payload) in &seen.publishes {
+        let wire = std::str::from_utf8(payload).unwrap();
+        let (headers, body) = wire.split_once("\r\n\r\n").unwrap();
+        assert!(body.is_empty(), "claim checks never send an inline body");
+        assert!(headers.contains("\r\nNats-Msg-Id: claim-42"));
+        assert!(headers.contains(&format!("\r\nCk-Content-Digest: {digest_text}")));
+        assert!(headers.contains("\r\nscope: agent-public"));
+    }
+}
+
+#[tokio::test]
+async fn claim_check_refuses_reserved_caller_headers_before_sending() {
+    use cortexkit_bus_trait::{BusError, ContentDigest, Headers};
+    let server = Server::start().await;
+    let (client, _) = event_client(&server).await;
+    for name in [
+        "Ck-Content-Digest",
+        "Nats-Msg-Id",
+        "ck-content-digest",
+        "NATS-MSG-ID",
+    ] {
+        let headers = Headers::from([(name.into(), "caller override".into())]);
+        let error = client
+            .publish_claim_check(
+                "fact",
+                1,
+                None,
+                "id",
+                ContentDigest::of_bytes(b"body"),
+                headers,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::Bus(BusError::Denied { ref subject, .. }) if subject == name)
+        );
+    }
+    assert!(server.observed.lock().unwrap().publishes.is_empty());
+}
+
 async fn delivery(reader: &mut crate::EventReader) -> EventDelivery {
     match tokio::time::timeout(Duration::from_secs(5), reader.next())
         .await
